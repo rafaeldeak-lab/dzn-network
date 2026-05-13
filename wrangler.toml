@@ -1,3 +1,8 @@
 name = "dzn-network"
 compatibility_date = "2026-05-13"
 pages_build_output_dir = "./out"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dzn_network_db"
+database_id = "37515c66-2787-49e4-8568-a461517e975e"

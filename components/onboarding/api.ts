@@ -8,10 +8,15 @@ export async function getGuilds() {
   return request<{ guilds: DiscordGuild[] }>("/api/discord/guilds");
 }
 
-export async function validateNitradoToken(token: string) {
+export async function validateNitradoToken(data: {
+  token: string;
+  discordGuildId: string;
+  serverType: string;
+  tags: string[];
+}) {
   return request<{ tokenValid: boolean }>("/api/nitrado/validate-token", {
     method: "POST",
-    body: JSON.stringify({ token }),
+    body: JSON.stringify(data),
   });
 }
 
@@ -25,7 +30,7 @@ export async function saveOnboarding(data: {
   tags: string[];
   nitradoServiceId: string;
 }) {
-  return request<{ ok: boolean; linkedServerId: number }>("/api/onboarding/save", {
+  return request<{ ok: boolean; linkedServerId: string }>("/api/onboarding/save", {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -44,7 +49,7 @@ export async function testOnboarding() {
 }
 
 export async function goLive() {
-  return request<{ ok: boolean; status: "Live" }>("/api/onboarding/go-live", {
+  return request<{ ok: boolean; status: "live" }>("/api/onboarding/go-live", {
     method: "POST",
   });
 }

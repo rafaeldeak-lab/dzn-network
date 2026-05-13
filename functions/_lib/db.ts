@@ -1,11 +1,11 @@
 import { hmacSha256, randomToken } from "./crypto";
 import { mockGuilds, mockUser } from "./mock";
-import type { D1DatabaseLike, DiscordGuild, DiscordUser, Env, SessionUser } from "./types";
+import type { DiscordGuild, DiscordUser, Env, SessionUser } from "./types";
 
 export const SESSION_COOKIE = "dzn_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
-export function requireDb(env: Env): D1DatabaseLike {
+export function requireDb(env: Env): D1Database {
   if (!env.DB) throw new Error("D1 DB binding is not configured");
   return env.DB;
 }
@@ -15,7 +15,7 @@ export async function upsertUser(env: Env, user: DiscordUser) {
   const existing = await db
     .prepare("SELECT id FROM users WHERE discord_id = ?")
     .bind(user.id)
-    .first<{ id: number }>();
+    .first<{ id: string }>();
 
   if (existing) {
     await db
@@ -27,18 +27,18 @@ export async function upsertUser(env: Env, user: DiscordUser) {
     return existing.id;
   }
 
-  const result = await db
+  const userId = crypto.randomUUID();
+  await db
     .prepare(
-      "INSERT INTO users (discord_id, username, avatar, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING id",
+      "INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
     )
-    .bind(user.id, user.username, user.avatar)
-    .first<{ id: number }>();
+    .bind(userId, user.id, user.username, user.avatar)
+    .run();
 
-  if (!result) throw new Error("Failed to create user");
-  return result.id;
+  return userId;
 }
 
-export async function storeGuilds(env: Env, ownerUserId: number, guilds: DiscordGuild[]) {
+export async function storeGuilds(env: Env, ownerUserId: string, guilds: DiscordGuild[]) {
   const db = requireDb(env);
   for (const guild of guilds) {
     const iconUrl = guild.icon
@@ -47,9 +47,10 @@ export async function storeGuilds(env: Env, ownerUserId: number, guilds: Discord
     await db
       .prepare(
         `INSERT INTO discord_guilds (
-          guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ON CONFLICT(guild_id, owner_user_id) DO UPDATE SET
+          id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(guild_id) DO UPDATE SET
+          owner_user_id = excluded.owner_user_id,
           name = excluded.name,
           icon = excluded.icon,
           icon_url = excluded.icon_url,
@@ -57,12 +58,12 @@ export async function storeGuilds(env: Env, ownerUserId: number, guilds: Discord
           is_owner = excluded.is_owner,
           updated_at = CURRENT_TIMESTAMP`,
       )
-      .bind(guild.id, ownerUserId, guild.name, guild.icon, iconUrl, guild.permissions, guild.owner ? 1 : 0)
+      .bind(crypto.randomUUID(), guild.id, ownerUserId, guild.name, guild.icon, iconUrl, guild.permissions, guild.owner ? 1 : 0)
       .run();
   }
 }
 
-export async function createSession(env: Env, userId: number) {
+export async function createSession(env: Env, userId: string) {
   const db = requireDb(env);
   const rawToken = randomToken(48);
   const secret = env.SESSION_SECRET || "dev-session-secret";
@@ -71,9 +72,9 @@ export async function createSession(env: Env, userId: number) {
 
   await db
     .prepare(
-      "INSERT INTO sessions (user_id, session_token_hash, expires_at, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+      "INSERT INTO sessions (id, user_id, session_token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
     )
-    .bind(userId, tokenHash, expiresAt)
+    .bind(crypto.randomUUID(), userId, tokenHash, expiresAt)
     .run();
 
   return { token: rawToken, maxAge: SESSION_TTL_SECONDS };
@@ -112,7 +113,7 @@ export async function ensureMockUser(env: Env) {
   return { userId, user: mockUser };
 }
 
-export async function getCurrentLinkedServer(env: Env, userId: number) {
+export async function getCurrentLinkedServer(env: Env, userId: string) {
   if (!env.DB) return null;
   return env.DB
     .prepare(

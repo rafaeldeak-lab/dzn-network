@@ -8,9 +8,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
 
-  const linkedServer = await getCurrentLinkedServer(env, user?.id ?? 1);
-  if (!linkedServer || typeof linkedServer.id !== "number") {
+  const linkedServer = await getCurrentLinkedServer(env, user.id);
+  if (!linkedServer || typeof linkedServer.id !== "string") {
     return json({ error: "No linked server found" }, { status: 400 });
   }
 
@@ -22,26 +23,47 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   };
 
   const db = requireDb(env);
-  await db
-    .prepare(
-      `INSERT INTO onboarding_checks (
-        linked_server_id, token_valid, service_access, adm_logs_found, dayz_service_detected, last_tested_at
-      ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(linked_server_id) DO UPDATE SET
-        token_valid = excluded.token_valid,
-        service_access = excluded.service_access,
-        adm_logs_found = excluded.adm_logs_found,
-        dayz_service_detected = excluded.dayz_service_detected,
-        last_tested_at = CURRENT_TIMESTAMP`,
-    )
-    .bind(
-      linkedServer.id,
-      checks.token_valid,
-      checks.service_access,
-      checks.adm_logs_found,
-      checks.dayz_service_detected,
-    )
-    .run();
+  const existing = await db
+    .prepare("SELECT id FROM onboarding_checks WHERE linked_server_id = ? LIMIT 1")
+    .bind(linkedServer.id)
+    .first<{ id: string }>();
+
+  if (existing) {
+    await db
+      .prepare(
+        `UPDATE onboarding_checks SET
+          token_valid = ?,
+          service_access = ?,
+          adm_logs_found = ?,
+          dayz_service_detected = ?,
+          last_tested_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+      )
+      .bind(
+        checks.token_valid,
+        checks.service_access,
+        checks.adm_logs_found,
+        checks.dayz_service_detected,
+        existing.id,
+      )
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO onboarding_checks (
+          id, linked_server_id, token_valid, service_access, adm_logs_found, dayz_service_detected, last_tested_at
+        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        linkedServer.id,
+        checks.token_valid,
+        checks.service_access,
+        checks.adm_logs_found,
+        checks.dayz_service_detected,
+      )
+      .run();
+  }
 
   return json({
     ok: true,

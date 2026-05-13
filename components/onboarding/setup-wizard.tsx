@@ -107,7 +107,12 @@ export function SetupWizard() {
     setBusy(true);
     setMessage("");
     try {
-      await validateNitradoToken(tokenInput);
+      await validateNitradoToken({
+        token: tokenInput,
+        discordGuildId: selectedGuild,
+        serverType,
+        tags: selectedTags,
+      });
       setTokenInput("");
       setTokenValid(true);
       const serviceResult = await getNitradoServices();

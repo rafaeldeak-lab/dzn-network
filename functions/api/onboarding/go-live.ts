@@ -8,9 +8,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
 
-  const linkedServer = await getCurrentLinkedServer(env, user?.id ?? 1);
-  if (!linkedServer || typeof linkedServer.id !== "number") {
+  const linkedServer = await getCurrentLinkedServer(env, user.id);
+  if (!linkedServer || typeof linkedServer.id !== "string") {
     return json({ error: "No linked server found" }, { status: 400 });
   }
 
@@ -27,16 +28,16 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   if (!checks?.token_valid || !checks.service_access || !checks.dayz_service_detected) {
     await db
-      .prepare("UPDATE linked_servers SET status = 'Error', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .prepare("UPDATE linked_servers SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
       .bind(linkedServer.id)
       .run();
     return json({ error: "Verification checks must pass before go-live" }, { status: 400 });
   }
 
   await db
-    .prepare("UPDATE linked_servers SET status = 'Live', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .prepare("UPDATE linked_servers SET status = 'live', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
     .bind(linkedServer.id)
     .run();
 
-  return json({ ok: true, status: "Live" });
+  return json({ ok: true, status: "live" });
 };

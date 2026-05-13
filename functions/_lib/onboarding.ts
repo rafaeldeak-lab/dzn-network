@@ -41,21 +41,80 @@ export function publicSlug(name: string) {
   return slug || `server-${Date.now()}`;
 }
 
-export async function storePendingNitradoToken(env: Env, userId: number, token: string) {
+export async function ensureDraftLinkedServer(
+  env: Env,
+  userId: string,
+  discordGuildId: string,
+  serverType: ServerType,
+  tags: string[],
+) {
+  const db = requireDb(env);
+  const guild = await db
+    .prepare("SELECT id, guild_id FROM discord_guilds WHERE guild_id = ? AND owner_user_id = ? LIMIT 1")
+    .bind(discordGuildId, userId)
+    .first<{ id: string; guild_id: string }>();
+
+  if (!guild) throw new Error("Discord guild not found");
+
+  const existing = await db
+    .prepare("SELECT id FROM linked_servers WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1")
+    .bind(userId)
+    .first<{ id: string }>();
+
+  if (existing) {
+    await db
+      .prepare(
+        `UPDATE linked_servers SET
+          guild_id = ?,
+          discord_guild_id = ?,
+          server_name = ?,
+          server_type = ?,
+          tags_json = ?,
+          status = 'pending',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+      )
+      .bind(guild.guild_id, guild.id, "Pending Nitrado Service", serverType, JSON.stringify(tags), existing.id)
+      .run();
+    return existing.id;
+  }
+
+  const linkedServerId = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO linked_servers (
+        id, user_id, guild_id, discord_guild_id, server_name, server_type, tags_json, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    )
+    .bind(
+      linkedServerId,
+      userId,
+      guild.guild_id,
+      guild.id,
+      "Pending Nitrado Service",
+      serverType,
+      JSON.stringify(tags),
+    )
+    .run();
+
+  return linkedServerId;
+}
+
+export async function storePendingNitradoToken(env: Env, userId: string, linkedServerId: string, token: string) {
   if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
   const encrypted = await encryptToken(token, env.TOKEN_ENCRYPTION_KEY);
   const db = requireDb(env);
   await db
     .prepare(
       `INSERT INTO nitrado_connections (
-        user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag, created_at, updated_at
-      ) VALUES (?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     )
-    .bind(userId, encrypted.encryptedToken, encrypted.iv, encrypted.authTag)
+    .bind(crypto.randomUUID(), userId, linkedServerId, encrypted.encryptedToken, encrypted.iv, encrypted.authTag)
     .run();
 }
 
-export async function getLatestNitradoToken(env: Env, userId: number) {
+export async function getLatestNitradoToken(env: Env, userId: string) {
   if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
   const db = requireDb(env);
   const row = await db
@@ -73,7 +132,7 @@ export async function getLatestNitradoToken(env: Env, userId: number) {
   return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
 }
 
-export async function linkLatestNitradoConnection(env: Env, userId: number, linkedServerId: number) {
+export async function linkLatestNitradoConnection(env: Env, userId: string, linkedServerId: string) {
   const db = requireDb(env);
   await db
     .prepare(

@@ -23,6 +23,11 @@ images: {
 
 ```toml
 pages_build_output_dir = "./out"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dzn_network_db"
+database_id = "37515c66-2787-49e4-8568-a461517e975e"
 ```
 
 ## Required Environment Variables
@@ -41,22 +46,14 @@ Do not expose `DISCORD_CLIENT_SECRET`, `SESSION_SECRET`, or `TOKEN_ENCRYPTION_KE
 
 ## Cloudflare D1
 
-Create and bind a D1 database named `DB`.
+The D1 database is bound through `wrangler.toml` with binding name `DB`.
 
 ```bash
-npx wrangler d1 create dzn-network
-npx wrangler d1 migrations apply dzn-network --remote
+npm run db:migrate:local
+npm run db:migrate:remote
 ```
 
-In Cloudflare Pages:
-
-1. Open the Pages project.
-2. Go to Settings -> Functions -> D1 database bindings.
-3. Add binding name `DB`.
-4. Select the D1 database.
-5. Redeploy.
-
-The schema lives in `migrations/0001_initial.sql`.
+The schema lives in `migrations/0001_initial_schema.sql`.
 
 ## Discord OAuth
 

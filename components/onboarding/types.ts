@@ -1,7 +1,7 @@
 export type AuthResponse = {
   authenticated: boolean;
   user?: {
-    id: number;
+    id: string;
     discord_id: string;
     username: string;
     avatar: string | null;
@@ -26,7 +26,7 @@ export type NitradoService = {
 };
 
 export type LinkedServer = {
-  id: number;
+  id: string;
   guild_id: string;
   guild_name?: string;
   guild_icon_url?: string | null;
@@ -36,6 +36,6 @@ export type LinkedServer = {
   server_type: string;
   tags_json: string;
   region: string | null;
-  status: "Pending" | "Live" | "Error";
+  status: "pending" | "live" | "error" | "Pending" | "Live" | "Error";
   public_slug: string;
 };

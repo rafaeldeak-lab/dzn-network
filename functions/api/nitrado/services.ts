@@ -10,10 +10,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
 
   const services = isMockNitrado(env.MOCK_NITRADO)
     ? await fetchMockNitradoServices()
-    : await fetchNitradoServices((await getLatestNitradoToken(env, user?.id ?? 1)) ?? "");
+    : await fetchNitradoServices((await getLatestNitradoToken(env, user.id)) ?? "");
 
   return json({ services });
 };

@@ -109,7 +109,8 @@ function ServerDashboard({ server }: { server: LinkedServer }) {
     }
   }, [server.tags_json]);
 
-  const progress = server.status === "Live" ? 100 : server.status === "Error" ? 72 : 84;
+  const normalizedStatus = server.status.toLowerCase();
+  const progress = normalizedStatus === "live" ? 100 : normalizedStatus === "error" ? 72 : 84;
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
       <section className="glass-surface animated-border rounded-lg p-6">
@@ -175,15 +176,16 @@ function ServerDashboard({ server }: { server: LinkedServer }) {
 }
 
 function Status({ status }: { status: LinkedServer["status"] }) {
+  const normalizedStatus = status.toLowerCase();
   const className =
-    status === "Live"
+    normalizedStatus === "live"
       ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
-      : status === "Error"
+      : normalizedStatus === "error"
         ? "border-red-300/30 bg-red-400/10 text-red-100"
         : "border-orange-300/30 bg-orange-400/10 text-orange-100";
   return (
     <span className={`rounded-lg border px-4 py-2 text-xs font-black uppercase ${className}`}>
-      {status}
+      {normalizedStatus}
     </span>
   );
 }

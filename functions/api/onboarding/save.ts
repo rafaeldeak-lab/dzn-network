@@ -14,7 +14,6 @@ import type { PagesFunction } from "../../_lib/types";
 
 type SaveBody = {
   discordGuildId?: string;
-  discordGuildDbId?: number;
   serverType?: string;
   tags?: string[];
   nitradoServiceId?: string;
@@ -25,6 +24,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
 
   const body = await readJson<SaveBody>(request);
   if (!body.discordGuildId || !body.nitradoServiceId || !body.serverType) {
@@ -34,12 +34,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ error: "Invalid server type" }, { status: 400 });
   }
 
-  const userId = user?.id ?? 1;
+  const userId = user.id;
   const db = requireDb(env);
   const guild = await db
     .prepare("SELECT id, guild_id, name FROM discord_guilds WHERE guild_id = ? AND owner_user_id = ? LIMIT 1")
     .bind(body.discordGuildId, userId)
-    .first<{ id: number; guild_id: string; name: string }>();
+    .first<{ id: string; guild_id: string; name: string }>();
   if (!guild) return json({ error: "Discord guild not found" }, { status: 400 });
 
   const services = isMockNitrado(env.MOCK_NITRADO)
@@ -52,9 +52,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const existing = await db
     .prepare("SELECT id FROM linked_servers WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1")
     .bind(userId)
-    .first<{ id: number }>();
+    .first<{ id: string }>();
 
-  let linkedServerId: number;
+  let linkedServerId: string;
   if (existing) {
     linkedServerId = existing.id;
     await db
@@ -68,7 +68,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
           server_type = ?,
           tags_json = ?,
           region = ?,
-          status = 'Pending',
+          status = 'pending',
           public_slug = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`,
@@ -87,15 +87,16 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       )
       .run();
   } else {
-    const inserted = await db
+    linkedServerId = crypto.randomUUID();
+    await db
       .prepare(
         `INSERT INTO linked_servers (
-          user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
+          id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
           server_name, server_type, tags_json, region, status, public_slug, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING id`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
       .bind(
+        linkedServerId,
         userId,
         guild.guild_id,
         guild.id,
@@ -107,9 +108,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.region ?? null,
         publicSlug(service.name),
       )
-      .first<{ id: number }>();
-    if (!inserted) throw new Error("Failed to save linked server");
-    linkedServerId = inserted.id;
+      .run();
   }
 
   await linkLatestNitradoConnection(env, userId, linkedServerId);
