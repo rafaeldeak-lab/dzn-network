@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertTriangle, ArrowRight, DatabaseZap, LogOut, RefreshCw, Server, ShieldCheck, Wrench } from "lucide-react";
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { clearMockTestSyncData, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
+
+const SYNC_POLL_INTERVAL_MS = 15000;
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -117,7 +119,13 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [syncDetailsOpen, setSyncDetailsOpen] = useState(false);
   const [diagnosingLogs, setDiagnosingLogs] = useState(false);
   const [clearingTestData, setClearingTestData] = useState(false);
+  const [refreshingSyncData, setRefreshingSyncData] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const syncRefreshInFlightRef = useRef(false);
+  const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const tags = useMemo(() => {
     try {
       return JSON.parse(server.tags_json) as string[];
@@ -151,23 +159,69 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   });
   const recentEventsAreMock = recentEvents.some((event) => event.is_mock || [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
 
-  useEffect(() => {
-    let active = true;
-    Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)])
+  const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
+    if (syncRefreshInFlightRef.current) {
+      if (options.queueIfBusy && syncRefreshPromiseRef.current) {
+        await syncRefreshPromiseRef.current.catch(() => false);
+        if (syncRefreshInFlightRef.current) return false;
+        options = { ...options, queueIfBusy: false };
+      } else {
+        return false;
+      }
+    }
+
+    syncRefreshInFlightRef.current = true;
+    if (options.manual) setManualRefreshing(true);
+    setRefreshingSyncData(true);
+
+    const refreshPromise = Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)])
       .then(([statusResult, eventsResult]) => {
-        if (!active) return;
         setSyncStatus(statusResult.status);
         setRecentEvents(eventsResult.events);
+        setLastRefreshedAt(new Date().toISOString());
+        setLiveRefreshWarning("");
+        return true;
       })
       .catch(() => {
-        if (!active) return;
-        setSyncStatus(null);
-        setRecentEvents([]);
+        if (options.warnOnError !== false) {
+          setLiveRefreshWarning("Live refresh temporarily failed. Retrying...");
+        }
+        return false;
       });
+
+    syncRefreshPromiseRef.current = refreshPromise;
+
+    try {
+      return await refreshPromise;
+    } finally {
+      syncRefreshInFlightRef.current = false;
+      syncRefreshPromiseRef.current = null;
+      setRefreshingSyncData(false);
+      if (options.manual) setManualRefreshing(false);
+    }
+  }, [server.id]);
+
+  useEffect(() => {
+    let active = true;
+    const initialRefresh = window.setTimeout(() => {
+      if (active) void refreshSyncData({ warnOnError: true });
+    }, 0);
+    const interval = window.setInterval(() => {
+      if (active) void refreshSyncData({ warnOnError: true });
+    }, SYNC_POLL_INTERVAL_MS);
+
     return () => {
       active = false;
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
     };
-  }, [server.id]);
+  }, [refreshSyncData]);
+
+  async function refreshNow() {
+    setActionMessage("");
+    const refreshed = await refreshSyncData({ manual: true, warnOnError: true });
+    if (refreshed) setActionMessage("Dashboard sync data refreshed.");
+  }
 
   async function rerunLogCheck() {
     setCheckingLogs(true);
@@ -175,6 +229,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     try {
       await testOnboarding();
       await onRefresh();
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
       setActionMessage("Log check refreshed. Dashboard status is up to date.");
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Unable to re-run log check.");
@@ -188,10 +243,8 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     setActionMessage("");
     try {
       const result = await runManualSync(server.id);
-      const [status, events] = await Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)]);
       setLastSyncResult(result);
-      setSyncStatus(status.status);
-      setRecentEvents(events.events);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
       await onRefresh();
       setActionMessage(getManualSyncMessage(result));
     } catch (error) {
@@ -208,6 +261,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       const result = await runLogAccessDiagnostics();
       setLogDiagnostics(result.diagnostics);
       setDiagnosticsOpen(true);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
       setActionMessage(result.diagnostics.readable.message);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Unable to run log access diagnostics.");
@@ -221,10 +275,8 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     setActionMessage("");
     try {
       await clearMockTestSyncData(server.id);
-      const [status, events] = await Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)]);
       setLastSyncResult(null);
-      setSyncStatus(status.status);
-      setRecentEvents(events.events);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
       await onRefresh();
       setActionMessage("Mock/test sync rows cleared for this linked server.");
     } catch (error) {
@@ -314,9 +366,25 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       <aside className="grid gap-5">
         <div className="glass-surface animated-border rounded-lg p-5">
           <div className="relative z-10">
-            <DatabaseZap className="h-8 w-8 text-cyan-200" />
-            <h3 className="mt-4 text-xl font-black uppercase text-white">Sync Engine Status</h3>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <DatabaseZap className={`h-8 w-8 text-cyan-200 ${refreshingSyncData ? "animate-pulse" : ""}`} />
+                <h3 className="mt-4 text-xl font-black uppercase text-white">Sync Engine Status</h3>
+              </div>
+              <button
+                type="button"
+                disabled={refreshingSyncData}
+                onClick={refreshNow}
+                className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
+                {manualRefreshing ? "Refreshing..." : "Refresh Now"}
+              </button>
+            </div>
             <div className="mt-4 grid gap-3">
+              <MiniInfo label="Auto-refresh" value="On" />
+              <MiniInfo label="Refresh Interval" value="15 seconds" />
+              <MiniInfo label="Last Refreshed" value={lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "Starting..."} />
               <MiniInfo label="Sync Status" value={formatSyncStatus(effectiveSyncStatus)} />
               <MiniInfo label="Latest ADM File" value={latestAdmFile} />
               <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
@@ -339,6 +407,11 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <MiniInfo label="Read Status" value={syncHasProcessedLines ? "Readable" : admState.readStatus} />
               <MiniInfo label="Next Action" value={syncHasProcessedLines ? "Continue syncing after fresh ADM activity" : admState.nextAction} />
             </div>
+            {liveRefreshWarning ? (
+              <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
+                {liveRefreshWarning}
+              </p>
+            ) : null}
             {syncStatus?.last_sync_status === "completed" ? (
               <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-3 text-sm font-bold leading-6 text-cyan-50">
                 {syncStatus.last_kills_created === 0
@@ -783,6 +856,13 @@ function formatCompactDate(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatClockTime(value: string | null) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function formatEventType(value: string) {
