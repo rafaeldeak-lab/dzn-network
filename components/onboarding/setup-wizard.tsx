@@ -88,11 +88,37 @@ export function SetupWizard() {
   useEffect(() => {
     async function load() {
       try {
-        await getMe();
+        const auth = await getMe();
         setAuthenticated(true);
         const guildResult = await getGuilds();
         setGuilds(guildResult.guilds);
-        if (guildResult.guilds[0]) setSelectedGuild(guildResult.guilds[0].guild_id);
+        const linkedServer = auth.linkedServer;
+        if (linkedServer?.guild_id) {
+          setSelectedGuild(linkedServer.guild_id);
+        } else if (guildResult.guilds[0]) {
+          setSelectedGuild(guildResult.guilds[0].guild_id);
+        }
+
+        if (window.location.hash === "#review-test" && linkedServer) {
+          const existingService: NitradoService = {
+            id: linkedServer.nitrado_service_id,
+            name: linkedServer.nitrado_service_name || linkedServer.server_name,
+            game: linkedServer.game ?? "DayZ",
+            region: linkedServer.region ?? undefined,
+            platform: linkedServer.platform ?? undefined,
+            ipAddress: linkedServer.ip_address ?? undefined,
+            playerSlots: linkedServer.player_slots ?? undefined,
+            status: linkedServer.status,
+          };
+          setServerType(linkedServer.server_type || "PVP");
+          setSelectedTags(parseLinkedServerTags(linkedServer.tags_json));
+          setServices([existingService]);
+          setValidatedService(existingService);
+          setSelectedService(existingService.id);
+          setTokenValid(true);
+          setDirectServiceValidated(true);
+          setStep(4);
+        }
       } catch {
         setAuthenticated(false);
       } finally {
@@ -1033,4 +1059,13 @@ function extractNitradoServiceId(value: string) {
   const services = value.match(/server\.nitrado\.net\/.*?services\/(\d+)/i);
   if (services?.[1]) return services[1];
   return "";
+}
+
+function parseLinkedServerTags(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
