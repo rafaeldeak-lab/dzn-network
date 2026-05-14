@@ -1,7 +1,7 @@
-import { getCurrentLinkedServer, getSessionUser, requireDb } from "../../_lib/db";
+import { getCurrentLinkedServer, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
-import { detectNitradoAdmLogs, mockAdmLogDetection } from "../../_lib/nitrado";
+import { detectNitradoAdmLogs, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getLatestNitradoToken } from "../../_lib/onboarding";
 import type { PagesFunction } from "../../_lib/types";
 
@@ -20,12 +20,17 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ error: "No Nitrado service selected" }, { status: 400 });
   }
 
+  const nitradoToken = isMockNitrado(env.MOCK_NITRADO) ? "" : (await getLatestNitradoToken(env, user.id)) ?? "";
+  const savedAdmPath = typeof linkedServer.adm_path === "string" ? linkedServer.adm_path : "";
   const admLog = isMockNitrado(env.MOCK_NITRADO)
     ? mockAdmLogDetection()
-    : await detectNitradoAdmLogs(
-        (await getLatestNitradoToken(env, user.id)) ?? "",
-        linkedServer.nitrado_service_id,
-      );
+    : savedAdmPath
+      ? await testExactNitradoAdmPath(nitradoToken, linkedServer.nitrado_service_id, savedAdmPath)
+      : await detectNitradoAdmLogs(nitradoToken, linkedServer.nitrado_service_id);
+
+  if (admLog.found && admLog.admPath) {
+    await saveServerAdmPath(env, linkedServer.id, admLog.admPath.replace(/^\/+/, ""));
+  }
 
   const checks = {
     token_valid: 1,

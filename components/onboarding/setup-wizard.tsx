@@ -22,10 +22,11 @@ import {
   getNitradoServices,
   goLive,
   saveOnboarding,
+  testAdmPath,
   testOnboarding,
   validateNitradoToken,
 } from "./api";
-import type { DiscordGuild, NitradoService, OnboardingChecks } from "./types";
+import type { AdmApiDebug, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 
 const steps = [
@@ -152,6 +153,19 @@ export function SetupWizard() {
     }
   }
 
+  async function runManualAdmPathTest(path: string) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await testAdmPath(path);
+      setChecks(result.checks);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ADM path test failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function publish() {
     setBusy(true);
     setMessage("");
@@ -248,7 +262,7 @@ export function SetupWizard() {
                   <ServiceStep services={services} selectedService={selectedService} setSelectedService={setSelectedService} onNext={saveAndReview} busy={busy} />
                 ) : null}
                 {step === 4 ? (
-                  <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onGoLive={publish} />
+                  <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
                 ) : null}
                 {step === 5 ? <LiveStep /> : null}
               </motion.div>
@@ -365,7 +379,8 @@ function ServiceStep({ services, selectedService, setSelectedService, onNext, bu
   );
 }
 
-function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onGoLive: () => void }) {
+function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, onTestAdmPath, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onTestAdmPath: (path: string) => Promise<void>; onGoLive: () => void }) {
+  const [manualAdmPath, setManualAdmPath] = useState("");
   const canGoLive = Boolean(checks?.tokenValid && checks.serviceAccess && checks.dayzServiceDetected);
   const checkRows = checks
     ? [
@@ -392,19 +407,47 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
               </div>
             ))}
           </div>
-          {checks.admLog ? (
-            <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-4">
-              <p className="text-xs font-black uppercase text-violet-200/70">ADM discovery</p>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <Summary label="Newest ADM file" value={checks.admLog.newestAdmFileName ?? "Not found"} />
-                <Summary label="ADM path found" value={checks.admLog.admPath ?? "Not found"} />
-                <Summary label="Last checked" value={formatCheckedAt(checks.admLog.lastCheckedAt)} />
-                <Summary label="Sample read" value={checks.admLog.sampleReadSucceeded ? "Succeeded" : "Not available"} />
-              </div>
-            </div>
-          ) : null}
         </>
       ) : null}
+      <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-4">
+        <p className="text-xs font-black uppercase text-violet-200/70">ADM discovery</p>
+        <div className="mt-4">
+          <label className="text-xs font-black uppercase text-zinc-500" htmlFor="manual-adm-path">
+            Manual ADM log path
+          </label>
+          <div className="mt-2 flex flex-col gap-3 lg:flex-row">
+            <input
+              id="manual-adm-path"
+              value={manualAdmPath}
+              onChange={(event) => setManualAdmPath(event.target.value)}
+              placeholder="dayzps/config/DayZServer_PS4_x64_2026-05-14_12-01-39.ADM"
+              className="h-12 flex-1 rounded-lg border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/60"
+            />
+            <button
+              type="button"
+              disabled={busy || !manualAdmPath.trim()}
+              onClick={() => onTestAdmPath(manualAdmPath)}
+              className="h-12 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Test ADM Path
+            </button>
+          </div>
+          <p className="mt-2 text-sm text-zinc-400">
+            Copy this from Nitrado - Information - Log Files - Your log link.
+          </p>
+        </div>
+        {checks?.admLog ? (
+          <>
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <Summary label="Newest ADM file" value={checks.admLog.newestAdmFileName ?? "Not found"} />
+              <Summary label="ADM path found" value={checks.admLog.admPath ?? "Not found"} />
+              <Summary label="Last checked" value={formatCheckedAt(checks.admLog.lastCheckedAt)} />
+              <Summary label="Sample read" value={checks.admLog.sampleReadSucceeded ? "Succeeded" : "Not available"} />
+            </div>
+            {checks.admLog.debug ? <AdmApiDebugPanel debug={checks.admLog.debug} /> : null}
+          </>
+        ) : null}
+      </div>
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
         <WizardButton disabled={busy} onClick={onTest}>{busy ? "Testing" : "Run test"}</WizardButton>
         <WizardButton disabled={!canGoLive || busy} onClick={onGoLive}>Go live</WizardButton>
@@ -451,6 +494,63 @@ function Summary({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-white/10 bg-black/24 p-4">
       <p className="text-xs font-black uppercase text-zinc-500">{label}</p>
       <p className="mt-2 break-words font-bold text-white">{value}</p>
+    </div>
+  );
+}
+
+function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
+  return (
+    <div className="mt-5 rounded-lg border border-violet-300/15 bg-violet-950/10 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-black uppercase text-violet-200/70">ADM API Debug</p>
+        <span className="text-xs font-bold text-zinc-500">{formatCheckedAt(debug.lastCheckedAt)}</span>
+      </div>
+      {debug.message ? (
+        <p className="mt-3 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-2 text-sm font-bold text-orange-100">
+          {debug.message}
+        </p>
+      ) : null}
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <Summary label="Exact selected ADM path" value={debug.exactSelectedAdmPath ?? "Not selected"} />
+        <Summary label="Sample read status" value={debug.sampleReadStatus} />
+      </div>
+      <DebugList title="Paths checked" items={debug.pathsChecked} />
+      <DebugList title="ADM files found" items={debug.filesFound.length ? debug.filesFound : ["No ADM files returned by API"]} />
+      <div className="mt-4">
+        <p className="text-xs font-black uppercase text-zinc-500">List attempts</p>
+        <div className="mt-2 grid max-h-64 gap-2 overflow-auto pr-1">
+          {debug.listAttempts.map((attempt, index) => (
+            <div key={`${attempt.dir}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 md:grid-cols-[70px_1fr_1fr]">
+              <span className={attempt.status === "OK" ? "font-black text-emerald-100" : "font-black text-orange-100"}>{attempt.status}</span>
+              <span className="break-words">dir: {attempt.dir}</span>
+              <span className="break-words">search: {attempt.search ?? "none"} | ADM: {attempt.admFileCount}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {debug.samplePreview ? (
+        <div className="mt-4">
+          <p className="text-xs font-black uppercase text-zinc-500">Sample preview</p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/30 p-3 text-xs leading-5 text-zinc-300">
+            {debug.samplePreview}
+          </pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DebugList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-black uppercase text-zinc-500">{title}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span key={item} className="break-all rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-zinc-300">
+            {item}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

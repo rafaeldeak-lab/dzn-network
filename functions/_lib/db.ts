@@ -129,15 +129,55 @@ export async function ensureMockUser(env: Env) {
 
 export async function getCurrentLinkedServer(env: Env, userId: string) {
   if (!env.DB) return null;
+  await ensureServerLogConfigTable(env);
   return env.DB
     .prepare(
-      `SELECT linked_servers.*, discord_guilds.name AS guild_name, discord_guilds.icon_url AS guild_icon_url
+      `SELECT
+        linked_servers.*,
+        discord_guilds.name AS guild_name,
+        discord_guilds.icon_url AS guild_icon_url,
+        server_log_config.adm_path AS adm_path
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
        WHERE linked_servers.user_id = ?
        ORDER BY linked_servers.updated_at DESC
        LIMIT 1`,
     )
     .bind(userId)
     .first();
+}
+
+export async function saveServerAdmPath(env: Env, linkedServerId: string, admPath: string) {
+  const db = requireDb(env);
+  await ensureServerLogConfigTable(env);
+  await db
+    .prepare(
+      `INSERT INTO server_log_config (id, linked_server_id, adm_path, created_at, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(linked_server_id) DO UPDATE SET
+         adm_path = excluded.adm_path,
+         updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(crypto.randomUUID(), linkedServerId, admPath)
+    .run();
+}
+
+async function ensureServerLogConfigTable(env: Env) {
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS server_log_config (
+        id TEXT PRIMARY KEY,
+        linked_server_id TEXT UNIQUE NOT NULL,
+        adm_path TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id)
+      )`,
+    )
+    .run();
+  await db
+    .prepare("CREATE INDEX IF NOT EXISTS idx_server_log_config_linked_server_id ON server_log_config(linked_server_id)")
+    .run();
 }

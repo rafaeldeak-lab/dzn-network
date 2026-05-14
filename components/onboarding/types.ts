@@ -33,6 +33,29 @@ export type AdmLogDetection = {
   admPath: string | null;
   lastCheckedAt: string;
   checkedPaths: string[];
+  debug?: AdmApiDebug;
+};
+
+export type AdmApiDebug = {
+  pathsChecked: string[];
+  listAttempts: {
+    dir: string;
+    search: string | null;
+    status: "OK" | "401" | "403" | "404" | "error";
+    fileCount: number;
+    admFileCount: number;
+  }[];
+  filesFound: string[];
+  exactSelectedAdmPath: string | null;
+  sampleReadStatus: "OK" | "401" | "403" | "404" | "error" | "not_attempted";
+  samplePreview: string | null;
+  lastCheckedAt: string;
+  message: string | null;
+  readAttempts: {
+    path: string;
+    method: "seek" | "download";
+    status: "OK" | "401" | "403" | "404" | "error";
+  }[];
 };
 
 export type OnboardingChecks = {
@@ -56,4 +79,5 @@ export type LinkedServer = {
   region: string | null;
   status: "pending" | "live" | "error" | "Pending" | "Live" | "Error";
   public_slug: string;
+  adm_path?: string | null;
 };

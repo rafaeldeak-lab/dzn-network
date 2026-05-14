@@ -43,6 +43,16 @@ export async function testOnboarding() {
   }>("/api/onboarding/test", { method: "POST" });
 }
 
+export async function testAdmPath(path: string) {
+  return request<{
+    ok: boolean;
+    checks: OnboardingChecks;
+  }>("/api/nitrado/test-adm-path", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
 export async function goLive() {
   return request<{ ok: boolean; status: "live" }>("/api/onboarding/go-live", {
     method: "POST",

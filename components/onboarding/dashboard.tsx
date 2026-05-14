@@ -138,6 +138,7 @@ function ServerDashboard({ server }: { server: LinkedServer }) {
             <Info label="Service ID" value={server.nitrado_service_id} />
             <Info label="Server type" value={server.server_type} />
             <Info label="Region" value={server.region ?? "Unknown"} />
+            <Info label="ADM Path" value={server.adm_path ?? "Not configured"} />
           </div>
 
           <div className="mt-6">
