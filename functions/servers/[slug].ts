@@ -5,7 +5,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, next }) => {
   if (!env.ASSETS) return next();
 
   const url = new URL(request.url);
-  const shellUrl = new URL("/servers/index.html", url.origin);
+  const shellUrl = new URL("/servers.html", url.origin);
   const shellRequest = new Request(shellUrl.toString(), request);
   const shellResponse = await env.ASSETS.fetch(shellRequest);
 

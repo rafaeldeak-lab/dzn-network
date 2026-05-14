@@ -331,7 +331,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
 
         <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
           <p className="text-xs font-bold uppercase text-zinc-500">{publicCardFooter(server)}</p>
-          <Link href={`/servers/${server.public_slug}`} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
+          <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
             View Server
             <ArrowRight className="h-4 w-4" />
           </Link>
@@ -518,6 +518,8 @@ function subscribeToPath(onStoreChange: () => void) {
 }
 
 function getCurrentSlug() {
+  const querySlug = new URLSearchParams(window.location.search).get("slug");
+  if (querySlug) return sanitizePublicSlug(querySlug);
   return getSlugFromPath(window.location.pathname);
 }
 
@@ -527,6 +529,7 @@ function getServerSlugSnapshot() {
 
 function getSlugFromPath(pathname: string) {
   const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] === "servers" && parts[1] === "profile") return null;
   return parts[0] === "servers" && parts[1] ? decodeURIComponent(parts[1]) : null;
 }
 
@@ -649,6 +652,15 @@ function serverSortRank(server: PublicServer) {
   if (server.adm_status === "Discovered") return 2;
   if (server.stats_sync === "Pending") return 3;
   return 4;
+}
+
+function publicServerProfileHref(slug: string) {
+  return `/servers/profile?slug=${encodeURIComponent(slug)}`;
+}
+
+function sanitizePublicSlug(value: string) {
+  const slug = value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 90);
+  return slug || null;
 }
 
 function publicCardFooter(server: PublicServer) {

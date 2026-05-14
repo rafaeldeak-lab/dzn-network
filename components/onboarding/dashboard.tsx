@@ -443,7 +443,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {server.public_slug ? (
-                    <Link href={`/servers/${server.public_slug}`} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50">
+                    <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50">
                       View Public Page
                       <ExternalLink className="h-3.5 w-3.5" />
                     </Link>
@@ -608,7 +608,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                 <span>{diagnosingLogs ? "Testing Nitrado routes..." : "Run Log Access Diagnostics"}</span>
                 <RefreshCw className={`h-4 w-4 ${diagnosingLogs ? "animate-spin" : ""}`} />
               </button>
-              {server.public_slug ? <ActionLink href={`/servers/${server.public_slug}`} icon={<ExternalLink className="h-4 w-4" />} label="View Public Page" tone="emerald" /> : null}
+              {server.public_slug ? <ActionLink href={publicServerProfileHref(server.public_slug)} icon={<ExternalLink className="h-4 w-4" />} label="View Public Page" tone="emerald" /> : null}
               <ActionLink href="/servers" icon={<Server className="h-4 w-4" />} label="View Network" />
               <button type="button" disabled={clearingTestData} onClick={clearTestData} className="inline-flex items-center justify-between rounded-lg border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-left text-sm font-bold text-orange-50 transition hover:border-orange-300/45 hover:bg-orange-400/18 disabled:cursor-not-allowed disabled:opacity-55">
                 <span>{clearingTestData ? "Clearing..." : "Clear Mock/Test Sync Data"}</span>
@@ -1273,6 +1273,10 @@ function getManualSyncMessage(result: AdmSyncRunResult) {
     return "Player activity synced successfully.";
   }
   return result.message;
+}
+
+function publicServerProfileHref(slug: string) {
+  return `/servers/profile?slug=${encodeURIComponent(slug)}`;
 }
 
 function getSyncBanner(values: {

@@ -935,7 +935,7 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
 function LiveStep({ server, service, admPending }: { server: LinkedServer | null; service?: NitradoService; admPending: boolean }) {
   const reduceMotion = useReducedMotion();
   const serverName = server?.server_name ?? service?.name ?? "Your DayZ server";
-  const publicHref = server?.public_slug ? `/servers/${server.public_slug}` : "/servers";
+  const publicHref = server?.public_slug ? `/servers/profile?slug=${encodeURIComponent(server.public_slug)}` : "/servers";
   return (
     <div className="relative overflow-hidden rounded-lg">
       {!reduceMotion ? <CelebrationField /> : null}
