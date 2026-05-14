@@ -35,7 +35,29 @@ type PublicServer = {
   adm_status: "Connected" | "Discovered" | "Needs Review";
   latest_adm_file: string | null;
   stats_sync: "Active" | "Pending" | "Not Started";
+  read_status: "Readable" | "Read Pending" | "Not Ready";
   player_slots: number | null;
+  created_at: string | null;
+  latest_sync_at: string | null;
+  total_kills: number;
+  total_deaths: number;
+  total_joins: number;
+  total_disconnects: number;
+  unique_players: number;
+  recent_events: PublicRecentEvent[];
+  public_sync_source?: "sync_runs" | "adm_sync_state" | "server_stats" | "linked_server_fallback";
+};
+
+type PublicRecentEvent = {
+  source: "kill" | "player";
+  event_type: string;
+  label: string;
+  player_name: string | null;
+  killer_name: string | null;
+  victim_name: string | null;
+  weapon: string | null;
+  distance: number | null;
+  occurred_at: string | null;
   created_at: string | null;
 };
 
@@ -236,7 +258,7 @@ function StatsRow({ stats }: { stats: PublicStats }) {
     { label: "PvP Servers", value: stats.pvpServers, icon: Crosshair, tone: "red" },
     { label: "PvE Servers", value: stats.pveServers, icon: ShieldCheck, tone: "cyan" },
     { label: "Deathmatch", value: stats.deathmatchServers, icon: Skull, tone: "orange" },
-    { label: "Sync Active / Pending", value: `${stats.statsSyncActive}/${stats.statsSyncPending}`, icon: Activity, tone: "emerald" },
+    { label: "Stats Sync", value: `${stats.statsSyncActive} Active \u00b7 ${stats.statsSyncPending} Pending`, icon: Activity, tone: "emerald" },
   ];
 
   return (
@@ -297,7 +319,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
         </div>
 
         <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
-          <p className="text-xs font-bold uppercase text-zinc-500">{server.latest_adm_file ? "ADM discovered" : "Awaiting ADM discovery"}</p>
+          <p className="text-xs font-bold uppercase text-zinc-500">{publicCardFooter(server)}</p>
           <Link href={`/servers/${server.public_slug}`} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
             View Server
             <ArrowRight className="h-4 w-4" />
@@ -330,6 +352,7 @@ function ServerProfileShell({ server, loading, error }: { server: PublicServer |
 function ServerProfile({ server }: { server: PublicServer }) {
   const tags = parseTags(server.tags_json);
   const statsPending = server.stats_sync === "Pending";
+  const statsActiveWithoutKills = server.stats_sync === "Active" && server.total_kills === 0;
 
   return (
     <div className="pb-16 pt-10">
@@ -370,6 +393,8 @@ function ServerProfile({ server }: { server: PublicServer }) {
               <MiniMetric label="Player Slots" value={server.player_slots ? String(server.player_slots) : "Not listed"} />
               <MiniMetric label="Latest ADM File" value={server.latest_adm_file ?? "Pending"} />
               <MiniMetric label="Stats Sync" value={server.stats_sync} />
+              <MiniMetric label="Read Status" value={server.read_status} />
+              <MiniMetric label="Last Sync" value={formatPublicDate(server.latest_sync_at)} />
             </div>
           </div>
         </div>
@@ -378,6 +403,11 @@ function ServerProfile({ server }: { server: PublicServer }) {
       {statsPending ? (
         <div className="mt-5 rounded-lg border border-orange-300/20 bg-orange-400/10 p-5 text-sm font-bold leading-6 text-orange-50">
           Stats sync is pending while ADM log reading is being finalised.
+        </div>
+      ) : null}
+      {statsActiveWithoutKills ? (
+        <div className="mt-5 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-5 text-sm font-bold leading-6 text-cyan-50">
+          No PvP kills synced yet. Player activity is syncing.
         </div>
       ) : null}
 
@@ -391,7 +421,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
           <div className="grid gap-5 md:grid-cols-2">
             <PlaceholderPanel title="PvP Leaderboard" icon={Trophy} text="Ranked leaderboards will appear here when stat sync is active." />
-            <PlaceholderPanel title="Recent Kills" icon={Crosshair} text="Killfeed activates once ADM sync is live." />
+            <RecentEventsPanel server={server} />
             <PlaceholderPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." />
             <PlaceholderPanel title="Achievements" icon={Crown} text="Community milestones will unlock as the DZN sync engine expands." />
           </div>
@@ -405,6 +435,8 @@ function ServerProfile({ server }: { server: PublicServer }) {
             <div className="grid gap-3">
               <MiniMetric label="ADM Status" value={server.adm_status} />
               <MiniMetric label="Stats Sync" value={server.stats_sync} />
+              <MiniMetric label="Total Joins" value={String(server.total_joins)} />
+              <MiniMetric label="Unique Players" value={String(server.unique_players)} />
               <MiniMetric label="Public Listing" value="Active" />
             </div>
           </GlassPanel>
@@ -509,6 +541,34 @@ function PlaceholderPanel({ title, icon: Icon, text }: { title: string; icon: ty
   );
 }
 
+function RecentEventsPanel({ server }: { server: PublicServer }) {
+  return (
+    <GlassPanel title="Recent Synced Events" icon={Crosshair}>
+      {server.recent_events.length ? (
+        <div className="grid gap-2">
+          {server.recent_events.slice(0, 5).map((event, index) => (
+            <div key={`${event.source}-${event.event_type}-${event.occurred_at ?? event.created_at ?? index}`} className="rounded-lg border border-white/10 bg-black/24 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase text-cyan-200">{event.label}</p>
+                  <p className="mt-1 truncate text-sm font-bold text-white">{publicEventDetail(event)}</p>
+                </div>
+                <span className="shrink-0 text-[10px] font-black uppercase text-zinc-500">{formatPublicTime(event.occurred_at ?? event.created_at)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm leading-6 text-zinc-400">
+          {server.stats_sync === "Active"
+            ? "No PvP kills synced yet. Player activity is syncing."
+            : "Stats sync is pending while ADM log reading is being finalised."}
+        </p>
+      )}
+    </GlassPanel>
+  );
+}
+
 function PlaceholderRows({ labels }: { labels: string[] }) {
   return (
     <div className="grid gap-2">
@@ -578,6 +638,42 @@ function serverSortRank(server: PublicServer) {
   if (server.adm_status === "Discovered") return 2;
   if (server.stats_sync === "Pending") return 3;
   return 4;
+}
+
+function publicCardFooter(server: PublicServer) {
+  if (server.stats_sync === "Active") return "Sync active";
+  if (server.adm_status === "Connected" || server.read_status === "Readable") return "ADM connected";
+  if (server.adm_status === "Discovered" || server.latest_adm_file) return "ADM discovered";
+  return "Awaiting sync data";
+}
+
+function publicEventDetail(event: PublicRecentEvent) {
+  if (event.source === "kill") {
+    const matchup = `${event.killer_name ?? "Unknown player"} to ${event.victim_name ?? "Unknown player"}`;
+    const weapon = event.weapon ? ` with ${event.weapon}` : "";
+    const distance = typeof event.distance === "number" && Number.isFinite(event.distance) ? ` from ${event.distance.toFixed(1)}m` : "";
+    return `${matchup}${weapon}${distance}`;
+  }
+  return event.player_name ?? "Server activity";
+}
+
+function formatPublicTime(value: string | null) {
+  if (!value) return "Pending";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Pending";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatPublicDate(value: string | null) {
+  if (!value) return "Pending";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Pending";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function buildStats(servers: PublicServer[]): PublicStats {
