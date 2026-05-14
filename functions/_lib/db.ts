@@ -153,6 +153,15 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
 
   if (!server) return null;
 
+  if (!server.public_slug && typeof server.id === "string") {
+    const slug = await ensureLinkedServerPublicSlug(
+      env,
+      server.id,
+      firstString(server.guild_name, server.server_name, server.nitrado_service_name, server.guild_id) ?? "dayz-server",
+    );
+    server.public_slug = slug;
+  }
+
   const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
   server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
   server.adm_status = Number(server.adm_logs_found) === 1
@@ -219,4 +228,43 @@ async function ensureServerLogConfigTable(env: Env) {
 
 function maskNitradoApiPath(path: string) {
   return path.replace(/(^|\/)games\/[^/]+\/noftp\//i, "$1games/{gameserver-username}/noftp/");
+}
+
+async function ensureLinkedServerPublicSlug(env: Env, linkedServerId: string, name: string) {
+  const db = requireDb(env);
+  const slug = await uniquePublicSlugForDb(db, name, linkedServerId);
+  await db
+    .prepare("UPDATE linked_servers SET public_slug = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(slug, linkedServerId)
+    .run();
+  return slug;
+}
+
+async function uniquePublicSlugForDb(db: D1Database, name: string, linkedServerId: string) {
+  const base = toPublicSlug(name);
+  for (let index = 0; index < 50; index += 1) {
+    const candidate = index === 0 ? base : `${base}-${index + 1}`;
+    const existing = await db
+      .prepare("SELECT id FROM linked_servers WHERE public_slug = ? LIMIT 1")
+      .bind(candidate)
+      .first<{ id: string }>();
+    if (!existing || existing.id === linkedServerId) return candidate;
+  }
+  return `${base}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function toPublicSlug(name: string) {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 72);
+  return slug || `server-${Date.now()}`;
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
 }

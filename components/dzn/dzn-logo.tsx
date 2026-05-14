@@ -1,7 +1,7 @@
-export function DznLogo({ compact = false }: { compact?: boolean }) {
+export function DznLogo({ compact = false, href = "#hero" }: { compact?: boolean; href?: string }) {
   return (
     <a
-      href="#hero"
+      href={href}
       aria-label="DZN Network home"
       className="group inline-flex items-center gap-3"
     >

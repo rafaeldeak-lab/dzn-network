@@ -41,6 +41,20 @@ export function publicSlug(name: string) {
   return slug || `server-${Date.now()}`;
 }
 
+export async function uniquePublicSlug(env: Env, name: string, linkedServerId?: string) {
+  const db = requireDb(env);
+  const base = publicSlug(name);
+  for (let index = 0; index < 50; index += 1) {
+    const candidate = index === 0 ? base : `${base}-${index + 1}`;
+    const existing = await db
+      .prepare("SELECT id FROM linked_servers WHERE public_slug = ? LIMIT 1")
+      .bind(candidate)
+      .first<{ id: string }>();
+    if (!existing || existing.id === linkedServerId) return candidate;
+  }
+  return `${base}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
 export async function ensureDraftLinkedServer(
   env: Env,
   userId: string,
@@ -162,6 +176,7 @@ export async function saveLinkedServerNitradoService(
 ) {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
+  const slug = await uniquePublicSlug(env, service.name, linkedServerId);
   await db
     .prepare(
       `UPDATE linked_servers SET
@@ -191,7 +206,7 @@ export async function saveLinkedServerNitradoService(
       service.platform ?? null,
       service.ipAddress ?? null,
       service.playerSlots ?? null,
-      publicSlug(service.name),
+      slug,
       linkedServerId,
     )
     .run();

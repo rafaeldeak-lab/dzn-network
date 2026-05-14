@@ -20,6 +20,9 @@ interface D1Database {
 }
 
 interface CloudflareEnv {
+  ASSETS?: {
+    fetch(input: Request | string, init?: RequestInit): Promise<Response>;
+  };
   DB: D1Database;
   DISCORD_CLIENT_ID?: string;
   DISCORD_CLIENT_SECRET?: string;

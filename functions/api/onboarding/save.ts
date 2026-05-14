@@ -7,7 +7,7 @@ import {
   getLatestNitradoToken,
   linkLatestNitradoConnection,
   normalizeTags,
-  publicSlug,
+  uniquePublicSlug,
   validateServerType,
 } from "../../_lib/onboarding";
 import type { PagesFunction } from "../../_lib/types";
@@ -58,6 +58,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   let linkedServerId: string;
   if (existing) {
     linkedServerId = existing.id;
+    const slug = await uniquePublicSlug(env, service.name, linkedServerId);
     await db
       .prepare(
         `UPDATE linked_servers SET
@@ -91,12 +92,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.platform ?? null,
         service.ipAddress ?? null,
         service.playerSlots ?? null,
-        publicSlug(service.name),
+        slug,
         linkedServerId,
       )
       .run();
   } else {
     linkedServerId = crypto.randomUUID();
+    const slug = await uniquePublicSlug(env, service.name, linkedServerId);
     await db
       .prepare(
         `INSERT INTO linked_servers (
@@ -120,7 +122,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.platform ?? null,
         service.ipAddress ?? null,
         service.playerSlots ?? null,
-        publicSlug(service.name),
+        slug,
       )
       .run();
   }

@@ -155,7 +155,10 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                 <h2 className="text-2xl font-black text-white">{server.guild_name ?? server.guild_id}</h2>
               </div>
             </div>
-            <Status status={server.status} />
+            <div className="flex flex-wrap items-center gap-2">
+              {server.public_slug ? <StatusBadge label="Public Listing" value="Active" tone="cyan" /> : null}
+              <Status status={server.status} />
+            </div>
           </div>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -255,8 +258,11 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                 <RefreshCw className={`h-4 w-4 ${checkingLogs ? "animate-spin" : ""}`} />
               </button>
               <Link href="/setup#review-test" className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-50">Go to Review & Test</Link>
+              {server.public_slug ? (
+                <Link href={`/servers/${server.public_slug}`} className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-50">View public page</Link>
+              ) : null}
               <Link href="/setup" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-100">Edit setup</Link>
-              <Link href="/" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-100">View network</Link>
+              <Link href="/servers" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-100">View network</Link>
             </div>
             {actionMessage ? (
               <p className="mt-4 rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-sm font-bold text-zinc-200">
