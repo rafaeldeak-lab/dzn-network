@@ -678,6 +678,41 @@ export async function clearMockTestSyncData(env: Env, userId: string, linkedServ
   return { ok: true, remainingRows: remaining };
 }
 
+export async function clearOldFailedSyncRuns(env: Env, userId: string, linkedServerId?: string | null) {
+  await ensureAdmSyncSchema(env);
+  const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
+  if (!linkedServer) throw new Error("No linked server found");
+
+  const db = requireDb(env);
+  const latestSuccess = await db
+    .prepare(
+      `SELECT COALESCE(finished_at, started_at, created_at) AS sync_time
+       FROM sync_runs
+       WHERE linked_server_id = ?
+         AND lower(status) IN ('completed', 'idle')
+       ORDER BY COALESCE(finished_at, started_at, created_at) DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServer.id)
+    .first<{ sync_time: string | null }>();
+
+  if (!latestSuccess?.sync_time) {
+    return { ok: true, deletedCount: 0 };
+  }
+
+  const result = await db
+    .prepare(
+      `DELETE FROM sync_runs
+       WHERE linked_server_id = ?
+         AND lower(status) IN ('error', 'failed')
+         AND COALESCE(finished_at, started_at, created_at) < ?`,
+    )
+    .bind(linkedServer.id, latestSuccess.sync_time)
+    .run();
+
+  return { ok: true, deletedCount: numberOrZero(result.meta?.changes) };
+}
+
 export type ScheduledAdmSyncResult = {
   ok: true;
   processed: number;

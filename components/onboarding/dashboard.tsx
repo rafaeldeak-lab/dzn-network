@@ -1,11 +1,34 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertTriangle, ArrowRight, DatabaseZap, LogOut, RefreshCw, Server, ShieldCheck, Wrench } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  BarChart3,
+  Bell,
+  ChevronDown,
+  CircleCheck,
+  Crosshair,
+  DatabaseZap,
+  ExternalLink,
+  Gamepad2,
+  Gauge,
+  LifeBuoy,
+  ListChecks,
+  LogOut,
+  RefreshCw,
+  Server,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  Users,
+  Wrench,
+  Zap,
+} from "lucide-react";
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { clearMockTestSyncData, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
+import { clearMockTestSyncData, clearOldFailedSyncRuns, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -49,36 +72,50 @@ export function Dashboard() {
 
   const server = auth.linkedServer;
   return (
-    <DashboardFrame onLogout={signOut}>
-      <div className="mb-8">
-        <p className="text-xs font-black uppercase text-violet-200/70">DZN owner console</p>
-        <h1 className="mt-2 text-4xl font-black uppercase text-white">Dashboard</h1>
-      </div>
+    <DashboardFrame onLogout={signOut} serverName={server?.server_name ?? server?.guild_name ?? null}>
       {server ? <ServerDashboard server={server} onRefresh={async () => setAuth(await getMe())} /> : <EmptyDashboard />}
     </DashboardFrame>
   );
 }
 
-function DashboardFrame({ children, onLogout }: { children: React.ReactNode; onLogout?: () => void }) {
+function DashboardFrame({ children, onLogout, serverName }: { children: React.ReactNode; onLogout?: () => void; serverName?: string | null }) {
+  const navItems = [
+    { label: "Dashboard", href: "/dashboard" },
+    { label: "Servers", href: "/servers" },
+    { label: "Analytics", href: "/leaderboards" },
+    { label: "Players", href: "/leaderboards" },
+    { label: "Settings", href: "/setup" },
+    { label: "Support", href: "#" },
+  ];
+
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-8 text-white sm:px-6 lg:px-8">
+    <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-4 py-5 text-white sm:px-6 lg:px-8">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(139,92,246,0.26),transparent_30%),radial-gradient(circle_at_78%_18%,rgba(14,165,233,0.14),transparent_28%),linear-gradient(180deg,#02030a_0%,#07101f_52%,#02030a_100%)]" />
       <div className="scanline absolute inset-0 opacity-20" />
-      <div className="relative z-10 mx-auto max-w-7xl">
-        <nav className="mb-8 flex items-center justify-between">
-          <DznLogo />
-          <div className="flex items-center gap-3">
-            <Link href="/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 sm:inline-flex">
-              Servers
-            </Link>
-            <Link href="/signup" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 md:inline-flex">
-              Add Your Server
-            </Link>
-            <Link href="/setup" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200">
-              Setup
-            </Link>
+      <div className="relative z-10 mx-auto max-w-[1500px]">
+        <nav className="mb-5 flex flex-col gap-4 rounded-lg border border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-4">
+            <DznLogo compact />
+            <div className="rounded-lg border border-violet-300/20 bg-violet-400/10 px-3 py-2">
+              <p className="text-[10px] font-black uppercase text-violet-200/75">Owner Dashboard</p>
+              <p className="mt-0.5 max-w-[220px] truncate text-xs font-black uppercase text-white">{serverName ?? "Server Console"}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {navItems.map((item) => (
+              <Link key={item.label} href={item.href} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200 transition hover:border-cyan-300/35 hover:text-white">
+                {item.label}
+              </Link>
+            ))}
+            <button type="button" aria-label="Notifications" className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-200">
+              <Bell className="h-4 w-4" />
+            </button>
+            <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
+              {serverName ?? "Server"}
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
             {onLogout ? (
-              <button type="button" onClick={onLogout} className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200">
+              <button type="button" onClick={onLogout} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
                 <LogOut className="inline h-4 w-4" /> Logout
               </button>
             ) : null}
@@ -119,6 +156,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [syncDetailsOpen, setSyncDetailsOpen] = useState(false);
   const [diagnosingLogs, setDiagnosingLogs] = useState(false);
   const [clearingTestData, setClearingTestData] = useState(false);
+  const [clearingFailedRuns, setClearingFailedRuns] = useState(false);
   const [refreshingSyncData, setRefreshingSyncData] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
@@ -141,11 +179,9 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const progress = coreSetupComplete ? 100 : normalizedStatus === "error" ? 72 : normalizedStatus === "live" ? 92 : 84;
   const networkAddress = server.ip_address ?? server.region ?? "Unknown";
   const networkAddressLabel = looksLikeIpAddress(networkAddress) ? "IP Address" : "Region";
-  const admFolder = getFolderFromPath(server.adm_path);
   const syncHasProcessedLines = (syncStatus?.last_processed_line ?? 0) > 0 && syncStatus?.last_sync_status !== "read_pending";
   const statsSyncActive = syncHasProcessedLines || admState.kind === "connected";
   const statsSyncPending = !statsSyncActive && admState.kind === "discovered_read_pending";
-  const statsSyncLabel = statsSyncActive ? "Stats Sync Active" : statsSyncPending ? "Stats Sync Pending" : "Stats Sync Not Started";
   const effectiveSyncStatus = syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started");
   const latestAdmFile = syncStatus?.latest_adm_file ?? server.adm_latest_file ?? "Not detected";
   const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
@@ -158,6 +194,11 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     hasActivity: activityCount > 0,
   });
   const recentEventsAreMock = recentEvents.some((event) => event.is_mock || [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
+  const syncRuns = getPrioritizedSyncRuns(syncStatus?.recent_sync_runs ?? []);
+  const syncHealth = getSyncHealth(syncStatus?.recent_sync_runs ?? [], syncStatus?.last_sync_status ?? effectiveSyncStatus, syncStatus?.last_sync_message ?? null);
+  const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
+  const processedPercent = getProcessedPercent(syncStatus);
+  const nextScheduledSync = getNextScheduledSync(syncStatus?.last_scheduled_sync_at ?? null);
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -286,309 +327,386 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     }
   }
 
+  async function clearFailedRuns() {
+    setClearingFailedRuns(true);
+    setActionMessage("");
+    try {
+      const result = await clearOldFailedSyncRuns(server.id);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
+      setActionMessage(result.deletedCount > 0 ? "Old failed sync runs cleared." : "No old failed sync runs needed clearing.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to clear old failed sync runs.");
+    } finally {
+      setClearingFailedRuns(false);
+    }
+  }
+
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-      <section className="glass-surface animated-border rounded-lg p-6">
-        <div className="relative z-10">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-4">
-              {server.guild_icon_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={server.guild_icon_url} alt="" className="h-16 w-16 rounded-lg" />
-              ) : (
-                <span className="grid h-16 w-16 place-items-center rounded-lg bg-violet-500/20 text-2xl font-black">
-                  {(server.guild_name ?? "D")[0]}
-                </span>
-              )}
+    <div className="space-y-5">
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
+        <DashboardPanel className="p-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+            {server.guild_icon_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={server.guild_icon_url} alt="" className="h-28 w-full rounded-lg object-cover md:h-auto md:w-32" />
+            ) : (
+              <span className="grid h-28 w-full place-items-center rounded-lg border border-violet-300/20 bg-violet-500/15 text-4xl font-black md:h-auto md:w-32">
+                {(server.guild_name ?? "D")[0]}
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="truncate text-3xl font-black text-white">{server.server_name || server.nitrado_service_name}</h1>
+                    <span className="rounded-md border border-emerald-300/25 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase text-emerald-100">
+                      {statsSyncActive ? "Synced" : formatServerStatus(server.status)}
+                    </span>
+                    {server.public_slug ? (
+                      <span className="rounded-md border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+                        Public Listing Active
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-sm font-bold text-zinc-300">
+                    {server.guild_name ?? server.guild_id} <span className="text-zinc-600">/</span> {server.server_type} <span className="text-zinc-600">/</span> {server.game ?? "DayZ"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {server.public_slug ? (
+                    <Link href={`/servers/${server.public_slug}`} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50">
+                      View Public Page
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  ) : null}
+                  <Link href="/setup" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-100">
+                    Server Settings
+                    <Settings className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <HeroMetric icon={<Gauge className="h-4 w-4" />} label={networkAddressLabel} value={networkAddress} />
+                <HeroMetric icon={<Users className="h-4 w-4" />} label="Players" value={server.player_slots ? `0 / ${server.player_slots}` : "Tracking"} />
+                <HeroMetric icon={<BarChart3 className="h-4 w-4" />} label="Rank" value="#--" />
+                <HeroMetric icon={<CircleCheck className="h-4 w-4" />} label="Status" value={statsSyncActive ? "Synced" : formatSyncStatus(effectiveSyncStatus)} />
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {tags.length ? tags.slice(0, 6).map((tag) => <TagPill key={tag}>{tag}</TagPill>) : <span className="text-sm text-zinc-400">No tags selected</span>}
+                {tags.length > 6 ? <TagPill>+{tags.length - 6}</TagPill> : null}
+              </div>
+            </div>
+          </div>
+        </DashboardPanel>
+
+        <div className="grid content-start gap-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <HealthCard icon={<Server className="h-4 w-4" />} label="Server" value={formatServerStatus(server.status)} tone="emerald" />
+            <HealthCard icon={<Gamepad2 className="h-4 w-4" />} label="Discord" value="Connected" tone="violet" />
+            <HealthCard icon={<DatabaseZap className="h-4 w-4" />} label="Nitrado" value="Connected" tone="amber" />
+            <HealthCard icon={<ListChecks className="h-4 w-4" />} label="ADM" value={admState.badge} tone="cyan" />
+            <HealthCard icon={<Zap className="h-4 w-4" />} label="Sync Engine" value={syncHealth.status === "error" ? "Needs Action" : "Active"} tone="violet" />
+          </div>
+          <div className={`rounded-lg border p-4 ${syncHealth.status === "error" ? "border-orange-300/25 bg-orange-400/10" : syncBanner.className}`}>
+            <div className="flex items-start gap-3">
+              <Activity className={`mt-1 h-5 w-5 shrink-0 ${syncHealth.status === "error" ? "text-orange-100" : "text-cyan-100"}`} />
               <div>
-                <p className="text-xs font-black uppercase text-violet-200/70">Discord guild</p>
-                <h2 className="text-2xl font-black text-white">{server.guild_name ?? server.guild_id}</h2>
+                <p className="text-xs font-black uppercase opacity-75">{syncHealth.status === "error" ? syncHealth.title : syncBanner.title}</p>
+                <p className="mt-1 text-sm font-black leading-6 text-white">{syncHealth.status === "error" ? syncHealth.message : syncBanner.message}</p>
+                <p className="mt-1 text-sm leading-6 text-zinc-300">
+                  {syncHealth.status === "error" ? syncHealth.detail : syncBanner.detail ?? "Player activity, kills, deaths and more are being synced in real time."}
+                </p>
               </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {server.public_slug ? <StatusBadge label="Public Listing" value="Active" tone="cyan" /> : null}
-              <Status status={server.status} />
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <StatusBadge label="Server" value={formatServerStatus(server.status)} tone={normalizedStatus === "live" ? "emerald" : normalizedStatus === "error" ? "red" : "orange"} />
-            <StatusBadge label="Discord" value="Connected" tone="cyan" />
-            <StatusBadge label="Nitrado" value="Connected" tone="violet" />
-            <StatusBadge label="ADM" value={admState.badge} tone={admState.kind === "connected" ? "emerald" : admState.kind === "discovered_read_pending" ? "cyan" : "orange"} />
-            <StatusBadge label="Stats Sync" value={statsSyncActive ? "Active" : statsSyncPending ? "Pending" : "Not Started"} tone={statsSyncActive ? "emerald" : statsSyncPending ? "orange" : "zinc"} />
-          </div>
-
-          <div className={`mt-5 rounded-lg border p-4 ${syncBanner.className}`}>
-            <p className="text-xs font-black uppercase opacity-75">{syncBanner.title}</p>
-            <p className="mt-2 text-sm font-bold leading-6 text-white">{syncBanner.message}</p>
-            {syncBanner.detail ? <p className="mt-1 text-sm leading-6 text-zinc-300">{syncBanner.detail}</p> : null}
-          </div>
-
-          {statsSyncPending ? (
-            <div className="mt-6 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-5">
-              <p className="text-xs font-black uppercase text-cyan-100/80">ADM Logs Discovered</p>
-              <div className="mt-2 flex flex-wrap items-center gap-3">
-                <h3 className="text-2xl font-black text-white">Read Pending</h3>
-                <span className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-xs font-black uppercase text-cyan-100">
-                  Production safe
-                </span>
-              </div>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300">
-                DZN can see your latest ADM log file, but full stat syncing is not active yet. Your server can remain live while log reading is finalised.
-              </p>
-            </div>
-          ) : null}
-
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <Info label="Nitrado DayZ server" value={server.server_name || server.nitrado_service_name} />
-            <Info label="Service ID" value={server.nitrado_service_id} />
-            <Info label="Server type" value={server.server_type} />
-            <Info label={networkAddressLabel} value={networkAddress} />
-            {server.game ? <Info label="Game" value={server.game} /> : null}
-            {server.platform ? <Info label="Platform" value={server.platform} /> : null}
-            {server.player_slots ? <Info label="Player Slots" value={String(server.player_slots)} /> : null}
-            <Info label="ADM Status" value={admState.title} />
-            <Info label="Stats Sync" value={statsSyncActive ? "Active" : statsSyncPending ? "Pending" : "Not Started"} />
-            <Info label="Latest ADM File" value={latestAdmFile} />
-            <Info label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
-          </div>
-
-          <div className="mt-6">
-            <p className="text-xs font-black uppercase text-zinc-500">Tags</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {tags.length ? tags.map((tag) => <span key={tag} className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-100">{tag}</span>) : <span className="text-sm text-zinc-400">No tags selected</span>}
             </div>
           </div>
         </div>
       </section>
 
-      <aside className="grid gap-5">
-        <div className="glass-surface animated-border rounded-lg p-5">
-          <div className="relative z-10">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <DatabaseZap className={`h-8 w-8 text-cyan-200 ${refreshingSyncData ? "animate-pulse" : ""}`} />
-                <h3 className="mt-4 text-xl font-black uppercase text-white">Sync Engine Status</h3>
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]">
+        <div className="grid gap-5">
+          <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+            <DashboardPanel className="p-4">
+              <PanelHeader icon={<Server className="h-5 w-5" />} title="Server Overview" />
+              <div className="mt-4 grid gap-x-4 gap-y-1 md:grid-cols-2">
+                <CompactRow label="Server Name" value={server.server_name || server.nitrado_service_name} />
+                <CompactRow label="Service ID" value={server.nitrado_service_id} />
+                <CompactRow label="Nitrado Service ID" value={server.nitrado_service_id} />
+                <CompactRow label={networkAddressLabel} value={networkAddress} />
+                <CompactRow label="Server Type" value={server.server_type} />
+                <CompactRow label="Game" value={server.game ?? "DayZ"} />
+                <CompactRow label="Player Slots" value={server.player_slots ? String(server.player_slots) : "Unknown"} />
+                <CompactRow label="Latest ADM File" value={latestAdmFile} />
+                <CompactRow label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
+                <CompactRow label="Next Scheduled Sync" value={nextScheduledSync} />
               </div>
-              <button
-                type="button"
-                disabled={refreshingSyncData}
-                onClick={refreshNow}
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
-                {manualRefreshing ? "Refreshing..." : "Refresh Now"}
-              </button>
-            </div>
-            <div className="mt-4 grid gap-3">
-              <MiniInfo label="Auto-refresh" value="On" />
-              <MiniInfo label="Refresh Interval" value="15 seconds" />
-              <MiniInfo label="Last Refreshed" value={lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "Starting..."} />
-              <MiniInfo label="Sync Status" value={formatSyncStatus(effectiveSyncStatus)} />
-              <MiniInfo label="Latest ADM File" value={latestAdmFile} />
-              <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
-              <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
-              <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
-              <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(syncStatus.last_manual_sync_at) : "Not synced"} />
-              <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
-              <MiniInfo label="Lines Read" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
-              <MiniInfo label="Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
-              <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
-              <MiniInfo label="Kills Created" value={String(syncStatus?.last_kills_created ?? lastSyncResult?.killsCreated ?? 0)} />
-              <MiniInfo label="Last Sync Result" value={syncStatus?.last_sync_message ?? lastSyncResult?.message ?? "Not synced"} />
-              <MiniInfo label="Last Sync Duration" value={formatDuration(lastSyncDuration)} />
-              <MiniInfo label="Total Kills" value={String(syncStatus?.total_kills ?? 0)} />
-              <MiniInfo label="Total Deaths" value={String(syncStatus?.total_deaths ?? 0)} />
-              <MiniInfo label="Total Joins" value={String(syncStatus?.total_joins ?? 0)} />
-              <MiniInfo label="Total Disconnects" value={String(syncStatus?.total_disconnects ?? 0)} />
-              <MiniInfo label="Unique Players" value={String(syncStatus?.unique_players ?? 0)} />
-              <MiniInfo label="ADM Folder" value={admFolder ?? "Not detected"} />
-              <MiniInfo label="Read Status" value={syncHasProcessedLines ? "Readable" : admState.readStatus} />
-              <MiniInfo label="Next Action" value={syncHasProcessedLines ? "Continue syncing after fresh ADM activity" : admState.nextAction} />
-            </div>
-            {liveRefreshWarning ? (
-              <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
-                {liveRefreshWarning}
-              </p>
-            ) : null}
-            {syncStatus?.last_sync_status === "completed" ? (
-              <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-3 text-sm font-bold leading-6 text-cyan-50">
-                {syncStatus.last_kills_created === 0
-                  ? activityCount > 0
-                    ? "Player activity synced successfully. No PvP kills found in the latest processed lines."
-                    : "ADM synced successfully. No PvP kills found in the latest processed lines."
-                  : "Player activity synced successfully."}
-              </p>
-            ) : null}
-            <LastSyncDetails
-              open={syncDetailsOpen}
-              onToggle={() => setSyncDetailsOpen((value) => !value)}
-              latestAdmFile={latestAdmFile}
-              syncStatus={syncStatus}
-              lastSyncResult={lastSyncResult}
-            />
-            <SyncRunsHistory runs={syncStatus?.recent_sync_runs ?? []} />
-            <button
-              type="button"
-              disabled={syncing}
-              onClick={runSync}
-              className="mt-4 inline-flex w-full items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              <span>{syncing ? "Syncing..." : "Run Manual Sync"}</span>
-              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            </button>
-            <button
-              type="button"
-              disabled={diagnosingLogs}
-              onClick={runDiagnostics}
-              className="mt-3 inline-flex w-full items-center justify-between rounded-lg border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-left text-sm font-bold text-violet-50 transition hover:border-violet-300/45 hover:bg-violet-400/18 disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              <span>{diagnosingLogs ? "Testing Nitrado routes..." : "Run Log Access Diagnostics"}</span>
-              <RefreshCw className={`h-4 w-4 ${diagnosingLogs ? "animate-spin" : ""}`} />
-            </button>
-            {logDiagnostics ? (
-              <LogDiagnosticsPanel
-                diagnostics={logDiagnostics}
-                open={diagnosticsOpen}
-                onToggle={() => setDiagnosticsOpen((value) => !value)}
-              />
-            ) : null}
-            {effectiveSyncStatus === "read_pending" ? (
-              <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
-                ADM file is discovered but DZN cannot read file contents through the current Nitrado API method yet.
-              </p>
-            ) : null}
-            {statsSyncPending ? (
-              <div className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 p-4">
-                <div className="flex gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-orange-100" />
-                  <p className="text-sm font-bold leading-6 text-orange-50">
-                    PvP rankings and player stats are not syncing yet. Your server is live, but kill tracking will activate once ADM log reading is available.
-                  </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {tags.length ? tags.map((tag) => <TagPill key={tag}>{tag}</TagPill>) : <span className="text-sm text-zinc-400">No tags selected</span>}
+              </div>
+            </DashboardPanel>
+
+            <DashboardPanel className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <PanelHeader icon={<DatabaseZap className={`h-5 w-5 ${refreshingSyncData ? "animate-pulse" : ""}`} />} title="Sync Engine Status" />
+                <button
+                  type="button"
+                  disabled={refreshingSyncData}
+                  onClick={refreshNow}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
+                  {manualRefreshing ? "Refreshing..." : "Refresh Now"}
+                </button>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <MiniInfo label="Auto-refresh" value="On (15s)" />
+                <MiniInfo label="Last Refreshed" value={lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "Starting..."} />
+                <MiniInfo label="Sync Status" value={syncHealth.status === "error" ? "Needs Action" : formatSyncStatus(effectiveSyncStatus)} />
+                <MiniInfo label="Latest ADM File" value={latestAdmFile} />
+                <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
+                <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
+                <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
+                <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(syncStatus.last_manual_sync_at) : "Not synced"} />
+                <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
+                <MiniInfo label="Last Sync Duration" value={formatDuration(lastSyncDuration)} />
+                <MiniInfo label="Next Action" value={syncHealth.status === "error" ? syncHealth.nextAction : "Continue syncing after fresh ADM activity"} />
+                <MiniInfo label="Lines Read" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
+                <MiniInfo label="Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
+                <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
+                <MiniInfo label="Kills Created" value={String(syncStatus?.last_kills_created ?? lastSyncResult?.killsCreated ?? 0)} />
+              </div>
+              <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_220px]">
+                <div className="space-y-3">
+                  <ProgressLine label="Read Status" value={`${processedPercent.toFixed(1)}%`} percent={processedPercent} />
+                  <ProgressLine label="Sync Health" value={`${syncHealthPercent}%`} percent={syncHealthPercent} />
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:grid-cols-1">
+                  <MetricTile label="Kills" value={syncStatus?.total_kills ?? 0} />
+                  <MetricTile label="Deaths" value={syncStatus?.total_deaths ?? 0} />
+                  <MetricTile label="Joins" value={syncStatus?.total_joins ?? 0} />
+                  <MetricTile label="Disconnects" value={syncStatus?.total_disconnects ?? 0} />
+                  <MetricTile label="Unique Players" value={syncStatus?.unique_players ?? 0} />
                 </div>
               </div>
-            ) : null}
+              {liveRefreshWarning ? (
+                <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
+                  {liveRefreshWarning}
+                </p>
+              ) : null}
+              <LastSyncDetails open={syncDetailsOpen} onToggle={() => setSyncDetailsOpen((value) => !value)} latestAdmFile={latestAdmFile} syncStatus={syncStatus} lastSyncResult={lastSyncResult} />
+            </DashboardPanel>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+            <DashboardPanel className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <PanelHeader icon={<Activity className="h-5 w-5" />} title="Recent Synced Events" />
+                {recentEventsAreMock ? <SmallBadge tone="orange">Mock Sync Data</SmallBadge> : <SmallBadge tone="emerald">Live Feed Active</SmallBadge>}
+              </div>
+              <div className="mt-4 grid max-h-[430px] gap-2 overflow-auto pr-1">
+                {recentEvents.length ? (
+                  recentEvents.map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)
+                ) : (
+                  <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">
+                    No synced events yet. Activity will appear after players join or events happen in-game.
+                  </div>
+                )}
+              </div>
+            </DashboardPanel>
+
+            <DashboardPanel className="p-4">
+              <SyncRunsHistory runs={syncRuns} latestSuccessTime={syncHealth.latestSuccessTime} onClearFailedRuns={clearFailedRuns} clearingFailedRuns={clearingFailedRuns} />
+            </DashboardPanel>
           </div>
         </div>
-        <div className="glass-surface animated-border rounded-lg p-5">
-          <div className="relative z-10">
-            <Activity className="h-8 w-8 text-emerald-200" />
-            <h3 className="mt-4 text-xl font-black uppercase text-white">Setup progress</h3>
-            <div className="mt-5 h-2 overflow-hidden rounded-sm bg-white/10">
-              <div className="h-full bg-gradient-to-r from-violet-300 to-emerald-300" style={{ width: `${progress}%` }} />
-            </div>
-            <p className="mt-3 text-sm font-bold text-zinc-300">{progress}% complete</p>
-            <p className={`mt-2 text-xs font-black uppercase ${statsSyncPending ? "text-orange-100" : admState.kind === "connected" ? "text-emerald-100" : "text-zinc-400"}`}>
-              {statsSyncLabel}
-            </p>
-          </div>
-        </div>
-        <div className="glass-surface animated-border rounded-lg p-5">
-          <div className="relative z-10">
-            <Wrench className="h-8 w-8 text-violet-200" />
-            <h3 className="mt-4 text-xl font-black uppercase text-white">Quick actions</h3>
+
+        <aside className="grid content-start gap-5">
+          <DashboardPanel className="p-4">
+            <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions & Setup" />
             <div className="mt-4 grid gap-3">
-              <button
-                type="button"
-                disabled={checkingLogs}
-                onClick={rerunLogCheck}
-                className="inline-flex items-center justify-between rounded-lg border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-left text-sm font-bold text-violet-50 transition hover:border-violet-300/45 hover:bg-violet-400/18 disabled:cursor-not-allowed disabled:opacity-55"
-              >
+              <ActionLink href="/leaderboards" icon={<Crosshair className="h-4 w-4" />} label="View Kill Feed" />
+              <ActionLink href="/setup" icon={<Settings className="h-4 w-4" />} label="Edit Server" />
+              <ActionLink href="/setup" icon={<Gauge className="h-4 w-4" />} label="Server Settings" />
+              <ActionLink href="/setup#review-test" icon={<LifeBuoy className="h-4 w-4" />} label="Setup Guide" />
+              <button type="button" disabled={syncing} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55">
+                <span>{syncing ? "Syncing..." : "Run Manual Sync"}</span>
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              </button>
+              <button type="button" disabled={checkingLogs} onClick={rerunLogCheck} className="inline-flex items-center justify-between rounded-lg border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-left text-sm font-bold text-violet-50 transition hover:border-violet-300/45 hover:bg-violet-400/18 disabled:cursor-not-allowed disabled:opacity-55">
                 <span>{checkingLogs ? "Checking logs..." : "Re-run Log Check"}</span>
                 <RefreshCw className={`h-4 w-4 ${checkingLogs ? "animate-spin" : ""}`} />
               </button>
-              <Link href="/setup#review-test" className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-50">Go to Review & Test</Link>
-              {server.public_slug ? (
-                <Link href={`/servers/${server.public_slug}`} className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-50">View public page</Link>
-              ) : null}
-              <Link href="/setup" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-100">Edit setup</Link>
-              <Link href="/servers" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-100">View network</Link>
-              <button
-                type="button"
-                disabled={clearingTestData}
-                onClick={clearTestData}
-                className="inline-flex items-center justify-between rounded-lg border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-left text-sm font-bold text-orange-50 transition hover:border-orange-300/45 hover:bg-orange-400/18 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                <span>{clearingTestData ? "Clearing..." : "Clear Mock/Test Sync Data"}</span>
-                <RefreshCw className={`h-4 w-4 ${clearingTestData ? "animate-spin" : ""}`} />
+              <button type="button" disabled={diagnosingLogs} onClick={runDiagnostics} className="inline-flex items-center justify-between rounded-lg border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-left text-sm font-bold text-violet-50 transition hover:border-violet-300/45 hover:bg-violet-400/18 disabled:cursor-not-allowed disabled:opacity-55">
+                <span>{diagnosingLogs ? "Testing Nitrado routes..." : "Run Log Access Diagnostics"}</span>
+                <RefreshCw className={`h-4 w-4 ${diagnosingLogs ? "animate-spin" : ""}`} />
               </button>
+              {server.public_slug ? <ActionLink href={`/servers/${server.public_slug}`} icon={<ExternalLink className="h-4 w-4" />} label="View Public Page" tone="emerald" /> : null}
+              <ActionLink href="/servers" icon={<Server className="h-4 w-4" />} label="View Network" />
+              <button type="button" disabled={clearingTestData} onClick={clearTestData} className="inline-flex items-center justify-between rounded-lg border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-left text-sm font-bold text-orange-50 transition hover:border-orange-300/45 hover:bg-orange-400/18 disabled:cursor-not-allowed disabled:opacity-55">
+                <span>{clearingTestData ? "Clearing..." : "Clear Mock/Test Sync Data"}</span>
+                <Trash2 className={`h-4 w-4 ${clearingTestData ? "animate-pulse" : ""}`} />
+              </button>
+            </div>
+            <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-black uppercase text-zinc-300">Setup Progress</p>
+                <span className="text-xs font-black uppercase text-emerald-100">{progress}% Complete</span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-sm bg-white/10">
+                <div className="h-full bg-gradient-to-r from-violet-300 via-cyan-300 to-emerald-300" style={{ width: `${progress}%` }} />
+              </div>
+              <div className="mt-3 grid gap-2">
+                <SetupCheck label="ADM Discovered" done={admState.isDiscovered} />
+                <SetupCheck label="Log Sync Active" done={statsSyncActive} />
+                <SetupCheck label="Events Processing" done={(syncStatus?.last_events_created ?? 0) > 0 || (syncStatus?.total_joins ?? 0) > 0} />
+                <SetupCheck label="Discord Connected" done />
+                <SetupCheck label="Stats Sync Active" done={statsSyncActive} />
+              </div>
             </div>
             {actionMessage ? (
               <p className="mt-4 rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-sm font-bold text-zinc-200">
                 {actionMessage}
               </p>
             ) : null}
-          </div>
-        </div>
-        <div className="glass-surface animated-border rounded-lg p-5">
-          <div className="relative z-10">
-            <Activity className="h-8 w-8 text-cyan-200" />
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <h3 className="text-xl font-black uppercase text-white">Recent Synced Events</h3>
-              {recentEventsAreMock ? (
-                <span className="rounded-md border border-orange-300/25 bg-orange-400/10 px-2 py-1 text-[10px] font-black uppercase text-orange-100">
-                  Mock Sync Data
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-4 grid gap-2">
-              {recentEvents.length ? (
-                recentEvents.map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)
-              ) : (
-                ["No synced events yet", "Killfeed activates once ADM sync is live", "Player stats will appear after log processing begins"].map((item) => (
-                  <div key={item} className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">
-                    {item}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </aside>
+            {logDiagnostics ? (
+              <LogDiagnosticsPanel diagnostics={logDiagnostics} open={diagnosticsOpen} onToggle={() => setDiagnosticsOpen((value) => !value)} />
+            ) : null}
+          </DashboardPanel>
+        </aside>
+      </section>
     </div>
   );
 }
 
-function Status({ status }: { status: LinkedServer["status"] }) {
-  const normalizedStatus = status.toLowerCase();
-  const className =
-    normalizedStatus === "live"
-      ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
-      : normalizedStatus === "error"
-        ? "border-red-300/30 bg-red-400/10 text-red-100"
-        : "border-orange-300/30 bg-orange-400/10 text-orange-100";
+function DashboardPanel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <span className={`rounded-lg border px-4 py-2 text-xs font-black uppercase ${className}`}>
-      {formatServerStatus(status)}
+    <section className={`glass-surface animated-border rounded-lg ${className}`}>
+      <div className="relative z-10">{children}</div>
+    </section>
+  );
+}
+
+function PanelHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-2 text-cyan-100">
+      {icon}
+      <h2 className="text-sm font-black uppercase tracking-normal text-white">{title}</h2>
+    </div>
+  );
+}
+
+function HeroMetric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
+      <div className="flex items-center gap-2 text-zinc-500">
+        {icon}
+        <p className="text-[10px] font-black uppercase">{label}</p>
+      </div>
+      <p className="mt-2 truncate text-sm font-black text-white">{value}</p>
+    </div>
+  );
+}
+
+function HealthCard({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone: "emerald" | "violet" | "amber" | "cyan";
+}) {
+  const classes = {
+    emerald: "border-emerald-300/30 bg-emerald-400/10 text-emerald-100",
+    violet: "border-violet-300/30 bg-violet-400/10 text-violet-100",
+    amber: "border-amber-300/35 bg-amber-400/10 text-amber-100",
+    cyan: "border-cyan-300/30 bg-cyan-400/10 text-cyan-100",
+  }[tone];
+
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${classes}`}>
+      <div className="flex items-center justify-between gap-2">
+        {icon}
+        <span className="h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_14px_currentColor]" />
+      </div>
+      <p className="mt-4 text-[10px] font-black uppercase opacity-70">{label}</p>
+      <p className="mt-1 truncate text-xs font-black uppercase">{value}</p>
+    </div>
+  );
+}
+
+function CompactRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-white/10 py-2">
+      <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+      <p className="max-w-[62%] truncate text-right text-sm font-bold text-white">{value}</p>
+    </div>
+  );
+}
+
+function TagPill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1.5 text-[11px] font-bold text-cyan-100">
+      {children}
     </span>
   );
 }
 
-function StatusBadge({ label, value, tone }: { label: string; value: string; tone: "emerald" | "cyan" | "violet" | "orange" | "red" | "zinc" }) {
-  const classes = {
-    emerald: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100",
-    cyan: "border-cyan-300/25 bg-cyan-400/10 text-cyan-100",
-    violet: "border-violet-300/25 bg-violet-400/10 text-violet-100",
-    orange: "border-orange-300/25 bg-orange-400/10 text-orange-100",
-    red: "border-red-300/25 bg-red-400/10 text-red-100",
-    zinc: "border-white/10 bg-white/[0.04] text-zinc-200",
-  }[tone];
+function ProgressLine({ label, value, percent }: { label: string; value: string; percent: number }) {
   return (
-    <div className={`rounded-lg border px-3 py-3 ${classes}`}>
-      <p className="text-[10px] font-black uppercase opacity-70">{label}</p>
-      <p className="mt-1 text-xs font-black uppercase">{value}</p>
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+        <p className="text-[10px] font-black uppercase text-cyan-100">{value}</p>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-sm bg-white/10">
+        <div className="h-full bg-gradient-to-r from-violet-300 via-cyan-300 to-emerald-300" style={{ width: `${Math.min(Math.max(percent, 0), 100)}%` }} />
+      </div>
     </div>
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function MetricTile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-black/24 p-4">
-      <p className="text-xs font-black uppercase text-zinc-500">{label}</p>
-      <p className="mt-2 font-bold text-white">{value}</p>
+    <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2">
+      <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+      <p className="mt-1 text-lg font-black text-white">{value.toLocaleString()}</p>
     </div>
   );
+}
+
+function ActionLink({ href, icon, label, tone = "zinc" }: { href: string; icon: React.ReactNode; label: string; tone?: "zinc" | "emerald" }) {
+  const className = tone === "emerald"
+    ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-50 hover:border-emerald-300/45"
+    : "border-white/10 bg-white/[0.04] text-zinc-100 hover:border-cyan-300/35";
+
+  return (
+    <Link href={href} className={`inline-flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-bold transition ${className}`}>
+      <span className="inline-flex items-center gap-2">{icon}{label}</span>
+      <ArrowRight className="h-4 w-4" />
+    </Link>
+  );
+}
+
+function SetupCheck({ label, done }: { label: string; done: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
+      <span className="text-xs font-bold text-zinc-200">{label}</span>
+      <CircleCheck className={`h-4 w-4 ${done ? "text-emerald-200" : "text-zinc-600"}`} />
+    </div>
+  );
+}
+
+function SmallBadge({ children, tone }: { children: React.ReactNode; tone: "emerald" | "orange" | "cyan" | "zinc" }) {
+  const classes = {
+    emerald: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100",
+    orange: "border-orange-300/25 bg-orange-400/10 text-orange-100",
+    cyan: "border-cyan-300/25 bg-cyan-400/10 text-cyan-100",
+    zinc: "border-white/10 bg-white/[0.04] text-zinc-300",
+  }[tone];
+
+  return <span className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase ${classes}`}>{children}</span>;
 }
 
 function MiniInfo({ label, value }: { label: string; value: string }) {
@@ -649,40 +767,66 @@ function LastSyncDetails({
   );
 }
 
-function SyncRunsHistory({ runs }: { runs: AdmSyncStatus["recent_sync_runs"] }) {
+function SyncRunsHistory({
+  runs,
+  latestSuccessTime,
+  onClearFailedRuns,
+  clearingFailedRuns,
+}: {
+  runs: AdmSyncStatus["recent_sync_runs"];
+  latestSuccessTime: string | null;
+  onClearFailedRuns: () => void;
+  clearingFailedRuns: boolean;
+}) {
+  const hasHistoricalErrors = runs.some((run) => isHistoricalFailedRun(run, latestSuccessTime));
   return (
-    <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+    <div>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-black uppercase text-zinc-300">Sync Runs History</p>
-        <span className="text-[10px] font-black uppercase text-zinc-500">Last 5</span>
+        <PanelHeader icon={<ListChecks className="h-5 w-5" />} title="Sync Runs History" />
+        <div className="flex items-center gap-2">
+          {hasHistoricalErrors ? <SmallBadge tone="orange">Historical errors</SmallBadge> : null}
+          <span className="text-[10px] font-black uppercase text-zinc-500">Last 5</span>
+        </div>
       </div>
-      <div className="mt-3 grid gap-2">
+      <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
         {runs.length ? (
           runs.map((run) => (
-            <div key={run.id} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-black uppercase text-zinc-500">{formatSyncTrigger(run.trigger_type)}</p>
-                  <p className="mt-1 text-sm font-bold text-white">{formatSyncStatus(run.status)}</p>
+            <div key={run.id} className="grid min-w-[720px] grid-cols-[1.2fr_0.8fr_0.9fr_0.8fr_0.8fr_0.7fr] items-center gap-3 border-b border-white/10 bg-black/20 px-3 py-3 text-xs last:border-b-0">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SmallBadge tone={isFailedRun(run) ? "orange" : isSuccessfulRun(run) ? "emerald" : "zinc"}>{formatSyncStatus(run.status)}</SmallBadge>
+                  {isHistoricalFailedRun(run, latestSuccessTime) ? <SmallBadge tone="orange">Historical error</SmallBadge> : null}
                 </div>
-                <p className="shrink-0 text-right text-[10px] font-black uppercase text-zinc-500">
-                  {formatCompactDate(run.finished_at ?? run.started_at ?? run.created_at)}
-                </p>
+                <p className="mt-2 line-clamp-2 text-[11px] font-bold leading-5 text-zinc-400">{run.message ?? "Sync run recorded"}</p>
               </div>
-              <p className="mt-2 text-xs font-bold leading-5 text-zinc-400">
-                {run.message ?? "Sync run recorded"}
-              </p>
-              <p className="mt-2 text-[10px] font-black uppercase text-zinc-500">
-                {run.lines_processed} lines / {run.events_created} events / {run.kills_created} kills / {formatDuration(run.duration_ms)}
-              </p>
+              <HistoryCell label="Type" value={formatSyncTrigger(run.trigger_type)} />
+              <HistoryCell label="Started" value={formatCompactDate(run.started_at ?? run.created_at)} />
+              <HistoryCell label="Duration" value={formatDuration(run.duration_ms)} />
+              <HistoryCell label="Lines Read" value={String(run.lines_read)} />
+              <HistoryCell label="Events" value={String(run.events_created)} />
             </div>
           ))
         ) : (
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-sm font-bold text-zinc-400">
+          <div className="bg-white/[0.03] px-3 py-3 text-sm font-bold text-zinc-400">
             No sync runs recorded yet.
           </div>
         )}
       </div>
+      {latestSuccessTime ? (
+        <button type="button" disabled={clearingFailedRuns} onClick={onClearFailedRuns} className="mt-3 inline-flex w-full items-center justify-between rounded-lg border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-left text-sm font-bold text-orange-50 transition hover:border-orange-300/45 hover:bg-orange-400/18 disabled:cursor-not-allowed disabled:opacity-55">
+          <span>{clearingFailedRuns ? "Clearing..." : "Clear Old Failed Sync Runs"}</span>
+          <Trash2 className={`h-4 w-4 ${clearingFailedRuns ? "animate-pulse" : ""}`} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function HistoryCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-black uppercase text-zinc-600">{label}</p>
+      <p className="mt-1 truncate font-bold text-zinc-200">{value}</p>
     </div>
   );
 }
@@ -693,16 +837,21 @@ function RecentSyncEventRow({ event }: { event: AdmRecentSyncEvent }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-black uppercase text-zinc-500">{event.event_label || formatEventType(event.event_type)}</p>
-          <p className="mt-1 text-sm font-bold leading-5 text-white">
-            {event.detail ?? (isKill ? `${event.killer_name ?? "Unknown"} -> ${event.victim_name ?? "Unknown"}` : event.player_name ?? "Unknown player")}
-          </p>
-          {secondary ? (
-            <p className="mt-1 text-xs font-bold text-zinc-400">
-              {secondary}
+        <div className="flex min-w-0 gap-3">
+          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-400/10 text-cyan-100">
+            {getEventIcon(event.event_type, isKill)}
+          </span>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase text-zinc-500">{event.event_label || formatEventType(event.event_type)}</p>
+            <p className="mt-1 truncate text-sm font-bold leading-5 text-white">
+              {event.detail ?? (isKill ? `${event.killer_name ?? "Unknown"} -> ${event.victim_name ?? "Unknown"}` : event.player_name ?? "Unknown player")}
             </p>
-          ) : null}
+            {secondary ? (
+              <p className="mt-1 truncate text-xs font-bold text-zinc-400">
+                {secondary}
+              </p>
+            ) : null}
+          </div>
         </div>
         <p className="shrink-0 text-right text-[10px] font-black uppercase text-zinc-500">
           {formatCompactDate(event.occurred_at ?? event.created_at)}
@@ -845,6 +994,100 @@ function getRecentEventSecondary(event: AdmRecentSyncEvent, isKill: boolean) {
   return null;
 }
 
+function getEventIcon(eventType: string, isKill: boolean) {
+  if (isKill) return <Crosshair className="h-4 w-4" />;
+  if (eventType === "player_connected" || eventType === "player_connecting") return <Users className="h-4 w-4" />;
+  if (eventType === "player_disconnected") return <LogOut className="h-4 w-4" />;
+  if (eventType === "player_suicide" || eventType === "player_killed_environment" || eventType === "player_died_stats") return <Activity className="h-4 w-4" />;
+  if (eventType.startsWith("player_hit")) return <Zap className="h-4 w-4" />;
+  if (eventType === "player_placed_object") return <Wrench className="h-4 w-4" />;
+  return <Activity className="h-4 w-4" />;
+}
+
+function getPrioritizedSyncRuns(runs: AdmSyncStatus["recent_sync_runs"]) {
+  const sorted = [...runs].sort((a, b) => getSyncRunTimestamp(b) - getSyncRunTimestamp(a));
+  const latestSuccess = sorted.find(isSuccessfulRun);
+  if (!latestSuccess) return sorted.slice(0, 5);
+  return [latestSuccess, ...sorted.filter((run) => run.id !== latestSuccess.id)].slice(0, 5);
+}
+
+function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: string, currentMessage: string | null) {
+  const sorted = [...runs].sort((a, b) => getSyncRunTimestamp(b) - getSyncRunTimestamp(a));
+  const latestSuccess = sorted.find(isSuccessfulRun) ?? null;
+  const latestFailure = sorted.find(isFailedRun) ?? null;
+  const latestSuccessTime = latestSuccess ? syncRunComparableTime(latestSuccess) : null;
+  const latestFailureTime = latestFailure ? syncRunComparableTime(latestFailure) : null;
+  const failureIsCurrent = Boolean(latestFailureTime && (!latestSuccessTime || Date.parse(latestFailureTime) > Date.parse(latestSuccessTime)));
+  const message = latestFailure?.message ?? currentMessage ?? "";
+  const reconnectRequired = failureIsCurrent && /decrypt|cipher|padding|cryptokey|aes-gcm|token/i.test(message);
+
+  if (failureIsCurrent) {
+    return {
+      status: "error" as const,
+      title: reconnectRequired ? "Nitrado Reconnect Required" : "Sync Needs Attention",
+      message: reconnectRequired ? "Reconnect Nitrado token to resume scheduled syncing." : "Latest sync run needs attention.",
+      detail: reconnectRequired ? "Your latest successful sync remains preserved, but scheduled sync needs a fresh readable token." : message || "Review the latest sync run.",
+      nextAction: reconnectRequired ? "Reconnect Nitrado token" : "Review latest sync error",
+      latestSuccessTime,
+    };
+  }
+
+  if (currentStatus === "read_pending") {
+    return {
+      status: "pending" as const,
+      title: "ADM Read Pending",
+      message: "ADM discovered, waiting for readable log content.",
+      detail: "Your server can stay live while DZN waits for readable ADM data.",
+      nextAction: "Waiting for readable ADM content",
+      latestSuccessTime,
+    };
+  }
+
+  return {
+    status: "active" as const,
+    title: "ADM Sync Active",
+    message: "ADM Sync Active - DZN is reading your server logs and updating player activity.",
+    detail: "Player activity, kills, deaths and more are being synced in real time.",
+    nextAction: "Continue syncing after fresh ADM activity",
+    latestSuccessTime,
+  };
+}
+
+function getProcessedPercent(syncStatus: AdmSyncStatus | null) {
+  const linesRead = syncStatus?.last_lines_read ?? 0;
+  const linesProcessed = syncStatus?.last_lines_processed ?? 0;
+  if (linesRead > 0) return Math.min(100, (linesProcessed / linesRead) * 100);
+  return (syncStatus?.last_processed_line ?? 0) > 0 ? 100 : 0;
+}
+
+function getNextScheduledSync(lastScheduledSync: string | null) {
+  if (!lastScheduledSync) return "Pending";
+  const date = new Date(lastScheduledSync);
+  if (Number.isNaN(date.getTime())) return "Pending";
+  return formatDashboardDate(new Date(date.getTime() + SYNC_POLL_INTERVAL_MS * 20).toISOString());
+}
+
+function isSuccessfulRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
+  return ["completed", "idle"].includes(run.status.toLowerCase());
+}
+
+function isFailedRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
+  return ["error", "failed"].includes(run.status.toLowerCase());
+}
+
+function isHistoricalFailedRun(run: AdmSyncStatus["recent_sync_runs"][number], latestSuccessTime: string | null) {
+  if (!latestSuccessTime || !isFailedRun(run)) return false;
+  return getSyncRunTimestamp(run) < Date.parse(latestSuccessTime);
+}
+
+function getSyncRunTimestamp(run: AdmSyncStatus["recent_sync_runs"][number]) {
+  return Date.parse(syncRunComparableTime(run) ?? "") || 0;
+}
+
+function syncRunComparableTime(run: AdmSyncStatus["recent_sync_runs"][number]) {
+  return run.finished_at ?? run.started_at ?? run.created_at;
+}
+
 function formatDuration(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "Not recorded";
   if (value < 1000) return `${Math.max(0, Math.round(value))}ms`;
@@ -932,11 +1175,4 @@ function getAdmState(server: LinkedServer) {
     nextAction: "Run the log check from Review & Test.",
     isDiscovered: false,
   };
-}
-
-function getFolderFromPath(path?: string | null) {
-  if (!path) return null;
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length <= 1) return null;
-  return parts.slice(0, -1).join("/");
 }

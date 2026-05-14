@@ -91,6 +91,13 @@ export async function clearMockTestSyncData(linkedServerId?: string) {
   });
 }
 
+export async function clearOldFailedSyncRuns(linkedServerId?: string) {
+  return request<{ ok: boolean; deletedCount: number }>("/api/sync/clear-failed-runs", {
+    method: "POST",
+    body: JSON.stringify(linkedServerId ? { linked_server_id: linkedServerId } : {}),
+  });
+}
+
 export async function goLive() {
   return request<{ ok: boolean; status: "live" }>("/api/onboarding/go-live", {
     method: "POST",
