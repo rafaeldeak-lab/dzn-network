@@ -1,4 +1,4 @@
-import { parseAdmLines, type ParsedAdmEvent } from "./adm-parser";
+import { parseAdmLine, parseAdmLines, type ParsedAdmEvent } from "./adm-parser";
 import { getCurrentLinkedServer, requireDb, saveServerAdmPath } from "./db";
 import { isMockNitrado } from "./mock";
 import {
@@ -29,6 +29,17 @@ type AdmSyncState = {
   last_sync_status: string | null;
   last_sync_message: string | null;
   last_sync_at: string | null;
+  last_lines_read: number | null;
+  last_lines_processed: number | null;
+  last_raw_events_stored: number | null;
+  last_player_events_stored: number | null;
+  last_kill_events_stored: number | null;
+  last_events_created: number | null;
+  last_kills_created: number | null;
+  last_unknown_lines: number | null;
+  last_duplicate_lines: number | null;
+  last_sync_duration_ms: number | null;
+  last_readable_route: string | null;
 };
 
 export type AdmSyncResult = {
@@ -44,6 +55,12 @@ export type AdmSyncResult = {
   readableRouteUsed: string | null;
   linesRead: number;
   syncStatus: string;
+  rawEventsStored: number;
+  playerEventsStored: number;
+  killEventsStored: number;
+  unknownLines: number;
+  skippedDuplicateLines: number;
+  syncDurationMs: number;
 };
 
 export type AdmSyncStatus = {
@@ -58,6 +75,17 @@ export type AdmSyncStatus = {
   total_joins: number;
   total_disconnects: number;
   unique_players: number;
+  last_lines_read: number;
+  last_lines_processed: number;
+  last_raw_events_stored: number;
+  last_player_events_stored: number;
+  last_kill_events_stored: number;
+  last_events_created: number;
+  last_kills_created: number;
+  last_unknown_lines: number;
+  last_duplicate_lines: number;
+  last_sync_duration_ms: number | null;
+  last_readable_route: string | null;
 };
 
 export type AdmRecentSyncEvent = {
@@ -70,6 +98,11 @@ export type AdmRecentSyncEvent = {
   distance: number | null;
   occurred_at: string | null;
   created_at: string | null;
+  event_label: string;
+  detail: string | null;
+  cause: string | null;
+  object_type: string | null;
+  is_mock: boolean;
 };
 
 export type ReadableAdmLinesResult = {
@@ -82,6 +115,7 @@ export type ReadableAdmLinesResult = {
 };
 
 export async function runAdmSync(env: Env, userId: string, linkedServerId?: string | null): Promise<AdmSyncResult> {
+  const syncStartedAt = Date.now();
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
@@ -121,6 +155,17 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
       status: admAvailable ? "read_pending" : "not_started",
       message,
       lastSyncAt: now,
+      linesRead: 0,
+      linesProcessed: 0,
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      unknownLines: 0,
+      duplicateLines: 0,
+      syncDurationMs: Date.now() - syncStartedAt,
+      readableRoute: readable.readableRouteUsed,
     });
     return {
       status: admAvailable ? "read_pending" : "not_started",
@@ -135,6 +180,12 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
       readableRouteUsed: readable.readableRouteUsed,
       linesRead: 0,
       syncStatus: admAvailable ? "read_pending" : "not_started",
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      unknownLines: 0,
+      skippedDuplicateLines: 0,
+      syncDurationMs: Date.now() - syncStartedAt,
     };
   }
 
@@ -147,6 +198,11 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
   let joinsCreated = 0;
   let disconnectsCreated = 0;
   let deathsCreated = 0;
+  let rawEventsStored = 0;
+  let playerEventsStored = 0;
+  let killEventsStored = 0;
+  let unknownLines = 0;
+  let duplicateLines = 0;
   let processedOffset = isSameAdmFile ? Number(existingState?.last_processed_offset ?? 0) : 0;
   let lastEventAt: string | null = null;
   const recentDeathLines = new Map<string, number>();
@@ -162,13 +218,21 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     const parsed = pendingParsedEvents[index];
     const rawLine = parsed.rawLine;
     const lineNumber = lastProcessedLine + index + 1;
-    await insertRawEvent(env, linkedServer.id, latestAdmFile, lineNumber, rawLine, parsed);
+    const rawInserted = await insertRawEvent(env, linkedServer.id, latestAdmFile, lineNumber, rawLine, parsed);
     processedOffset += rawLine.length + 1;
+    if (!rawInserted) {
+      duplicateLines += 1;
+      continue;
+    }
+    rawEventsStored += 1;
+    if (parsed.eventType === "unknown") unknownLines += 1;
 
     const eventResult = await persistParsedEvent(env, linkedServer.id, latestAdmFile, lineNumber, parsed, {
       recentDeathLines,
     });
     eventsCreated += eventResult.eventsCreated;
+    playerEventsStored += eventResult.playerEventsCreated;
+    killEventsStored += eventResult.killEventsCreated;
     killsCreated += eventResult.killsCreated;
     joinsCreated += eventResult.joinsCreated;
     disconnectsCreated += eventResult.disconnectsCreated;
@@ -179,6 +243,7 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
   const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
   const status = pendingParsedEvents.length ? "completed" : "idle";
   const message = pendingParsedEvents.length ? "ADM lines processed successfully" : "No new ADM lines to process";
+  const syncDurationMs = Date.now() - syncStartedAt;
   const uniquePlayers = await countUniquePlayers(env, linkedServer.id);
   await upsertServerStats(env, linkedServer.id, {
     kills: killsCreated,
@@ -197,6 +262,17 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     status,
     message,
     lastSyncAt: now,
+    linesRead: lines.length,
+    linesProcessed: pendingParsedEvents.length,
+    rawEventsStored,
+    playerEventsStored,
+    killEventsStored,
+    eventsCreated,
+    killsCreated,
+    unknownLines,
+    duplicateLines,
+    syncDurationMs,
+    readableRoute: readable.readableRouteUsed,
   });
 
   return {
@@ -212,6 +288,12 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     readableRouteUsed: readable.readableRouteUsed,
     linesRead: lines.length,
     syncStatus: status,
+    rawEventsStored,
+    playerEventsStored,
+    killEventsStored,
+    unknownLines,
+    skippedDuplicateLines: duplicateLines,
+    syncDurationMs,
   };
 }
 
@@ -230,6 +312,17 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
         adm_sync_state.last_processed_file,
         adm_sync_state.last_processed_line,
         adm_sync_state.last_sync_at,
+        adm_sync_state.last_lines_read,
+        adm_sync_state.last_lines_processed,
+        adm_sync_state.last_raw_events_stored,
+        adm_sync_state.last_player_events_stored,
+        adm_sync_state.last_kill_events_stored,
+        adm_sync_state.last_events_created,
+        adm_sync_state.last_kills_created,
+        adm_sync_state.last_unknown_lines,
+        adm_sync_state.last_duplicate_lines,
+        adm_sync_state.last_sync_duration_ms,
+        adm_sync_state.last_readable_route,
         server_stats.total_kills,
         server_stats.total_deaths,
         server_stats.total_joins,
@@ -256,6 +349,17 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     total_joins: numberOrZero(row?.total_joins),
     total_disconnects: numberOrZero(row?.total_disconnects),
     unique_players: numberOrZero(row?.unique_players),
+    last_lines_read: numberOrZero(row?.last_lines_read),
+    last_lines_processed: numberOrZero(row?.last_lines_processed),
+    last_raw_events_stored: numberOrZero(row?.last_raw_events_stored),
+    last_player_events_stored: numberOrZero(row?.last_player_events_stored),
+    last_kill_events_stored: numberOrZero(row?.last_kill_events_stored),
+    last_events_created: numberOrZero(row?.last_events_created),
+    last_kills_created: numberOrZero(row?.last_kills_created),
+    last_unknown_lines: numberOrZero(row?.last_unknown_lines),
+    last_duplicate_lines: numberOrZero(row?.last_duplicate_lines),
+    last_sync_duration_ms: row?.last_sync_duration_ms === null || row?.last_sync_duration_ms === undefined ? null : numberOrZero(row.last_sync_duration_ms),
+    last_readable_route: typeof row?.last_readable_route === "string" ? row.last_readable_route : null,
   };
 }
 
@@ -273,7 +377,7 @@ export async function getRecentAdmSyncEvents(
   const safeLimit = Math.min(Math.max(Math.trunc(limit) || 10, 1), 25);
   const result = await db
     .prepare(
-      `SELECT source, event_type, player_name, killer_name, victim_name, weapon, distance, occurred_at, created_at
+      `SELECT source, event_type, player_name, killer_name, victim_name, weapon, distance, occurred_at, created_at, raw_line
        FROM (
          SELECT
            'kill' AS source,
@@ -285,6 +389,7 @@ export async function getRecentAdmSyncEvents(
            distance,
            occurred_at,
            created_at,
+           raw_line,
            COALESCE(occurred_at, created_at) AS sort_time
        FROM kill_events
        WHERE linked_server_id = ?
@@ -312,6 +417,7 @@ export async function getRecentAdmSyncEvents(
            NULL AS distance,
            occurred_at,
            created_at,
+           raw_line,
            COALESCE(occurred_at, created_at) AS sort_time
        FROM player_events
        WHERE linked_server_id = ?
@@ -328,9 +434,110 @@ export async function getRecentAdmSyncEvents(
        LIMIT ?`,
     )
     .bind(linkedServer.id, isMockNitrado(env.MOCK_NITRADO) ? 1 : 0, linkedServer.id, isMockNitrado(env.MOCK_NITRADO) ? 1 : 0, safeLimit)
-    .all<AdmRecentSyncEvent>();
+    .all<AdmRecentSyncEvent & { raw_line?: string | null }>();
 
-  return result.results ?? [];
+  return (result.results ?? []).map(toSafeRecentSyncEvent);
+}
+
+function toSafeRecentSyncEvent(row: AdmRecentSyncEvent & { raw_line?: string | null }): AdmRecentSyncEvent {
+  const parsed = row.raw_line ? parseAdmLine(row.raw_line) : null;
+  const eventType = row.event_type || parsed?.eventType || "unknown";
+  const killerName = row.killer_name ?? parsed?.killerName ?? null;
+  const victimName = row.victim_name ?? parsed?.victimName ?? null;
+  const playerName = row.player_name ?? parsed?.playerName ?? parsed?.victimName ?? parsed?.attackerName ?? null;
+  const weapon = row.weapon ?? parsed?.weapon ?? null;
+  const distance = row.distance ?? parsed?.distance ?? null;
+  const cause = parsed?.cause ?? syncEventCause(eventType);
+  const objectType = parsed?.objectType ?? null;
+  const isKill = row.source === "kill" || eventType === "player_killed";
+
+  return {
+    source: row.source,
+    event_type: eventType,
+    player_name: playerName,
+    killer_name: killerName,
+    victim_name: victimName,
+    weapon,
+    distance,
+    occurred_at: row.occurred_at ?? parsed?.occurredAt ?? null,
+    created_at: row.created_at,
+    event_label: syncEventLabel(eventType, isKill),
+    detail: syncEventDetail({
+      eventType,
+      isKill,
+      playerName,
+      killerName,
+      victimName,
+      attackerName: parsed?.attackerName ?? null,
+      weapon,
+      cause,
+      objectType,
+    }),
+    cause,
+    object_type: objectType,
+    is_mock: [playerName, killerName, victimName, parsed?.attackerName].some(isMockPlayerName),
+  };
+}
+
+function syncEventLabel(eventType: string, isKill: boolean) {
+  if (isKill) return "PvP Kill";
+  const labels: Record<string, string> = {
+    player_connected: "Connected",
+    player_disconnected: "Disconnected",
+    player_died_stats: "Died",
+    player_killed_environment: "Died",
+    player_suicide: "Suicide",
+    player_hit: "Hit",
+    player_hit_explosion: "Hit",
+    player_hit_unknown_attacker: "Hit",
+    player_placed_object: "Placed Object",
+    player_connecting: "Connecting",
+    player_unconscious: "Unconscious",
+    player_regained_consciousness: "Regained Consciousness",
+    player_choosing_respawn: "Choosing Respawn",
+    player_performed_action: "Action",
+    playerlist_entry: "Player Snapshot",
+    plain_player_state: "Player Snapshot",
+  };
+  return labels[eventType] ?? formatSyncEventType(eventType);
+}
+
+function syncEventCause(eventType: string) {
+  if (eventType === "player_suicide") return "Suicide";
+  if (eventType === "player_died_stats") return "Death stats";
+  return null;
+}
+
+function syncEventDetail(values: {
+  eventType: string;
+  isKill: boolean;
+  playerName: string | null;
+  killerName: string | null;
+  victimName: string | null;
+  attackerName: string | null;
+  weapon: string | null;
+  cause: string | null;
+  objectType: string | null;
+}) {
+  if (values.isKill) return `${values.killerName ?? "Unknown"} -> ${values.victimName ?? "Unknown"}`;
+  if (values.eventType === "player_hit") return `${values.attackerName ?? "Unknown"} hit ${values.victimName ?? values.playerName ?? "Unknown"}`;
+  if (values.eventType === "player_hit_explosion") return `${values.playerName ?? "Unknown"} hit by explosion`;
+  if (values.eventType === "player_hit_unknown_attacker") return `${values.playerName ?? values.victimName ?? "Unknown"} hit by unknown attacker`;
+  if (values.eventType === "player_killed_environment") return `${values.victimName ?? values.playerName ?? "Unknown"} died${values.cause ? `: ${values.cause}` : ""}`;
+  if (values.eventType === "player_suicide") return `${values.playerName ?? "Unknown"} committed suicide`;
+  if (values.eventType === "player_placed_object") return `${values.playerName ?? "Unknown"} placed ${values.objectType ?? "an object"}`;
+  return values.playerName ?? values.victimName ?? null;
+}
+
+function formatSyncEventType(value: string) {
+  return value
+    .replace(/^player_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function isMockPlayerName(value: string | null | undefined) {
+  return /^Mock(Survivor|Bandit|Runner)/.test(value ?? "");
 }
 
 export async function clearMockTestSyncData(env: Env, userId: string, linkedServerId?: string | null) {
@@ -408,6 +615,7 @@ export async function ensureAdmSyncSchema(env: Env) {
   for (const statement of ADM_SYNC_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();
   }
+  await ensureAdmSyncDetailColumns(env);
 }
 
 async function getOwnedLinkedServer(env: Env, userId: string, linkedServerId?: string | null): Promise<SyncLinkedServer | null> {
@@ -435,6 +643,29 @@ async function getOwnedLinkedServer(env: Env, userId: string, linkedServerId?: s
     .first<SyncLinkedServer>();
 }
 
+async function ensureAdmSyncDetailColumns(env: Env) {
+  const db = requireDb(env);
+  const columns = await db.prepare("PRAGMA table_info(adm_sync_state)").all<{ name: string }>();
+  const existing = new Set((columns.results ?? []).map((column) => column.name));
+  const missingColumns = [
+    ["last_lines_read", "INTEGER DEFAULT 0"],
+    ["last_lines_processed", "INTEGER DEFAULT 0"],
+    ["last_raw_events_stored", "INTEGER DEFAULT 0"],
+    ["last_player_events_stored", "INTEGER DEFAULT 0"],
+    ["last_kill_events_stored", "INTEGER DEFAULT 0"],
+    ["last_events_created", "INTEGER DEFAULT 0"],
+    ["last_kills_created", "INTEGER DEFAULT 0"],
+    ["last_unknown_lines", "INTEGER DEFAULT 0"],
+    ["last_duplicate_lines", "INTEGER DEFAULT 0"],
+    ["last_sync_duration_ms", "INTEGER"],
+    ["last_readable_route", "TEXT"],
+  ].filter(([name]) => !existing.has(name));
+
+  for (const [name, type] of missingColumns) {
+    await db.prepare(`ALTER TABLE adm_sync_state ADD COLUMN ${name} ${type}`).run();
+  }
+}
+
 async function getSyncState(env: Env, linkedServerId: string) {
   const db = requireDb(env);
   return db
@@ -455,6 +686,17 @@ async function upsertSyncState(
     status: string;
     message: string;
     lastSyncAt: string;
+    linesRead: number;
+    linesProcessed: number;
+    rawEventsStored: number;
+    playerEventsStored: number;
+    killEventsStored: number;
+    eventsCreated: number;
+    killsCreated: number;
+    unknownLines: number;
+    duplicateLines: number;
+    syncDurationMs: number;
+    readableRoute: string | null;
   },
 ) {
   const db = requireDb(env);
@@ -463,8 +705,11 @@ async function upsertSyncState(
       `INSERT INTO adm_sync_state (
         id, linked_server_id, latest_adm_file, latest_adm_path, last_processed_file,
         last_processed_line, last_processed_offset, last_sync_status, last_sync_message,
-        last_sync_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        last_sync_at, last_lines_read, last_lines_processed, last_raw_events_stored,
+        last_player_events_stored, last_kill_events_stored, last_events_created,
+        last_kills_created, last_unknown_lines, last_duplicate_lines, last_sync_duration_ms,
+        last_readable_route, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(linked_server_id) DO UPDATE SET
         latest_adm_file = excluded.latest_adm_file,
         latest_adm_path = excluded.latest_adm_path,
@@ -474,6 +719,17 @@ async function upsertSyncState(
         last_sync_status = excluded.last_sync_status,
         last_sync_message = excluded.last_sync_message,
         last_sync_at = excluded.last_sync_at,
+        last_lines_read = excluded.last_lines_read,
+        last_lines_processed = excluded.last_lines_processed,
+        last_raw_events_stored = excluded.last_raw_events_stored,
+        last_player_events_stored = excluded.last_player_events_stored,
+        last_kill_events_stored = excluded.last_kill_events_stored,
+        last_events_created = excluded.last_events_created,
+        last_kills_created = excluded.last_kills_created,
+        last_unknown_lines = excluded.last_unknown_lines,
+        last_duplicate_lines = excluded.last_duplicate_lines,
+        last_sync_duration_ms = excluded.last_sync_duration_ms,
+        last_readable_route = excluded.last_readable_route,
         updated_at = CURRENT_TIMESTAMP`,
     )
     .bind(
@@ -487,6 +743,17 @@ async function upsertSyncState(
       values.status,
       values.message,
       values.lastSyncAt,
+      values.linesRead,
+      values.linesProcessed,
+      values.rawEventsStored,
+      values.playerEventsStored,
+      values.killEventsStored,
+      values.eventsCreated,
+      values.killsCreated,
+      values.unknownLines,
+      values.duplicateLines,
+      values.syncDurationMs,
+      values.readableRoute,
     )
     .run();
 }
@@ -501,7 +768,7 @@ async function insertRawEvent(
 ) {
   const db = requireDb(env);
   const id = await stableSyncId("raw", linkedServerId, admFile, lineNumber);
-  await db
+  const result = await db
     .prepare(
       `INSERT OR IGNORE INTO adm_raw_events (
         id, linked_server_id, adm_file, line_number, raw_line, event_type, parsed, created_at
@@ -517,6 +784,7 @@ async function insertRawEvent(
       parsed.eventType === "unknown" ? 0 : 1,
     )
     .run();
+  return didMutate(result);
 }
 
 async function persistParsedEvent(
@@ -545,6 +813,7 @@ async function persistParsedEvent(
     return {
       ...emptyPersistResult(),
       eventsCreated: inserted ? 1 : 0,
+      playerEventsCreated: inserted ? 1 : 0,
     };
   }
 
@@ -567,6 +836,7 @@ async function persistParsedEvent(
         distance: parsed.distance,
       });
       result.eventsCreated = 1;
+      result.killEventsCreated = 1;
       result.killsCreated = 1;
       result.deathsCreated = 1;
     }
@@ -584,6 +854,7 @@ async function persistParsedEvent(
   if (!inserted) return result;
 
   result.eventsCreated = 1;
+  result.playerEventsCreated = 1;
 
   if (parsed.eventType === "player_connected") result.joinsCreated = 1;
   if (parsed.eventType === "player_disconnected") result.disconnectsCreated = 1;
@@ -1060,6 +1331,8 @@ function isDeathCountingEvent(parsed: ParsedAdmEvent) {
 function emptyPersistResult() {
   return {
     eventsCreated: 0,
+    playerEventsCreated: 0,
+    killEventsCreated: 0,
     killsCreated: 0,
     joinsCreated: 0,
     disconnectsCreated: 0,
@@ -1087,6 +1360,17 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_sync_status TEXT DEFAULT 'not_started',
     last_sync_message TEXT,
     last_sync_at TEXT,
+    last_lines_read INTEGER DEFAULT 0,
+    last_lines_processed INTEGER DEFAULT 0,
+    last_raw_events_stored INTEGER DEFAULT 0,
+    last_player_events_stored INTEGER DEFAULT 0,
+    last_kill_events_stored INTEGER DEFAULT 0,
+    last_events_created INTEGER DEFAULT 0,
+    last_kills_created INTEGER DEFAULT 0,
+    last_unknown_lines INTEGER DEFAULT 0,
+    last_duplicate_lines INTEGER DEFAULT 0,
+    last_sync_duration_ms INTEGER,
+    last_readable_route TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,

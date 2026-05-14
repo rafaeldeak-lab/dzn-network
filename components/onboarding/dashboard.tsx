@@ -6,7 +6,7 @@ import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { clearMockTestSyncData, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -110,9 +110,11 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [checkingLogs, setCheckingLogs] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
+  const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
   const [recentEvents, setRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [logDiagnostics, setLogDiagnostics] = useState<NitradoLogAccessDiagnostics | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [syncDetailsOpen, setSyncDetailsOpen] = useState(false);
   const [diagnosingLogs, setDiagnosingLogs] = useState(false);
   const [clearingTestData, setClearingTestData] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
@@ -137,7 +139,17 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const statsSyncPending = !statsSyncActive && admState.kind === "discovered_read_pending";
   const statsSyncLabel = statsSyncActive ? "Stats Sync Active" : statsSyncPending ? "Stats Sync Pending" : "Stats Sync Not Started";
   const effectiveSyncStatus = syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started");
-  const recentEventsAreMock = recentEvents.some((event) => [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
+  const latestAdmFile = syncStatus?.latest_adm_file ?? server.adm_latest_file ?? "Not detected";
+  const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
+  const activityCount = (syncStatus?.total_joins ?? 0) + (syncStatus?.total_disconnects ?? 0) + (syncStatus?.total_deaths ?? 0);
+  const noPvpKillsYet = statsSyncActive && (syncStatus?.total_kills ?? 0) === 0;
+  const syncBanner = getSyncBanner({
+    active: statsSyncActive,
+    readPending: effectiveSyncStatus === "read_pending",
+    noPvpKillsYet,
+    hasActivity: activityCount > 0,
+  });
+  const recentEventsAreMock = recentEvents.some((event) => event.is_mock || [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
 
   useEffect(() => {
     let active = true;
@@ -177,10 +189,11 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     try {
       const result = await runManualSync(server.id);
       const [status, events] = await Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)]);
+      setLastSyncResult(result);
       setSyncStatus(status.status);
       setRecentEvents(events.events);
       await onRefresh();
-      setActionMessage(`${result.message}${result.readableRouteUsed ? ` Route: ${result.readableRouteUsed}` : ""}`);
+      setActionMessage(getManualSyncMessage(result));
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Unable to run manual sync.");
     } finally {
@@ -209,6 +222,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     try {
       await clearMockTestSyncData(server.id);
       const [status, events] = await Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)]);
+      setLastSyncResult(null);
       setSyncStatus(status.status);
       setRecentEvents(events.events);
       await onRefresh();
@@ -253,6 +267,12 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             <StatusBadge label="Stats Sync" value={statsSyncActive ? "Active" : statsSyncPending ? "Pending" : "Not Started"} tone={statsSyncActive ? "emerald" : statsSyncPending ? "orange" : "zinc"} />
           </div>
 
+          <div className={`mt-5 rounded-lg border p-4 ${syncBanner.className}`}>
+            <p className="text-xs font-black uppercase opacity-75">{syncBanner.title}</p>
+            <p className="mt-2 text-sm font-bold leading-6 text-white">{syncBanner.message}</p>
+            {syncBanner.detail ? <p className="mt-1 text-sm leading-6 text-zinc-300">{syncBanner.detail}</p> : null}
+          </div>
+
           {statsSyncPending ? (
             <div className="mt-6 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-5">
               <p className="text-xs font-black uppercase text-cyan-100/80">ADM Logs Discovered</p>
@@ -278,7 +298,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             {server.player_slots ? <Info label="Player Slots" value={String(server.player_slots)} /> : null}
             <Info label="ADM Status" value={admState.title} />
             <Info label="Stats Sync" value={statsSyncActive ? "Active" : statsSyncPending ? "Pending" : "Not Started"} />
-            <Info label="Latest ADM File" value={server.adm_latest_file ?? "Not detected"} />
+            <Info label="Latest ADM File" value={latestAdmFile} />
             <Info label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
           </div>
 
@@ -298,9 +318,15 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             <h3 className="mt-4 text-xl font-black uppercase text-white">Sync Engine Status</h3>
             <div className="mt-4 grid gap-3">
               <MiniInfo label="Sync Status" value={formatSyncStatus(effectiveSyncStatus)} />
-              <MiniInfo label="Latest ADM File" value={syncStatus?.latest_adm_file ?? server.adm_latest_file ?? "Not detected"} />
+              <MiniInfo label="Latest ADM File" value={latestAdmFile} />
               <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
               <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
+              <MiniInfo label="Lines Read" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
+              <MiniInfo label="Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
+              <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
+              <MiniInfo label="Kills Created" value={String(syncStatus?.last_kills_created ?? lastSyncResult?.killsCreated ?? 0)} />
+              <MiniInfo label="Last Sync Result" value={syncStatus?.last_sync_message ?? lastSyncResult?.message ?? "Not synced"} />
+              <MiniInfo label="Last Sync Duration" value={formatDuration(lastSyncDuration)} />
               <MiniInfo label="Total Kills" value={String(syncStatus?.total_kills ?? 0)} />
               <MiniInfo label="Total Deaths" value={String(syncStatus?.total_deaths ?? 0)} />
               <MiniInfo label="Total Joins" value={String(syncStatus?.total_joins ?? 0)} />
@@ -308,15 +334,31 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <MiniInfo label="Unique Players" value={String(syncStatus?.unique_players ?? 0)} />
               <MiniInfo label="ADM Folder" value={admFolder ?? "Not detected"} />
               <MiniInfo label="Read Status" value={syncHasProcessedLines ? "Readable" : admState.readStatus} />
-              <MiniInfo label="Next Action" value={syncHasProcessedLines ? "Continue manual sync after fresh ADM activity." : admState.nextAction} />
+              <MiniInfo label="Next Action" value={syncHasProcessedLines ? "Continue syncing after fresh ADM activity" : admState.nextAction} />
             </div>
+            {syncStatus?.last_sync_status === "completed" ? (
+              <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-3 text-sm font-bold leading-6 text-cyan-50">
+                {syncStatus.last_kills_created === 0
+                  ? activityCount > 0
+                    ? "Player activity synced successfully. No PvP kills found in the latest processed lines."
+                    : "ADM synced successfully. No PvP kills found in the latest processed lines."
+                  : "Player activity synced successfully."}
+              </p>
+            ) : null}
+            <LastSyncDetails
+              open={syncDetailsOpen}
+              onToggle={() => setSyncDetailsOpen((value) => !value)}
+              latestAdmFile={latestAdmFile}
+              syncStatus={syncStatus}
+              lastSyncResult={lastSyncResult}
+            />
             <button
               type="button"
               disabled={syncing}
               onClick={runSync}
               className="mt-4 inline-flex w-full items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
             >
-              <span>{syncing ? "Running sync..." : "Run Manual Sync"}</span>
+              <span>{syncing ? "Syncing..." : "Run Manual Sync"}</span>
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             </button>
             <button
@@ -481,21 +523,69 @@ function MiniInfo({ label, value }: { label: string; value: string }) {
   );
 }
 
+function LastSyncDetails({
+  open,
+  onToggle,
+  latestAdmFile,
+  syncStatus,
+  lastSyncResult,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  latestAdmFile: string;
+  syncStatus: AdmSyncStatus | null;
+  lastSyncResult: AdmSyncRunResult | null;
+}) {
+  const values = {
+    linesRead: syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0,
+    linesProcessed: syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0,
+    rawEventsStored: syncStatus?.last_raw_events_stored ?? lastSyncResult?.rawEventsStored ?? 0,
+    playerEventsStored: syncStatus?.last_player_events_stored ?? lastSyncResult?.playerEventsStored ?? 0,
+    killEventsStored: syncStatus?.last_kill_events_stored ?? lastSyncResult?.killEventsStored ?? 0,
+    unknownLines: syncStatus?.last_unknown_lines ?? lastSyncResult?.unknownLines ?? 0,
+    duplicateLines: syncStatus?.last_duplicate_lines ?? lastSyncResult?.skippedDuplicateLines ?? 0,
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-white/10 bg-black/24">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-3 py-3 text-left text-xs font-black uppercase text-zinc-200"
+      >
+        <span>Last Sync Details</span>
+        <span className="text-cyan-200">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open ? (
+        <div className="grid gap-2 border-t border-white/10 p-3">
+          <MiniInfo label="Latest ADM File" value={latestAdmFile} />
+          <MiniInfo label="Lines Read" value={String(values.linesRead)} />
+          <MiniInfo label="Lines Processed" value={String(values.linesProcessed)} />
+          <MiniInfo label="Raw Events Stored" value={String(values.rawEventsStored)} />
+          <MiniInfo label="Player Events Stored" value={String(values.playerEventsStored)} />
+          <MiniInfo label="Kill Events Stored" value={String(values.killEventsStored)} />
+          <MiniInfo label="Parser Unknown Lines" value={String(values.unknownLines)} />
+          <MiniInfo label="Skipped Duplicate Lines" value={String(values.duplicateLines)} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RecentSyncEventRow({ event }: { event: AdmRecentSyncEvent }) {
   const isKill = event.source === "kill";
+  const secondary = getRecentEventSecondary(event, isKill);
   return (
     <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] font-black uppercase text-zinc-500">{formatEventType(event.event_type)}</p>
+          <p className="text-[10px] font-black uppercase text-zinc-500">{event.event_label || formatEventType(event.event_type)}</p>
           <p className="mt-1 text-sm font-bold leading-5 text-white">
-            {isKill
-              ? `${event.killer_name ?? "Unknown"} -> ${event.victim_name ?? "Unknown"}`
-              : event.player_name ?? "Unknown player"}
+            {event.detail ?? (isKill ? `${event.killer_name ?? "Unknown"} -> ${event.victim_name ?? "Unknown"}` : event.player_name ?? "Unknown player")}
           </p>
-          {isKill ? (
+          {secondary ? (
             <p className="mt-1 text-xs font-bold text-zinc-400">
-              {[event.weapon, event.distance !== null ? `${event.distance.toFixed(1)}m` : null].filter(Boolean).join(" / ") || "Credited PvP kill"}
+              {secondary}
             </p>
           ) : null}
         </div>
@@ -574,6 +664,76 @@ function LogDiagnosticsPanel({
 function formatDashboardDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function getManualSyncMessage(result: AdmSyncRunResult) {
+  if (result.status === "completed" && result.killsCreated === 0) {
+    return result.eventsCreated > 0
+      ? "Player activity synced successfully. No PvP kills found in the latest processed lines."
+      : "ADM synced successfully. No PvP kills found in the latest processed lines.";
+  }
+  if (result.status === "completed" && result.eventsCreated > 0) {
+    return "Player activity synced successfully.";
+  }
+  return result.message;
+}
+
+function getSyncBanner(values: {
+  active: boolean;
+  readPending: boolean;
+  noPvpKillsYet: boolean;
+  hasActivity: boolean;
+}) {
+  if (values.readPending) {
+    return {
+      title: "ADM Discovered",
+      message: "ADM discovered, waiting for readable log content.",
+      detail: null,
+      className: "border-orange-300/20 bg-orange-400/10",
+    };
+  }
+
+  if (values.active) {
+    return {
+      title: "ADM Sync Active",
+      message: "ADM Sync Active - DZN is reading your server logs and updating player activity.",
+      detail: values.noPvpKillsYet && values.hasActivity
+        ? "Player activity synced successfully. No PvP kills found yet. Kills will appear once they happen in-game."
+        : values.noPvpKillsYet
+        ? "No PvP kills found yet. Kills will appear once they happen in-game."
+        : values.hasActivity
+          ? "Player activity synced successfully."
+          : null,
+      className: "border-emerald-300/20 bg-emerald-400/10",
+    };
+  }
+
+  return {
+    title: "Stats Sync Not Started",
+    message: "Run a manual sync after ADM activity appears in your latest server log.",
+    detail: null,
+    className: "border-white/10 bg-white/[0.04]",
+  };
+}
+
+function getRecentEventSecondary(event: AdmRecentSyncEvent, isKill: boolean) {
+  if (isKill) {
+    return [event.weapon, event.distance !== null ? `${event.distance.toFixed(1)}m` : null].filter(Boolean).join(" / ") || "Credited PvP kill";
+  }
+  if (event.event_type === "player_killed_environment" || event.event_type === "player_died_stats" || event.event_type === "player_suicide") {
+    return event.cause ? `Death type: ${event.cause}` : "Death event";
+  }
+  if (event.event_type === "player_hit" || event.event_type === "player_hit_explosion" || event.event_type === "player_hit_unknown_attacker") {
+    return [event.weapon, event.distance !== null ? `${event.distance.toFixed(1)}m` : null].filter(Boolean).join(" / ") || "Damage event";
+  }
+  if (event.object_type) return event.object_type;
+  return null;
+}
+
+function formatDuration(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "Not recorded";
+  if (value < 1000) return `${Math.max(0, Math.round(value))}ms`;
+  return `${(value / 1000).toFixed(1)}s`;
 }
 
 function formatCompactDate(value: string | null) {

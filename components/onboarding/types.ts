@@ -194,6 +194,17 @@ export type AdmSyncStatus = {
   total_joins: number;
   total_disconnects: number;
   unique_players: number;
+  last_lines_read: number;
+  last_lines_processed: number;
+  last_raw_events_stored: number;
+  last_player_events_stored: number;
+  last_kill_events_stored: number;
+  last_events_created: number;
+  last_kills_created: number;
+  last_unknown_lines: number;
+  last_duplicate_lines: number;
+  last_sync_duration_ms: number | null;
+  last_readable_route: string | null;
 };
 
 export type AdmRecentSyncEvent = {
@@ -206,6 +217,11 @@ export type AdmRecentSyncEvent = {
   distance: number | null;
   occurred_at: string | null;
   created_at: string | null;
+  event_label: string;
+  detail: string | null;
+  cause: string | null;
+  object_type: string | null;
+  is_mock: boolean;
 };
 
 export type NitradoLogAccessAttempt = {
@@ -259,4 +275,10 @@ export type AdmSyncRunResult = {
   readableRouteUsed: string | null;
   linesRead: number;
   syncStatus: string;
+  rawEventsStored: number;
+  playerEventsStored: number;
+  killEventsStored: number;
+  unknownLines: number;
+  skippedDuplicateLines: number;
+  syncDurationMs: number;
 };
