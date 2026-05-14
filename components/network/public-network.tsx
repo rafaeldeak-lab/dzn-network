@@ -274,11 +274,10 @@ function StatsRow({ stats }: { stats: PublicStats }) {
           <div className="relative z-10">
             <row.icon className={`h-6 w-6 ${toneClass(row.tone)}`} />
             {row.syncSummary ? (
-              <div aria-label={`${stats.statsSyncActive} Active \u00b7 ${stats.statsSyncPending} Pending`} className="mt-4 flex flex-wrap items-center gap-1.5">
+              <div aria-label={`${stats.statsSyncActive} Active, ${stats.statsSyncPending} Pending`} className="mt-4 flex flex-wrap items-center gap-1.5">
                 <span className="whitespace-nowrap rounded-md border border-emerald-300/25 bg-emerald-400/10 px-2.5 py-1 text-sm font-black text-emerald-100">
                   {stats.statsSyncActive} Active
                 </span>
-                <span className="hidden text-sm font-black text-zinc-600 sm:inline">\u00b7</span>
                 <span className="whitespace-nowrap rounded-md border border-orange-300/25 bg-orange-400/10 px-2.5 py-1 text-sm font-black text-orange-100">
                   {stats.statsSyncPending} Pending
                 </span>
