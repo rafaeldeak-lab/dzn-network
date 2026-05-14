@@ -37,7 +37,21 @@ export type AdmLogDetection = {
 };
 
 export type AdmApiDebug = {
+  exactManualPath: string | null;
+  pathVariants: string[];
   pathsChecked: string[];
+  methodsTried: {
+    method: "download" | "seek" | "stat" | "list" | "service-details";
+    status: "OK" | "401" | "403" | "404" | "error";
+    path?: string;
+    dir?: string;
+    search?: string | null;
+    fileVisible?: boolean;
+    downloadTokenCreated?: boolean;
+    sampleReadSucceeded?: boolean;
+    entriesReturned?: number;
+    admFilesFound?: number;
+  }[];
   listAttempts: {
     dir: string;
     search: string | null;
@@ -45,9 +59,21 @@ export type AdmApiDebug = {
     fileCount: number;
     admFileCount: number;
   }[];
+  statAttempts: {
+    path: string;
+    status: "OK" | "401" | "403" | "404" | "error";
+    fileVisible: boolean;
+  }[];
+  serviceDetailsAttempt: {
+    status: "OK" | "401" | "403" | "404" | "error";
+    pathsFound: number;
+  } | null;
   filesFound: string[];
   exactSelectedAdmPath: string | null;
+  fileVisibleThroughStat: boolean;
+  downloadTokenCreated: boolean;
   sampleReadStatus: "OK" | "401" | "403" | "404" | "error" | "not_attempted";
+  sampleReadSucceeded: boolean;
   samplePreview: string | null;
   lastCheckedAt: string;
   message: string | null;

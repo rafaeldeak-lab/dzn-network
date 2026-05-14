@@ -511,11 +511,37 @@ function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
         </p>
       ) : null}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <Summary label="Exact manual path tested" value={debug.exactManualPath ?? "Not provided"} />
         <Summary label="Exact selected ADM path" value={debug.exactSelectedAdmPath ?? "Not selected"} />
+        <Summary label="File visible through stat" value={debug.fileVisibleThroughStat ? "yes" : "no"} />
+        <Summary label="Download token created" value={debug.downloadTokenCreated ? "yes" : "no"} />
         <Summary label="Sample read status" value={debug.sampleReadStatus} />
+        <Summary label="Sample read succeeded" value={debug.sampleReadSucceeded ? "yes" : "no"} />
       </div>
+      <DebugList title="Path variants tested" items={debug.pathVariants.length ? debug.pathVariants : ["No path variants"]} />
       <DebugList title="Paths checked" items={debug.pathsChecked} />
       <DebugList title="ADM files found" items={debug.filesFound.length ? debug.filesFound : ["No ADM files returned by API"]} />
+      <div className="mt-4">
+        <p className="text-xs font-black uppercase text-zinc-500">Methods tried</p>
+        <div className="mt-2 grid max-h-72 gap-2 overflow-auto pr-1">
+          {debug.methodsTried.map((attempt, index) => (
+            <div key={`${attempt.method}-${attempt.path ?? attempt.dir ?? "detail"}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 lg:grid-cols-[90px_70px_1fr_1fr]">
+              <span className="font-black text-violet-100">{attempt.method}</span>
+              <span className={attempt.status === "OK" ? "font-black text-emerald-100" : "font-black text-orange-100"}>{attempt.status}</span>
+              <span className="break-words">{attempt.path ? `path: ${attempt.path}` : `dir: ${attempt.dir ?? "-"}`}</span>
+              <span className="break-words">
+                {attempt.method === "list"
+                  ? `search: ${attempt.search ?? "none"} | entries: ${attempt.entriesReturned ?? 0} | ADM: ${attempt.admFilesFound ?? 0}`
+                  : attempt.method === "stat"
+                    ? `visible: ${attempt.fileVisible ? "yes" : "no"}`
+                    : attempt.method === "service-details"
+                      ? `paths: ${attempt.entriesReturned ?? 0}`
+                      : `token: ${attempt.downloadTokenCreated ? "yes" : "no"} | sample: ${attempt.sampleReadSucceeded ? "yes" : "no"}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="mt-4">
         <p className="text-xs font-black uppercase text-zinc-500">List attempts</p>
         <div className="mt-2 grid max-h-64 gap-2 overflow-auto pr-1">
