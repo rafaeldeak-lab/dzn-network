@@ -84,6 +84,13 @@ export async function runManualSync(linkedServerId?: string) {
   });
 }
 
+export async function clearMockTestSyncData(linkedServerId?: string) {
+  return request<{ ok: boolean; remainingRows: number }>("/api/sync/clear-test-data", {
+    method: "POST",
+    body: JSON.stringify(linkedServerId ? { linked_server_id: linkedServerId } : {}),
+  });
+}
+
 export async function goLive() {
   return request<{ ok: boolean; status: "live" }>("/api/onboarding/go-live", {
     method: "POST",

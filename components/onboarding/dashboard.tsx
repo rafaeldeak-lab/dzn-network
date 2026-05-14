@@ -5,7 +5,7 @@ import { Activity, AlertTriangle, ArrowRight, DatabaseZap, LogOut, RefreshCw, Se
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
+import { clearMockTestSyncData, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 export function Dashboard() {
@@ -114,6 +114,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [logDiagnostics, setLogDiagnostics] = useState<NitradoLogAccessDiagnostics | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [diagnosingLogs, setDiagnosingLogs] = useState(false);
+  const [clearingTestData, setClearingTestData] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const tags = useMemo(() => {
     try {
@@ -131,9 +132,12 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const networkAddress = server.ip_address ?? server.region ?? "Unknown";
   const networkAddressLabel = looksLikeIpAddress(networkAddress) ? "IP Address" : "Region";
   const admFolder = getFolderFromPath(server.adm_path);
-  const statsSyncPending = admState.kind === "discovered_read_pending";
-  const statsSyncLabel = admState.kind === "connected" ? "Stats Sync Active" : statsSyncPending ? "Stats Sync Pending" : "Stats Sync Not Started";
+  const syncHasProcessedLines = (syncStatus?.last_processed_line ?? 0) > 0 && syncStatus?.last_sync_status !== "read_pending";
+  const statsSyncActive = syncHasProcessedLines || admState.kind === "connected";
+  const statsSyncPending = !statsSyncActive && admState.kind === "discovered_read_pending";
+  const statsSyncLabel = statsSyncActive ? "Stats Sync Active" : statsSyncPending ? "Stats Sync Pending" : "Stats Sync Not Started";
   const effectiveSyncStatus = syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started");
+  const recentEventsAreMock = recentEvents.some((event) => [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
 
   useEffect(() => {
     let active = true;
@@ -176,7 +180,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       setSyncStatus(status.status);
       setRecentEvents(events.events);
       await onRefresh();
-      setActionMessage(result.message);
+      setActionMessage(`${result.message}${result.readableRouteUsed ? ` Route: ${result.readableRouteUsed}` : ""}`);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Unable to run manual sync.");
     } finally {
@@ -196,6 +200,23 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       setActionMessage(error instanceof Error ? error.message : "Unable to run log access diagnostics.");
     } finally {
       setDiagnosingLogs(false);
+    }
+  }
+
+  async function clearTestData() {
+    setClearingTestData(true);
+    setActionMessage("");
+    try {
+      await clearMockTestSyncData(server.id);
+      const [status, events] = await Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)]);
+      setSyncStatus(status.status);
+      setRecentEvents(events.events);
+      await onRefresh();
+      setActionMessage("Mock/test sync rows cleared for this linked server.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to clear mock/test sync data.");
+    } finally {
+      setClearingTestData(false);
     }
   }
 
@@ -229,7 +250,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             <StatusBadge label="Discord" value="Connected" tone="cyan" />
             <StatusBadge label="Nitrado" value="Connected" tone="violet" />
             <StatusBadge label="ADM" value={admState.badge} tone={admState.kind === "connected" ? "emerald" : admState.kind === "discovered_read_pending" ? "cyan" : "orange"} />
-            <StatusBadge label="Stats Sync" value={statsSyncPending ? "Pending" : admState.kind === "connected" ? "Active" : "Not Started"} tone={statsSyncPending ? "orange" : admState.kind === "connected" ? "emerald" : "zinc"} />
+            <StatusBadge label="Stats Sync" value={statsSyncActive ? "Active" : statsSyncPending ? "Pending" : "Not Started"} tone={statsSyncActive ? "emerald" : statsSyncPending ? "orange" : "zinc"} />
           </div>
 
           {statsSyncPending ? (
@@ -256,7 +277,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             {server.platform ? <Info label="Platform" value={server.platform} /> : null}
             {server.player_slots ? <Info label="Player Slots" value={String(server.player_slots)} /> : null}
             <Info label="ADM Status" value={admState.title} />
-            <Info label="Stats Sync" value={statsSyncPending ? "Pending" : admState.kind === "connected" ? "Active" : "Not Started"} />
+            <Info label="Stats Sync" value={statsSyncActive ? "Active" : statsSyncPending ? "Pending" : "Not Started"} />
             <Info label="Latest ADM File" value={server.adm_latest_file ?? "Not detected"} />
             <Info label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
           </div>
@@ -286,8 +307,8 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <MiniInfo label="Total Disconnects" value={String(syncStatus?.total_disconnects ?? 0)} />
               <MiniInfo label="Unique Players" value={String(syncStatus?.unique_players ?? 0)} />
               <MiniInfo label="ADM Folder" value={admFolder ?? "Not detected"} />
-              <MiniInfo label="Read Status" value={admState.readStatus} />
-              <MiniInfo label="Next Action" value={admState.nextAction} />
+              <MiniInfo label="Read Status" value={syncHasProcessedLines ? "Readable" : admState.readStatus} />
+              <MiniInfo label="Next Action" value={syncHasProcessedLines ? "Continue manual sync after fresh ADM activity." : admState.nextAction} />
             </div>
             <button
               type="button"
@@ -364,6 +385,15 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               ) : null}
               <Link href="/setup" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-100">Edit setup</Link>
               <Link href="/servers" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-100">View network</Link>
+              <button
+                type="button"
+                disabled={clearingTestData}
+                onClick={clearTestData}
+                className="inline-flex items-center justify-between rounded-lg border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-left text-sm font-bold text-orange-50 transition hover:border-orange-300/45 hover:bg-orange-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                <span>{clearingTestData ? "Clearing..." : "Clear Mock/Test Sync Data"}</span>
+                <RefreshCw className={`h-4 w-4 ${clearingTestData ? "animate-spin" : ""}`} />
+              </button>
             </div>
             {actionMessage ? (
               <p className="mt-4 rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-sm font-bold text-zinc-200">
@@ -375,7 +405,14 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
         <div className="glass-surface animated-border rounded-lg p-5">
           <div className="relative z-10">
             <Activity className="h-8 w-8 text-cyan-200" />
-            <h3 className="mt-4 text-xl font-black uppercase text-white">Recent Synced Events</h3>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <h3 className="text-xl font-black uppercase text-white">Recent Synced Events</h3>
+              {recentEventsAreMock ? (
+                <span className="rounded-md border border-orange-300/25 bg-orange-400/10 px-2 py-1 text-[10px] font-black uppercase text-orange-100">
+                  Mock Sync Data
+                </span>
+              ) : null}
+            </div>
             <div className="mt-4 grid gap-2">
               {recentEvents.length ? (
                 recentEvents.map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)

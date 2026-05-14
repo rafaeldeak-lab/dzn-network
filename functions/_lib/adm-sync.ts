@@ -6,12 +6,14 @@ import {
   fetchReadableNitradoAdmLines,
   getAdmLogStoragePath,
   mockAdmLogDetection,
+  mockNitradoLogAccessDiagnostics,
+  type NitradoLogAccessDiagnostics,
   testExactNitradoAdmPath,
 } from "./nitrado";
-import { getLatestNitradoToken } from "./onboarding";
+import { decryptToken } from "./crypto";
 import type { Env } from "./types";
 
-type SyncLinkedServer = {
+export type SyncLinkedServer = {
   id: string;
   user_id: string;
   nitrado_service_id: string | null;
@@ -39,6 +41,9 @@ export type AdmSyncResult = {
   latestAdmFile: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;
+  readableRouteUsed: string | null;
+  linesRead: number;
+  syncStatus: string;
 };
 
 export type AdmSyncStatus = {
@@ -67,6 +72,15 @@ export type AdmRecentSyncEvent = {
   created_at: string | null;
 };
 
+export type ReadableAdmLinesResult = {
+  lines: string[];
+  newestAdmFileName: string | null;
+  latestAdmPath: string | null;
+  readableRouteUsed: string | null;
+  diagnostics: NitradoLogAccessDiagnostics | null;
+  message: string;
+};
+
 export async function runAdmSync(env: Env, userId: string, linkedServerId?: string | null): Promise<AdmSyncResult> {
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
@@ -77,23 +91,24 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
   const existingState = await getSyncState(env, linkedServer.id);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const now = new Date().toISOString();
-  const token = isMock ? null : (await getLatestNitradoToken(env, userId)) ?? "";
-  const admLog = isMock
-    ? mockAdmLogDetection()
-    : linkedServer.adm_path
-      ? await testExactNitradoAdmPath(token ?? "", nitradoServiceId, linkedServer.adm_path)
-      : await detectNitradoAdmLogs(token ?? "", nitradoServiceId);
-  const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, admLog, token, isMock);
+  const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock });
+  let admLog = isMock ? mockAdmLogDetection() : null;
+  if (!readable.lines.length && !isMock) {
+    const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+    admLog = linkedServer.adm_path
+      ? await testExactNitradoAdmPath(token, nitradoServiceId, linkedServer.adm_path)
+      : await detectNitradoAdmLogs(token, nitradoServiceId);
+  }
 
-  const latestAdmPath = getAdmLogStoragePath(admLog) ?? linkedServer.adm_path ?? null;
-  const latestAdmFile = admLog.newestAdmFileName ?? readable.newestAdmFileName ?? fileNameFromPath(latestAdmPath);
-  if (admLog.admFileExists && latestAdmPath) {
+  const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? linkedServer.adm_path ?? null;
+  const latestAdmFile = readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? fileNameFromPath(latestAdmPath);
+  if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath) {
     await saveServerAdmPath(env, linkedServer.id, latestAdmPath.replace(/^\/+/, ""));
   }
 
-  const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog.debug?.samplePreview ?? null);
+  const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog?.debug?.samplePreview ?? null);
   if (!lines.length) {
-    const admAvailable = admLog.admFileExists || Boolean(readable.newestAdmFileName);
+    const admAvailable = Boolean(admLog?.admFileExists || readable.newestAdmFileName);
     const message = admAvailable
       ? readable.message
       : "No ADM file is available for sync yet";
@@ -117,6 +132,9 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
       latestAdmFile,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastSyncAt: now,
+      readableRouteUsed: readable.readableRouteUsed,
+      linesRead: 0,
+      syncStatus: admAvailable ? "read_pending" : "not_started",
     };
   }
 
@@ -160,7 +178,7 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
 
   const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
   const status = pendingParsedEvents.length ? "completed" : "idle";
-  const message = pendingParsedEvents.length ? "Manual ADM sync completed" : "No new ADM lines to process";
+  const message = pendingParsedEvents.length ? "ADM lines processed successfully" : "No new ADM lines to process";
   const uniquePlayers = await countUniquePlayers(env, linkedServer.id);
   await upsertServerStats(env, linkedServer.id, {
     kills: killsCreated,
@@ -191,6 +209,9 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     latestAdmFile,
     lastProcessedLine: nextProcessedLine,
     lastSyncAt: now,
+    readableRouteUsed: readable.readableRouteUsed,
+    linesRead: lines.length,
+    syncStatus: status,
   };
 }
 
@@ -265,8 +286,19 @@ export async function getRecentAdmSyncEvents(
            occurred_at,
            created_at,
            COALESCE(occurred_at, created_at) AS sort_time
-         FROM kill_events
-         WHERE linked_server_id = ?
+       FROM kill_events
+       WHERE linked_server_id = ?
+          AND (
+            ? = 1
+            OR (
+              COALESCE(killer_name, '') NOT LIKE 'MockSurvivor%'
+              AND COALESCE(killer_name, '') NOT LIKE 'MockBandit%'
+              AND COALESCE(killer_name, '') NOT LIKE 'MockRunner%'
+              AND COALESCE(victim_name, '') NOT LIKE 'MockSurvivor%'
+              AND COALESCE(victim_name, '') NOT LIKE 'MockBandit%'
+              AND COALESCE(victim_name, '') NOT LIKE 'MockRunner%'
+            )
+          )
 
          UNION ALL
 
@@ -281,16 +313,94 @@ export async function getRecentAdmSyncEvents(
            occurred_at,
            created_at,
            COALESCE(occurred_at, created_at) AS sort_time
-         FROM player_events
-         WHERE linked_server_id = ?
+       FROM player_events
+       WHERE linked_server_id = ?
+          AND (
+            ? = 1
+            OR (
+              COALESCE(player_name, '') NOT LIKE 'MockSurvivor%'
+              AND COALESCE(player_name, '') NOT LIKE 'MockBandit%'
+              AND COALESCE(player_name, '') NOT LIKE 'MockRunner%'
+            )
+          )
        )
        ORDER BY sort_time DESC, created_at DESC
        LIMIT ?`,
     )
-    .bind(linkedServer.id, linkedServer.id, safeLimit)
+    .bind(linkedServer.id, isMockNitrado(env.MOCK_NITRADO) ? 1 : 0, linkedServer.id, isMockNitrado(env.MOCK_NITRADO) ? 1 : 0, safeLimit)
     .all<AdmRecentSyncEvent>();
 
   return result.results ?? [];
+}
+
+export async function clearMockTestSyncData(env: Env, userId: string, linkedServerId?: string | null) {
+  await ensureAdmSyncSchema(env);
+  const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
+  if (!linkedServer) throw new Error("No linked server found");
+
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `DELETE FROM adm_raw_events
+       WHERE linked_server_id = ?
+         AND (
+           raw_line LIKE '%MockSurvivor%'
+           OR raw_line LIKE '%MockBandit%'
+           OR raw_line LIKE '%MockRunner%'
+         )`,
+    )
+    .bind(linkedServer.id)
+    .run();
+  await db
+    .prepare(
+      `DELETE FROM kill_events
+       WHERE linked_server_id = ?
+         AND (
+           COALESCE(killer_name, '') LIKE 'MockSurvivor%'
+           OR COALESCE(killer_name, '') LIKE 'MockBandit%'
+           OR COALESCE(killer_name, '') LIKE 'MockRunner%'
+           OR COALESCE(victim_name, '') LIKE 'MockSurvivor%'
+           OR COALESCE(victim_name, '') LIKE 'MockBandit%'
+           OR COALESCE(victim_name, '') LIKE 'MockRunner%'
+         )`,
+    )
+    .bind(linkedServer.id)
+    .run();
+  await db
+    .prepare(
+      `DELETE FROM player_events
+       WHERE linked_server_id = ?
+         AND (
+           COALESCE(player_name, '') LIKE 'MockSurvivor%'
+           OR COALESCE(player_name, '') LIKE 'MockBandit%'
+           OR COALESCE(player_name, '') LIKE 'MockRunner%'
+         )`,
+    )
+    .bind(linkedServer.id)
+    .run();
+  await db
+    .prepare(
+      `DELETE FROM player_profiles
+       WHERE linked_server_id = ?
+         AND (
+           player_name LIKE 'MockSurvivor%'
+           OR player_name LIKE 'MockBandit%'
+           OR player_name LIKE 'MockRunner%'
+           OR COALESCE(player_id, '') LIKE 'mock-player-%'
+         )`,
+    )
+    .bind(linkedServer.id)
+    .run();
+
+  const remaining = await countRemainingSyncRows(env, linkedServer.id);
+  if (remaining === 0) {
+    await db.prepare("DELETE FROM server_stats WHERE linked_server_id = ?").bind(linkedServer.id).run();
+    await db.prepare("DELETE FROM adm_sync_state WHERE linked_server_id = ?").bind(linkedServer.id).run();
+  } else {
+    await rebuildServerStats(env, linkedServer.id);
+  }
+
+  return { ok: true, remainingRows: remaining };
 }
 
 export async function ensureAdmSyncSchema(env: Env) {
@@ -721,6 +831,93 @@ async function countUniquePlayers(env: Env, linkedServerId: string) {
   return Number(row?.count ?? 0);
 }
 
+async function getNitradoTokenForLinkedServer(env: Env, linkedServer: SyncLinkedServer) {
+  if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT encrypted_token, token_iv, token_auth_tag
+       FROM nitrado_connections
+       WHERE user_id = ? AND linked_server_id = ?
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServer.user_id, linkedServer.id)
+    .first<{ encrypted_token: string; token_iv: string; token_auth_tag: string }>();
+
+  if (!row) throw new Error("No Nitrado token found for this linked server");
+  return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+}
+
+async function countRemainingSyncRows(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const [raw, playerEvents, killEvents, profiles] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS count FROM adm_raw_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM player_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM player_profiles WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+  ]);
+  return numberOrZero(raw?.count) + numberOrZero(playerEvents?.count) + numberOrZero(killEvents?.count) + numberOrZero(profiles?.count);
+}
+
+async function rebuildServerStats(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const [kills, deathsFromKills, deathsFromPlayerEvents, joins, disconnects, uniquePlayers, lastEvent] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ? AND victim_name IS NOT NULL").bind(linkedServerId).first<{ count: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM player_events
+         WHERE linked_server_id = ?
+           AND event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats')`,
+      )
+      .bind(linkedServerId)
+      .first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM player_events WHERE linked_server_id = ? AND event_type = 'player_connected'").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM player_events WHERE linked_server_id = ? AND event_type = 'player_disconnected'").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM player_profiles WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+    db
+      .prepare(
+        `SELECT MAX(COALESCE(occurred_at, created_at)) AS last_event_at
+         FROM (
+           SELECT occurred_at, created_at FROM player_events WHERE linked_server_id = ?
+           UNION ALL
+           SELECT occurred_at, created_at FROM kill_events WHERE linked_server_id = ?
+         )`,
+      )
+      .bind(linkedServerId, linkedServerId)
+      .first<{ last_event_at: string | null }>(),
+  ]);
+
+  await db
+    .prepare(
+      `INSERT INTO server_stats (
+        id, linked_server_id, total_kills, total_deaths, total_joins, total_disconnects,
+        unique_players, last_event_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(linked_server_id) DO UPDATE SET
+        total_kills = excluded.total_kills,
+        total_deaths = excluded.total_deaths,
+        total_joins = excluded.total_joins,
+        total_disconnects = excluded.total_disconnects,
+        unique_players = excluded.unique_players,
+        last_event_at = excluded.last_event_at,
+        updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      linkedServerId,
+      numberOrZero(kills?.count),
+      numberOrZero(deathsFromKills?.count) + numberOrZero(deathsFromPlayerEvents?.count),
+      numberOrZero(joins?.count),
+      numberOrZero(disconnects?.count),
+      numberOrZero(uniquePlayers?.count),
+      lastEvent?.last_event_at ?? null,
+    )
+    .run();
+}
+
 function getReadableAdmLines(samplePreview: string | null) {
   if (!samplePreview) return [];
   return samplePreview
@@ -732,38 +929,55 @@ function getReadableAdmLines(samplePreview: string | null) {
 export async function getReadableAdmLinesForLinkedServer(
   env: Env,
   linkedServer: SyncLinkedServer,
-  admLog: { newestAdmFileName: string | null; admFileExists: boolean },
-  token: string | null,
-  isMock = isMockNitrado(env.MOCK_NITRADO),
-) {
+  options: { isMock?: boolean } = {},
+): Promise<ReadableAdmLinesResult> {
+  const isMock = options.isMock ?? isMockNitrado(env.MOCK_NITRADO);
   if (isMock) {
+    const diagnostics = mockNitradoLogAccessDiagnostics(linkedServer.nitrado_service_id ?? "mock-service");
     return {
       lines: mockAdmLines(),
-      newestAdmFileName: admLog.newestAdmFileName,
+      newestAdmFileName: diagnostics.newestAdmFileName,
+      latestAdmPath: "dayzps/config/DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM",
+      readableRouteUsed: diagnostics.readable.routeRecommendation,
+      diagnostics,
       message: "Mock ADM lines loaded through parser sync path",
     };
   }
 
-  if (!token || !linkedServer.nitrado_service_id) {
+  if (!linkedServer.nitrado_service_id) {
     return {
       lines: [],
-      newestAdmFileName: admLog.newestAdmFileName,
+      newestAdmFileName: null,
+      latestAdmPath: linkedServer.adm_path,
+      readableRouteUsed: null,
+      diagnostics: null,
       message: "No Nitrado token or service ID is available for ADM log reading.",
     };
   }
 
+  const token = await getNitradoTokenForLinkedServer(env, linkedServer);
   const readable = await fetchReadableNitradoAdmLines(token, linkedServer.nitrado_service_id);
+  if (readable.diagnostics.readable.found && !readable.lines.length) {
+    throw new Error("Diagnostics could read ADM lines, but sync helper failed to process them.");
+  }
+
   if (readable.lines.length) {
     return {
       lines: readable.lines,
-      newestAdmFileName: admLog.newestAdmFileName ?? readable.diagnostics.newestAdmFileName,
+      newestAdmFileName: readable.diagnostics.newestAdmFileName,
+      latestAdmPath: linkedServer.adm_path,
+      readableRouteUsed: readable.diagnostics.readable.routeRecommendation,
+      diagnostics: readable.diagnostics,
       message: `ADM lines readable via ${readable.diagnostics.readable.sourceLabel ?? "Nitrado diagnostics"}`,
     };
   }
 
   return {
     lines: [],
-    newestAdmFileName: admLog.newestAdmFileName ?? readable.diagnostics.newestAdmFileName,
+    newestAdmFileName: readable.diagnostics.newestAdmFileName,
+    latestAdmPath: linkedServer.adm_path,
+    readableRouteUsed: readable.diagnostics.readable.routeRecommendation,
+    diagnostics: readable.diagnostics,
     message: readable.diagnostics.readable.message,
   };
 }

@@ -1,8 +1,8 @@
+import { getReadableAdmLinesForLinkedServer, type SyncLinkedServer } from "../../_lib/adm-sync";
 import { getCurrentLinkedServer, getSessionUser } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockNitrado } from "../../_lib/mock";
-import { runNitradoLogAccessDiagnostics, type NitradoLogAccessDiagnostics } from "../../_lib/nitrado";
-import { getLatestNitradoToken } from "../../_lib/onboarding";
+import { mockNitradoLogAccessDiagnostics } from "../../_lib/nitrado";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -12,65 +12,26 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
   const linkedServer = await getCurrentLinkedServer(env, user.id, { includePrivateAdmPath: true });
+  if (!linkedServer) return json({ error: "No linked server found" }, { status: 400 });
   const serviceId = typeof linkedServer?.nitrado_service_id === "string" ? linkedServer.nitrado_service_id : null;
   if (!serviceId) return json({ error: "No linked Nitrado service found" }, { status: 400 });
 
-  if (isMockNitrado(env.MOCK_NITRADO)) {
-    return json({ diagnostics: mockDiagnostics(serviceId) });
-  }
-
-  const token = await getLatestNitradoToken(env, user.id);
-  if (!token) return json({ error: "No Nitrado token found" }, { status: 400 });
-
   try {
-    const diagnostics = await runNitradoLogAccessDiagnostics(token, serviceId);
+    const diagnostics = isMockNitrado(env.MOCK_NITRADO)
+      ? mockNitradoLogAccessDiagnostics(serviceId)
+      : (await getReadableAdmLinesForLinkedServer(env, toSyncLinkedServer(linkedServer, user.id), { isMock: false })).diagnostics;
+    if (!diagnostics) return json({ error: "Log access diagnostics unavailable" }, { status: 400 });
     return json({ diagnostics });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Log access diagnostics failed" }, { status: 400 });
   }
 };
 
-function mockDiagnostics(serviceId: string): NitradoLogAccessDiagnostics {
-  const newestAdmFileName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
+function toSyncLinkedServer(linkedServer: Record<string, unknown>, userId: string): SyncLinkedServer {
   return {
-    serviceId,
-    lastCheckedAt: new Date().toISOString(),
-    gameserverUsernameFound: true,
-    gameSpecificLogFilesFound: true,
-    gameSpecificLogFilesReturned: 1,
-    admFilesFromGameSpecific: 1,
-    newestAdmFileName,
-    testedPathVariants: [
-      newestAdmFileName,
-      `dayzps/config/${newestAdmFileName}`,
-      `/games/{gameserver-username}/noftp/${newestAdmFileName}`,
-    ],
-    readable: {
-      found: true,
-      sourceLabel: "MOCK_NITRADO",
-      method: "mock",
-      lineCount: 14,
-      routeRecommendation: "Mock mode only",
-      message: "Mock ADM lines are readable through the parser sync path.",
-    },
-    attempts: [
-      {
-        label: "MOCK_NITRADO",
-        method: "GET",
-        requestUrlPathOnly: "/mock/nitrado/log-access",
-        httpStatusCode: 200,
-        status: "OK",
-        responseContentType: "application/json",
-        topLevelJsonKeys: ["data"],
-        dataKeys: ["log_files"],
-        arrayLengths: [{ path: "$.data.log_files", length: 1 }],
-        containsLogLikeText: true,
-        containsAdmFilenames: true,
-        hasDownloadTokenFields: false,
-        sampleFetchAttempted: true,
-        sampleReadSucceeded: true,
-        safeErrorMessage: null,
-      },
-    ],
+    id: String(linkedServer.id),
+    user_id: typeof linkedServer.user_id === "string" ? linkedServer.user_id : userId,
+    nitrado_service_id: typeof linkedServer.nitrado_service_id === "string" ? linkedServer.nitrado_service_id : null,
+    adm_path: typeof linkedServer.adm_path === "string" ? linkedServer.adm_path : null,
   };
 }

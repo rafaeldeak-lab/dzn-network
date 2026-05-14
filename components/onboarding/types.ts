@@ -256,4 +256,7 @@ export type AdmSyncRunResult = {
   latestAdmFile: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;
+  readableRouteUsed: string | null;
+  linesRead: number;
+  syncStatus: string;
 };

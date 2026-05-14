@@ -42,7 +42,9 @@ Tested Nitrado routes:
 
 The diagnostics return only safe response shape data: status, content type, JSON keys, array lengths, log-text detection, ADM filename detection, and token-field presence. They never return Nitrado tokens, download token URLs/values, FTP/MySQL credentials, raw ADM lines, or secrets.
 
-Manual sync now asks the real log-access helper for readable ADM lines first. If `admin_logs` returns content, it becomes the preferred sync source. If file download or seek returns content, that path becomes the source. If no route returns content, sync remains `read_pending` with the message that ADM files are visible but file contents are unavailable through the tested Nitrado API routes.
+Manual sync now asks the shared `getReadableAdmLinesForLinkedServer()` helper for readable ADM lines first. The helper decrypts the linked server's stored Nitrado token server-side, uses the linked service ID, and runs the same route probes as diagnostics. If `admin_logs` returns content, it becomes the preferred sync source. If file download or seek returns content, that path becomes the source. If no route returns content, sync remains `read_pending` with the message that ADM files are visible but file contents are unavailable through the tested Nitrado API routes.
+
+Owner-only cleanup is available through `POST /api/sync/clear-test-data`. It removes old mock sync rows for `MockSurvivor`, `MockBandit`, and `MockRunner` from sync/event/profile/stat tables for the current linked server only. It does not delete linked server config, Discord data, Nitrado connections, or encrypted tokens.
 
 ## Supported ADM Event Types
 

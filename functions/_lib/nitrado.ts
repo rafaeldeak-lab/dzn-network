@@ -323,6 +323,51 @@ export async function fetchReadableNitradoAdmLines(
   return runNitradoLogAccessDiagnosticsInternal(token, serviceId);
 }
 
+export function mockNitradoLogAccessDiagnostics(serviceId: string): NitradoLogAccessDiagnostics {
+  const newestAdmFileName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
+  return {
+    serviceId,
+    lastCheckedAt: new Date().toISOString(),
+    gameserverUsernameFound: true,
+    gameSpecificLogFilesFound: true,
+    gameSpecificLogFilesReturned: 1,
+    admFilesFromGameSpecific: 1,
+    newestAdmFileName,
+    testedPathVariants: [
+      newestAdmFileName,
+      `dayzps/config/${newestAdmFileName}`,
+      `/games/{gameserver-username}/noftp/${newestAdmFileName}`,
+    ],
+    readable: {
+      found: true,
+      sourceLabel: "MOCK_NITRADO",
+      method: "mock",
+      lineCount: 14,
+      routeRecommendation: "Mock mode only",
+      message: "Mock ADM lines are readable through the parser sync path.",
+    },
+    attempts: [
+      {
+        label: "MOCK_NITRADO",
+        method: "GET",
+        requestUrlPathOnly: "/mock/nitrado/log-access",
+        httpStatusCode: 200,
+        status: "OK",
+        responseContentType: "application/json",
+        topLevelJsonKeys: ["data"],
+        dataKeys: ["log_files"],
+        arrayLengths: [{ path: "$.data.log_files", length: 1 }],
+        containsLogLikeText: true,
+        containsAdmFilenames: true,
+        hasDownloadTokenFields: false,
+        sampleFetchAttempted: true,
+        sampleReadSucceeded: true,
+        safeErrorMessage: null,
+      },
+    ],
+  };
+}
+
 export async function detectNitradoAdmLogs(
   token: string,
   serviceId: string,
