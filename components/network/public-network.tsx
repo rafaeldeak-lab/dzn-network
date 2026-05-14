@@ -378,14 +378,14 @@ function ServerProfile({ server }: { server: PublicServer }) {
         transition={{ duration: 0.42 }}
         className="mt-8 glass-surface animated-border rounded-lg p-6 sm:p-8"
       >
-        <div className="relative z-10 grid gap-7 lg:grid-cols-[1fr_320px] lg:items-end">
-          <div>
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+        <div className="relative z-10 grid min-w-0 gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] lg:items-start">
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-center">
               <GuildIcon server={server} size="lg" />
-              <div>
+              <div className="min-w-0 max-w-full">
                 <p className="text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified DZN community"}</p>
-                <h1 className="mt-2 text-4xl font-black uppercase text-white sm:text-6xl">{server.server_name}</h1>
-                <p className="mt-3 max-w-2xl text-lg leading-8 text-zinc-300">{server.nitrado_service_name ?? server.server_name}</p>
+                <h1 className="mt-2 max-w-full break-words text-3xl font-black uppercase leading-tight text-white [overflow-wrap:anywhere] sm:text-4xl lg:text-5xl">{server.server_name}</h1>
+                <p className="mt-3 max-w-2xl break-words text-base leading-7 text-zinc-300 [overflow-wrap:anywhere] sm:text-lg sm:leading-8">{server.nitrado_service_name ?? server.server_name}</p>
               </div>
             </div>
             <div className="mt-7 flex flex-wrap gap-2">
@@ -398,7 +398,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
             </div>
           </div>
 
-          <div className="rounded-lg border border-white/10 bg-black/26 p-5">
+          <div className="w-full min-w-0 self-start overflow-hidden rounded-lg border border-white/10 bg-black/26 p-5 lg:justify-self-end">
             <p className="text-xs font-black uppercase text-zinc-500">Server Signal</p>
             <div className="mt-4 grid gap-3">
               <MiniMetric label="Player Slots" value={server.player_slots ? String(server.player_slots) : "Not listed"} />
@@ -598,9 +598,9 @@ function PlaceholderRows({ labels }: { labels: string[] }) {
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+    <div className="min-w-0 rounded-lg border border-white/10 bg-black/24 p-3">
       <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
-      <p className="mt-1 break-words text-sm font-bold text-white">{value}</p>
+      <p className="mt-1 max-w-full break-words text-sm font-bold text-white [overflow-wrap:anywhere]">{value}</p>
     </div>
   );
 }
