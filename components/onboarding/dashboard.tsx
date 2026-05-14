@@ -66,6 +66,12 @@ function DashboardFrame({ children, onLogout }: { children: React.ReactNode; onL
         <nav className="mb-8 flex items-center justify-between">
           <DznLogo />
           <div className="flex items-center gap-3">
+            <Link href="/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 sm:inline-flex">
+              Servers
+            </Link>
+            <Link href="/signup" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 md:inline-flex">
+              Add Your Server
+            </Link>
             <Link href="/setup" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200">
               Setup
             </Link>
@@ -120,7 +126,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const networkAddressLabel = looksLikeIpAddress(networkAddress) ? "IP Address" : "Region";
   const admFolder = getFolderFromPath(server.adm_path);
   const statsSyncPending = admState.kind === "discovered_read_pending";
-  const statsSyncLabel = admState.kind === "connected" ? "Stats Sync Active" : statsSyncPending ? "Stats Sync Pending" : "Stats Sync Waiting";
+  const statsSyncLabel = admState.kind === "connected" ? "Stats Sync Active" : statsSyncPending ? "Stats Sync Pending" : "Stats Sync Not Started";
 
   async function rerunLogCheck() {
     setCheckingLogs(true);
@@ -166,7 +172,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             <StatusBadge label="Discord" value="Connected" tone="cyan" />
             <StatusBadge label="Nitrado" value="Connected" tone="violet" />
             <StatusBadge label="ADM" value={admState.badge} tone={admState.kind === "connected" ? "emerald" : admState.kind === "discovered_read_pending" ? "cyan" : "orange"} />
-            <StatusBadge label="Stats Sync" value={statsSyncPending ? "Pending" : admState.kind === "connected" ? "Active" : "Waiting"} tone={statsSyncPending ? "orange" : admState.kind === "connected" ? "emerald" : "zinc"} />
+            <StatusBadge label="Stats Sync" value={statsSyncPending ? "Pending" : admState.kind === "connected" ? "Active" : "Not Started"} tone={statsSyncPending ? "orange" : admState.kind === "connected" ? "emerald" : "zinc"} />
           </div>
 
           {statsSyncPending ? (
@@ -193,6 +199,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             {server.platform ? <Info label="Platform" value={server.platform} /> : null}
             {server.player_slots ? <Info label="Player Slots" value={String(server.player_slots)} /> : null}
             <Info label="ADM Status" value={admState.title} />
+            <Info label="Stats Sync" value={statsSyncPending ? "Pending" : admState.kind === "connected" ? "Active" : "Not Started"} />
             <Info label="Latest ADM File" value={server.adm_latest_file ?? "Not detected"} />
             <Info label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
           </div>
@@ -271,6 +278,19 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             ) : null}
           </div>
         </div>
+        <div className="glass-surface animated-border rounded-lg p-5">
+          <div className="relative z-10">
+            <Activity className="h-8 w-8 text-cyan-200" />
+            <h3 className="mt-4 text-xl font-black uppercase text-white">Recent Activity</h3>
+            <div className="mt-4 grid gap-2">
+              {["No synced events yet", "Killfeed activates once ADM sync is live", "Player stats will appear after log processing begins"].map((item) => (
+                <div key={item} className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </aside>
     </div>
   );
@@ -286,7 +306,7 @@ function Status({ status }: { status: LinkedServer["status"] }) {
         : "border-orange-300/30 bg-orange-400/10 text-orange-100";
   return (
     <span className={`rounded-lg border px-4 py-2 text-xs font-black uppercase ${className}`}>
-      {normalizedStatus}
+      {formatServerStatus(status)}
     </span>
   );
 }
@@ -336,7 +356,10 @@ function looksLikeIpAddress(value: string) {
 }
 
 function formatServerStatus(status: LinkedServer["status"]) {
-  return status.toLowerCase() === "live" ? "LIVE" : status.toUpperCase();
+  const normalized = status.toLowerCase();
+  if (normalized === "live") return "Live";
+  if (normalized === "error") return "Error";
+  return "Pending";
 }
 
 function getAdmState(server: LinkedServer) {

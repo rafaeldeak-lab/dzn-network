@@ -155,6 +155,23 @@ function LoadingOverlay({ isVisible }: { isVisible: boolean }) {
 }
 
 function Navbar() {
+  const [authenticated, setAuthenticated] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me", { credentials: "include" })
+      .then((response) => setAuthenticated(response.ok))
+      .catch(() => setAuthenticated(false));
+  }, []);
+
+  async function signOut() {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+    }).catch(() => null);
+    setAuthenticated(false);
+  }
+
   return (
     <motion.header
       initial={{ opacity: 0, y: -20 }}
@@ -180,14 +197,38 @@ function Navbar() {
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <a
-            href="#community"
+            href="#"
             className="hidden items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-xs font-bold uppercase text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white sm:inline-flex"
           >
             <MessageCircle className="h-4 w-4" />
             Discord
           </a>
+          {authenticated ? (
+            <>
+              <a
+                href="/dashboard"
+                className="hidden rounded-lg border border-white/10 px-4 py-2 text-xs font-bold uppercase text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white sm:inline-flex"
+              >
+                Dashboard
+              </a>
+              <button
+                type="button"
+                onClick={signOut}
+                className="hidden rounded-lg border border-white/10 px-4 py-2 text-xs font-bold uppercase text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white sm:inline-flex"
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <a
+              href="/login"
+              className="hidden rounded-lg border border-white/10 px-4 py-2 text-xs font-bold uppercase text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white sm:inline-flex"
+            >
+              Login
+            </a>
+          )}
           <a
-            href="#servers"
+            href="/signup"
             className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_28px_rgba(139,92,246,0.55)] transition duration-300 hover:bg-violet-400 hover:shadow-[0_0_42px_rgba(167,139,250,0.7)] sm:px-5"
           >
             Sign up
@@ -232,10 +273,10 @@ function Hero() {
             variants={fadeUp}
             className="mt-8 flex flex-col gap-3 sm:flex-row"
           >
-            <ButtonLink href="#leaderboards" icon={Trophy}>
+            <ButtonLink href="/leaderboards" icon={Trophy}>
               View leaderboards
             </ButtonLink>
-            <ButtonLink href="#servers" icon={Server} variant="secondary">
+            <ButtonLink href="/signup" icon={Server} variant="secondary">
               Add your server
             </ButtonLink>
           </motion.div>
@@ -601,10 +642,10 @@ function Community() {
               Add your server, publish your season, connect your Discord, and let survivors find your world through verified stats, mode filters, and live activity.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <ButtonLink href="#servers" icon={Zap}>
+              <ButtonLink href="/signup" icon={Zap}>
                 Add your server
               </ButtonLink>
-              <ButtonLink href="#leaderboards" icon={Play} variant="secondary">
+              <ButtonLink href="/servers" icon={Play} variant="secondary">
                 Explore network
               </ButtonLink>
             </div>

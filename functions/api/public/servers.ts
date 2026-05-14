@@ -31,9 +31,9 @@ type SafePublicServer = {
   nitrado_service_name: string | null;
   guild_name: string | null;
   guild_icon_url: string | null;
-  adm_status: "Connected" | "Discovered" | "Pending";
+  adm_status: "Connected" | "Discovered" | "Needs Review";
   latest_adm_file: string | null;
-  stats_sync: "Active" | "Pending";
+  stats_sync: "Active" | "Pending" | "Not Started";
   player_slots: number | null;
   created_at: string | null;
 };
@@ -105,7 +105,18 @@ async function queryPublicServers(env: Env, slug: string | null) {
   }
 
   const result = await db
-    .prepare(`${baseQuery} ORDER BY linked_servers.updated_at DESC, linked_servers.created_at DESC LIMIT 100`)
+    .prepare(
+      `${baseQuery}
+       ORDER BY
+         CASE
+           WHEN onboarding_checks.adm_logs_found = 1 THEN 0
+           WHEN server_log_config.adm_path IS NOT NULL THEN 2
+           ELSE 4
+         END ASC,
+         linked_servers.updated_at DESC,
+         linked_servers.created_at DESC
+       LIMIT 100`,
+    )
     .all<PublicServerRow>();
   return result.results ?? [];
 }
@@ -159,7 +170,7 @@ async function ensureServerLogConfigTable(env: Env) {
 function toSafePublicServer(row: PublicServerRow) {
   if (!row.public_slug) return null;
   const latestAdmFile = row.adm_path ? row.adm_path.split("/").filter(Boolean).at(-1) ?? null : null;
-  const admStatus = Number(row.adm_logs_found) === 1 ? "Connected" : row.adm_path ? "Discovered" : "Pending";
+  const admStatus = Number(row.adm_logs_found) === 1 ? "Connected" : row.adm_path ? "Discovered" : "Needs Review";
 
   return {
     public_slug: row.public_slug,
@@ -172,7 +183,7 @@ function toSafePublicServer(row: PublicServerRow) {
     guild_icon_url: row.guild_icon_url,
     adm_status: admStatus,
     latest_adm_file: latestAdmFile,
-    stats_sync: Number(row.adm_logs_found) === 1 ? "Active" : "Pending",
+    stats_sync: Number(row.adm_logs_found) === 1 ? "Active" : row.adm_path ? "Pending" : "Not Started",
     player_slots: row.player_slots,
     created_at: row.created_at,
   } satisfies SafePublicServer;
@@ -185,7 +196,7 @@ function buildPublicStats(servers: SafePublicServer[]) {
     pveServers: servers.filter((server) => server.server_type === "PVE").length,
     deathmatchServers: servers.filter((server) => server.server_type === "DEATHMATCH").length,
     statsSyncActive: servers.filter((server) => server.stats_sync === "Active").length,
-    statsSyncPending: servers.filter((server) => server.stats_sync === "Pending").length,
+    statsSyncPending: servers.filter((server) => server.stats_sync !== "Active").length,
   };
 }
 
@@ -230,9 +241,9 @@ function mockPublicServers(): SafePublicServer[] {
       nitrado_service_name: "Apocalypse DM",
       guild_name: "Warlords Community",
       guild_icon_url: null,
-      adm_status: "Pending",
+      adm_status: "Needs Review",
       latest_adm_file: null,
-      stats_sync: "Pending",
+      stats_sync: "Not Started",
       player_slots: 50,
       created_at: new Date().toISOString(),
     },

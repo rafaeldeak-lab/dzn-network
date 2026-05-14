@@ -1,4 +1,4 @@
-export function DznLogo({ compact = false, href = "#hero" }: { compact?: boolean; href?: string }) {
+export function DznLogo({ compact = false, href = "/" }: { compact?: boolean; href?: string }) {
   return (
     <a
       href={href}

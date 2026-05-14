@@ -1,7 +1,7 @@
 export const navItems = [
   { label: "Features", href: "#features" },
-  { label: "Leaderboards", href: "#leaderboards" },
-  { label: "Servers", href: "#servers" },
+  { label: "Leaderboards", href: "/leaderboards" },
+  { label: "Servers", href: "/servers" },
   { label: "Modes", href: "#modes" },
   { label: "Community", href: "#community" },
 ];

@@ -46,12 +46,20 @@ export function AuthShell({
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col">
         <nav className="flex items-center justify-between">
           <DznLogo />
-          <Link
-            href="/"
-            className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/40 hover:bg-violet-400/10"
-          >
-            Home
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/servers"
+              className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/40 hover:bg-violet-400/10"
+            >
+              Servers
+            </Link>
+            <Link
+              href="/dashboard"
+              className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/40 hover:bg-violet-400/10 sm:inline-flex"
+            >
+              Dashboard
+            </Link>
+          </div>
         </nav>
         <section className="grid flex-1 items-center gap-10 py-16 lg:grid-cols-[0.9fr_1.1fr]">
           <motion.div

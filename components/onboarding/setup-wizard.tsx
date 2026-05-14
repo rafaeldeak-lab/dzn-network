@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
+  BarChart3,
   Check,
+  CheckCircle2,
   ChevronRight,
+  Crosshair,
   Eye,
   EyeOff,
   ExternalLink,
-  Gamepad2,
   HelpCircle,
   KeyRound,
   Loader2,
@@ -16,7 +18,9 @@ import {
   Search,
   Server,
   ShieldCheck,
+  Sparkles,
   Tags,
+  Trophy,
   Users,
   X,
   type LucideIcon,
@@ -28,12 +32,13 @@ import {
   getMe,
   getNitradoServices,
   goLive,
+  logout,
   saveOnboarding,
   testAdmPath,
   testOnboarding,
   validateNitradoToken,
 } from "./api";
-import type { AdmApiDebug, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
+import type { AdmApiDebug, DiscordGuild, LinkedServer, NitradoService, OnboardingChecks } from "./types";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 
 const steps = [
@@ -84,6 +89,7 @@ export function SetupWizard() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [checks, setChecks] = useState<OnboardingChecks | null>(null);
+  const [publishedServer, setPublishedServer] = useState<LinkedServer | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -244,12 +250,19 @@ export function SetupWizard() {
     setMessage("");
     try {
       await goLive();
+      const refreshed = await getMe().catch(() => null);
+      setPublishedServer(refreshed?.linkedServer ?? null);
       setStep(5);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Go-live failed");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function signOut() {
+    await logout().catch(() => null);
+    window.location.href = "/";
   }
 
   function toggleTag(tag: string) {
@@ -289,7 +302,7 @@ export function SetupWizard() {
   }
 
   return (
-    <SetupFrame>
+    <SetupFrame onLogout={signOut}>
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
         <aside className="glass-surface animated-border rounded-lg p-5">
           <div className="relative z-10">
@@ -360,7 +373,7 @@ export function SetupWizard() {
                 {step === 4 ? (
                   <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
                 ) : null}
-                {step === 5 ? <LiveStep /> : null}
+                {step === 5 ? <LiveStep server={publishedServer} service={selectedServiceData} admPending={Boolean(checks?.admLog?.admFileExists && !checks.admLog.sampleReadSucceeded)} /> : null}
               </motion.div>
             </AnimatePresence>
             {message ? (
@@ -375,7 +388,7 @@ export function SetupWizard() {
   );
 }
 
-function SetupFrame({ children }: { children: React.ReactNode }) {
+function SetupFrame({ children, onLogout }: { children: React.ReactNode; onLogout?: () => void }) {
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-8 text-white sm:px-6 lg:px-8">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(139,92,246,0.25),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.14),transparent_26%),linear-gradient(180deg,#02030a_0%,#07101f_52%,#02030a_100%)]" />
@@ -383,9 +396,22 @@ function SetupFrame({ children }: { children: React.ReactNode }) {
       <div className="relative z-10 mx-auto max-w-7xl">
         <nav className="mb-8 flex items-center justify-between">
           <DznLogo />
-          <Link href="/dashboard" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200">
-            Dashboard
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 sm:inline-flex">
+              Servers
+            </Link>
+            <Link href="/signup" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 md:inline-flex">
+              Add Your Server
+            </Link>
+            <Link href="/dashboard" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200">
+              Dashboard
+            </Link>
+            {onLogout ? (
+              <button type="button" onClick={onLogout} className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200">
+                Logout
+              </button>
+            ) : null}
+          </div>
         </nav>
         {children}
       </div>
@@ -820,12 +846,15 @@ function ServiceStep({ services, selectedService, setSelectedService, onNext, bu
 function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, onTestAdmPath, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onTestAdmPath: (path: string) => Promise<void>; onGoLive: () => void }) {
   const [manualAdmPath, setManualAdmPath] = useState("");
   const canGoLive = Boolean(checks?.tokenValid && checks.serviceAccess && checks.dayzServiceDetected);
+  const admDiscovered = Boolean(checks?.admLogsFound || checks?.admLog?.admFileExists);
+  const statsSyncActive = Boolean(checks?.admLogsFound && checks?.admLog?.sampleReadSucceeded);
   const checkRows = checks
     ? [
-        ["tokenValid", checks.tokenValid],
-        ["serviceAccess", checks.serviceAccess],
-        ["admLogsFound", checks.admLogsFound],
-        ["dayzServiceDetected", checks.dayzServiceDetected],
+        { label: "Token Validation", value: checks.tokenValid ? "Passed" : "Needs Review", tone: checks.tokenValid ? "success" : "warning" },
+        { label: "Service Access", value: checks.serviceAccess ? "Passed" : "Needs Review", tone: checks.serviceAccess ? "success" : "warning" },
+        { label: "DayZ Service Detected", value: checks.dayzServiceDetected ? "Passed" : "Needs Review", tone: checks.dayzServiceDetected ? "success" : "warning" },
+        { label: "ADM Logs", value: checks.admLogsFound ? "Connected" : admDiscovered ? "Discovered" : "Needs Review", tone: checks.admLogsFound ? "success" : admDiscovered ? "warning" : "warning" },
+        { label: "Stats Sync", value: statsSyncActive ? "Active" : admDiscovered ? "Pending" : "Not Started", tone: statsSyncActive ? "success" : admDiscovered ? "warning" : "neutral" },
       ] as const
     : [];
   return (
@@ -839,12 +868,18 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
       {checks ? (
         <>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {checkRows.map(([key, value]) => (
-              <div key={key} className={`rounded-lg border p-3 text-sm font-bold ${value ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-orange-300/25 bg-orange-400/10 text-orange-100"}`}>
-                {key}: {value ? "Passed" : "Needs review"}
+            {checkRows.map((row) => (
+              <div key={row.label} className={`rounded-lg border p-3 text-sm font-bold ${reviewToneClass(row.tone)}`}>
+                <span className="block text-[10px] font-black uppercase opacity-70">{row.label}</span>
+                <span className="mt-1 block">{row.value}</span>
               </div>
             ))}
           </div>
+          {admDiscovered && !statsSyncActive ? (
+            <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-sm font-bold leading-6 text-cyan-50">
+              DZN can see your latest ADM log file, but full stat syncing is not active yet.
+            </p>
+          ) : null}
         </>
       ) : null}
       <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-4">
@@ -897,14 +932,76 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
   );
 }
 
-function LiveStep() {
+function LiveStep({ server, service, admPending }: { server: LinkedServer | null; service?: NitradoService; admPending: boolean }) {
+  const reduceMotion = useReducedMotion();
+  const serverName = server?.server_name ?? service?.name ?? "Your DayZ server";
+  const publicHref = server?.public_slug ? `/servers/${server.public_slug}` : "/servers";
   return (
-    <Step title="Go Live" icon={Gamepad2} description="Your verified DayZ server is now ready for DZN Network discovery.">
-      <Link href="/dashboard" className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white">
-        Open dashboard
-        <ChevronRight className="h-4 w-4" />
-      </Link>
-    </Step>
+    <div className="relative overflow-hidden rounded-lg">
+      {!reduceMotion ? <CelebrationField /> : null}
+      <div className="relative z-10 glass-surface animated-border overflow-hidden rounded-lg p-6 text-center sm:p-8">
+        <div className="relative z-10">
+          <motion.div
+            initial={reduceMotion ? false : { scale: 0.75, opacity: 0 }}
+            animate={reduceMotion ? undefined : { scale: [0.75, 1.12, 1], opacity: 1 }}
+            transition={{ duration: 0.72, ease: "easeOut" }}
+            className="mx-auto grid h-20 w-20 place-items-center rounded-lg border border-emerald-300/35 bg-emerald-400/15 text-emerald-100 shadow-[0_0_46px_rgba(52,211,153,0.45)]"
+          >
+            <CheckCircle2 className="h-11 w-11" />
+          </motion.div>
+          <motion.h2
+            initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+            animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.12 }}
+            className="mt-7 bg-gradient-to-r from-white via-emerald-100 to-violet-100 bg-clip-text text-4xl font-black uppercase text-transparent sm:text-5xl"
+          >
+            Setup Complete!
+          </motion.h2>
+          <p className="mt-3 text-xl font-black text-white">{serverName}</p>
+          <div className="mt-4 flex justify-center">
+            <span className="rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-4 py-2 text-xs font-black uppercase text-emerald-100">
+              Online / Live
+            </span>
+          </div>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-300">
+            Your server is now listed on DZN Network.
+          </p>
+          {admPending ? (
+            <p className="mx-auto mt-4 max-w-2xl rounded-lg border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-sm font-bold leading-6 text-orange-50">
+              Your server is live. PvP stats will begin syncing once ADM log reading is active.
+            </p>
+          ) : null}
+
+          <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { title: "Global Rankings", icon: Trophy },
+              { title: "Player Profiles", icon: Users },
+              { title: "Live Kill Feed", icon: Crosshair },
+              { title: "Server Analytics", icon: BarChart3 },
+            ].map((item) => (
+              <div key={item.title} className="rounded-lg border border-white/10 bg-black/24 p-4 text-left">
+                <item.icon className="h-6 w-6 text-violet-200" />
+                <p className="mt-3 text-sm font-black uppercase text-white">{item.title}</p>
+                <p className="mt-2 text-xs leading-5 text-zinc-500">Activates as the DZN sync engine comes online.</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <Link href="/dashboard" className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_28px_rgba(139,92,246,0.42)] transition hover:bg-violet-400">
+              Open Dashboard
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+            <Link href={publicHref} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-5 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/40">
+              View Public Page
+            </Link>
+            <Link href="/servers" className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-5 text-xs font-black uppercase text-zinc-100 transition hover:border-violet-300/35 hover:text-white">
+              View Network
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -928,6 +1025,62 @@ function WizardButton({ children, disabled, onClick }: { children: React.ReactNo
       <ChevronRight className="h-4 w-4" />
     </button>
   );
+}
+
+function CelebrationField() {
+  const confetti = Array.from({ length: 34 }, (_, index) => ({
+    id: `confetti-${index}`,
+    left: `${8 + ((index * 23) % 84)}%`,
+    delay: index * 0.035,
+    x: (index % 2 === 0 ? 1 : -1) * (22 + (index % 7) * 10),
+    rotate: (index % 2 === 0 ? 1 : -1) * (120 + (index % 8) * 26),
+    color: ["bg-violet-300", "bg-emerald-300", "bg-cyan-200", "bg-white", "bg-yellow-200"][index % 5],
+  }));
+  const particles = Array.from({ length: 18 }, (_, index) => ({
+    id: `success-particle-${index}`,
+    left: `${12 + ((index * 31) % 78)}%`,
+    top: `${32 + ((index * 17) % 38)}%`,
+    delay: index * 0.09,
+  }));
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.82 }}
+        animate={{ opacity: [0, 0.85, 0], scale: [0.82, 1.18, 1.34] }}
+        transition={{ duration: 3.6, ease: "easeOut" }}
+        className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-400/18 blur-3xl"
+      />
+      {confetti.map((item) => (
+        <motion.span
+          key={item.id}
+          initial={{ opacity: 0, y: 40, x: 0, rotate: 0, scale: 0.8 }}
+          animate={{ opacity: [0, 1, 1, 0], y: [-8, -130, -190], x: [0, item.x, item.x * 1.35], rotate: item.rotate, scale: [0.8, 1, 0.92] }}
+          transition={{ duration: 3.2, delay: item.delay, ease: "easeOut" }}
+          className={`absolute bottom-[16%] h-2 w-5 rounded-sm ${item.color} shadow-[0_0_18px_rgba(255,255,255,0.28)]`}
+          style={{ left: item.left }}
+        />
+      ))}
+      {particles.map((item) => (
+        <motion.span
+          key={item.id}
+          initial={{ opacity: 0, y: 18, scale: 0.6 }}
+          animate={{ opacity: [0, 0.9, 0], y: [-8, -58], scale: [0.6, 1.1, 0.7] }}
+          transition={{ duration: 3.8, delay: item.delay, ease: "easeOut" }}
+          className="absolute grid h-8 w-8 place-items-center text-violet-100/70"
+          style={{ left: item.left, top: item.top }}
+        >
+          <Sparkles className="h-4 w-4" />
+        </motion.span>
+      ))}
+    </div>
+  );
+}
+
+function reviewToneClass(tone: "success" | "warning" | "neutral") {
+  if (tone === "success") return "border-emerald-300/25 bg-emerald-400/10 text-emerald-100";
+  if (tone === "warning") return "border-orange-300/25 bg-orange-400/10 text-orange-100";
+  return "border-white/10 bg-white/[0.04] text-zinc-200";
 }
 
 function Summary({ label, value }: { label: string; value: string }) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -10,11 +10,11 @@ import {
   Crosshair,
   Crown,
   Flame,
+  LogOut,
   RadioTower,
   Search,
   ShieldCheck,
   Skull,
-  Swords,
   Trophy,
   Users,
 } from "lucide-react";
@@ -32,9 +32,9 @@ type PublicServer = {
   nitrado_service_name: string | null;
   guild_name: string | null;
   guild_icon_url: string | null;
-  adm_status: "Connected" | "Discovered" | "Pending";
+  adm_status: "Connected" | "Discovered" | "Needs Review";
   latest_adm_file: string | null;
-  stats_sync: "Active" | "Pending";
+  stats_sync: "Active" | "Pending" | "Not Started";
   player_slots: number | null;
   created_at: string | null;
 };
@@ -51,7 +51,7 @@ type PublicStats = {
 const filters = ["All", "PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
 
 export function PublicNetwork() {
-  const [slug, setSlug] = useState<string | null | undefined>(undefined);
+  const slug = useSyncExternalStore(subscribeToPath, getCurrentSlug, getServerSlugSnapshot);
   const [servers, setServers] = useState<PublicServer[]>([]);
   const [server, setServer] = useState<PublicServer | null>(null);
   const [stats, setStats] = useState<PublicStats | null>(null);
@@ -60,13 +60,6 @@ export function PublicNetwork() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const parts = window.location.pathname.split("/").filter(Boolean);
-    setSlug(parts[0] === "servers" && parts[1] ? decodeURIComponent(parts[1]) : null);
-  }, []);
-
-  useEffect(() => {
-    if (slug === undefined) return;
-
     async function load() {
       setLoading(true);
       setError("");
@@ -95,9 +88,10 @@ export function PublicNetwork() {
     load();
   }, [slug]);
 
+  const sortedServers = useMemo(() => [...servers].sort((a, b) => serverSortRank(a) - serverSortRank(b)), [servers]);
   const filteredServers = useMemo(
-    () => (filter === "All" ? servers : servers.filter((item) => item.server_type === filter)),
-    [filter, servers],
+    () => (filter === "All" ? sortedServers : sortedServers.filter((item) => item.server_type === filter)),
+    [filter, sortedServers],
   );
   const calculatedStats = useMemo(() => stats ?? buildStats(servers), [stats, servers]);
 
@@ -117,13 +111,45 @@ export function PublicNetwork() {
 }
 
 function PublicNav() {
+  const [authenticated, setAuthenticated] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me", { credentials: "include" })
+      .then((response) => setAuthenticated(response.ok))
+      .catch(() => setAuthenticated(false));
+  }, []);
+
+  async function signOut() {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+    }).catch(() => null);
+    setAuthenticated(false);
+  }
+
   return (
     <nav className="flex items-center justify-between">
       <DznLogo href="/" />
       <div className="flex items-center gap-3">
-        <Link href="/dashboard" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
-          Owner Console
+        <Link href="/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white lg:inline-flex">
+          Servers
         </Link>
+        {authenticated ? (
+          <>
+            <Link href="/dashboard" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
+              Dashboard
+            </Link>
+            <button type="button" onClick={signOut} className="hidden items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white md:inline-flex">
+              <LogOut className="h-4 w-4" />
+              Logout
+            </button>
+          </>
+        ) : (
+          <Link href="/login" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
+            Login
+          </Link>
+        )}
         <Link href="/signup" className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_26px_rgba(139,92,246,0.35)] transition hover:bg-violet-400">
           Add Your Server
         </Link>
@@ -189,7 +215,7 @@ function ServerBrowser({
           </div>
         </div>
 
-        {error ? <MessagePanel tone="error" message={error} /> : null}
+        {error ? <MessagePanel message={error} /> : null}
         {loading ? <ServerSkeletonGrid /> : null}
         {!loading && !error && servers.length === 0 ? <EmptyPublicState /> : null}
         {!loading && !error && servers.length > 0 ? (
@@ -258,9 +284,11 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
+          <StatusPill label="Verified Owner" tone="cyan" />
+          <StatusPill label="DZN Verified" tone="violet" />
           <StatusPill label={server.server_type} tone="violet" />
-          <StatusPill label={`ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
-          <StatusPill label={`Stats ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : "orange"} />
+          <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
+          <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
           {server.player_slots ? <StatusPill label={`${server.player_slots} slots`} tone="zinc" /> : null}
         </div>
 
@@ -328,9 +356,11 @@ function ServerProfile({ server }: { server: PublicServer }) {
             </div>
             <div className="mt-7 flex flex-wrap gap-2">
               <StatusPill label="Live" tone="emerald" />
+              <StatusPill label="Verified Owner" tone="cyan" />
+              <StatusPill label="DZN Verified" tone="violet" />
               <StatusPill label={server.server_type} tone="violet" />
-              <StatusPill label={`ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
-              <StatusPill label={`Stats ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : "orange"} />
+              <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
+              <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
             </div>
           </div>
 
@@ -361,15 +391,15 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
           <div className="grid gap-5 md:grid-cols-2">
             <PlaceholderPanel title="PvP Leaderboard" icon={Trophy} text="Ranked leaderboards will appear here when stat sync is active." />
-            <PlaceholderPanel title="Recent Kills" icon={Crosshair} text="Kill feed data will populate from verified ADM logs." />
+            <PlaceholderPanel title="Recent Kills" icon={Crosshair} text="Killfeed activates once ADM sync is live." />
             <PlaceholderPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." />
-            <PlaceholderPanel title="Server Achievements" icon={Crown} text="Community milestones will unlock as the DZN sync engine expands." />
+            <PlaceholderPanel title="Achievements" icon={Crown} text="Community milestones will unlock as the DZN sync engine expands." />
           </div>
         </div>
 
         <aside className="grid gap-5">
           <GlassPanel title="Top Players" icon={Flame}>
-            <PlaceholderRows labels={["Survivor ranking pending", "Kill streaks pending", "Playtime records pending"]} />
+            <PlaceholderRows labels={["No synced events yet", "Player stats will appear after log processing begins", "Killfeed activates once ADM sync is live"]} />
           </GlassPanel>
           <GlassPanel title="Network Status" icon={BarChart3}>
             <div className="grid gap-3">
@@ -431,12 +461,30 @@ function ProfileMessage({ tone, message }: { tone: "error" | "empty"; message: s
   );
 }
 
-function MessagePanel({ tone, message }: { tone: "error"; message: string }) {
+function MessagePanel({ message }: { message: string }) {
   return (
     <div className="mt-6 rounded-lg border border-red-300/20 bg-red-400/10 p-4 text-sm font-bold text-red-100">
       {message}
     </div>
   );
+}
+
+function subscribeToPath(onStoreChange: () => void) {
+  window.addEventListener("popstate", onStoreChange);
+  return () => window.removeEventListener("popstate", onStoreChange);
+}
+
+function getCurrentSlug() {
+  return getSlugFromPath(window.location.pathname);
+}
+
+function getServerSlugSnapshot() {
+  return null;
+}
+
+function getSlugFromPath(pathname: string) {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts[0] === "servers" && parts[1] ? decodeURIComponent(parts[1]) : null;
 }
 
 function GlassPanel({ title, icon: Icon, children }: { title: string; icon: typeof Activity; children: React.ReactNode }) {
@@ -524,6 +572,14 @@ function parseTags(value: string) {
   }
 }
 
+function serverSortRank(server: PublicServer) {
+  if (server.stats_sync === "Active") return 0;
+  if (server.adm_status === "Connected") return 1;
+  if (server.adm_status === "Discovered") return 2;
+  if (server.stats_sync === "Pending") return 3;
+  return 4;
+}
+
 function buildStats(servers: PublicServer[]): PublicStats {
   return {
     totalServers: servers.length,
@@ -531,6 +587,6 @@ function buildStats(servers: PublicServer[]): PublicStats {
     pveServers: servers.filter((server) => server.server_type === "PVE").length,
     deathmatchServers: servers.filter((server) => server.server_type === "DEATHMATCH").length,
     statsSyncActive: servers.filter((server) => server.stats_sync === "Active").length,
-    statsSyncPending: servers.filter((server) => server.stats_sync === "Pending").length,
+    statsSyncPending: servers.filter((server) => server.stats_sync !== "Active").length,
   };
 }
