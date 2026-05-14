@@ -1,17 +1,23 @@
 # ADM Sync Plan
 
-This is a planning note only. Do not implement parser logic here.
+This is a planning note for the ADM sync engine.
+
+## Phase 1 Implemented
+
+- D1 schema for sync cursors, raw ADM events, parsed player events, kill events, player profiles, and server counters.
+- ADM parser helper for first-pass admin-log lines.
+- Sync state helper that records `read_pending` when ADM files are discovered but not readable through the current Nitrado API path.
+- Owner-only manual sync endpoint.
+- Owner dashboard sync card with safe counters and manual sync action.
 
 ## Next Worker Scope
 
-- Fetch latest ADM file for each live linked server.
-- Track last processed line and byte offset per linked server.
-- Parse player joins.
-- Parse disconnects.
-- Parse kills and deaths.
-- Save raw and normalized events to D1.
-- Update player profiles from parsed identifiers.
-- Update leaderboards and server aggregates.
+- Scheduled sync.
+- Queue/cron execution.
+- Full ADM file download/read once the Nitrado API path is confirmed.
+- Leaderboard calculations.
+- Player profile pages.
+- Public stat surfacing after privacy review.
 
 ## Safety Notes
 

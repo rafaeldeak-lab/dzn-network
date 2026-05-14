@@ -181,3 +181,29 @@ export type LinkedServer = {
   adm_last_checked_at?: string | null;
   adm_logs_found?: number | null;
 };
+
+export type AdmSyncStatus = {
+  last_sync_status: string;
+  last_sync_message: string | null;
+  latest_adm_file: string | null;
+  last_processed_file: string | null;
+  last_processed_line: number;
+  last_sync_at: string | null;
+  total_kills: number;
+  total_deaths: number;
+  total_joins: number;
+  total_disconnects: number;
+  unique_players: number;
+};
+
+export type AdmSyncRunResult = {
+  status: string;
+  message: string;
+  linesSeen: number;
+  linesProcessed: number;
+  eventsCreated: number;
+  killsCreated: number;
+  latestAdmFile: string | null;
+  lastProcessedLine: number;
+  lastSyncAt: string;
+};

@@ -5,8 +5,8 @@ import { Activity, AlertTriangle, ArrowRight, DatabaseZap, LogOut, RefreshCw, Se
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { getMe, logout, testOnboarding } from "./api";
-import type { AuthResponse, LinkedServer } from "./types";
+import { getMe, getSyncStatus, logout, runManualSync, testOnboarding } from "./api";
+import type { AdmSyncStatus, AuthResponse, LinkedServer } from "./types";
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -108,6 +108,8 @@ function EmptyDashboard() {
 
 function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefresh: () => Promise<void> }) {
   const [checkingLogs, setCheckingLogs] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const tags = useMemo(() => {
     try {
@@ -127,6 +129,21 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const admFolder = getFolderFromPath(server.adm_path);
   const statsSyncPending = admState.kind === "discovered_read_pending";
   const statsSyncLabel = admState.kind === "connected" ? "Stats Sync Active" : statsSyncPending ? "Stats Sync Pending" : "Stats Sync Not Started";
+  const effectiveSyncStatus = syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started");
+
+  useEffect(() => {
+    let active = true;
+    getSyncStatus(server.id)
+      .then((result) => {
+        if (active) setSyncStatus(result.status);
+      })
+      .catch(() => {
+        if (active) setSyncStatus(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [server.id]);
 
   async function rerunLogCheck() {
     setCheckingLogs(true);
@@ -139,6 +156,22 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       setActionMessage(error instanceof Error ? error.message : "Unable to re-run log check.");
     } finally {
       setCheckingLogs(false);
+    }
+  }
+
+  async function runSync() {
+    setSyncing(true);
+    setActionMessage("");
+    try {
+      const result = await runManualSync(server.id);
+      const status = await getSyncStatus(server.id);
+      setSyncStatus(status.status);
+      await onRefresh();
+      setActionMessage(result.message);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to run manual sync.");
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -219,12 +252,31 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             <DatabaseZap className="h-8 w-8 text-cyan-200" />
             <h3 className="mt-4 text-xl font-black uppercase text-white">Sync Engine Status</h3>
             <div className="mt-4 grid gap-3">
-              <MiniInfo label="Latest ADM File" value={server.adm_latest_file ?? "Not detected"} />
-              <MiniInfo label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
+              <MiniInfo label="Sync Status" value={formatSyncStatus(effectiveSyncStatus)} />
+              <MiniInfo label="Latest ADM File" value={syncStatus?.latest_adm_file ?? server.adm_latest_file ?? "Not detected"} />
+              <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
+              <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
+              <MiniInfo label="Total Kills" value={String(syncStatus?.total_kills ?? 0)} />
+              <MiniInfo label="Total Joins" value={String(syncStatus?.total_joins ?? 0)} />
+              <MiniInfo label="Unique Players" value={String(syncStatus?.unique_players ?? 0)} />
               <MiniInfo label="ADM Folder" value={admFolder ?? "Not detected"} />
               <MiniInfo label="Read Status" value={admState.readStatus} />
               <MiniInfo label="Next Action" value={admState.nextAction} />
             </div>
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={runSync}
+              className="mt-4 inline-flex w-full items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <span>{syncing ? "Running sync..." : "Run Manual Sync"}</span>
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            </button>
+            {effectiveSyncStatus === "read_pending" ? (
+              <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
+                ADM file is discovered but DZN cannot read file contents through the current Nitrado API method yet.
+              </p>
+            ) : null}
             {statsSyncPending ? (
               <div className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 p-4">
                 <div className="flex gap-3">
@@ -360,6 +412,15 @@ function formatServerStatus(status: LinkedServer["status"]) {
   if (normalized === "live") return "Live";
   if (normalized === "error") return "Error";
   return "Pending";
+}
+
+function formatSyncStatus(value: string) {
+  if (value === "read_pending") return "Read Pending";
+  if (value === "completed") return "Completed";
+  if (value === "idle") return "Idle";
+  if (value === "active") return "Active";
+  if (value === "not_started") return "Not Started";
+  return value.replace(/_/g, " ");
 }
 
 function getAdmState(server: LinkedServer) {

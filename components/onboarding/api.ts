@@ -1,4 +1,4 @@
-import type { AuthResponse, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
+import type { AdmSyncRunResult, AdmSyncStatus, AuthResponse, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
 
 export async function getMe() {
   return request<AuthResponse>("/api/auth/me");
@@ -51,6 +51,18 @@ export async function testAdmPath(path: string) {
   }>("/api/nitrado/test-adm-path", {
     method: "POST",
     body: JSON.stringify({ path }),
+  });
+}
+
+export async function getSyncStatus(linkedServerId?: string) {
+  const query = linkedServerId ? `?linked_server_id=${encodeURIComponent(linkedServerId)}` : "";
+  return request<{ status: AdmSyncStatus }>(`/api/sync/status${query}`);
+}
+
+export async function runManualSync(linkedServerId?: string) {
+  return request<AdmSyncRunResult>("/api/sync/run", {
+    method: "POST",
+    body: JSON.stringify(linkedServerId ? { linked_server_id: linkedServerId } : {}),
   });
 }
 
