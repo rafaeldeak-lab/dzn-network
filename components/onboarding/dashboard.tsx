@@ -5,8 +5,8 @@ import { Activity, AlertTriangle, ArrowRight, DatabaseZap, LogOut, RefreshCw, Se
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { getMe, getRecentSyncEvents, getSyncStatus, logout, runManualSync, testOnboarding } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncStatus, AuthResponse, LinkedServer } from "./types";
+import { getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -111,6 +111,9 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
   const [recentEvents, setRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
+  const [logDiagnostics, setLogDiagnostics] = useState<NitradoLogAccessDiagnostics | null>(null);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosingLogs, setDiagnosingLogs] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const tags = useMemo(() => {
     try {
@@ -178,6 +181,21 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       setActionMessage(error instanceof Error ? error.message : "Unable to run manual sync.");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function runDiagnostics() {
+    setDiagnosingLogs(true);
+    setActionMessage("");
+    try {
+      const result = await runLogAccessDiagnostics();
+      setLogDiagnostics(result.diagnostics);
+      setDiagnosticsOpen(true);
+      setActionMessage(result.diagnostics.readable.message);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to run log access diagnostics.");
+    } finally {
+      setDiagnosingLogs(false);
     }
   }
 
@@ -280,6 +298,22 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <span>{syncing ? "Running sync..." : "Run Manual Sync"}</span>
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             </button>
+            <button
+              type="button"
+              disabled={diagnosingLogs}
+              onClick={runDiagnostics}
+              className="mt-3 inline-flex w-full items-center justify-between rounded-lg border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-left text-sm font-bold text-violet-50 transition hover:border-violet-300/45 hover:bg-violet-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <span>{diagnosingLogs ? "Testing Nitrado routes..." : "Run Log Access Diagnostics"}</span>
+              <RefreshCw className={`h-4 w-4 ${diagnosingLogs ? "animate-spin" : ""}`} />
+            </button>
+            {logDiagnostics ? (
+              <LogDiagnosticsPanel
+                diagnostics={logDiagnostics}
+                open={diagnosticsOpen}
+                onToggle={() => setDiagnosticsOpen((value) => !value)}
+              />
+            ) : null}
             {effectiveSyncStatus === "read_pending" ? (
               <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
                 ADM file is discovered but DZN cannot read file contents through the current Nitrado API method yet.
@@ -432,6 +466,70 @@ function RecentSyncEventRow({ event }: { event: AdmRecentSyncEvent }) {
           {formatCompactDate(event.occurred_at ?? event.created_at)}
         </p>
       </div>
+    </div>
+  );
+}
+
+function LogDiagnosticsPanel({
+  diagnostics,
+  open,
+  onToggle,
+}: {
+  diagnostics: NitradoLogAccessDiagnostics;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-white/10 bg-black/24">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-3 py-3 text-left text-xs font-black uppercase text-zinc-200"
+      >
+        <span>ADM API Diagnostics</span>
+        <span className={diagnostics.readable.found ? "text-emerald-200" : "text-orange-200"}>
+          {diagnostics.readable.found ? "Readable" : "Pending"}
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-white/10 p-3">
+          <div className="grid gap-2 text-xs font-bold text-zinc-300">
+            <p>Newest ADM: {diagnostics.newestAdmFileName ?? "Not found"}</p>
+            <p>game_specific.log_files: {diagnostics.gameSpecificLogFilesFound ? `${diagnostics.gameSpecificLogFilesReturned} returned` : "not found"}</p>
+            <p>Readable route: {diagnostics.readable.routeRecommendation ?? "not found"}</p>
+            <p>Message: {diagnostics.readable.message}</p>
+          </div>
+          <div className="mt-3 max-h-80 overflow-auto rounded-lg border border-white/10">
+            <table className="min-w-[760px] w-full border-collapse text-left text-[11px]">
+              <thead className="bg-white/[0.04] text-zinc-400">
+                <tr>
+                  <th className="px-3 py-2 font-black uppercase">Endpoint</th>
+                  <th className="px-3 py-2 font-black uppercase">Status</th>
+                  <th className="px-3 py-2 font-black uppercase">Keys</th>
+                  <th className="px-3 py-2 font-black uppercase">Token</th>
+                  <th className="px-3 py-2 font-black uppercase">Log Text</th>
+                  <th className="px-3 py-2 font-black uppercase">ADM Files</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diagnostics.attempts.map((attempt, index) => (
+                  <tr key={`${attempt.label}-${index}`} className="border-t border-white/10 text-zinc-200">
+                    <td className="px-3 py-2 align-top">
+                      <p className="font-black text-white">{attempt.label}</p>
+                      <p className="mt-1 break-all text-zinc-500">{attempt.requestUrlPathOnly}</p>
+                    </td>
+                    <td className="px-3 py-2 align-top">{attempt.httpStatusCode ?? attempt.status}</td>
+                    <td className="px-3 py-2 align-top">{[...attempt.topLevelJsonKeys, ...attempt.dataKeys.map((key) => `data.${key}`)].slice(0, 8).join(", ") || "none"}</td>
+                    <td className="px-3 py-2 align-top">{attempt.hasDownloadTokenFields ? "yes" : "no"}</td>
+                    <td className="px-3 py-2 align-top">{attempt.containsLogLikeText || attempt.sampleReadSucceeded ? "yes" : "no"}</td>
+                    <td className="px-3 py-2 align-top">{attempt.containsAdmFilenames ? "yes" : "no"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

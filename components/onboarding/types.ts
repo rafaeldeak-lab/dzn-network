@@ -208,6 +208,44 @@ export type AdmRecentSyncEvent = {
   created_at: string | null;
 };
 
+export type NitradoLogAccessAttempt = {
+  label: string;
+  method: "GET";
+  requestUrlPathOnly: string;
+  httpStatusCode: number | null;
+  status: "OK" | "401" | "403" | "404" | "error";
+  responseContentType: string | null;
+  topLevelJsonKeys: string[];
+  dataKeys: string[];
+  arrayLengths: { path: string; length: number }[];
+  containsLogLikeText: boolean;
+  containsAdmFilenames: boolean;
+  hasDownloadTokenFields: boolean;
+  sampleFetchAttempted: boolean;
+  sampleReadSucceeded: boolean;
+  safeErrorMessage: string | null;
+};
+
+export type NitradoLogAccessDiagnostics = {
+  serviceId: string;
+  lastCheckedAt: string;
+  gameserverUsernameFound: boolean;
+  gameSpecificLogFilesFound: boolean;
+  gameSpecificLogFilesReturned: number;
+  admFilesFromGameSpecific: number;
+  newestAdmFileName: string | null;
+  testedPathVariants: string[];
+  readable: {
+    found: boolean;
+    sourceLabel: string | null;
+    method: string | null;
+    lineCount: number;
+    routeRecommendation: string | null;
+    message: string;
+  };
+  attempts: NitradoLogAccessAttempt[];
+};
+
 export type AdmSyncRunResult = {
   status: string;
   message: string;

@@ -21,6 +21,29 @@ This is a planning note for the ADM sync engine.
 - The owner dashboard reads `/api/sync/status` and `/api/sync/recent-events` for live sync counters and recent synced activity.
 - Mock Nitrado mode runs representative ADM lines through the same parser and sync path as real data.
 
+## Real Nitrado Log Access Investigation
+
+Owner-only diagnostics are available through `GET /api/nitrado/log-access-diagnostics` and the dashboard `Run Log Access Diagnostics` button.
+
+Tested Nitrado routes:
+
+- `GET /services/{serviceId}/gameservers`
+- `GET /services/{serviceId}/gameservers/admin_logs`
+- `GET /services/{serviceId}/gameservers/admin_logs?limit=100`
+- `GET /services/{serviceId}/gameservers/admin_logs?count=100`
+- `GET /services/{serviceId}/gameservers/logs`
+- `GET /services/{serviceId}/gameservers/logs/admin`
+- `GET /services/{serviceId}/gameservers/file_server/list?dir=/`
+- `GET /services/{serviceId}/gameservers/file_server/list?dir=dayzps/config`
+- `GET /services/{serviceId}/gameservers/file_server/list?dir=/dayzps/config`
+- `GET /services/{serviceId}/gameservers/file_server/download?file={encodedPath}`
+- `GET /services/{serviceId}/gameservers/file_server/seek?file={encodedPath}&offset=0&length=4096`
+- `GET /services/{serviceId}/gameservers/file_server/stat?files[]={encodedPath}`
+
+The diagnostics return only safe response shape data: status, content type, JSON keys, array lengths, log-text detection, ADM filename detection, and token-field presence. They never return Nitrado tokens, download token URLs/values, FTP/MySQL credentials, raw ADM lines, or secrets.
+
+Manual sync now asks the real log-access helper for readable ADM lines first. If `admin_logs` returns content, it becomes the preferred sync source. If file download or seek returns content, that path becomes the source. If no route returns content, sync remains `read_pending` with the message that ADM files are visible but file contents are unavailable through the tested Nitrado API routes.
+
 ## Supported ADM Event Types
 
 - `admin_log_started`

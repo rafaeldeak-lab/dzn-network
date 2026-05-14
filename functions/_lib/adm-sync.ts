@@ -1,7 +1,13 @@
 import { parseAdmLines, type ParsedAdmEvent } from "./adm-parser";
 import { getCurrentLinkedServer, requireDb, saveServerAdmPath } from "./db";
 import { isMockNitrado } from "./mock";
-import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "./nitrado";
+import {
+  detectNitradoAdmLogs,
+  fetchReadableNitradoAdmLines,
+  getAdmLogStoragePath,
+  mockAdmLogDetection,
+  testExactNitradoAdmPath,
+} from "./nitrado";
 import { getLatestNitradoToken } from "./onboarding";
 import type { Env } from "./types";
 
@@ -65,27 +71,31 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
-  if (!linkedServer.nitrado_service_id) throw new Error("No Nitrado service selected");
+  const nitradoServiceId = linkedServer.nitrado_service_id;
+  if (!nitradoServiceId) throw new Error("No Nitrado service selected");
 
   const existingState = await getSyncState(env, linkedServer.id);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const now = new Date().toISOString();
+  const token = isMock ? null : (await getLatestNitradoToken(env, userId)) ?? "";
   const admLog = isMock
     ? mockAdmLogDetection()
     : linkedServer.adm_path
-      ? await testExactNitradoAdmPath((await getLatestNitradoToken(env, userId)) ?? "", linkedServer.nitrado_service_id, linkedServer.adm_path)
-      : await detectNitradoAdmLogs((await getLatestNitradoToken(env, userId)) ?? "", linkedServer.nitrado_service_id);
+      ? await testExactNitradoAdmPath(token ?? "", nitradoServiceId, linkedServer.adm_path)
+      : await detectNitradoAdmLogs(token ?? "", nitradoServiceId);
+  const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, admLog, token, isMock);
 
   const latestAdmPath = getAdmLogStoragePath(admLog) ?? linkedServer.adm_path ?? null;
-  const latestAdmFile = admLog.newestAdmFileName ?? fileNameFromPath(latestAdmPath);
+  const latestAdmFile = admLog.newestAdmFileName ?? readable.newestAdmFileName ?? fileNameFromPath(latestAdmPath);
   if (admLog.admFileExists && latestAdmPath) {
     await saveServerAdmPath(env, linkedServer.id, latestAdmPath.replace(/^\/+/, ""));
   }
 
-  const lines = isMock ? mockAdmLines() : getReadableAdmLines(admLog.debug?.samplePreview ?? null);
+  const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog.debug?.samplePreview ?? null);
   if (!lines.length) {
-    const message = admLog.admFileExists
-      ? "ADM file discovered but not readable through Nitrado file API yet"
+    const admAvailable = admLog.admFileExists || Boolean(readable.newestAdmFileName);
+    const message = admAvailable
+      ? readable.message
       : "No ADM file is available for sync yet";
     await upsertSyncState(env, linkedServer.id, {
       latestAdmFile,
@@ -93,12 +103,12 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
       lastProcessedFile: existingState?.last_processed_file ?? null,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
-      status: admLog.admFileExists ? "read_pending" : "not_started",
+      status: admAvailable ? "read_pending" : "not_started",
       message,
       lastSyncAt: now,
     });
     return {
-      status: admLog.admFileExists ? "read_pending" : "not_started",
+      status: admAvailable ? "read_pending" : "not_started",
       message,
       linesSeen: 0,
       linesProcessed: 0,
@@ -717,6 +727,45 @@ function getReadableAdmLines(samplePreview: string | null) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+export async function getReadableAdmLinesForLinkedServer(
+  env: Env,
+  linkedServer: SyncLinkedServer,
+  admLog: { newestAdmFileName: string | null; admFileExists: boolean },
+  token: string | null,
+  isMock = isMockNitrado(env.MOCK_NITRADO),
+) {
+  if (isMock) {
+    return {
+      lines: mockAdmLines(),
+      newestAdmFileName: admLog.newestAdmFileName,
+      message: "Mock ADM lines loaded through parser sync path",
+    };
+  }
+
+  if (!token || !linkedServer.nitrado_service_id) {
+    return {
+      lines: [],
+      newestAdmFileName: admLog.newestAdmFileName,
+      message: "No Nitrado token or service ID is available for ADM log reading.",
+    };
+  }
+
+  const readable = await fetchReadableNitradoAdmLines(token, linkedServer.nitrado_service_id);
+  if (readable.lines.length) {
+    return {
+      lines: readable.lines,
+      newestAdmFileName: admLog.newestAdmFileName ?? readable.diagnostics.newestAdmFileName,
+      message: `ADM lines readable via ${readable.diagnostics.readable.sourceLabel ?? "Nitrado diagnostics"}`,
+    };
+  }
+
+  return {
+    lines: [],
+    newestAdmFileName: admLog.newestAdmFileName ?? readable.diagnostics.newestAdmFileName,
+    message: readable.diagnostics.readable.message,
+  };
 }
 
 function mockAdmLines() {

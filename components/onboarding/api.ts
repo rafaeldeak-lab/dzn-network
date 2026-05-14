@@ -1,4 +1,13 @@
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
+import type {
+  AdmRecentSyncEvent,
+  AdmSyncRunResult,
+  AdmSyncStatus,
+  AuthResponse,
+  DiscordGuild,
+  NitradoLogAccessDiagnostics,
+  NitradoService,
+  OnboardingChecks,
+} from "./types";
 
 export async function getMe() {
   return request<AuthResponse>("/api/auth/me");
@@ -62,6 +71,10 @@ export async function getSyncStatus(linkedServerId?: string) {
 export async function getRecentSyncEvents(linkedServerId?: string) {
   const query = linkedServerId ? `?linked_server_id=${encodeURIComponent(linkedServerId)}` : "";
   return request<{ events: AdmRecentSyncEvent[] }>(`/api/sync/recent-events${query}`);
+}
+
+export async function runLogAccessDiagnostics() {
+  return request<{ diagnostics: NitradoLogAccessDiagnostics }>("/api/nitrado/log-access-diagnostics");
 }
 
 export async function runManualSync(linkedServerId?: string) {

@@ -215,6 +215,44 @@ export type AdmLogDetection = {
   debug?: AdmApiDebug;
 };
 
+export type NitradoLogAccessAttempt = {
+  label: string;
+  method: "GET";
+  requestUrlPathOnly: string;
+  httpStatusCode: number | null;
+  status: SafeApiStatus;
+  responseContentType: string | null;
+  topLevelJsonKeys: string[];
+  dataKeys: string[];
+  arrayLengths: { path: string; length: number }[];
+  containsLogLikeText: boolean;
+  containsAdmFilenames: boolean;
+  hasDownloadTokenFields: boolean;
+  sampleFetchAttempted: boolean;
+  sampleReadSucceeded: boolean;
+  safeErrorMessage: string | null;
+};
+
+export type NitradoLogAccessDiagnostics = {
+  serviceId: string;
+  lastCheckedAt: string;
+  gameserverUsernameFound: boolean;
+  gameSpecificLogFilesFound: boolean;
+  gameSpecificLogFilesReturned: number;
+  admFilesFromGameSpecific: number;
+  newestAdmFileName: string | null;
+  testedPathVariants: string[];
+  readable: {
+    found: boolean;
+    sourceLabel: string | null;
+    method: string | null;
+    lineCount: number;
+    routeRecommendation: string | null;
+    message: string;
+  };
+  attempts: NitradoLogAccessAttempt[];
+};
+
 export async function validateNitradoToken(token: string) {
   if (!token || token.length < 12) return false;
   try {
@@ -272,6 +310,17 @@ export async function fetchNitradoServiceById(token: string, serviceId: string):
   const service = normalizeGameserverDetails(payload, serviceId);
   if (!isDayZService(service)) throw new NitradoServiceLookupError("not_dayz");
   return service;
+}
+
+export async function runNitradoLogAccessDiagnostics(token: string, serviceId: string): Promise<NitradoLogAccessDiagnostics> {
+  return (await runNitradoLogAccessDiagnosticsInternal(token, serviceId)).diagnostics;
+}
+
+export async function fetchReadableNitradoAdmLines(
+  token: string,
+  serviceId: string,
+): Promise<{ lines: string[]; diagnostics: NitradoLogAccessDiagnostics }> {
+  return runNitradoLogAccessDiagnosticsInternal(token, serviceId);
 }
 
 export async function detectNitradoAdmLogs(
@@ -914,6 +963,114 @@ async function fetchGameserverDetailsAttempt(token: string, serviceId: string) {
   }
 }
 
+async function runNitradoLogAccessDiagnosticsInternal(
+  token: string,
+  serviceId: string,
+): Promise<{ lines: string[]; diagnostics: NitradoLogAccessDiagnostics }> {
+  const lastCheckedAt = new Date().toISOString();
+  const attempts: NitradoLogAccessAttempt[] = [];
+  let readableLines: string[] = [];
+  let readableSourceLabel: string | null = null;
+  let readableMethod: string | null = null;
+  let routeRecommendation: string | null = null;
+
+  const base = `/services/${encodeURIComponent(serviceId)}/gameservers`;
+  const serviceProbe = await probeNitradoEndpoint(token, "A gameserver details", base);
+  attempts.push(serviceProbe.attempt);
+
+  const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
+  const pathVariants = buildAdmReadPathVariants(gameSpecificLogs);
+  const pathVariantLabels = createPathVariantLabelMap(pathVariants);
+  const testedPathVariants = pathVariants.map((variant) => maskNitradoUsernameInPath(variant.path, gameSpecificLogs.username));
+
+  const adminLogEndpoints = [
+    { label: "B admin_logs", path: `${base}/admin_logs` },
+    { label: "C admin_logs limit", path: `${base}/admin_logs?limit=100` },
+    { label: "D admin_logs count", path: `${base}/admin_logs?count=100` },
+    { label: "E logs", path: `${base}/logs` },
+    { label: "F logs admin", path: `${base}/logs/admin` },
+  ];
+
+  for (const endpoint of adminLogEndpoints) {
+    const probe = await probeNitradoEndpoint(token, endpoint.label, endpoint.path);
+    const lines = extractAdmLinesFromPayload(probe.payload, probe.bodyText);
+    const hasReadableAdminLogs = lines.length > 0 && lines.some((line) => containsDayZAdminLogMarkers(line));
+    attempts.push({
+      ...probe.attempt,
+      containsLogLikeText: probe.attempt.containsLogLikeText || hasReadableAdminLogs,
+      sampleReadSucceeded: hasReadableAdminLogs,
+    });
+    if (!readableLines.length && hasReadableAdminLogs) {
+      readableLines = lines;
+      readableSourceLabel = endpoint.label;
+      readableMethod = "admin_logs";
+      routeRecommendation = endpoint.path.replace(base, "/services/{serviceId}/gameservers");
+    }
+  }
+
+  const listEndpoints = [
+    { label: "G list root", path: `${base}/file_server/list?dir=${encodeURIComponent("/")}` },
+    { label: "H list dayzps config", path: `${base}/file_server/list?dir=${encodeURIComponent("dayzps/config")}` },
+    { label: "I list slash dayzps config", path: `${base}/file_server/list?dir=${encodeURIComponent("/dayzps/config")}` },
+  ];
+
+  for (const endpoint of listEndpoints) {
+    const probe = await probeNitradoEndpoint(token, endpoint.label, endpoint.path);
+    attempts.push(probe.attempt);
+  }
+
+  for (const variant of pathVariants) {
+    const downloadAttempts: AdmReadAttempt[] = [];
+    const download = await readNitradoFileViaDownload(token, serviceId, variant.path, downloadAttempts, pathVariantLabels);
+    attempts.push(logAccessAttemptFromRead(`J download ${variant.label}`, download, downloadAttempts.at(-1), "download", variant.path, gameSpecificLogs.username));
+    const downloadLines = splitAdmLines(download.sample);
+    if (!readableLines.length && downloadLines.some((line) => containsDayZAdminLogMarkers(line))) {
+      readableLines = downloadLines;
+      readableSourceLabel = `J download ${variant.label}`;
+      readableMethod = "file_server/download";
+      routeRecommendation = "/services/{serviceId}/gameservers/file_server/download";
+    }
+
+    const seekAttempts: AdmReadAttempt[] = [];
+    const seek = await readNitradoFileViaSeek(token, serviceId, variant.path, seekAttempts, pathVariantLabels);
+    attempts.push(logAccessAttemptFromRead(`K seek ${variant.label}`, seek, seekAttempts.at(-1), "seek", variant.path, gameSpecificLogs.username));
+    const seekLines = splitAdmLines(seek.sample);
+    if (!readableLines.length && seekLines.some((line) => containsDayZAdminLogMarkers(line))) {
+      readableLines = seekLines;
+      readableSourceLabel = `K seek ${variant.label}`;
+      readableMethod = "file_server/seek";
+      routeRecommendation = "/services/{serviceId}/gameservers/file_server/seek";
+    }
+
+    const stat = await statNitradoFile(token, serviceId, variant.path, pathVariantLabels);
+    attempts.push(logAccessAttemptFromStat(`L stat ${variant.label}`, stat, gameSpecificLogs.username));
+  }
+
+  const diagnostics: NitradoLogAccessDiagnostics = {
+    serviceId,
+    lastCheckedAt,
+    gameserverUsernameFound: gameSpecificLogs.usernameFound,
+    gameSpecificLogFilesFound: gameSpecificLogs.logFilesFound,
+    gameSpecificLogFilesReturned: gameSpecificLogs.logFilesReturned,
+    admFilesFromGameSpecific: gameSpecificLogs.admLogFiles.length,
+    newestAdmFileName: gameSpecificLogs.selectedAdmFile?.name ?? null,
+    testedPathVariants,
+    readable: {
+      found: readableLines.length > 0,
+      sourceLabel: readableSourceLabel,
+      method: readableMethod,
+      lineCount: readableLines.length,
+      routeRecommendation,
+      message: readableLines.length
+        ? "ADM log content was readable through a tested Nitrado route."
+        : "ADM file list is visible through Nitrado API, but file contents are not available through the tested Nitrado API routes.",
+    },
+    attempts,
+  };
+
+  return { lines: readableLines, diagnostics };
+}
+
 async function readNitradoFileSample(
   token: string,
   serviceId: string,
@@ -1114,6 +1271,209 @@ async function statNitradoFile(
       success: false,
     };
   }
+}
+
+async function probeNitradoEndpoint(token: string, label: string, requestUrlPathOnly: string) {
+  try {
+    const response = await fetch(`${NITRADO_API}${requestUrlPathOnly}`, { headers: nitradoHeaders(token) });
+    const responseContentType = response.headers.get("content-type");
+    const status = safeResponseStatus(response);
+    const bodyText = await response.text().catch(() => "");
+    const payload = parseJsonText(bodyText, responseContentType);
+    return {
+      payload,
+      bodyText,
+      attempt: createLogAccessAttempt({
+        label,
+        requestUrlPathOnly: redactServiceIdInPath(requestUrlPathOnly),
+        httpStatusCode: response.status,
+        status,
+        responseContentType,
+        payload,
+        bodyText,
+        sampleReadSucceeded: response.ok && extractAdmLinesFromPayload(payload, bodyText).length > 0,
+        safeErrorMessage: response.ok ? null : safeFileApiError(status),
+      }),
+    };
+  } catch {
+    return {
+      payload: null,
+      bodyText: "",
+      attempt: createLogAccessAttempt({
+        label,
+        requestUrlPathOnly: redactServiceIdInPath(requestUrlPathOnly),
+        httpStatusCode: null,
+        status: "error" as const,
+        responseContentType: null,
+        payload: null,
+        bodyText: "",
+        sampleReadSucceeded: false,
+        safeErrorMessage: "Nitrado request failed",
+      }),
+    };
+  }
+}
+
+function logAccessAttemptFromRead(
+  label: string,
+  result: Awaited<ReturnType<typeof readNitradoFileViaDownload>>,
+  readAttempt: AdmReadAttempt | undefined,
+  method: "download" | "seek",
+  path: string,
+  username: string | null,
+): NitradoLogAccessAttempt {
+  const redactedPath = maskNitradoUsernameInPath(path, username);
+  const requestUrlPathOnly = buildSafeRequestUrlPathOnly(method, redactedPath);
+  const lines = splitAdmLines(result.sample);
+  return {
+    label,
+    method: "GET",
+    requestUrlPathOnly,
+    httpStatusCode: readAttempt?.httpStatusCode ?? null,
+    status: result.status,
+    responseContentType: readAttempt?.responseContentType ?? null,
+    topLevelJsonKeys: result.responseShape.topLevelKeys,
+    dataKeys: result.responseShape.dataKeys,
+    arrayLengths: [],
+    containsLogLikeText: lines.some((line) => containsDayZAdminLogMarkers(line)),
+    containsAdmFilenames: /\.adm/i.test(path),
+    hasDownloadTokenFields: result.downloadTokenCreated || result.responseShape.hasTokenUrl || result.responseShape.hasTokenValue,
+    sampleFetchAttempted: result.sampleFetchAttempted,
+    sampleReadSucceeded: result.sample !== null,
+    safeErrorMessage: result.errorMessageSafe,
+  };
+}
+
+function logAccessAttemptFromStat(label: string, stat: AdmStatAttempt, username: string | null): NitradoLogAccessAttempt {
+  const redactedPath = maskNitradoUsernameInPath(stat.path, username);
+  return {
+    label,
+    method: "GET",
+    requestUrlPathOnly: buildSafeRequestUrlPathOnly("stat", redactedPath),
+    httpStatusCode: stat.httpStatusCode,
+    status: stat.status,
+    responseContentType: stat.responseContentType,
+    topLevelJsonKeys: stat.responseShape.topLevelKeys,
+    dataKeys: stat.responseShape.dataKeys,
+    arrayLengths: [],
+    containsLogLikeText: false,
+    containsAdmFilenames: /\.adm/i.test(stat.path),
+    hasDownloadTokenFields: stat.responseShape.hasTokenUrl || stat.responseShape.hasTokenValue,
+    sampleFetchAttempted: false,
+    sampleReadSucceeded: false,
+    safeErrorMessage: stat.errorMessageSafe,
+  };
+}
+
+function createLogAccessAttempt({
+  label,
+  requestUrlPathOnly,
+  httpStatusCode,
+  status,
+  responseContentType,
+  payload,
+  bodyText,
+  sampleReadSucceeded,
+  safeErrorMessage,
+}: {
+  label: string;
+  requestUrlPathOnly: string;
+  httpStatusCode: number | null;
+  status: SafeApiStatus;
+  responseContentType: string | null;
+  payload: unknown;
+  bodyText: string;
+  sampleReadSucceeded: boolean;
+  safeErrorMessage: string | null;
+}): NitradoLogAccessAttempt {
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  const responseShape = describeFileTokenResponseShape(payload);
+  return {
+    label,
+    method: "GET",
+    requestUrlPathOnly,
+    httpStatusCode,
+    status,
+    responseContentType,
+    topLevelJsonKeys: safeObjectKeys(payload),
+    dataKeys: safeObjectKeys(data),
+    arrayLengths: collectArrayLengths(payload),
+    containsLogLikeText: containsLogLikeText(payload) || containsLogLikeText(bodyText),
+    containsAdmFilenames: containsAdmFilename(payload) || containsAdmFilename(bodyText),
+    hasDownloadTokenFields: Boolean(extractDownloadToken(payload)) || responseShape.hasTokenUrl || responseShape.hasTokenValue,
+    sampleFetchAttempted: false,
+    sampleReadSucceeded,
+    safeErrorMessage,
+  };
+}
+
+function parseJsonText(bodyText: string, contentType: string | null) {
+  if (!/json/i.test(contentType ?? "")) return null;
+  try {
+    return JSON.parse(bodyText) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function collectArrayLengths(value: unknown, path = "$", results: { path: string; length: number }[] = []) {
+  if (results.length >= 20) return results;
+  if (Array.isArray(value)) {
+    results.push({ path, length: value.length });
+    value.slice(0, 5).forEach((child, index) => collectArrayLengths(child, `${path}[${index}]`, results));
+    return results;
+  }
+  if (!isRecord(value)) return results;
+  for (const [key, child] of Object.entries(value)) {
+    if (isSensitiveKey(key) || isSensitiveResponseKey(key)) continue;
+    collectArrayLengths(child, `${path}.${key}`, results);
+  }
+  return results.slice(0, 20);
+}
+
+function containsLogLikeText(value: unknown): boolean {
+  return collectSafeStrings(value, 80).some((text) => containsDayZAdminLogMarkers(text) || /^\d{2}:\d{2}:\d{2}\s*\|/.test(text));
+}
+
+function containsAdmFilename(value: unknown): boolean {
+  return collectSafeStrings(value, 80).some((text) => /\.adm\b/i.test(text) || /dayzserver.*\.adm/i.test(text));
+}
+
+function extractAdmLinesFromPayload(payload: unknown, bodyText: string) {
+  const candidates = [...collectSafeStrings(payload, 300), bodyText];
+  const lines = candidates.flatMap(splitAdmLines);
+  return dedupeStrings(lines.filter((line) => containsDayZAdminLogMarkers(line) || /^\d{2}:\d{2}:\d{2}\s*\|/.test(line))).slice(0, 5000);
+}
+
+function splitAdmLines(value: string | null | undefined) {
+  if (!value) return [];
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function collectSafeStrings(value: unknown, limit: number, results: string[] = []): string[] {
+  if (results.length >= limit) return results;
+  if (typeof value === "string" || typeof value === "number") {
+    const text = String(value);
+    if (text.trim()) results.push(text);
+    return results;
+  }
+  if (Array.isArray(value)) {
+    for (const child of value) collectSafeStrings(child, limit, results);
+    return results;
+  }
+  if (!isRecord(value)) return results;
+  for (const [key, child] of Object.entries(value)) {
+    if (isSensitiveKey(key) || isSensitiveResponseKey(key)) continue;
+    collectSafeStrings(child, limit, results);
+  }
+  return results;
+}
+
+function redactServiceIdInPath(path: string) {
+  return path.replace(/\/services\/[^/]+/i, "/services/{serviceId}");
 }
 
 async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string) {
