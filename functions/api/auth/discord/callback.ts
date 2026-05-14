@@ -5,21 +5,27 @@ import {
   fetchDiscordUser,
   filterAdminGuilds,
 } from "../../../_lib/discord";
-import { readCookie, redirect, setCookie } from "../../../_lib/http";
+import { methodNotAllowed, readCookie, redirect, secureHeaders, setCookie } from "../../../_lib/http";
+import { isValidOAuthState, OAUTH_STATE_COOKIE } from "../../../_lib/oauth";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") {
-    return new Response("Method not allowed", { status: 405 });
+    return methodNotAllowed();
   }
 
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const expectedState = readCookie(request, "dzn_oauth_state");
+  const expectedState = readCookie(request, OAUTH_STATE_COOKIE);
 
-  if (!code || !state || !expectedState || state !== expectedState) {
-    return redirect("/login?error=discord_state");
+  if (!code || !isValidOAuthState(state) || !isValidOAuthState(expectedState) || state !== expectedState) {
+    return redirect("/login?error=discord_state", {
+      "set-cookie": setCookie(OAUTH_STATE_COOKIE, "", {
+        maxAge: 0,
+        path: "/api/auth/discord/callback",
+      }),
+    });
   }
 
   try {
@@ -32,11 +38,19 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     await storeGuilds(env, userId, filterAdminGuilds(guilds));
     const session = await createSession(env, userId);
 
-    const headers = new Headers({ location: "/setup", "cache-control": "no-store" });
+    const headers = secureHeaders({ location: "/setup", "cache-control": "no-store" });
     headers.append("set-cookie", setCookie(SESSION_COOKIE, session.token, { maxAge: session.maxAge }));
-    headers.append("set-cookie", setCookie("dzn_oauth_state", "", { maxAge: 0 }));
+    headers.append("set-cookie", setCookie(OAUTH_STATE_COOKIE, "", {
+      maxAge: 0,
+      path: "/api/auth/discord/callback",
+    }));
     return new Response(null, { status: 302, headers });
   } catch {
-    return redirect("/login?error=discord_callback");
+    return redirect("/login?error=discord_callback", {
+      "set-cookie": setCookie(OAUTH_STATE_COOKIE, "", {
+        maxAge: 0,
+        path: "/api/auth/discord/callback",
+      }),
+    });
   }
 };

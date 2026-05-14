@@ -1,11 +1,26 @@
+const DEFAULT_SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "permissions-policy":
+    "accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()",
+};
+
+export function secureHeaders(headers?: HeadersInit) {
+  const nextHeaders = new Headers(headers);
+  for (const [name, value] of Object.entries(DEFAULT_SECURITY_HEADERS)) {
+    if (!nextHeaders.has(name)) nextHeaders.set(name, value);
+  }
+  return nextHeaders;
+}
+
 export function json(data: unknown, init: ResponseInit = {}) {
+  const headers = secureHeaders(init.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("cache-control", "no-store");
+
   return new Response(JSON.stringify(data), {
     ...init,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      ...(init.headers ?? {}),
-    },
+    headers,
   });
 }
 
@@ -14,13 +29,13 @@ export function methodNotAllowed() {
 }
 
 export function redirect(location: string, headers?: HeadersInit) {
+  const nextHeaders = secureHeaders(headers);
+  nextHeaders.set("location", location);
+  nextHeaders.set("cache-control", "no-store");
+
   return new Response(null, {
     status: 302,
-    headers: {
-      location,
-      "cache-control": "no-store",
-      ...(headers ?? {}),
-    },
+    headers: nextHeaders,
   });
 }
 

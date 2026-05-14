@@ -1,13 +1,13 @@
 import { createSession, ensureMockUser, SESSION_COOKIE } from "../../../_lib/db";
 import { buildDiscordAuthorizeUrl } from "../../../_lib/discord";
-import { redirect, setCookie } from "../../../_lib/http";
+import { methodNotAllowed, redirect, setCookie } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
-import { randomToken } from "../../../_lib/crypto";
+import { createOAuthState, OAUTH_STATE_COOKIE } from "../../../_lib/oauth";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") {
-    return new Response("Method not allowed", { status: 405 });
+    return methodNotAllowed();
   }
 
   if (isMockAuth(env.MOCK_AUTH)) {
@@ -18,11 +18,25 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     });
   }
 
-  const state = randomToken(24);
-  return redirect(buildDiscordAuthorizeUrl(env, state), {
-    "set-cookie": setCookie("dzn_oauth_state", state, {
+  const state = createOAuthState();
+  let destination: URL;
+
+  try {
+    destination = new URL(buildDiscordAuthorizeUrl(env, state));
+  } catch {
+    return redirect("/login?error=discord_authorize");
+  }
+
+  if (destination.origin !== "https://discord.com" || destination.pathname !== "/oauth2/authorize") {
+    return redirect("/login?error=discord_authorize");
+  }
+
+  return redirect(destination.toString(), {
+    "set-cookie": setCookie(OAUTH_STATE_COOKIE, state, {
       maxAge: 60 * 10,
       httpOnly: true,
+      path: "/api/auth/discord/callback",
+      sameSite: "Lax",
     }),
   });
 };
