@@ -29,6 +29,7 @@ interface CloudflareEnv {
   DISCORD_REDIRECT_URI?: string;
   SESSION_SECRET?: string;
   TOKEN_ENCRYPTION_KEY?: string;
+  SYNC_WORKER_HEALTH_TOKEN?: string;
   MOCK_AUTH?: string;
   MOCK_NITRADO?: string;
 }

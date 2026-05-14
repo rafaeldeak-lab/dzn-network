@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test:adm-parser": "tsx scripts/test-adm-parser.ts",
     "db:migrate:local": "wrangler d1 migrations apply dzn_network_db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply dzn_network_db --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply dzn_network_db --remote",
+    "worker:adm-sync:dev": "wrangler dev --config wrangler.adm-sync.toml --test-scheduled",
+    "worker:adm-sync:dry-run": "wrangler deploy --config wrangler.adm-sync.toml --dry-run",
+    "worker:adm-sync:deploy": "wrangler deploy --config wrangler.adm-sync.toml"
   },
   "dependencies": {
     "framer-motion": "^12.38.0",

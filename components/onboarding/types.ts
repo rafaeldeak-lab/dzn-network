@@ -205,6 +205,25 @@ export type AdmSyncStatus = {
   last_duplicate_lines: number;
   last_sync_duration_ms: number | null;
   last_readable_route: string | null;
+  last_sync_trigger: string | null;
+  last_scheduled_sync_at: string | null;
+  last_manual_sync_at: string | null;
+  recent_sync_runs: SyncRunSummary[];
+};
+
+export type SyncRunSummary = {
+  id: string;
+  trigger_type: string;
+  status: string;
+  message: string | null;
+  lines_read: number;
+  lines_processed: number;
+  events_created: number;
+  kills_created: number;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  created_at: string | null;
 };
 
 export type AdmRecentSyncEvent = {

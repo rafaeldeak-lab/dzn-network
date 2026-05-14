@@ -63,6 +63,26 @@ export type AdmSyncResult = {
   syncDurationMs: number;
 };
 
+export type AdmSyncOptions = {
+  triggerType?: "manual" | "scheduled";
+  maxLinesPerRun?: number;
+};
+
+export type AdmSyncRunSummary = {
+  id: string;
+  trigger_type: "manual" | "scheduled" | string;
+  status: string;
+  message: string | null;
+  lines_read: number;
+  lines_processed: number;
+  events_created: number;
+  kills_created: number;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  created_at: string | null;
+};
+
 export type AdmSyncStatus = {
   last_sync_status: string;
   last_sync_message: string | null;
@@ -86,6 +106,10 @@ export type AdmSyncStatus = {
   last_duplicate_lines: number;
   last_sync_duration_ms: number | null;
   last_readable_route: string | null;
+  last_sync_trigger: string | null;
+  last_scheduled_sync_at: string | null;
+  last_manual_sync_at: string | null;
+  recent_sync_runs: AdmSyncRunSummary[];
 };
 
 export type AdmRecentSyncEvent = {
@@ -114,8 +138,16 @@ export type ReadableAdmLinesResult = {
   message: string;
 };
 
-export async function runAdmSync(env: Env, userId: string, linkedServerId?: string | null): Promise<AdmSyncResult> {
+export async function runAdmSync(
+  env: Env,
+  userId: string,
+  linkedServerId?: string | null,
+  options: AdmSyncOptions = {},
+): Promise<AdmSyncResult> {
   const syncStartedAt = Date.now();
+  const syncStartedAtIso = new Date(syncStartedAt).toISOString();
+  const triggerType = options.triggerType ?? "manual";
+  const maxLinesPerRun = clampPositiveInteger(options.maxLinesPerRun ?? 10000, 10000);
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
@@ -167,6 +199,20 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
       syncDurationMs: Date.now() - syncStartedAt,
       readableRoute: readable.readableRouteUsed,
     });
+    const syncDurationMs = Date.now() - syncStartedAt;
+    await recordSyncRun(env, {
+      linkedServerId: linkedServer.id,
+      triggerType,
+      status: admAvailable ? "read_pending" : "not_started",
+      message,
+      linesRead: 0,
+      linesProcessed: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      startedAt: syncStartedAtIso,
+      finishedAt: new Date().toISOString(),
+      durationMs: syncDurationMs,
+    });
     return {
       status: admAvailable ? "read_pending" : "not_started",
       message,
@@ -185,14 +231,14 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
       killEventsStored: 0,
       unknownLines: 0,
       skippedDuplicateLines: 0,
-      syncDurationMs: Date.now() - syncStartedAt,
+      syncDurationMs,
     };
   }
 
   const isSameAdmFile = Boolean(latestAdmFile && existingState?.last_processed_file === latestAdmFile);
   const lastProcessedLine = isSameAdmFile ? Number(existingState?.last_processed_line ?? 0) : 0;
   const parsedLines = parseAdmLines(lines, { admDate: extractAdmDateFromFile(latestAdmFile) ?? undefined });
-  const pendingParsedEvents = parsedLines.slice(lastProcessedLine);
+  const pendingParsedEvents = parsedLines.slice(lastProcessedLine, lastProcessedLine + maxLinesPerRun);
   let eventsCreated = 0;
   let killsCreated = 0;
   let joinsCreated = 0;
@@ -274,6 +320,19 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     syncDurationMs,
     readableRoute: readable.readableRouteUsed,
   });
+  await recordSyncRun(env, {
+    linkedServerId: linkedServer.id,
+    triggerType,
+    status,
+    message,
+    linesRead: lines.length,
+    linesProcessed: pendingParsedEvents.length,
+    eventsCreated,
+    killsCreated,
+    startedAt: syncStartedAtIso,
+    finishedAt: new Date().toISOString(),
+    durationMs: syncDurationMs,
+  });
 
   return {
     status,
@@ -336,6 +395,11 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     )
     .bind(linkedServer.id, userId)
     .first<Record<string, unknown>>();
+  const [recentRuns, lastManualRun, lastScheduledRun] = await Promise.all([
+    getRecentSyncRuns(env, linkedServer.id, 5),
+    getLatestSyncRunByTrigger(env, linkedServer.id, "manual"),
+    getLatestSyncRunByTrigger(env, linkedServer.id, "scheduled"),
+  ]);
 
   return {
     last_sync_status: stringOrDefault(row?.last_sync_status, "not_started"),
@@ -360,6 +424,10 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     last_duplicate_lines: numberOrZero(row?.last_duplicate_lines),
     last_sync_duration_ms: row?.last_sync_duration_ms === null || row?.last_sync_duration_ms === undefined ? null : numberOrZero(row.last_sync_duration_ms),
     last_readable_route: typeof row?.last_readable_route === "string" ? row.last_readable_route : null,
+    last_sync_trigger: recentRuns[0]?.trigger_type ?? null,
+    last_scheduled_sync_at: lastScheduledRun?.finished_at ?? lastScheduledRun?.started_at ?? null,
+    last_manual_sync_at: lastManualRun?.finished_at ?? lastManualRun?.started_at ?? null,
+    recent_sync_runs: recentRuns,
   };
 }
 
@@ -610,6 +678,71 @@ export async function clearMockTestSyncData(env: Env, userId: string, linkedServ
   return { ok: true, remainingRows: remaining };
 }
 
+export type ScheduledAdmSyncResult = {
+  ok: true;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  cron: string | null;
+  maxServers: number;
+  maxLinesPerServer: number;
+};
+
+export async function runScheduledAdmSync(
+  env: Env,
+  options: {
+    cron?: string | null;
+    maxServers?: number;
+    maxLinesPerServer?: number;
+    minSyncIntervalMs?: number;
+  } = {},
+): Promise<ScheduledAdmSyncResult> {
+  await ensureAdmSyncSchema(env);
+  const maxServers = clampPositiveInteger(options.maxServers ?? 10, 10);
+  const maxLinesPerServer = clampPositiveInteger(options.maxLinesPerServer ?? 1000, 1000);
+  const minSyncIntervalMs = clampPositiveInteger(options.minSyncIntervalMs ?? 120000, 120000);
+  const eligibleServers = await getEligibleScheduledSyncServers(env, maxServers, minSyncIntervalMs);
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const server of eligibleServers) {
+    try {
+      await runAdmSync(env, server.user_id, server.id, {
+        triggerType: "scheduled",
+        maxLinesPerRun: maxLinesPerServer,
+      });
+      succeeded += 1;
+    } catch (error) {
+      failed += 1;
+      await recordSyncRun(env, {
+        linkedServerId: server.id,
+        triggerType: "scheduled",
+        status: "error",
+        message: safeSyncErrorMessage(error),
+        linesRead: 0,
+        linesProcessed: 0,
+        eventsCreated: 0,
+        killsCreated: 0,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: 0,
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    processed: eligibleServers.length,
+    succeeded,
+    failed,
+    skipped: Math.max(0, maxServers - eligibleServers.length),
+    cron: options.cron ?? null,
+    maxServers,
+    maxLinesPerServer,
+  };
+}
+
 export async function ensureAdmSyncSchema(env: Env) {
   const db = requireDb(env);
   for (const statement of ADM_SYNC_SCHEMA_STATEMENTS) {
@@ -641,6 +774,38 @@ async function getOwnedLinkedServer(env: Env, userId: string, linkedServerId?: s
     )
     .bind(linkedServerId, userId)
     .first<SyncLinkedServer>();
+}
+
+async function getEligibleScheduledSyncServers(env: Env, limit: number, minSyncIntervalMs: number) {
+  const db = requireDb(env);
+  const minSyncIntervalSeconds = Math.max(1, Math.floor(minSyncIntervalMs / 1000));
+  const result = await db
+    .prepare(
+      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.nitrado_service_id, server_log_config.adm_path AS adm_path
+       FROM linked_servers
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       WHERE lower(linked_servers.status) = 'live'
+         AND linked_servers.nitrado_service_id IS NOT NULL
+         AND linked_servers.nitrado_service_id != ''
+         AND (
+           server_log_config.adm_path IS NOT NULL
+           OR onboarding_checks.adm_logs_found = 1
+           OR adm_sync_state.last_sync_status IN ('completed', 'idle', 'read_pending', 'active')
+         )
+         AND (
+           adm_sync_state.last_sync_at IS NULL
+           OR (strftime('%s', 'now') - strftime('%s', adm_sync_state.last_sync_at)) >= ?
+         )
+       ORDER BY COALESCE(adm_sync_state.last_sync_at, '1970-01-01T00:00:00.000Z') ASC,
+                linked_servers.updated_at DESC
+       LIMIT ?`,
+    )
+    .bind(minSyncIntervalSeconds, limit)
+    .all<SyncLinkedServer>();
+
+  return result.results ?? [];
 }
 
 async function ensureAdmSyncDetailColumns(env: Env) {
@@ -1189,6 +1354,99 @@ async function rebuildServerStats(env: Env, linkedServerId: string) {
     .run();
 }
 
+export async function recordSyncRun(
+  env: Env,
+  values: {
+    linkedServerId: string | null;
+    triggerType: "manual" | "scheduled";
+    status: string;
+    message: string | null;
+    linesRead: number;
+    linesProcessed: number;
+    eventsCreated: number;
+    killsCreated: number;
+    startedAt: string;
+    finishedAt: string;
+    durationMs: number;
+  },
+) {
+  await ensureAdmSyncSchema(env);
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `INSERT INTO sync_runs (
+        id, linked_server_id, trigger_type, status, message, lines_read, lines_processed,
+        events_created, kills_created, started_at, finished_at, duration_ms, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      values.linkedServerId,
+      values.triggerType,
+      values.status,
+      values.message,
+      values.linesRead,
+      values.linesProcessed,
+      values.eventsCreated,
+      values.killsCreated,
+      values.startedAt,
+      values.finishedAt,
+      values.durationMs,
+    )
+    .run();
+}
+
+async function getRecentSyncRuns(env: Env, linkedServerId: string, limit: number) {
+  const db = requireDb(env);
+  const result = await db
+    .prepare(
+      `SELECT id, trigger_type, status, message, lines_read, lines_processed, events_created,
+              kills_created, started_at, finished_at, duration_ms, created_at
+       FROM sync_runs
+       WHERE linked_server_id = ?
+       ORDER BY COALESCE(finished_at, started_at, created_at) DESC
+       LIMIT ?`,
+    )
+    .bind(linkedServerId, limit)
+    .all<AdmSyncRunSummary>();
+
+  return (result.results ?? []).map(mapSyncRunSummary);
+}
+
+async function getLatestSyncRunByTrigger(env: Env, linkedServerId: string, triggerType: "manual" | "scheduled") {
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT id, trigger_type, status, message, lines_read, lines_processed, events_created,
+              kills_created, started_at, finished_at, duration_ms, created_at
+       FROM sync_runs
+       WHERE linked_server_id = ? AND trigger_type = ?
+       ORDER BY COALESCE(finished_at, started_at, created_at) DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServerId, triggerType)
+    .first<AdmSyncRunSummary>();
+
+  return row ? mapSyncRunSummary(row) : null;
+}
+
+function mapSyncRunSummary(row: AdmSyncRunSummary): AdmSyncRunSummary {
+  return {
+    id: row.id,
+    trigger_type: row.trigger_type,
+    status: row.status,
+    message: row.message,
+    lines_read: numberOrZero(row.lines_read),
+    lines_processed: numberOrZero(row.lines_processed),
+    events_created: numberOrZero(row.events_created),
+    kills_created: numberOrZero(row.kills_created),
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    duration_ms: row.duration_ms === null || row.duration_ms === undefined ? null : numberOrZero(row.duration_ms),
+    created_at: row.created_at,
+  };
+}
+
 function getReadableAdmLines(samplePreview: string | null) {
   if (!samplePreview) return [];
   return samplePreview
@@ -1348,6 +1606,19 @@ function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
 }
 
+function clampPositiveInteger(value: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.trunc(value));
+}
+
+function safeSyncErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "Scheduled sync failed";
+  return message
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/token=([^&\s]+)/gi, "token=[redacted]")
+    .slice(0, 500);
+}
+
 const ADM_SYNC_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS adm_sync_state (
     id TEXT PRIMARY KEY,
@@ -1446,6 +1717,21 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_event_at TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS sync_runs (
+    id TEXT PRIMARY KEY,
+    linked_server_id TEXT,
+    trigger_type TEXT,
+    status TEXT,
+    message TEXT,
+    lines_read INTEGER DEFAULT 0,
+    lines_processed INTEGER DEFAULT 0,
+    events_created INTEGER DEFAULT 0,
+    kills_created INTEGER DEFAULT 0,
+    started_at TEXT,
+    finished_at TEXT,
+    duration_ms INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`,
   "CREATE INDEX IF NOT EXISTS idx_adm_sync_state_linked_server_id ON adm_sync_state(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_adm_raw_events_linked_server_id ON adm_raw_events(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_adm_raw_events_adm_file ON adm_raw_events(adm_file)",
@@ -1461,4 +1747,7 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   "CREATE INDEX IF NOT EXISTS idx_kill_events_victim_name ON kill_events(victim_name)",
   "CREATE INDEX IF NOT EXISTS idx_kill_events_occurred_at ON kill_events(occurred_at)",
   "CREATE INDEX IF NOT EXISTS idx_server_stats_linked_server_id ON server_stats(linked_server_id)",
+  "CREATE INDEX IF NOT EXISTS idx_sync_runs_linked_server_id ON sync_runs(linked_server_id)",
+  "CREATE INDEX IF NOT EXISTS idx_sync_runs_created_at ON sync_runs(created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_sync_runs_status ON sync_runs(status)",
 ];

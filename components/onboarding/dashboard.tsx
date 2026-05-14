@@ -321,6 +321,9 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <MiniInfo label="Latest ADM File" value={latestAdmFile} />
               <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
               <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
+              <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
+              <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(syncStatus.last_manual_sync_at) : "Not synced"} />
+              <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
               <MiniInfo label="Lines Read" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
               <MiniInfo label="Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
               <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
@@ -352,6 +355,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               syncStatus={syncStatus}
               lastSyncResult={lastSyncResult}
             />
+            <SyncRunsHistory runs={syncStatus?.recent_sync_runs ?? []} />
             <button
               type="button"
               disabled={syncing}
@@ -572,6 +576,44 @@ function LastSyncDetails({
   );
 }
 
+function SyncRunsHistory({ runs }: { runs: AdmSyncStatus["recent_sync_runs"] }) {
+  return (
+    <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-black uppercase text-zinc-300">Sync Runs History</p>
+        <span className="text-[10px] font-black uppercase text-zinc-500">Last 5</span>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {runs.length ? (
+          runs.map((run) => (
+            <div key={run.id} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase text-zinc-500">{formatSyncTrigger(run.trigger_type)}</p>
+                  <p className="mt-1 text-sm font-bold text-white">{formatSyncStatus(run.status)}</p>
+                </div>
+                <p className="shrink-0 text-right text-[10px] font-black uppercase text-zinc-500">
+                  {formatCompactDate(run.finished_at ?? run.started_at ?? run.created_at)}
+                </p>
+              </div>
+              <p className="mt-2 text-xs font-bold leading-5 text-zinc-400">
+                {run.message ?? "Sync run recorded"}
+              </p>
+              <p className="mt-2 text-[10px] font-black uppercase text-zinc-500">
+                {run.lines_processed} lines / {run.events_created} events / {run.kills_created} kills / {formatDuration(run.duration_ms)}
+              </p>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-sm font-bold text-zinc-400">
+            No sync runs recorded yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RecentSyncEventRow({ event }: { event: AdmRecentSyncEvent }) {
   const isKill = event.source === "kill";
   const secondary = getRecentEventSecondary(event, isKill);
@@ -768,6 +810,12 @@ function formatSyncStatus(value: string) {
   if (value === "active") return "Active";
   if (value === "not_started") return "Not Started";
   return value.replace(/_/g, " ");
+}
+
+function formatSyncTrigger(value: string | null | undefined) {
+  if (value === "manual") return "Manual";
+  if (value === "scheduled") return "Scheduled";
+  return "Not recorded";
 }
 
 function getAdmState(server: LinkedServer) {

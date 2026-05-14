@@ -53,7 +53,48 @@ npm run db:migrate:local
 npm run db:migrate:remote
 ```
 
-The schema lives in `migrations/0001_initial_schema.sql`.
+The schema lives in `migrations/`.
+
+## ADM Sync Worker
+
+Automatic ADM sync runs from a separate Cloudflare Worker because Pages Functions do not run cron triggers.
+
+Worker config:
+
+```toml
+# wrangler.adm-sync.toml
+name = "dzn-adm-sync-worker"
+main = "workers/adm-sync-worker.ts"
+
+[triggers]
+crons = ["*/5 * * * *"]
+```
+
+Before deploying the Worker, set the same Nitrado token encryption secret on the Worker:
+
+```bash
+npx wrangler secret put TOKEN_ENCRYPTION_KEY --config wrangler.adm-sync.toml
+```
+
+Optional health endpoint protection:
+
+```bash
+npx wrangler secret put SYNC_WORKER_HEALTH_TOKEN --config wrangler.adm-sync.toml
+```
+
+Useful commands:
+
+```bash
+npm run worker:adm-sync:dry-run
+npm run worker:adm-sync:deploy
+npm run worker:adm-sync:dev
+```
+
+When running `worker:adm-sync:dev`, test the scheduled handler at:
+
+```bash
+curl "http://localhost:8787/cdn-cgi/handler/scheduled"
+```
 
 ## Discord OAuth
 

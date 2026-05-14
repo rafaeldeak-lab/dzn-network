@@ -21,6 +21,24 @@ This is a planning note for the ADM sync engine.
 - The owner dashboard reads `/api/sync/status` and `/api/sync/recent-events` for live sync counters and recent synced activity.
 - Mock Nitrado mode runs representative ADM lines through the same parser and sync path as real data.
 
+## Phase 3 Implemented
+
+- `workers/adm-sync-worker.ts` runs the shared ADM sync helper from a standalone Cloudflare Worker.
+- The Worker cron trigger is configured in `wrangler.adm-sync.toml` as `*/5 * * * *`, so scheduled sync is intended to run every five minutes.
+- Scheduled runs process up to 10 eligible live linked servers per invocation.
+- Each scheduled server sync processes up to 1,000 new ADM lines per run.
+- Servers synced less than two minutes ago are skipped to avoid duplicate work and unnecessary Nitrado API calls.
+- Each server sync is isolated so one failed server does not stop the rest of the scheduled run.
+- Manual and scheduled sync executions are recorded in `sync_runs` for owner dashboard visibility.
+- The dashboard shows last scheduled sync, last manual sync, last trigger type, and the last five safe sync run records.
+
+Future scale plan:
+
+- Use Cloudflare Queues to enqueue one sync job per linked server when the network grows.
+- Batch queue messages by server and process them with backoff/retry controls.
+- Keep Workers Cron as the scheduler that discovers eligible servers and pushes queue messages.
+- Keep parser and D1 write logic in the shared sync helper so manual, scheduled, and queued execution remain consistent.
+
 ## Real Nitrado Log Access Investigation
 
 Owner-only diagnostics are available through `GET /api/nitrado/log-access-diagnostics` and the dashboard `Run Log Access Diagnostics` button.
@@ -95,9 +113,7 @@ Owner-only cleanup is available through `POST /api/sync/clear-test-data`. It rem
 
 ## Next Worker Scope
 
-- Scheduled sync.
-- Queue/cron execution.
-- Full ADM file download/read once the Nitrado API path is confirmed.
+- Queue-backed sync fanout once server count grows beyond simple cron limits.
 - Leaderboard calculations.
 - Player profile pages.
 - Public stat surfacing after privacy review.

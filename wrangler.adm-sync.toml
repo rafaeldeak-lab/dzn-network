@@ -1,0 +1,14 @@
+name = "dzn-adm-sync-worker"
+main = "workers/adm-sync-worker.ts"
+compatibility_date = "2026-05-13"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+MOCK_NITRADO = "false"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dzn_network_db"
+database_id = "37515c66-2787-49e4-8568-a461517e975e"
