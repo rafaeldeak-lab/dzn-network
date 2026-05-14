@@ -54,6 +54,16 @@ type NitradoFileEntry = {
   modified?: string | number | null;
 };
 
+type GameSpecificLogDetails = {
+  username: string | null;
+  usernameFound: boolean;
+  logFilesFound: boolean;
+  logFilesReturned: number;
+  admLogFiles: NitradoFileEntry[];
+  selectedAdmFile: NitradoFileEntry | null;
+  logContextPaths: string[];
+};
+
 type SafeApiStatus = "OK" | "401" | "403" | "404" | "error";
 
 export type AdmListAttempt = {
@@ -81,6 +91,11 @@ export type AdmStatAttempt = {
 export type AdmServiceDetailsAttempt = {
   status: SafeApiStatus;
   pathsFound: number;
+  gameserverUsernameFound: boolean;
+  gameSpecificLogFilesFound: boolean;
+  logFilesReturned: number;
+  gameSpecificAdmFilesFound: number;
+  selectedGameSpecificAdmFile: string | null;
 };
 
 export type AdmMethodAttempt = {
@@ -99,11 +114,18 @@ export type AdmMethodAttempt = {
 export type AdmApiDebug = {
   exactManualPath: string | null;
   pathVariants: string[];
+  apiLogFilePathVariants: string[];
   pathsChecked: string[];
   methodsTried: AdmMethodAttempt[];
   listAttempts: AdmListAttempt[];
   statAttempts: AdmStatAttempt[];
   serviceDetailsAttempt: AdmServiceDetailsAttempt | null;
+  gameserverUsernameFound: boolean;
+  gameSpecificLogFilesFound: boolean;
+  gameSpecificLogFilesReturned: number;
+  gameSpecificAdmFilesFound: string[];
+  selectedGameSpecificAdmFile: string | null;
+  apiLogFilePathTested: string | null;
   filesFound: string[];
   exactSelectedAdmPath: string | null;
   fileVisibleThroughStat: boolean;
@@ -122,6 +144,7 @@ export type AdmLogDetection = {
   sampleReadSucceeded: boolean;
   newestAdmFileName: string | null;
   admPath: string | null;
+  internalAdmPath?: string;
   lastCheckedAt: string;
   checkedPaths: string[];
   debug?: AdmApiDebug;
@@ -155,8 +178,31 @@ export async function detectNitradoAdmLogs(
   const lastCheckedAt = new Date().toISOString();
   const checkedPaths = new Set<string>();
   const listAttempts: AdmListAttempt[] = [];
+  const statAttempts: AdmStatAttempt[] = [];
+  const serviceDetails = await fetchGameserverDetailsAttempt(token, serviceId);
+  const gameSpecificLogs = extractGameSpecificLogDetails(serviceDetails.payload);
+  const serviceLogPaths = extractServiceLogPaths(serviceDetails.payload);
+  const apiPathVariants = buildGameSpecificApiPathVariants(gameSpecificLogs);
   const searchDirs = await buildAdmSearchDirs(token, serviceId);
   const candidates = new Map<string, NitradoFileEntry>();
+
+  const gameSpecificReadPaths = dedupeStrings([
+    ...apiPathVariants,
+    ...gameSpecificLogs.admLogFiles.map((entry) => entry.path),
+    ...serviceLogPaths.filter((path) => /\.adm$/i.test(path)),
+  ]);
+  const gameSpecificReadAttempts: AdmReadAttempt[] = [];
+  let gameSpecificSampleResult: { sample: string | null; status: SafeApiStatus | "not_attempted"; path: string | null } = {
+    sample: null,
+    status: "not_attempted",
+    path: null,
+  };
+
+  for (const path of gameSpecificReadPaths) {
+    const result = await readNitradoFileSample(token, serviceId, path, gameSpecificReadAttempts);
+    gameSpecificSampleResult = { ...result, path };
+    if (result.sample !== null) break;
+  }
 
   for (const dir of searchDirs) {
     checkedPaths.add(displayDir(dir));
@@ -167,31 +213,82 @@ export async function detectNitradoAdmLogs(
   }
 
   const newest = pickNewestAdmFile([...candidates.values()]);
-  if (!newest) {
+  const gameSpecificSelectedPath = gameSpecificSampleResult.sample ? gameSpecificSampleResult.path : apiPathVariants[0] ?? gameSpecificLogs.selectedAdmFile?.path ?? null;
+  const gameSpecificSampleReadSucceeded = gameSpecificSampleResult.sample !== null;
+  const gameSpecificSampleHasMarkers = containsDayZAdminLogMarkers(gameSpecificSampleResult.sample);
+  if (gameSpecificLogs.selectedAdmFile && gameSpecificSampleReadSucceeded && gameSpecificSampleHasMarkers && gameSpecificSelectedPath) {
+    const selectedDisplayPath = maskNitradoUsernameInPath(gameSpecificSelectedPath, gameSpecificLogs.username);
     const debug = createAdmDebug({
       exactManualPath: null,
       pathVariants: [],
+      apiLogFilePathVariants: apiPathVariants,
       pathsChecked: [...checkedPaths],
       listAttempts,
-      statAttempts: [],
-      serviceDetailsAttempt: null,
+      statAttempts,
+      serviceDetailsAttempt: createServiceDetailsDebug(serviceDetails.status, serviceLogPaths, gameSpecificLogs),
+      gameSpecificLogs,
+      filesFound: dedupeStrings([
+        ...gameSpecificLogs.admLogFiles.map((entry) => entry.path),
+        ...[...candidates.values()].map((entry) => entry.path),
+      ]),
+      selectedPath: gameSpecificSelectedPath,
+      fileVisibleThroughStat: false,
+      sampleReadStatus: gameSpecificSampleResult.status,
+      downloadTokenCreated: gameSpecificReadAttempts.some((attempt) => attempt.downloadTokenCreated),
+      sampleReadSucceeded: true,
+      samplePreview: gameSpecificSampleResult.sample,
+      lastCheckedAt,
+      message: null,
+      readAttempts: gameSpecificReadAttempts,
+    });
+    return withInternalAdmPath({
+      found: true,
+      admFileExists: true,
+      sampleReadSucceeded: true,
+      newestAdmFileName: gameSpecificLogs.selectedAdmFile.name,
+      admPath: selectedDisplayPath,
+      lastCheckedAt,
+      checkedPaths: [...checkedPaths],
+      debug,
+    }, gameSpecificSelectedPath);
+  }
+
+  if (!newest) {
+    const admFileExists = Boolean(gameSpecificLogs.selectedAdmFile || gameSpecificReadAttempts.length);
+    const debug = createAdmDebug({
+      exactManualPath: null,
+      pathVariants: [],
+      apiLogFilePathVariants: apiPathVariants,
+      pathsChecked: [...checkedPaths],
+      listAttempts,
+      statAttempts,
+      serviceDetailsAttempt: createServiceDetailsDebug(serviceDetails.status, serviceLogPaths, gameSpecificLogs),
+      gameSpecificLogs,
       filesFound: [],
       selectedPath: null,
       fileVisibleThroughStat: false,
-      sampleReadStatus: "not_attempted",
-      downloadTokenCreated: false,
-      sampleReadSucceeded: false,
-      samplePreview: null,
+      sampleReadStatus: gameSpecificSampleResult.status,
+      downloadTokenCreated: gameSpecificReadAttempts.some((attempt) => attempt.downloadTokenCreated),
+      sampleReadSucceeded: gameSpecificSampleReadSucceeded,
+      samplePreview: gameSpecificSampleResult.sample,
       lastCheckedAt,
-      message: buildAdmDebugMessage(listAttempts, [], [], null, false, false),
-      readAttempts: [],
+      message: buildAdmDebugMessage(
+        listAttempts,
+        gameSpecificReadAttempts,
+        statAttempts,
+        serviceDetails.status,
+        admFileExists,
+        gameSpecificSampleReadSucceeded,
+        gameSpecificSampleHasMarkers,
+      ),
+      readAttempts: gameSpecificReadAttempts,
     });
     return {
       found: false,
-      admFileExists: false,
-      sampleReadSucceeded: false,
-      newestAdmFileName: null,
-      admPath: null,
+      admFileExists,
+      sampleReadSucceeded: gameSpecificSampleReadSucceeded,
+      newestAdmFileName: gameSpecificLogs.selectedAdmFile?.name ?? null,
+      admPath: gameSpecificSelectedPath ? maskNitradoUsernameInPath(gameSpecificSelectedPath, gameSpecificLogs.username) : null,
       lastCheckedAt,
       checkedPaths: [...checkedPaths],
       debug,
@@ -200,16 +297,22 @@ export async function detectNitradoAdmLogs(
 
   const readAttempts: AdmReadAttempt[] = [];
   const sampleResult = await readNitradoFileSample(token, serviceId, newest.path, readAttempts);
+  readAttempts.unshift(...gameSpecificReadAttempts);
   const sampleReadSucceeded = sampleResult.sample !== null;
   const sampleHasMarkers = containsDayZAdminLogMarkers(sampleResult.sample);
   const debug = createAdmDebug({
     exactManualPath: null,
     pathVariants: [],
+    apiLogFilePathVariants: apiPathVariants,
     pathsChecked: [...checkedPaths],
     listAttempts,
-    statAttempts: [],
-    serviceDetailsAttempt: null,
-    filesFound: [...candidates.values()].map((entry) => entry.path),
+    statAttempts,
+    serviceDetailsAttempt: createServiceDetailsDebug(serviceDetails.status, serviceLogPaths, gameSpecificLogs),
+    gameSpecificLogs,
+    filesFound: dedupeStrings([
+      ...gameSpecificLogs.admLogFiles.map((entry) => entry.path),
+      ...[...candidates.values()].map((entry) => entry.path),
+    ]),
     selectedPath: newest.path,
     fileVisibleThroughStat: true,
     sampleReadStatus: sampleResult.status,
@@ -220,16 +323,16 @@ export async function detectNitradoAdmLogs(
     message: buildAdmDebugMessage(listAttempts, readAttempts, [], null, true, sampleReadSucceeded, sampleHasMarkers),
     readAttempts,
   });
-  return {
+  return withInternalAdmPath({
     found: sampleReadSucceeded && sampleHasMarkers,
     admFileExists: true,
     sampleReadSucceeded,
     newestAdmFileName: newest.name,
-    admPath: newest.path,
+    admPath: maskNitradoUsernameInPath(newest.path, gameSpecificLogs.username),
     lastCheckedAt,
     checkedPaths: [...checkedPaths],
     debug,
-  };
+  }, newest.path);
 }
 
 export async function testExactNitradoAdmPath(
@@ -240,9 +343,12 @@ export async function testExactNitradoAdmPath(
   const lastCheckedAt = new Date().toISOString();
   const pathVariants = createAdmPathVariants(inputPath);
   const serviceDetails = await fetchGameserverDetailsAttempt(token, serviceId);
+  const gameSpecificLogs = extractGameSpecificLogDetails(serviceDetails.payload);
   const serviceLogPaths = extractServiceLogPaths(serviceDetails.payload);
   const serviceAdmPaths = serviceLogPaths.filter((path) => /\.adm$/i.test(path));
+  const apiPathVariants = buildGameSpecificApiPathVariants(gameSpecificLogs, inputPath);
   const allPathVariants = dedupeStrings([
+    ...apiPathVariants,
     ...serviceAdmPaths.flatMap(createAdmPathVariants),
     ...pathVariants,
   ]);
@@ -272,6 +378,8 @@ export async function testExactNitradoAdmPath(
   const matchingCandidate = findMatchingAdmCandidate([...candidates.values()], allPathVariants);
   const newest = pickNewestAdmFile([...candidates.values()]);
   const readPaths = dedupeStrings([
+    ...apiPathVariants,
+    ...gameSpecificLogs.admLogFiles.map((entry) => entry.path),
     ...serviceAdmPaths,
     ...(matchingCandidate ? [matchingCandidate.path] : []),
     ...allPathVariants,
@@ -298,7 +406,7 @@ export async function testExactNitradoAdmPath(
   const selectedEntry = selectedPath ? findEntryForPath([...candidates.values()], selectedPath) : null;
   const sampleReadSucceeded = sampleResult.sample !== null;
   const fileVisibleThroughStat = statAttempts.some((attempt) => attempt.fileVisible);
-  const admFileExists = Boolean(selectedEntry || candidates.size || fileVisibleThroughStat || sampleReadSucceeded);
+  const admFileExists = Boolean(selectedEntry || candidates.size || fileVisibleThroughStat || sampleReadSucceeded || gameSpecificLogs.selectedAdmFile);
   const sampleHasMarkers = containsDayZAdminLogMarkers(sampleResult.sample);
   const found = admFileExists && sampleReadSucceeded && sampleHasMarkers;
   const filesFound = [...candidates.values()].map((entry) => entry.path);
@@ -306,14 +414,13 @@ export async function testExactNitradoAdmPath(
   const debug = createAdmDebug({
     exactManualPath: inputPath,
     pathVariants: allPathVariants,
+    apiLogFilePathVariants: apiPathVariants,
     pathsChecked,
     listAttempts,
     statAttempts,
-    serviceDetailsAttempt: {
-      status: serviceDetails.status,
-      pathsFound: serviceLogPaths.length,
-    },
-    filesFound,
+    serviceDetailsAttempt: createServiceDetailsDebug(serviceDetails.status, serviceLogPaths, gameSpecificLogs),
+    gameSpecificLogs,
+    filesFound: dedupeStrings([...gameSpecificLogs.admLogFiles.map((entry) => entry.path), ...filesFound]),
     selectedPath,
     fileVisibleThroughStat,
     sampleReadStatus: sampleResult.status,
@@ -333,16 +440,16 @@ export async function testExactNitradoAdmPath(
     readAttempts,
   });
 
-  return {
+  return withInternalAdmPath({
     found,
     admFileExists,
     sampleReadSucceeded,
-    newestAdmFileName: selectedEntry?.name ?? selectedPath?.split("/").filter(Boolean).at(-1) ?? null,
-    admPath: found ? normalizeRemotePath(selectedPath ?? "") : selectedPath,
+    newestAdmFileName: selectedEntry?.name ?? gameSpecificLogs.selectedAdmFile?.name ?? selectedPath?.split("/").filter(Boolean).at(-1) ?? null,
+    admPath: selectedPath ? maskNitradoUsernameInPath(found ? normalizeRemotePath(selectedPath) : selectedPath, gameSpecificLogs.username) : null,
     lastCheckedAt,
     checkedPaths: pathsChecked,
     debug,
-  };
+  }, selectedPath);
 }
 
 export function mockAdmLogDetection(): AdmLogDetection {
@@ -366,6 +473,7 @@ export function mockAdmLogDetection(): AdmLogDetection {
       exactSelectedAdmPath: admPath,
       exactManualPath: admPath,
       pathVariants: [admPath, `/${admPath}`],
+      apiLogFilePathVariants: ["/games/{gameserver-username}/noftp/DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM"],
       methodsTried: [
         { method: "download", path: admPath, status: "OK", downloadTokenCreated: true, sampleReadSucceeded: true },
         { method: "seek", path: admPath, status: "OK", downloadTokenCreated: true, sampleReadSucceeded: true },
@@ -373,7 +481,21 @@ export function mockAdmLogDetection(): AdmLogDetection {
         { method: "list", dir: "dayzps/config", search: ".ADM", status: "OK", entriesReturned: 1, admFilesFound: 1 },
       ],
       statAttempts: [{ path: admPath, status: "OK", fileVisible: true }],
-      serviceDetailsAttempt: { status: "OK", pathsFound: 1 },
+      serviceDetailsAttempt: {
+        status: "OK",
+        pathsFound: 1,
+        gameserverUsernameFound: true,
+        gameSpecificLogFilesFound: true,
+        logFilesReturned: 3,
+        gameSpecificAdmFilesFound: 1,
+        selectedGameSpecificAdmFile: newestAdmFileName,
+      },
+      gameserverUsernameFound: true,
+      gameSpecificLogFilesFound: true,
+      gameSpecificLogFilesReturned: 3,
+      gameSpecificAdmFilesFound: [newestAdmFileName],
+      selectedGameSpecificAdmFile: newestAdmFileName,
+      apiLogFilePathTested: "/games/{gameserver-username}/noftp/DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM",
       fileVisibleThroughStat: true,
       downloadTokenCreated: true,
       sampleReadStatus: "OK",
@@ -686,6 +808,28 @@ function normalizeFileEntry(entry: unknown, dir: string): NitradoFileEntry | nul
   };
 }
 
+function normalizeGameSpecificLogFile(value: unknown): NitradoFileEntry | null {
+  if (typeof value === "string" || typeof value === "number") {
+    const path = normalizeRemotePath(String(value));
+    if (!isSafePathLikeValue(path) || !isAdmLogPath(path)) return null;
+    const name = path.split("/").filter(Boolean).at(-1) ?? path;
+    return { name, path };
+  }
+
+  if (!isRecord(value)) return null;
+  const name = stringValue(value.name ?? value.filename ?? value.file_name ?? value.log_file);
+  const rawPath = stringValue(value.path ?? value.file ?? value.filename ?? value.name ?? value.log_file);
+  const dir = stringValue(value.dir ?? value.directory ?? value.dirpath ?? value.dir_path);
+  const path = normalizeRemotePath(rawPath && rawPath !== name ? rawPath : joinRemotePath(dir, name || rawPath));
+  if (!path || !isSafePathLikeValue(path) || !isAdmLogPath(path)) return null;
+
+  return {
+    name: name || path.split("/").filter(Boolean).at(-1) || path,
+    path,
+    modified: stringValue(value.modified ?? value.mtime ?? value.last_modified ?? value.changed) ?? null,
+  };
+}
+
 function findArrayByKey(value: unknown, key: string): unknown[] | null {
   if (Array.isArray(value)) return value;
   if (!value || typeof value !== "object") return null;
@@ -696,6 +840,62 @@ function findArrayByKey(value: unknown, key: string): unknown[] | null {
     if (found) return found;
   }
   return null;
+}
+
+function findRecordByKey(value: unknown, key: string): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const direct = value[key];
+  if (isRecord(direct)) return direct;
+  for (const child of Object.values(value)) {
+    const found = findRecordByKey(child, key);
+    if (found) return found;
+  }
+  return null;
+}
+
+function flattenSafeLogValues(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value.flatMap(flattenSafeLogValues);
+  if (typeof value === "string" || typeof value === "number") return [value];
+  if (!isRecord(value)) return [];
+  return Object.entries(value).flatMap(([key, child]) => {
+    if (isSensitiveKey(key)) return [];
+    const values = flattenSafeLogValues(child);
+    return isAdmLogPath(key) ? [key, ...values] : values;
+  });
+}
+
+function extractGameSpecificLogContextPaths(gameSpecific: Record<string, unknown>) {
+  const paths = new Set<string>();
+  collectGameSpecificLogContextPaths(gameSpecific, [], false, paths);
+  return [...paths].slice(0, 64);
+}
+
+function collectGameSpecificLogContextPaths(
+  value: unknown,
+  keyPath: string[],
+  inLogContext: boolean,
+  paths: Set<string>,
+) {
+  if (typeof value === "string" || typeof value === "number") {
+    const text = String(value);
+    const lastKey = keyPath.at(-1) ?? "";
+    if ((inLogContext || isAdmLogPath(text)) && !isSensitiveKey(lastKey) && isSafePathLikeValue(text)) {
+      paths.add(normalizeRemotePath(text));
+    }
+    return;
+  }
+  if (!isRecord(value)) return;
+
+  for (const [key, child] of Object.entries(value)) {
+    if (isSensitiveKey(key)) continue;
+    const nextLogContext = inLogContext || isGameSpecificLogContextKey(key);
+    if (nextLogContext && isAdmLogPath(key)) paths.add(normalizeRemotePath(key));
+    collectGameSpecificLogContextPaths(child, [...keyPath, key], nextLogContext, paths);
+  }
+}
+
+function isGameSpecificLogContextKey(key: string) {
+  return /(log|logs|log_files|adm|admin|file|files|crash|rpt)/i.test(key);
 }
 
 function statPayloadShowsFile(payload: unknown, file: string) {
@@ -720,6 +920,18 @@ function payloadContainsPath(value: unknown, normalizedPath: string, basename: s
 
 function isAdmFile(entry: NitradoFileEntry) {
   return /\.adm$/i.test(entry.name) || /\.adm$/i.test(entry.path);
+}
+
+function isAdmLogPath(value: string) {
+  return /\.adm$/i.test(value) || (/dayzserver/i.test(value) && /\.adm/i.test(value));
+}
+
+function dedupeFileEntries(entries: NitradoFileEntry[]) {
+  const seen = new Map<string, NitradoFileEntry>();
+  for (const entry of entries) {
+    seen.set(normalizeRemotePath(entry.path).toLowerCase(), entry);
+  }
+  return [...seen.values()];
 }
 
 function pickNewestAdmFile(entries: NitradoFileEntry[]) {
@@ -784,6 +996,79 @@ function createAdmPathVariants(inputPath: string) {
   ]);
 }
 
+function extractGameSpecificLogDetails(payload: unknown): GameSpecificLogDetails {
+  const gameserver = findRecordByKey(payload, "gameserver");
+  const rawUsername = gameserver ? stringValue(gameserver.username).trim() : "";
+  const username = isSafeNitradoPathSegment(rawUsername) ? rawUsername : null;
+  const gameSpecific = gameserver && isRecord(gameserver.game_specific) ? gameserver.game_specific : null;
+  const logFilesFound = Boolean(gameSpecific && Object.prototype.hasOwnProperty.call(gameSpecific, "log_files"));
+  const directLogFiles = gameSpecific && logFilesFound ? flattenSafeLogValues(gameSpecific.log_files) : [];
+  const logContextPaths = gameSpecific ? extractGameSpecificLogContextPaths(gameSpecific) : [];
+  const admLogFiles = dedupeFileEntries([
+    ...directLogFiles.map(normalizeGameSpecificLogFile).filter((entry): entry is NitradoFileEntry => Boolean(entry)),
+    ...logContextPaths.map((path) => normalizeGameSpecificLogFile(path)).filter((entry): entry is NitradoFileEntry => Boolean(entry)),
+  ]).filter(isAdmFile);
+  const selectedAdmFile = pickNewestAdmFile(admLogFiles);
+
+  return {
+    username,
+    usernameFound: Boolean(username),
+    logFilesFound,
+    logFilesReturned: directLogFiles.length,
+    admLogFiles,
+    selectedAdmFile,
+    logContextPaths,
+  };
+}
+
+function buildGameSpecificApiPathVariants(details: GameSpecificLogDetails, manualPath?: string) {
+  if (!details.username) return [];
+  const sources = dedupeStrings([
+    ...(details.selectedAdmFile ? [details.selectedAdmFile.path] : []),
+    ...details.admLogFiles.map((entry) => entry.path),
+    ...(manualPath ? [manualPath] : []),
+  ]);
+  const paths: string[] = [];
+
+  for (const source of sources) {
+    const normalized = normalizeRemotePath(source);
+    if (!normalized || normalized.includes("..") || /^https?:\/\//i.test(normalized)) continue;
+    const fileName = normalized.split("/").filter(Boolean).at(-1);
+    if (!fileName || !/(\.adm$|dayzserver.*\.adm$)/i.test(fileName)) continue;
+
+    if (normalized.toLowerCase().startsWith(`games/${details.username.toLowerCase()}/noftp/`)) {
+      paths.push(`/${normalized}`);
+    } else {
+      paths.push(`/games/${details.username}/noftp/${normalized}`);
+      paths.push(`/games/${details.username}/noftp/${fileName}`);
+      paths.push(`/games/${details.username}/noftp/dayzps/config/${fileName}`);
+      paths.push(`/games/${details.username}/noftp/config/${fileName}`);
+    }
+  }
+
+  return dedupeStrings(paths.flatMap((path) => {
+    const normalized = normalizeRemotePath(path);
+    const leadingPath = `/${normalized}`;
+    return [leadingPath, ...createAdmPathVariants(path).filter((variant) => variant !== leadingPath)];
+  }));
+}
+
+function createServiceDetailsDebug(
+  status: SafeApiStatus,
+  serviceLogPaths: string[],
+  gameSpecificLogs: GameSpecificLogDetails,
+): AdmServiceDetailsAttempt {
+  return {
+    status,
+    pathsFound: dedupeStrings([...serviceLogPaths, ...gameSpecificLogs.logContextPaths]).length,
+    gameserverUsernameFound: gameSpecificLogs.usernameFound,
+    gameSpecificLogFilesFound: gameSpecificLogs.logFilesFound,
+    logFilesReturned: gameSpecificLogs.logFilesReturned,
+    gameSpecificAdmFilesFound: gameSpecificLogs.admLogFiles.length,
+    selectedGameSpecificAdmFile: gameSpecificLogs.selectedAdmFile?.name ?? null,
+  };
+}
+
 function extractServiceLogPaths(payload: unknown) {
   const paths = new Set<string>();
   collectServiceLogPaths(payload, [], false, paths);
@@ -813,12 +1098,12 @@ function collectServiceLogPaths(
 
 function isSafePathLikeValue(value: string) {
   if (/^https?:\/\//i.test(value)) return false;
-  if (/(password|passwd|secret|token|credential|mysql|ftp)/i.test(value)) return false;
-  return /(\.adm$|dayz|config|logs?)/i.test(value);
+  if (/(password|passwd|secret|token|credential|mysql|ftp:\/\/)/i.test(value)) return false;
+  return /(\.adm$|dayz|config|logs?|games\/.+\/noftp)/i.test(value);
 }
 
 function isSensitiveKey(key: string) {
-  return /(password|passwd|secret|token|credential|mysql|ftp)/i.test(key);
+  return /(password|passwd|secret|token|credential|mysql|^ftp$|ftp_|_ftp|ftpuser|ftp_user)/i.test(key);
 }
 
 function createExactAdmListDirs(pathVariants: string[]) {
@@ -861,10 +1146,12 @@ function uppercaseRemoteFileName(path: string) {
 function createAdmDebug({
   exactManualPath,
   pathVariants,
+  apiLogFilePathVariants,
   pathsChecked,
   listAttempts,
   statAttempts,
   serviceDetailsAttempt,
+  gameSpecificLogs,
   filesFound,
   selectedPath,
   fileVisibleThroughStat,
@@ -878,10 +1165,12 @@ function createAdmDebug({
 }: {
   exactManualPath: string | null;
   pathVariants: string[];
+  apiLogFilePathVariants: string[];
   pathsChecked: string[];
   listAttempts: AdmListAttempt[];
   statAttempts: AdmStatAttempt[];
   serviceDetailsAttempt: AdmServiceDetailsAttempt | null;
+  gameSpecificLogs: GameSpecificLogDetails;
   filesFound: string[];
   selectedPath: string | null;
   fileVisibleThroughStat: boolean;
@@ -893,16 +1182,24 @@ function createAdmDebug({
   message: string | null;
   readAttempts: AdmReadAttempt[];
 }): AdmApiDebug {
+  const mask = (value: string) => maskNitradoUsernameInPath(value, gameSpecificLogs.username);
   return {
     exactManualPath,
-    pathVariants: dedupeStrings(pathVariants).slice(0, 24),
-    pathsChecked: dedupeStrings(pathsChecked).slice(0, 64),
-    methodsTried: buildMethodAttempts(serviceDetailsAttempt, listAttempts, statAttempts, readAttempts).slice(0, 140),
-    listAttempts: listAttempts.map(stripListAttemptEntries).slice(0, 80),
-    statAttempts: statAttempts.slice(0, 32),
+    pathVariants: dedupeStrings(pathVariants.map(mask)).slice(0, 24),
+    apiLogFilePathVariants: dedupeStrings(apiLogFilePathVariants.map(mask)).slice(0, 24),
+    pathsChecked: dedupeStrings(pathsChecked.map(mask)).slice(0, 64),
+    methodsTried: buildMethodAttempts(serviceDetailsAttempt, listAttempts, statAttempts, readAttempts, gameSpecificLogs.username).slice(0, 140),
+    listAttempts: listAttempts.map((attempt) => stripListAttemptEntries(attempt, gameSpecificLogs.username)).slice(0, 80),
+    statAttempts: statAttempts.map((attempt) => ({ ...attempt, path: mask(attempt.path) })).slice(0, 32),
     serviceDetailsAttempt,
-    filesFound: dedupeStrings(filesFound).slice(0, 40),
-    exactSelectedAdmPath: selectedPath,
+    gameserverUsernameFound: gameSpecificLogs.usernameFound,
+    gameSpecificLogFilesFound: gameSpecificLogs.logFilesFound,
+    gameSpecificLogFilesReturned: gameSpecificLogs.logFilesReturned,
+    gameSpecificAdmFilesFound: dedupeStrings(gameSpecificLogs.admLogFiles.map((entry) => mask(entry.path))).slice(0, 40),
+    selectedGameSpecificAdmFile: gameSpecificLogs.selectedAdmFile?.name ?? null,
+    apiLogFilePathTested: selectedPath ? mask(selectedPath) : null,
+    filesFound: dedupeStrings(filesFound.map(mask)).slice(0, 40),
+    exactSelectedAdmPath: selectedPath ? mask(selectedPath) : null,
     fileVisibleThroughStat,
     downloadTokenCreated,
     sampleReadStatus,
@@ -910,7 +1207,7 @@ function createAdmDebug({
     samplePreview: samplePreview ? samplePreview.slice(0, 300) : null,
     lastCheckedAt,
     message,
-    readAttempts: readAttempts.slice(0, 20),
+    readAttempts: readAttempts.map((attempt) => ({ ...attempt, path: mask(attempt.path) })).slice(0, 20),
   };
 }
 
@@ -919,7 +1216,9 @@ function buildMethodAttempts(
   listAttempts: AdmListAttempt[],
   statAttempts: AdmStatAttempt[],
   readAttempts: AdmReadAttempt[],
+  username: string | null,
 ): AdmMethodAttempt[] {
+  const mask = (value: string) => maskNitradoUsernameInPath(value, username);
   return [
     ...(serviceDetailsAttempt
       ? [{
@@ -931,7 +1230,7 @@ function buildMethodAttempts(
     ...listAttempts.map((attempt) => ({
       method: "list" as const,
       status: attempt.status,
-      dir: attempt.dir,
+      dir: mask(attempt.dir),
       search: attempt.search,
       entriesReturned: attempt.fileCount,
       admFilesFound: attempt.admFileCount,
@@ -939,22 +1238,22 @@ function buildMethodAttempts(
     ...statAttempts.map((attempt) => ({
       method: "stat" as const,
       status: attempt.status,
-      path: attempt.path,
+      path: mask(attempt.path),
       fileVisible: attempt.fileVisible,
     })),
     ...readAttempts.map((attempt) => ({
       method: attempt.method,
       status: attempt.status,
-      path: attempt.path,
+      path: mask(attempt.path),
       downloadTokenCreated: attempt.downloadTokenCreated,
       sampleReadSucceeded: attempt.sampleReadSucceeded,
     })),
   ];
 }
 
-function stripListAttemptEntries(attempt: AdmListAttempt) {
+function stripListAttemptEntries(attempt: AdmListAttempt, username: string | null) {
   return {
-    dir: attempt.dir,
+    dir: maskNitradoUsernameInPath(attempt.dir, username),
     search: attempt.search,
     status: attempt.status,
     fileCount: attempt.fileCount,
@@ -1009,6 +1308,10 @@ function safeResponseStatus(response: Response): SafeApiStatus {
   return "error";
 }
 
+export function getAdmLogStoragePath(admLog: AdmLogDetection) {
+  return admLog.internalAdmPath ?? admLog.admPath;
+}
+
 function extractPathLikeStrings(value: unknown, results = new Set<string>()) {
   if (typeof value === "string") {
     if (/(dayz|config|logs?|\.adm)/i.test(value)) results.add(value);
@@ -1033,6 +1336,14 @@ function stringValue(value: unknown) {
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isSafeNitradoPathSegment(value: string) {
+  return Boolean(value && !value.includes("/") && !value.includes("\\") && !value.includes("..") && !/^https?:/i.test(value));
+}
+
 function normalizeRemotePath(path: string) {
   return path.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/").replace(/\/$/, "");
 }
@@ -1047,4 +1358,26 @@ function displayDir(dir: string) {
 
 function dedupeStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function maskNitradoUsernameInPath(path: string, username: string | null) {
+  if (!username) return path;
+  const escaped = escapeRegExp(username);
+  return path.replace(new RegExp(`(/?games/)${escaped}(/noftp)`, "gi"), "$1{gameserver-username}$2");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function withInternalAdmPath<T extends AdmLogDetection>(detection: T, internalPath: string | null): T {
+  if (internalPath) {
+    Object.defineProperty(detection, "internalAdmPath", {
+      value: internalPath,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+  }
+  return detection;
 }

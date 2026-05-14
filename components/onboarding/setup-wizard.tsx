@@ -433,7 +433,10 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
             </button>
           </div>
           <p className="mt-2 text-sm text-zinc-400">
-            Copy this from Nitrado - Information - Log Files - Your log link.
+            The visible Nitrado Web Interface path may differ from the API file path. DZN will first try Nitrado&apos;s game_specific.log_files API list.
+          </p>
+          <p className="mt-1 text-sm text-zinc-500">
+            Copy this from Nitrado - Information - Log Files - Your log link when a manual fallback is needed.
           </p>
         </div>
         {checks?.admLog ? (
@@ -513,11 +516,19 @@ function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <Summary label="Exact manual path tested" value={debug.exactManualPath ?? "Not provided"} />
         <Summary label="Exact selected ADM path" value={debug.exactSelectedAdmPath ?? "Not selected"} />
+        <Summary label="Gameserver username found" value={debug.gameserverUsernameFound ? "yes" : "no"} />
+        <Summary label="game_specific.log_files found" value={debug.gameSpecificLogFilesFound ? "yes" : "no"} />
+        <Summary label="Log files returned" value={String(debug.gameSpecificLogFilesReturned)} />
+        <Summary label="ADM files from log_files" value={String(debug.gameSpecificAdmFilesFound.length)} />
+        <Summary label="Selected game_specific ADM" value={debug.selectedGameSpecificAdmFile ?? "Not selected"} />
+        <Summary label="API file path tested" value={debug.apiLogFilePathTested ?? "Not tested"} />
         <Summary label="File visible through stat" value={debug.fileVisibleThroughStat ? "yes" : "no"} />
         <Summary label="Download token created" value={debug.downloadTokenCreated ? "yes" : "no"} />
         <Summary label="Sample read status" value={debug.sampleReadStatus} />
         <Summary label="Sample read succeeded" value={debug.sampleReadSucceeded ? "yes" : "no"} />
       </div>
+      <DebugList title="Nitrado API log file paths tested" items={debug.apiLogFilePathVariants.length ? debug.apiLogFilePathVariants : ["No game_specific API paths"]} />
+      <DebugList title="ADM files from game_specific.log_files" items={debug.gameSpecificAdmFilesFound.length ? debug.gameSpecificAdmFilesFound : ["No ADM files returned by game_specific.log_files"]} />
       <DebugList title="Path variants tested" items={debug.pathVariants.length ? debug.pathVariants : ["No path variants"]} />
       <DebugList title="Paths checked" items={debug.pathsChecked} />
       <DebugList title="ADM files found" items={debug.filesFound.length ? debug.filesFound : ["No ADM files returned by API"]} />
@@ -535,7 +546,7 @@ function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
                   : attempt.method === "stat"
                     ? `visible: ${attempt.fileVisible ? "yes" : "no"}`
                     : attempt.method === "service-details"
-                      ? `paths: ${attempt.entriesReturned ?? 0}`
+                      ? `paths: ${attempt.entriesReturned ?? 0} | log_files: ${debug.gameSpecificLogFilesReturned} | ADM: ${debug.gameSpecificAdmFilesFound.length}`
                       : `token: ${attempt.downloadTokenCreated ? "yes" : "no"} | sample: ${attempt.sampleReadSucceeded ? "yes" : "no"}`}
               </span>
             </div>

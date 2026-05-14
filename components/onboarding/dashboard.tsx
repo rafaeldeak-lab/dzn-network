@@ -111,6 +111,7 @@ function ServerDashboard({ server }: { server: LinkedServer }) {
 
   const normalizedStatus = server.status.toLowerCase();
   const progress = normalizedStatus === "live" ? 100 : normalizedStatus === "error" ? 72 : 84;
+  const admConnected = server.adm_status === "Connected" || Number(server.adm_logs_found) === 1;
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
       <section className="glass-surface animated-border rounded-lg p-6">
@@ -138,7 +139,9 @@ function ServerDashboard({ server }: { server: LinkedServer }) {
             <Info label="Service ID" value={server.nitrado_service_id} />
             <Info label="Server type" value={server.server_type} />
             <Info label="Region" value={server.region ?? "Unknown"} />
-            <Info label="ADM Path" value={server.adm_path ?? "Not configured"} />
+            <Info label="ADM Status" value={admConnected ? "Connected" : "Needs review"} />
+            <Info label="Latest ADM File" value={server.adm_latest_file ?? "Not detected"} />
+            <Info label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
           </div>
 
           <div className="mt-6">
@@ -198,4 +201,9 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="mt-2 font-bold text-white">{value}</p>
     </div>
   );
+}
+
+function formatDashboardDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }

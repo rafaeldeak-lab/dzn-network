@@ -127,25 +127,39 @@ export async function ensureMockUser(env: Env) {
   return { userId: MOCK_USER_ID, user: mockUser };
 }
 
-export async function getCurrentLinkedServer(env: Env, userId: string) {
+export async function getCurrentLinkedServer(env: Env, userId: string, options: { includePrivateAdmPath?: boolean } = {}) {
   if (!env.DB) return null;
   await ensureServerLogConfigTable(env);
-  return env.DB
+  const server = await env.DB
     .prepare(
       `SELECT
         linked_servers.*,
         discord_guilds.name AS guild_name,
         discord_guilds.icon_url AS guild_icon_url,
-        server_log_config.adm_path AS adm_path
+        server_log_config.adm_path AS adm_path,
+        onboarding_checks.adm_logs_found AS adm_logs_found,
+        onboarding_checks.last_tested_at AS adm_last_checked_at
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
        WHERE linked_servers.user_id = ?
        ORDER BY linked_servers.updated_at DESC
        LIMIT 1`,
     )
     .bind(userId)
-    .first();
+    .first<Record<string, unknown>>();
+
+  if (!server) return null;
+
+  const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
+  server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
+  server.adm_status = Number(server.adm_logs_found) === 1 ? "Connected" : "Needs review";
+  if (!options.includePrivateAdmPath && rawAdmPath) {
+    server.adm_path = maskNitradoApiPath(rawAdmPath);
+  }
+
+  return server;
 }
 
 export async function saveServerAdmPath(env: Env, linkedServerId: string, admPath: string) {
@@ -180,4 +194,8 @@ async function ensureServerLogConfigTable(env: Env) {
   await db
     .prepare("CREATE INDEX IF NOT EXISTS idx_server_log_config_linked_server_id ON server_log_config(linked_server_id)")
     .run();
+}
+
+function maskNitradoApiPath(path: string) {
+  return path.replace(/(^|\/)games\/[^/]+\/noftp\//i, "$1games/{gameserver-username}/noftp/");
 }

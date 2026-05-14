@@ -39,6 +39,7 @@ export type AdmLogDetection = {
 export type AdmApiDebug = {
   exactManualPath: string | null;
   pathVariants: string[];
+  apiLogFilePathVariants: string[];
   pathsChecked: string[];
   methodsTried: {
     method: "download" | "seek" | "stat" | "list" | "service-details";
@@ -67,7 +68,18 @@ export type AdmApiDebug = {
   serviceDetailsAttempt: {
     status: "OK" | "401" | "403" | "404" | "error";
     pathsFound: number;
+    gameserverUsernameFound: boolean;
+    gameSpecificLogFilesFound: boolean;
+    logFilesReturned: number;
+    gameSpecificAdmFilesFound: number;
+    selectedGameSpecificAdmFile: string | null;
   } | null;
+  gameserverUsernameFound: boolean;
+  gameSpecificLogFilesFound: boolean;
+  gameSpecificLogFilesReturned: number;
+  gameSpecificAdmFilesFound: string[];
+  selectedGameSpecificAdmFile: string | null;
+  apiLogFilePathTested: string | null;
   filesFound: string[];
   exactSelectedAdmPath: string | null;
   fileVisibleThroughStat: boolean;
@@ -106,4 +118,8 @@ export type LinkedServer = {
   status: "pending" | "live" | "error" | "Pending" | "Live" | "Error";
   public_slug: string;
   adm_path?: string | null;
+  adm_status?: "Connected" | "Needs review" | string | null;
+  adm_latest_file?: string | null;
+  adm_last_checked_at?: string | null;
+  adm_logs_found?: number | null;
 };

@@ -1,7 +1,7 @@
 import { getCurrentLinkedServer, getSessionUser, saveServerAdmPath } from "../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
-import { mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
+import { getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getLatestNitradoToken } from "../../_lib/onboarding";
 import type { PagesFunction } from "../../_lib/types";
 
@@ -20,7 +20,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const admPath = sanitizeAdmPath(body.path);
   if (!admPath) return json({ error: "Manual ADM log path is required" }, { status: 400 });
 
-  const linkedServer = await getCurrentLinkedServer(env, user.id);
+  const linkedServer = await getCurrentLinkedServer(env, user.id, { includePrivateAdmPath: true });
   if (!linkedServer || typeof linkedServer.id !== "string") {
     return json({ error: "No linked server found" }, { status: 400 });
   }
@@ -36,8 +36,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         admPath,
       );
 
-  if (admLog.found && admLog.admPath) {
-    await saveServerAdmPath(env, linkedServer.id, admLog.admPath.replace(/^\/+/, ""));
+  const admStoragePath = getAdmLogStoragePath(admLog);
+  if (admLog.found && admStoragePath) {
+    await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
   }
 
   return json({

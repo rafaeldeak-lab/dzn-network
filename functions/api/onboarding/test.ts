@@ -1,7 +1,7 @@
 import { getCurrentLinkedServer, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
-import { detectNitradoAdmLogs, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
+import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getLatestNitradoToken } from "../../_lib/onboarding";
 import type { PagesFunction } from "../../_lib/types";
 
@@ -12,7 +12,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
   if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
 
-  const linkedServer = await getCurrentLinkedServer(env, user.id);
+  const linkedServer = await getCurrentLinkedServer(env, user.id, { includePrivateAdmPath: true });
   if (!linkedServer || typeof linkedServer.id !== "string") {
     return json({ error: "No linked server found" }, { status: 400 });
   }
@@ -28,8 +28,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       ? await testExactNitradoAdmPath(nitradoToken, linkedServer.nitrado_service_id, savedAdmPath)
       : await detectNitradoAdmLogs(nitradoToken, linkedServer.nitrado_service_id);
 
-  if (admLog.found && admLog.admPath) {
-    await saveServerAdmPath(env, linkedServer.id, admLog.admPath.replace(/^\/+/, ""));
+  const admStoragePath = getAdmLogStoragePath(admLog);
+  if (admLog.found && admStoragePath) {
+    await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
   }
 
   const checks = {
