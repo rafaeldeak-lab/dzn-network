@@ -172,6 +172,10 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
   if (!options.includePrivateAdmPath && rawAdmPath) {
     server.adm_path = maskNitradoApiPath(rawAdmPath);
   }
+  server.original_owner_is_current_user = server.user_id === userId;
+  if (!options.includePrivateAdmPath) {
+    delete server.user_id;
+  }
 
   return server;
 }

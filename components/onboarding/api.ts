@@ -98,6 +98,34 @@ export async function clearOldFailedSyncRuns(linkedServerId?: string) {
   });
 }
 
+export async function deleteLinkedServer(data: {
+  linkedServerId: string;
+  confirmationText: string;
+  finalConfirmed: boolean;
+}) {
+  return request<DeletionResponse>("/api/server/delete", {
+    method: "POST",
+    body: JSON.stringify({
+      linked_server_id: data.linkedServerId,
+      confirmation_text: data.confirmationText,
+      final_confirmed: data.finalConfirmed,
+    }),
+  });
+}
+
+export async function deleteAccount(data: {
+  confirmationText: string;
+  finalConfirmed: boolean;
+}) {
+  return request<DeletionResponse>("/api/account/delete", {
+    method: "POST",
+    body: JSON.stringify({
+      confirmation_text: data.confirmationText,
+      final_confirmed: data.finalConfirmed,
+    }),
+  });
+}
+
 export async function goLive() {
   return request<{ ok: boolean; status: "live" }>("/api/onboarding/go-live", {
     method: "POST",
@@ -122,3 +150,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
   return data;
 }
+
+export type DeletionResponse = {
+  ok: boolean;
+  redirectTarget: string;
+  message: string;
+  deleted: {
+    linkedServers: number;
+    serverStats: number;
+    playerProfiles: number;
+    playerEvents: number;
+    killEvents: number;
+    admRawEvents: number;
+    admSyncState?: number;
+    syncRuns: number;
+    sessions: number;
+    nitradoConnections?: number;
+    onboardingChecks?: number;
+    serverLogConfig?: number;
+    serverMetadataVersions?: number;
+    serverSlugAliases?: number;
+    discordGuilds?: number;
+    users?: number;
+  };
+};

@@ -180,6 +180,7 @@ export type LinkedServer = {
   adm_latest_file?: string | null;
   adm_last_checked_at?: string | null;
   adm_logs_found?: number | null;
+  original_owner_is_current_user?: boolean;
 };
 
 export type AdmSyncStatus = {

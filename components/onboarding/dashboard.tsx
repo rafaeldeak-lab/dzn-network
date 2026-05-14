@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   Bell,
@@ -10,6 +11,7 @@ import {
   CircleCheck,
   Crosshair,
   DatabaseZap,
+  Download,
   ExternalLink,
   Gamepad2,
   Gauge,
@@ -23,12 +25,13 @@ import {
   Trash2,
   Users,
   Wrench,
+  X,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { clearMockTestSyncData, clearOldFailedSyncRuns, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
+import { clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -157,6 +160,8 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [diagnosingLogs, setDiagnosingLogs] = useState(false);
   const [clearingTestData, setClearingTestData] = useState(false);
   const [clearingFailedRuns, setClearingFailedRuns] = useState(false);
+  const [dangerAction, setDangerAction] = useState<"server" | "account" | null>(null);
+  const [deletingDangerAction, setDeletingDangerAction] = useState(false);
   const [refreshingSyncData, setRefreshingSyncData] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
@@ -199,6 +204,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
   const processedPercent = getProcessedPercent(syncStatus);
   const nextScheduledSync = getNextScheduledSync(syncStatus?.last_scheduled_sync_at ?? null);
+  const isOriginalOwner = server.original_owner_is_current_user !== false;
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -339,6 +345,69 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     } finally {
       setClearingFailedRuns(false);
     }
+  }
+
+  async function confirmDangerAction(action: "server" | "account", confirmationText: string, finalConfirmed: boolean) {
+    setDeletingDangerAction(true);
+    setActionMessage("");
+    try {
+      const result = action === "server"
+        ? await deleteLinkedServer({ linkedServerId: server.id, confirmationText, finalConfirmed })
+        : await deleteAccount({ confirmationText, finalConfirmed });
+      setDangerAction(null);
+      setActionMessage(result.message);
+      window.setTimeout(() => {
+        window.location.href = result.redirectTarget;
+      }, 900);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to complete deletion.");
+    } finally {
+      setDeletingDangerAction(false);
+    }
+  }
+
+  function downloadDataSummary() {
+    const summary = {
+      exportedAt: new Date().toISOString(),
+      note: "Safe DZN data summary. No tokens, credentials, OAuth secrets, FTP/MySQL credentials, or player IDs are included.",
+      server: {
+        id: server.id,
+        serverName: server.server_name,
+        nitradoServiceId: server.nitrado_service_id,
+        nitradoServiceName: server.nitrado_service_name,
+        publicSlug: server.public_slug,
+        discordGuildName: server.guild_name ?? null,
+        serverType: server.server_type,
+        tags,
+        status: server.status,
+        game: server.game ?? null,
+        platform: server.platform ?? null,
+        ipAddress: server.ip_address ?? null,
+        playerSlots: server.player_slots ?? null,
+        latestAdmFile,
+        lastAdmCheck: server.adm_last_checked_at ?? null,
+      },
+      sync: {
+        status: syncStatus?.last_sync_status ?? effectiveSyncStatus,
+        latestAdmFile: syncStatus?.latest_adm_file ?? latestAdmFile,
+        lastProcessedLine: syncStatus?.last_processed_line ?? 0,
+        lastSyncAt: syncStatus?.last_sync_at ?? null,
+        totalKills: syncStatus?.total_kills ?? 0,
+        totalDeaths: syncStatus?.total_deaths ?? 0,
+        totalJoins: syncStatus?.total_joins ?? 0,
+        totalDisconnects: syncStatus?.total_disconnects ?? 0,
+        uniquePlayers: syncStatus?.unique_players ?? 0,
+      },
+    };
+    const blob = new Blob([JSON.stringify(summary, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `dzn-data-summary-${server.public_slug || server.id}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -571,8 +640,26 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <LogDiagnosticsPanel diagnostics={logDiagnostics} open={diagnosticsOpen} onToggle={() => setDiagnosticsOpen((value) => !value)} />
             ) : null}
           </DashboardPanel>
+          <DangerZonePanel
+            isOriginalOwner={isOriginalOwner}
+            onRemoveServer={() => setDangerAction("server")}
+            onCloseAccount={() => setDangerAction("account")}
+            onDownloadSummary={downloadDataSummary}
+          />
         </aside>
       </section>
+      {dangerAction ? (
+        <DangerZoneModal
+          action={dangerAction}
+          serverName={server.server_name || server.nitrado_service_name || "DZN server"}
+          deleting={deletingDangerAction}
+          onClose={() => {
+            if (!deletingDangerAction) setDangerAction(null);
+          }}
+          onDownloadSummary={downloadDataSummary}
+          onConfirm={confirmDangerAction}
+        />
+      ) : null}
     </div>
   );
 }
@@ -584,6 +671,252 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
     </section>
   );
 }
+
+function DangerZonePanel({
+  isOriginalOwner,
+  onRemoveServer,
+  onCloseAccount,
+  onDownloadSummary,
+}: {
+  isOriginalOwner: boolean;
+  onRemoveServer: () => void;
+  onCloseAccount: () => void;
+  onDownloadSummary: () => void;
+}) {
+  return (
+    <DashboardPanel className="border-red-300/20 p-4">
+      <PanelHeader icon={<AlertTriangle className="h-5 w-5 text-red-200" />} title="Danger Zone" />
+      <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+        <p className="text-[10px] font-black uppercase text-zinc-500">Original DZN Owner</p>
+        <p className="mt-1 text-sm font-black text-white">{isOriginalOwner ? "You" : "Hidden"}</p>
+        <p className="mt-2 text-xs font-bold leading-5 text-zinc-400">
+          {isOriginalOwner ? "Permanent deletion is available only to the original DZN owner who linked this server." : "Permanent deletion: Owner only. Only the original DZN server owner can permanently remove this server."}
+        </p>
+      </div>
+      <div className="mt-4 grid gap-3">
+        <div className="rounded-lg border border-red-300/20 bg-red-500/10 p-4">
+          <h3 className="text-sm font-black uppercase text-red-100">Remove This Server From DZN</h3>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">
+            This permanently removes this server from DZN Network. The public listing, synced ADM data, player stats, kill history, sync history, and server metadata for this server will be deleted. Your Discord server and Nitrado server are not deleted.
+          </p>
+          <button type="button" disabled={!isOriginalOwner} onClick={onRemoveServer} className="mt-4 inline-flex w-full items-center justify-between rounded-lg border border-red-300/30 bg-red-500/15 px-4 py-3 text-left text-sm font-black text-red-50 transition hover:border-red-300/55 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50">
+            <span>Remove Server From DZN</span>
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="rounded-lg border border-red-300/20 bg-red-500/10 p-4">
+          <h3 className="text-sm font-black uppercase text-red-100">Close My DZN Account</h3>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">
+            This permanently closes your DZN account and removes your DZN user data, sessions, linked servers, saved Nitrado connections, public listings, synced logs, player stats, kill events, and dashboard data. Your Discord account, Discord server, and Nitrado account are not deleted.
+          </p>
+          <div className="mt-4 grid gap-2">
+            <button type="button" onClick={onDownloadSummary} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45">
+              <span>Download My DZN Data Summary</span>
+              <Download className="h-4 w-4" />
+            </button>
+            <button type="button" disabled={!isOriginalOwner} onClick={onCloseAccount} className="inline-flex items-center justify-between rounded-lg border border-red-300/30 bg-red-500/15 px-4 py-3 text-left text-sm font-black text-red-50 transition hover:border-red-300/55 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50">
+              <span>Close DZN Account</span>
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function DangerZoneModal({
+  action,
+  serverName,
+  deleting,
+  onClose,
+  onDownloadSummary,
+  onConfirm,
+}: {
+  action: "server" | "account";
+  serverName: string;
+  deleting: boolean;
+  onClose: () => void;
+  onDownloadSummary: () => void;
+  onConfirm: (action: "server" | "account", confirmationText: string, finalConfirmed: boolean) => Promise<void>;
+}) {
+  const [step, setStep] = useState(1);
+  const [confirmationText, setConfirmationText] = useState("");
+  const [finalConfirmed, setFinalConfirmed] = useState(false);
+  const isServerDelete = action === "server";
+  const requiredText = isServerDelete ? "DELETE SERVER" : "DELETE MY DZN ACCOUNT";
+  const confirmationValid = isServerDelete
+    ? confirmationText.trim() === "DELETE SERVER" || confirmationText.trim() === serverName
+    : confirmationText.trim() === requiredText;
+  const canDelete = confirmationValid && finalConfirmed && !deleting;
+  const deletedItems = isServerDelete ? SERVER_DELETE_ITEMS : ACCOUNT_DELETE_ITEMS;
+  const preservedItems = isServerDelete ? SERVER_NOT_DELETED_ITEMS : ACCOUNT_NOT_DELETED_ITEMS;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 px-4 py-6 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg border border-red-300/25 bg-[#070b16] p-5 shadow-[0_0_80px_rgba(239,68,68,0.18)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase text-red-200">Permanent deletion</p>
+            <h2 className="mt-1 text-2xl font-black uppercase text-white">
+              {isServerDelete ? "Remove This Server From DZN" : "Close My DZN Account"}
+            </h2>
+          </div>
+          <button type="button" disabled={deleting} onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-300 disabled:opacity-50">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 flex gap-2">
+          {[1, 2, 3, 4].map((item) => (
+            <span key={item} className={`h-1.5 flex-1 rounded-sm ${item <= step ? "bg-red-300" : "bg-white/10"}`} />
+          ))}
+        </div>
+
+        {step === 1 ? (
+          <div className="mt-5 rounded-lg border border-red-300/20 bg-red-500/10 p-4">
+            <div className="flex gap-3">
+              <AlertTriangle className="mt-1 h-5 w-5 shrink-0 text-red-200" />
+              <div>
+                <p className="text-sm font-black uppercase text-red-100">This cannot be undone.</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                  {isServerDelete
+                    ? "This will permanently delete this server's DZN listing, metadata, synced logs, stats, and history. DZN will not touch your real Discord or Nitrado server."
+                    : "This will permanently close your DZN account and delete your DZN-owned user/server data. DZN will not touch your real Discord or Nitrado accounts or servers."}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {step === 2 ? (
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <Checklist title="Will be deleted" tone="danger" items={deletedItems} />
+            <Checklist title="Will not be deleted" tone="safe" items={preservedItems} />
+          </div>
+        ) : null}
+
+        {step === 3 ? (
+          <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-4">
+            <label className="text-xs font-black uppercase text-zinc-400" htmlFor="delete-confirmation">
+              Type confirmation
+            </label>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">
+              {isServerDelete ? (
+                <>Type the exact public server name <span className="font-black text-white">{serverName}</span> or <span className="font-black text-white">DELETE SERVER</span>.</>
+              ) : (
+                <>Type <span className="font-black text-white">DELETE MY DZN ACCOUNT</span>.</>
+              )}
+            </p>
+            <input
+              id="delete-confirmation"
+              value={confirmationText}
+              onChange={(event) => setConfirmationText(event.target.value)}
+              className="mt-4 w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm font-bold text-white outline-none transition focus:border-red-300/45"
+              placeholder={requiredText}
+            />
+          </div>
+        ) : null}
+
+        {step === 4 ? (
+          <div className="mt-5 grid gap-4">
+            <button type="button" onClick={onDownloadSummary} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50">
+              <span>Download My DZN Data Summary</span>
+              <Download className="h-4 w-4" />
+            </button>
+            <label className="flex items-start gap-3 rounded-lg border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold leading-6 text-red-50">
+              <input
+                type="checkbox"
+                checked={finalConfirmed}
+                onChange={(event) => setFinalConfirmed(event.target.checked)}
+                className="mt-1 h-4 w-4 accent-red-500"
+              />
+              <span>I understand this is permanent and cannot be undone.</span>
+            </label>
+            {!confirmationValid ? (
+              <p className="rounded-lg border border-orange-300/20 bg-orange-400/10 p-3 text-sm font-bold text-orange-50">
+                Go back and enter the required confirmation text before deletion is enabled.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <button type="button" disabled={deleting} onClick={step === 1 ? onClose : () => setStep((value) => Math.max(1, value - 1))} className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-black uppercase text-zinc-200 disabled:opacity-50">
+            {step === 1 ? "Cancel" : "Back"}
+          </button>
+          {step < 4 ? (
+            <button type="button" disabled={step === 3 && !confirmationValid} onClick={() => setStep((value) => Math.min(4, value + 1))} className="rounded-lg border border-red-300/25 bg-red-500/15 px-4 py-3 text-sm font-black uppercase text-red-50 disabled:cursor-not-allowed disabled:opacity-50">
+              Continue
+            </button>
+          ) : (
+            <button type="button" disabled={!canDelete} onClick={() => void onConfirm(action, confirmationText.trim(), finalConfirmed)} className="rounded-lg border border-red-300/40 bg-red-600 px-4 py-3 text-sm font-black uppercase text-white shadow-[0_0_32px_rgba(239,68,68,0.28)] disabled:cursor-not-allowed disabled:opacity-50">
+              {deleting ? "Deleting..." : isServerDelete ? "Permanently Remove Server" : "Permanently Close Account"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Checklist({ title, items, tone }: { title: string; items: string[]; tone: "danger" | "safe" }) {
+  return (
+    <div className={`rounded-lg border p-4 ${tone === "danger" ? "border-red-300/20 bg-red-500/10" : "border-emerald-300/20 bg-emerald-400/10"}`}>
+      <h3 className={`text-xs font-black uppercase ${tone === "danger" ? "text-red-100" : "text-emerald-100"}`}>{title}</h3>
+      <ul className="mt-3 grid gap-2 text-sm leading-5 text-zinc-300">
+        {items.map((item) => (
+          <li key={item} className="flex gap-2">
+            <span className={tone === "danger" ? "text-red-200" : "text-emerald-200"}>{tone === "danger" ? "Delete" : "Keep"}</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const SERVER_DELETE_ITEMS = [
+  "Public server listing",
+  "Server metadata",
+  "Server slug and aliases",
+  "ADM sync state",
+  "ADM raw event rows",
+  "Player events",
+  "Kill events",
+  "Player profiles for this linked server",
+  "Server stats",
+  "Sync runs",
+  "Server metadata version history",
+  "Saved Nitrado token/connection for this server",
+];
+
+const SERVER_NOT_DELETED_ITEMS = [
+  "Your Discord account",
+  "Your Discord server",
+  "Your Nitrado account",
+  "Your actual Nitrado game server",
+  "Any other DZN server owned by you",
+];
+
+const ACCOUNT_DELETE_ITEMS = [
+  "User profile in DZN",
+  "Sessions",
+  "Discord guild links owned by this DZN user where applicable",
+  "All linked servers owned by you",
+  "All Nitrado connections saved by you",
+  "All synced logs/events/stats for those linked servers",
+  "All public server listings owned by you",
+  "All metadata versions/aliases for those linked servers",
+  "Sync runs for those linked servers",
+];
+
+const ACCOUNT_NOT_DELETED_ITEMS = [
+  "Your actual Discord account",
+  "Your actual Discord server",
+  "Your actual Nitrado account",
+  "Your actual Nitrado game server",
+];
 
 function PanelHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
