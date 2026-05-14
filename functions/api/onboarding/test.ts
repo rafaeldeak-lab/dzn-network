@@ -1,6 +1,8 @@
 import { getCurrentLinkedServer, getSessionUser, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
+import { detectNitradoAdmLogs, mockAdmLogDetection } from "../../_lib/nitrado";
+import { getLatestNitradoToken } from "../../_lib/onboarding";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -14,11 +16,21 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!linkedServer || typeof linkedServer.id !== "string") {
     return json({ error: "No linked server found" }, { status: 400 });
   }
+  if (typeof linkedServer.nitrado_service_id !== "string" || !linkedServer.nitrado_service_id) {
+    return json({ error: "No Nitrado service selected" }, { status: 400 });
+  }
+
+  const admLog = isMockNitrado(env.MOCK_NITRADO)
+    ? mockAdmLogDetection()
+    : await detectNitradoAdmLogs(
+        (await getLatestNitradoToken(env, user.id)) ?? "",
+        linkedServer.nitrado_service_id,
+      );
 
   const checks = {
     token_valid: 1,
     service_access: 1,
-    adm_logs_found: isMockNitrado(env.MOCK_NITRADO) ? 1 : 0,
+    adm_logs_found: admLog.found ? 1 : 0,
     dayz_service_detected: 1,
   };
 
@@ -72,6 +84,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       serviceAccess: true,
       admLogsFound: Boolean(checks.adm_logs_found),
       dayzServiceDetected: true,
+      admLog,
     },
   });
 };

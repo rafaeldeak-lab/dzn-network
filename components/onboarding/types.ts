@@ -25,6 +25,24 @@ export type NitradoService = {
   region?: string;
 };
 
+export type AdmLogDetection = {
+  found: boolean;
+  admFileExists: boolean;
+  sampleReadSucceeded: boolean;
+  newestAdmFileName: string | null;
+  admPath: string | null;
+  lastCheckedAt: string;
+  checkedPaths: string[];
+};
+
+export type OnboardingChecks = {
+  tokenValid: boolean;
+  serviceAccess: boolean;
+  admLogsFound: boolean;
+  dayzServiceDetected: boolean;
+  admLog?: AdmLogDetection;
+};
+
 export type LinkedServer = {
   id: string;
   guild_id: string;

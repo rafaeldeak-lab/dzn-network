@@ -25,7 +25,7 @@ import {
   testOnboarding,
   validateNitradoToken,
 } from "./api";
-import type { DiscordGuild, NitradoService } from "./types";
+import type { DiscordGuild, NitradoService, OnboardingChecks } from "./types";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 
 const steps = [
@@ -70,12 +70,7 @@ export function SetupWizard() {
   const [selectedService, setSelectedService] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [checks, setChecks] = useState<null | {
-    tokenValid: boolean;
-    serviceAccess: boolean;
-    admLogsFound: boolean;
-    dayzServiceDetected: boolean;
-  }>(null);
+  const [checks, setChecks] = useState<OnboardingChecks | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -370,8 +365,16 @@ function ServiceStep({ services, selectedService, setSelectedService, onNext, bu
   );
 }
 
-function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; tags: string[]; checks: null | { tokenValid: boolean; serviceAccess: boolean; admLogsFound: boolean; dayzServiceDetected: boolean }; busy: boolean; onTest: () => void; onGoLive: () => void }) {
+function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onGoLive: () => void }) {
   const canGoLive = Boolean(checks?.tokenValid && checks.serviceAccess && checks.dayzServiceDetected);
+  const checkRows = checks
+    ? [
+        ["tokenValid", checks.tokenValid],
+        ["serviceAccess", checks.serviceAccess],
+        ["admLogsFound", checks.admLogsFound],
+        ["dayzServiceDetected", checks.dayzServiceDetected],
+      ] as const
+    : [];
   return (
     <Step title="Review & Test" icon={ShieldCheck} description="Confirm details and run the owner verification checks before publishing.">
       <div className="grid gap-3 md:grid-cols-2">
@@ -381,13 +384,26 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
         <Summary label="Tags" value={tags.length ? tags.join(", ") : "No optional tags"} />
       </div>
       {checks ? (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          {Object.entries(checks).map(([key, value]) => (
-            <div key={key} className={`rounded-lg border p-3 text-sm font-bold ${value ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-orange-300/25 bg-orange-400/10 text-orange-100"}`}>
-              {key}: {value ? "Passed" : "Needs review"}
+        <>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {checkRows.map(([key, value]) => (
+              <div key={key} className={`rounded-lg border p-3 text-sm font-bold ${value ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-orange-300/25 bg-orange-400/10 text-orange-100"}`}>
+                {key}: {value ? "Passed" : "Needs review"}
+              </div>
+            ))}
+          </div>
+          {checks.admLog ? (
+            <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-4">
+              <p className="text-xs font-black uppercase text-violet-200/70">ADM discovery</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <Summary label="Newest ADM file" value={checks.admLog.newestAdmFileName ?? "Not found"} />
+                <Summary label="ADM path found" value={checks.admLog.admPath ?? "Not found"} />
+                <Summary label="Last checked" value={formatCheckedAt(checks.admLog.lastCheckedAt)} />
+                <Summary label="Sample read" value={checks.admLog.sampleReadSucceeded ? "Succeeded" : "Not available"} />
+              </div>
             </div>
-          ))}
-        </div>
+          ) : null}
+        </>
       ) : null}
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
         <WizardButton disabled={busy} onClick={onTest}>{busy ? "Testing" : "Run test"}</WizardButton>
@@ -434,7 +450,12 @@ function Summary({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/24 p-4">
       <p className="text-xs font-black uppercase text-zinc-500">{label}</p>
-      <p className="mt-2 font-bold text-white">{value}</p>
+      <p className="mt-2 break-words font-bold text-white">{value}</p>
     </div>
   );
+}
+
+function formatCheckedAt(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }

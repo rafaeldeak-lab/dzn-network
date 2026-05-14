@@ -1,4 +1,4 @@
-import type { AuthResponse, DiscordGuild, NitradoService } from "./types";
+import type { AuthResponse, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
 
 export async function getMe() {
   return request<AuthResponse>("/api/auth/me");
@@ -39,12 +39,7 @@ export async function saveOnboarding(data: {
 export async function testOnboarding() {
   return request<{
     ok: boolean;
-    checks: {
-      tokenValid: boolean;
-      serviceAccess: boolean;
-      admLogsFound: boolean;
-      dayzServiceDetected: boolean;
-    };
+    checks: OnboardingChecks;
   }>("/api/onboarding/test", { method: "POST" });
 }
 
