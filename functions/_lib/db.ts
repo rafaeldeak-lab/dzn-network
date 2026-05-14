@@ -154,7 +154,11 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
 
   const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
   server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
-  server.adm_status = Number(server.adm_logs_found) === 1 ? "Connected" : "Needs review";
+  server.adm_status = Number(server.adm_logs_found) === 1
+    ? "Connected"
+    : rawAdmPath
+      ? "Discovered, read pending"
+      : "Needs review";
   if (!options.includePrivateAdmPath && rawAdmPath) {
     server.adm_path = maskNitradoApiPath(rawAdmPath);
   }

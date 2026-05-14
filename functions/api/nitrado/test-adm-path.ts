@@ -37,7 +37,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       );
 
   const admStoragePath = getAdmLogStoragePath(admLog);
-  if (admLog.found && admStoragePath) {
+  if (admLog.admFileExists && admStoragePath) {
     await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
   }
 

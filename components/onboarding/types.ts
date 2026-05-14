@@ -44,8 +44,13 @@ export type AdmApiDebug = {
   methodsTried: {
     method: "download" | "seek" | "stat" | "list" | "service-details";
     status: "OK" | "401" | "403" | "404" | "error";
+    pathVariantLabel?: string | null;
     path?: string;
     pathRedacted?: string;
+    redactedPath?: string;
+    requestUrlPathOnly?: string;
+    httpStatusCode?: number | null;
+    responseContentType?: string | null;
     dir?: string;
     search?: string | null;
     fileVisible?: boolean;
@@ -56,6 +61,7 @@ export type AdmApiDebug = {
     sampleFetchAttempted?: boolean;
     sampleFetchStatus?: "OK" | "401" | "403" | "404" | "error" | "not_attempted";
     sampleReadSucceeded?: boolean;
+    success?: boolean;
     entriesReturned?: number;
     admFilesFound?: number;
   }[];
@@ -68,10 +74,15 @@ export type AdmApiDebug = {
   }[];
   statAttempts: {
     path: string;
+    pathVariantLabel: string | null;
+    requestUrlPathOnly: string;
+    httpStatusCode: number | null;
+    responseContentType: string | null;
     status: "OK" | "401" | "403" | "404" | "error";
     fileVisible: boolean;
     responseShape: AdmApiResponseShape;
     errorMessageSafe: string | null;
+    success: boolean;
   }[];
   serviceDetailsAttempt: {
     status: "OK" | "401" | "403" | "404" | "error";
@@ -105,6 +116,10 @@ export type AdmApiDebug = {
   readAttempts: {
     path: string;
     method: "seek" | "download";
+    pathVariantLabel: string | null;
+    requestUrlPathOnly: string;
+    httpStatusCode: number | null;
+    responseContentType: string | null;
     status: "OK" | "401" | "403" | "404" | "error";
     responseShape: AdmApiResponseShape;
     errorMessageSafe: string | null;
@@ -113,6 +128,7 @@ export type AdmApiDebug = {
     sampleFetchAttempted: boolean;
     sampleFetchStatus: "OK" | "401" | "403" | "404" | "error" | "not_attempted";
     sampleReadSucceeded: boolean;
+    success: boolean;
   }[];
 };
 
@@ -121,6 +137,13 @@ export type AdmApiResponseShape = {
   hasToken: boolean;
   hasTokenUrl: boolean;
   hasTokenValue: boolean;
+  topLevelKeys: string[];
+  dataKeys: string[];
+  hasDataToken: boolean;
+  hasDataTokenUrl: boolean;
+  hasDataTokenValue: boolean;
+  hasDataDownload: boolean;
+  hasDataUrl: boolean;
 };
 
 export type OnboardingChecks = {
@@ -145,7 +168,7 @@ export type LinkedServer = {
   status: "pending" | "live" | "error" | "Pending" | "Live" | "Error";
   public_slug: string;
   adm_path?: string | null;
-  adm_status?: "Connected" | "Needs review" | string | null;
+  adm_status?: "Connected" | "Discovered, read pending" | "Needs review" | string | null;
   adm_latest_file?: string | null;
   adm_last_checked_at?: string | null;
   adm_logs_found?: number | null;

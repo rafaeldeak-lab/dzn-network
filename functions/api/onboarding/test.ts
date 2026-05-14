@@ -29,7 +29,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       : await detectNitradoAdmLogs(nitradoToken, linkedServer.nitrado_service_id);
 
   const admStoragePath = getAdmLogStoragePath(admLog);
-  if (admLog.found && admStoragePath) {
+  if (admLog.admFileExists && admStoragePath) {
     await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
   }
 

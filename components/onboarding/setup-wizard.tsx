@@ -541,18 +541,22 @@ function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
         <p className="text-xs font-black uppercase text-zinc-500">Methods tried</p>
         <div className="mt-2 grid max-h-72 gap-2 overflow-auto pr-1">
           {debug.methodsTried.map((attempt, index) => (
-            <div key={`${attempt.method}-${attempt.path ?? attempt.dir ?? "detail"}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 lg:grid-cols-[90px_70px_1fr_1fr]">
+            <div key={`${attempt.method}-${attempt.path ?? attempt.dir ?? "detail"}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 xl:grid-cols-[70px_90px_90px_1.1fr_1.1fr_1.3fr]">
+              <span className="font-black text-violet-100">{attempt.pathVariantLabel ?? "-"}</span>
               <span className="font-black text-violet-100">{attempt.method}</span>
-              <span className={attempt.status === "OK" ? "font-black text-emerald-100" : "font-black text-orange-100"}>{attempt.status}</span>
-              <span className="break-words">{attempt.pathRedacted || attempt.path ? `path: ${attempt.pathRedacted ?? attempt.path}` : `dir: ${attempt.dir ?? "-"}`}</span>
+              <span className={attempt.status === "OK" ? "font-black text-emerald-100" : "font-black text-orange-100"}>
+                {attempt.status}{attempt.httpStatusCode ? ` / ${attempt.httpStatusCode}` : ""}
+              </span>
+              <span className="break-words">{attempt.pathRedacted || attempt.redactedPath || attempt.path ? `path: ${attempt.pathRedacted ?? attempt.redactedPath ?? attempt.path}` : `dir: ${attempt.dir ?? "-"}`}</span>
+              <span className="break-words">{attempt.requestUrlPathOnly ? `request: ${attempt.requestUrlPathOnly}` : `content: ${attempt.responseContentType ?? "-"}`}</span>
               <span className="break-words">
                 {attempt.method === "list"
                   ? `search: ${attempt.search ?? "none"} | entries: ${attempt.entriesReturned ?? 0} | ADM: ${attempt.admFilesFound ?? 0}`
                   : attempt.method === "stat"
-                    ? `visible: ${attempt.fileVisible ? "yes" : "no"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`
+                    ? `success: ${attempt.success ? "yes" : "no"} | visible: ${attempt.fileVisible ? "yes" : "no"} | content: ${attempt.responseContentType ?? "-"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`
                     : attempt.method === "service-details"
                       ? `paths: ${attempt.entriesReturned ?? 0} | log_files: ${debug.gameSpecificLogFilesReturned} | ADM: ${debug.gameSpecificAdmFilesFound.length}`
-                      : `token: ${attempt.downloadTokenCreated ? "yes" : "no"} | token URL: ${attempt.tokenUrlReceived ? "yes" : "no"} | fetch: ${attempt.sampleFetchAttempted ? attempt.sampleFetchStatus ?? "error" : "no"} | sample: ${attempt.sampleReadSucceeded ? "yes" : "no"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`}
+                      : `success: ${attempt.success ? "yes" : "no"} | token: ${attempt.downloadTokenCreated ? "yes" : "no"} | token URL: ${attempt.tokenUrlReceived ? "yes" : "no"} | fetch: ${attempt.sampleFetchAttempted ? attempt.sampleFetchStatus ?? "error" : "no"} | sample: ${attempt.sampleReadSucceeded ? "yes" : "no"} | content: ${attempt.responseContentType ?? "-"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`}
               </span>
             </div>
           ))}
@@ -604,5 +608,7 @@ function formatCheckedAt(value: string) {
 
 function formatShape(shape: AdmApiDebug["methodsTried"][number]["responseShape"]) {
   if (!shape) return "shape: data no / token no / url no / value no";
-  return `shape: data ${shape.hasData ? "yes" : "no"} / token ${shape.hasToken ? "yes" : "no"} / url ${shape.hasTokenUrl ? "yes" : "no"} / value ${shape.hasTokenValue ? "yes" : "no"}`;
+  const top = shape.topLevelKeys.length ? shape.topLevelKeys.join(",") : "-";
+  const data = shape.dataKeys.length ? shape.dataKeys.join(",") : "-";
+  return `shape: top [${top}] / data [${data}] / data.token ${shape.hasDataToken ? "yes" : "no"} / data.token.url ${shape.hasDataTokenUrl ? "yes" : "no"} / data.token.token ${shape.hasDataTokenValue ? "yes" : "no"} / data.download ${shape.hasDataDownload ? "yes" : "no"} / data.url ${shape.hasDataUrl ? "yes" : "no"} / token.url ${shape.hasTokenUrl ? "yes" : "no"} / token ${shape.hasTokenValue ? "yes" : "no"}`;
 }
