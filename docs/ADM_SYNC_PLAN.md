@@ -10,6 +10,17 @@ This is a planning note for the ADM sync engine.
 - Owner-only manual sync endpoint.
 - Owner dashboard sync card with safe counters and manual sync action.
 
+## Phase 2 Implemented
+
+- Parsed ADM lines are persisted into owner-only raw event, player event, and credited kill tables.
+- Manual sync uses `adm_sync_state` as the cursor and skips lines already processed for the same ADM file.
+- New ADM files reset the line cursor so processing starts from the beginning of the new file.
+- Event row IDs are deterministic per linked server, ADM file, and line number so repeated manual sync runs do not duplicate rows or counters.
+- Player profiles are upserted by `player_id` when present, then by player name as a fallback.
+- Server counters now update from real parsed events: credited PvP kills, deaths, joins, disconnects, unique players, and last event time.
+- The owner dashboard reads `/api/sync/status` and `/api/sync/recent-events` for live sync counters and recent synced activity.
+- Mock Nitrado mode runs representative ADM lines through the same parser and sync path as real data.
+
 ## Supported ADM Event Types
 
 - `admin_log_started`
@@ -65,6 +76,8 @@ This is a planning note for the ADM sync engine.
 - Leaderboard calculations.
 - Player profile pages.
 - Public stat surfacing after privacy review.
+- Damage analytics.
+- Grenade attribution correlation.
 
 ## Safety Notes
 

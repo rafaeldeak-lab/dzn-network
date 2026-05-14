@@ -5,8 +5,8 @@ import { Activity, AlertTriangle, ArrowRight, DatabaseZap, LogOut, RefreshCw, Se
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { getMe, getSyncStatus, logout, runManualSync, testOnboarding } from "./api";
-import type { AdmSyncStatus, AuthResponse, LinkedServer } from "./types";
+import { getMe, getRecentSyncEvents, getSyncStatus, logout, runManualSync, testOnboarding } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncStatus, AuthResponse, LinkedServer } from "./types";
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -110,6 +110,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [checkingLogs, setCheckingLogs] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
+  const [recentEvents, setRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [actionMessage, setActionMessage] = useState("");
   const tags = useMemo(() => {
     try {
@@ -133,12 +134,16 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
 
   useEffect(() => {
     let active = true;
-    getSyncStatus(server.id)
-      .then((result) => {
-        if (active) setSyncStatus(result.status);
+    Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)])
+      .then(([statusResult, eventsResult]) => {
+        if (!active) return;
+        setSyncStatus(statusResult.status);
+        setRecentEvents(eventsResult.events);
       })
       .catch(() => {
-        if (active) setSyncStatus(null);
+        if (!active) return;
+        setSyncStatus(null);
+        setRecentEvents([]);
       });
     return () => {
       active = false;
@@ -164,8 +169,9 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     setActionMessage("");
     try {
       const result = await runManualSync(server.id);
-      const status = await getSyncStatus(server.id);
+      const [status, events] = await Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)]);
       setSyncStatus(status.status);
+      setRecentEvents(events.events);
       await onRefresh();
       setActionMessage(result.message);
     } catch (error) {
@@ -257,7 +263,9 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
               <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
               <MiniInfo label="Total Kills" value={String(syncStatus?.total_kills ?? 0)} />
+              <MiniInfo label="Total Deaths" value={String(syncStatus?.total_deaths ?? 0)} />
               <MiniInfo label="Total Joins" value={String(syncStatus?.total_joins ?? 0)} />
+              <MiniInfo label="Total Disconnects" value={String(syncStatus?.total_disconnects ?? 0)} />
               <MiniInfo label="Unique Players" value={String(syncStatus?.unique_players ?? 0)} />
               <MiniInfo label="ADM Folder" value={admFolder ?? "Not detected"} />
               <MiniInfo label="Read Status" value={admState.readStatus} />
@@ -333,13 +341,17 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
         <div className="glass-surface animated-border rounded-lg p-5">
           <div className="relative z-10">
             <Activity className="h-8 w-8 text-cyan-200" />
-            <h3 className="mt-4 text-xl font-black uppercase text-white">Recent Activity</h3>
+            <h3 className="mt-4 text-xl font-black uppercase text-white">Recent Synced Events</h3>
             <div className="mt-4 grid gap-2">
-              {["No synced events yet", "Killfeed activates once ADM sync is live", "Player stats will appear after log processing begins"].map((item) => (
-                <div key={item} className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">
-                  {item}
-                </div>
-              ))}
+              {recentEvents.length ? (
+                recentEvents.map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)
+              ) : (
+                ["No synced events yet", "Killfeed activates once ADM sync is live", "Player stats will appear after log processing begins"].map((item) => (
+                  <div key={item} className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">
+                    {item}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -398,9 +410,49 @@ function MiniInfo({ label, value }: { label: string; value: string }) {
   );
 }
 
+function RecentSyncEventRow({ event }: { event: AdmRecentSyncEvent }) {
+  const isKill = event.source === "kill";
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black uppercase text-zinc-500">{formatEventType(event.event_type)}</p>
+          <p className="mt-1 text-sm font-bold leading-5 text-white">
+            {isKill
+              ? `${event.killer_name ?? "Unknown"} -> ${event.victim_name ?? "Unknown"}`
+              : event.player_name ?? "Unknown player"}
+          </p>
+          {isKill ? (
+            <p className="mt-1 text-xs font-bold text-zinc-400">
+              {[event.weapon, event.distance !== null ? `${event.distance.toFixed(1)}m` : null].filter(Boolean).join(" / ") || "Credited PvP kill"}
+            </p>
+          ) : null}
+        </div>
+        <p className="shrink-0 text-right text-[10px] font-black uppercase text-zinc-500">
+          {formatCompactDate(event.occurred_at ?? event.created_at)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function formatDashboardDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatCompactDate(value: string | null) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatEventType(value: string) {
+  return value
+    .replace(/^player_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function looksLikeIpAddress(value: string) {

@@ -1,4 +1,4 @@
-import type { AdmSyncRunResult, AdmSyncStatus, AuthResponse, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, DiscordGuild, NitradoService, OnboardingChecks } from "./types";
 
 export async function getMe() {
   return request<AuthResponse>("/api/auth/me");
@@ -57,6 +57,11 @@ export async function testAdmPath(path: string) {
 export async function getSyncStatus(linkedServerId?: string) {
   const query = linkedServerId ? `?linked_server_id=${encodeURIComponent(linkedServerId)}` : "";
   return request<{ status: AdmSyncStatus }>(`/api/sync/status${query}`);
+}
+
+export async function getRecentSyncEvents(linkedServerId?: string) {
+  const query = linkedServerId ? `?linked_server_id=${encodeURIComponent(linkedServerId)}` : "";
+  return request<{ events: AdmRecentSyncEvent[] }>(`/api/sync/recent-events${query}`);
 }
 
 export async function runManualSync(linkedServerId?: string) {

@@ -196,6 +196,18 @@ export type AdmSyncStatus = {
   unique_players: number;
 };
 
+export type AdmRecentSyncEvent = {
+  source: "kill" | "player";
+  event_type: string;
+  player_name: string | null;
+  killer_name: string | null;
+  victim_name: string | null;
+  weapon: string | null;
+  distance: number | null;
+  occurred_at: string | null;
+  created_at: string | null;
+};
+
 export type AdmSyncRunResult = {
   status: string;
   message: string;

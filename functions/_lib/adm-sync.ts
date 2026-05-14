@@ -49,6 +49,18 @@ export type AdmSyncStatus = {
   unique_players: number;
 };
 
+export type AdmRecentSyncEvent = {
+  source: "kill" | "player";
+  event_type: string;
+  player_name: string | null;
+  killer_name: string | null;
+  victim_name: string | null;
+  weapon: string | null;
+  distance: number | null;
+  occurred_at: string | null;
+  created_at: string | null;
+};
+
 export async function runAdmSync(env: Env, userId: string, linkedServerId?: string | null): Promise<AdmSyncResult> {
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
@@ -98,9 +110,8 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     };
   }
 
-  const lastProcessedLine = existingState?.last_processed_file === latestAdmFile
-    ? Number(existingState?.last_processed_line ?? 0)
-    : 0;
+  const isSameAdmFile = Boolean(latestAdmFile && existingState?.last_processed_file === latestAdmFile);
+  const lastProcessedLine = isSameAdmFile ? Number(existingState?.last_processed_line ?? 0) : 0;
   const parsedLines = parseAdmLines(lines, { admDate: extractAdmDateFromFile(latestAdmFile) ?? undefined });
   const pendingParsedEvents = parsedLines.slice(lastProcessedLine);
   let eventsCreated = 0;
@@ -108,7 +119,7 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
   let joinsCreated = 0;
   let disconnectsCreated = 0;
   let deathsCreated = 0;
-  let processedOffset = Number(existingState?.last_processed_offset ?? 0);
+  let processedOffset = isSameAdmFile ? Number(existingState?.last_processed_offset ?? 0) : 0;
   let lastEventAt: string | null = null;
   const recentDeathLines = new Map<string, number>();
   const warmupStart = Math.max(0, lastProcessedLine - 5);
@@ -217,6 +228,61 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
   };
 }
 
+export async function getRecentAdmSyncEvents(
+  env: Env,
+  userId: string,
+  linkedServerId?: string | null,
+  limit = 10,
+): Promise<AdmRecentSyncEvent[]> {
+  await ensureAdmSyncSchema(env);
+  const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
+  if (!linkedServer) throw new Error("No linked server found");
+
+  const db = requireDb(env);
+  const safeLimit = Math.min(Math.max(Math.trunc(limit) || 10, 1), 25);
+  const result = await db
+    .prepare(
+      `SELECT source, event_type, player_name, killer_name, victim_name, weapon, distance, occurred_at, created_at
+       FROM (
+         SELECT
+           'kill' AS source,
+           'player_killed' AS event_type,
+           NULL AS player_name,
+           killer_name,
+           victim_name,
+           weapon,
+           distance,
+           occurred_at,
+           created_at,
+           COALESCE(occurred_at, created_at) AS sort_time
+         FROM kill_events
+         WHERE linked_server_id = ?
+
+         UNION ALL
+
+         SELECT
+           'player' AS source,
+           event_type,
+           player_name,
+           NULL AS killer_name,
+           NULL AS victim_name,
+           NULL AS weapon,
+           NULL AS distance,
+           occurred_at,
+           created_at,
+           COALESCE(occurred_at, created_at) AS sort_time
+         FROM player_events
+         WHERE linked_server_id = ?
+       )
+       ORDER BY sort_time DESC, created_at DESC
+       LIMIT ?`,
+    )
+    .bind(linkedServer.id, linkedServer.id, safeLimit)
+    .all<AdmRecentSyncEvent>();
+
+  return result.results ?? [];
+}
+
 export async function ensureAdmSyncSchema(env: Env) {
   const db = requireDb(env);
   for (const statement of ADM_SYNC_SCHEMA_STATEMENTS) {
@@ -314,14 +380,15 @@ async function insertRawEvent(
   parsed: ParsedAdmEvent,
 ) {
   const db = requireDb(env);
+  const id = await stableSyncId("raw", linkedServerId, admFile, lineNumber);
   await db
     .prepare(
-      `INSERT INTO adm_raw_events (
+      `INSERT OR IGNORE INTO adm_raw_events (
         id, linked_server_id, adm_file, line_number, raw_line, event_type, parsed, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
-      crypto.randomUUID(),
+      id,
       linkedServerId,
       admFile,
       lineNumber,
@@ -350,10 +417,15 @@ async function persistParsedEvent(
   }
 
   if (parsed.eventType === "playerlist_entry" || parsed.eventType === "plain_player_state") {
+    let playerProfileId: string | null = null;
     if (parsed.playerName) {
-      await upsertPlayerProfile(env, linkedServerId, parsed.playerName, parsed.playerId, parsed.occurredAt);
+      playerProfileId = await upsertPlayerProfile(env, linkedServerId, parsed.playerName, parsed.playerId, parsed.occurredAt);
     }
-    return emptyPersistResult();
+    const inserted = await insertPlayerEvent(env, linkedServerId, playerProfileId, admFile, lineNumber, parsed);
+    return {
+      ...emptyPersistResult(),
+      eventsCreated: inserted ? 1 : 0,
+    };
   }
 
   const result = emptyPersistResult();
@@ -365,18 +437,20 @@ async function persistParsedEvent(
     const victimProfileId = parsed.victimName
       ? await upsertPlayerProfile(env, linkedServerId, parsed.victimName, parsed.victimId, parsed.occurredAt)
       : null;
-    await insertKillEvent(env, linkedServerId, killerProfileId, victimProfileId, admFile, lineNumber, parsed);
-    await updateProfilesForDeath(env, {
-      killerProfileId,
-      victimProfileId,
-      killerGetsKill: true,
-      suicide: false,
-      distance: parsed.distance,
-    });
+    const inserted = await insertKillEvent(env, linkedServerId, killerProfileId, victimProfileId, admFile, lineNumber, parsed);
+    if (inserted) {
+      await updateProfilesForDeath(env, {
+        killerProfileId,
+        victimProfileId,
+        killerGetsKill: true,
+        suicide: false,
+        distance: parsed.distance,
+      });
+      result.eventsCreated = 1;
+      result.killsCreated = 1;
+      result.deathsCreated = 1;
+    }
     markDeathCounted(context.recentDeathLines, parsed, lineNumber);
-    result.eventsCreated = 1;
-    result.killsCreated = 1;
-    result.deathsCreated = 1;
     return result;
   }
 
@@ -386,7 +460,9 @@ async function persistParsedEvent(
     playerProfileId = await upsertPlayerProfile(env, linkedServerId, eventPlayer.name, eventPlayer.id, parsed.occurredAt);
   }
 
-  await insertPlayerEvent(env, linkedServerId, playerProfileId, admFile, lineNumber, parsed);
+  const inserted = await insertPlayerEvent(env, linkedServerId, playerProfileId, admFile, lineNumber, parsed);
+  if (!inserted) return result;
+
   result.eventsCreated = 1;
 
   if (parsed.eventType === "player_connected") result.joinsCreated = 1;
@@ -434,15 +510,16 @@ async function insertPlayerEvent(
   parsed: ParsedAdmEvent,
 ) {
   const db = requireDb(env);
-  await db
+  const id = await stableSyncId("player-event", linkedServerId, admFile, lineNumber, parsed.eventType);
+  const result = await db
     .prepare(
-      `INSERT INTO player_events (
+      `INSERT OR IGNORE INTO player_events (
         id, linked_server_id, player_profile_id, player_name, player_id, event_type,
         position_x, position_y, position_z, adm_file, line_number, occurred_at, raw_line, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
-      crypto.randomUUID(),
+      id,
       linkedServerId,
       playerProfileId,
       parsed.playerName,
@@ -457,6 +534,7 @@ async function insertPlayerEvent(
       parsed.rawLine,
     )
     .run();
+  return didMutate(result);
 }
 
 async function insertKillEvent(
@@ -469,16 +547,17 @@ async function insertKillEvent(
   parsed: ParsedAdmEvent,
 ) {
   const db = requireDb(env);
-  await db
+  const id = await stableSyncId("kill-event", linkedServerId, admFile, lineNumber);
+  const result = await db
     .prepare(
-      `INSERT INTO kill_events (
+      `INSERT OR IGNORE INTO kill_events (
         id, linked_server_id, killer_profile_id, victim_profile_id, killer_name, victim_name,
         killer_id, victim_id, weapon, distance, position_x, position_y, position_z,
         adm_file, line_number, occurred_at, raw_line, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
-      crypto.randomUUID(),
+      id,
       linkedServerId,
       killerProfileId,
       victimProfileId,
@@ -497,6 +576,7 @@ async function insertKillEvent(
       parsed.rawLine,
     )
     .run();
+  return didMutate(result);
 }
 
 async function upsertPlayerProfile(
@@ -642,16 +722,36 @@ function getReadableAdmLines(samplePreview: string | null) {
 function mockAdmLines() {
   return [
     "AdminLog started on 2026-05-14 at 13:45:00",
+    "13:45:05 | Player \"MockSurvivor\" (id=mock-player-1) is connecting",
     "13:45:10 | Player \"MockSurvivor\" (id=mock-player-1 pos=<123.4, 456.7, 89.0>) is connected",
+    "13:45:12 | Player \"MockBandit\" (id=mock-player-2 pos=<140.0, 490.0, 92.0>) is connected",
     "13:45:35 | Player \"MockSurvivor\" (id=mock-player-1 pos=<124.0, 457.0, 89.1>) placed Fireplace",
     "13:46:09 | Player \"MockSurvivor\" (DEAD) (id=mock-player-1 pos=<130.0, 460.0, 89.1>)[HP: 0] hit by Player \"MockBandit\" (id=mock-player-2 pos=<140.0, 490.0, 92.0>) into Head(0) for 30.5 damage (Bullet_556x45) with M4A1 from 72.5 meters",
     "13:46:10 | Player \"MockSurvivor\" (DEAD) (id=mock-player-1 pos=<130.0, 460.0, 89.1>) killed by Player \"MockBandit\" (id=mock-player-2 pos=<140.0, 490.0, 92.0>) with M4A1 from 72.5 meters",
+    "13:46:11 | Player \"MockSurvivor\" (DEAD) (id=mock-player-1 pos=<130.0, 460.0, 89.1>) died. Stats> Water: 582.795 Energy: 582.795 Bleed sources: 0",
+    "13:47:00 | Player \"MockRunner\" (id=mock-player-3 pos=<150.0, 500.0, 94.0>) is connected",
+    "13:47:40 | Player \"MockRunner\" (id=mock-player-3 pos=<151.0, 501.0, 94.2>) committed suicide",
     "13:48:00 | Player \"MockBandit\" (id=mock-player-2 pos=<141.0, 491.0, 92.0>) has been disconnected",
+    "13:48:02 | ##### PlayerList log: 2 players",
+    "13:48:02 | #####",
+    "13:48:02 | Player \"MockBandit\" (id=mock-player-2 pos=<141.0, 491.0, 92.0>)",
+    "13:48:02 | Player \"MockSurvivor\" (DEAD) (id=mock-player-1 pos=<130.0, 460.0, 89.1>)",
   ];
 }
 
 function fileNameFromPath(path: string | null) {
   return path ? path.split("/").filter(Boolean).at(-1) ?? null : null;
+}
+
+async function stableSyncId(prefix: string, linkedServerId: string, admFile: string | null, lineNumber: number, suffix = "") {
+  const input = `${prefix}:${linkedServerId}:${admFile ?? "unknown-adm"}:${lineNumber}:${suffix}`;
+  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  const hash = [...new Uint8Array(hashBuffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${prefix}:${hash.slice(0, 48)}`;
+}
+
+function didMutate(result: { meta?: { changes?: number } }) {
+  return Number(result.meta?.changes ?? 0) > 0;
 }
 
 function extractAdmDateFromFile(fileName: string | null) {
