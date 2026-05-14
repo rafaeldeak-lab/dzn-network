@@ -1,8 +1,8 @@
 import type { DiscordGuild, DiscordUser, NitradoService } from "./types";
 
 export const mockUser: DiscordUser = {
-  id: "100000000000000001",
-  username: "DZNOwner",
+  id: "mock-discord-user",
+  username: "RafaelDeak",
   avatar: null,
 };
 

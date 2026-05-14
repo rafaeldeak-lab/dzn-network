@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import Link from "next/link";
@@ -10,11 +11,34 @@ export function AuthShell({
   title,
   description,
   actionLabel = "Login with Discord",
+  authStartHref = "/api/auth/discord/start",
+  resolveAuthMode = false,
 }: {
   title: string;
   description: string;
   actionLabel?: string;
+  authStartHref?: string;
+  resolveAuthMode?: boolean;
 }) {
+  const [startHref, setStartHref] = useState(authStartHref);
+
+  useEffect(() => {
+    if (!resolveAuthMode) return;
+
+    let active = true;
+    fetch("/api/auth/mode", { cache: "no-store", credentials: "include" })
+      .then((response) => response.json() as Promise<{ mockAuth?: boolean }>)
+      .then((data) => {
+        if (!active) return;
+        setStartHref(data.mockAuth ? "/api/auth/mock/start" : "/api/auth/discord/start");
+      })
+      .catch(() => null);
+
+    return () => {
+      active = false;
+    };
+  }, [resolveAuthMode]);
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-8 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(139,92,246,0.28),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(14,165,233,0.16),transparent_28%),linear-gradient(180deg,#02030a_0%,#07101f_52%,#02030a_100%)]" />
@@ -46,7 +70,7 @@ export function AuthShell({
               {description}
             </p>
             <a
-              href="/api/auth/discord/start"
+              href={startHref}
               className="mt-8 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_34px_rgba(139,92,246,0.55)] transition hover:bg-violet-400"
             >
               {actionLabel}

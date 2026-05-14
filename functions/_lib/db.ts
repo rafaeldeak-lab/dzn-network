@@ -3,6 +3,7 @@ import { mockGuilds, mockUser } from "./mock";
 import type { DiscordGuild, DiscordUser, Env, SessionUser } from "./types";
 
 export const SESSION_COOKIE = "dzn_session";
+export const MOCK_USER_ID = "mock-user";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 export function requireDb(env: Env): D1Database {
@@ -108,9 +109,22 @@ export async function destroySession(env: Env, request: Request) {
 }
 
 export async function ensureMockUser(env: Env) {
-  const userId = await upsertUser(env, mockUser);
-  await storeGuilds(env, userId, mockGuilds);
-  return { userId, user: mockUser };
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET
+         discord_id = excluded.discord_id,
+         username = excluded.username,
+         avatar = excluded.avatar,
+         updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(MOCK_USER_ID, mockUser.id, mockUser.username, mockUser.avatar)
+    .run();
+
+  await storeGuilds(env, MOCK_USER_ID, mockGuilds);
+  return { userId: MOCK_USER_ID, user: mockUser };
 }
 
 export async function getCurrentLinkedServer(env: Env, userId: string) {
