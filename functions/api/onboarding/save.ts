@@ -1,4 +1,4 @@
-import { getSessionUser, requireDb } from "../../_lib/db";
+import { ensureLinkedServerMetadataColumns, getSessionUser, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { fetchMockNitradoServices, fetchNitradoServices } from "../../_lib/nitrado";
@@ -36,6 +36,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const userId = user.id;
   const db = requireDb(env);
+  await ensureLinkedServerMetadataColumns(env);
   const guild = await db
     .prepare("SELECT id, guild_id, name FROM discord_guilds WHERE guild_id = ? AND owner_user_id = ? LIMIT 1")
     .bind(body.discordGuildId, userId)
@@ -68,6 +69,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
           server_type = ?,
           tags_json = ?,
           region = ?,
+          game = ?,
+          platform = ?,
+          ip_address = ?,
+          player_slots = ?,
           status = 'pending',
           public_slug = ?,
           updated_at = CURRENT_TIMESTAMP
@@ -81,7 +86,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.name,
         body.serverType,
         JSON.stringify(tags),
-        service.region ?? null,
+        service.ipAddress ?? service.region ?? null,
+        service.game ?? null,
+        service.platform ?? null,
+        service.ipAddress ?? null,
+        service.playerSlots ?? null,
         publicSlug(service.name),
         linkedServerId,
       )
@@ -92,8 +101,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       .prepare(
         `INSERT INTO linked_servers (
           id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
-          server_name, server_type, tags_json, region, status, public_slug, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          server_name, server_type, tags_json, region, game, platform, ip_address, player_slots,
+          status, public_slug, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
       .bind(
         linkedServerId,
@@ -105,7 +115,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.name,
         body.serverType,
         JSON.stringify(tags),
-        service.region ?? null,
+        service.ipAddress ?? service.region ?? null,
+        service.game ?? null,
+        service.platform ?? null,
+        service.ipAddress ?? null,
+        service.playerSlots ?? null,
         publicSlug(service.name),
       )
       .run();

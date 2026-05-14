@@ -112,6 +112,8 @@ function ServerDashboard({ server }: { server: LinkedServer }) {
   const normalizedStatus = server.status.toLowerCase();
   const progress = normalizedStatus === "live" ? 100 : normalizedStatus === "error" ? 72 : 84;
   const admStatus = server.adm_status ?? (Number(server.adm_logs_found) === 1 ? "Connected" : "Needs review");
+  const networkAddress = server.ip_address ?? server.region ?? "Unknown";
+  const networkAddressLabel = looksLikeIpAddress(networkAddress) ? "IP Address" : "Region";
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
       <section className="glass-surface animated-border rounded-lg p-6">
@@ -138,7 +140,10 @@ function ServerDashboard({ server }: { server: LinkedServer }) {
             <Info label="Nitrado DayZ server" value={server.server_name || server.nitrado_service_name} />
             <Info label="Service ID" value={server.nitrado_service_id} />
             <Info label="Server type" value={server.server_type} />
-            <Info label="Region" value={server.region ?? "Unknown"} />
+            <Info label={networkAddressLabel} value={networkAddress} />
+            {server.game ? <Info label="Game" value={server.game} /> : null}
+            {server.platform ? <Info label="Platform" value={server.platform} /> : null}
+            {server.player_slots ? <Info label="Player Slots" value={String(server.player_slots)} /> : null}
             <Info label="ADM Status" value={admStatus} />
             <Info label="Latest ADM File" value={server.adm_latest_file ?? "Not detected"} />
             <Info label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
@@ -206,4 +211,8 @@ function Info({ label, value }: { label: string; value: string }) {
 function formatDashboardDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function looksLikeIpAddress(value: string) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(value);
 }

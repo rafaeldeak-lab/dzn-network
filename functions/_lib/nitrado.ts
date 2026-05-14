@@ -47,6 +47,12 @@ type NitradoRawService = {
   websocket_token?: string;
 };
 
+export class NitradoServiceLookupError extends Error {
+  constructor(public code: "invalid_token" | "service_not_found" | "access_denied" | "not_dayz" | "api_unavailable") {
+    super(code);
+  }
+}
+
 type NitradoFileEntry = {
   name: string;
   path: string;
@@ -211,10 +217,14 @@ export type AdmLogDetection = {
 
 export async function validateNitradoToken(token: string) {
   if (!token || token.length < 12) return false;
-  const response = await fetch(`${NITRADO_API}/services`, {
-    headers: nitradoHeaders(token),
-  });
-  return response.ok;
+  try {
+    const response = await fetch(`${NITRADO_API}/services`, {
+      headers: nitradoHeaders(token),
+    });
+    return response.ok;
+  } catch {
+    throw new NitradoServiceLookupError("api_unavailable");
+  }
 }
 
 export async function fetchNitradoServices(token: string): Promise<NitradoService[]> {
@@ -228,6 +238,40 @@ export async function fetchNitradoServices(token: string): Promise<NitradoServic
 
 export async function fetchMockNitradoServices() {
   return mockNitradoServices;
+}
+
+export async function fetchMockNitradoServiceById(serviceId: string) {
+  if (serviceId === "18765761") {
+    return {
+      ...mockNitradoServices[0],
+      id: "18765761",
+    };
+  }
+  return mockNitradoServices.find((service) => service.id === serviceId) ?? null;
+}
+
+export async function fetchNitradoServiceById(token: string, serviceId: string): Promise<NitradoService> {
+  if (!/^\d+$/.test(serviceId)) throw new NitradoServiceLookupError("service_not_found");
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers`,
+      { headers: nitradoHeaders(token) },
+    );
+  } catch {
+    throw new NitradoServiceLookupError("api_unavailable");
+  }
+
+  if (response.status === 401) throw new NitradoServiceLookupError("invalid_token");
+  if (response.status === 403) throw new NitradoServiceLookupError("access_denied");
+  if (response.status === 404) throw new NitradoServiceLookupError("service_not_found");
+  if (!response.ok) throw new NitradoServiceLookupError("api_unavailable");
+
+  const payload = await response.json().catch(() => null);
+  const service = normalizeGameserverDetails(payload, serviceId);
+  if (!isDayZService(service)) throw new NitradoServiceLookupError("not_dayz");
+  return service;
 }
 
 export async function detectNitradoAdmLogs(
@@ -690,8 +734,71 @@ function normalizeServices(services: NitradoRawService[]): NitradoService[] {
       name,
       game: details.game || details.folder_short || details.portlist_short || service.type || "Unknown",
       region: details.address?.split(":")[0],
+      ipAddress: details.address?.split(":")[0],
+      platform: detectPlatform(`${details.game ?? ""} ${details.folder_short ?? ""} ${details.portlist_short ?? ""}`),
+      status: service.status,
     };
   });
+}
+
+function normalizeGameserverDetails(payload: unknown, serviceId: string): NitradoService {
+  const gameserver = findRecordByKey(payload, "gameserver") ?? {};
+  const details = isRecord(gameserver.details) ? gameserver.details : {};
+  const settings = isRecord(gameserver.settings) ? gameserver.settings : {};
+  const config = isRecord(settings.config) ? settings.config : {};
+  const query = isRecord(gameserver.query) ? gameserver.query : {};
+  const gameSpecific = isRecord(gameserver.game_specific) ? gameserver.game_specific : {};
+
+  const name = firstString(
+    config.hostname,
+    gameserver.name,
+    gameserver.hostname,
+    details.name,
+    details.server_name,
+    query.name,
+  ) || `Nitrado Service ${serviceId}`;
+  const game = firstString(
+    gameserver.game,
+    gameserver.game_human,
+    gameserver.game_short,
+    details.game,
+    details.folder_short,
+    details.portlist_short,
+    gameSpecific.game,
+  ) || "Unknown";
+  const ipAddress = normalizeIpAddress(firstString(
+    gameserver.ip,
+    gameserver.address,
+    query.ip,
+    query.address,
+    details.address,
+  ));
+  const platform = firstString(
+    gameSpecific.platform,
+    gameserver.platform,
+    details.platform,
+  ) || detectPlatform(`${game} ${details.folder_short ?? ""} ${details.portlist_short ?? ""}`);
+  const playerSlots = firstNumber(
+    gameserver.slots,
+    gameserver.player_slots,
+    gameserver.maxplayers,
+    config.slots,
+    config.maxplayers,
+    query.maxplayers,
+    query.max_players,
+  );
+  const status = firstString(gameserver.status, query.status, details.status);
+
+  return {
+    id: serviceId,
+    name,
+    game,
+    region: ipAddress,
+    platform,
+    ipAddress,
+    playerSlots,
+    status,
+  };
 }
 
 function nitradoHeaders(token: string) {
@@ -1987,6 +2094,35 @@ function addPathCandidates(dirs: Set<string>, value: string) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    const text = stringValue(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+  return undefined;
+}
+
+function normalizeIpAddress(value: string) {
+  if (!value) return undefined;
+  const withoutPort = value.split(":")[0]?.trim();
+  return withoutPort || undefined;
+}
+
+function detectPlatform(value: string) {
+  if (/ps4|ps5|playstation/i.test(value)) return "PlayStation";
+  if (/xbox|xb/i.test(value)) return "Xbox";
+  if (/pc|steam|standalone/i.test(value)) return "PC";
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -5,13 +5,20 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
   ChevronRight,
+  Eye,
+  EyeOff,
+  ExternalLink,
   Gamepad2,
+  HelpCircle,
   KeyRound,
   Loader2,
+  LockKeyhole,
+  Search,
   Server,
   ShieldCheck,
   Tags,
   Users,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -32,7 +39,7 @@ import { DznLogo } from "@/components/dzn/dzn-logo";
 const steps = [
   "Select Discord Server",
   "Server Type & Categories",
-  "Connect Nitrado Account",
+  "Nitrado Token + Service ID",
   "Select Nitrado Service",
   "Review & Test",
   "Go Live",
@@ -68,6 +75,11 @@ export function SetupWizard() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [tokenInput, setTokenInput] = useState("");
   const [tokenValid, setTokenValid] = useState(false);
+  const [serviceIdInput, setServiceIdInput] = useState("");
+  const [webInterfaceUrl, setWebInterfaceUrl] = useState("");
+  const [detectedServiceId, setDetectedServiceId] = useState("");
+  const [validatedService, setValidatedService] = useState<NitradoService | null>(null);
+  const [directServiceValidated, setDirectServiceValidated] = useState(false);
   const [selectedService, setSelectedService] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -95,11 +107,44 @@ export function SetupWizard() {
     [guilds, selectedGuild],
   );
   const selectedServiceData = useMemo(
-    () => services.find((service) => service.id === selectedService),
-    [services, selectedService],
+    () => services.find((service) => service.id === selectedService) ?? validatedService ?? undefined,
+    [services, selectedService, validatedService],
+  );
+  const stepLabels = useMemo(
+    () => steps.map((label, index) => (index === 3 && directServiceValidated ? "Confirm Nitrado Server" : label)),
+    [directServiceValidated],
   );
 
-  async function validateToken() {
+  async function validateTokenWithServiceId() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const normalizedServiceId = serviceIdInput.trim();
+      if (!normalizedServiceId) throw new Error("Nitrado Service ID is required");
+      const result = await validateNitradoToken({
+        token: tokenInput,
+        serviceId: normalizedServiceId,
+        discordGuildId: selectedGuild,
+        serverType,
+        tags: selectedTags,
+      });
+      setTokenInput("");
+      setTokenValid(true);
+      if (result.service) {
+        setValidatedService(result.service);
+        setServices([result.service]);
+        setSelectedService(result.service.id);
+      }
+      setDirectServiceValidated(true);
+      setStep(3);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nitrado token validation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function findServicesInstead() {
     setBusy(true);
     setMessage("");
     try {
@@ -111,12 +156,14 @@ export function SetupWizard() {
       });
       setTokenInput("");
       setTokenValid(true);
+      setDirectServiceValidated(false);
+      setValidatedService(null);
       const serviceResult = await getNitradoServices();
       setServices(serviceResult.services);
       if (serviceResult.services[0]) setSelectedService(serviceResult.services[0].id);
       setStep(3);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nitrado token validation failed");
+      setMessage(error instanceof Error ? error.message : "Nitrado service discovery failed");
     } finally {
       setBusy(false);
     }
@@ -187,6 +234,13 @@ export function SetupWizard() {
     });
   }
 
+  function updateWebInterfaceUrl(value: string) {
+    setWebInterfaceUrl(value);
+    const id = extractNitradoServiceId(value);
+    setDetectedServiceId(id);
+    if (id) setServiceIdInput(id);
+  }
+
   if (loading) return <SetupFrame><LoadingState /></SetupFrame>;
 
   if (!authenticated) {
@@ -216,7 +270,7 @@ export function SetupWizard() {
             <p className="text-xs font-black uppercase text-violet-200/70">Verification flow</p>
             <h1 className="mt-2 text-2xl font-black uppercase text-white">Server onboarding</h1>
             <div className="mt-6 space-y-3">
-              {steps.map((label, index) => (
+              {stepLabels.map((label, index) => (
                 <button
                   key={label}
                   className={`flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left text-sm font-bold transition ${
@@ -256,10 +310,26 @@ export function SetupWizard() {
                   <TypeStep serverType={serverType} setServerType={setServerType} selectedTags={selectedTags} toggleTag={toggleTag} onNext={() => setStep(2)} />
                 ) : null}
                 {step === 2 ? (
-                  <TokenStep tokenInput={tokenInput} setTokenInput={setTokenInput} tokenValid={tokenValid} busy={busy} onValidate={validateToken} />
+                  <TokenStep
+                    tokenInput={tokenInput}
+                    setTokenInput={setTokenInput}
+                    serviceIdInput={serviceIdInput}
+                    setServiceIdInput={setServiceIdInput}
+                    webInterfaceUrl={webInterfaceUrl}
+                    setWebInterfaceUrl={updateWebInterfaceUrl}
+                    detectedServiceId={detectedServiceId}
+                    tokenValid={tokenValid}
+                    busy={busy}
+                    onValidateServiceId={validateTokenWithServiceId}
+                    onFindServices={findServicesInstead}
+                  />
                 ) : null}
                 {step === 3 ? (
-                  <ServiceStep services={services} selectedService={selectedService} setSelectedService={setSelectedService} onNext={saveAndReview} busy={busy} />
+                  directServiceValidated && validatedService ? (
+                    <ConfirmedServiceStep service={validatedService} onNext={() => setStep(4)} />
+                  ) : (
+                    <ServiceStep services={services} selectedService={selectedService} setSelectedService={setSelectedService} onNext={saveAndReview} busy={busy} />
+                  )
                 ) : null}
                 {step === 4 ? (
                   <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
@@ -352,14 +422,356 @@ function TypeStep({ serverType, setServerType, selectedTags, toggleTag, onNext }
   );
 }
 
-function TokenStep({ tokenInput, setTokenInput, tokenValid, busy, onValidate }: { tokenInput: string; setTokenInput: (value: string) => void; tokenValid: boolean; busy: boolean; onValidate: () => void }) {
+function TokenStep({
+  tokenInput,
+  setTokenInput,
+  serviceIdInput,
+  setServiceIdInput,
+  webInterfaceUrl,
+  setWebInterfaceUrl,
+  detectedServiceId,
+  tokenValid,
+  busy,
+  onValidateServiceId,
+  onFindServices,
+}: {
+  tokenInput: string;
+  setTokenInput: (value: string) => void;
+  serviceIdInput: string;
+  setServiceIdInput: (value: string) => void;
+  webInterfaceUrl: string;
+  setWebInterfaceUrl: (value: string) => void;
+  detectedServiceId: string;
+  tokenValid: boolean;
+  busy: boolean;
+  onValidateServiceId: () => void;
+  onFindServices: () => void;
+}) {
+  const [showToken, setShowToken] = useState(false);
+  const [showServiceGuide, setShowServiceGuide] = useState(false);
+  const [showPermissionGuide, setShowPermissionGuide] = useState(false);
+
   return (
-    <Step title="Connect Nitrado Account" icon={KeyRound} description="Paste your Nitrado access token. It is sent only to the backend, encrypted, and never returned to this page.">
-      <input value={tokenInput} onChange={(event) => setTokenInput(event.target.value)} type="password" autoComplete="off" placeholder="Nitrado API token" className="h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition focus:border-violet-300/60" />
-      <WizardButton disabled={!tokenInput || busy} onClick={onValidate}>
-        {busy ? "Validating" : tokenValid ? "Validated" : "Validate token"}
-      </WizardButton>
+    <Step
+      title="Connect Your Nitrado Server"
+      icon={KeyRound}
+      description="To verify ownership and read DayZ server logs, DZN needs a Nitrado Long-Life Token and your Nitrado Service ID."
+    >
+      <div className="grid gap-5 xl:grid-cols-[1fr_330px]">
+        <div className="space-y-5">
+          <GuideSection title="1. Create Your Nitrado Token">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <a
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition hover:bg-violet-400"
+                href="https://server.nitrado.net/eng/account_api"
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open Nitrado Token Page
+                <ExternalLink className="h-4 w-4" />
+              </a>
+              <a
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/30"
+                href="https://server.nitrado.net/eng/services"
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open My Nitrado Services
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            </div>
+            <p className="mt-3 text-sm text-zinc-400">
+              If the button does not open the correct page, log in to Nitrado and go to: Account - Developer Portal - Long-Life Tokens.
+            </p>
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_280px]">
+              <MiniChecklist
+                items={[
+                  "Description: DZN Network Access",
+                  "Enable only: service",
+                  "Click Create",
+                  "Copy the token once it appears",
+                ]}
+              />
+              <NitradoTokenMockup />
+            </div>
+          </GuideSection>
+
+          <GuideSection title="2. Use Only The Required Permission">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4">
+                <p className="text-xs font-black uppercase text-emerald-100">Required</p>
+                <p className="mt-3 flex items-center gap-2 text-sm font-black text-white"><Check className="h-4 w-4 text-emerald-200" />service</p>
+              </div>
+              <div className="rounded-lg border border-red-300/20 bg-red-400/8 p-4">
+                <p className="text-xs font-black uppercase text-red-100">Not required</p>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-red-100/80">
+                  {["rootserver", "ssh_keys", "user_edit", "service_order", "user_info"].map((permission) => (
+                    <span key={permission} className="inline-flex items-center gap-1 rounded-md border border-red-300/20 px-2 py-1"><X className="h-3 w-3" />{permission}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <p className="mt-3 text-sm text-zinc-400">
+              DZN only needs the service permission to verify your DayZ server and read server information/logs. Do not enable extra permissions.
+            </p>
+          </GuideSection>
+
+          <GuideSection title="3. Paste Token + Service ID">
+            <div className="grid gap-4">
+              <div>
+                <label className="text-xs font-black uppercase text-zinc-500" htmlFor="nitrado-token">Nitrado API Token</label>
+                <div className="mt-2 flex h-12 items-center rounded-lg border border-white/10 bg-black/30 focus-within:border-violet-300/60">
+                  <input
+                    id="nitrado-token"
+                    value={tokenInput}
+                    onChange={(event) => setTokenInput(event.target.value)}
+                    type={showToken ? "text" : "password"}
+                    autoComplete="off"
+                    placeholder="Paste your Nitrado Long-Life Token"
+                    className="h-full min-w-0 flex-1 bg-transparent px-4 text-sm text-white outline-none placeholder:text-zinc-600"
+                  />
+                  <button
+                    aria-label={showToken ? "Hide token" : "Show token"}
+                    className="grid h-12 w-12 place-items-center text-zinc-400 transition hover:text-violet-100"
+                    onClick={() => setShowToken((value) => !value)}
+                    type="button"
+                  >
+                    {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <p className="mt-2 text-sm font-bold text-orange-100/90">
+                  Never share this token publicly. DZN encrypts it and never shows it again.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase text-zinc-500" htmlFor="nitrado-service-id">Nitrado Service ID</label>
+                <input
+                  id="nitrado-service-id"
+                  value={serviceIdInput}
+                  onChange={(event) => setServiceIdInput(event.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric"
+                  placeholder="Example: 18765761"
+                  className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/60"
+                />
+                <p className="mt-2 text-sm text-zinc-400">Find this number in your Nitrado Web Interface URL.</p>
+                <p className="mt-1 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-bold text-zinc-300">
+                  webinterface.nitrado.net/18765761/wi/gameserver - Service ID = 18765761
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase text-zinc-500" htmlFor="nitrado-web-url">Paste Nitrado Web Interface URL</label>
+                <input
+                  id="nitrado-web-url"
+                  value={webInterfaceUrl}
+                  onChange={(event) => setWebInterfaceUrl(event.target.value)}
+                  placeholder="https://webinterface.nitrado.net/18765761/wi/gameserver/..."
+                  className="mt-2 h-12 w-full rounded-lg border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/60"
+                />
+                {detectedServiceId ? (
+                  <p className="mt-2 text-sm font-black text-emerald-100">Detected Service ID: {detectedServiceId}</p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 lg:flex-row">
+              <button
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_28px_rgba(139,92,246,0.42)] transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={!tokenInput || !serviceIdInput || busy}
+                onClick={onValidateServiceId}
+                type="button"
+              >
+                {busy ? "Validating" : tokenValid ? "Validated" : "Validate Token + Service ID"}
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <button
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-5 text-xs font-black uppercase text-zinc-100 transition hover:border-violet-300/30 disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={!tokenInput || busy}
+                onClick={onFindServices}
+                type="button"
+              >
+                <Search className="h-4 w-4" />
+                Find My Services Instead
+              </button>
+            </div>
+          </GuideSection>
+        </div>
+
+        <aside className="space-y-4">
+          <HelpPanel
+            onOpenPermissions={() => setShowPermissionGuide((value) => !value)}
+            onOpenServiceGuide={() => setShowServiceGuide((value) => !value)}
+          />
+          {showServiceGuide ? <ServiceIdGuide /> : null}
+          {showPermissionGuide ? <PermissionGuide /> : null}
+          <TrustCard />
+        </aside>
+      </div>
     </Step>
+  );
+}
+
+function ConfirmedServiceStep({ service, onNext }: { service: NitradoService; onNext: () => void }) {
+  return (
+    <Step title="Confirm Nitrado Server" icon={Server} description="DZN verified that your token can access this DayZ service. Continue when the details look right.">
+      <ServerFoundCard service={service} />
+      <button
+        className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_28px_rgba(139,92,246,0.42)] transition hover:bg-violet-400"
+        onClick={onNext}
+        type="button"
+      >
+        Continue to Log Check
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </Step>
+  );
+}
+
+function GuideSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border border-white/10 bg-black/24 p-4">
+      <h3 className="text-sm font-black uppercase text-white">{title}</h3>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function MiniChecklist({ items }: { items: string[] }) {
+  return (
+    <div className="grid gap-2">
+      {items.map((item) => (
+        <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-bold text-zinc-200">
+          <Check className="h-4 w-4 text-emerald-200" />
+          {item}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NitradoTokenMockup() {
+  const permissions = [
+    ["service", true],
+    ["rootserver", false],
+    ["ssh_keys", false],
+    ["user_edit", false],
+    ["service_order", false],
+    ["user_info", false],
+  ] as const;
+  return (
+    <div className="rounded-lg border border-violet-300/20 bg-[#080a14] p-4 shadow-[0_0_28px_rgba(139,92,246,0.14)]">
+      <p className="text-xs font-black uppercase text-violet-200/70">Long-Life Token</p>
+      <div className="mt-3 rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-zinc-200">DZN Network Access</div>
+      <div className="mt-3 grid gap-2">
+        {permissions.map(([permission, checked]) => (
+          <div key={permission} className="flex items-center justify-between rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-bold text-zinc-300">
+            <span>{permission}</span>
+            <span className={`grid h-4 w-4 place-items-center rounded-sm border ${checked ? "border-emerald-300 bg-emerald-400/20 text-emerald-100" : "border-zinc-600 text-transparent"}`}>
+              <Check className="h-3 w-3" />
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 rounded-md bg-yellow-400 px-3 py-2 text-center text-xs font-black uppercase text-black">Create</div>
+    </div>
+  );
+}
+
+function HelpPanel({ onOpenServiceGuide, onOpenPermissions }: { onOpenServiceGuide: () => void; onOpenPermissions: () => void }) {
+  return (
+    <div className="rounded-lg border border-violet-300/15 bg-violet-950/10 p-4">
+      <p className="text-xs font-black uppercase text-violet-200/70">Need help?</p>
+      <div className="mt-3 grid gap-2">
+        <button type="button" onClick={onOpenServiceGuide} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-left text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
+          View Setup Guide
+        </button>
+        <a href="https://discord.com" rel="noreferrer" target="_blank" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
+          Join Discord
+        </a>
+        <a href="mailto:support@dayz-network.com" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
+          Contact Support
+        </a>
+        <button type="button" onClick={onOpenServiceGuide} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-left text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
+          Where do I find my Service ID?
+        </button>
+        <button type="button" onClick={onOpenPermissions} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-left text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
+          What permissions should I enable?
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ServiceIdGuide() {
+  return (
+    <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/8 p-4">
+      <HelpCircle className="h-5 w-5 text-cyan-100" />
+      <p className="mt-3 text-sm font-black uppercase text-white">Where do I find my Service ID?</p>
+      <ol className="mt-3 space-y-2 text-sm text-zinc-300">
+        <li>1. Open your Nitrado Web Interface.</li>
+        <li>2. Look at the browser URL.</li>
+        <li>3. Copy the number after webinterface.nitrado.net/</li>
+        <li>4. Example: webinterface.nitrado.net/18765761/wi/gameserver</li>
+      </ol>
+      <p className="mt-3 rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-sm font-black text-cyan-100">Service ID = 18765761</p>
+    </div>
+  );
+}
+
+function PermissionGuide() {
+  return (
+    <div className="rounded-lg border border-emerald-300/20 bg-emerald-400/8 p-4">
+      <ShieldCheck className="h-5 w-5 text-emerald-100" />
+      <p className="mt-3 text-sm font-black uppercase text-white">What permissions should I enable?</p>
+      <p className="mt-2 text-sm text-zinc-300">Enable only service. Leave rootserver, ssh_keys, user_edit, service_order, and user_info disabled.</p>
+    </div>
+  );
+}
+
+function TrustCard() {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+      <LockKeyhole className="h-5 w-5 text-violet-100" />
+      <p className="mt-3 text-sm font-black uppercase text-white">We only request what we need</p>
+      <p className="mt-2 text-sm text-zinc-400">
+        DZN uses your token only to verify your Nitrado DayZ server and read required server/log information. We do not access billing, rootserver systems, SSH keys, or unrelated services.
+      </p>
+      <div className="mt-3 grid gap-2 text-sm font-bold text-zinc-300">
+        {["Token encrypted before storage", "Token never shown again", "No FTP/MySQL passwords displayed", "No billing access", "You can revoke the token in Nitrado anytime"].map((item) => (
+          <span key={item} className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-200" />{item}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ServerFoundCard({ service }: { service: NitradoService }) {
+  const rows = [
+    ["Server name", service.name],
+    ["Service ID", service.id],
+    ["Game", service.game || "DayZ"],
+    ["Platform", service.platform],
+    ["IP address", service.ipAddress],
+    ["Player slots", service.playerSlots ? String(service.playerSlots) : undefined],
+    ["Status", service.status],
+  ].filter(([, value]) => Boolean(value)) as [string, string][];
+
+  return (
+    <div className="rounded-lg border border-emerald-300/20 bg-emerald-400/8 p-5">
+      <div className="flex items-center gap-3">
+        <span className="grid h-10 w-10 place-items-center rounded-lg border border-emerald-300/20 bg-emerald-400/15 text-emerald-100">
+          <Check className="h-5 w-5" />
+        </span>
+        <div>
+          <p className="text-xs font-black uppercase text-emerald-100/80">Nitrado Server Found</p>
+          <h3 className="text-xl font-black text-white">{service.name}</h3>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {rows.map(([label, value]) => <Summary key={label} label={label} value={value} />)}
+      </div>
+    </div>
   );
 }
 
@@ -611,4 +1023,14 @@ function formatShape(shape: AdmApiDebug["methodsTried"][number]["responseShape"]
   const top = shape.topLevelKeys.length ? shape.topLevelKeys.join(",") : "-";
   const data = shape.dataKeys.length ? shape.dataKeys.join(",") : "-";
   return `shape: top [${top}] / data [${data}] / data.token ${shape.hasDataToken ? "yes" : "no"} / data.token.url ${shape.hasDataTokenUrl ? "yes" : "no"} / data.token.token ${shape.hasDataTokenValue ? "yes" : "no"} / data.download ${shape.hasDataDownload ? "yes" : "no"} / data.url ${shape.hasDataUrl ? "yes" : "no"} / token.url ${shape.hasTokenUrl ? "yes" : "no"} / token ${shape.hasTokenValue ? "yes" : "no"}`;
+}
+
+function extractNitradoServiceId(value: string) {
+  const direct = value.trim().match(/^\d{5,}$/);
+  if (direct) return direct[0];
+  const webInterface = value.match(/webinterface\.nitrado\.net\/(\d+)/i);
+  if (webInterface?.[1]) return webInterface[1];
+  const services = value.match(/server\.nitrado\.net\/.*?services\/(\d+)/i);
+  if (services?.[1]) return services[1];
+  return "";
 }

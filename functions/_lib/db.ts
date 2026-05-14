@@ -129,6 +129,7 @@ export async function ensureMockUser(env: Env) {
 
 export async function getCurrentLinkedServer(env: Env, userId: string, options: { includePrivateAdmPath?: boolean } = {}) {
   if (!env.DB) return null;
+  await ensureLinkedServerMetadataColumns(env);
   await ensureServerLogConfigTable(env);
   const server = await env.DB
     .prepare(
@@ -164,6 +165,22 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
   }
 
   return server;
+}
+
+export async function ensureLinkedServerMetadataColumns(env: Env) {
+  const db = requireDb(env);
+  const columns = await db.prepare("PRAGMA table_info(linked_servers)").all<{ name: string }>();
+  const existing = new Set((columns.results ?? []).map((column) => column.name));
+  const missingColumns = [
+    ["game", "TEXT"],
+    ["platform", "TEXT"],
+    ["ip_address", "TEXT"],
+    ["player_slots", "INTEGER"],
+  ].filter(([name]) => !existing.has(name));
+
+  for (const [name, type] of missingColumns) {
+    await db.prepare(`ALTER TABLE linked_servers ADD COLUMN ${name} ${type}`).run();
+  }
 }
 
 export async function saveServerAdmPath(env: Env, linkedServerId: string, admPath: string) {

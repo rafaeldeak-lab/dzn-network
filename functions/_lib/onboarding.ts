@@ -1,5 +1,5 @@
 import { decryptToken, encryptToken } from "./crypto";
-import { requireDb } from "./db";
+import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import type { Env, NitradoService, ServerType } from "./types";
 
 export const serverTypes: ServerType[] = ["PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
@@ -151,4 +151,48 @@ export async function linkLatestNitradoConnection(env: Env, userId: string, link
 
 export function findService(services: NitradoService[], id: string) {
   return services.find((service) => service.id === id) ?? null;
+}
+
+export async function saveLinkedServerNitradoService(
+  env: Env,
+  linkedServerId: string,
+  service: NitradoService,
+  serverType: ServerType,
+  tags: string[],
+) {
+  const db = requireDb(env);
+  await ensureLinkedServerMetadataColumns(env);
+  await db
+    .prepare(
+      `UPDATE linked_servers SET
+        nitrado_service_id = ?,
+        nitrado_service_name = ?,
+        server_name = ?,
+        server_type = ?,
+        tags_json = ?,
+        region = ?,
+        game = ?,
+        platform = ?,
+        ip_address = ?,
+        player_slots = ?,
+        status = 'pending',
+        public_slug = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`,
+    )
+    .bind(
+      service.id,
+      service.name,
+      service.name,
+      serverType,
+      JSON.stringify(tags),
+      service.ipAddress ?? service.region ?? null,
+      service.game ?? null,
+      service.platform ?? null,
+      service.ipAddress ?? null,
+      service.playerSlots ?? null,
+      publicSlug(service.name),
+      linkedServerId,
+    )
+    .run();
 }

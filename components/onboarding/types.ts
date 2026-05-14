@@ -23,6 +23,10 @@ export type NitradoService = {
   name: string;
   game: string;
   region?: string;
+  platform?: string;
+  ipAddress?: string;
+  playerSlots?: number;
+  status?: string;
 };
 
 export type AdmLogDetection = {
@@ -165,6 +169,10 @@ export type LinkedServer = {
   server_type: string;
   tags_json: string;
   region: string | null;
+  game?: string | null;
+  platform?: string | null;
+  ip_address?: string | null;
+  player_slots?: number | null;
   status: "pending" | "live" | "error" | "Pending" | "Live" | "Error";
   public_slug: string;
   adm_path?: string | null;

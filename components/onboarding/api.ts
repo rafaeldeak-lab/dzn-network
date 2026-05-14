@@ -13,8 +13,9 @@ export async function validateNitradoToken(data: {
   discordGuildId: string;
   serverType: string;
   tags: string[];
+  serviceId?: string;
 }) {
-  return request<{ tokenValid: boolean }>("/api/nitrado/validate-token", {
+  return request<{ tokenValid: boolean; linkedServerId?: string; service?: NitradoService }>("/api/nitrado/validate-token", {
     method: "POST",
     body: JSON.stringify(data),
   });

@@ -39,4 +39,8 @@ export type NitradoService = {
   name: string;
   game: string;
   region?: string;
+  platform?: string;
+  ipAddress?: string;
+  playerSlots?: number;
+  status?: string;
 };
