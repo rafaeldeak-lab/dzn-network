@@ -517,6 +517,8 @@ function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
         <Summary label="Exact manual path tested" value={debug.exactManualPath ?? "Not provided"} />
         <Summary label="Exact selected ADM path" value={debug.exactSelectedAdmPath ?? "Not selected"} />
         <Summary label="Gameserver username found" value={debug.gameserverUsernameFound ? "yes" : "no"} />
+        <Summary label="Actual username used" value={debug.actualUsernameUsed ? "yes" : "no"} />
+        <Summary label="Username redacted in UI" value={debug.usernameRedactedInUi ? "yes" : "no"} />
         <Summary label="game_specific.log_files found" value={debug.gameSpecificLogFilesFound ? "yes" : "no"} />
         <Summary label="Log files returned" value={String(debug.gameSpecificLogFilesReturned)} />
         <Summary label="ADM files from log_files" value={String(debug.gameSpecificAdmFilesFound.length)} />
@@ -524,6 +526,9 @@ function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
         <Summary label="API file path tested" value={debug.apiLogFilePathTested ?? "Not tested"} />
         <Summary label="File visible through stat" value={debug.fileVisibleThroughStat ? "yes" : "no"} />
         <Summary label="Download token created" value={debug.downloadTokenCreated ? "yes" : "no"} />
+        <Summary label="Token URL received" value={debug.tokenUrlReceived ? "yes" : "no"} />
+        <Summary label="Sample fetch attempted" value={debug.sampleFetchAttempted ? "yes" : "no"} />
+        <Summary label="Sample fetch status" value={debug.sampleFetchStatus} />
         <Summary label="Sample read status" value={debug.sampleReadStatus} />
         <Summary label="Sample read succeeded" value={debug.sampleReadSucceeded ? "yes" : "no"} />
       </div>
@@ -539,15 +544,15 @@ function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
             <div key={`${attempt.method}-${attempt.path ?? attempt.dir ?? "detail"}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 lg:grid-cols-[90px_70px_1fr_1fr]">
               <span className="font-black text-violet-100">{attempt.method}</span>
               <span className={attempt.status === "OK" ? "font-black text-emerald-100" : "font-black text-orange-100"}>{attempt.status}</span>
-              <span className="break-words">{attempt.path ? `path: ${attempt.path}` : `dir: ${attempt.dir ?? "-"}`}</span>
+              <span className="break-words">{attempt.pathRedacted || attempt.path ? `path: ${attempt.pathRedacted ?? attempt.path}` : `dir: ${attempt.dir ?? "-"}`}</span>
               <span className="break-words">
                 {attempt.method === "list"
                   ? `search: ${attempt.search ?? "none"} | entries: ${attempt.entriesReturned ?? 0} | ADM: ${attempt.admFilesFound ?? 0}`
                   : attempt.method === "stat"
-                    ? `visible: ${attempt.fileVisible ? "yes" : "no"}`
+                    ? `visible: ${attempt.fileVisible ? "yes" : "no"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`
                     : attempt.method === "service-details"
                       ? `paths: ${attempt.entriesReturned ?? 0} | log_files: ${debug.gameSpecificLogFilesReturned} | ADM: ${debug.gameSpecificAdmFilesFound.length}`
-                      : `token: ${attempt.downloadTokenCreated ? "yes" : "no"} | sample: ${attempt.sampleReadSucceeded ? "yes" : "no"}`}
+                      : `token: ${attempt.downloadTokenCreated ? "yes" : "no"} | token URL: ${attempt.tokenUrlReceived ? "yes" : "no"} | fetch: ${attempt.sampleFetchAttempted ? attempt.sampleFetchStatus ?? "error" : "no"} | sample: ${attempt.sampleReadSucceeded ? "yes" : "no"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`}
               </span>
             </div>
           ))}
@@ -595,4 +600,9 @@ function DebugList({ title, items }: { title: string; items: string[] }) {
 function formatCheckedAt(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatShape(shape: AdmApiDebug["methodsTried"][number]["responseShape"]) {
+  if (!shape) return "shape: data no / token no / url no / value no";
+  return `shape: data ${shape.hasData ? "yes" : "no"} / token ${shape.hasToken ? "yes" : "no"} / url ${shape.hasTokenUrl ? "yes" : "no"} / value ${shape.hasTokenValue ? "yes" : "no"}`;
 }

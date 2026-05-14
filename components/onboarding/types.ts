@@ -45,10 +45,16 @@ export type AdmApiDebug = {
     method: "download" | "seek" | "stat" | "list" | "service-details";
     status: "OK" | "401" | "403" | "404" | "error";
     path?: string;
+    pathRedacted?: string;
     dir?: string;
     search?: string | null;
     fileVisible?: boolean;
+    responseShape?: AdmApiResponseShape;
+    errorMessageSafe?: string | null;
     downloadTokenCreated?: boolean;
+    tokenUrlReceived?: boolean;
+    sampleFetchAttempted?: boolean;
+    sampleFetchStatus?: "OK" | "401" | "403" | "404" | "error" | "not_attempted";
     sampleReadSucceeded?: boolean;
     entriesReturned?: number;
     admFilesFound?: number;
@@ -64,6 +70,8 @@ export type AdmApiDebug = {
     path: string;
     status: "OK" | "401" | "403" | "404" | "error";
     fileVisible: boolean;
+    responseShape: AdmApiResponseShape;
+    errorMessageSafe: string | null;
   }[];
   serviceDetailsAttempt: {
     status: "OK" | "401" | "403" | "404" | "error";
@@ -80,6 +88,11 @@ export type AdmApiDebug = {
   gameSpecificAdmFilesFound: string[];
   selectedGameSpecificAdmFile: string | null;
   apiLogFilePathTested: string | null;
+  actualUsernameUsed: boolean;
+  usernameRedactedInUi: boolean;
+  tokenUrlReceived: boolean;
+  sampleFetchAttempted: boolean;
+  sampleFetchStatus: "OK" | "401" | "403" | "404" | "error" | "not_attempted";
   filesFound: string[];
   exactSelectedAdmPath: string | null;
   fileVisibleThroughStat: boolean;
@@ -93,7 +106,21 @@ export type AdmApiDebug = {
     path: string;
     method: "seek" | "download";
     status: "OK" | "401" | "403" | "404" | "error";
+    responseShape: AdmApiResponseShape;
+    errorMessageSafe: string | null;
+    downloadTokenCreated: boolean;
+    tokenUrlReceived: boolean;
+    sampleFetchAttempted: boolean;
+    sampleFetchStatus: "OK" | "401" | "403" | "404" | "error" | "not_attempted";
+    sampleReadSucceeded: boolean;
   }[];
+};
+
+export type AdmApiResponseShape = {
+  hasData: boolean;
+  hasToken: boolean;
+  hasTokenUrl: boolean;
+  hasTokenValue: boolean;
 };
 
 export type OnboardingChecks = {

@@ -65,6 +65,14 @@ type GameSpecificLogDetails = {
 };
 
 type SafeApiStatus = "OK" | "401" | "403" | "404" | "error";
+type SampleFetchStatus = SafeApiStatus | "not_attempted";
+
+type AdmApiResponseShape = {
+  hasData: boolean;
+  hasToken: boolean;
+  hasTokenUrl: boolean;
+  hasTokenValue: boolean;
+};
 
 export type AdmListAttempt = {
   dir: string;
@@ -78,7 +86,12 @@ export type AdmReadAttempt = {
   path: string;
   method: "seek" | "download";
   status: SafeApiStatus;
+  responseShape: AdmApiResponseShape;
+  errorMessageSafe: string | null;
   downloadTokenCreated: boolean;
+  tokenUrlReceived: boolean;
+  sampleFetchAttempted: boolean;
+  sampleFetchStatus: SampleFetchStatus;
   sampleReadSucceeded: boolean;
 };
 
@@ -86,6 +99,8 @@ export type AdmStatAttempt = {
   path: string;
   status: SafeApiStatus;
   fileVisible: boolean;
+  responseShape: AdmApiResponseShape;
+  errorMessageSafe: string | null;
 };
 
 export type AdmServiceDetailsAttempt = {
@@ -102,10 +117,16 @@ export type AdmMethodAttempt = {
   method: "download" | "seek" | "stat" | "list" | "service-details";
   status: SafeApiStatus;
   path?: string;
+  pathRedacted?: string;
   dir?: string;
   search?: string | null;
   fileVisible?: boolean;
+  responseShape?: AdmApiResponseShape;
+  errorMessageSafe?: string | null;
   downloadTokenCreated?: boolean;
+  tokenUrlReceived?: boolean;
+  sampleFetchAttempted?: boolean;
+  sampleFetchStatus?: SampleFetchStatus;
   sampleReadSucceeded?: boolean;
   entriesReturned?: number;
   admFilesFound?: number;
@@ -126,6 +147,11 @@ export type AdmApiDebug = {
   gameSpecificAdmFilesFound: string[];
   selectedGameSpecificAdmFile: string | null;
   apiLogFilePathTested: string | null;
+  actualUsernameUsed: boolean;
+  usernameRedactedInUi: boolean;
+  tokenUrlReceived: boolean;
+  sampleFetchAttempted: boolean;
+  sampleFetchStatus: SampleFetchStatus;
   filesFound: string[];
   exactSelectedAdmPath: string | null;
   fileVisibleThroughStat: boolean;
@@ -182,13 +208,12 @@ export async function detectNitradoAdmLogs(
   const serviceDetails = await fetchGameserverDetailsAttempt(token, serviceId);
   const gameSpecificLogs = extractGameSpecificLogDetails(serviceDetails.payload);
   const serviceLogPaths = extractServiceLogPaths(serviceDetails.payload);
-  const apiPathVariants = buildGameSpecificApiPathVariants(gameSpecificLogs);
+  const apiPathVariants = buildAdmReadPathVariants(gameSpecificLogs);
   const searchDirs = await buildAdmSearchDirs(token, serviceId);
   const candidates = new Map<string, NitradoFileEntry>();
 
   const gameSpecificReadPaths = dedupeStrings([
     ...apiPathVariants,
-    ...gameSpecificLogs.admLogFiles.map((entry) => entry.path),
     ...serviceLogPaths.filter((path) => /\.adm$/i.test(path)),
   ]);
   const gameSpecificReadAttempts: AdmReadAttempt[] = [];
@@ -197,6 +222,10 @@ export async function detectNitradoAdmLogs(
     status: "not_attempted",
     path: null,
   };
+
+  for (const path of gameSpecificReadPaths) {
+    statAttempts.push(await statNitradoFile(token, serviceId, path));
+  }
 
   for (const path of gameSpecificReadPaths) {
     const result = await readNitradoFileSample(token, serviceId, path, gameSpecificReadAttempts);
@@ -232,13 +261,22 @@ export async function detectNitradoAdmLogs(
         ...[...candidates.values()].map((entry) => entry.path),
       ]),
       selectedPath: gameSpecificSelectedPath,
-      fileVisibleThroughStat: false,
+      fileVisibleThroughStat: statAttempts.some((attempt) => attempt.fileVisible),
       sampleReadStatus: gameSpecificSampleResult.status,
       downloadTokenCreated: gameSpecificReadAttempts.some((attempt) => attempt.downloadTokenCreated),
       sampleReadSucceeded: true,
       samplePreview: gameSpecificSampleResult.sample,
       lastCheckedAt,
-      message: null,
+      message: buildAdmDebugMessage(
+        listAttempts,
+        gameSpecificReadAttempts,
+        statAttempts,
+        serviceDetails.status,
+        true,
+        true,
+        gameSpecificSampleHasMarkers,
+        gameSpecificSampleResult.sample,
+      ),
       readAttempts: gameSpecificReadAttempts,
     });
     return withInternalAdmPath({
@@ -280,6 +318,7 @@ export async function detectNitradoAdmLogs(
         admFileExists,
         gameSpecificSampleReadSucceeded,
         gameSpecificSampleHasMarkers,
+        gameSpecificSampleResult.sample,
       ),
       readAttempts: gameSpecificReadAttempts,
     });
@@ -320,7 +359,7 @@ export async function detectNitradoAdmLogs(
     sampleReadSucceeded,
     samplePreview: sampleResult.sample,
     lastCheckedAt,
-    message: buildAdmDebugMessage(listAttempts, readAttempts, [], null, true, sampleReadSucceeded, sampleHasMarkers),
+    message: buildAdmDebugMessage(listAttempts, readAttempts, statAttempts, serviceDetails.status, true, sampleReadSucceeded, sampleHasMarkers, sampleResult.sample),
     readAttempts,
   });
   return withInternalAdmPath({
@@ -346,7 +385,7 @@ export async function testExactNitradoAdmPath(
   const gameSpecificLogs = extractGameSpecificLogDetails(serviceDetails.payload);
   const serviceLogPaths = extractServiceLogPaths(serviceDetails.payload);
   const serviceAdmPaths = serviceLogPaths.filter((path) => /\.adm$/i.test(path));
-  const apiPathVariants = buildGameSpecificApiPathVariants(gameSpecificLogs, inputPath);
+  const apiPathVariants = buildAdmReadPathVariants(gameSpecificLogs, inputPath);
   const allPathVariants = dedupeStrings([
     ...apiPathVariants,
     ...serviceAdmPaths.flatMap(createAdmPathVariants),
@@ -379,7 +418,6 @@ export async function testExactNitradoAdmPath(
   const newest = pickNewestAdmFile([...candidates.values()]);
   const readPaths = dedupeStrings([
     ...apiPathVariants,
-    ...gameSpecificLogs.admLogFiles.map((entry) => entry.path),
     ...serviceAdmPaths,
     ...(matchingCandidate ? [matchingCandidate.path] : []),
     ...allPathVariants,
@@ -436,6 +474,7 @@ export async function testExactNitradoAdmPath(
       filesFound.length > 0 || admFileExists,
       sampleReadSucceeded,
       sampleHasMarkers,
+      sampleResult.sample,
     ),
     readAttempts,
   });
@@ -456,6 +495,12 @@ export function mockAdmLogDetection(): AdmLogDetection {
   const newestAdmFileName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
   const admPath = `dayzps/config/${newestAdmFileName}`;
   const lastCheckedAt = new Date().toISOString();
+  const mockResponseShape = {
+    hasData: true,
+    hasToken: true,
+    hasTokenUrl: true,
+    hasTokenValue: true,
+  };
   return {
     found: true,
     admFileExists: true,
@@ -475,12 +520,36 @@ export function mockAdmLogDetection(): AdmLogDetection {
       pathVariants: [admPath, `/${admPath}`],
       apiLogFilePathVariants: ["/games/{gameserver-username}/noftp/DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM"],
       methodsTried: [
-        { method: "download", path: admPath, status: "OK", downloadTokenCreated: true, sampleReadSucceeded: true },
-        { method: "seek", path: admPath, status: "OK", downloadTokenCreated: true, sampleReadSucceeded: true },
-        { method: "stat", path: admPath, status: "OK", fileVisible: true },
+        {
+          method: "download",
+          path: admPath,
+          pathRedacted: admPath,
+          status: "OK",
+          responseShape: mockResponseShape,
+          errorMessageSafe: null,
+          downloadTokenCreated: true,
+          tokenUrlReceived: true,
+          sampleFetchAttempted: true,
+          sampleFetchStatus: "OK",
+          sampleReadSucceeded: true,
+        },
+        {
+          method: "seek",
+          path: admPath,
+          pathRedacted: admPath,
+          status: "OK",
+          responseShape: mockResponseShape,
+          errorMessageSafe: null,
+          downloadTokenCreated: true,
+          tokenUrlReceived: true,
+          sampleFetchAttempted: true,
+          sampleFetchStatus: "OK",
+          sampleReadSucceeded: true,
+        },
+        { method: "stat", path: admPath, pathRedacted: admPath, status: "OK", fileVisible: true, responseShape: emptyResponseShape(), errorMessageSafe: null },
         { method: "list", dir: "dayzps/config", search: ".ADM", status: "OK", entriesReturned: 1, admFilesFound: 1 },
       ],
-      statAttempts: [{ path: admPath, status: "OK", fileVisible: true }],
+      statAttempts: [{ path: admPath, status: "OK", fileVisible: true, responseShape: emptyResponseShape(), errorMessageSafe: null }],
       serviceDetailsAttempt: {
         status: "OK",
         pathsFound: 1,
@@ -496,6 +565,11 @@ export function mockAdmLogDetection(): AdmLogDetection {
       gameSpecificAdmFilesFound: [newestAdmFileName],
       selectedGameSpecificAdmFile: newestAdmFileName,
       apiLogFilePathTested: "/games/{gameserver-username}/noftp/DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM",
+      actualUsernameUsed: true,
+      usernameRedactedInUi: true,
+      tokenUrlReceived: true,
+      sampleFetchAttempted: true,
+      sampleFetchStatus: "OK",
       fileVisibleThroughStat: true,
       downloadTokenCreated: true,
       sampleReadStatus: "OK",
@@ -503,7 +577,18 @@ export function mockAdmLogDetection(): AdmLogDetection {
       samplePreview: "AdminLog started\nPlayer MockSurvivor is connected\nPlayer MockSurvivor placed Fireplace",
       lastCheckedAt,
       message: null,
-      readAttempts: [{ path: admPath, method: "download", status: "OK", downloadTokenCreated: true, sampleReadSucceeded: true }],
+      readAttempts: [{
+        path: admPath,
+        method: "download",
+        status: "OK",
+        responseShape: mockResponseShape,
+        errorMessageSafe: null,
+        downloadTokenCreated: true,
+        tokenUrlReceived: true,
+        sampleFetchAttempted: true,
+        sampleFetchStatus: "OK",
+        sampleReadSucceeded: true,
+      }],
     },
   };
 }
@@ -656,6 +741,13 @@ async function readNitradoFileViaSeek(
   file: string,
   readAttempts?: AdmReadAttempt[],
 ) {
+  if (isUnsafeRemotePathForRequest(file)) {
+    readAttempts?.push(createReadAttempt(file, "seek", "error", {
+      errorMessageSafe: "Skipped unsafe or placeholder path",
+    }));
+    return createSampleResult(null, "error", false, "error", false, "Skipped unsafe or placeholder path");
+  }
+
   try {
     const url = new URL(`${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers/file_server/seek`);
     url.searchParams.set("file", file);
@@ -665,22 +757,28 @@ async function readNitradoFileViaSeek(
     const response = await fetch(url, { headers: nitradoHeaders(token) });
     if (!response.ok) {
       const status = safeResponseStatus(response);
-      readAttempts?.push({ path: file, method: "seek", status, downloadTokenCreated: false, sampleReadSucceeded: false });
-      return { sample: null, status, downloadTokenCreated: false };
+      readAttempts?.push(createReadAttempt(file, "seek", status, {
+        errorMessageSafe: safeFileApiError(status),
+      }));
+      return createSampleResult(null, status, false, "not_attempted", false, safeFileApiError(status));
     }
     const payload = await response.json();
     const sample = await fetchTokenizedFileSample(payload);
-    readAttempts?.push({
-      path: file,
-      method: "seek",
-      status: sample.status,
+    readAttempts?.push(createReadAttempt(file, "seek", sample.status, {
+      responseShape: sample.responseShape,
+      errorMessageSafe: sample.errorMessageSafe,
       downloadTokenCreated: sample.downloadTokenCreated,
+      tokenUrlReceived: sample.tokenUrlReceived,
+      sampleFetchAttempted: sample.sampleFetchAttempted,
+      sampleFetchStatus: sample.sampleFetchStatus,
       sampleReadSucceeded: sample.sample !== null,
-    });
+    }));
     return sample;
   } catch {
-    readAttempts?.push({ path: file, method: "seek", status: "error", downloadTokenCreated: false, sampleReadSucceeded: false });
-    return { sample: null, status: "error" as const, downloadTokenCreated: false };
+    readAttempts?.push(createReadAttempt(file, "seek", "error", {
+      errorMessageSafe: "Nitrado seek request failed",
+    }));
+    return createSampleResult(null, "error", false, "error", false, "Nitrado seek request failed");
   }
 }
 
@@ -690,28 +788,41 @@ async function readNitradoFileViaDownload(
   file: string,
   readAttempts?: AdmReadAttempt[],
 ) {
+  if (isUnsafeRemotePathForRequest(file)) {
+    readAttempts?.push(createReadAttempt(file, "download", "error", {
+      errorMessageSafe: "Skipped unsafe or placeholder path",
+    }));
+    return createSampleResult(null, "error", false, "error", false, "Skipped unsafe or placeholder path");
+  }
+
   try {
     const url = new URL(`${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers/file_server/download`);
     url.searchParams.set("file", file);
     const response = await fetch(url, { headers: nitradoHeaders(token) });
     if (!response.ok) {
       const status = safeResponseStatus(response);
-      readAttempts?.push({ path: file, method: "download", status, downloadTokenCreated: false, sampleReadSucceeded: false });
-      return { sample: null, status, downloadTokenCreated: false };
+      readAttempts?.push(createReadAttempt(file, "download", status, {
+        errorMessageSafe: safeFileApiError(status),
+      }));
+      return createSampleResult(null, status, false, "not_attempted", false, safeFileApiError(status));
     }
     const payload = await response.json();
     const sample = await fetchTokenizedFileSample(payload);
-    readAttempts?.push({
-      path: file,
-      method: "download",
-      status: sample.status,
+    readAttempts?.push(createReadAttempt(file, "download", sample.status, {
+      responseShape: sample.responseShape,
+      errorMessageSafe: sample.errorMessageSafe,
       downloadTokenCreated: sample.downloadTokenCreated,
+      tokenUrlReceived: sample.tokenUrlReceived,
+      sampleFetchAttempted: sample.sampleFetchAttempted,
+      sampleFetchStatus: sample.sampleFetchStatus,
       sampleReadSucceeded: sample.sample !== null,
-    });
+    }));
     return sample;
   } catch {
-    readAttempts?.push({ path: file, method: "download", status: "error", downloadTokenCreated: false, sampleReadSucceeded: false });
-    return { sample: null, status: "error" as const, downloadTokenCreated: false };
+    readAttempts?.push(createReadAttempt(file, "download", "error", {
+      errorMessageSafe: "Nitrado download request failed",
+    }));
+    return createSampleResult(null, "error", false, "error", false, "Nitrado download request failed");
   }
 }
 
@@ -720,33 +831,193 @@ async function statNitradoFile(
   serviceId: string,
   file: string,
 ): Promise<AdmStatAttempt> {
+  if (isUnsafeRemotePathForRequest(file)) {
+    return {
+      path: file,
+      status: "error",
+      fileVisible: false,
+      responseShape: emptyResponseShape(),
+      errorMessageSafe: "Skipped unsafe or placeholder path",
+    };
+  }
+
   try {
     const url = new URL(`${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers/file_server/stat`);
     url.searchParams.append("files[]", file);
     const response = await fetch(url, { headers: nitradoHeaders(token) });
     const status = safeResponseStatus(response);
-    if (!response.ok) return { path: file, status, fileVisible: false };
+    if (!response.ok) {
+      return {
+        path: file,
+        status,
+        fileVisible: false,
+        responseShape: emptyResponseShape(),
+        errorMessageSafe: safeFileApiError(status),
+      };
+    }
     const payload = await response.json();
-    return { path: file, status: "OK", fileVisible: statPayloadShowsFile(payload, file) };
+    return {
+      path: file,
+      status: "OK",
+      fileVisible: statPayloadShowsFile(payload, file),
+      responseShape: describeFileTokenResponseShape(payload),
+      errorMessageSafe: null,
+    };
   } catch {
-    return { path: file, status: "error", fileVisible: false };
+    return {
+      path: file,
+      status: "error",
+      fileVisible: false,
+      responseShape: emptyResponseShape(),
+      errorMessageSafe: "Nitrado stat request failed",
+    };
   }
 }
 
 async function fetchTokenizedFileSample(payload: unknown) {
+  const responseShape = describeFileTokenResponseShape(payload);
   const token = extractDownloadToken(payload);
-  if (!token) return { sample: null, status: "error" as const, downloadTokenCreated: false };
-
-  const url = new URL(token.url);
-  url.searchParams.set("token", token.token);
-  url.searchParams.set("offset", "0");
-  url.searchParams.set("count", String(ADM_SAMPLE_BYTES));
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    return { sample: null, status: safeResponseStatus(response), downloadTokenCreated: true };
+  if (!token) {
+    return createSampleResult(
+      null,
+      "error",
+      false,
+      "error",
+      false,
+      "No file download token returned",
+      responseShape,
+      false,
+    );
   }
-  return { sample: await response.text(), status: "OK" as const, downloadTokenCreated: true };
+
+  const queryResult = await fetchTokenizedFileSampleWithQuery(token);
+  if (queryResult.sample !== null) {
+    return {
+      ...queryResult,
+      responseShape,
+      downloadTokenCreated: true,
+      tokenUrlReceived: true,
+      sampleFetchAttempted: true,
+    };
+  }
+
+  const headerResult = await fetchTokenizedFileSampleWithHeader(token);
+  return {
+    ...headerResult,
+    responseShape,
+    downloadTokenCreated: true,
+    tokenUrlReceived: true,
+    sampleFetchAttempted: true,
+    errorMessageSafe: headerResult.sample !== null ? null : "Tokenized sample fetch failed",
+  };
+}
+
+async function fetchTokenizedFileSampleWithQuery(token: { url: string; token: string }) {
+  try {
+    const url = new URL(token.url);
+    url.searchParams.set("token", token.token);
+    url.searchParams.set("offset", "0");
+    url.searchParams.set("count", String(ADM_SAMPLE_BYTES));
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      return createSampleResult(null, safeResponseStatus(response), true, safeResponseStatus(response), true, "Tokenized sample query fetch failed");
+    }
+    return createSampleResult((await response.text()).slice(0, ADM_SAMPLE_BYTES), "OK", true, "OK", true, null);
+  } catch {
+    return createSampleResult(null, "error", true, "error", true, "Tokenized sample query fetch failed");
+  }
+}
+
+async function fetchTokenizedFileSampleWithHeader(token: { url: string; token: string }) {
+  try {
+    const url = new URL(token.url);
+    url.searchParams.set("offset", "0");
+    url.searchParams.set("count", String(ADM_SAMPLE_BYTES));
+
+    const response = await fetch(url, { headers: { token: token.token } });
+    if (!response.ok) {
+      return createSampleResult(null, safeResponseStatus(response), true, safeResponseStatus(response), true, "Tokenized sample header fetch failed");
+    }
+    return createSampleResult((await response.text()).slice(0, ADM_SAMPLE_BYTES), "OK", true, "OK", true, null);
+  } catch {
+    return createSampleResult(null, "error", true, "error", true, "Tokenized sample header fetch failed");
+  }
+}
+
+function createSampleResult(
+  sample: string | null,
+  status: SafeApiStatus,
+  downloadTokenCreated: boolean,
+  sampleFetchStatus: SampleFetchStatus,
+  sampleFetchAttempted: boolean,
+  errorMessageSafe: string | null,
+  responseShape: AdmApiResponseShape = emptyResponseShape(),
+  tokenUrlReceived = downloadTokenCreated,
+) {
+  return {
+    sample,
+    status,
+    downloadTokenCreated,
+    tokenUrlReceived,
+    sampleFetchAttempted,
+    sampleFetchStatus,
+    sampleReadSucceeded: sample !== null,
+    responseShape,
+    errorMessageSafe,
+  };
+}
+
+function createReadAttempt(
+  path: string,
+  method: "seek" | "download",
+  status: SafeApiStatus,
+  values: Partial<Omit<AdmReadAttempt, "path" | "method" | "status">> = {},
+): AdmReadAttempt {
+  return {
+    path,
+    method,
+    status,
+    responseShape: values.responseShape ?? emptyResponseShape(),
+    errorMessageSafe: values.errorMessageSafe ?? null,
+    downloadTokenCreated: values.downloadTokenCreated ?? false,
+    tokenUrlReceived: values.tokenUrlReceived ?? false,
+    sampleFetchAttempted: values.sampleFetchAttempted ?? false,
+    sampleFetchStatus: values.sampleFetchStatus ?? "not_attempted",
+    sampleReadSucceeded: values.sampleReadSucceeded ?? false,
+  };
+}
+
+function emptyResponseShape(): AdmApiResponseShape {
+  return {
+    hasData: false,
+    hasToken: false,
+    hasTokenUrl: false,
+    hasTokenValue: false,
+  };
+}
+
+function describeFileTokenResponseShape(payload: unknown): AdmApiResponseShape {
+  const token = findTokenObject(payload);
+  return {
+    hasData: payloadHasKey(payload, "data"),
+    hasToken: payloadHasKey(payload, "token"),
+    hasTokenUrl: Boolean(token?.url),
+    hasTokenValue: Boolean(token?.token),
+  };
+}
+
+function payloadHasKey(value: unknown, key: string): boolean {
+  if (!isRecord(value)) return false;
+  if (Object.prototype.hasOwnProperty.call(value, key)) return true;
+  return Object.values(value).some((child) => payloadHasKey(child, key));
+}
+
+function safeFileApiError(status: SafeApiStatus) {
+  if (status === "401") return "Nitrado token was rejected";
+  if (status === "403") return "Nitrado file browser permission denied";
+  if (status === "404") return "Nitrado file path not found";
+  return "Nitrado file request failed";
 }
 
 function extractDownloadToken(payload: unknown) {
@@ -984,9 +1255,25 @@ function containsDayZAdminLogMarkers(sample: string | null) {
   return markers.some((marker) => marker.test(sample));
 }
 
+function containsAdminLogStarted(sample: string | null) {
+  return Boolean(sample && /AdminLog started/i.test(sample));
+}
+
+function containsPlayerActivityMarkers(sample: string | null) {
+  if (!sample) return false;
+  return [
+    /Player/i,
+    /is connected/i,
+    /has been disconnected/i,
+    /\bplaced\b/i,
+    /\bkilled\b/i,
+    /\bdied\b/i,
+  ].some((marker) => marker.test(sample));
+}
+
 function createAdmPathVariants(inputPath: string) {
   const normalized = normalizeRemotePath(inputPath.trim().replace(/[\u0000-\u001f]/g, ""));
-  if (!normalized || /^https?:\/\//i.test(normalized) || normalized.includes("..")) return [];
+  if (isUnsafeRemotePathForRequest(normalized)) return [];
   const upperFileName = uppercaseRemoteFileName(normalized);
   return dedupeStrings([
     normalized,
@@ -994,6 +1281,17 @@ function createAdmPathVariants(inputPath: string) {
     upperFileName,
     `/${upperFileName}`,
   ]);
+}
+
+function isUnsafeRemotePathForRequest(path: string) {
+  const normalized = normalizeRemotePath(path.trim().replace(/[\u0000-\u001f]/g, ""));
+  return (
+    !normalized ||
+    /^https?:\/\//i.test(normalized) ||
+    normalized.includes("..") ||
+    /[{}]/.test(normalized) ||
+    /gameserver-username/i.test(normalized)
+  );
 }
 
 function extractGameSpecificLogDetails(payload: unknown): GameSpecificLogDetails {
@@ -1021,26 +1319,34 @@ function extractGameSpecificLogDetails(payload: unknown): GameSpecificLogDetails
   };
 }
 
-function buildGameSpecificApiPathVariants(details: GameSpecificLogDetails, manualPath?: string) {
-  if (!details.username) return [];
+function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: string) {
   const sources = dedupeStrings([
     ...(details.selectedAdmFile ? [details.selectedAdmFile.path] : []),
-    ...details.admLogFiles.map((entry) => entry.path),
     ...(manualPath ? [manualPath] : []),
+    ...details.admLogFiles.map((entry) => entry.path),
   ]);
   const paths: string[] = [];
 
   for (const source of sources) {
     const normalized = normalizeRemotePath(source);
-    if (!normalized || normalized.includes("..") || /^https?:\/\//i.test(normalized)) continue;
+    if (isUnsafeRemotePathForRequest(normalized)) continue;
     const fileName = normalized.split("/").filter(Boolean).at(-1);
     if (!fileName || !/(\.adm$|dayzserver.*\.adm$)/i.test(fileName)) continue;
+
+    paths.push(fileName);
+    paths.push(`/${fileName}`);
+    paths.push(normalized);
+    paths.push(`/${normalized}`);
+    paths.push(`dayzps/config/${fileName}`);
+    paths.push(`/dayzps/config/${fileName}`);
+
+    if (!details.username) continue;
 
     if (normalized.toLowerCase().startsWith(`games/${details.username.toLowerCase()}/noftp/`)) {
       paths.push(`/${normalized}`);
     } else {
-      paths.push(`/games/${details.username}/noftp/${normalized}`);
       paths.push(`/games/${details.username}/noftp/${fileName}`);
+      paths.push(`/games/${details.username}/noftp/${normalized}`);
       paths.push(`/games/${details.username}/noftp/dayzps/config/${fileName}`);
       paths.push(`/games/${details.username}/noftp/config/${fileName}`);
     }
@@ -1048,9 +1354,10 @@ function buildGameSpecificApiPathVariants(details: GameSpecificLogDetails, manua
 
   return dedupeStrings(paths.flatMap((path) => {
     const normalized = normalizeRemotePath(path);
+    if (isUnsafeRemotePathForRequest(normalized)) return [];
     const leadingPath = `/${normalized}`;
     return [leadingPath, ...createAdmPathVariants(path).filter((variant) => variant !== leadingPath)];
-  }));
+  })).slice(0, 80);
 }
 
 function createServiceDetailsDebug(
@@ -1183,6 +1490,20 @@ function createAdmDebug({
   readAttempts: AdmReadAttempt[];
 }): AdmApiDebug {
   const mask = (value: string) => maskNitradoUsernameInPath(value, gameSpecificLogs.username);
+  const username = gameSpecificLogs.username;
+  const actualUsernameUsed = Boolean(
+    username &&
+      [
+        ...apiLogFilePathVariants,
+        ...pathVariants,
+        ...statAttempts.map((attempt) => attempt.path),
+        ...readAttempts.map((attempt) => attempt.path),
+        selectedPath ?? "",
+      ].some((path) => pathUsesNitradoUsername(path, username)),
+  );
+  const successfulReadAttempt = readAttempts.find((attempt) => attempt.sampleReadSucceeded);
+  const latestReadAttempt = readAttempts.at(-1);
+  const representativeReadAttempt = successfulReadAttempt ?? latestReadAttempt;
   return {
     exactManualPath,
     pathVariants: dedupeStrings(pathVariants.map(mask)).slice(0, 24),
@@ -1198,6 +1519,11 @@ function createAdmDebug({
     gameSpecificAdmFilesFound: dedupeStrings(gameSpecificLogs.admLogFiles.map((entry) => mask(entry.path))).slice(0, 40),
     selectedGameSpecificAdmFile: gameSpecificLogs.selectedAdmFile?.name ?? null,
     apiLogFilePathTested: selectedPath ? mask(selectedPath) : null,
+    actualUsernameUsed,
+    usernameRedactedInUi: actualUsernameUsed,
+    tokenUrlReceived: readAttempts.some((attempt) => attempt.tokenUrlReceived),
+    sampleFetchAttempted: readAttempts.some((attempt) => attempt.sampleFetchAttempted),
+    sampleFetchStatus: representativeReadAttempt?.sampleFetchStatus ?? "not_attempted",
     filesFound: dedupeStrings(filesFound.map(mask)).slice(0, 40),
     exactSelectedAdmPath: selectedPath ? mask(selectedPath) : null,
     fileVisibleThroughStat,
@@ -1239,13 +1565,22 @@ function buildMethodAttempts(
       method: "stat" as const,
       status: attempt.status,
       path: mask(attempt.path),
+      pathRedacted: mask(attempt.path),
       fileVisible: attempt.fileVisible,
+      responseShape: attempt.responseShape,
+      errorMessageSafe: attempt.errorMessageSafe,
     })),
     ...readAttempts.map((attempt) => ({
       method: attempt.method,
       status: attempt.status,
       path: mask(attempt.path),
+      pathRedacted: mask(attempt.path),
+      responseShape: attempt.responseShape,
+      errorMessageSafe: attempt.errorMessageSafe,
       downloadTokenCreated: attempt.downloadTokenCreated,
+      tokenUrlReceived: attempt.tokenUrlReceived,
+      sampleFetchAttempted: attempt.sampleFetchAttempted,
+      sampleFetchStatus: attempt.sampleFetchStatus,
       sampleReadSucceeded: attempt.sampleReadSucceeded,
     })),
   ];
@@ -1269,7 +1604,29 @@ function buildAdmDebugMessage(
   admFileExists: boolean,
   sampleReadSucceeded: boolean,
   sampleHasMarkers = false,
+  sample: string | null = null,
 ) {
+  if (sampleReadSucceeded) {
+    if (sampleHasMarkers) {
+      return containsAdminLogStarted(sample) && !containsPlayerActivityMarkers(sample)
+        ? "ADM Connected - waiting for player activity"
+        : null;
+    }
+    return "ADM file read succeeded, but no DayZ admin log markers were found in the sample.";
+  }
+
+  if (admFileExists && readAttempts.length > 0 && !sampleReadSucceeded) {
+    if (readAttempts.every((attempt) => attempt.status === "403")) {
+      return "ADM file is listed, but the Nitrado token may not have file browser read permission.";
+    }
+    if (readAttempts.every((attempt) => attempt.status === "404")) {
+      return "ADM file is listed, but the tested API file paths were not found.";
+    }
+    if (!readAttempts.some((attempt) => attempt.downloadTokenCreated)) {
+      return "ADM file was discovered, but Nitrado did not return a file download token.";
+    }
+  }
+
   if (hasStatus(listAttempts, "403") || hasReadStatus(readAttempts, "403") || hasStatStatus(statAttempts, "403") || serviceDetailsStatus === "403") {
     return "Token may not have permission to read file server logs.";
   }
@@ -1284,7 +1641,6 @@ function buildAdmDebugMessage(
   }
   if (!admFileExists) return "Could not list ADM files through Nitrado API.";
   if (!sampleReadSucceeded) return "ADM file found, but sample read failed.";
-  if (!sampleHasMarkers) return "ADM file read succeeded, but no DayZ admin log markers were found in the sample.";
   return null;
 }
 
@@ -1364,6 +1720,11 @@ function maskNitradoUsernameInPath(path: string, username: string | null) {
   if (!username) return path;
   const escaped = escapeRegExp(username);
   return path.replace(new RegExp(`(/?games/)${escaped}(/noftp)`, "gi"), "$1{gameserver-username}$2");
+}
+
+function pathUsesNitradoUsername(path: string, username: string) {
+  const escaped = escapeRegExp(username);
+  return new RegExp(`/?games/${escaped}/noftp`, "i").test(path);
 }
 
 function escapeRegExp(value: string) {
