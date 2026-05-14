@@ -60,19 +60,15 @@ type SafePublicServer = {
   guild_name: string | null;
   guild_icon_url: string | null;
   adm_status: "Connected" | "Discovered" | "Needs Review";
-  latest_adm_file: string | null;
   stats_sync: "Active" | "Pending" | "Not Started";
-  read_status: "Readable" | "Read Pending" | "Not Ready";
   player_slots: number | null;
   created_at: string | null;
-  latest_sync_at: string | null;
   total_kills: number;
   total_deaths: number;
   total_joins: number;
   total_disconnects: number;
   unique_players: number;
   recent_events: PublicRecentEvent[];
-  public_sync_source: "sync_runs" | "adm_sync_state" | "server_stats" | "linked_server_fallback";
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -261,14 +257,6 @@ async function toSafePublicServer(env: Env, row: PublicServerRow) {
     : latestAdmFile || row.adm_path
       ? "Pending"
       : "Not Started";
-  const publicSyncSource = latestSyncCompleted
-    ? "sync_runs"
-    : admSyncCompleted
-      ? "adm_sync_state"
-      : hasActivity
-        ? "server_stats"
-        : "linked_server_fallback";
-
   return {
     public_slug: row.public_slug,
     server_name: row.server_name,
@@ -279,19 +267,15 @@ async function toSafePublicServer(env: Env, row: PublicServerRow) {
     guild_name: row.guild_name,
     guild_icon_url: row.guild_icon_url,
     adm_status: admStatus,
-    latest_adm_file: latestAdmFile,
     stats_sync: statsSync,
-    read_status: readable ? "Readable" : latestAdmFile ? "Read Pending" : "Not Ready",
     player_slots: row.player_slots,
     created_at: row.created_at,
-    latest_sync_at: row.latest_success_sync_at ?? row.adm_sync_at ?? row.server_stats_updated_at,
     total_kills: numberOrZero(row.total_kills),
     total_deaths: numberOrZero(row.total_deaths),
     total_joins: numberOrZero(row.total_joins),
     total_disconnects: numberOrZero(row.total_disconnects),
     unique_players: numberOrZero(row.unique_players),
     recent_events: await getPublicRecentEvents(env, row.id),
-    public_sync_source: publicSyncSource,
   } satisfies SafePublicServer;
 }
 
@@ -318,19 +302,15 @@ function mockPublicServers(): SafePublicServer[] {
       guild_name: "Warlords Community",
       guild_icon_url: null,
       adm_status: "Discovered",
-      latest_adm_file: "DayZServer_PS4_x64_2026-05-14_13-01-57.ADM",
       stats_sync: "Pending",
-      read_status: "Read Pending",
       player_slots: 60,
       created_at: new Date().toISOString(),
-      latest_sync_at: null,
       total_kills: 0,
       total_deaths: 0,
       total_joins: 0,
       total_disconnects: 0,
       unique_players: 0,
       recent_events: [],
-      public_sync_source: "linked_server_fallback",
     },
     {
       public_slug: "warlords-pvp",
@@ -342,19 +322,15 @@ function mockPublicServers(): SafePublicServer[] {
       guild_name: "Warlords Community",
       guild_icon_url: null,
       adm_status: "Connected",
-      latest_adm_file: "DayZServer_PS4_x64_2026-05-14_12-29-09.ADM",
       stats_sync: "Active",
-      read_status: "Readable",
       player_slots: 70,
       created_at: new Date().toISOString(),
-      latest_sync_at: new Date().toISOString(),
       total_kills: 12,
       total_deaths: 18,
       total_joins: 42,
       total_disconnects: 36,
       unique_players: 14,
       recent_events: [],
-      public_sync_source: "sync_runs",
     },
     {
       public_slug: "apocalypse-dm",
@@ -366,19 +342,15 @@ function mockPublicServers(): SafePublicServer[] {
       guild_name: "Warlords Community",
       guild_icon_url: null,
       adm_status: "Needs Review",
-      latest_adm_file: null,
       stats_sync: "Not Started",
-      read_status: "Not Ready",
       player_slots: 50,
       created_at: new Date().toISOString(),
-      latest_sync_at: null,
       total_kills: 0,
       total_deaths: 0,
       total_joins: 0,
       total_disconnects: 0,
       unique_players: 0,
       recent_events: [],
-      public_sync_source: "linked_server_fallback",
     },
   ];
 }

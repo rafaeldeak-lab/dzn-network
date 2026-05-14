@@ -33,19 +33,15 @@ type PublicServer = {
   guild_name: string | null;
   guild_icon_url: string | null;
   adm_status: "Connected" | "Discovered" | "Needs Review";
-  latest_adm_file: string | null;
   stats_sync: "Active" | "Pending" | "Not Started";
-  read_status: "Readable" | "Read Pending" | "Not Ready";
   player_slots: number | null;
   created_at: string | null;
-  latest_sync_at: string | null;
   total_kills: number;
   total_deaths: number;
   total_joins: number;
   total_disconnects: number;
   unique_players: number;
   recent_events: PublicRecentEvent[];
-  public_sync_source?: "sync_runs" | "adm_sync_state" | "server_stats" | "linked_server_fallback";
 };
 
 type PublicRecentEvent = {
@@ -364,6 +360,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const tags = parseTags(server.tags_json);
   const statsPending = server.stats_sync === "Pending";
   const statsActiveWithoutKills = server.stats_sync === "Active" && server.total_kills === 0;
+  const heroTags = tags.slice(0, 5);
 
   return (
     <div className="pb-16 pt-10">
@@ -376,11 +373,11 @@ function ServerProfile({ server }: { server: PublicServer }) {
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.42 }}
-        className="mt-8 glass-surface animated-border rounded-lg p-6 sm:p-8"
+        className="mt-8 glass-surface animated-border rounded-lg p-5 sm:p-6"
       >
-        <div className="relative z-10 grid min-w-0 gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] lg:items-start">
+        <div className="relative z-10 grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] lg:items-start">
           <div className="min-w-0">
-            <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
               <GuildIcon server={server} size="lg" />
               <div className="min-w-0 max-w-full">
                 <p className="text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified DZN community"}</p>
@@ -388,7 +385,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
                 <p className="mt-3 max-w-2xl break-words text-base leading-7 text-zinc-300 [overflow-wrap:anywhere] sm:text-lg sm:leading-8">{server.nitrado_service_name ?? server.server_name}</p>
               </div>
             </div>
-            <div className="mt-7 flex flex-wrap gap-2">
+            <div className="mt-5 flex flex-wrap gap-2">
               <StatusPill label="Live" tone="emerald" />
               <StatusPill label="Verified Owner" tone="cyan" />
               <StatusPill label="DZN Verified" tone="violet" />
@@ -396,16 +393,20 @@ function ServerProfile({ server }: { server: PublicServer }) {
               <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
               <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
             </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {heroTags.length ? heroTags.map((tag) => <span key={tag} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100">{tag}</span>) : <span className="text-sm text-zinc-500">No tags listed yet.</span>}
+            </div>
           </div>
 
           <div className="w-full min-w-0 self-start overflow-hidden rounded-lg border border-white/10 bg-black/26 p-5 lg:justify-self-end">
-            <p className="text-xs font-black uppercase text-zinc-500">Server Signal</p>
-            <div className="mt-4 grid gap-3">
-              <MiniMetric label="Player Slots" value={server.player_slots ? String(server.player_slots) : "Not listed"} />
-              <MiniMetric label="Latest ADM File" value={server.latest_adm_file ?? "Pending"} />
+            <p className="text-xs font-black uppercase text-zinc-500">Public Server Status</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              <MiniMetric label="Status" value="Live" />
               <MiniMetric label="Stats Sync" value={server.stats_sync} />
-              <MiniMetric label="Read Status" value={server.read_status} />
-              <MiniMetric label="Last Sync" value={formatPublicDate(server.latest_sync_at)} />
+              <MiniMetric label="Player Slots" value={server.player_slots ? `0 / ${server.player_slots}` : "Not listed"} />
+              <MiniMetric label="Server Type" value={server.server_type} />
+              <MiniMetric label="Unique Players" value={String(server.unique_players)} />
+              <MiniMetric label="Total Kills" value={String(server.total_kills)} />
             </div>
           </div>
         </div>
@@ -413,12 +414,12 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
       {statsPending ? (
         <div className="mt-5 rounded-lg border border-orange-300/20 bg-orange-400/10 p-5 text-sm font-bold leading-6 text-orange-50">
-          Stats sync is pending while ADM log reading is being finalised.
+          Stats sync is pending while this server is being prepared.
         </div>
       ) : null}
       {statsActiveWithoutKills ? (
         <div className="mt-5 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-5 text-sm font-bold leading-6 text-cyan-50">
-          No PvP kills synced yet. Player activity is syncing.
+          Player activity is syncing. PvP kills will appear once detected.
         </div>
       ) : null}
 
@@ -440,7 +441,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
         <aside className="grid gap-5">
           <GlassPanel title="Top Players" icon={Flame}>
-            <PlaceholderRows labels={["No synced events yet", "Player stats will appear after log processing begins", "Killfeed activates once ADM sync is live"]} />
+            <PlaceholderRows labels={["No ranked players yet", "Player rankings will appear after kills are detected", "Activity is currently syncing"]} />
           </GlassPanel>
           <GlassPanel title="Network Status" icon={BarChart3}>
             <div className="grid gap-3">
@@ -575,8 +576,8 @@ function RecentEventsPanel({ server }: { server: PublicServer }) {
       ) : (
         <p className="text-sm leading-6 text-zinc-400">
           {server.stats_sync === "Active"
-            ? "No PvP kills synced yet. Player activity is syncing."
-            : "Stats sync is pending while ADM log reading is being finalised."}
+            ? "Player activity is syncing. PvP kills will appear once detected."
+            : "Stats sync is pending while this server is being prepared."}
         </p>
       )}
     </GlassPanel>
@@ -665,8 +666,8 @@ function sanitizePublicSlug(value: string) {
 
 function publicCardFooter(server: PublicServer) {
   if (server.stats_sync === "Active") return "Sync active";
-  if (server.adm_status === "Connected" || server.read_status === "Readable") return "ADM connected";
-  if (server.adm_status === "Discovered" || server.latest_adm_file) return "ADM discovered";
+  if (server.adm_status === "Connected") return "ADM connected";
+  if (server.adm_status === "Discovered") return "ADM discovered";
   return "Awaiting sync data";
 }
 
@@ -685,18 +686,6 @@ function formatPublicTime(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Pending";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatPublicDate(value: string | null) {
-  if (!value) return "Pending";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Pending";
-  return date.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function buildStats(servers: PublicServer[]): PublicStats {
