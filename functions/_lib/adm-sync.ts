@@ -1,4 +1,4 @@
-import { parseAdmLine, type ParsedAdmEvent } from "./adm-parser";
+import { parseAdmLines, type ParsedAdmEvent } from "./adm-parser";
 import { getCurrentLinkedServer, requireDb, saveServerAdmPath } from "./db";
 import { isMockNitrado } from "./mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "./nitrado";
@@ -101,7 +101,8 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
   const lastProcessedLine = existingState?.last_processed_file === latestAdmFile
     ? Number(existingState?.last_processed_line ?? 0)
     : 0;
-  const pendingLines = lines.slice(lastProcessedLine);
+  const parsedLines = parseAdmLines(lines, { admDate: extractAdmDateFromFile(latestAdmFile) ?? undefined });
+  const pendingParsedEvents = parsedLines.slice(lastProcessedLine);
   let eventsCreated = 0;
   let killsCreated = 0;
   let joinsCreated = 0;
@@ -109,15 +110,25 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
   let deathsCreated = 0;
   let processedOffset = Number(existingState?.last_processed_offset ?? 0);
   let lastEventAt: string | null = null;
+  const recentDeathLines = new Map<string, number>();
+  const warmupStart = Math.max(0, lastProcessedLine - 5);
+  for (let index = warmupStart; index < lastProcessedLine; index += 1) {
+    const previousEvent = parsedLines[index];
+    if (previousEvent && isDeathCountingEvent(previousEvent)) {
+      markDeathCounted(recentDeathLines, previousEvent, index + 1);
+    }
+  }
 
-  for (let index = 0; index < pendingLines.length; index += 1) {
-    const rawLine = pendingLines[index];
+  for (let index = 0; index < pendingParsedEvents.length; index += 1) {
+    const parsed = pendingParsedEvents[index];
+    const rawLine = parsed.rawLine;
     const lineNumber = lastProcessedLine + index + 1;
-    const parsed = parseAdmLine(rawLine);
     await insertRawEvent(env, linkedServer.id, latestAdmFile, lineNumber, rawLine, parsed);
     processedOffset += rawLine.length + 1;
 
-    const eventResult = await persistParsedEvent(env, linkedServer.id, latestAdmFile, lineNumber, parsed);
+    const eventResult = await persistParsedEvent(env, linkedServer.id, latestAdmFile, lineNumber, parsed, {
+      recentDeathLines,
+    });
     eventsCreated += eventResult.eventsCreated;
     killsCreated += eventResult.killsCreated;
     joinsCreated += eventResult.joinsCreated;
@@ -126,9 +137,9 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     lastEventAt = parsed.occurredAt ?? now;
   }
 
-  const nextProcessedLine = lastProcessedLine + pendingLines.length;
-  const status = pendingLines.length ? "completed" : "idle";
-  const message = pendingLines.length ? "Manual ADM sync completed" : "No new ADM lines to process";
+  const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
+  const status = pendingParsedEvents.length ? "completed" : "idle";
+  const message = pendingParsedEvents.length ? "Manual ADM sync completed" : "No new ADM lines to process";
   const uniquePlayers = await countUniquePlayers(env, linkedServer.id);
   await upsertServerStats(env, linkedServer.id, {
     kills: killsCreated,
@@ -153,7 +164,7 @@ export async function runAdmSync(env: Env, userId: string, linkedServerId?: stri
     status,
     message,
     linesSeen: lines.length,
-    linesProcessed: pendingLines.length,
+    linesProcessed: pendingParsedEvents.length,
     eventsCreated,
     killsCreated,
     latestAdmFile,
@@ -327,31 +338,88 @@ async function persistParsedEvent(
   admFile: string | null,
   lineNumber: number,
   parsed: ParsedAdmEvent,
+  context: { recentDeathLines: Map<string, number> },
 ) {
-  if (parsed.eventType === "admin_log_started" || parsed.eventType === "unknown") {
+  if (
+    parsed.eventType === "admin_log_started" ||
+    parsed.eventType === "playerlist_snapshot" ||
+    parsed.eventType === "playerlist_delimiter" ||
+    parsed.eventType === "unknown"
+  ) {
     return emptyPersistResult();
   }
 
+  if (parsed.eventType === "playerlist_entry" || parsed.eventType === "plain_player_state") {
+    if (parsed.playerName) {
+      await upsertPlayerProfile(env, linkedServerId, parsed.playerName, parsed.playerId, parsed.occurredAt);
+    }
+    return emptyPersistResult();
+  }
+
+  const result = emptyPersistResult();
+
+  if (parsed.eventType === "player_killed" && parsed.isCreditedKill) {
+    const killerProfileId = parsed.killerName
+      ? await upsertPlayerProfile(env, linkedServerId, parsed.killerName, parsed.killerId, parsed.occurredAt)
+      : null;
+    const victimProfileId = parsed.victimName
+      ? await upsertPlayerProfile(env, linkedServerId, parsed.victimName, parsed.victimId, parsed.occurredAt)
+      : null;
+    await insertKillEvent(env, linkedServerId, killerProfileId, victimProfileId, admFile, lineNumber, parsed);
+    await updateProfilesForDeath(env, {
+      killerProfileId,
+      victimProfileId,
+      killerGetsKill: true,
+      suicide: false,
+      distance: parsed.distance,
+    });
+    markDeathCounted(context.recentDeathLines, parsed, lineNumber);
+    result.eventsCreated = 1;
+    result.killsCreated = 1;
+    result.deathsCreated = 1;
+    return result;
+  }
+
+  const eventPlayer = getPlayerForPlayerEvent(parsed);
   let playerProfileId: string | null = null;
-  if (parsed.playerName) {
-    playerProfileId = await upsertPlayerProfile(env, linkedServerId, parsed.playerName, parsed.playerId, parsed.occurredAt);
+  if (eventPlayer.name) {
+    playerProfileId = await upsertPlayerProfile(env, linkedServerId, eventPlayer.name, eventPlayer.id, parsed.occurredAt);
   }
 
   await insertPlayerEvent(env, linkedServerId, playerProfileId, admFile, lineNumber, parsed);
-  const result = emptyPersistResult();
   result.eventsCreated = 1;
+
   if (parsed.eventType === "player_connected") result.joinsCreated = 1;
   if (parsed.eventType === "player_disconnected") result.disconnectsCreated = 1;
 
-  if (parsed.eventType === "player_killed" || parsed.eventType === "player_suicide" || parsed.eventType === "player_died") {
-    const victimProfileId = parsed.victimName
-      ? await upsertPlayerProfile(env, linkedServerId, parsed.victimName, parsed.victimId, parsed.occurredAt)
+  if (parsed.eventType === "player_killed_environment" || parsed.eventType === "player_suicide") {
+    const victimProfileId = eventPlayer.name
+      ? await upsertPlayerProfile(env, linkedServerId, eventPlayer.name, eventPlayer.id, parsed.occurredAt)
       : playerProfileId;
-    const killerProfileId = parsed.eventType === "player_killed" ? playerProfileId : null;
-    await insertKillEvent(env, linkedServerId, killerProfileId, victimProfileId, admFile, lineNumber, parsed);
-    await updateProfilesForDeath(env, killerProfileId, victimProfileId, parsed);
-    result.killsCreated = parsed.eventType === "player_killed" ? 1 : 0;
+    await updateProfilesForDeath(env, {
+      killerProfileId: null,
+      victimProfileId,
+      killerGetsKill: false,
+      suicide: parsed.eventType === "player_suicide",
+      distance: null,
+    });
+    markDeathCounted(context.recentDeathLines, parsed, lineNumber);
     result.deathsCreated = 1;
+  }
+
+  if (parsed.eventType === "player_died_stats") {
+    const deathAlreadyCounted = wasDeathRecentlyCounted(context.recentDeathLines, parsed, lineNumber);
+    if (!deathAlreadyCounted) {
+      await updateProfilesForDeath(env, {
+        killerProfileId: null,
+        victimProfileId: playerProfileId,
+        killerGetsKill: false,
+        suicide: false,
+        distance: null,
+      });
+      markDeathCounted(context.recentDeathLines, parsed, lineNumber);
+      result.deathsCreated = 1;
+    }
   }
 
   return result;
@@ -414,15 +482,15 @@ async function insertKillEvent(
       linkedServerId,
       killerProfileId,
       victimProfileId,
-      parsed.playerName,
+      parsed.killerName ?? parsed.playerName,
       parsed.victimName,
-      parsed.playerId,
+      parsed.killerId ?? parsed.playerId,
       parsed.victimId,
       parsed.weapon,
       parsed.distance,
-      parsed.position?.x ?? null,
-      parsed.position?.y ?? null,
-      parsed.position?.z ?? null,
+      parsed.killerPosition?.x ?? parsed.position?.x ?? null,
+      parsed.killerPosition?.y ?? parsed.position?.y ?? null,
+      parsed.killerPosition?.z ?? parsed.position?.z ?? null,
       admFile,
       lineNumber,
       parsed.occurredAt,
@@ -478,12 +546,16 @@ async function upsertPlayerProfile(
 
 async function updateProfilesForDeath(
   env: Env,
-  killerProfileId: string | null,
-  victimProfileId: string | null,
-  parsed: ParsedAdmEvent,
+  values: {
+    killerProfileId: string | null;
+    victimProfileId: string | null;
+    killerGetsKill: boolean;
+    suicide: boolean;
+    distance: number | null;
+  },
 ) {
   const db = requireDb(env);
-  if (killerProfileId) {
+  if (values.killerProfileId && values.killerGetsKill) {
     await db
       .prepare(
         `UPDATE player_profiles SET
@@ -492,10 +564,10 @@ async function updateProfilesForDeath(
           updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
       )
-      .bind(parsed.distance ?? 0, killerProfileId)
+      .bind(values.distance ?? 0, values.killerProfileId)
       .run();
   }
-  if (victimProfileId) {
+  if (values.victimProfileId) {
     await db
       .prepare(
         `UPDATE player_profiles SET
@@ -504,7 +576,7 @@ async function updateProfilesForDeath(
           updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
       )
-      .bind(parsed.eventType === "player_suicide" ? 1 : 0, victimProfileId)
+      .bind(values.suicide ? 1 : 0, values.victimProfileId)
       .run();
   }
 }
@@ -569,16 +641,57 @@ function getReadableAdmLines(samplePreview: string | null) {
 
 function mockAdmLines() {
   return [
-    "AdminLog started",
-    "Player \"MockSurvivor\" (id=mock-player-1 pos=<123.4, 0.0, 456.7>) is connected",
-    "Player \"MockSurvivor\" (id=mock-player-1 pos=<124.0, 0.0, 457.0>) placed Fireplace",
-    "Player \"MockBandit\" (id=mock-player-2 pos=<140.0, 0.0, 490.0>) killed Player \"MockSurvivor\" (id=mock-player-1) with M4A1 from 72.5 meters",
-    "Player \"MockBandit\" (id=mock-player-2) has been disconnected",
+    "AdminLog started on 2026-05-14 at 13:45:00",
+    "13:45:10 | Player \"MockSurvivor\" (id=mock-player-1 pos=<123.4, 456.7, 89.0>) is connected",
+    "13:45:35 | Player \"MockSurvivor\" (id=mock-player-1 pos=<124.0, 457.0, 89.1>) placed Fireplace",
+    "13:46:09 | Player \"MockSurvivor\" (DEAD) (id=mock-player-1 pos=<130.0, 460.0, 89.1>)[HP: 0] hit by Player \"MockBandit\" (id=mock-player-2 pos=<140.0, 490.0, 92.0>) into Head(0) for 30.5 damage (Bullet_556x45) with M4A1 from 72.5 meters",
+    "13:46:10 | Player \"MockSurvivor\" (DEAD) (id=mock-player-1 pos=<130.0, 460.0, 89.1>) killed by Player \"MockBandit\" (id=mock-player-2 pos=<140.0, 490.0, 92.0>) with M4A1 from 72.5 meters",
+    "13:48:00 | Player \"MockBandit\" (id=mock-player-2 pos=<141.0, 491.0, 92.0>) has been disconnected",
   ];
 }
 
 function fileNameFromPath(path: string | null) {
   return path ? path.split("/").filter(Boolean).at(-1) ?? null : null;
+}
+
+function extractAdmDateFromFile(fileName: string | null) {
+  const match = fileName ? /(\d{4}-\d{2}-\d{2})/.exec(fileName) : null;
+  return match?.[1] ?? null;
+}
+
+function getPlayerForPlayerEvent(parsed: ParsedAdmEvent) {
+  if (parsed.playerName) return { name: parsed.playerName, id: parsed.playerId };
+  if (parsed.victimName) return { name: parsed.victimName, id: parsed.victimId };
+  if (parsed.attackerName) return { name: parsed.attackerName, id: parsed.attackerId };
+  return { name: null, id: null };
+}
+
+function getDeathKey(parsed: ParsedAdmEvent) {
+  const id = parsed.victimId ?? parsed.playerId;
+  if (id) return `id:${id}`;
+  const name = parsed.victimName ?? parsed.playerName;
+  return name ? `name:${name.toLowerCase()}` : null;
+}
+
+function markDeathCounted(recentDeathLines: Map<string, number>, parsed: ParsedAdmEvent, lineNumber: number) {
+  const key = getDeathKey(parsed);
+  if (key) recentDeathLines.set(key, lineNumber);
+}
+
+function wasDeathRecentlyCounted(recentDeathLines: Map<string, number>, parsed: ParsedAdmEvent, lineNumber: number) {
+  const key = getDeathKey(parsed);
+  if (!key) return false;
+  const previousLine = recentDeathLines.get(key);
+  return typeof previousLine === "number" && lineNumber - previousLine <= 5;
+}
+
+function isDeathCountingEvent(parsed: ParsedAdmEvent) {
+  return (
+    (parsed.eventType === "player_killed" && parsed.isCreditedKill) ||
+    parsed.eventType === "player_killed_environment" ||
+    parsed.eventType === "player_suicide" ||
+    parsed.eventType === "player_died_stats"
+  );
 }
 
 function emptyPersistResult() {
