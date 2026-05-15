@@ -452,7 +452,7 @@ function SetupFrame({ children, onLogout }: { children: React.ReactNode; onLogou
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(139,92,246,0.25),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.14),transparent_26%),linear-gradient(180deg,#02030a_0%,#07101f_52%,#02030a_100%)]" />
       <div className="scanline absolute inset-0 opacity-20" />
       <div className="relative z-10 mx-auto max-w-7xl">
-        <nav className="mb-8 flex items-center justify-between">
+        <nav className="mb-8 flex min-h-[104px] items-center justify-between">
           <DznLogo />
           <div className="flex items-center gap-3">
             <Link href="/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 sm:inline-flex">

@@ -204,8 +204,8 @@ export function AuthShell({
 
 function AuthNav({ authenticated, onLogout }: { authenticated: boolean; onLogout: () => void }) {
   return (
-    <nav className="flex items-start justify-between gap-4">
-      <DznLogo size="hero" className="max-w-[220px] sm:max-w-[280px]" />
+    <nav className="flex min-h-[104px] items-start justify-between gap-4">
+      <DznLogo size="hero" />
       <div className="flex flex-wrap justify-end gap-2 pt-2">
         <Link href="/servers" className="rounded-lg border border-white/10 bg-black/24 px-4 py-2 text-xs font-black uppercase text-zinc-200 backdrop-blur-xl transition hover:border-cyan-300/35 hover:text-white">
           Servers

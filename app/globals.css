@@ -101,47 +101,44 @@ body {
 
 .dzn-logo-frame {
   position: relative;
-  width: 128px;
-  height: 58px;
+  width: 220px;
+  height: 88px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 16px;
-  padding: 8px 12px;
+  border-radius: 22px;
+  padding: 6px 10px;
   overflow: visible;
   background:
-    radial-gradient(circle at 30% 20%, rgba(168, 85, 247, 0.22), transparent 45%),
-    linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(14, 18, 35, 0.02));
-  filter: drop-shadow(0 0 18px rgba(138, 76, 255, 0.35));
-}
-
-.dzn-logo-frame--compact {
-  width: 120px;
-  height: 54px;
+    radial-gradient(circle at 24% 18%, rgba(168, 85, 247, 0.26), transparent 44%),
+    linear-gradient(135deg, rgba(124, 58, 237, 0.13), rgba(4, 8, 20, 0.12));
+  filter:
+    drop-shadow(0 0 14px rgba(168, 85, 247, 0.38))
+    drop-shadow(0 0 28px rgba(59, 130, 246, 0.12));
 }
 
 .dzn-logo-frame--hero {
-  width: 220px;
-  height: 112px;
-  border-radius: 22px;
-  padding: 12px 18px;
+  width: 300px;
+  height: 128px;
+  border-radius: 28px;
+  padding: 8px 14px;
 }
 
 .dzn-logo-frame::before {
   content: "";
   position: absolute;
   inset: -2px;
-  border-radius: 18px;
+  border-radius: 24px;
   padding: 1px;
   background:
     conic-gradient(
       from var(--dzn-spin, 0deg),
       transparent 0deg,
-      transparent 55deg,
-      rgba(168, 85, 247, 0.2) 80deg,
-      rgba(216, 180, 254, 1) 105deg,
-      rgba(124, 58, 237, 0.7) 130deg,
-      transparent 165deg,
+      transparent 45deg,
+      rgba(168, 85, 247, 0.18) 75deg,
+      rgba(233, 213, 255, 1) 105deg,
+      rgba(124, 58, 237, 0.78) 135deg,
+      transparent 170deg,
       transparent 360deg
     );
   -webkit-mask:
@@ -149,63 +146,64 @@ body {
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: dznLogoSpin 5.5s linear infinite;
+  animation: dznLogoSpin 6s linear infinite;
   pointer-events: none;
-  opacity: 0.95;
 }
 
 .dzn-logo-frame--hero::before {
-  border-radius: 24px;
+  border-radius: 30px;
 }
 
 .dzn-logo-frame::after {
   content: "";
   position: absolute;
-  inset: -12px;
-  border-radius: 24px;
+  inset: -16px;
+  border-radius: 30px;
   background:
-    radial-gradient(circle at 50% 0%, rgba(168, 85, 247, 0.42), transparent 18%),
-    radial-gradient(circle at 100% 55%, rgba(99, 102, 241, 0.3), transparent 22%),
-    radial-gradient(circle at 10% 80%, rgba(236, 72, 153, 0.22), transparent 20%);
-  filter: blur(16px);
-  opacity: 0.5;
-  animation: dznLogoPulse 3.8s ease-in-out infinite;
+    radial-gradient(circle at 45% 0%, rgba(168, 85, 247, 0.48), transparent 20%),
+    radial-gradient(circle at 100% 70%, rgba(96, 165, 250, 0.24), transparent 28%),
+    radial-gradient(circle at 5% 80%, rgba(236, 72, 153, 0.2), transparent 24%);
+  filter: blur(18px);
+  opacity: 0.56;
+  animation: dznLogoPulse 4s ease-in-out infinite;
   z-index: -1;
   pointer-events: none;
 }
 
 .dzn-logo-img {
-  width: 100%;
-  max-width: 108px;
-  height: auto;
-  object-fit: contain;
   display: block;
+  width: 190px;
+  height: auto;
+  max-width: none;
+  max-height: 78px;
+  object-fit: contain;
+  object-position: center;
   position: relative;
   z-index: 2;
   transform: translateZ(0);
-}
-
-.dzn-logo-frame--compact .dzn-logo-img {
-  max-width: 100px;
+  filter:
+    drop-shadow(0 0 8px rgba(255, 255, 255, 0.18))
+    drop-shadow(0 0 15px rgba(168, 85, 247, 0.34));
 }
 
 .dzn-logo-frame--hero .dzn-logo-img {
-  max-width: 190px;
+  width: 260px;
+  max-height: 112px;
 }
 
 .dzn-logo-sparkle {
   position: absolute;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  background: #e9d5ff;
+  background: #f5e8ff;
   box-shadow:
-    0 0 8px rgba(233, 213, 255, 1),
+    0 0 8px rgba(245, 232, 255, 1),
     0 0 18px rgba(168, 85, 247, 0.95),
-    0 0 30px rgba(124, 58, 237, 0.75);
-  offset-path: inset(-4px round 18px);
+    0 0 34px rgba(124, 58, 237, 0.8);
+  offset-path: inset(-5px round 24px);
   offset-distance: 0%;
-  animation: dznSparkleOrbit 5.5s linear infinite;
+  animation: dznSparkleOrbit 6s linear infinite;
   z-index: 4;
   pointer-events: none;
 }
@@ -637,11 +635,11 @@ body {
 @keyframes dznLogoPulse {
   0%,
   100% {
-    opacity: 0.35;
+    opacity: 0.4;
     transform: scale(0.98);
   }
   50% {
-    opacity: 0.75;
+    opacity: 0.78;
     transform: scale(1.04);
   }
 }
@@ -891,26 +889,56 @@ body {
   }
 }
 
-@media (max-width: 768px) {
-  .dzn-logo-frame,
-  .dzn-logo-frame--compact {
-    width: 100px;
-    height: 48px;
-    padding: 6px 8px;
+@media (max-width: 1100px) {
+  .dzn-logo-frame {
+    width: 178px;
+    height: 72px;
+  }
+
+  .dzn-logo-img {
+    width: 154px;
+    max-height: 64px;
   }
 
   .dzn-logo-frame--hero {
-    width: 150px;
-    height: 78px;
-    padding: 8px 12px;
-  }
-
-  .dzn-logo-img,
-  .dzn-logo-frame--compact .dzn-logo-img {
-    max-width: 86px;
+    width: 240px;
+    height: 104px;
   }
 
   .dzn-logo-frame--hero .dzn-logo-img {
-    max-width: 126px;
+    width: 208px;
+    max-height: 92px;
+  }
+}
+
+@media (max-width: 768px) {
+  .dzn-logo-frame {
+    width: 138px;
+    height: 58px;
+    border-radius: 18px;
+    padding: 5px 7px;
+  }
+
+  .dzn-logo-frame--hero {
+    width: 190px;
+    height: 84px;
+    border-radius: 22px;
+    padding: 6px 10px;
+  }
+
+  .dzn-logo-img {
+    width: 120px;
+    max-height: 50px;
+  }
+
+  .dzn-logo-frame--hero .dzn-logo-img {
+    width: 162px;
+    max-height: 72px;
+  }
+
+  .dzn-logo-sparkle {
+    width: 6px;
+    height: 6px;
+    offset-path: inset(-4px round 18px);
   }
 }

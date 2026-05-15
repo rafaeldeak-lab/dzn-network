@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const PRIMARY_LOGO_SRC = "/media/dzn-logo.png";
 const FALLBACK_LOGO_SRC = "/media/dzn-logo-fallback.svg";
+let hasLoggedRealLogo = false;
 
 export function DznLogo({
   compact = false,
@@ -18,9 +19,16 @@ export function DznLogo({
 }) {
   const [logoSrc, setLogoSrc] = useState(PRIMARY_LOGO_SRC);
   const [fallbackFailed, setFallbackFailed] = useState(false);
-  const frameClass = size === "hero" ? "dzn-logo-frame dzn-logo-frame--hero" : compact ? "dzn-logo-frame dzn-logo-frame--compact" : "dzn-logo-frame";
+  const frameClass = size === "hero" ? "dzn-logo-frame dzn-logo-frame--hero" : "dzn-logo-frame";
   const fallbackMarkSize = size === "hero" ? "h-20 w-20" : "h-10 w-10";
   const fallbackTextClass = size === "hero" ? "text-4xl sm:text-5xl" : "text-xl";
+
+  useEffect(() => {
+    if (!hasLoggedRealLogo) {
+      console.log("DZN REAL LOGO LOADED");
+      hasLoggedRealLogo = true;
+    }
+  }, []);
 
   function handleImageError() {
     if (logoSrc !== FALLBACK_LOGO_SRC) {
@@ -34,7 +42,7 @@ export function DznLogo({
   return (
     <a
       href={href}
-      aria-label="DZN Network home"
+      aria-label="DZN Network Home"
       className={`dzn-brand group ${className}`}
     >
       <span className={frameClass}>

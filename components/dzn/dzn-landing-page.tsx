@@ -354,7 +354,7 @@ function Navbar() {
     >
       <nav
         aria-label="Primary navigation"
-        className="mx-auto flex h-[84px] w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8"
+        className="mx-auto flex min-h-[104px] w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8"
       >
         <DznLogo compact className="-ml-2" />
         <div className="hidden flex-1 items-center justify-center gap-1 lg:flex">

@@ -238,7 +238,7 @@ export function DznTestLanding() {
 function TestNavbar() {
   return (
     <header className="relative z-30 border-b border-white/10 bg-[#020713]/72 backdrop-blur-2xl">
-      <nav className="mx-auto flex min-h-[86px] w-full max-w-[1380px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:flex-nowrap lg:px-8">
+      <nav className="mx-auto flex min-h-[104px] w-full max-w-[1380px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:flex-nowrap lg:px-8">
         <DznLogo compact className="-ml-2" />
 
         <div className="order-3 flex w-full flex-wrap items-center justify-center gap-1 lg:order-2 lg:w-auto lg:flex-1">

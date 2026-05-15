@@ -102,7 +102,7 @@ function DashboardFrame({ children, onLogout, serverName }: { children: React.Re
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(139,92,246,0.26),transparent_30%),radial-gradient(circle_at_78%_18%,rgba(14,165,233,0.14),transparent_28%),linear-gradient(180deg,#02030a_0%,#07101f_52%,#02030a_100%)]" />
       <div className="scanline absolute inset-0 opacity-20" />
       <div className="relative z-10 mx-auto max-w-[1500px]">
-        <nav className="mb-5 flex flex-col gap-4 rounded-lg border border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
+        <nav className="mb-5 flex flex-col gap-4 rounded-lg border border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl lg:min-h-[104px] lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-4">
             <DznLogo compact />
             <div className="rounded-lg border border-violet-300/20 bg-violet-400/10 px-3 py-2">
