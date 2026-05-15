@@ -35,6 +35,7 @@ const ADM_FULL_READ_BYTES = 20 * 1024 * 1024;
 type AdmReadMode = "sample" | "full";
 type AdmReadOptions = {
   mode?: AdmReadMode;
+  preferredAdmFileName?: string;
 };
 
 type NitradoRawService = {
@@ -1031,9 +1032,10 @@ async function runNitradoLogAccessDiagnosticsInternal(
   attempts.push(serviceProbe.attempt);
 
   const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
-  const pathVariants = buildAdmReadPathVariants(gameSpecificLogs);
+  const selectedGameSpecificLogs = withPreferredAdmFile(gameSpecificLogs, options.preferredAdmFileName);
+  const pathVariants = buildAdmReadPathVariants(selectedGameSpecificLogs);
   const pathVariantLabels = createPathVariantLabelMap(pathVariants);
-  const testedPathVariants = pathVariants.map((variant) => maskNitradoUsernameInPath(variant.path, gameSpecificLogs.username));
+  const testedPathVariants = pathVariants.map((variant) => maskNitradoUsernameInPath(variant.path, selectedGameSpecificLogs.username));
 
   const adminLogEndpoints = [
     { label: "B admin_logs", path: `${base}/admin_logs` },
@@ -1074,7 +1076,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
   for (const variant of pathVariants) {
     const downloadAttempts: AdmReadAttempt[] = [];
     const download = await readNitradoFileViaDownload(token, serviceId, variant.path, downloadAttempts, pathVariantLabels, options);
-    attempts.push(logAccessAttemptFromRead(`J download ${variant.label}`, download, downloadAttempts.at(-1), "download", variant.path, gameSpecificLogs.username));
+    attempts.push(logAccessAttemptFromRead(`J download ${variant.label}`, download, downloadAttempts.at(-1), "download", variant.path, selectedGameSpecificLogs.username));
     const downloadLines = splitAdmLines(download.sample);
     if (!readableLines.length && downloadLines.some((line) => containsDayZAdminLogMarkers(line))) {
       readableLines = downloadLines;
@@ -1085,7 +1087,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
 
     const seekAttempts: AdmReadAttempt[] = [];
     const seek = await readNitradoFileViaSeek(token, serviceId, variant.path, seekAttempts, pathVariantLabels, options);
-    attempts.push(logAccessAttemptFromRead(`K seek ${variant.label}`, seek, seekAttempts.at(-1), "seek", variant.path, gameSpecificLogs.username));
+    attempts.push(logAccessAttemptFromRead(`K seek ${variant.label}`, seek, seekAttempts.at(-1), "seek", variant.path, selectedGameSpecificLogs.username));
     const seekLines = splitAdmLines(seek.sample);
     if (!readableLines.length && seekLines.some((line) => containsDayZAdminLogMarkers(line))) {
       readableLines = seekLines;
@@ -1095,17 +1097,17 @@ async function runNitradoLogAccessDiagnosticsInternal(
     }
 
     const stat = await statNitradoFile(token, serviceId, variant.path, pathVariantLabels);
-    attempts.push(logAccessAttemptFromStat(`L stat ${variant.label}`, stat, gameSpecificLogs.username));
+    attempts.push(logAccessAttemptFromStat(`L stat ${variant.label}`, stat, selectedGameSpecificLogs.username));
   }
 
   const diagnostics: NitradoLogAccessDiagnostics = {
     serviceId,
     lastCheckedAt,
-    gameserverUsernameFound: gameSpecificLogs.usernameFound,
-    gameSpecificLogFilesFound: gameSpecificLogs.logFilesFound,
-    gameSpecificLogFilesReturned: gameSpecificLogs.logFilesReturned,
-    admFilesFromGameSpecific: gameSpecificLogs.admLogFiles.length,
-    newestAdmFileName: gameSpecificLogs.selectedAdmFile?.name ?? null,
+    gameserverUsernameFound: selectedGameSpecificLogs.usernameFound,
+    gameSpecificLogFilesFound: selectedGameSpecificLogs.logFilesFound,
+    gameSpecificLogFilesReturned: selectedGameSpecificLogs.logFilesReturned,
+    admFilesFromGameSpecific: selectedGameSpecificLogs.admLogFiles.length,
+    newestAdmFileName: selectedGameSpecificLogs.selectedAdmFile?.name ?? null,
     testedPathVariants,
     readable: {
       found: readableLines.length > 0,
@@ -2127,6 +2129,17 @@ function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: 
   }
 
   return dedupePathVariants(variants).slice(0, 80);
+}
+
+function withPreferredAdmFile(details: GameSpecificLogDetails, preferredAdmFileName?: string): GameSpecificLogDetails {
+  const preferred = preferredAdmFileName?.trim().toLowerCase();
+  if (!preferred) return details;
+  const selectedAdmFile = details.admLogFiles.find((entry) => {
+    const name = entry.name.toLowerCase();
+    const pathName = entry.path.split("/").filter(Boolean).at(-1)?.toLowerCase();
+    return name === preferred || pathName === preferred;
+  });
+  return selectedAdmFile ? { ...details, selectedAdmFile } : details;
 }
 
 function createServiceDetailsDebug(

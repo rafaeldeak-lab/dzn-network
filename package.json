@@ -11,6 +11,7 @@
     "test:adm-parser": "tsx scripts/test-adm-parser.ts",
     "test:discord-guilds": "tsx scripts/test-discord-guilds.ts",
     "test:server-metadata": "tsx scripts/test-server-metadata.ts",
+    "backfill:adm:once": "tsx scripts/one-time-adm-backfill.ts",
     "db:migrate:local": "wrangler d1 migrations apply dzn_network_db --local",
     "db:migrate:remote": "wrangler d1 migrations apply dzn_network_db --remote",
     "worker:adm-sync:dev": "wrangler dev --config wrangler.adm-sync.toml --test-scheduled",
