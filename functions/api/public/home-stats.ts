@@ -1,3 +1,4 @@
+import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -60,6 +61,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
 
   await ensureLinkedServerMetadataColumns(env);
+  await ensureAdmSyncSchema(env);
   const data = await buildHomeStats(env);
   return json(data);
 };
@@ -126,8 +128,19 @@ async function getTotals(db: D1Database) {
           END
         ) AS statsActiveServers,
         SUM(COALESCE(server_stats.unique_players, 0)) AS playersSeenFromStats,
-        SUM(COALESCE(server_stats.total_kills, 0)) AS killsTracked,
-        SUM(COALESCE(server_stats.total_deaths, 0)) AS deathsTracked,
+        (
+          SELECT COUNT(*)
+          FROM kill_events
+          INNER JOIN linked_servers AS live_kill_servers ON live_kill_servers.id = kill_events.linked_server_id
+          WHERE lower(live_kill_servers.status) = 'live'
+        ) AS killsTracked,
+        (
+          SELECT COUNT(*)
+          FROM kill_events
+          INNER JOIN linked_servers AS live_death_servers ON live_death_servers.id = kill_events.linked_server_id
+          WHERE lower(live_death_servers.status) = 'live'
+            AND kill_events.victim_name IS NOT NULL
+        ) AS deathsTracked,
         SUM(COALESCE(server_stats.total_joins, 0)) AS joinsTracked
        FROM linked_servers
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
@@ -211,8 +224,8 @@ async function getTopServers(db: D1Database) {
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         discord_guilds.name AS guild_name,
-        COALESCE(server_stats.total_kills, 0) AS total_kills,
-        COALESCE(server_stats.total_deaths, 0) AS total_deaths,
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS total_kills,
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL) AS total_deaths,
         COALESCE(server_stats.unique_players, 0) AS unique_players,
         CASE
           WHEN COALESCE(server_stats.total_joins, 0) > 0
@@ -228,7 +241,7 @@ async function getTopServers(db: D1Database) {
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
-       ORDER BY stats_active DESC, COALESCE(server_stats.total_kills, 0) DESC, COALESCE(server_stats.unique_players, 0) DESC, linked_servers.created_at DESC
+       ORDER BY stats_active DESC, total_kills DESC, COALESCE(server_stats.unique_players, 0) DESC, linked_servers.created_at DESC
        LIMIT 6`,
     )
     .all<TopServerRow>();

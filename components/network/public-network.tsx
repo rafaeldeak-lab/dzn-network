@@ -43,6 +43,7 @@ type PublicServer = {
   total_disconnects: number;
   unique_players: number;
   recent_events: PublicRecentEvent[];
+  top_players?: PublicLeaderboardPlayer[];
 };
 
 type PublicRecentEvent = {
@@ -56,6 +57,20 @@ type PublicRecentEvent = {
   distance: number | null;
   occurred_at: string | null;
   created_at: string | null;
+};
+
+type PublicLeaderboardPlayer = {
+  rank: number;
+  player_name: string;
+  player_id: null;
+  server_name: string;
+  server_slug: string | null;
+  kills: number;
+  deaths: number;
+  kd: number | null;
+  kd_label: string;
+  longest_kill: number;
+  last_seen: string | null;
 };
 
 type PublicStats = {
@@ -448,7 +463,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
         <aside className="grid gap-5">
           <GlassPanel title="Top Players" icon={Flame}>
-            <PlaceholderRows labels={["No ranked players yet", "Player rankings will appear after kills are detected", "Activity is currently syncing"]} />
+            <TopPlayersPanel players={server.top_players ?? []} />
           </GlassPanel>
           <GlassPanel title="Network Status" icon={BarChart3}>
             <div className="grid gap-3">
@@ -591,13 +606,36 @@ function RecentEventsPanel({ server }: { server: PublicServer }) {
   );
 }
 
-function PlaceholderRows({ labels }: { labels: string[] }) {
+function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
+  if (!players.length) {
+    return (
+      <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+        <p className="text-sm font-black uppercase text-white">No ranked players yet</p>
+        <p className="mt-2 text-sm leading-6 text-zinc-400">
+          Player rankings will appear after kills are detected.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-2">
-      {labels.map((label, index) => (
-        <div key={label} className="flex items-center justify-between rounded-lg border border-white/10 bg-black/24 px-3 py-3">
-          <span className="text-sm font-bold text-zinc-300">{label}</span>
-          <span className="text-xs font-black uppercase text-zinc-600">#{index + 1}</span>
+      {players.slice(0, 5).map((player) => (
+        <div key={`${player.rank}-${player.player_name}`} className="rounded-lg border border-white/10 bg-black/24 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase text-violet-200">#{player.rank}</p>
+              <p className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{player.player_name}</p>
+            </div>
+            <span className="rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-xs font-black text-emerald-100">
+              {player.kills} kills
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <MiniMetric label="Deaths" value={String(player.deaths)} />
+            <MiniMetric label="K/D" value={formatKdLabel(player)} />
+            <MiniMetric label="Longest Kill" value={formatDistance(player.longest_kill)} />
+          </div>
         </div>
       ))}
     </div>
@@ -711,12 +749,20 @@ function publicCardFooter(server: PublicServer) {
 
 function publicEventDetail(event: PublicRecentEvent) {
   if (event.source === "kill") {
-    const matchup = `${event.killer_name ?? "Unknown player"} to ${event.victim_name ?? "Unknown player"}`;
+    const matchup = `${event.killer_name ?? "Unknown player"} eliminated ${event.victim_name ?? "Unknown player"}`;
     const weapon = event.weapon ? ` with ${event.weapon}` : "";
     const distance = typeof event.distance === "number" && Number.isFinite(event.distance) ? ` from ${event.distance.toFixed(1)}m` : "";
     return `${matchup}${weapon}${distance}`;
   }
   return event.player_name ?? "Server activity";
+}
+
+function formatKdLabel(player: PublicLeaderboardPlayer) {
+  return player.kd_label || (typeof player.kd === "number" ? player.kd.toFixed(2) : "Awaiting data");
+}
+
+function formatDistance(value: number) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? `${value.toFixed(1)}m` : "Awaiting data";
 }
 
 function formatPublicTime(value: string | null) {

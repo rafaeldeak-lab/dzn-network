@@ -3,6 +3,7 @@ import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { uniquePublicSlug } from "../../_lib/onboarding";
+import { getPublicServerLeaderboardById, type PublicLeaderboardPlayer } from "../../_lib/public-leaderboards";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type PublicServerRow = {
@@ -76,6 +77,7 @@ type SafePublicServer = {
   total_disconnects: number;
   unique_players: number;
   recent_events: PublicRecentEvent[];
+  top_players?: PublicLeaderboardPlayer[];
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -106,6 +108,9 @@ export async function getPublicServersPayload(env: Env, slug: string | null) {
   if (slug) {
     if (servers.length === 0 && shouldShowMockServers(env)) {
       return { ok: true, server: findPublicServerBySlug(mockPublicServers(), slug) ?? null };
+    }
+    if (servers[0] && publicRows[0]?.id) {
+      servers[0].top_players = await getPublicServerLeaderboardById(env, publicRows[0].id, 5);
     }
     return { ok: true, server: servers[0] ?? null };
   }
@@ -146,8 +151,8 @@ async function queryPublicServers(env: Env) {
       adm_sync_state.last_sync_status AS adm_sync_status,
       adm_sync_state.last_sync_message AS adm_sync_message,
       adm_sync_state.last_sync_at AS adm_sync_at,
-      server_stats.total_kills,
-      server_stats.total_deaths,
+      (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS total_kills,
+      (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL) AS total_deaths,
       server_stats.total_joins,
       server_stats.total_disconnects,
       server_stats.unique_players,

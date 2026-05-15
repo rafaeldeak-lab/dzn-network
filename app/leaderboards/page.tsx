@@ -1,10 +1,118 @@
-import { Trophy, RadioTower, ShieldCheck } from "lucide-react";
+"use client";
+
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Activity, ArrowRight, Crosshair, RadioTower, Skull, Trophy, Users } from "lucide-react";
 import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 
+type LeaderboardServer = {
+  rank: number;
+  server_id: string;
+  server_name: string;
+  slug: string | null;
+  mode: string;
+  kills: number;
+  deaths: number;
+  kd: number | null;
+  kd_label: string;
+  longest_kill: number;
+  score: number;
+};
+
+type LeaderboardPlayer = {
+  rank: number;
+  player_name: string;
+  player_id: null;
+  server_name: string;
+  server_slug: string | null;
+  kills: number;
+  deaths: number;
+  kd: number | null;
+  kd_label: string;
+  longest_kill: number;
+  last_seen: string | null;
+};
+
+type LongestKill = {
+  rank: number;
+  player_name: string;
+  victim_name: string;
+  server_name: string;
+  server_slug: string | null;
+  weapon: string;
+  distance: number;
+  occurred_at: string | null;
+};
+
+type LeaderboardsPayload = {
+  ok?: boolean;
+  top_servers?: LeaderboardServer[];
+  top_players?: LeaderboardPlayer[];
+  longest_kills?: LongestKill[];
+  updated_at?: string;
+  error?: string;
+};
+
+const emptyPayload = {
+  top_servers: [],
+  top_players: [],
+  longest_kills: [],
+  updated_at: null,
+};
+
 export default function LeaderboardsPage() {
+  const [payload, setPayload] = useState<{
+    top_servers: LeaderboardServer[];
+    top_players: LeaderboardPlayer[];
+    longest_kills: LongestKill[];
+    updated_at: string | null;
+  }>(emptyPayload);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    console.log("DZN LIVE LEADERBOARDS LOADED");
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      try {
+        const response = await fetch("/api/public/leaderboards", {
+          cache: "no-store",
+          headers: { accept: "application/json" },
+        });
+        const data = (await response.json().catch(() => ({}))) as LeaderboardsPayload;
+        if (!response.ok) throw new Error(data.error || "Unable to load leaderboards");
+        if (!active) return;
+        setPayload(normalizePayload(data));
+        setError("");
+      } catch (loadError) {
+        if (active) setError(loadError instanceof Error ? loadError.message : "Unable to load leaderboards");
+      } finally {
+        if (active) setLoading(false);
+        inFlight.current = false;
+      }
+    }
+
+    load();
+    const interval = window.setInterval(load, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const totalKills = useMemo(() => payload.top_servers.reduce((total, server) => total + server.kills, 0), [payload.top_servers]);
+  const totalPlayers = payload.top_players.length;
+  const longestKill = payload.longest_kills[0]?.distance ?? 0;
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-6 text-white sm:px-6 lg:px-8">
       <AnimatedBackground />
@@ -21,40 +129,265 @@ export default function LeaderboardsPage() {
           </div>
         </nav>
 
-        <section className="grid flex-1 place-items-center py-16">
-          <div className="glass-surface animated-border max-w-3xl rounded-lg p-8 text-center sm:p-10">
-            <div className="relative z-10">
-              <div className="mx-auto grid h-16 w-16 place-items-center rounded-lg border border-violet-300/25 bg-violet-500/15 text-violet-100 shadow-[0_0_38px_rgba(139,92,246,0.38)]">
-                <Trophy className="h-8 w-8" />
-              </div>
-              <h1 className="mt-7 text-4xl font-black uppercase text-white sm:text-5xl">Global Leaderboards</h1>
-              <p className="mt-4 text-lg leading-8 text-zinc-300">
-                Global leaderboards are coming soon. Servers are currently being verified and prepared for stat syncing.
+        <section className="py-12">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end">
+            <div>
+              <p className="inline-flex rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
+                Live ADM intelligence
               </p>
-              <div className="mt-8 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-4 text-left">
-                  <RadioTower className="h-6 w-6 text-cyan-100" />
-                  <p className="mt-3 text-sm font-black uppercase text-white">Verified servers first</p>
-                  <p className="mt-2 text-sm leading-6 text-zinc-400">Only connected DZN servers will feed the first ranked season.</p>
-                </div>
-                <div className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4 text-left">
-                  <ShieldCheck className="h-6 w-6 text-emerald-100" />
-                  <p className="mt-3 text-sm font-black uppercase text-white">ADM sync pending</p>
-                  <p className="mt-2 text-sm leading-6 text-zinc-400">Kill tracking starts once the ADM sync engine is active.</p>
-                </div>
-              </div>
-              <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-                <Link href="/servers" className="inline-flex h-12 items-center justify-center rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_28px_rgba(139,92,246,0.42)] transition hover:bg-violet-400">
-                  Browse Servers
-                </Link>
-                <Link href="/signup" className="inline-flex h-12 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-5 text-xs font-black uppercase text-zinc-100 transition hover:border-violet-300/35 hover:text-white">
-                  Add Your Server
-                </Link>
+              <h1 className="mt-5 text-4xl font-black uppercase tracking-normal text-white sm:text-6xl">Global Leaderboards</h1>
+              <p className="mt-4 max-w-3xl text-lg leading-8 text-zinc-300">
+                Ranked connected DayZ servers and players based on synced ADM activity.
+              </p>
+              <p className="mt-3 text-sm font-bold text-zinc-500">
+                Updated: {payload.updated_at ? formatDateTime(payload.updated_at) : loading ? "Loading live data..." : "Live data pending"}
+              </p>
+            </div>
+
+            <div className="glass-surface animated-border rounded-lg p-5">
+              <div className="relative z-10 grid gap-3">
+                <MetricRow icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} />
+                <MetricRow icon={Crosshair} label="Kills Tracked" value={formatNumber(totalKills)} />
+                <MetricRow icon={Users} label="Ranked Players" value={String(totalPlayers)} />
+                <MetricRow icon={Trophy} label="Longest Kill" value={formatDistance(longestKill)} />
               </div>
             </div>
           </div>
         </section>
+
+        {error ? <MessagePanel message={error} /> : null}
+        {loading ? <LoadingGrid /> : null}
+
+        {!loading ? (
+          <div className="grid gap-6 pb-14">
+            <LeaderboardTable
+              title="Top Servers"
+              icon={Trophy}
+              empty="No ranked servers yet."
+              headers={["Rank", "Server", "Mode", "Kills", "Deaths", "K/D", "Longest", "Score"]}
+              rows={payload.top_servers.map((server) => [
+                `#${server.rank}`,
+                <ServerLink key="server" slug={server.slug} label={server.server_name} />,
+                server.mode,
+                formatNumber(server.kills),
+                formatNumber(server.deaths),
+                formatKd(server),
+                formatDistance(server.longest_kill),
+                formatNumber(server.score),
+              ])}
+            />
+
+            <LeaderboardTable
+              title="Top Players"
+              icon={Users}
+              empty="No ranked players yet."
+              headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
+              rows={payload.top_players.map((player) => [
+                `#${player.rank}`,
+                player.player_name,
+                <ServerLink key="server" slug={player.server_slug} label={player.server_name} />,
+                formatNumber(player.kills),
+                formatNumber(player.deaths),
+                formatKd(player),
+                formatDistance(player.longest_kill),
+              ])}
+            />
+
+            <LeaderboardTable
+              title="Longest Kills"
+              icon={Skull}
+              empty="No confirmed kill distances yet."
+              headers={["Rank", "Player", "Server", "Weapon", "Distance", "Time"]}
+              rows={payload.longest_kills.map((kill) => [
+                `#${kill.rank}`,
+                `${kill.player_name} eliminated ${kill.victim_name}`,
+                <ServerLink key="server" slug={kill.server_slug} label={kill.server_name} />,
+                kill.weapon,
+                formatDistance(kill.distance),
+                formatDateTime(kill.occurred_at),
+              ])}
+            />
+          </div>
+        ) : null}
       </div>
     </main>
   );
+}
+
+function LeaderboardTable({
+  title,
+  icon: Icon,
+  headers,
+  rows,
+  empty,
+}: {
+  title: string;
+  icon: typeof Activity;
+  headers: string[];
+  rows: Array<Array<ReactNode>>;
+  empty: string;
+}) {
+  return (
+    <section className="glass-surface animated-border rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex items-center gap-3">
+          <Icon className="h-6 w-6 text-violet-200" />
+          <h2 className="text-2xl font-black uppercase text-white">{title}</h2>
+        </div>
+        {rows.length ? (
+          <div className="mt-5 overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-y-2 text-left">
+              <thead>
+                <tr>
+                  {headers.map((header) => (
+                    <th key={header} className="px-3 py-2 text-xs font-black uppercase text-zinc-500">
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, rowIndex) => (
+                  <tr key={rowIndex} className="rounded-lg bg-black/24">
+                    {row.map((cell, cellIndex) => (
+                      <td key={cellIndex} className="border-y border-white/10 px-3 py-3 first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r">
+                        <span className={cellIndex === 0 ? "text-sm font-black text-violet-200" : "text-sm font-bold text-zinc-100"}>
+                          {cell}
+                        </span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-5 text-sm font-bold text-zinc-400">
+            {empty}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MetricRow({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-black/24 p-3">
+      <span className="inline-flex items-center gap-3 text-xs font-black uppercase text-zinc-400">
+        <Icon className="h-4 w-4 text-cyan-200" />
+        {label}
+      </span>
+      <span className="text-sm font-black text-white">{value}</span>
+    </div>
+  );
+}
+
+function ServerLink({ slug, label }: { slug: string | null; label: string }) {
+  if (!slug) return label;
+  return (
+    <Link href={`/servers/profile?slug=${encodeURIComponent(slug)}`} className="inline-flex items-center gap-1 text-cyan-100 transition hover:text-white">
+      {label}
+      <ArrowRight className="h-3 w-3" />
+    </Link>
+  );
+}
+
+function MessagePanel({ message }: { message: string }) {
+  return (
+    <div className="mb-6 rounded-lg border border-red-300/20 bg-red-400/10 p-4 text-sm font-bold text-red-100">
+      {message}
+    </div>
+  );
+}
+
+function LoadingGrid() {
+  return (
+    <div className="grid gap-6">
+      {[0, 1, 2].map((item) => (
+        <div key={item} className="glass-surface rounded-lg p-5">
+          <div className="h-7 w-52 animate-pulse rounded bg-white/10" />
+          <div className="mt-5 h-36 animate-pulse rounded-lg bg-white/10" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function normalizePayload(data: LeaderboardsPayload) {
+  return {
+    top_servers: Array.isArray(data.top_servers) ? data.top_servers.map(normalizeServer) : [],
+    top_players: Array.isArray(data.top_players) ? data.top_players.map(normalizePlayer) : [],
+    longest_kills: Array.isArray(data.longest_kills) ? data.longest_kills.map(normalizeLongestKill) : [],
+    updated_at: data.updated_at ?? new Date().toISOString(),
+  };
+}
+
+function normalizeServer(server: LeaderboardServer): LeaderboardServer {
+  return {
+    rank: numberOrZero(server.rank),
+    server_id: server.server_id || "",
+    server_name: server.server_name || "Unnamed DZN Server",
+    slug: server.slug ?? null,
+    mode: server.mode || "UNKNOWN",
+    kills: numberOrZero(server.kills),
+    deaths: numberOrZero(server.deaths),
+    kd: typeof server.kd === "number" && Number.isFinite(server.kd) ? server.kd : null,
+    kd_label: server.kd_label || "Awaiting data",
+    longest_kill: numberOrZero(server.longest_kill),
+    score: numberOrZero(server.score),
+  };
+}
+
+function normalizePlayer(player: LeaderboardPlayer): LeaderboardPlayer {
+  return {
+    rank: numberOrZero(player.rank),
+    player_name: player.player_name || "Unknown Player",
+    player_id: null,
+    server_name: player.server_name || "Unnamed DZN Server",
+    server_slug: player.server_slug ?? null,
+    kills: numberOrZero(player.kills),
+    deaths: numberOrZero(player.deaths),
+    kd: typeof player.kd === "number" && Number.isFinite(player.kd) ? player.kd : null,
+    kd_label: player.kd_label || "Awaiting data",
+    longest_kill: numberOrZero(player.longest_kill),
+    last_seen: player.last_seen ?? null,
+  };
+}
+
+function normalizeLongestKill(kill: LongestKill): LongestKill {
+  return {
+    rank: numberOrZero(kill.rank),
+    player_name: kill.player_name || "Unknown Player",
+    victim_name: kill.victim_name || "Unknown Player",
+    server_name: kill.server_name || "Unnamed DZN Server",
+    server_slug: kill.server_slug ?? null,
+    weapon: kill.weapon || "Unknown weapon",
+    distance: numberOrZero(kill.distance),
+    occurred_at: kill.occurred_at ?? null,
+  };
+}
+
+function formatKd(item: { kd: number | null; kd_label: string }) {
+  if (item.kd_label) return item.kd_label;
+  return typeof item.kd === "number" ? item.kd.toFixed(2) : "Awaiting data";
+}
+
+function formatDistance(value: number) {
+  return value > 0 ? `${numberOrZero(value).toFixed(1)}m` : "Awaiting data";
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(numberOrZero(value));
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "Pending";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Pending";
+  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function numberOrZero(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
 }

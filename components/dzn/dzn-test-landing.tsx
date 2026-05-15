@@ -718,17 +718,7 @@ function buildTopServers(stats: HomeStats): TopServerRow[] {
     };
   });
 
-  if (rows.length === 0) return fallbackTopServers;
-
-  const merged = [...rows];
-  for (const fallback of fallbackTopServers) {
-    const exists = merged.some((row) => row.server.toLowerCase() === fallback.server.toLowerCase());
-    if (!exists && merged.length < 5) {
-      merged.push({ ...fallback, rank: merged.length + 1 });
-    }
-  }
-
-  return merged;
+  return rows.length > 0 ? rows : fallbackTopServers;
 }
 
 function buildRecentRows(stats: HomeStats): RecentRow[] {
