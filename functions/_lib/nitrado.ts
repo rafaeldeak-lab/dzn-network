@@ -31,6 +31,11 @@ const EXACT_ADM_LIST_DIRS = [
 ];
 const EXACT_ADM_SEARCH_TERMS = [undefined, ".ADM", ".adm", "DayZServer", "DAYZSERVER"];
 const ADM_SAMPLE_BYTES = 4096;
+const ADM_FULL_READ_BYTES = 20 * 1024 * 1024;
+type AdmReadMode = "sample" | "full";
+type AdmReadOptions = {
+  mode?: AdmReadMode;
+};
 
 type NitradoRawService = {
   id?: number | string;
@@ -319,8 +324,9 @@ export async function runNitradoLogAccessDiagnostics(token: string, serviceId: s
 export async function fetchReadableNitradoAdmLines(
   token: string,
   serviceId: string,
+  options: AdmReadOptions = {},
 ): Promise<{ lines: string[]; diagnostics: NitradoLogAccessDiagnostics }> {
-  return runNitradoLogAccessDiagnosticsInternal(token, serviceId);
+  return runNitradoLogAccessDiagnosticsInternal(token, serviceId, options);
 }
 
 export function mockNitradoLogAccessDiagnostics(serviceId: string): NitradoLogAccessDiagnostics {
@@ -1011,6 +1017,7 @@ async function fetchGameserverDetailsAttempt(token: string, serviceId: string) {
 async function runNitradoLogAccessDiagnosticsInternal(
   token: string,
   serviceId: string,
+  options: AdmReadOptions = {},
 ): Promise<{ lines: string[]; diagnostics: NitradoLogAccessDiagnostics }> {
   const lastCheckedAt = new Date().toISOString();
   const attempts: NitradoLogAccessAttempt[] = [];
@@ -1066,7 +1073,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
 
   for (const variant of pathVariants) {
     const downloadAttempts: AdmReadAttempt[] = [];
-    const download = await readNitradoFileViaDownload(token, serviceId, variant.path, downloadAttempts, pathVariantLabels);
+    const download = await readNitradoFileViaDownload(token, serviceId, variant.path, downloadAttempts, pathVariantLabels, options);
     attempts.push(logAccessAttemptFromRead(`J download ${variant.label}`, download, downloadAttempts.at(-1), "download", variant.path, gameSpecificLogs.username));
     const downloadLines = splitAdmLines(download.sample);
     if (!readableLines.length && downloadLines.some((line) => containsDayZAdminLogMarkers(line))) {
@@ -1077,7 +1084,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
     }
 
     const seekAttempts: AdmReadAttempt[] = [];
-    const seek = await readNitradoFileViaSeek(token, serviceId, variant.path, seekAttempts, pathVariantLabels);
+    const seek = await readNitradoFileViaSeek(token, serviceId, variant.path, seekAttempts, pathVariantLabels, options);
     attempts.push(logAccessAttemptFromRead(`K seek ${variant.label}`, seek, seekAttempts.at(-1), "seek", variant.path, gameSpecificLogs.username));
     const seekLines = splitAdmLines(seek.sample);
     if (!readableLines.length && seekLines.some((line) => containsDayZAdminLogMarkers(line))) {
@@ -1122,10 +1129,11 @@ async function readNitradoFileSample(
   file: string,
   readAttempts?: AdmReadAttempt[],
   pathVariantLabels?: Map<string, string>,
+  options: AdmReadOptions = {},
 ) {
-  const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels);
+  const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels, options);
   if (download.sample !== null) return download;
-  return readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels);
+  return readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels, options);
 }
 
 async function readNitradoFileViaSeek(
@@ -1134,6 +1142,7 @@ async function readNitradoFileViaSeek(
   file: string,
   readAttempts?: AdmReadAttempt[],
   pathVariantLabels?: Map<string, string>,
+  options: AdmReadOptions = {},
 ) {
   const pathVariantLabel = getPathVariantLabel(pathVariantLabels, file);
   const requestUrlPathOnly = buildRequestUrlPathOnly(serviceId, "seek", file);
@@ -1162,7 +1171,7 @@ async function readNitradoFileViaSeek(
       return createSampleResult(null, status, false, "not_attempted", false, safeFileApiError(status));
     }
     const payload = await parseJsonPayload(response);
-    const sample = await fetchTokenizedFileSample(payload, token);
+    const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "seek", sample.status, {
       pathVariantLabel,
       requestUrlPathOnly,
@@ -1193,6 +1202,7 @@ async function readNitradoFileViaDownload(
   file: string,
   readAttempts?: AdmReadAttempt[],
   pathVariantLabels?: Map<string, string>,
+  options: AdmReadOptions = {},
 ) {
   const pathVariantLabel = getPathVariantLabel(pathVariantLabels, file);
   const requestUrlPathOnly = buildRequestUrlPathOnly(serviceId, "download", file);
@@ -1221,7 +1231,7 @@ async function readNitradoFileViaDownload(
       return createSampleResult(null, status, false, "not_attempted", false, safeFileApiError(status));
     }
     const payload = await parseJsonPayload(response);
-    const sample = await fetchTokenizedFileSample(payload, token);
+    const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "download", sample.status, {
       pathVariantLabel,
       requestUrlPathOnly,
@@ -1521,7 +1531,7 @@ function redactServiceIdInPath(path: string) {
   return path.replace(/\/services\/[^/]+/i, "/services/{serviceId}");
 }
 
-async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string) {
+async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string, options: AdmReadOptions = {}) {
   const responseShape = describeFileTokenResponseShape(payload);
   const token = extractDownloadToken(payload);
   if (!token) {
@@ -1553,12 +1563,13 @@ async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string) 
     );
   }
 
+  const mode = options.mode ?? "sample";
   const sampleAttempts = [
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: true, offsetCount: true, authorizationToken: null }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: true, authorizationToken: nitradoToken }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: true, authorizationToken: null }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: false, authorizationToken: nitradoToken }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: false, authorizationToken: null }),
+    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: true, offsetCount: true, authorizationToken: null, mode }),
+    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: true, authorizationToken: nitradoToken, mode }),
+    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: true, authorizationToken: null, mode }),
+    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: false, authorizationToken: nitradoToken, mode }),
+    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: false, authorizationToken: null, mode }),
   ];
 
   let lastResult = createSampleResult(null, "error", true, "error", true, "Tokenized sample fetch failed");
@@ -1590,7 +1601,7 @@ async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string) 
 
 async function fetchTokenizedFileSampleUrl(
   token: DownloadTokenDescriptor,
-  options: { tokenQuery: boolean; offsetCount: boolean; authorizationToken: string | null },
+  options: { tokenQuery: boolean; offsetCount: boolean; authorizationToken: string | null; mode: AdmReadMode },
 ) {
   if (!token.url) {
     return createSampleResult(null, "error", true, "not_attempted", false, "Download token response did not include a usable URL");
@@ -1601,7 +1612,7 @@ async function fetchTokenizedFileSampleUrl(
     if (options.tokenQuery && token.token) url.searchParams.set("token", token.token);
     if (options.offsetCount) {
       url.searchParams.set("offset", "0");
-      url.searchParams.set("count", String(ADM_SAMPLE_BYTES));
+      url.searchParams.set("count", String(options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES));
     }
 
     const response = await fetch(url, {
@@ -1611,8 +1622,10 @@ async function fetchTokenizedFileSampleUrl(
     if (!response.ok) {
       return createSampleResult(null, status, true, status, true, "Tokenized sample fetch failed");
     }
+    const text = await response.text();
+    const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
     return {
-      ...createSampleResult((await response.text()).slice(0, ADM_SAMPLE_BYTES), "OK", true, "OK", true, null),
+      ...createSampleResult(text.slice(0, maxBytes), "OK", true, "OK", true, null),
     };
   } catch {
     return createSampleResult(null, "error", true, "error", true, "Tokenized sample fetch failed");

@@ -159,6 +159,7 @@ export type OnboardingChecks = {
   serviceAccess: boolean;
   admLogsFound: boolean;
   dayzServiceDetected: boolean;
+  metadataSynced?: boolean;
   admLog?: AdmLogDetection;
 };
 
@@ -309,6 +310,10 @@ export type AdmSyncRunResult = {
   linesProcessed: number;
   eventsCreated: number;
   killsCreated: number;
+  killsFound: number;
+  newKillsCreated: number;
+  duplicateKillsSkipped: number;
+  playersUpdated: number;
   latestAdmFile: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;

@@ -50,6 +50,10 @@ export type AdmSyncResult = {
   linesProcessed: number;
   eventsCreated: number;
   killsCreated: number;
+  killsFound: number;
+  newKillsCreated: number;
+  duplicateKillsSkipped: number;
+  playersUpdated: number;
   latestAdmFile: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;
@@ -148,7 +152,7 @@ export async function runAdmSync(
   const syncStartedAt = Date.now();
   const syncStartedAtIso = new Date(syncStartedAt).toISOString();
   const triggerType = options.triggerType ?? "manual";
-  const maxLinesPerRun = clampPositiveInteger(options.maxLinesPerRun ?? 10000, 10000);
+  const maxLinesPerRun = clampPositiveInteger(options.maxLinesPerRun ?? 50000, 50000);
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
@@ -163,7 +167,7 @@ export async function runAdmSync(
   const existingState = await getSyncState(env, linkedServer.id);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const now = new Date().toISOString();
-  const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock });
+  const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock, readMode: "full" });
   let admLog = isMock ? mockAdmLogDetection() : null;
   if (!readable.lines.length && !isMock) {
     const token = await getNitradoTokenForLinkedServer(env, linkedServer);
@@ -226,6 +230,10 @@ export async function runAdmSync(
       linesProcessed: 0,
       eventsCreated: 0,
       killsCreated: 0,
+      killsFound: 0,
+      newKillsCreated: 0,
+      duplicateKillsSkipped: 0,
+      playersUpdated: 0,
       latestAdmFile,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastSyncAt: now,
@@ -245,6 +253,7 @@ export async function runAdmSync(
   const lastProcessedLine = isSameAdmFile ? Number(existingState?.last_processed_line ?? 0) : 0;
   const parsedLines = parseAdmLines(lines, { admDate: extractAdmDateFromFile(latestAdmFile) ?? undefined });
   const pendingParsedEvents = parsedLines.slice(lastProcessedLine, lastProcessedLine + maxLinesPerRun);
+  const creditedKillLinesFound = parsedLines.filter(isCreditedKillEvent).length;
   let eventsCreated = 0;
   let killsCreated = 0;
   let joinsCreated = 0;
@@ -265,6 +274,21 @@ export async function runAdmSync(
       markDeathCounted(recentDeathLines, previousEvent, index + 1);
     }
   }
+
+  const backfillResult = await backfillMissingCreditedKills(
+    env,
+    linkedServer.id,
+    latestAdmFile,
+    parsedLines,
+    lastProcessedLine,
+    recentDeathLines,
+  );
+  eventsCreated += backfillResult.eventsCreated;
+  killEventsStored += backfillResult.killEventsCreated;
+  killsCreated += backfillResult.killsCreated;
+  deathsCreated += backfillResult.deathsCreated;
+  duplicateLines += backfillResult.duplicatesSkipped;
+  if (backfillResult.lastEventAt) lastEventAt = backfillResult.lastEventAt;
 
   for (let index = 0; index < pendingParsedEvents.length; index += 1) {
     const parsed = pendingParsedEvents[index];
@@ -293,10 +317,16 @@ export async function runAdmSync(
   }
 
   const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
-  const status = pendingParsedEvents.length ? "completed" : "idle";
-  const message = pendingParsedEvents.length ? "ADM lines processed successfully" : "No new ADM lines to process";
   const syncDurationMs = Date.now() - syncStartedAt;
   const uniquePlayers = await countUniquePlayers(env, linkedServer.id);
+  const creditedKillLinesConsidered =
+    parsedLines.slice(0, lastProcessedLine).filter(isCreditedKillEvent).length +
+    pendingParsedEvents.filter(isCreditedKillEvent).length;
+  const duplicateKillsSkipped = Math.max(0, creditedKillLinesConsidered - killsCreated);
+  const status = pendingParsedEvents.length || killsCreated ? "completed" : "idle";
+  const message = status === "completed"
+    ? `${triggerType === "manual" ? "Manual sync" : "Scheduled sync"} complete. Lines scanned: ${lines.length}. Kills found: ${creditedKillLinesFound}. New kills created: ${killsCreated}. Duplicates skipped: ${duplicateKillsSkipped}. Players updated: ${uniquePlayers}.`
+    : "No new ADM lines to process";
   await upsertServerStats(env, linkedServer.id, {
     kills: killsCreated,
     deaths: deathsCreated,
@@ -339,6 +369,8 @@ export async function runAdmSync(
     finishedAt: new Date().toISOString(),
     durationMs: syncDurationMs,
   });
+  await rebuildServerStats(env, linkedServer.id);
+  console.log("DZN ADM FULL SYNC COMPLETE");
 
   return {
     status,
@@ -347,6 +379,10 @@ export async function runAdmSync(
     linesProcessed: pendingParsedEvents.length,
     eventsCreated,
     killsCreated,
+    killsFound: creditedKillLinesFound,
+    newKillsCreated: killsCreated,
+    duplicateKillsSkipped,
+    playersUpdated: uniquePlayers,
     latestAdmFile,
     lastProcessedLine: nextProcessedLine,
     lastSyncAt: now,
@@ -741,7 +777,7 @@ export async function runScheduledAdmSync(
 ): Promise<ScheduledAdmSyncResult> {
   await ensureAdmSyncSchema(env);
   const maxServers = clampPositiveInteger(options.maxServers ?? 10, 10);
-  const maxLinesPerServer = clampPositiveInteger(options.maxLinesPerServer ?? 1000, 1000);
+  const maxLinesPerServer = clampPositiveInteger(options.maxLinesPerServer ?? 50000, 50000);
   const minSyncIntervalMs = clampPositiveInteger(options.minSyncIntervalMs ?? 120000, 120000);
   const eligibleServers = await getEligibleScheduledSyncServers(env, maxServers, minSyncIntervalMs);
   let succeeded = 0;
@@ -1098,6 +1134,44 @@ async function persistParsedEvent(
   return result;
 }
 
+async function backfillMissingCreditedKills(
+  env: Env,
+  linkedServerId: string,
+  admFile: string | null,
+  parsedLines: ParsedAdmEvent[],
+  processedLineCount: number,
+  recentDeathLines: Map<string, number>,
+) {
+  const result = {
+    eventsCreated: 0,
+    killEventsCreated: 0,
+    killsCreated: 0,
+    deathsCreated: 0,
+    duplicatesSkipped: 0,
+    lastEventAt: null as string | null,
+  };
+  const backfillLimit = Math.min(Math.max(0, processedLineCount), parsedLines.length);
+
+  for (let index = 0; index < backfillLimit; index += 1) {
+    const parsed = parsedLines[index];
+    if (!parsed || !isCreditedKillEvent(parsed)) continue;
+
+    const lineNumber = index + 1;
+    const eventResult = await persistParsedEvent(env, linkedServerId, admFile, lineNumber, parsed, { recentDeathLines });
+    if (eventResult.killsCreated > 0) {
+      result.eventsCreated += eventResult.eventsCreated;
+      result.killEventsCreated += eventResult.killEventsCreated;
+      result.killsCreated += eventResult.killsCreated;
+      result.deathsCreated += eventResult.deathsCreated;
+      result.lastEventAt = parsed.occurredAt ?? result.lastEventAt;
+    } else {
+      result.duplicatesSkipped += 1;
+    }
+  }
+
+  return result;
+}
+
 async function insertPlayerEvent(
   env: Env,
   linkedServerId: string,
@@ -1144,6 +1218,7 @@ async function insertKillEvent(
   parsed: ParsedAdmEvent,
 ) {
   const db = requireDb(env);
+  if (await hasExistingKillEventByFallback(env, linkedServerId, parsed)) return false;
   const id = await stableSyncId("kill-event", linkedServerId, admFile, lineNumber);
   const result = await db
     .prepare(
@@ -1174,6 +1249,42 @@ async function insertKillEvent(
     )
     .run();
   return didMutate(result);
+}
+
+async function hasExistingKillEventByFallback(env: Env, linkedServerId: string, parsed: ParsedAdmEvent) {
+  const killer = parsed.killerId ?? parsed.killerName ?? parsed.playerId ?? parsed.playerName ?? "";
+  const victim = parsed.victimId ?? parsed.victimName ?? "";
+  if (!killer || !victim) return false;
+
+  const db = requireDb(env);
+  const distance = parsed.distance;
+  const row = await db
+    .prepare(
+      `SELECT id
+       FROM kill_events
+       WHERE linked_server_id = ?
+         AND COALESCE(occurred_at, '') = COALESCE(?, '')
+         AND COALESCE(killer_id, killer_name, '') = ?
+         AND COALESCE(victim_id, victim_name, '') = ?
+         AND COALESCE(weapon, '') = COALESCE(?, '')
+         AND (
+           (? IS NULL AND distance IS NULL)
+           OR ABS(COALESCE(distance, -9999999) - COALESCE(?, -9999999)) < 0.0001
+         )
+       LIMIT 1`,
+    )
+    .bind(
+      linkedServerId,
+      parsed.occurredAt,
+      killer,
+      victim,
+      parsed.weapon,
+      distance,
+      distance,
+    )
+    .first<{ id: string }>();
+
+  return Boolean(row?.id);
 }
 
 async function upsertPlayerProfile(
@@ -1499,7 +1610,7 @@ function getReadableAdmLines(samplePreview: string | null) {
 export async function getReadableAdmLinesForLinkedServer(
   env: Env,
   linkedServer: SyncLinkedServer,
-  options: { isMock?: boolean } = {},
+  options: { isMock?: boolean; readMode?: "sample" | "full" } = {},
 ): Promise<ReadableAdmLinesResult> {
   const isMock = options.isMock ?? isMockNitrado(env.MOCK_NITRADO);
   if (isMock) {
@@ -1526,7 +1637,7 @@ export async function getReadableAdmLinesForLinkedServer(
   }
 
   const token = await getNitradoTokenForLinkedServer(env, linkedServer);
-  const readable = await fetchReadableNitradoAdmLines(token, linkedServer.nitrado_service_id);
+  const readable = await fetchReadableNitradoAdmLines(token, linkedServer.nitrado_service_id, { mode: options.readMode ?? "sample" });
   if (readable.diagnostics.readable.found && !readable.lines.length) {
     throw new Error("Diagnostics could read ADM lines, but sync helper failed to process them.");
   }
@@ -1620,11 +1731,15 @@ function wasDeathRecentlyCounted(recentDeathLines: Map<string, number>, parsed: 
 
 function isDeathCountingEvent(parsed: ParsedAdmEvent) {
   return (
-    (parsed.eventType === "player_killed" && parsed.isCreditedKill) ||
+    isCreditedKillEvent(parsed) ||
     parsed.eventType === "player_killed_environment" ||
     parsed.eventType === "player_suicide" ||
     parsed.eventType === "player_died_stats"
   );
+}
+
+function isCreditedKillEvent(parsed: ParsedAdmEvent) {
+  return parsed.eventType === "player_killed" && parsed.isCreditedKill;
 }
 
 function emptyPersistResult() {

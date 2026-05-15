@@ -21,7 +21,7 @@ export async function scheduled(
     runScheduledAdmSync(env, {
       cron: event.cron ?? null,
       maxServers: 10,
-      maxLinesPerServer: 1000,
+      maxLinesPerServer: 50000,
       minSyncIntervalMs: 120000,
     }),
   );

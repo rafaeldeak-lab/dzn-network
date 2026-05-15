@@ -162,4 +162,34 @@ assert.equal(invalidPosition.position, null);
 const unknown = parseAdmLine("this is not a valid ADM line", context);
 assert.equal(unknown.eventType, "unknown");
 
+const realConsoleKillFixture = [
+  '19:45:34 | Player "xAKA-MINI_KickAs" (DEAD) (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6363.7, 8031.0, 333.0>) killed by Player "Netfl1xAndK1II" (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6369.5, 8035.0, 333.0>) with M4-A1 from 6.96356 meters',
+  '19:46:42 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6375.8, 8056.2, 341.9>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6365.1, 8053.2, 341.9>) with M4-A1 from 11.1206 meters',
+  '19:47:32 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6393.7, 8081.1, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6401.7, 8080.4, 338.9>) with M4-A1 from 9.97779 meters',
+  '19:48:17 | Player "xAKA-MINI_KickAs" (DEAD) (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6382.5, 8046.7, 333.0>) killed by Player "Netfl1xAndK1II" (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6385.0, 8045.9, 333.0>) with M4-A1 from 2.59635 meters',
+  '19:48:29 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6375.1, 8036.9, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6374.2, 8036.6, 333.3>) with M4-A1 from 0.962042 meters',
+  '19:53:17 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6406.9, 8072.6, 339.2>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6412.8, 8077.8, 340.2>) with M4-A1 from 7.90784 meters',
+  '19:54:07 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6407.9, 8082.0, 340.2>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6403.4, 8079.5, 339.2>) with M4-A1 from 5.19115 meters',
+  '19:54:19 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6427.2, 8082.2, 336.8>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6410.8, 8087.3, 339.6>) with M4-A1 from 17.4068 meters',
+  '19:54:58 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6428.4, 8088.7, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6413.0, 8087.5, 339.2>) with M4-A1 from 16.6234 meters',
+  '19:58:08 | Player "Netfl1xAndK1II" (DEAD) (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6385.8, 8071.3, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6384.5, 8067.3, 333.0>) with M4-A1 from 4.13884 meters',
+];
+const realConsoleKills = parseAdmLines(realConsoleKillFixture, { admDate: "2026-05-15" })
+  .filter((event) => event.eventType === "player_killed" && event.isCreditedKill);
+assert.equal(realConsoleKills.length, 10);
+assert.equal(realConsoleKills[0]?.victimName, "xAKA-MINI_KickAs");
+assert.equal(realConsoleKills[0]?.victimId, "6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q=");
+assert.equal(realConsoleKills[0]?.killerName, "Netfl1xAndK1II");
+assert.equal(realConsoleKills[0]?.killerId, "A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk=");
+assert.equal(realConsoleKills[0]?.weapon, "M4-A1");
+assert.equal(realConsoleKills[0]?.distance, 6.96356);
+assert.equal(realConsoleKills[0]?.occurredAt, "2026-05-15T19:45:34.000Z");
+
+const nonKillDamageLines = parseAdmLines([
+  '19:45:33 | Player "xAKA-MINI_KickAs" (DEAD) (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6363.7, 8031.0, 333.0>)[HP: 0] hit by Player "Netfl1xAndK1II" (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6369.5, 8035.0, 333.0>) into Torso(1) for 30 damage (Bullet_556x45) with M4-A1 from 6.96356 meters',
+  '19:45:34 | Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6363.7, 8031.0, 333.0>) is unconscious',
+  '19:45:35 | Player "xAKA-MINI_KickAs" (DEAD) (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6363.7, 8031.0, 333.0>) died. Stats> Water: 100 Energy: 100 Bleed sources: 0',
+], { admDate: "2026-05-15" });
+assert.equal(nonKillDamageLines.filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length, 0);
+
 console.log("ADM parser tests passed");

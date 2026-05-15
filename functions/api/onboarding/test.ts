@@ -3,6 +3,7 @@ import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getLatestNitradoToken } from "../../_lib/onboarding";
+import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -20,6 +21,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ error: "No Nitrado service selected" }, { status: 400 });
   }
 
+  const metadataResult = await refreshNitradoServerMetadata(env, {
+    linkedServerId: linkedServer.id,
+    userId: user.id,
+    force: true,
+  }).catch(() => null);
   const nitradoToken = isMockNitrado(env.MOCK_NITRADO) ? "" : (await getLatestNitradoToken(env, user.id)) ?? "";
   const savedAdmPath = typeof linkedServer.adm_path === "string" ? linkedServer.adm_path : "";
   const admLog = isMockNitrado(env.MOCK_NITRADO)
@@ -90,6 +96,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       serviceAccess: true,
       admLogsFound: Boolean(checks.adm_logs_found),
       dayzServiceDetected: true,
+      metadataSynced: Boolean(metadataResult?.ok),
       admLog,
     },
   });

@@ -24,6 +24,7 @@ import {
   Trophy,
   Users,
   X,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -92,6 +93,7 @@ export function SetupWizard() {
   const [busy, setBusy] = useState(false);
   const [checks, setChecks] = useState<OnboardingChecks | null>(null);
   const [publishedServer, setPublishedServer] = useState<LinkedServer | null>(null);
+  const [publishError, setPublishError] = useState("");
   const [guildRefreshing, setGuildRefreshing] = useState(false);
   const [guildRefreshMessage, setGuildRefreshMessage] = useState("");
 
@@ -282,13 +284,15 @@ export function SetupWizard() {
   async function publish() {
     setBusy(true);
     setMessage("");
+    setPublishError("");
     try {
       await goLive();
       const refreshed = await getMe().catch(() => null);
       setPublishedServer(refreshed?.linkedServer ?? null);
       setStep(5);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Go-live failed");
+      setPublishError(error instanceof Error ? error.message : "Go-live failed");
+      setStep(5);
     } finally {
       setBusy(false);
     }
@@ -415,7 +419,19 @@ export function SetupWizard() {
                 {step === 4 ? (
                   <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
                 ) : null}
-                {step === 5 ? <LiveStep server={publishedServer} service={selectedServiceData} admPending={Boolean(checks?.admLog?.admFileExists && !checks.admLog.sampleReadSucceeded)} /> : null}
+                {step === 5 ? (
+                  <LiveStep
+                    server={publishedServer}
+                    service={selectedServiceData}
+                    checks={checks}
+                    finalError={publishError}
+                    onRetryTest={async () => {
+                      await runTest();
+                      setStep(4);
+                    }}
+                    onBack={() => setStep(4)}
+                  />
+                ) : null}
               </motion.div>
             </AnimatePresence>
             {message ? (
@@ -486,12 +502,17 @@ function GuildStep({
   refreshing: boolean;
   refreshMessage: string;
 }) {
+  useEffect(() => {
+    console.log("DZN DISCORD SERVER LINK LIST READY");
+  }, [guilds.length]);
+
   return (
-    <Step title="Select Discord Server" icon={Users} description="Only guilds you own or administer are eligible for DZN Network verification.">
+    <Step title="Select Discord Server" icon={Users} description="Choose the Discord community you want to link to DZN Network.">
       <div className="mb-4 flex flex-col gap-3 rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-black uppercase text-cyan-100">Latest Discord servers</p>
-          <p className="mt-1 text-sm leading-6 text-zinc-300">
+          <p className="mt-1 text-sm leading-6 text-zinc-300">Only servers you own or administer are shown.</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-400">
             Can&apos;t see a new Discord server? Click Refresh Discord Servers or log out and back in to refresh Discord permissions.
           </p>
         </div>
@@ -521,15 +542,14 @@ function GuildStep({
             )}
             <span className="flex-1">
               <span className="block font-black text-white">{guild.name}</span>
+              <span className="mt-1 block text-sm text-zinc-400">This Discord server can be linked to DZN Network.</span>
               <span className="mt-2 flex flex-wrap gap-2">
                 <span className="rounded-md border border-violet-300/25 bg-violet-400/10 px-2 py-1 text-[10px] font-black uppercase text-violet-100">
                   {guild.owner ? "Owner" : "Administrator"}
                 </span>
-                {guild.bot_present === false ? (
-                  <span className="rounded-md border border-orange-300/25 bg-orange-400/10 px-2 py-1 text-[10px] font-black uppercase text-orange-100">
-                    Bot not installed yet
-                  </span>
-                ) : null}
+                <span className="rounded-md border border-emerald-300/25 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase text-emerald-100">
+                  Ready to link
+                </span>
               </span>
             </span>
           </button>
@@ -941,18 +961,8 @@ function ServiceStep({ services, selectedService, setSelectedService, onNext, bu
 
 function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, onTestAdmPath, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onTestAdmPath: (path: string) => Promise<void>; onGoLive: () => void }) {
   const [manualAdmPath, setManualAdmPath] = useState("");
-  const canGoLive = Boolean(checks?.tokenValid && checks.serviceAccess && checks.dayzServiceDetected);
-  const admDiscovered = Boolean(checks?.admLogsFound || checks?.admLog?.admFileExists);
-  const statsSyncActive = Boolean(checks?.admLogsFound && checks?.admLog?.sampleReadSucceeded);
-  const checkRows = checks
-    ? [
-        { label: "Token Validation", value: checks.tokenValid ? "Passed" : "Needs Review", tone: checks.tokenValid ? "success" : "warning" },
-        { label: "Service Access", value: checks.serviceAccess ? "Passed" : "Needs Review", tone: checks.serviceAccess ? "success" : "warning" },
-        { label: "DayZ Service Detected", value: checks.dayzServiceDetected ? "Passed" : "Needs Review", tone: checks.dayzServiceDetected ? "success" : "warning" },
-        { label: "ADM Logs", value: checks.admLogsFound ? "Connected" : admDiscovered ? "Discovered" : "Needs Review", tone: checks.admLogsFound ? "success" : admDiscovered ? "warning" : "warning" },
-        { label: "Stats Sync", value: statsSyncActive ? "Active" : admDiscovered ? "Pending" : "Not Started", tone: statsSyncActive ? "success" : admDiscovered ? "warning" : "neutral" },
-      ] as const
-    : [];
+  const setupReview = getSetupReviewState({ guild, service, checks });
+  const canGoLive = setupReview.requiredPassed;
   return (
     <Step title="Review & Test" icon={ShieldCheck} description="Confirm details and run the owner verification checks before publishing.">
       <div className="grid gap-3 md:grid-cols-2">
@@ -961,77 +971,313 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
         <Summary label="Server type" value={serverType} />
         <Summary label="Tags" value={tags.length ? tags.join(", ") : "No optional tags"} />
       </div>
-      {checks ? (
-        <>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {checkRows.map((row) => (
-              <div key={row.label} className={`rounded-lg border p-3 text-sm font-bold ${reviewToneClass(row.tone)}`}>
-                <span className="block text-[10px] font-black uppercase opacity-70">{row.label}</span>
-                <span className="mt-1 block">{row.value}</span>
-              </div>
-            ))}
-          </div>
-          {admDiscovered && !statsSyncActive ? (
-            <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-sm font-bold leading-6 text-cyan-50">
-              DZN can see your latest ADM log file, but full stat syncing is not active yet.
-            </p>
-          ) : null}
-        </>
-      ) : null}
-      <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-4">
-        <p className="text-xs font-black uppercase text-violet-200/70">ADM discovery</p>
-        <div className="mt-4">
-          <label className="text-xs font-black uppercase text-zinc-500" htmlFor="manual-adm-path">
-            Manual ADM log path
-          </label>
-          <div className="mt-2 flex flex-col gap-3 lg:flex-row">
-            <input
-              id="manual-adm-path"
-              value={manualAdmPath}
-              onChange={(event) => setManualAdmPath(event.target.value)}
-              placeholder="dayzps/config/DayZServer_PS4_x64_2026-05-14_12-01-39.ADM"
-              className="h-12 flex-1 rounded-lg border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/60"
-            />
-            <button
-              type="button"
-              disabled={busy || !manualAdmPath.trim()}
-              onClick={() => onTestAdmPath(manualAdmPath)}
-              className="h-12 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              Test ADM Path
-            </button>
-          </div>
-          <p className="mt-2 text-sm text-zinc-400">
-            The visible Nitrado Web Interface path may differ from the API file path. DZN will first try Nitrado&apos;s game_specific.log_files API list.
-          </p>
-          <p className="mt-1 text-sm text-zinc-500">
-            Copy this from Nitrado - Information - Log Files - Your log link when a manual fallback is needed.
-          </p>
-        </div>
-        {checks?.admLog ? (
-          <>
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
-              <Summary label="Newest ADM file" value={checks.admLog.newestAdmFileName ?? "Not found"} />
-              <Summary label="ADM path found" value={checks.admLog.admPath ?? "Not found"} />
-              <Summary label="Last checked" value={formatCheckedAt(checks.admLog.lastCheckedAt)} />
-              <Summary label="Sample read" value={checks.admLog.sampleReadSucceeded ? "Succeeded" : "Not available"} />
-            </div>
-            {checks.admLog.debug ? <AdmApiDebugPanel debug={checks.admLog.debug} /> : null}
-          </>
-        ) : null}
+      <SetupResultBanner review={setupReview} busy={busy} />
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {setupReview.checks.map((check) => (
+          <SetupCheckCard key={check.label} check={check} />
+        ))}
       </div>
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
         <WizardButton disabled={busy} onClick={onTest}>{busy ? "Testing" : "Run test"}</WizardButton>
         <WizardButton disabled={!canGoLive || busy} onClick={onGoLive}>Go live</WizardButton>
       </div>
+      {!canGoLive ? (
+        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 px-4 py-3 text-sm font-bold leading-6 text-zinc-300">
+          Run the test and pass the required Discord, Nitrado, DayZ service, and metadata checks before publishing. ADM read pending is a warning, not a hard block.
+        </p>
+      ) : null}
+      <AdvancedDiagnostics
+        checks={checks}
+        manualAdmPath={manualAdmPath}
+        setManualAdmPath={setManualAdmPath}
+        busy={busy}
+        onTestAdmPath={onTestAdmPath}
+      />
     </Step>
   );
 }
 
-function LiveStep({ server, service, admPending }: { server: LinkedServer | null; service?: NitradoService; admPending: boolean }) {
+type FriendlyCheck = {
+  label: string;
+  message: string;
+  status: "passed" | "warning" | "failed" | "pending";
+  required?: boolean;
+};
+
+type SetupReviewState = {
+  status: "success" | "warning" | "failed" | "pending";
+  title: string;
+  message: string;
+  requiredPassed: boolean;
+  checks: FriendlyCheck[];
+  attention: FriendlyCheck[];
+};
+
+function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild; service?: NitradoService; checks: OnboardingChecks | null }): SetupReviewState {
+  const admDiscovered = Boolean(checks?.admLogsFound || checks?.admLog?.admFileExists);
+  const admReadable = Boolean(checks?.admLogsFound && checks?.admLog?.sampleReadSucceeded);
+  const metadataSynced = Boolean(checks?.metadataSynced || service?.name);
+  const checkRows: FriendlyCheck[] = [
+    {
+      label: "Discord server selected",
+      status: guild ? "passed" : "failed",
+      message: guild ? "Discord server connected." : "Select a Discord server you own or administer.",
+      required: true,
+    },
+    {
+      label: "Nitrado token valid",
+      status: !checks ? "pending" : checks.tokenValid ? "passed" : "failed",
+      message: !checks ? "Run the test to confirm Nitrado access." : checks.tokenValid ? "Nitrado access confirmed." : "Your Nitrado token was rejected. Check the token and try again.",
+      required: true,
+    },
+    {
+      label: "Nitrado service connected",
+      status: !checks ? (service ? "pending" : "failed") : checks.serviceAccess ? "passed" : "failed",
+      message: !checks ? (service ? "Ready to verify selected service." : "Select or validate a Nitrado service first.") : checks.serviceAccess ? "Nitrado service access confirmed." : "No DayZ service was found for that Service ID.",
+      required: true,
+    },
+    {
+      label: "DayZ server detected",
+      status: !checks ? "pending" : checks.dayzServiceDetected ? "passed" : "failed",
+      message: !checks ? "Run the test to confirm this is a DayZ server." : checks.dayzServiceDetected ? "DayZ server found." : "This service does not look like a DayZ server.",
+      required: true,
+    },
+    {
+      label: "ADM logs discovered",
+      status: !checks ? "pending" : admDiscovered ? "passed" : "warning",
+      message: !checks
+        ? "Run the test to search for ADM logs."
+        : admDiscovered
+          ? "ADM log files discovered."
+          : "DZN connected to Nitrado, but could not find ADM log files yet. Restart the server and try again after the next log update.",
+    },
+    {
+      label: "Stats sync",
+      status: !checks ? "pending" : admReadable ? "passed" : admDiscovered ? "warning" : "warning",
+      message: !checks
+        ? "Stats sync checks run after ADM discovery."
+        : admReadable
+          ? "Readable ADM activity is available for sync."
+          : admDiscovered
+            ? "ADM logs found. Stats will begin syncing automatically once readable activity is available."
+            : "PvP stats will begin syncing once ADM logs are discovered and readable.",
+    },
+    {
+      label: "Server metadata synced",
+      status: !checks ? "pending" : metadataSynced ? "passed" : "failed",
+      message: !checks ? "Run the test to sync server name, slots, and category." : metadataSynced ? "Server name, slots, and category were detected." : "Required server metadata could not be synced from Nitrado.",
+      required: true,
+    },
+    {
+      label: "Ready to publish",
+      status: !checks ? "pending" : "pending",
+      message: !checks ? "Run the test to confirm readiness." : "Waiting for required checks.",
+    },
+  ];
+
+  const requiredPassed = checkRows.every((check) => !check.required || check.status === "passed");
+  const hasFailedRequired = checkRows.some((check) => check.required && check.status === "failed");
+  const hasWarnings = checkRows.some((check) => check.status === "warning");
+  const status = !checks ? "pending" : hasFailedRequired ? "failed" : hasWarnings ? "warning" : "success";
+  const readyIndex = checkRows.findIndex((check) => check.label === "Ready to publish");
+  if (readyIndex >= 0) {
+    checkRows[readyIndex] = {
+      ...checkRows[readyIndex],
+      status: requiredPassed ? "passed" : status === "failed" ? "failed" : "pending",
+      message: requiredPassed ? "Required setup checks passed. You can publish this server." : "Complete the required checks before publishing.",
+    };
+  }
+
+  const attention = checkRows.filter((check) => check.status === "failed" || check.status === "warning");
+  if (status === "success") {
+    return {
+      status,
+      title: "Ready to go live",
+      message: "Your server is connected. DZN can detect your DayZ service and will begin syncing stats from ADM logs as data becomes available.",
+      requiredPassed,
+      checks: checkRows,
+      attention,
+    };
+  }
+  if (status === "warning") {
+    return {
+      status,
+      title: "Almost ready",
+      message: "Your server was found, but some optional sync checks are still waiting for Nitrado log activity.",
+      requiredPassed,
+      checks: checkRows,
+      attention,
+    };
+  }
+  if (status === "failed") {
+    return {
+      status,
+      title: "Setup needs attention",
+      message: "We could not complete verification. Fix the issue below and run the test again.",
+      requiredPassed,
+      checks: checkRows,
+      attention,
+    };
+  }
+  return {
+    status,
+    title: "Run verification",
+    message: "Run the test to confirm Discord, Nitrado, DayZ service, metadata, and ADM readiness.",
+    requiredPassed,
+    checks: checkRows,
+    attention,
+  };
+}
+
+function SetupResultBanner({ review, busy }: { review: SetupReviewState; busy: boolean }) {
+  const tone = review.status === "success" ? "emerald" : review.status === "failed" ? "red" : review.status === "warning" ? "orange" : "violet";
+  const className = {
+    emerald: "border-emerald-300/25 bg-emerald-400/10 text-emerald-50",
+    red: "border-red-300/25 bg-red-400/10 text-red-50",
+    orange: "border-orange-300/25 bg-orange-400/10 text-orange-50",
+    violet: "border-violet-300/20 bg-violet-400/10 text-violet-50",
+  }[tone];
+  return (
+    <div className={`mt-5 rounded-lg border p-4 ${className}`}>
+      <div className="flex items-start gap-3">
+        {review.status === "failed" ? <AlertTriangle className="mt-1 h-5 w-5 shrink-0" /> : review.status === "success" ? <CheckCircle2 className="mt-1 h-5 w-5 shrink-0" /> : <ShieldCheck className="mt-1 h-5 w-5 shrink-0" />}
+        <div>
+          <p className="text-xs font-black uppercase opacity-75">{busy ? "Verification running" : review.title}</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-white">{busy ? "Running setup checks..." : review.message}</p>
+          {review.attention.length && review.status !== "pending" ? (
+            <ul className="mt-3 space-y-1 text-sm leading-6">
+              {review.attention.slice(0, 3).map((item) => (
+                <li key={item.label}>- {item.message}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SetupCheckCard({ check }: { check: FriendlyCheck }) {
+  const Icon = check.status === "passed" ? CheckCircle2 : check.status === "failed" ? X : check.status === "warning" ? AlertTriangle : ShieldCheck;
+  return (
+    <div className={`rounded-lg border p-4 ${setupStatusClass(check.status)}`}>
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-current/20 bg-black/20">
+          <Icon className="h-5 w-5" />
+        </span>
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-black uppercase text-white">{check.label}</p>
+            <span className="rounded-md border border-current/20 bg-black/20 px-2 py-1 text-[10px] font-black uppercase">
+              {statusLabel(check.status)}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 opacity-85">{check.message}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function setupStatusClass(status: FriendlyCheck["status"]) {
+  if (status === "passed") return "border-emerald-300/25 bg-emerald-400/10 text-emerald-100";
+  if (status === "failed") return "border-red-300/25 bg-red-400/10 text-red-100";
+  if (status === "warning") return "border-orange-300/25 bg-orange-400/10 text-orange-100";
+  return "border-white/10 bg-white/[0.04] text-zinc-300";
+}
+
+function statusLabel(status: FriendlyCheck["status"]) {
+  if (status === "passed") return "Passed";
+  if (status === "failed") return "Failed";
+  if (status === "warning") return "Warning";
+  return "Pending";
+}
+
+function AdvancedDiagnostics({
+  checks,
+  manualAdmPath,
+  setManualAdmPath,
+  busy,
+  onTestAdmPath,
+}: {
+  checks: OnboardingChecks | null;
+  manualAdmPath: string;
+  setManualAdmPath: (value: string) => void;
+  busy: boolean;
+  onTestAdmPath: (path: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const admLog = checks?.admLog;
+  return (
+    <div className="mt-6 rounded-lg border border-violet-300/15 bg-violet-950/10 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-violet-100">Advanced diagnostics</p>
+          <p className="mt-1 text-sm text-zinc-400">Technical diagnostics for support only.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="inline-flex items-center justify-center rounded-lg border border-violet-300/25 bg-violet-400/10 px-4 py-2 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45"
+        >
+          {open ? "Hide technical details" : "Show technical details"}
+        </button>
+      </div>
+      {open ? (
+        <div className="mt-4 max-h-[360px] overflow-auto rounded-lg border border-white/10 bg-black/30 p-4">
+          <div>
+            <label className="text-xs font-black uppercase text-zinc-500" htmlFor="manual-adm-path">
+              Manual ADM log path
+            </label>
+            <div className="mt-2 flex flex-col gap-3 lg:flex-row">
+              <input
+                id="manual-adm-path"
+                value={manualAdmPath}
+                onChange={(event) => setManualAdmPath(event.target.value)}
+                placeholder="dayzps/config/DayZServer_PS4_x64_2026-05-14_12-01-39.ADM"
+                className="h-12 flex-1 rounded-lg border border-white/10 bg-black/30 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/60"
+              />
+              <button
+                type="button"
+                disabled={busy || !manualAdmPath.trim()}
+                onClick={() => onTestAdmPath(manualAdmPath)}
+                className="h-12 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.35)] transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Test ADM Path
+              </button>
+            </div>
+          </div>
+          {admLog ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <Summary label="Newest ADM file" value={redactDiagnosticValue(admLog.newestAdmFileName ?? "Not found")} />
+              <Summary label="ADM path found" value={redactDiagnosticValue(admLog.admPath ?? "Not found")} />
+              <Summary label="Last checked" value={formatCheckedAt(admLog.lastCheckedAt)} />
+              <Summary label="Sample read" value={admLog.sampleReadSucceeded ? "Succeeded" : "Waiting for readable ADM data"} />
+            </div>
+          ) : null}
+          {admLog?.debug ? <AdmApiDebugPanel debug={admLog.debug} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LiveStep({ server, service, checks, finalError, onRetryTest, onBack }: { server: LinkedServer | null; service?: NitradoService; checks: OnboardingChecks | null; finalError: string; onRetryTest: () => void | Promise<void>; onBack: () => void }) {
   const reduceMotion = useReducedMotion();
-  const serverName = server?.server_name ?? service?.name ?? "Your DayZ server";
+  const serverName = server?.display_name ?? server?.hostname ?? server?.server_name ?? service?.name ?? "Your DayZ server";
   const publicHref = server?.public_slug ? `/servers/profile?slug=${encodeURIComponent(server.public_slug)}` : "/servers";
+  const isFailure = Boolean(finalError || !server);
+  const admPending = Boolean(checks?.admLog?.admFileExists && !checks.admLog.sampleReadSucceeded);
+
+  useEffect(() => {
+    console.log(isFailure ? "DZN SETUP FAILURE STATE LOADED" : "DZN SETUP SUCCESS CELEBRATION LOADED");
+  }, [isFailure]);
+
+  if (isFailure) {
+    const attention = getSetupReviewState({ service, checks }).attention[0];
+    return <SetupFailureState reason={finalError || attention?.message || "We could not complete your server setup yet."} onRetryTest={onRetryTest} onBack={onBack} />;
+  }
+
   return (
     <div className="relative overflow-hidden rounded-lg">
       {!reduceMotion ? <CelebrationField /> : null}
@@ -1062,11 +1308,9 @@ function LiveStep({ server, service, admPending }: { server: LinkedServer | null
           <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-300">
             Your server is now listed on DZN Network.
           </p>
-          {admPending ? (
-            <p className="mx-auto mt-4 max-w-2xl rounded-lg border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-sm font-bold leading-6 text-orange-50">
-              Your server is live. PvP stats will begin syncing once ADM log reading is active.
-            </p>
-          ) : null}
+          <p className={`mx-auto mt-4 max-w-2xl rounded-lg border px-4 py-3 text-sm font-bold leading-6 ${admPending ? "border-orange-300/20 bg-orange-400/10 text-orange-50" : "border-emerald-300/20 bg-emerald-400/10 text-emerald-50"}`}>
+            PvP stats will begin syncing automatically as ADM activity becomes available.
+          </p>
 
           <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
@@ -1095,6 +1339,48 @@ function LiveStep({ server, service, admPending }: { server: LinkedServer | null
               View Network
             </Link>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SetupFailureState({ reason, onRetryTest, onBack }: { reason: string; onRetryTest: () => void | Promise<void>; onBack: () => void }) {
+  return (
+    <div className="relative overflow-hidden rounded-lg">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(248,113,113,0.18),transparent_28%),radial-gradient(circle_at_80%_70%,rgba(251,191,36,0.12),transparent_24%)]" />
+      <div className="relative z-10 glass-surface animated-border rounded-lg border-red-300/20 p-6 text-center sm:p-8">
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: [0.9, 1.05, 1], opacity: 1 }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+          className="mx-auto grid h-20 w-20 place-items-center rounded-lg border border-orange-300/35 bg-orange-400/15 text-orange-100 shadow-[0_0_42px_rgba(251,146,60,0.32)]"
+        >
+          <AlertTriangle className="h-11 w-11" />
+        </motion.div>
+        <h2 className="mt-7 text-4xl font-black uppercase text-white sm:text-5xl">Setup Needs Attention</h2>
+        <p className="mt-3 text-lg font-bold text-zinc-300">We could not complete your server setup yet.</p>
+        <div className="mx-auto mt-6 max-w-2xl rounded-lg border border-orange-300/20 bg-orange-400/10 p-4 text-left">
+          <p className="text-xs font-black uppercase text-orange-100/80">What happened</p>
+          <p className="mt-2 text-sm font-bold leading-6 text-orange-50">{friendlyFailureReason(reason)}</p>
+          <p className="mt-4 text-xs font-black uppercase text-zinc-400">Next steps</p>
+          <ol className="mt-2 space-y-1 text-sm leading-6 text-zinc-300">
+            <li>1. Review the failed or warning check on Review & Test.</li>
+            <li>2. Wait a few minutes if Nitrado has just restarted or created a new ADM log.</li>
+            <li>3. Run the test again after making changes.</li>
+          </ol>
+        </div>
+        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+          <button type="button" onClick={onRetryTest} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 text-xs font-black uppercase text-white shadow-[0_0_28px_rgba(139,92,246,0.42)] transition hover:bg-violet-400">
+            Run Test Again
+            <RefreshCw className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={onBack} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-5 text-xs font-black uppercase text-zinc-100 transition hover:border-violet-300/35 hover:text-white">
+            Back to Review & Test
+          </button>
+          <a href="mailto:support@dayz-network.com" className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-orange-300/20 bg-orange-400/10 px-5 text-xs font-black uppercase text-orange-50 transition hover:border-orange-300/40">
+            Contact Support
+          </a>
         </div>
       </div>
     </div>
@@ -1173,12 +1459,6 @@ function CelebrationField() {
   );
 }
 
-function reviewToneClass(tone: "success" | "warning" | "neutral") {
-  if (tone === "success") return "border-emerald-300/25 bg-emerald-400/10 text-emerald-100";
-  if (tone === "warning") return "border-orange-300/25 bg-orange-400/10 text-orange-100";
-  return "border-white/10 bg-white/[0.04] text-zinc-200";
-}
-
 function Summary({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/24 p-4">
@@ -1189,83 +1469,69 @@ function Summary({ label, value }: { label: string; value: string }) {
 }
 
 function AdmApiDebugPanel({ debug }: { debug: AdmApiDebug }) {
+  const methods = debug.methodsTried.slice(0, 80);
+  const diagnosticsObject = sanitizeDiagnostics({
+    message: debug.message,
+    exactManualPath: debug.exactManualPath,
+    newestSelectedAdmFile: debug.selectedGameSpecificAdmFile,
+    exactSelectedAdmPath: debug.exactSelectedAdmPath,
+    apiLogFilePathTested: debug.apiLogFilePathTested,
+    gameserverUsernameFound: debug.gameserverUsernameFound,
+    gameSpecificLogFilesFound: debug.gameSpecificLogFilesFound,
+    gameSpecificLogFilesReturned: debug.gameSpecificLogFilesReturned,
+    gameSpecificAdmFilesFound: debug.gameSpecificAdmFilesFound,
+    sampleReadStatus: debug.sampleReadStatus,
+    sampleReadSucceeded: debug.sampleReadSucceeded,
+    pathsChecked: debug.pathsChecked,
+    pathVariants: debug.pathVariants,
+    listAttempts: debug.listAttempts,
+    methodsTried: methods,
+  });
   return (
     <div className="mt-5 rounded-lg border border-violet-300/15 bg-violet-950/10 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs font-black uppercase text-violet-200/70">ADM API Debug</p>
+        <p className="text-xs font-black uppercase text-violet-200/70">Technical ADM diagnostics</p>
         <span className="text-xs font-bold text-zinc-500">{formatCheckedAt(debug.lastCheckedAt)}</span>
       </div>
       {debug.message ? (
         <p className="mt-3 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-2 text-sm font-bold text-orange-100">
-          {debug.message}
+          {friendlyAdmMessage(debug.message)}
         </p>
       ) : null}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <Summary label="Exact manual path tested" value={debug.exactManualPath ?? "Not provided"} />
-        <Summary label="Exact selected ADM path" value={debug.exactSelectedAdmPath ?? "Not selected"} />
+        <Summary label="ADM path tested" value={redactDiagnosticValue(debug.exactManualPath ?? debug.apiLogFilePathTested ?? "Not provided")} />
+        <Summary label="Selected ADM path" value={redactDiagnosticValue(debug.exactSelectedAdmPath ?? "Not selected")} />
         <Summary label="Gameserver username found" value={debug.gameserverUsernameFound ? "yes" : "no"} />
-        <Summary label="Actual username used" value={debug.actualUsernameUsed ? "yes" : "no"} />
-        <Summary label="Username redacted in UI" value={debug.usernameRedactedInUi ? "yes" : "no"} />
         <Summary label="game_specific.log_files found" value={debug.gameSpecificLogFilesFound ? "yes" : "no"} />
         <Summary label="Log files returned" value={String(debug.gameSpecificLogFilesReturned)} />
-        <Summary label="ADM files from log_files" value={String(debug.gameSpecificAdmFilesFound.length)} />
-        <Summary label="Selected game_specific ADM" value={debug.selectedGameSpecificAdmFile ?? "Not selected"} />
-        <Summary label="API file path tested" value={debug.apiLogFilePathTested ?? "Not tested"} />
-        <Summary label="File visible through stat" value={debug.fileVisibleThroughStat ? "yes" : "no"} />
-        <Summary label="Download token created" value={debug.downloadTokenCreated ? "yes" : "no"} />
-        <Summary label="Token URL received" value={debug.tokenUrlReceived ? "yes" : "no"} />
-        <Summary label="Sample fetch attempted" value={debug.sampleFetchAttempted ? "yes" : "no"} />
-        <Summary label="Sample fetch status" value={debug.sampleFetchStatus} />
         <Summary label="Sample read status" value={debug.sampleReadStatus} />
         <Summary label="Sample read succeeded" value={debug.sampleReadSucceeded ? "yes" : "no"} />
       </div>
-      <DebugList title="Nitrado API log file paths tested" items={debug.apiLogFilePathVariants.length ? debug.apiLogFilePathVariants : ["No game_specific API paths"]} />
-      <DebugList title="ADM files from game_specific.log_files" items={debug.gameSpecificAdmFilesFound.length ? debug.gameSpecificAdmFilesFound : ["No ADM files returned by game_specific.log_files"]} />
-      <DebugList title="Path variants tested" items={debug.pathVariants.length ? debug.pathVariants : ["No path variants"]} />
-      <DebugList title="Paths checked" items={debug.pathsChecked} />
-      <DebugList title="ADM files found" items={debug.filesFound.length ? debug.filesFound : ["No ADM files returned by API"]} />
+      <DebugList title="Paths checked" items={(debug.pathsChecked.length ? debug.pathsChecked : ["No paths checked"]).map(redactDiagnosticValue).slice(0, 24)} />
+      <DebugList title="ADM files found" items={(debug.filesFound.length ? debug.filesFound : ["No ADM files returned by API"]).map(redactDiagnosticValue).slice(0, 24)} />
       <div className="mt-4">
         <p className="text-xs font-black uppercase text-zinc-500">Methods tried</p>
-        <div className="mt-2 grid max-h-72 gap-2 overflow-auto pr-1">
-          {debug.methodsTried.map((attempt, index) => (
-            <div key={`${attempt.method}-${attempt.path ?? attempt.dir ?? "detail"}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 xl:grid-cols-[70px_90px_90px_1.1fr_1.1fr_1.3fr]">
+        <div className="mt-2 grid gap-2 pr-1">
+          {methods.map((attempt, index) => (
+            <div key={`${attempt.method}-${attempt.path ?? attempt.dir ?? "detail"}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 md:grid-cols-[70px_90px_90px_1fr]">
               <span className="font-black text-violet-100">{attempt.pathVariantLabel ?? "-"}</span>
               <span className="font-black text-violet-100">{attempt.method}</span>
               <span className={attempt.status === "OK" ? "font-black text-emerald-100" : "font-black text-orange-100"}>
                 {attempt.status}{attempt.httpStatusCode ? ` / ${attempt.httpStatusCode}` : ""}
               </span>
-              <span className="break-words">{attempt.pathRedacted || attempt.redactedPath || attempt.path ? `path: ${attempt.pathRedacted ?? attempt.redactedPath ?? attempt.path}` : `dir: ${attempt.dir ?? "-"}`}</span>
-              <span className="break-words">{attempt.requestUrlPathOnly ? `request: ${attempt.requestUrlPathOnly}` : `content: ${attempt.responseContentType ?? "-"}`}</span>
-              <span className="break-words">
-                {attempt.method === "list"
-                  ? `search: ${attempt.search ?? "none"} | entries: ${attempt.entriesReturned ?? 0} | ADM: ${attempt.admFilesFound ?? 0}`
-                  : attempt.method === "stat"
-                    ? `success: ${attempt.success ? "yes" : "no"} | visible: ${attempt.fileVisible ? "yes" : "no"} | content: ${attempt.responseContentType ?? "-"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`
-                    : attempt.method === "service-details"
-                      ? `paths: ${attempt.entriesReturned ?? 0} | log_files: ${debug.gameSpecificLogFilesReturned} | ADM: ${debug.gameSpecificAdmFilesFound.length}`
-                      : `success: ${attempt.success ? "yes" : "no"} | token: ${attempt.downloadTokenCreated ? "yes" : "no"} | token URL: ${attempt.tokenUrlReceived ? "yes" : "no"} | fetch: ${attempt.sampleFetchAttempted ? attempt.sampleFetchStatus ?? "error" : "no"} | sample: ${attempt.sampleReadSucceeded ? "yes" : "no"} | content: ${attempt.responseContentType ?? "-"} | ${formatShape(attempt.responseShape)}${attempt.errorMessageSafe ? ` | ${attempt.errorMessageSafe}` : ""}`}
-              </span>
+              <span className="break-words">{attempt.pathRedacted || attempt.redactedPath || attempt.path ? `path: ${redactDiagnosticValue(attempt.pathRedacted ?? attempt.redactedPath ?? attempt.path ?? "")}` : `dir: ${redactDiagnosticValue(attempt.dir ?? "-")}`}</span>
             </div>
           ))}
         </div>
       </div>
-      <div className="mt-4">
-        <p className="text-xs font-black uppercase text-zinc-500">List attempts</p>
-        <div className="mt-2 grid max-h-64 gap-2 overflow-auto pr-1">
-          {debug.listAttempts.map((attempt, index) => (
-            <div key={`${attempt.dir}-${attempt.search ?? "none"}-${index}`} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-300 md:grid-cols-[70px_1fr_1fr]">
-              <span className={attempt.status === "OK" ? "font-black text-emerald-100" : "font-black text-orange-100"}>{attempt.status}</span>
-              <span className="break-words">dir: {attempt.dir}</span>
-              <span className="break-words">search: {attempt.search ?? "none"} | ADM: {attempt.admFileCount}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <pre className="mt-4 max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-[11px] leading-5 text-zinc-300">
+        {JSON.stringify(diagnosticsObject, null, 2)}
+      </pre>
       {debug.samplePreview ? (
         <div className="mt-4">
           <p className="text-xs font-black uppercase text-zinc-500">Sample preview</p>
           <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/30 p-3 text-xs leading-5 text-zinc-300">
-            {debug.samplePreview}
+            {redactDiagnosticValue(debug.samplePreview)}
           </pre>
         </div>
       ) : null}
@@ -1288,16 +1554,50 @@ function DebugList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function sanitizeDiagnostics(value: unknown): unknown {
+  if (typeof value === "string") return redactDiagnosticValue(value);
+  if (Array.isArray(value)) return value.map(sanitizeDiagnostics);
+  if (!value || typeof value !== "object") return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (/(token|secret|password|credential|authorization|auth_url|download_url)/i.test(key)) {
+      result[key] = "[redacted]";
+    } else {
+      result[key] = sanitizeDiagnostics(child);
+    }
+  }
+  return result;
+}
+
+function redactDiagnosticValue(value: string) {
+  return value
+    .replace(/\/games\/\{gameserver-username\}\/noftp/gi, "/games/[gameserver]/noftp")
+    .replace(/\/games\/[^/\s]+\/noftp/gi, "/games/[gameserver]/noftp")
+    .replace(/token=([^&\s]+)/gi, "token=[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]");
+}
+
+function friendlyAdmMessage(value: string) {
+  if (/not yet readable|did not return|file api|sample read/i.test(value)) {
+    return "ADM logs found, waiting for Nitrado to make the latest file readable.";
+  }
+  if (/could not list|not found/i.test(value)) {
+    return "DZN connected to Nitrado, but could not find ADM log files yet.";
+  }
+  return redactDiagnosticValue(value);
+}
+
+function friendlyFailureReason(value: string) {
+  if (/token|unauthorized|access/i.test(value)) return "Your Nitrado token was rejected or no longer has access. Check the token and try again.";
+  if (/service/i.test(value) && /not found|missing|selected/i.test(value)) return "No DayZ service was found for that Service ID. Confirm the Service ID and token access.";
+  if (/dayz/i.test(value)) return "This Nitrado service does not look like a DayZ server.";
+  if (/adm|log|readable|file api/i.test(value)) return "ADM logs were found, but Nitrado has not made the latest file readable yet. This can happen shortly after a restart.";
+  return value;
+}
+
 function formatCheckedAt(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-function formatShape(shape: AdmApiDebug["methodsTried"][number]["responseShape"]) {
-  if (!shape) return "shape: data no / token no / url no / value no";
-  const top = shape.topLevelKeys.length ? shape.topLevelKeys.join(",") : "-";
-  const data = shape.dataKeys.length ? shape.dataKeys.join(",") : "-";
-  return `shape: top [${top}] / data [${data}] / data.token ${shape.hasDataToken ? "yes" : "no"} / data.token.url ${shape.hasDataTokenUrl ? "yes" : "no"} / data.token.token ${shape.hasDataTokenValue ? "yes" : "no"} / data.download ${shape.hasDataDownload ? "yes" : "no"} / data.url ${shape.hasDataUrl ? "yes" : "no"} / token.url ${shape.hasTokenUrl ? "yes" : "no"} / token ${shape.hasTokenValue ? "yes" : "no"}`;
 }
 
 function extractNitradoServiceId(value: string) {
