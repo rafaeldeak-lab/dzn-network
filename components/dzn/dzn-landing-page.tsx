@@ -32,17 +32,13 @@ import {
   useReducedMotion,
 } from "framer-motion";
 import type { Variants } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AnimatedBackground } from "./animated-background";
 import {
-  activityFeed,
-  communityStats,
   features,
-  gameModes,
-  leaderboardRows,
+  gameModes as gameModeTemplates,
   navItems,
-  serverStats,
 } from "./data";
 import { DznLogo } from "./dzn-logo";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
@@ -86,9 +82,132 @@ const stagger: Variants = {
   },
 };
 
+type HomeStats = {
+  totals: {
+    serversLinked: number;
+    statsActiveServers: number;
+    playersSeen: number;
+    killsTracked: number;
+    deathsTracked: number;
+    joinsTracked: number;
+    recentEventsCount: number;
+  };
+  topServers: Array<{
+    public_slug: string | null;
+    server_name: string;
+    guild_name: string | null;
+    server_type: string | null;
+    total_kills: number;
+    unique_players: number;
+    stats_active: boolean;
+  }>;
+  topPlayers: Array<{
+    rank: number;
+    playerName: string;
+    serverName: string;
+    publicSlug: string | null;
+    kills: number;
+    deaths: number;
+    kd: number;
+    longestKill: number;
+  }>;
+  recentActivity: Array<{
+    source: "kill" | "player" | "sync" | "server";
+    eventType: string;
+    title: string;
+    serverName: string | null;
+    publicSlug: string | null;
+    occurredAt: string | null;
+  }>;
+  gameModes: {
+    pvp: number;
+    pve: number;
+    deathmatch: number;
+    pvpPve: number;
+  };
+  syncHealth: {
+    active: number;
+    pending: number;
+  };
+};
+
+type HomeStatsResponse = HomeStats & {
+  ok?: boolean;
+  error?: string;
+};
+
+const emptyHomeStats: HomeStats = {
+  totals: {
+    serversLinked: 0,
+    statsActiveServers: 0,
+    playersSeen: 0,
+    killsTracked: 0,
+    deathsTracked: 0,
+    joinsTracked: 0,
+    recentEventsCount: 0,
+  },
+  topServers: [],
+  topPlayers: [],
+  recentActivity: [],
+  gameModes: {
+    pvp: 0,
+    pve: 0,
+    deathmatch: 0,
+    pvpPve: 0,
+  },
+  syncHealth: {
+    active: 0,
+    pending: 0,
+  },
+};
+
+const HOME_STATS_REFRESH_MS = 30000;
+
+function useHomeStats() {
+  const [data, setData] = useState<HomeStats>(emptyHomeStats);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [error, setError] = useState("");
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      try {
+        const response = await fetch("/api/public/home-stats", {
+          cache: "no-store",
+          headers: { accept: "application/json" },
+        });
+        const payload = (await response.json().catch(() => ({}))) as HomeStatsResponse;
+        if (!response.ok) throw new Error(payload.error || "Live stats unavailable");
+        if (!active) return;
+        setData(normalizeHomeStats(payload));
+        setLastUpdated(new Date());
+        setError("");
+      } catch {
+        if (active) setError("Live stats temporarily unavailable.");
+      } finally {
+        inFlight.current = false;
+      }
+    }
+
+    load();
+    const interval = window.setInterval(load, HOME_STATS_REFRESH_MS);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  return { data, lastUpdated, error };
+}
+
 export function DznLandingPage() {
   const reduceMotion = useReducedMotion();
   const [isLoading, setIsLoading] = useState(true);
+  const liveStats = useHomeStats();
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsLoading(false), reduceMotion ? 120 : 1050);
@@ -107,13 +226,13 @@ export function DznLandingPage() {
           variants={stagger}
           className="relative z-10"
         >
-          <Hero />
-          <LiveStats />
-          <Leaderboards />
-          <GameModes />
+          <Hero homeStats={liveStats.data} lastUpdated={liveStats.lastUpdated} error={liveStats.error} />
+          <LiveStats homeStats={liveStats.data} />
+          <Leaderboards players={liveStats.data.topPlayers} />
+          <GameModes counts={liveStats.data.gameModes} />
           <Features />
-          <RecentActivity />
-          <Community />
+          <RecentActivity homeStats={liveStats.data} />
+          <Community homeStats={liveStats.data} />
         </motion.main>
         <Footer />
       </div>
@@ -237,7 +356,10 @@ function Navbar() {
   );
 }
 
-function Hero() {
+function Hero({ homeStats, lastUpdated, error }: { homeStats: HomeStats; lastUpdated: Date | null; error: string }) {
+  const heroCards = buildHeroStatCards(homeStats);
+  const operationalNodes = homeStats.topServers.slice(0, 3);
+
   return (
     <section
       id="hero"
@@ -283,22 +405,26 @@ function Hero() {
             variants={stagger}
             className="mt-10 grid gap-3 sm:grid-cols-3"
           >
-            {[
-              ["312", "servers linked"],
-              ["1.24M", "kills tracked"],
-              ["94K", "survivors connected"],
-            ].map(([value, label]) => (
+            {heroCards.map((card) => (
               <motion.div
-                key={label}
+                key={card.label}
                 variants={fadeUp}
                 className="glass-surface rounded-lg px-4 py-4"
               >
-                <span className="block text-2xl font-black text-white">{value}</span>
+                <span className={`block font-black text-white ${card.compact ? "text-lg leading-6" : "text-2xl"}`}>{card.value}</span>
                 <span className="mt-1 block text-xs font-semibold uppercase text-zinc-400">
-                  {label}
+                  {card.label}
                 </span>
               </motion.div>
             ))}
+          </motion.div>
+          <motion.div variants={fadeUp} className="mt-5 flex flex-wrap items-center gap-3 text-xs font-black uppercase text-zinc-400">
+            <span className="inline-flex items-center gap-2 text-emerald-200">
+              <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
+              Live data
+            </span>
+            <span>Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Loading"}</span>
+            {error ? <span className="text-orange-200">{error}</span> : null}
           </motion.div>
         </motion.div>
 
@@ -326,20 +452,32 @@ function Hero() {
             </div>
             <div className="relative h-72 overflow-hidden rounded-lg border border-white/10 bg-[#050916]/70">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_36%,rgba(139,92,246,0.35),transparent_18%),radial-gradient(circle_at_66%_52%,rgba(14,165,233,0.24),transparent_18%),linear-gradient(135deg,rgba(255,255,255,0.04)_0_1px,transparent_1px_18px)]" />
-              <div className="absolute left-[18%] top-[28%] h-3 w-3 rounded-full bg-emerald-300 shadow-[0_0_22px_rgba(52,211,153,0.9)]" />
-              <div className="absolute left-[53%] top-[44%] h-3 w-3 rounded-full bg-violet-300 shadow-[0_0_22px_rgba(196,181,253,0.9)]" />
-              <div className="absolute right-[18%] top-[23%] h-3 w-3 rounded-full bg-orange-300 shadow-[0_0_22px_rgba(251,146,60,0.9)]" />
+              {(operationalNodes.length ? operationalNodes : [{ server_name: "DZN sync network", stats_active: homeStats.syncHealth.active > 0 }]).map((node, index) => (
+                <div
+                  key={`${node.server_name}-${index}`}
+                  className={`absolute h-3 w-3 rounded-full ${node.stats_active ? "bg-emerald-300 shadow-[0_0_22px_rgba(52,211,153,0.9)]" : "bg-orange-300 shadow-[0_0_22px_rgba(251,146,60,0.9)]"}`}
+                  style={mapDotPosition(index)}
+                />
+              ))}
+              <div className="absolute left-4 top-4 rounded-lg border border-cyan-300/15 bg-black/34 px-4 py-3">
+                <p className="text-xs font-black uppercase text-cyan-100">DZN sync network online</p>
+                <p className="mt-1 text-sm font-bold text-zinc-300">{plural(homeStats.syncHealth.active, "active sync node")}</p>
+              </div>
               <div className="absolute bottom-4 left-4 right-4 grid grid-cols-3 gap-2">
-                {["EU-West", "US-East", "APAC"].map((region) => (
+                {[
+                  ["Sync Active", String(homeStats.syncHealth.active)],
+                  ["Pending", String(homeStats.syncHealth.pending)],
+                  ["24h Events", String(homeStats.totals.recentEventsCount)],
+                ].map(([label, value]) => (
                   <div
-                    key={region}
+                    key={label}
                     className="rounded-md border border-white/10 bg-black/28 px-3 py-2"
                   >
                     <span className="block text-xs font-bold uppercase text-zinc-300">
-                      {region}
+                      {label}
                     </span>
                     <span className="mt-1 block text-sm font-black text-emerald-200">
-                      Online
+                      {value}
                     </span>
                   </div>
                 ))}
@@ -357,16 +495,18 @@ function Hero() {
   );
 }
 
-function LiveStats() {
+function LiveStats({ homeStats }: { homeStats: HomeStats }) {
+  const stats = buildLiveServerStats(homeStats);
+
   return (
     <Section id="servers" title="Live Server Stats" description="A real-time command layer for population, kills, factions, and community growth across the DZN ecosystem.">
       <motion.div variants={stagger} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {serverStats.map((stat) => (
+        {stats.map((stat) => (
           <GlassCard key={stat.label} className="p-5">
             <div className="flex items-start justify-between gap-4">
               <IconBadge icon={stat.icon} />
               <span className="rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-xs font-black text-emerald-200">
-                {stat.trend}
+                {stat.status}
               </span>
             </div>
             <div className="mt-6">
@@ -392,7 +532,7 @@ function LiveStats() {
   );
 }
 
-function Leaderboards() {
+function Leaderboards({ players }: { players: HomeStats["topPlayers"] }) {
   return (
     <Section
       id="leaderboards"
@@ -420,16 +560,16 @@ function Leaderboards() {
                 <tr className="border-b border-white/[0.08] text-xs font-bold uppercase text-zinc-500">
                   <th className="px-5 py-3">#</th>
                   <th className="px-5 py-3">Player</th>
-                  <th className="px-5 py-3">Faction</th>
-                  <th className="px-5 py-3">K/D</th>
                   <th className="px-5 py-3">Kills</th>
-                  <th className="px-5 py-3">Score</th>
+                  <th className="px-5 py-3">Deaths</th>
+                  <th className="px-5 py-3">K/D</th>
+                  <th className="px-5 py-3">Longest Kill</th>
                 </tr>
               </thead>
               <tbody>
-                {leaderboardRows.map((row) => (
+                {players.length ? players.map((row) => (
                   <motion.tr
-                    key={row.player}
+                    key={`${row.serverName}-${row.playerName}`}
                     variants={fadeUp}
                     className="border-b border-white/[0.08] text-sm transition duration-300 hover:bg-violet-300/[0.08]"
                   >
@@ -437,16 +577,22 @@ function Leaderboards() {
                       {row.rank}
                     </td>
                     <td className="px-5 py-4">
-                      <span className="font-black text-white">{row.player}</span>
+                      <span className="font-black text-white">{row.playerName}</span>
+                      <span className="mt-1 block text-xs font-semibold uppercase text-zinc-500">{row.serverName}</span>
                     </td>
-                    <td className={`px-5 py-4 font-semibold ${row.accent}`}>
-                      {row.faction}
-                    </td>
+                    <td className="px-5 py-4 font-black text-white">{formatNumber(row.kills)}</td>
+                    <td className="px-5 py-4 text-zinc-300">{formatNumber(row.deaths)}</td>
                     <td className="px-5 py-4 font-semibold text-zinc-200">{row.kd}</td>
-                    <td className="px-5 py-4 text-zinc-300">{row.kills}</td>
-                    <td className="px-5 py-4 font-black text-white">{row.score}</td>
+                    <td className="px-5 py-4 text-zinc-300">{row.longestKill > 0 ? `${row.longestKill.toFixed(1)}m` : "Pending"}</td>
                   </motion.tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-10 text-center">
+                      <p className="text-lg font-black uppercase text-white">PvP leaderboard waiting for kill data.</p>
+                      <p className="mt-2 text-sm text-zinc-400">Player activity is syncing from connected servers.</p>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -465,27 +611,28 @@ function Leaderboards() {
             <IconBadge icon="Swords" />
           </div>
           <div className="mt-6 space-y-5">
-            {[
-              ["Black Ridge", "87%", "from-violet-300 to-cyan-300"],
-              ["Red Road", "74%", "from-red-300 to-orange-300"],
-              ["Free Zone", "61%", "from-emerald-300 to-teal-300"],
-            ].map(([label, value, gradient]) => (
-              <div key={label}>
+            {players.length ? players.slice(0, 3).map((player, index) => (
+              <div key={`${player.playerName}-${player.serverName}`}>
                 <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-bold text-zinc-200">{label}</span>
-                  <span className="font-black text-white">{value}</span>
+                  <span className="font-bold text-zinc-200">{player.playerName}</span>
+                  <span className="font-black text-white">{formatNumber(player.kills)} kills</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-sm bg-white/[0.08]">
                   <motion.div
-                    className={`h-full bg-gradient-to-r ${gradient}`}
+                    className={`h-full bg-gradient-to-r ${["from-violet-300 to-cyan-300", "from-red-300 to-orange-300", "from-emerald-300 to-teal-300"][index]}`}
                     initial={{ width: "18%" }}
-                    whileInView={{ width: value }}
+                    whileInView={{ width: `${Math.max(12, Math.min(100, player.kills * 10))}%` }}
                     viewport={{ once: true }}
                     transition={{ duration: 1, ease: "easeOut" }}
                   />
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+                <p className="text-sm font-bold text-zinc-200">No PvP kills synced yet.</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">This panel will activate when credited PvP kills are detected.</p>
+              </div>
+            )}
           </div>
         </GlassCard>
       </div>
@@ -493,11 +640,16 @@ function Leaderboards() {
   );
 }
 
-function GameModes() {
+function GameModes({ counts }: { counts: HomeStats["gameModes"] }) {
+  const modes = gameModeTemplates.map((mode) => ({
+    ...mode,
+    stat: `${modeCountForTitle(mode.title, counts)} connected ${modeCountForTitle(mode.title, counts) === 1 ? "server" : "servers"}`,
+  }));
+
   return (
     <Section id="modes" title="Game Mode Cards" description="Every server type gets a cinematic identity, a score model, and a discoverable path for the right player.">
       <motion.div variants={stagger} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {gameModes.map((mode) => (
+        {modes.map((mode) => (
           <GlassCard key={mode.title} className="group min-h-[270px] overflow-hidden p-5">
             <div className={`absolute inset-0 bg-gradient-to-br ${mode.glow} opacity-80 transition duration-500 group-hover:opacity-100`} />
             <div className="relative z-10 flex h-full flex-col">
@@ -545,7 +697,9 @@ function Features() {
   );
 }
 
-function RecentActivity() {
+function RecentActivity({ homeStats }: { homeStats: HomeStats }) {
+  const activity = homeStats.recentActivity;
+
   return (
     <Section
       id="activity"
@@ -572,7 +726,11 @@ function RecentActivity() {
             </motion.span>
           </div>
           <div className="mt-6 grid gap-3">
-            {["No global outages", "3 raid events live", "21 servers near cap"].map((item) => (
+            {[
+              `${plural(homeStats.syncHealth.active, "active sync server")}`,
+              `${plural(homeStats.totals.recentEventsCount, "public event")} in 24h`,
+              homeStats.totals.serversLinked > 0 ? "Public servers connected" : "Awaiting first public server",
+            ].map((item) => (
               <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3">
                 <span className="h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.9)]" />
                 <span className="text-sm font-semibold text-zinc-200">{item}</span>
@@ -588,24 +746,29 @@ function RecentActivity() {
             </h3>
           </div>
           <div className="relative z-10 divide-y divide-white/[0.08]">
-            {activityFeed.map((item) => (
+            {activity.length ? activity.map((item) => (
               <motion.div
-                key={item.title}
+                key={`${item.source}-${item.eventType}-${item.occurredAt}-${item.title}`}
                 variants={fadeUp}
                 className="flex items-center gap-4 px-5 py-4 transition duration-300 hover:bg-white/[0.04]"
               >
-                <IconBadge icon={item.icon} tone={item.tone} compact />
+                <IconBadge icon={activityIcon(item)} tone={activityTone(item)} compact />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-bold text-zinc-100">
                     {item.title}
                   </p>
                   <p className="mt-1 text-xs font-semibold uppercase text-zinc-500">
-                    {item.meta}
+                    {formatRelativeTime(item.occurredAt)}
                   </p>
                 </div>
                 <Clock className="h-4 w-4 shrink-0 text-zinc-500" />
               </motion.div>
-            ))}
+            )) : (
+              <div className="px-5 py-10">
+                <p className="text-lg font-black uppercase text-white">No public activity yet.</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">Sync engine is online and waiting for server events.</p>
+              </div>
+            )}
           </div>
         </GlassCard>
       </div>
@@ -613,7 +776,13 @@ function RecentActivity() {
   );
 }
 
-function Community() {
+function Community({ homeStats }: { homeStats: HomeStats }) {
+  const communityStats = [
+    { value: formatNumber(homeStats.totals.serversLinked), label: "Connected servers" },
+    { value: formatNumber(homeStats.totals.statsActiveServers), label: "Active sync servers" },
+    { value: homeStats.totals.playersSeen > 0 ? formatNumber(homeStats.totals.playersSeen) : "Awaiting activity", label: "Players seen" },
+  ];
+
   return (
     <Section
       id="community"
@@ -724,6 +893,146 @@ function Section({
       {children}
     </motion.section>
   );
+}
+
+function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
+  return {
+    totals: {
+      serversLinked: numberOrZero(payload.totals?.serversLinked),
+      statsActiveServers: numberOrZero(payload.totals?.statsActiveServers),
+      playersSeen: numberOrZero(payload.totals?.playersSeen),
+      killsTracked: numberOrZero(payload.totals?.killsTracked),
+      deathsTracked: numberOrZero(payload.totals?.deathsTracked),
+      joinsTracked: numberOrZero(payload.totals?.joinsTracked),
+      recentEventsCount: numberOrZero(payload.totals?.recentEventsCount),
+    },
+    topServers: Array.isArray(payload.topServers) ? payload.topServers : [],
+    topPlayers: Array.isArray(payload.topPlayers) ? payload.topPlayers : [],
+    recentActivity: Array.isArray(payload.recentActivity) ? payload.recentActivity : [],
+    gameModes: {
+      pvp: numberOrZero(payload.gameModes?.pvp),
+      pve: numberOrZero(payload.gameModes?.pve),
+      deathmatch: numberOrZero(payload.gameModes?.deathmatch),
+      pvpPve: numberOrZero(payload.gameModes?.pvpPve),
+    },
+    syncHealth: {
+      active: numberOrZero(payload.syncHealth?.active),
+      pending: numberOrZero(payload.syncHealth?.pending),
+    },
+  };
+}
+
+function buildHeroStatCards(homeStats: HomeStats) {
+  return [
+    {
+      value: formatNumber(homeStats.totals.serversLinked),
+      label: "Servers linked",
+      compact: false,
+    },
+    {
+      value: homeStats.totals.killsTracked > 0 ? formatNumber(homeStats.totals.killsTracked) : "Waiting for first PvP kill",
+      label: "Kills tracked",
+      compact: homeStats.totals.killsTracked === 0,
+    },
+    {
+      value: homeStats.totals.playersSeen > 0 ? formatNumber(homeStats.totals.playersSeen) : "Awaiting synced player activity",
+      label: "Players seen",
+      compact: homeStats.totals.playersSeen === 0,
+    },
+  ];
+}
+
+function buildLiveServerStats(homeStats: HomeStats) {
+  return [
+    {
+      label: "Players seen",
+      value: homeStats.totals.playersSeen > 0 ? formatNumber(homeStats.totals.playersSeen) : "0",
+      detail: homeStats.totals.playersSeen > 0 ? "synced public profiles" : "awaiting synced player activity",
+      icon: "Users",
+      status: "Live",
+    },
+    {
+      label: "Servers linked",
+      value: formatNumber(homeStats.totals.serversLinked),
+      detail: "public connected servers",
+      icon: "Server",
+      status: `${homeStats.syncHealth.active} active`,
+    },
+    {
+      label: "Kills tracked",
+      value: homeStats.totals.killsTracked > 0 ? formatNumber(homeStats.totals.killsTracked) : "0",
+      detail: homeStats.totals.killsTracked > 0 ? "credited PvP kills" : "waiting for first PvP kill",
+      icon: "Crosshair",
+      status: "Public",
+    },
+    {
+      label: "Joins tracked",
+      value: homeStats.totals.joinsTracked > 0 ? formatNumber(homeStats.totals.joinsTracked) : "0",
+      detail: homeStats.totals.joinsTracked > 0 ? "synced player joins" : "waiting for activity",
+      icon: "Shield",
+      status: "ADM",
+    },
+  ];
+}
+
+function modeCountForTitle(title: string, counts: HomeStats["gameModes"]) {
+  if (title === "PvP") return counts.pvp;
+  if (title === "PvE") return counts.pve;
+  if (title === "Deathmatch") return counts.deathmatch;
+  return counts.pvpPve;
+}
+
+function mapDotPosition(index: number) {
+  const positions = [
+    { left: "18%", top: "28%" },
+    { left: "53%", top: "44%" },
+    { right: "18%", top: "23%" },
+    { left: "72%", top: "62%" },
+    { left: "34%", top: "66%" },
+    { right: "28%", top: "38%" },
+  ];
+  return positions[index % positions.length];
+}
+
+function activityIcon(item: HomeStats["recentActivity"][number]) {
+  if (item.source === "kill") return "Crosshair";
+  if (item.source === "sync") return "Activity";
+  if (item.source === "server") return "Radio";
+  if (item.eventType === "player_connected" || item.eventType === "player_disconnected") return "Users";
+  return "Radio";
+}
+
+function activityTone(item: HomeStats["recentActivity"][number]) {
+  if (item.source === "kill") return "text-red-300";
+  if (item.source === "sync") return "text-emerald-300";
+  if (item.source === "server") return "text-violet-300";
+  return "text-sky-300";
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(numberOrZero(value));
+}
+
+function numberOrZero(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
+}
+
+function plural(count: number, label: string) {
+  return `${formatNumber(count)} ${label}${count === 1 ? "" : "s"}`;
+}
+
+function formatRelativeTime(value: string | null) {
+  if (!value) return "Recently";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently";
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function GlassCard({
