@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 
+const PRIMARY_LOGO_SRC = "/media/dzn-logo.png";
+const FALLBACK_LOGO_SRC = "/media/dzn-logo-fallback.svg";
+
 export function DznLogo({
   compact = false,
   href = "/",
@@ -13,10 +16,20 @@ export function DznLogo({
   size?: "default" | "hero";
   className?: string;
 }) {
-  const [logoLoaded, setLogoLoaded] = useState(true);
+  const [logoSrc, setLogoSrc] = useState(PRIMARY_LOGO_SRC);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
   const imageClasses = size === "hero" ? "h-24 w-auto sm:h-32" : compact ? "h-9 w-auto sm:h-10" : "h-12 w-auto";
   const fallbackMarkSize = size === "hero" ? "h-20 w-20" : "h-10 w-10";
   const fallbackTextClass = size === "hero" ? "text-4xl sm:text-5xl" : "text-xl";
+
+  function handleImageError() {
+    if (logoSrc !== FALLBACK_LOGO_SRC) {
+      setLogoSrc(FALLBACK_LOGO_SRC);
+      return;
+    }
+
+    setFallbackFailed(true);
+  }
 
   return (
     <a
@@ -24,13 +37,13 @@ export function DznLogo({
       aria-label="DZN Network home"
       className={`group inline-flex items-center gap-3 ${className}`}
     >
-      {logoLoaded ? (
+      {!fallbackFailed ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src="/media/dzn-logo.png"
+          src={logoSrc}
           alt="DZN Network"
           className={`${imageClasses} object-contain drop-shadow-[0_0_24px_rgba(139,92,246,0.55)] transition duration-300 group-hover:drop-shadow-[0_0_34px_rgba(167,139,250,0.75)]`}
-          onError={() => setLogoLoaded(false)}
+          onError={handleImageError}
         />
       ) : (
         <>
