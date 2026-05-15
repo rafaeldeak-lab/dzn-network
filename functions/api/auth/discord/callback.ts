@@ -6,7 +6,7 @@ import {
   filterAdminGuilds,
 } from "../../../_lib/discord";
 import { methodNotAllowed, readCookie, redirect, secureHeaders, setCookie } from "../../../_lib/http";
-import { isValidOAuthState, OAUTH_STATE_COOKIE } from "../../../_lib/oauth";
+import { isValidOAuthState, OAUTH_RETURN_COOKIE, OAUTH_STATE_COOKIE, safeReturnTo } from "../../../_lib/oauth";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -18,14 +18,19 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const expectedState = readCookie(request, OAUTH_STATE_COOKIE);
+  const returnTo = safeReturnTo(readCookie(request, OAUTH_RETURN_COOKIE));
 
   if (!code || !isValidOAuthState(state) || !isValidOAuthState(expectedState) || state !== expectedState) {
-    return redirect("/login?error=discord_state", {
-      "set-cookie": setCookie(OAUTH_STATE_COOKIE, "", {
-        maxAge: 0,
-        path: "/api/auth/discord/callback",
-      }),
-    });
+    const headers = new Headers();
+    headers.append("set-cookie", setCookie(OAUTH_STATE_COOKIE, "", {
+      maxAge: 0,
+      path: "/api/auth/discord/callback",
+    }));
+    headers.append("set-cookie", setCookie(OAUTH_RETURN_COOKIE, "", {
+      maxAge: 0,
+      path: "/api/auth/discord/callback",
+    }));
+    return redirect("/login?error=discord_state", headers);
   }
 
   try {
@@ -38,19 +43,27 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     await storeGuilds(env, userId, filterAdminGuilds(guilds));
     const session = await createSession(env, userId);
 
-    const headers = secureHeaders({ location: "/setup", "cache-control": "no-store" });
+    const headers = secureHeaders({ location: returnTo, "cache-control": "no-store" });
     headers.append("set-cookie", setCookie(SESSION_COOKIE, session.token, { maxAge: session.maxAge }));
     headers.append("set-cookie", setCookie(OAUTH_STATE_COOKIE, "", {
       maxAge: 0,
       path: "/api/auth/discord/callback",
     }));
+    headers.append("set-cookie", setCookie(OAUTH_RETURN_COOKIE, "", {
+      maxAge: 0,
+      path: "/api/auth/discord/callback",
+    }));
     return new Response(null, { status: 302, headers });
   } catch {
-    return redirect("/login?error=discord_callback", {
-      "set-cookie": setCookie(OAUTH_STATE_COOKIE, "", {
-        maxAge: 0,
-        path: "/api/auth/discord/callback",
-      }),
-    });
+    const headers = new Headers();
+    headers.append("set-cookie", setCookie(OAUTH_STATE_COOKIE, "", {
+      maxAge: 0,
+      path: "/api/auth/discord/callback",
+    }));
+    headers.append("set-cookie", setCookie(OAUTH_RETURN_COOKIE, "", {
+      maxAge: 0,
+      path: "/api/auth/discord/callback",
+    }));
+    return redirect("/login?error=discord_callback", headers);
   }
 };
