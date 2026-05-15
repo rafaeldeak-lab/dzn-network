@@ -16,9 +16,13 @@ type PublicServerRow = {
   nitrado_service_name: string | null;
   player_slots: number | null;
   current_players: number | null;
+  platform: string | null;
+  map_name: string | null;
+  mission: string | null;
   server_mode: string | null;
   server_status: string | null;
   is_online: number | null;
+  metadata_last_checked_at: string | null;
   created_at: string | null;
   updated_at: string | null;
   guild_name: string | null;
@@ -68,8 +72,13 @@ type SafePublicServer = {
   stats_sync: "Active" | "Pending" | "Not Started";
   player_slots: number | null;
   current_players: number | null;
+  platform: string | null;
+  map_name: string | null;
+  mission: string | null;
   server_status: string | null;
   is_online: boolean;
+  last_sync_at: string | null;
+  metadata_last_checked_at: string | null;
   created_at: string | null;
   total_kills: number;
   total_deaths: number;
@@ -136,9 +145,13 @@ async function queryPublicServers(env: Env) {
       linked_servers.nitrado_service_name,
       COALESCE(linked_servers.max_players, linked_servers.player_slots) AS player_slots,
       linked_servers.current_players,
+      linked_servers.platform,
+      linked_servers.map_name,
+      linked_servers.mission,
       linked_servers.server_mode,
       linked_servers.server_status,
       linked_servers.is_online,
+      linked_servers.metadata_last_checked_at,
       linked_servers.created_at,
       linked_servers.updated_at,
       discord_guilds.name AS guild_name,
@@ -316,8 +329,13 @@ async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafeP
     stats_sync: statsSync,
     player_slots: row.player_slots,
     current_players: numberOrZero(row.current_players),
+    platform: row.platform,
+    map_name: row.map_name,
+    mission: row.mission,
     server_status: row.server_status,
     is_online: Number(row.is_online) === 1,
+    last_sync_at: row.latest_success_sync_at ?? row.adm_sync_at,
+    metadata_last_checked_at: row.metadata_last_checked_at,
     created_at: row.created_at,
     total_kills: numberOrZero(row.total_kills),
     total_deaths: numberOrZero(row.total_deaths),
@@ -358,8 +376,13 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync: "Pending",
       player_slots: 60,
       current_players: 0,
+      platform: "PlayStation",
+      map_name: "Chernarus",
+      mission: null,
       server_status: "online",
       is_online: true,
+      last_sync_at: null,
+      metadata_last_checked_at: null,
       created_at: new Date().toISOString(),
       total_kills: 0,
       total_deaths: 0,
@@ -381,8 +404,13 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync: "Active",
       player_slots: 70,
       current_players: 12,
+      platform: "PlayStation",
+      map_name: "Chernarus",
+      mission: null,
       server_status: "online",
       is_online: true,
+      last_sync_at: new Date().toISOString(),
+      metadata_last_checked_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       total_kills: 12,
       total_deaths: 18,
@@ -404,8 +432,13 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync: "Not Started",
       player_slots: 50,
       current_players: 0,
+      platform: "PlayStation",
+      map_name: "Deathmatch Arena",
+      mission: null,
       server_status: "restarting",
       is_online: false,
+      last_sync_at: null,
+      metadata_last_checked_at: null,
       created_at: new Date().toISOString(),
       total_kills: 0,
       total_deaths: 0,

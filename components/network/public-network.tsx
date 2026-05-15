@@ -7,15 +7,24 @@ import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  CheckCircle2,
+  Clock3,
   Crosshair,
   Crown,
   Flame,
+  Gamepad2,
   LogOut,
+  Map,
+  MapPin,
+  Medal,
   RadioTower,
   Search,
   ShieldCheck,
   Skull,
+  Sparkles,
+  Target,
   Trophy,
+  UserRound,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -36,6 +45,14 @@ type PublicServer = {
   adm_status: "Connected" | "Discovered" | "Needs Review";
   stats_sync: "Active" | "Pending" | "Not Started";
   player_slots: number | null;
+  current_players: number | null;
+  platform: string | null;
+  map_name: string | null;
+  mission: string | null;
+  server_status: string | null;
+  is_online: boolean;
+  last_sync_at: string | null;
+  metadata_last_checked_at: string | null;
   created_at: string | null;
   total_kills: number;
   total_deaths: number;
@@ -382,53 +399,64 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const tags = parseTags(server.tags_json);
   const statsPending = server.stats_sync === "Pending";
   const statsActiveWithoutKills = server.stats_sync === "Active" && server.total_kills === 0;
-  const heroTags = tags.slice(0, 5);
+  const players = server.top_players ?? [];
+  const kd = calculateServerKd(server.total_kills, server.total_deaths);
+
+  useEffect(() => {
+    console.log("DZN LIVE SERVER PROFILE LOADED");
+  }, []);
 
   return (
-    <div className="pb-16 pt-10">
+    <div className="relative pb-12 pt-6">
+      <div className="pointer-events-none absolute inset-x-[-12vw] top-10 -z-10 h-[520px] bg-[radial-gradient(circle_at_18%_18%,rgba(139,92,246,0.28),transparent_34%),radial-gradient(circle_at_88%_12%,rgba(34,211,238,0.16),transparent_28%)] blur-2xl" />
       <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
         <ArrowLeft className="h-4 w-4" />
         Back to servers
       </Link>
 
-      <motion.header
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.42 }}
-        className="mt-8 glass-surface animated-border rounded-lg p-5 sm:p-6"
-      >
-        <div className="relative z-10 grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] lg:items-start">
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
-              <GuildIcon server={server} size="lg" />
-              <div className="min-w-0 max-w-full">
-                <p className="text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified DZN community"}</p>
-                <h1 className="mt-2 max-w-full break-words text-3xl font-black uppercase leading-tight text-white [overflow-wrap:anywhere] sm:text-4xl lg:text-5xl">{server.server_name}</h1>
-                <p className="mt-3 max-w-2xl break-words text-base leading-7 text-zinc-300 [overflow-wrap:anywhere] sm:text-lg sm:leading-8">{server.nitrado_service_name ?? server.server_name}</p>
+      <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className="relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+        <div className="absolute inset-0 bg-[url('/media/dzn-cinematic-survivor.png')] bg-cover bg-center opacity-28" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_18%,rgba(139,92,246,0.32),transparent_30%),linear-gradient(90deg,rgba(2,3,10,0.95),rgba(2,3,10,0.58),rgba(2,3,10,0.9))]" />
+        <div className="relative z-10 grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="flex min-w-0 flex-col gap-5 sm:flex-row">
+            <ServerHeroAvatar server={server} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">DZN Network</span>
+                <StatusPill label="Live" tone="emerald" pulse />
               </div>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <StatusPill label="Live" tone="emerald" />
-              <StatusPill label="Verified Owner" tone="cyan" />
-              <StatusPill label="DZN Verified" tone="violet" />
-              <StatusPill label={server.server_type} tone="violet" />
-              <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
-              <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {heroTags.length ? heroTags.map((tag) => <span key={tag} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100">{tag}</span>) : <span className="text-sm text-zinc-500">No tags listed yet.</span>}
+              <h1 className="mt-3 max-w-full break-words text-4xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-5xl lg:text-6xl">
+                {server.server_name}
+              </h1>
+              <p className="mt-3 break-words text-base font-bold text-zinc-300 [overflow-wrap:anywhere]">{server.nitrado_service_name ?? server.guild_name ?? "Verified DZN community"}</p>
+              <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold uppercase text-zinc-400">
+                <MetaChip icon={Gamepad2} label={server.platform ?? "Platform awaiting data"} />
+                <MetaChip icon={Target} label={server.server_type} />
+                <MetaChip icon={Map} label={server.map_name ?? server.mission ?? "Map awaiting data"} />
+                <MetaChip icon={MapPin} label={server.server_status ?? "Network online"} />
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <StatusPill label="Verified Owner" tone="cyan" />
+                <StatusPill label="DZN Verified" tone="violet" />
+                <StatusPill label={server.server_type} tone="violet" />
+                <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
+                <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
+              </div>
             </div>
           </div>
 
-          <div className="w-full min-w-0 self-start overflow-hidden rounded-lg border border-white/10 bg-black/26 p-5 lg:justify-self-end">
-            <p className="text-xs font-black uppercase text-zinc-500">Public Server Status</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              <MiniMetric label="Status" value="Live" />
-              <MiniMetric label="Stats Sync" value={server.stats_sync} />
-              <MiniMetric label="Player Slots" value={server.player_slots ? `0 / ${server.player_slots}` : "Not listed"} />
-              <MiniMetric label="Server Type" value={server.server_type} />
-              <MiniMetric label="Unique Players" value={String(server.unique_players)} />
-              <MiniMetric label="Total Kills" value={String(server.total_kills)} />
+          <div className="grid gap-3 rounded-xl border border-white/10 bg-black/38 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <div className="grid grid-cols-2 gap-3">
+              <HeroStat label="Players" value={formatPlayers(server)} icon={UserRound} />
+              <HeroStat label="Unique Players" value={String(server.unique_players)} icon={Users} />
+              <HeroStat label="Server Type" value={server.server_type} icon={Target} />
+              <HeroStat label="Total Kills" value={String(server.total_kills)} icon={Crosshair} />
+              <HeroStat label="Total Deaths" value={String(server.total_deaths)} icon={Skull} />
+              <HeroStat label="K/D Ratio" value={kd} icon={BarChart3} />
+            </div>
+            <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
+              <p className="text-[10px] font-black uppercase text-cyan-200/70">Last Sync</p>
+              <p className="mt-1 text-sm font-black text-white">{formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)}</p>
             </div>
           </div>
         </div>
@@ -445,35 +473,25 @@ function ServerProfile({ server }: { server: PublicServer }) {
         </div>
       ) : null}
 
-      <section className="mt-6 grid gap-5 lg:grid-cols-[1fr_360px]">
+      <section className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-5">
-          <GlassPanel title="Server Tags" icon={ShieldCheck}>
-            <div className="flex flex-wrap gap-2">
-              {tags.length ? tags.map((tag) => <span key={tag} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-100">{tag}</span>) : <span className="text-sm text-zinc-500">No tags listed yet.</span>}
-            </div>
-          </GlassPanel>
+          <ServerTagsPanel tags={tags} />
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+            <PvpLeaderboardPanel players={players} />
+            <RecentEventsPanel server={server} />
+          </div>
 
           <div className="grid gap-5 md:grid-cols-2">
-            <PlaceholderPanel title="PvP Leaderboard" icon={Trophy} text="Ranked leaderboards will appear here when stat sync is active." />
-            <RecentEventsPanel server={server} />
-            <PlaceholderPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." />
-            <PlaceholderPanel title="Achievements" icon={Crown} text="Community milestones will unlock as the DZN sync engine expands." />
+            <FeaturePreviewPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." variant="faction" />
+            <FeaturePreviewPanel title="Achievements" icon={Crown} text="Community milestones will unlock as the DZN sync engine expands." variant="achievement" />
           </div>
         </div>
 
-        <aside className="grid gap-5">
+        <aside className="grid content-start gap-5">
           <GlassPanel title="Top Players" icon={Flame}>
-            <TopPlayersPanel players={server.top_players ?? []} />
+            <TopPlayersPanel players={players} />
           </GlassPanel>
-          <GlassPanel title="Network Status" icon={BarChart3}>
-            <div className="grid gap-3">
-              <MiniMetric label="ADM Status" value={server.adm_status} />
-              <MiniMetric label="Stats Sync" value={server.stats_sync} />
-              <MiniMetric label="Total Joins" value={String(server.total_joins)} />
-              <MiniMetric label="Unique Players" value={String(server.unique_players)} />
-              <MiniMetric label="Public Listing" value="Active" />
-            </div>
-          </GlassPanel>
+          <NetworkStatusPanel server={server} />
         </aside>
       </section>
     </div>
@@ -558,7 +576,7 @@ function getSlugFromPath(pathname: string) {
 
 function GlassPanel({ title, icon: Icon, children }: { title: string; icon: typeof Activity; children: React.ReactNode }) {
   return (
-    <section className="glass-surface animated-border rounded-lg p-5">
+    <section className="glass-surface animated-border rounded-xl p-4 transition duration-300 hover:-translate-y-0.5 hover:border-violet-300/30 sm:p-5">
       <div className="relative z-10">
         <div className="flex items-center gap-3">
           <Icon className="h-6 w-6 text-violet-200" />
@@ -570,10 +588,108 @@ function GlassPanel({ title, icon: Icon, children }: { title: string; icon: type
   );
 }
 
-function PlaceholderPanel({ title, icon: Icon, text }: { title: string; icon: typeof Activity; text: string }) {
+function ServerHeroAvatar({ server }: { server: PublicServer }) {
+  if (server.guild_icon_url) {
+    return (
+      <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-violet-300/30 bg-black shadow-[0_0_36px_rgba(139,92,246,0.35)]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={server.guild_icon_url} alt="" className="h-full w-full object-cover" />
+        <span className="absolute inset-0 rounded-xl border border-white/10" />
+      </div>
+    );
+  }
+
   return (
-    <GlassPanel title={title} icon={Icon}>
-      <p className="text-sm leading-6 text-zinc-400">{text}</p>
+    <div className="relative grid h-28 w-28 shrink-0 place-items-center overflow-hidden rounded-xl border border-violet-300/30 bg-black shadow-[0_0_36px_rgba(139,92,246,0.35)]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/media/dzn-logo.png" alt="" className="h-20 w-20 object-contain" />
+      <span className="absolute inset-0 rounded-xl border border-white/10 bg-[radial-gradient(circle_at_50%_0%,rgba(168,85,247,0.28),transparent_42%)]" />
+    </div>
+  );
+}
+
+function MetaChip({ icon: Icon, label }: { icon: typeof Activity; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-black/24 px-2.5 py-1.5">
+      <Icon className="h-3.5 w-3.5 text-cyan-200" />
+      {label}
+    </span>
+  );
+}
+
+function HeroStat({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-white/10 bg-black/28 p-3 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/25 hover:bg-cyan-300/[0.06]">
+      <div className="flex items-center gap-2">
+        <Icon className="h-4 w-4 text-cyan-200" />
+        <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+      </div>
+      <p className="mt-2 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{value}</p>
+    </div>
+  );
+}
+
+function ServerTagsPanel({ tags }: { tags: string[] }) {
+  if (!tags.length) {
+    return (
+      <GlassPanel title="Server Tags" icon={ShieldCheck}>
+        <p className="text-sm text-zinc-500">No tags added yet.</p>
+      </GlassPanel>
+    );
+  }
+
+  return (
+    <GlassPanel title="Server Tags" icon={ShieldCheck}>
+      <div className="flex flex-wrap gap-2">
+        {tags.map((tag) => (
+          <span key={tag} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-black text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.08)]">
+            {tag}
+          </span>
+        ))}
+      </div>
+    </GlassPanel>
+  );
+}
+
+function PvpLeaderboardPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
+  return (
+    <GlassPanel title="PvP Leaderboard" icon={Trophy}>
+      {players.length ? (
+        <>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-y-2 text-left">
+              <thead>
+                <tr className="text-[10px] font-black uppercase text-zinc-500">
+                  <th className="px-2 py-1">Rank</th>
+                  <th className="px-2 py-1">Player</th>
+                  <th className="px-2 py-1 text-right">Kills</th>
+                  <th className="px-2 py-1 text-right">Deaths</th>
+                  <th className="px-2 py-1 text-right">K/D</th>
+                  <th className="px-2 py-1 text-right">Longest Kill</th>
+                </tr>
+              </thead>
+              <tbody>
+                {players.slice(0, 6).map((player) => (
+                  <tr key={`pvp-${player.rank}-${player.player_name}`} className="bg-black/24">
+                    <td className="rounded-l-lg border-y border-l border-white/10 px-2 py-2 text-sm font-black text-violet-200">#{player.rank}</td>
+                    <td className="border-y border-white/10 px-2 py-2 text-sm font-black text-white">{player.player_name}</td>
+                    <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-200">{player.kills}</td>
+                    <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-300">{player.deaths}</td>
+                    <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-cyan-100">{formatKdLabel(player)}</td>
+                    <td className="rounded-r-lg border-y border-r border-white/10 px-2 py-2 text-right text-sm font-bold text-violet-100">{formatDistance(player.longest_kill)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Link href="/leaderboards" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/12 px-4 py-3 text-xs font-black uppercase text-violet-100 transition hover:border-violet-200/70 hover:bg-violet-500/22">
+            View Full PvP Leaderboard
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </>
+      ) : (
+        <p className="text-sm leading-6 text-zinc-400">No ranked players yet.</p>
+      )}
     </GlassPanel>
   );
 }
@@ -582,19 +698,35 @@ function RecentEventsPanel({ server }: { server: PublicServer }) {
   return (
     <GlassPanel title="Recent Synced Events" icon={Crosshair}>
       {server.recent_events.length ? (
-        <div className="grid gap-2">
-          {server.recent_events.slice(0, 5).map((event, index) => (
-            <div key={`${event.source}-${event.event_type}-${event.occurred_at ?? event.created_at ?? index}`} className="rounded-lg border border-white/10 bg-black/24 p-3">
+        <>
+          <div className="max-h-[420px] overflow-y-auto pr-1">
+            <div className="grid gap-2">
+              {server.recent_events.slice(0, 8).map((event, index) => {
+                const EventIcon = eventIcon(event);
+                return (
+            <div key={`${event.source}-${event.event_type}-${event.occurred_at ?? event.created_at ?? index}`} className="rounded-lg border border-white/10 bg-black/24 p-3 transition duration-300 hover:border-cyan-300/25 hover:bg-cyan-300/[0.055]">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
+                <div className="flex min-w-0 gap-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-red-300/20 bg-red-400/10 text-red-100">
+                    <EventIcon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
                   <p className="text-xs font-black uppercase text-cyan-200">{event.label}</p>
-                  <p className="mt-1 truncate text-sm font-bold text-white">{publicEventDetail(event)}</p>
+                    <p className="mt-1 text-sm font-bold leading-5 text-white">{publicEventDetail(event)}</p>
+                  </div>
                 </div>
-                <span className="shrink-0 text-[10px] font-black uppercase text-zinc-500">{formatPublicTime(event.occurred_at ?? event.created_at)}</span>
+                    <span className="shrink-0 text-[10px] font-black uppercase text-zinc-500">{formatRelativeTime(event.occurred_at ?? event.created_at)}</span>
               </div>
             </div>
-          ))}
-        </div>
+                );
+              })}
+            </div>
+          </div>
+          <Link href="/leaderboards" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/12 px-4 py-3 text-xs font-black uppercase text-violet-100 transition hover:border-violet-200/70 hover:bg-violet-500/22">
+            View All Activity
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </>
       ) : (
         <p className="text-sm leading-6 text-zinc-400">
           {server.stats_sync === "Active"
@@ -621,11 +753,14 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
   return (
     <div className="grid gap-2">
       {players.slice(0, 5).map((player) => (
-        <div key={`${player.rank}-${player.player_name}`} className="rounded-lg border border-white/10 bg-black/24 p-3">
+        <div key={`${player.rank}-${player.player_name}`} className="group rounded-xl border border-white/10 bg-black/24 p-3 transition duration-300 hover:-translate-y-0.5 hover:border-violet-300/35 hover:bg-violet-400/[0.07]">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase text-violet-200">#{player.rank}</p>
-              <p className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{player.player_name}</p>
+            <div className="flex min-w-0 gap-3">
+              <PlayerAvatar player={player} />
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase text-violet-200">#{player.rank}</p>
+                <p className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{player.player_name}</p>
+              </div>
             </div>
             <span className="rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-xs font-black text-emerald-100">
               {player.kills} kills
@@ -639,6 +774,73 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function PlayerAvatar({ player }: { player: PublicLeaderboardPlayer }) {
+  const initials = player.player_name
+    .split(/[\s_-]+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <span className="relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-violet-300/25 bg-[radial-gradient(circle_at_50%_10%,rgba(168,85,247,0.36),rgba(8,13,29,0.94)_58%)] text-sm font-black text-violet-100 shadow-[0_0_24px_rgba(139,92,246,0.22)]">
+      <span className="absolute inset-x-2 bottom-0 h-7 rounded-t-full bg-black/42" />
+      <UserRound className="relative h-6 w-6 opacity-45" />
+      <span className="absolute right-1 top-1 rounded bg-black/55 px-1 text-[9px] text-white">#{player.rank}</span>
+      <span className="sr-only">{initials}</span>
+    </span>
+  );
+}
+
+function NetworkStatusPanel({ server }: { server: PublicServer }) {
+  return (
+    <GlassPanel title="Network Status" icon={BarChart3}>
+      <div className="grid gap-2">
+        <StatusRow label="ADM Status" value={server.adm_status} tone={server.adm_status === "Connected" ? "good" : server.adm_status === "Discovered" ? "warn" : "bad"} />
+        <StatusRow label="Stats Sync" value={server.stats_sync} tone={server.stats_sync === "Active" ? "good" : server.stats_sync === "Pending" ? "warn" : "bad"} />
+        <StatusRow label="Total Joins" value={String(server.total_joins)} tone="neutral" />
+        <StatusRow label="Unique Players" value={String(server.unique_players)} tone="neutral" />
+        <StatusRow label="Public Listing" value="Active" tone="good" />
+        <StatusRow label="Last Sync" value={formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)} tone="neutral" />
+        <StatusRow label="Sync Health" value={server.stats_sync === "Active" ? "Online" : "Watching"} tone={server.stats_sync === "Active" ? "good" : "warn"} />
+      </div>
+    </GlassPanel>
+  );
+}
+
+function StatusRow({ label, value, tone }: { label: string; value: string; tone: "good" | "warn" | "bad" | "neutral" }) {
+  const toneClassName = {
+    good: "text-emerald-200",
+    warn: "text-orange-200",
+    bad: "text-red-200",
+    neutral: "text-cyan-100",
+  }[tone];
+  const Icon = tone === "good" ? CheckCircle2 : tone === "warn" ? Clock3 : tone === "bad" ? Skull : Activity;
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-white/10 py-2.5 last:border-b-0">
+      <div>
+        <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+        <p className="mt-1 text-sm font-bold text-white">{value}</p>
+      </div>
+      <Icon className={`h-4 w-4 ${toneClassName}`} />
+    </div>
+  );
+}
+
+function FeaturePreviewPanel({ title, text, icon: Icon, variant }: { title: string; text: string; icon: typeof Activity; variant: "faction" | "achievement" }) {
+  return (
+    <GlassPanel title={title} icon={Icon}>
+      <div className="flex items-center justify-between gap-4">
+        <p className="max-w-[220px] text-sm leading-6 text-zinc-400">{text}</p>
+        <span className="relative grid h-20 w-20 shrink-0 place-items-center rounded-xl border border-violet-300/25 bg-violet-500/12 text-violet-100 shadow-[0_0_34px_rgba(139,92,246,0.28)]">
+          {variant === "faction" ? <Sparkles className="h-9 w-9" /> : <Medal className="h-9 w-9" />}
+          <span className="absolute inset-2 rounded-lg border border-violet-200/10" />
+        </span>
+      </div>
+    </GlassPanel>
   );
 }
 
@@ -664,7 +866,7 @@ function GuildIcon({ server, size }: { server: PublicServer; size: "md" | "lg" }
   );
 }
 
-function StatusPill({ label, tone }: { label: string; tone: "emerald" | "cyan" | "violet" | "orange" | "zinc" }) {
+function StatusPill({ label, tone, pulse = false }: { label: string; tone: "emerald" | "cyan" | "violet" | "orange" | "zinc"; pulse?: boolean }) {
   const classes = {
     emerald: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100",
     cyan: "border-cyan-300/25 bg-cyan-400/10 text-cyan-100",
@@ -672,7 +874,12 @@ function StatusPill({ label, tone }: { label: string; tone: "emerald" | "cyan" |
     orange: "border-orange-300/25 bg-orange-400/10 text-orange-100",
     zinc: "border-white/10 bg-white/[0.04] text-zinc-200",
   }[tone];
-  return <span className={`rounded-md border px-3 py-1.5 text-xs font-black uppercase ${classes}`}>{label}</span>;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-black uppercase ${classes}`}>
+      {pulse ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.95)]" /> : null}
+      {label}
+    </span>
+  );
 }
 
 function toneClass(tone: string) {
@@ -757,19 +964,45 @@ function publicEventDetail(event: PublicRecentEvent) {
   return event.player_name ?? "Server activity";
 }
 
+function eventIcon(event: PublicRecentEvent) {
+  if (event.source === "kill") return Crosshair;
+  if (event.event_type === "player_connected" || event.event_type === "player_disconnected") return UserRound;
+  if (event.event_type === "player_hit" || event.event_type === "player_hit_explosion" || event.event_type === "player_hit_unknown_attacker") return Target;
+  if (event.event_type === "player_unconscious") return Activity;
+  return RadioTower;
+}
+
 function formatKdLabel(player: PublicLeaderboardPlayer) {
   return player.kd_label || (typeof player.kd === "number" ? player.kd.toFixed(2) : "Awaiting data");
+}
+
+function calculateServerKd(kills: number, deaths: number) {
+  if (kills === 0 && deaths === 0) return "Awaiting data";
+  if (kills > 0 && deaths === 0) return "Flawless";
+  return deaths > 0 ? (kills / deaths).toFixed(2) : "0.00";
+}
+
+function formatPlayers(server: PublicServer) {
+  const current = typeof server.current_players === "number" ? server.current_players : 0;
+  return server.player_slots ? `${current} / ${server.player_slots}` : "Awaiting data";
 }
 
 function formatDistance(value: number) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? `${value.toFixed(1)}m` : "Awaiting data";
 }
 
-function formatPublicTime(value: string | null) {
-  if (!value) return "Pending";
+function formatRelativeTime(value: string | null) {
+  if (!value) return "Awaiting data";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Pending";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (Number.isNaN(date.getTime())) return "Awaiting data";
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60_000) return "now";
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function buildStats(servers: PublicServer[]): PublicStats {
