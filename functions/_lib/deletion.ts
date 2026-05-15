@@ -130,6 +130,9 @@ export async function deleteOwnedAccountData(env: Env, userId: string) {
   }
 
   deleted.nitradoConnections += await deleteRows(db, "DELETE FROM nitrado_connections WHERE user_id = ?", [userId]);
+  if (await tableExists(db, "discord_oauth_tokens")) {
+    await deleteRows(db, "DELETE FROM discord_oauth_tokens WHERE user_id = ?", [userId]);
+  }
   deleted.sessions += await deleteRows(db, "DELETE FROM sessions WHERE user_id = ?", [userId]);
   deleted.discordGuilds += await deleteRows(
     db,

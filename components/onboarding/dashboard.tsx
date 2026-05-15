@@ -31,7 +31,7 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logoutAndRedirect, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
+import { clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -170,6 +170,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [deletingDangerAction, setDeletingDangerAction] = useState(false);
   const [refreshingSyncData, setRefreshingSyncData] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [refreshingServerInfo, setRefreshingServerInfo] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
@@ -183,9 +184,11 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     }
   }, [server.tags_json]);
 
+  const serverDisplayName = server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name;
+  const effectiveServerMode = server.server_mode ?? server.server_type;
   const normalizedStatus = server.status.toLowerCase();
   const admState = getAdmState(server);
-  const isDayzService = [server.game, server.server_name, server.nitrado_service_name].some((value) => /dayz/i.test(value ?? ""));
+  const isDayzService = [server.game, serverDisplayName, server.nitrado_service_name].some((value) => /dayz/i.test(value ?? ""));
   const coreSetupComplete = Boolean(server.guild_id && server.nitrado_service_id && isDayzService && admState.isDiscovered);
   const progress = coreSetupComplete ? 100 : normalizedStatus === "error" ? 72 : normalizedStatus === "live" ? 92 : 84;
   const networkAddress = server.ip_address ?? server.region ?? "Unknown";
@@ -272,8 +275,26 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
 
   async function refreshNow() {
     setActionMessage("");
+    if (shouldRefreshServerInfo(server.metadata_last_checked_at)) {
+      await refreshServerMetadata(server.id).catch(() => null);
+      await onRefresh();
+    }
     const refreshed = await refreshSyncData({ manual: true, warnOnError: true });
     if (refreshed) setActionMessage("Dashboard sync data refreshed.");
+  }
+
+  async function refreshServerInfo() {
+    setRefreshingServerInfo(true);
+    setActionMessage("");
+    try {
+      const result = await refreshServerMetadata(server.id);
+      await onRefresh();
+      setActionMessage(result.message || "Server info refreshed from Nitrado.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to refresh server info.");
+    } finally {
+      setRefreshingServerInfo(false);
+    }
   }
 
   async function rerunLogCheck() {
@@ -378,12 +399,12 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       note: "Safe DZN data summary. No tokens, credentials, OAuth secrets, FTP/MySQL credentials, or player IDs are included.",
       server: {
         id: server.id,
-        serverName: server.server_name,
+        serverName: serverDisplayName,
         nitradoServiceId: server.nitrado_service_id,
         nitradoServiceName: server.nitrado_service_name,
         publicSlug: server.public_slug,
         discordGuildName: server.guild_name ?? null,
-        serverType: server.server_type,
+        serverType: effectiveServerMode,
         tags,
         status: server.status,
         game: server.game ?? null,
@@ -433,7 +454,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="truncate text-3xl font-black text-white">{server.server_name || server.nitrado_service_name}</h1>
+                    <h1 className="truncate text-3xl font-black text-white">{serverDisplayName}</h1>
                     <span className="rounded-md border border-emerald-300/25 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase text-emerald-100">
                       {statsSyncActive ? "Synced" : formatServerStatus(server.status)}
                     </span>
@@ -444,7 +465,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                     ) : null}
                   </div>
                   <p className="mt-2 text-sm font-bold text-zinc-300">
-                    {server.guild_name ?? server.guild_id} <span className="text-zinc-600">/</span> {server.server_type} <span className="text-zinc-600">/</span> {server.game ?? "DayZ"}
+                    {server.guild_name ?? server.guild_id} <span className="text-zinc-600">/</span> {effectiveServerMode} <span className="text-zinc-600">/</span> {server.game ?? "DayZ"}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -503,16 +524,33 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
             <DashboardPanel className="p-4">
               <PanelHeader icon={<Server className="h-5 w-5" />} title="Server Overview" />
               <div className="mt-4 grid gap-x-4 gap-y-1 md:grid-cols-2">
-                <CompactRow label="Server Name" value={server.server_name || server.nitrado_service_name} />
+                <CompactRow label="Server Name" value={serverDisplayName} />
                 <CompactRow label="Service ID" value={server.nitrado_service_id} />
                 <CompactRow label="Nitrado Service ID" value={server.nitrado_service_id} />
                 <CompactRow label={networkAddressLabel} value={networkAddress} />
-                <CompactRow label="Server Type" value={server.server_type} />
+                <CompactRow label="Server Type" value={effectiveServerMode} />
                 <CompactRow label="Game" value={server.game ?? "DayZ"} />
-                <CompactRow label="Player Slots" value={server.player_slots ? String(server.player_slots) : "Unknown"} />
+                <CompactRow label="Player Slots" value={formatPlayerSlots(server.current_players, server.max_players ?? server.player_slots)} />
+                <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
+                <CompactRow label="Metadata Last Checked" value={server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "Not checked"} />
                 <CompactRow label="Latest ADM File" value={latestAdmFile} />
                 <CompactRow label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
                 <CompactRow label="Next Scheduled Sync" value={nextScheduledSync} />
+              </div>
+              <div className="mt-4 flex flex-col gap-3 rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-bold text-cyan-50">
+                  Server info auto-synced from Nitrado.
+                  {server.metadata_last_changed_at ? <span className="text-zinc-300"> Last changed {formatRelativeTime(server.metadata_last_changed_at)}.</span> : null}
+                </p>
+                <button
+                  type="button"
+                  disabled={refreshingServerInfo}
+                  onClick={refreshServerInfo}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshingServerInfo ? "animate-spin" : ""}`} />
+                  {refreshingServerInfo ? "Refreshing..." : "Refresh Server Info"}
+                </button>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {tags.length ? tags.map((tag) => <TagPill key={tag}>{tag}</TagPill>) : <span className="text-sm text-zinc-400">No tags selected</span>}
@@ -606,6 +644,10 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                 <span>{syncing ? "Syncing..." : "Run Manual Sync"}</span>
                 <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               </button>
+              <button type="button" disabled={refreshingServerInfo} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55">
+                <span>{refreshingServerInfo ? "Refreshing..." : "Refresh Server Info"}</span>
+                <RefreshCw className={`h-4 w-4 ${refreshingServerInfo ? "animate-spin" : ""}`} />
+              </button>
               <button type="button" disabled={checkingLogs} onClick={rerunLogCheck} className="inline-flex items-center justify-between rounded-lg border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-left text-sm font-bold text-violet-50 transition hover:border-violet-300/45 hover:bg-violet-400/18 disabled:cursor-not-allowed disabled:opacity-55">
                 <span>{checkingLogs ? "Checking logs..." : "Re-run Log Check"}</span>
                 <RefreshCw className={`h-4 w-4 ${checkingLogs ? "animate-spin" : ""}`} />
@@ -657,7 +699,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
       {dangerAction ? (
         <DangerZoneModal
           action={dangerAction}
-          serverName={server.server_name || server.nitrado_service_name || "DZN server"}
+          serverName={serverDisplayName || "DZN server"}
           deleting={deletingDangerAction}
           onClose={() => {
             if (!deletingDangerAction) setDangerAction(null);
@@ -1267,6 +1309,40 @@ function LogDiagnosticsPanel({
 function formatDashboardDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatRelativeTime(value: string) {
+  const date = new Date(value);
+  const deltaMs = Date.now() - date.getTime();
+  if (Number.isNaN(deltaMs)) return value;
+  if (Math.abs(deltaMs) < 60_000) return "just now";
+  const minutes = Math.round(Math.abs(deltaMs) / 60_000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function shouldRefreshServerInfo(value: string | null | undefined) {
+  if (!value) return true;
+  const checkedAt = Date.parse(value);
+  return !Number.isFinite(checkedAt) || Date.now() - checkedAt > 2 * 60 * 1000;
+}
+
+function formatPlayerSlots(current: number | null | undefined, max: number | null | undefined) {
+  const currentValue = typeof current === "number" && Number.isFinite(current) ? current : null;
+  const maxValue = typeof max === "number" && Number.isFinite(max) ? max : null;
+  if (currentValue !== null && maxValue !== null) return `${currentValue} / ${maxValue}`;
+  if (maxValue !== null) return String(maxValue);
+  return "Unknown";
+}
+
+function formatNitradoServerStatus(status: string | null | undefined, online: boolean | number | null | undefined) {
+  if (typeof status === "string" && status.trim()) return status.trim();
+  if (online === true || online === 1) return "Online";
+  if (online === false || online === 0) return "Offline";
+  return "Unknown";
 }
 
 function getManualSyncMessage(result: AdmSyncRunResult) {

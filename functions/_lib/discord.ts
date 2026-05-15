@@ -20,6 +20,14 @@ export function buildDiscordAuthorizeUrl(env: Env, state: string) {
   return url.toString();
 }
 
+export type DiscordTokenResponse = {
+  access_token: string;
+  token_type: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+};
+
 export async function exchangeDiscordCode(env: Env, code: string) {
   const body = new URLSearchParams({
     client_id: required(env.DISCORD_CLIENT_ID, "DISCORD_CLIENT_ID"),
@@ -36,7 +44,25 @@ export async function exchangeDiscordCode(env: Env, code: string) {
   });
 
   if (!response.ok) throw new Error("Discord token exchange failed");
-  return response.json() as Promise<{ access_token: string; token_type: string }>;
+  return response.json() as Promise<DiscordTokenResponse>;
+}
+
+export async function refreshDiscordAccessToken(env: Env, refreshToken: string) {
+  const body = new URLSearchParams({
+    client_id: required(env.DISCORD_CLIENT_ID, "DISCORD_CLIENT_ID"),
+    client_secret: required(env.DISCORD_CLIENT_SECRET, "DISCORD_CLIENT_SECRET"),
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+
+  const response = await fetch(`${DISCORD_API}/oauth2/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  if (!response.ok) throw new Error("Discord token refresh failed");
+  return response.json() as Promise<DiscordTokenResponse>;
 }
 
 export async function fetchDiscordUser(accessToken: string): Promise<DiscordUser> {
@@ -56,16 +82,20 @@ export async function fetchDiscordGuilds(accessToken: string): Promise<DiscordGu
 }
 
 export function filterAdminGuilds(guilds: DiscordGuild[]) {
-  return guilds.filter((guild) => guild.owner || hasAdministrator(guild.permissions));
+  return guilds.filter(canManageDiscordGuild);
 }
 
 export function guildIconUrl(guild: DiscordGuild) {
   return guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png` : null;
 }
 
-function hasAdministrator(permissions: string) {
+export function canManageDiscordGuild(guild: Pick<DiscordGuild, "owner" | "permissions">) {
+  return Boolean(guild.owner) || hasAdministrator(guild.permissions);
+}
+
+function hasAdministrator(permissions: string | undefined | null) {
   try {
-    return (BigInt(permissions) & ADMINISTRATOR) === ADMINISTRATOR;
+    return (BigInt(permissions ?? "0") & ADMINISTRATOR) === ADMINISTRATOR;
   } catch {
     return false;
   }

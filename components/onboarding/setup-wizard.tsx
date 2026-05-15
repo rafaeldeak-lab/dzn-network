@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   BarChart3,
@@ -16,6 +16,7 @@ import {
   Loader2,
   LockKeyhole,
   Search,
+  RefreshCw,
   Server,
   ShieldCheck,
   Sparkles,
@@ -91,13 +92,27 @@ export function SetupWizard() {
   const [busy, setBusy] = useState(false);
   const [checks, setChecks] = useState<OnboardingChecks | null>(null);
   const [publishedServer, setPublishedServer] = useState<LinkedServer | null>(null);
+  const [guildRefreshing, setGuildRefreshing] = useState(false);
+  const [guildRefreshMessage, setGuildRefreshMessage] = useState("");
+
+  const loadDiscordGuilds = useCallback(async (fresh: boolean) => {
+    try {
+      return await getGuilds({ fresh });
+    } catch (error) {
+      if (fresh) {
+        setGuildRefreshMessage(error instanceof Error ? error.message : "Unable to refresh Discord servers.");
+        return getGuilds();
+      }
+      throw error;
+    }
+  }, []);
 
   useEffect(() => {
     async function load() {
       try {
         const auth = await getMe();
         setAuthenticated(true);
-        const guildResult = await getGuilds();
+        const guildResult = await loadDiscordGuilds(true);
         setGuilds(guildResult.guilds);
         const linkedServer = auth.linkedServer;
         if (linkedServer?.guild_id) {
@@ -133,7 +148,25 @@ export function SetupWizard() {
       }
     }
     load();
-  }, []);
+  }, [loadDiscordGuilds]);
+
+  async function refreshDiscordGuilds() {
+    setGuildRefreshing(true);
+    setGuildRefreshMessage("");
+    try {
+      const result = await getGuilds({ fresh: true });
+      setGuilds(result.guilds);
+      setSelectedGuild((current) => current && result.guilds.some((guild) => guild.guild_id === current)
+        ? current
+        : result.guilds[0]?.guild_id ?? "");
+      setGuildRefreshMessage("Discord servers refreshed.");
+      console.log("DZN DISCORD GUILDS REFRESHED");
+    } catch (error) {
+      setGuildRefreshMessage(error instanceof Error ? error.message : "Unable to refresh Discord servers. Log out and back in to refresh Discord permissions.");
+    } finally {
+      setGuildRefreshing(false);
+    }
+  }
 
   const selectedGuildData = useMemo(
     () => guilds.find((guild) => guild.guild_id === selectedGuild),
@@ -344,7 +377,15 @@ export function SetupWizard() {
                 transition={{ duration: 0.28 }}
               >
                 {step === 0 ? (
-                  <GuildStep guilds={guilds} selectedGuild={selectedGuild} setSelectedGuild={setSelectedGuild} onNext={() => setStep(1)} />
+                  <GuildStep
+                    guilds={guilds}
+                    selectedGuild={selectedGuild}
+                    setSelectedGuild={setSelectedGuild}
+                    onNext={() => setStep(1)}
+                    onRefresh={refreshDiscordGuilds}
+                    refreshing={guildRefreshing}
+                    refreshMessage={guildRefreshMessage}
+                  />
                 ) : null}
                 {step === 1 ? (
                   <TypeStep serverType={serverType} setServerType={setServerType} selectedTags={selectedTags} toggleTag={toggleTag} onNext={() => setStep(2)} />
@@ -428,11 +469,49 @@ function LoadingState() {
   );
 }
 
-function GuildStep({ guilds, selectedGuild, setSelectedGuild, onNext }: { guilds: DiscordGuild[]; selectedGuild: string; setSelectedGuild: (value: string) => void; onNext: () => void }) {
+function GuildStep({
+  guilds,
+  selectedGuild,
+  setSelectedGuild,
+  onNext,
+  onRefresh,
+  refreshing,
+  refreshMessage,
+}: {
+  guilds: DiscordGuild[];
+  selectedGuild: string;
+  setSelectedGuild: (value: string) => void;
+  onNext: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+  refreshMessage: string;
+}) {
   return (
     <Step title="Select Discord Server" icon={Users} description="Only guilds you own or administer are eligible for DZN Network verification.">
+      <div className="mb-4 flex flex-col gap-3 rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase text-cyan-100">Latest Discord servers</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-300">
+            Can&apos;t see a new Discord server? Click Refresh Discord Servers or log out and back in to refresh Discord permissions.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={refreshing}
+          onClick={onRefresh}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-400/12 px-4 py-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/55 hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "Refreshing..." : "Refresh Discord Servers"}
+        </button>
+      </div>
+      {refreshMessage ? (
+        <p className="mb-4 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-zinc-200">
+          {refreshMessage}
+        </p>
+      ) : null}
       <div className="grid gap-3">
-        {guilds.map((guild) => (
+        {guilds.length ? guilds.map((guild) => (
           <button key={guild.guild_id} type="button" onClick={() => setSelectedGuild(guild.guild_id)} className={`flex items-center gap-4 rounded-lg border p-4 text-left transition ${selectedGuild === guild.guild_id ? "border-violet-300/50 bg-violet-400/12" : "border-white/10 bg-white/[0.03]"}`}>
             {guild.icon_url ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -442,10 +521,26 @@ function GuildStep({ guilds, selectedGuild, setSelectedGuild, onNext }: { guilds
             )}
             <span className="flex-1">
               <span className="block font-black text-white">{guild.name}</span>
-              <span className="text-xs font-bold uppercase text-zinc-500">{guild.owner ? "Owner" : "Administrator"}</span>
+              <span className="mt-2 flex flex-wrap gap-2">
+                <span className="rounded-md border border-violet-300/25 bg-violet-400/10 px-2 py-1 text-[10px] font-black uppercase text-violet-100">
+                  {guild.owner ? "Owner" : "Administrator"}
+                </span>
+                {guild.bot_present === false ? (
+                  <span className="rounded-md border border-orange-300/25 bg-orange-400/10 px-2 py-1 text-[10px] font-black uppercase text-orange-100">
+                    Bot not installed yet
+                  </span>
+                ) : null}
+              </span>
             </span>
           </button>
-        ))}
+        )) : (
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+            <p className="text-sm font-black uppercase text-white">No manageable Discord servers found.</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">
+              You need to own the server or have Administrator permission. If you just created a server, click Refresh Discord Servers. If it still does not appear, log out and log back in.
+            </p>
+          </div>
+        )}
       </div>
       <WizardButton disabled={!selectedGuild} onClick={onNext}>Continue</WizardButton>
     </Step>

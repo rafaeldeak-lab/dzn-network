@@ -11,6 +11,7 @@ import {
   testExactNitradoAdmPath,
 } from "./nitrado";
 import { decryptToken } from "./crypto";
+import { refreshNitradoServerMetadata } from "./server-metadata";
 import type { Env } from "./types";
 
 export type SyncLinkedServer = {
@@ -153,6 +154,11 @@ export async function runAdmSync(
   if (!linkedServer) throw new Error("No linked server found");
   const nitradoServiceId = linkedServer.nitrado_service_id;
   if (!nitradoServiceId) throw new Error("No Nitrado service selected");
+  await refreshNitradoServerMetadata(env, {
+    linkedServerId: linkedServer.id,
+    userId: linkedServer.user_id,
+    force: triggerType === "manual",
+  }).catch(() => null);
 
   const existingState = await getSyncState(env, linkedServer.id);
   const isMock = isMockNitrado(env.MOCK_NITRADO);

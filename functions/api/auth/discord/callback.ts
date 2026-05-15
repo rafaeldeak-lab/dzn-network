@@ -1,4 +1,4 @@
-import { createSession, SESSION_COOKIE, storeGuilds, upsertUser } from "../../../_lib/db";
+import { createSession, SESSION_COOKIE, storeDiscordOAuthToken, storeGuilds, upsertUser } from "../../../_lib/db";
 import {
   exchangeDiscordCode,
   fetchDiscordGuilds,
@@ -40,6 +40,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       fetchDiscordGuilds(token.access_token),
     ]);
     const userId = await upsertUser(env, user);
+    await storeDiscordOAuthToken(env, userId, token);
     await storeGuilds(env, userId, filterAdminGuilds(guilds));
     const session = await createSession(env, userId);
 

@@ -13,8 +13,9 @@ export async function getMe() {
   return request<AuthResponse>("/api/auth/me");
 }
 
-export async function getGuilds() {
-  return request<{ guilds: DiscordGuild[] }>("/api/discord/guilds");
+export async function getGuilds(options: { fresh?: boolean } = {}) {
+  const query = options.fresh ? "?fresh=1" : "";
+  return request<{ guilds: DiscordGuild[]; fetched_at?: string; fresh?: boolean }>(`/api/discord/guilds${query}`);
 }
 
 export async function validateNitradoToken(data: {
@@ -81,6 +82,18 @@ export async function runManualSync(linkedServerId?: string) {
   return request<AdmSyncRunResult>("/api/sync/run", {
     method: "POST",
     body: JSON.stringify(linkedServerId ? { linked_server_id: linkedServerId } : {}),
+  });
+}
+
+export async function refreshServerMetadata(linkedServerId: string) {
+  return request<{
+    ok: boolean;
+    changed: boolean;
+    skipped?: boolean;
+    message: string;
+    metadata?: Record<string, unknown>;
+  }>(`/api/servers/${encodeURIComponent(linkedServerId)}/refresh-metadata`, {
+    method: "POST",
   });
 }
 

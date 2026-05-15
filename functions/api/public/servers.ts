@@ -14,6 +14,10 @@ type PublicServerRow = {
   status: string;
   nitrado_service_name: string | null;
   player_slots: number | null;
+  current_players: number | null;
+  server_mode: string | null;
+  server_status: string | null;
+  is_online: number | null;
   created_at: string | null;
   updated_at: string | null;
   guild_name: string | null;
@@ -62,6 +66,9 @@ type SafePublicServer = {
   adm_status: "Connected" | "Discovered" | "Needs Review";
   stats_sync: "Active" | "Pending" | "Not Started";
   player_slots: number | null;
+  current_players: number | null;
+  server_status: string | null;
+  is_online: boolean;
   created_at: string | null;
   total_kills: number;
   total_deaths: number;
@@ -117,12 +124,16 @@ async function queryPublicServers(env: Env) {
     SELECT
       linked_servers.id,
       linked_servers.public_slug,
-      linked_servers.server_name,
-      linked_servers.server_type,
+      COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+      COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
       linked_servers.tags_json,
       linked_servers.status,
       linked_servers.nitrado_service_name,
-      linked_servers.player_slots,
+      COALESCE(linked_servers.max_players, linked_servers.player_slots) AS player_slots,
+      linked_servers.current_players,
+      linked_servers.server_mode,
+      linked_servers.server_status,
+      linked_servers.is_online,
       linked_servers.created_at,
       linked_servers.updated_at,
       discord_guilds.name AS guild_name,
@@ -228,7 +239,7 @@ async function ensurePublicSlugsForLiveServers(env: Env) {
     .prepare(
       `SELECT
         linked_servers.id,
-        linked_servers.server_name,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name) AS server_name,
         linked_servers.nitrado_service_name,
         linked_servers.public_slug,
         discord_guilds.name AS guild_name
@@ -268,7 +279,7 @@ async function ensureServerLogConfigTable(env: Env) {
     .run();
 }
 
-async function toSafePublicServer(env: Env, row: PublicServerRow) {
+async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafePublicServer | null> {
   if (!row.public_slug) return null;
   const latestAdmPath = row.adm_sync_latest_path ?? row.adm_path;
   const latestAdmFile = row.adm_sync_latest_file ?? fileNameFromPath(latestAdmPath);
@@ -299,6 +310,9 @@ async function toSafePublicServer(env: Env, row: PublicServerRow) {
     adm_status: admStatus,
     stats_sync: statsSync,
     player_slots: row.player_slots,
+    current_players: numberOrZero(row.current_players),
+    server_status: row.server_status,
+    is_online: Number(row.is_online) === 1,
     created_at: row.created_at,
     total_kills: numberOrZero(row.total_kills),
     total_deaths: numberOrZero(row.total_deaths),
@@ -338,6 +352,9 @@ function mockPublicServers(): SafePublicServer[] {
       adm_status: "Discovered",
       stats_sync: "Pending",
       player_slots: 60,
+      current_players: 0,
+      server_status: "online",
+      is_online: true,
       created_at: new Date().toISOString(),
       total_kills: 0,
       total_deaths: 0,
@@ -358,6 +375,9 @@ function mockPublicServers(): SafePublicServer[] {
       adm_status: "Connected",
       stats_sync: "Active",
       player_slots: 70,
+      current_players: 12,
+      server_status: "online",
+      is_online: true,
       created_at: new Date().toISOString(),
       total_kills: 12,
       total_deaths: 18,
@@ -378,6 +398,9 @@ function mockPublicServers(): SafePublicServer[] {
       adm_status: "Needs Review",
       stats_sync: "Not Started",
       player_slots: 50,
+      current_players: 0,
+      server_status: "restarting",
+      is_online: false,
       created_at: new Date().toISOString(),
       total_kills: 0,
       total_deaths: 0,

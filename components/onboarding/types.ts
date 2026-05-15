@@ -10,12 +10,16 @@ export type AuthResponse = {
 };
 
 export type DiscordGuild = {
+  id?: string;
   guild_id: string;
   name: string;
   icon: string | null;
   icon_url: string | null;
   owner: boolean;
+  administrator?: boolean;
+  manageable?: boolean;
   permissions: string;
+  bot_present?: boolean;
 };
 
 export type NitradoService = {
@@ -175,6 +179,22 @@ export type LinkedServer = {
   player_slots?: number | null;
   status: "pending" | "live" | "error" | "Pending" | "Live" | "Error";
   public_slug: string;
+  display_name?: string | null;
+  hostname?: string | null;
+  description?: string | null;
+  max_players?: number | null;
+  current_players?: number | null;
+  game_port?: number | null;
+  query_port?: number | null;
+  map_name?: string | null;
+  mission?: string | null;
+  server_status?: string | null;
+  is_online?: number | boolean | null;
+  server_mode?: string | null;
+  server_mode_source?: string | null;
+  metadata_hash?: string | null;
+  metadata_last_checked_at?: string | null;
+  metadata_last_changed_at?: string | null;
   adm_path?: string | null;
   adm_status?: "Connected" | "Discovered, read pending" | "Needs review" | string | null;
   adm_latest_file?: string | null;

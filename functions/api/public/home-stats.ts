@@ -1,4 +1,4 @@
-import { requireDb } from "../../_lib/db";
+import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -59,6 +59,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json(emptyHomeStats());
   }
 
+  await ensureLinkedServerMetadataColumns(env);
   const data = await buildHomeStats(env);
   return json(data);
 };
@@ -175,8 +176,11 @@ async function getGameModes(db: D1Database) {
   const result = await db
     .prepare(
       `SELECT server_type, COUNT(*) AS count
-       FROM linked_servers
-       WHERE lower(status) = 'live'
+       FROM (
+         SELECT COALESCE(NULLIF(server_mode, ''), server_type) AS server_type
+         FROM linked_servers
+         WHERE lower(status) = 'live'
+       )
        GROUP BY server_type`,
     )
     .all<GameModeRow>();
@@ -193,7 +197,7 @@ async function getGameModes(db: D1Database) {
     if (type === "PVP") counts.pvp = numberOrZero(row.count);
     if (type === "PVE") counts.pve = numberOrZero(row.count);
     if (type === "DEATHMATCH") counts.deathmatch = numberOrZero(row.count);
-    if (type === "PVP / PVE") counts.pvpPve = numberOrZero(row.count);
+    if (type === "PVP / PVE" || type === "PVP_PVE") counts.pvpPve = numberOrZero(row.count);
   }
 
   return counts;
@@ -204,8 +208,8 @@ async function getTopServers(db: D1Database) {
     .prepare(
       `SELECT
         linked_servers.public_slug,
-        linked_servers.server_name,
-        linked_servers.server_type,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         discord_guilds.name AS guild_name,
         COALESCE(server_stats.total_kills, 0) AS total_kills,
         COALESCE(server_stats.total_deaths, 0) AS total_deaths,
@@ -246,7 +250,7 @@ async function getTopPlayers(db: D1Database) {
     .prepare(
       `SELECT
         player_profiles.player_name,
-        linked_servers.server_name,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         linked_servers.public_slug,
         player_profiles.kills,
         player_profiles.deaths,
@@ -286,7 +290,7 @@ async function getRecentActivity(db: D1Database) {
          SELECT
            'kill' AS source,
            'player_killed' AS event_type,
-           linked_servers.server_name,
+           COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
            linked_servers.public_slug,
            NULL AS player_name,
            kill_events.killer_name,
@@ -305,7 +309,7 @@ async function getRecentActivity(db: D1Database) {
          SELECT
            'player' AS source,
            player_events.event_type,
-           linked_servers.server_name,
+           COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
            linked_servers.public_slug,
            player_events.player_name,
            NULL AS killer_name,
@@ -323,7 +327,7 @@ async function getRecentActivity(db: D1Database) {
          SELECT
            'sync' AS source,
            'sync_completed' AS event_type,
-           linked_servers.server_name,
+           COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
            linked_servers.public_slug,
            NULL AS player_name,
            NULL AS killer_name,
@@ -341,7 +345,7 @@ async function getRecentActivity(db: D1Database) {
          SELECT
            'server' AS source,
            'server_joined' AS event_type,
-           linked_servers.server_name,
+           COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
            linked_servers.public_slug,
            NULL AS player_name,
            NULL AS killer_name,

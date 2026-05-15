@@ -1,0 +1,531 @@
+import { decryptToken, sha256 } from "./crypto";
+import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
+import { isMockNitrado } from "./mock";
+import type { Env } from "./types";
+
+const NITRADO_API = "https://api.nitrado.net";
+const METADATA_STALE_MS = 2 * 60 * 1000;
+
+export type LinkedServerMetadata = {
+  hostname: string | null;
+  description: string | null;
+  max_players: number | null;
+  current_players: number | null;
+  ip_address: string | null;
+  game_port: number | null;
+  query_port: number | null;
+  map_name: string | null;
+  mission: string | null;
+  server_status: string | null;
+  is_online: boolean;
+  game: string | null;
+  platform: string | null;
+  server_mode: string;
+  server_mode_source: "auto" | "manual";
+  raw_metadata: Record<string, unknown>;
+  metadata_hash: string;
+  metadata_last_checked_at: string;
+};
+
+type LinkedServerMetadataRow = {
+  id: string;
+  user_id: string;
+  nitrado_service_id: string | null;
+  nitrado_service_name: string | null;
+  server_name: string | null;
+  server_type: string | null;
+  tags_json: string | null;
+  display_name: string | null;
+  hostname: string | null;
+  max_players: number | null;
+  current_players: number | null;
+  ip_address: string | null;
+  server_status: string | null;
+  server_mode: string | null;
+  server_mode_source: string | null;
+  metadata_hash: string | null;
+  metadata_last_checked_at: string | null;
+};
+
+export async function refreshNitradoServerMetadata(
+  env: Env,
+  options: { linkedServerId: string; userId?: string | null; force?: boolean },
+) {
+  const db = requireDb(env);
+  await ensureLinkedServerMetadataColumns(env);
+  await ensureServerMetadataVersionsTable(env);
+
+  const linkedServer = await getLinkedServerMetadataRow(env, options.linkedServerId, options.userId);
+  if (!linkedServer) throw new Error("Linked server not found");
+  if (!linkedServer.nitrado_service_id) throw new Error("No Nitrado service selected");
+
+  if (!options.force && !isMetadataStale(linkedServer.metadata_last_checked_at)) {
+    return {
+      ok: true,
+      changed: false,
+      skipped: true,
+      message: "Server metadata is fresh",
+      metadata: rowToMetadata(linkedServer),
+    };
+  }
+
+  const now = new Date().toISOString();
+  const metadata = isMockNitrado(env.MOCK_NITRADO)
+    ? await mockMetadata(linkedServer, now)
+    : await fetchNitradoServerMetadata(env, linkedServer, now);
+  const displayName = firstString(metadata.hostname, linkedServer.nitrado_service_name, linkedServer.server_name) ?? "DayZ Server";
+  const changes = buildMetadataChanges(linkedServer, metadata, displayName);
+  const changed = changes.length > 0 || linkedServer.metadata_hash !== metadata.metadata_hash;
+  const previousHash = linkedServer.metadata_hash;
+
+  await db
+    .prepare(
+      `UPDATE linked_servers SET
+        display_name = ?,
+        hostname = ?,
+        description = ?,
+        max_players = ?,
+        current_players = ?,
+        ip_address = ?,
+        game_port = ?,
+        query_port = ?,
+        map_name = ?,
+        mission = ?,
+        server_status = ?,
+        is_online = ?,
+        server_mode = ?,
+        server_mode_source = ?,
+        metadata_hash = ?,
+        metadata_last_checked_at = ?,
+        metadata_last_changed_at = CASE WHEN ? THEN ? ELSE metadata_last_changed_at END,
+        raw_metadata_json = ?,
+        server_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE server_name END,
+        nitrado_service_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE nitrado_service_name END,
+        region = COALESCE(?, region),
+        player_slots = COALESCE(?, player_slots),
+        game = COALESCE(?, game),
+        platform = COALESCE(?, platform),
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(
+      displayName,
+      metadata.hostname,
+      metadata.description,
+      metadata.max_players,
+      metadata.current_players,
+      metadata.ip_address,
+      metadata.game_port,
+      metadata.query_port,
+      metadata.map_name,
+      metadata.mission,
+      metadata.server_status,
+      metadata.is_online ? 1 : 0,
+      metadata.server_mode,
+      metadata.server_mode_source,
+      metadata.metadata_hash,
+      metadata.metadata_last_checked_at,
+      changed ? 1 : 0,
+      changed ? metadata.metadata_last_checked_at : null,
+      JSON.stringify(metadata.raw_metadata),
+      displayName,
+      displayName,
+      displayName,
+      displayName,
+      displayName,
+      displayName,
+      metadata.ip_address,
+      metadata.max_players,
+      metadata.game,
+      metadata.platform,
+      linkedServer.id,
+    )
+    .run();
+
+  if (changed && metadata.metadata_hash !== previousHash) {
+    await db
+      .prepare(
+        `INSERT INTO server_metadata_versions (id, linked_server_id, metadata_hash, changes_json, created_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      )
+      .bind(crypto.randomUUID(), linkedServer.id, metadata.metadata_hash, JSON.stringify(changes.slice(0, 12)))
+      .run();
+  }
+
+  console.log("DZN SERVER METADATA AUTO SYNC COMPLETE");
+
+  return {
+    ok: true,
+    changed,
+    skipped: false,
+    message: changed ? "Server info updated from Nitrado" : "Server info checked; no changes found",
+    metadata: {
+      ...metadata,
+      display_name: displayName,
+      changed_fields: changes.map((change) => change.field),
+    },
+  };
+}
+
+export async function refreshMetadataIfStale(env: Env, linkedServerId: string, userId?: string | null) {
+  return refreshNitradoServerMetadata(env, { linkedServerId, userId, force: false }).catch(() => null);
+}
+
+export function detectServerModeFromText(values: Array<string | null | undefined>) {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+  const hasPve = /\b(pve|no\s*kos|roleplay|\brp\b|survival)\b/.test(text);
+  const pvpText = text.replace(/\bno\s*kos\b/g, "");
+  const hasPvp = /\b(pvp|kos|raid|raids|faction wars?)\b/.test(pvpText);
+  if (hasPvp && hasPve) return "PVP / PVE";
+  if (/\b(deathmatch|dm|nuketown|arena|instant action)\b/.test(text)) return "DEATHMATCH";
+  if (hasPvp) return "PVP";
+  if (hasPve) return "PVE";
+  return "SURVIVAL";
+}
+
+export function isMetadataStale(value: string | null | undefined, staleMs = METADATA_STALE_MS) {
+  if (!value) return true;
+  const checkedAt = Date.parse(value);
+  return !Number.isFinite(checkedAt) || Date.now() - checkedAt > staleMs;
+}
+
+async function getLinkedServerMetadataRow(env: Env, linkedServerId: string, userId?: string | null) {
+  const db = requireDb(env);
+  const where = userId ? "id = ? AND user_id = ?" : "id = ?";
+  const values = userId ? [linkedServerId, userId] : [linkedServerId];
+  return db
+    .prepare(
+      `SELECT id, user_id, nitrado_service_id, nitrado_service_name, server_name, server_type,
+              tags_json, display_name, hostname, max_players, current_players, ip_address,
+              server_status, server_mode, server_mode_source, metadata_hash, metadata_last_checked_at
+       FROM linked_servers
+       WHERE ${where}
+       LIMIT 1`,
+    )
+    .bind(...values)
+    .first<LinkedServerMetadataRow>();
+}
+
+async function fetchNitradoServerMetadata(env: Env, linkedServer: LinkedServerMetadataRow, now: string) {
+  const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+  const response = await fetch(
+    `${NITRADO_API}/services/${encodeURIComponent(linkedServer.nitrado_service_id ?? "")}/gameservers`,
+    { headers: { authorization: `Bearer ${token}`, accept: "application/json" } },
+  );
+  if (response.status === 401 || response.status === 403) throw new Error("Nitrado token cannot access this service");
+  if (!response.ok) throw new Error("Nitrado metadata fetch failed");
+  const payload = await response.json().catch(() => null);
+  return normalizeNitradoMetadata(payload, linkedServer, now);
+}
+
+async function mockMetadata(linkedServer: LinkedServerMetadataRow, now: string) {
+  const name = linkedServer.nitrado_service_id === "18765761"
+    ? "NukeTown DEATHMATCH"
+    : linkedServer.nitrado_service_name ?? linkedServer.server_name ?? "Pandora DayZ";
+  return normalizeMetadataValues({
+    linkedServer,
+    now,
+    hostname: name,
+    description: "Mock DayZ server metadata from MOCK_NITRADO mode",
+    maxPlayers: linkedServer.nitrado_service_id === "18765761" ? 10 : 60,
+    currentPlayers: 0,
+    ipAddress: linkedServer.ip_address ?? "203.0.113.10",
+    gamePort: 2302,
+    queryPort: 27016,
+    mapName: "Chernarusplus",
+    mission: "dayzps",
+    serverStatus: "online",
+    isOnline: true,
+    game: "dayzps",
+    platform: "PlayStation",
+    rawMetadata: { source: "MOCK_NITRADO", hostname: name },
+  });
+}
+
+function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMetadataRow, now: string): Promise<LinkedServerMetadata> | LinkedServerMetadata {
+  const gameserver = findRecordByKey(payload, "gameserver") ?? {};
+  const details = record(gameserver.details);
+  const settings = record(gameserver.settings);
+  const config = record(settings.config);
+  const query = record(gameserver.query);
+  const gameSpecific = record(gameserver.game_specific);
+  const portList = record(gameserver.portlist);
+
+  const hostname = firstString(config.hostname, gameserver.hostname, gameserver.name, query.name, details.name, details.server_name);
+  const description = firstString(config.description, gameserver.description, details.description, gameSpecific.description);
+  const maxPlayers = firstNumber(gameserver.slots, gameserver.max_players, gameserver.maxplayers, gameserver.player_slots, config.slots, config.maxplayers, query.maxplayers, query.max_players);
+  const currentPlayers = firstNumber(query.players, query.player_current, query.current_players, gameserver.player_current, gameserver.current_players, gameserver.players_online);
+  const ipAddress = normalizeIpAddress(firstString(gameserver.ip, gameserver.address, query.ip, query.address, details.address));
+  const gamePort = firstNumber(gameserver.port, config.port, query.port, details.port, portList.game, portList.port);
+  const queryPort = firstNumber(gameserver.query_port, config.query_port, query.query_port, details.query_port, portList.query);
+  const mapName = firstString(config.map, config.map_name, gameSpecific.map, gameSpecific.map_name, gameserver.map, query.map);
+  const mission = firstString(config.mission, gameSpecific.mission, gameSpecific.mission_name, gameserver.mission);
+  const serverStatus = firstString(gameserver.status, query.status, details.status, gameserver.server_status);
+  const online = firstBoolean(gameserver.online, query.online, gameserver.is_online) ?? /^(online|started|running|active)$/i.test(serverStatus ?? "");
+  const game = firstString(gameserver.game, gameserver.game_human, gameserver.game_short, details.game, details.folder_short, details.portlist_short, gameSpecific.game);
+  const platform = firstString(gameSpecific.platform, gameserver.platform, details.platform) ?? detectPlatform(`${game ?? ""} ${details.folder_short ?? ""} ${details.portlist_short ?? ""}`);
+
+  return normalizeMetadataValues({
+    linkedServer,
+    now,
+    hostname,
+    description,
+    maxPlayers,
+    currentPlayers,
+    ipAddress,
+    gamePort,
+    queryPort,
+    mapName,
+    mission,
+    serverStatus,
+    isOnline: online,
+    game,
+    platform,
+    rawMetadata: safeRawMetadata({
+      hostname,
+      description,
+      maxPlayers,
+      currentPlayers,
+      ipAddress,
+      gamePort,
+      queryPort,
+      mapName,
+      mission,
+      serverStatus,
+      isOnline: online,
+      game,
+      platform,
+      gameSpecific,
+    }),
+  });
+}
+
+async function normalizeMetadataValues(values: {
+  linkedServer: LinkedServerMetadataRow;
+  now: string;
+  hostname: string | null | undefined;
+  description: string | null | undefined;
+  maxPlayers: number | null | undefined;
+  currentPlayers: number | null | undefined;
+  ipAddress: string | null | undefined;
+  gamePort: number | null | undefined;
+  queryPort: number | null | undefined;
+  mapName: string | null | undefined;
+  mission: string | null | undefined;
+  serverStatus: string | null | undefined;
+  isOnline: boolean;
+  game: string | null | undefined;
+  platform: string | null | undefined;
+  rawMetadata: Record<string, unknown>;
+}): Promise<LinkedServerMetadata> {
+  const tags = parseTags(values.linkedServer.tags_json).join(" ");
+  const existingSource = values.linkedServer.server_mode_source;
+  const manualMode = existingSource === "manual";
+  const serverMode = manualMode
+    ? firstString(values.linkedServer.server_mode, values.linkedServer.server_type) ?? "PVP"
+    : detectServerModeFromText([values.hostname, values.description, tags, values.mapName, values.mission]);
+  const rawMetadata = safeRawMetadata(values.rawMetadata);
+  const hashInput = JSON.stringify({
+    hostname: values.hostname ?? null,
+    description: values.description ?? null,
+    maxPlayers: values.maxPlayers ?? null,
+    currentPlayers: values.currentPlayers ?? null,
+    ipAddress: values.ipAddress ?? null,
+    gamePort: values.gamePort ?? null,
+    queryPort: values.queryPort ?? null,
+    mapName: values.mapName ?? null,
+    mission: values.mission ?? null,
+    serverStatus: values.serverStatus ?? null,
+    isOnline: values.isOnline,
+    game: values.game ?? null,
+    platform: values.platform ?? null,
+    serverMode,
+  });
+
+  return {
+    hostname: cleanString(values.hostname),
+    description: cleanString(values.description),
+    max_players: cleanNumber(values.maxPlayers),
+    current_players: cleanNumber(values.currentPlayers),
+    ip_address: cleanString(values.ipAddress),
+    game_port: cleanNumber(values.gamePort),
+    query_port: cleanNumber(values.queryPort),
+    map_name: cleanString(values.mapName),
+    mission: cleanString(values.mission),
+    server_status: cleanString(values.serverStatus),
+    is_online: values.isOnline,
+    game: cleanString(values.game),
+    platform: cleanString(values.platform),
+    server_mode: serverMode,
+    server_mode_source: manualMode ? "manual" : "auto",
+    raw_metadata: rawMetadata,
+    metadata_hash: await sha256(hashInput),
+    metadata_last_checked_at: values.now,
+  };
+}
+
+function buildMetadataChanges(linkedServer: LinkedServerMetadataRow, metadata: LinkedServerMetadata, displayName: string) {
+  const comparisons: Array<[string, unknown, unknown]> = [
+    ["display_name", linkedServer.display_name ?? linkedServer.server_name, displayName],
+    ["hostname", linkedServer.hostname, metadata.hostname],
+    ["max_players", linkedServer.max_players ?? null, metadata.max_players],
+    ["current_players", linkedServer.current_players ?? null, metadata.current_players],
+    ["ip_address", linkedServer.ip_address, metadata.ip_address],
+    ["server_status", linkedServer.server_status, metadata.server_status],
+    ["server_mode", linkedServer.server_mode, metadata.server_mode],
+  ];
+  return comparisons
+    .filter(([, previous, next]) => normalizeCompare(previous) !== normalizeCompare(next))
+    .map(([field, previous, next]) => ({ field, previous: previous ?? null, next: next ?? null }));
+}
+
+async function getNitradoTokenForLinkedServer(env: Env, linkedServer: LinkedServerMetadataRow) {
+  if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT encrypted_token, token_iv, token_auth_tag
+       FROM nitrado_connections
+       WHERE user_id = ? AND linked_server_id = ?
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServer.user_id, linkedServer.id)
+    .first<{ encrypted_token: string; token_iv: string; token_auth_tag: string }>();
+  if (!row) throw new Error("No Nitrado token found for this linked server");
+  return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+}
+
+async function ensureServerMetadataVersionsTable(env: Env) {
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS server_metadata_versions (
+        id TEXT PRIMARY KEY,
+        linked_server_id TEXT NOT NULL,
+        metadata_hash TEXT,
+        changes_json TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id)
+      )`,
+    )
+    .run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_metadata_versions_linked_server_id ON server_metadata_versions(linked_server_id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_metadata_versions_created_at ON server_metadata_versions(created_at)").run();
+}
+
+function rowToMetadata(row: LinkedServerMetadataRow) {
+  return {
+    display_name: firstString(row.display_name, row.hostname, row.server_name, row.nitrado_service_name),
+    hostname: row.hostname,
+    max_players: row.max_players,
+    current_players: row.current_players,
+    ip_address: row.ip_address,
+    server_status: row.server_status,
+    server_mode: row.server_mode ?? row.server_type,
+    server_mode_source: row.server_mode_source ?? null,
+    metadata_last_checked_at: row.metadata_last_checked_at,
+  };
+}
+
+function findRecordByKey(value: unknown, key: string): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const direct = value[key];
+  if (isRecord(direct)) return direct;
+  for (const child of Object.values(value)) {
+    const found = findRecordByKey(child, key);
+    if (found) return found;
+  }
+  return null;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+  return null;
+}
+
+function firstBoolean(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value === 1;
+    if (typeof value === "string" && /^(true|1|yes|online)$/i.test(value)) return true;
+    if (typeof value === "string" && /^(false|0|no|offline)$/i.test(value)) return false;
+  }
+  return null;
+}
+
+function normalizeIpAddress(value: string | null) {
+  if (!value) return null;
+  const withoutProtocol = value.replace(/^https?:\/\//i, "");
+  const withoutPort = withoutProtocol.split(":")[0]?.trim();
+  return withoutPort || null;
+}
+
+function detectPlatform(value: string) {
+  if (/ps4|ps5|playstation/i.test(value)) return "PlayStation";
+  if (/xbox|xb/i.test(value)) return "Xbox";
+  if (/pc|steam|standalone/i.test(value)) return "PC";
+  return null;
+}
+
+function parseTags(value: string | null) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeRawMetadata(value: unknown, depth = 0): Record<string, unknown> {
+  if (depth > 4 || !isRecord(value)) return {};
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isSensitiveKey(key)) continue;
+    if (child === null || typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
+      result[key] = child;
+    } else if (Array.isArray(child)) {
+      result[key] = child.slice(0, 20).map((item) => (isRecord(item) ? safeRawMetadata(item, depth + 1) : item)).filter((item) => item !== undefined);
+    } else if (isRecord(child)) {
+      result[key] = safeRawMetadata(child, depth + 1);
+    }
+  }
+  return result;
+}
+
+function isSensitiveKey(key: string) {
+  return /(password|passwd|secret|token|credential|mysql|^ftp$|ftp_|_ftp|ftpuser|ftp_user|authorization|auth)/i.test(key);
+}
+
+function cleanString(value: string | null | undefined) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 500) : null;
+}
+
+function cleanNumber(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
+}
+
+function normalizeCompare(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().toLowerCase();
+}

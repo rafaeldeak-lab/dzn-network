@@ -1,6 +1,7 @@
 import { hmacSha256, randomToken } from "./crypto";
 import { mockGuilds, mockUser } from "./mock";
 import type { DiscordGuild, DiscordUser, Env, SessionUser } from "./types";
+import type { DiscordTokenResponse } from "./discord";
 
 export const SESSION_COOKIE = "dzn_session";
 export const MOCK_USER_ID = "mock-user";
@@ -62,6 +63,80 @@ export async function storeGuilds(env: Env, ownerUserId: string, guilds: Discord
       .bind(crypto.randomUUID(), guild.id, ownerUserId, guild.name, guild.icon, iconUrl, guild.permissions, guild.owner ? 1 : 0)
       .run();
   }
+}
+
+export async function storeDiscordOAuthToken(env: Env, userId: string, token: DiscordTokenResponse) {
+  const db = requireDb(env);
+  await ensureDiscordOAuthTokenTable(env);
+  const expiresAt = typeof token.expires_in === "number"
+    ? new Date(Date.now() + Math.max(0, token.expires_in - 60) * 1000).toISOString()
+    : null;
+
+  await db
+    .prepare(
+      `INSERT INTO discord_oauth_tokens (
+        id, user_id, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id) DO UPDATE SET
+        access_token = excluded.access_token,
+        refresh_token = COALESCE(excluded.refresh_token, discord_oauth_tokens.refresh_token),
+        token_type = excluded.token_type,
+        scope = excluded.scope,
+        expires_at = excluded.expires_at,
+        updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      userId,
+      token.access_token,
+      token.refresh_token ?? null,
+      token.token_type ?? "Bearer",
+      token.scope ?? null,
+      expiresAt,
+    )
+    .run();
+}
+
+export async function getDiscordOAuthToken(env: Env, userId: string) {
+  const db = requireDb(env);
+  await ensureDiscordOAuthTokenTable(env);
+  return db
+    .prepare(
+      `SELECT access_token, refresh_token, token_type, scope, expires_at
+       FROM discord_oauth_tokens
+       WHERE user_id = ?
+       LIMIT 1`,
+    )
+    .bind(userId)
+    .first<{
+      access_token: string;
+      refresh_token: string | null;
+      token_type: string | null;
+      scope: string | null;
+      expires_at: string | null;
+    }>();
+}
+
+export async function ensureDiscordOAuthTokenTable(env: Env) {
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS discord_oauth_tokens (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL UNIQUE,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT,
+        token_type TEXT,
+        scope TEXT,
+        expires_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`,
+    )
+    .run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_oauth_tokens_user_id ON discord_oauth_tokens(user_id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_oauth_tokens_expires_at ON discord_oauth_tokens(expires_at)").run();
 }
 
 export async function createSession(env: Env, userId: string) {
@@ -189,6 +264,23 @@ export async function ensureLinkedServerMetadataColumns(env: Env) {
     ["platform", "TEXT"],
     ["ip_address", "TEXT"],
     ["player_slots", "INTEGER"],
+    ["display_name", "TEXT"],
+    ["hostname", "TEXT"],
+    ["description", "TEXT"],
+    ["max_players", "INTEGER"],
+    ["current_players", "INTEGER"],
+    ["game_port", "INTEGER"],
+    ["query_port", "INTEGER"],
+    ["map_name", "TEXT"],
+    ["mission", "TEXT"],
+    ["server_status", "TEXT"],
+    ["is_online", "INTEGER DEFAULT 0"],
+    ["server_mode", "TEXT"],
+    ["server_mode_source", "TEXT"],
+    ["metadata_hash", "TEXT"],
+    ["metadata_last_checked_at", "TEXT"],
+    ["metadata_last_changed_at", "TEXT"],
+    ["raw_metadata_json", "TEXT"],
   ].filter(([name]) => !existing.has(name));
 
   for (const [name, type] of missingColumns) {

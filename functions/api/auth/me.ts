@@ -1,6 +1,7 @@
 import { ensureMockUser, getCurrentLinkedServer, getSessionUser } from "../../_lib/db";
 import { json } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
+import { isMetadataStale, refreshMetadataIfStale } from "../../_lib/server-metadata";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -20,6 +21,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ authenticated: false }, { status: 401 });
   }
 
-  const linkedServer = await getCurrentLinkedServer(env, user.id);
+  let linkedServer = await getCurrentLinkedServer(env, user.id);
+  if (
+    linkedServer &&
+    typeof linkedServer.id === "string" &&
+    typeof linkedServer.nitrado_service_id === "string" &&
+    isMetadataStale(typeof linkedServer.metadata_last_checked_at === "string" ? linkedServer.metadata_last_checked_at : null)
+  ) {
+    await refreshMetadataIfStale(env, linkedServer.id, user.id);
+    linkedServer = await getCurrentLinkedServer(env, user.id);
+  }
   return json({ authenticated: true, user, linkedServer });
 };
