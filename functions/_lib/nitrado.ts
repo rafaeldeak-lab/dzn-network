@@ -2139,7 +2139,21 @@ function withPreferredAdmFile(details: GameSpecificLogDetails, preferredAdmFileN
     const pathName = entry.path.split("/").filter(Boolean).at(-1)?.toLowerCase();
     return name === preferred || pathName === preferred;
   });
-  return selectedAdmFile ? { ...details, selectedAdmFile } : details;
+  if (selectedAdmFile) return { ...details, selectedAdmFile };
+
+  const forcedFileName = preferredAdmFileName?.trim();
+  if (!forcedFileName || !/\.adm$/i.test(forcedFileName)) return details;
+  const forcedEntry = {
+    name: forcedFileName,
+    path: `dayzps/config/${forcedFileName}`,
+    type: "file",
+  };
+
+  return {
+    ...details,
+    admLogFiles: [forcedEntry, ...details.admLogFiles],
+    selectedAdmFile: forcedEntry,
+  };
 }
 
 function createServiceDetailsDebug(
