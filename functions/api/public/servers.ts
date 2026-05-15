@@ -13,6 +13,7 @@ type PublicServerRow = {
   server_type: string;
   tags_json: string | null;
   status: string;
+  nitrado_service_id: string | null;
   nitrado_service_name: string | null;
   player_slots: number | null;
   current_players: number | null;
@@ -159,6 +160,7 @@ async function queryPublicServers(env: Env) {
       COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
       linked_servers.tags_json,
       linked_servers.status,
+      linked_servers.nitrado_service_id,
       linked_servers.nitrado_service_name,
       COALESCE(linked_servers.max_players, linked_servers.player_slots) AS player_slots,
       linked_servers.current_players,
@@ -218,6 +220,7 @@ async function queryPublicServers(env: Env) {
     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
     WHERE lower(linked_servers.status) = 'live'
+      AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
   `;
 
   const result = await db
@@ -234,7 +237,39 @@ async function queryPublicServers(env: Env) {
        LIMIT 500`,
     )
     .all<PublicServerRow>();
-  return result.results ?? [];
+  return canonicalizePublicServerRows(result.results ?? []);
+}
+
+function canonicalizePublicServerRows(rows: PublicServerRow[]) {
+  const byService = new Map<string, PublicServerRow>();
+  const passthrough: PublicServerRow[] = [];
+
+  for (const row of rows) {
+    const serviceKey = row.nitrado_service_id ? `service:${row.nitrado_service_id}` : null;
+    const key = serviceKey ?? row.id;
+    if (!serviceKey) {
+      passthrough.push(row);
+      continue;
+    }
+    const existing = byService.get(key);
+    if (!existing || publicCanonicalScore(row) > publicCanonicalScore(existing)) {
+      byService.set(key, row);
+    }
+  }
+
+  return [...byService.values(), ...passthrough].sort((a, b) => {
+    const statusDiff = publicCanonicalScore(b) - publicCanonicalScore(a);
+    if (statusDiff) return statusDiff;
+    return dateValue(b.updated_at) - dateValue(a.updated_at);
+  });
+}
+
+function publicCanonicalScore(row: PublicServerRow) {
+  return numberOrZero(row.total_kills) * 1000 +
+    numberOrZero(row.unique_players) * 100 +
+    (row.public_slug ? 20 : 0) +
+    (stringEquals(row.latest_success_sync_status, "completed") || stringEquals(row.adm_sync_status, "completed") ? 10 : 0) +
+    (Number(row.adm_logs_found) === 1 ? 5 : 0);
 }
 
 async function findPublicServerRowsBySlug(env: Env, rows: PublicServerRow[], slug: string) {
@@ -583,6 +618,12 @@ function numberOrZero(value: unknown) {
 
 function stringEquals(value: string | null, expected: string) {
   return typeof value === "string" && value.toLowerCase() === expected;
+}
+
+function dateValue(value: string | null) {
+  if (!value) return 0;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
 function sanitizeSlug(value: string | null) {

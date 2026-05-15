@@ -181,6 +181,7 @@ async function getTopServers(env: Env, limit: number) {
        FROM linked_servers
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY kills DESC, longest_kill DESC, unique_players DESC, linked_servers.created_at DESC
        LIMIT ?`,
     )
@@ -231,6 +232,7 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string) {
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.killer_name IS NOT NULL
          AND ${mockNameFilterSql("kill_events.killer_name")}
          ${serverFilter}
@@ -253,6 +255,7 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string) {
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.victim_name IS NOT NULL
          AND ${mockNameFilterSql("kill_events.victim_name")}
          ${serverFilter}
@@ -283,6 +286,7 @@ async function getLongestKillSummary(env: Env, limit: number) {
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.killer_name IS NOT NULL
          AND kill_events.victim_name IS NOT NULL
          AND COALESCE(kill_events.distance, 0) > 0
@@ -309,6 +313,7 @@ async function getLongestKillSummary(env: Env, limit: number) {
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.killer_name IS NOT NULL
          AND kill_events.victim_name IS NOT NULL
          AND ${mockNameFilterSql("kill_events.killer_name")}
@@ -486,6 +491,7 @@ async function resolvePublicLinkedServerId(env: Env, slug: string) {
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 500`,
     )
     .all<PublicServerLookupRow>();

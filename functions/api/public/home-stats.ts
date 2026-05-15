@@ -133,19 +133,22 @@ async function getTotals(db: D1Database) {
           FROM kill_events
           INNER JOIN linked_servers AS live_kill_servers ON live_kill_servers.id = kill_events.linked_server_id
           WHERE lower(live_kill_servers.status) = 'live'
+            AND (live_kill_servers.merged_into_server_id IS NULL OR live_kill_servers.merged_into_server_id = '')
         ) AS killsTracked,
         (
           SELECT COUNT(*)
           FROM kill_events
           INNER JOIN linked_servers AS live_death_servers ON live_death_servers.id = kill_events.linked_server_id
           WHERE lower(live_death_servers.status) = 'live'
+            AND (live_death_servers.merged_into_server_id IS NULL OR live_death_servers.merged_into_server_id = '')
             AND kill_events.victim_name IS NOT NULL
         ) AS deathsTracked,
         SUM(COALESCE(server_stats.total_joins, 0)) AS joinsTracked
        FROM linked_servers
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
-       WHERE lower(linked_servers.status) = 'live'`,
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
     )
     .first<TotalsRow>();
   return row ?? {
@@ -165,6 +168,7 @@ async function getPlayerProfileCount(db: D1Database) {
        FROM player_profiles
        INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND ${mockNameFilterSql("player_profiles.player_name")}`,
     )
     .first<{ count: number | null }>();
@@ -178,6 +182,7 @@ async function getRecentEventsCount(db: D1Database) {
        FROM player_events
        INNER JOIN linked_servers ON linked_servers.id = player_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND COALESCE(player_events.occurred_at, player_events.created_at) >= datetime('now', '-1 day')
          AND ${mockNameFilterSql("player_events.player_name")}`,
     )
@@ -241,6 +246,7 @@ async function getTopServers(db: D1Database) {
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY stats_active DESC, total_kills DESC, COALESCE(server_stats.unique_players, 0) DESC, linked_servers.created_at DESC
        LIMIT 6`,
     )
@@ -271,6 +277,7 @@ async function getTopPlayers(db: D1Database) {
        FROM player_profiles
        INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND ${mockNameFilterSql("player_profiles.player_name")}
        ORDER BY player_profiles.kills DESC, player_profiles.longest_kill_distance DESC, player_profiles.updated_at DESC
        LIMIT 5`,
@@ -316,6 +323,7 @@ async function getRecentActivity(db: D1Database) {
          FROM kill_events
          INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("kill_events.killer_name")}
            AND ${mockNameFilterSql("kill_events.victim_name")}
          UNION ALL
@@ -335,6 +343,7 @@ async function getRecentActivity(db: D1Database) {
          FROM player_events
          INNER JOIN linked_servers ON linked_servers.id = player_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("player_events.player_name")}
          UNION ALL
          SELECT
@@ -353,6 +362,7 @@ async function getRecentActivity(db: D1Database) {
          FROM sync_runs
          INNER JOIN linked_servers ON linked_servers.id = sync_runs.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND lower(sync_runs.status) IN ('completed', 'idle')
          UNION ALL
          SELECT
@@ -370,6 +380,7 @@ async function getRecentActivity(db: D1Database) {
            linked_servers.created_at AS sort_time
          FROM linked_servers
          WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        )
        ORDER BY sort_time DESC
        LIMIT 8`,

@@ -13,6 +13,7 @@
     "test:server-metadata": "tsx scripts/test-server-metadata.ts",
     "test:public-leaderboards": "tsx scripts/test-public-leaderboards.ts",
     "backfill:adm:once": "tsx scripts/one-time-adm-backfill.ts",
+    "repair:readded-server": "tsx scripts/repair-readded-server.ts",
     "audit:linked-servers": "tsx scripts/audit-linked-servers.ts",
     "db:migrate:local": "wrangler d1 migrations apply dzn_network_db --local",
     "db:migrate:remote": "wrangler d1 migrations apply dzn_network_db --remote",

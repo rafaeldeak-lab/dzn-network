@@ -219,14 +219,25 @@ export async function getLinkedServersForUser(env: Env, userId: string, options:
         discord_guilds.icon_url AS guild_icon_url,
         server_log_config.adm_path AS adm_path,
         onboarding_checks.adm_logs_found AS adm_logs_found,
-        onboarding_checks.last_tested_at AS adm_last_checked_at
+        onboarding_checks.last_tested_at AS adm_last_checked_at,
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS canonical_kill_count,
+        COALESCE(server_stats.unique_players, 0) AS canonical_unique_players
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
        LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        WHERE linked_servers.user_id = ?
          AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
-       ORDER BY linked_servers.updated_at DESC, linked_servers.created_at DESC, linked_servers.id DESC`,
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY
+         CASE WHEN lower(COALESCE(linked_servers.status, 'pending')) = 'live' THEN 0 ELSE 1 END,
+         canonical_kill_count DESC,
+         canonical_unique_players DESC,
+         linked_servers.updated_at DESC,
+         linked_servers.created_at DESC,
+         linked_servers.id DESC`,
     )
     .bind(userId)
     .all<Record<string, unknown>>();
@@ -288,6 +299,8 @@ export async function ensureLinkedServerMetadataColumns(env: Env) {
     ["metadata_last_checked_at", "TEXT"],
     ["metadata_last_changed_at", "TEXT"],
     ["raw_metadata_json", "TEXT"],
+    ["merged_into_server_id", "TEXT"],
+    ["merged_at", "TEXT"],
   ].filter(([name]) => !existing.has(name));
 
   for (const [name, type] of missingColumns) {

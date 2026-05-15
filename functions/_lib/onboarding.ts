@@ -135,7 +135,8 @@ export async function countLinkedServersForUser(env: Env, userId: string) {
       `SELECT COUNT(*) AS count
        FROM linked_servers
        WHERE user_id = ?
-         AND lower(COALESCE(status, 'pending')) != 'deleted'`,
+         AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
+         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')`,
     )
     .bind(userId)
     .first<{ count: number }>();
@@ -205,21 +206,26 @@ export async function saveLinkedServerNitradoService(
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
   const draft = await db
-    .prepare("SELECT id, user_id FROM linked_servers WHERE id = ? LIMIT 1")
+    .prepare("SELECT id, user_id, guild_id, discord_guild_id FROM linked_servers WHERE id = ? LIMIT 1")
     .bind(linkedServerId)
-    .first<{ id: string; user_id: string }>();
+    .first<{ id: string; user_id: string; guild_id: string; discord_guild_id: string }>();
   if (!draft) throw new Error("Linked server draft not found");
 
   const existingService = await db
     .prepare(
       `SELECT id
        FROM linked_servers
-       WHERE user_id = ?
-         AND nitrado_service_id = ?
+       WHERE nitrado_service_id = ?
          AND id != ?
+         AND lower(COALESCE(status, 'pending')) != 'merged'
+         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+       ORDER BY
+         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
+         updated_at DESC,
+         created_at DESC
        LIMIT 1`,
     )
-    .bind(draft.user_id, service.id, linkedServerId)
+    .bind(service.id, linkedServerId)
     .first<{ id: string }>();
 
   const targetLinkedServerId = existingService?.id ?? linkedServerId;
@@ -227,6 +233,9 @@ export async function saveLinkedServerNitradoService(
   await db
     .prepare(
       `UPDATE linked_servers SET
+        user_id = ?,
+        guild_id = ?,
+        discord_guild_id = ?,
         nitrado_service_id = ?,
         nitrado_service_name = ?,
         server_name = ?,
@@ -237,12 +246,15 @@ export async function saveLinkedServerNitradoService(
         platform = ?,
         ip_address = ?,
         player_slots = ?,
-        status = 'pending',
+        status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
         public_slug = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
     )
     .bind(
+      draft.user_id,
+      draft.guild_id,
+      draft.discord_guild_id,
       service.id,
       service.name,
       service.name,

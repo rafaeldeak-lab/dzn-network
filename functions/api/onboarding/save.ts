@@ -53,8 +53,19 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const tags = normalizeTags(body.tags);
   const existingSameService = await db
-    .prepare("SELECT id FROM linked_servers WHERE user_id = ? AND nitrado_service_id = ? LIMIT 1")
-    .bind(userId, service.id)
+    .prepare(
+      `SELECT id
+       FROM linked_servers
+       WHERE nitrado_service_id = ?
+         AND lower(COALESCE(status, 'pending')) != 'merged'
+         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+       ORDER BY
+         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
+         updated_at DESC,
+         created_at DESC
+       LIMIT 1`,
+    )
+    .bind(service.id)
     .first<{ id: string }>();
   const existingDraft = existingSameService
     ? null
@@ -78,6 +89,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     await db
       .prepare(
         `UPDATE linked_servers SET
+          user_id = ?,
           guild_id = ?,
           discord_guild_id = ?,
           nitrado_service_id = ?,
@@ -90,12 +102,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
           platform = ?,
           ip_address = ?,
           player_slots = ?,
-          status = 'pending',
+          status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
           public_slug = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`,
       )
       .bind(
+        userId,
         guild.guild_id,
         guild.id,
         service.id,
