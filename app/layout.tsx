@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DZN Network | Global DayZ Survival Platform",
+  title: "DZN Network | DayZ Server Competition Platform",
   description:
-    "DZN Network connects DayZ servers, survivor profiles, live stats, leaderboards, game modes, and community activity in one premium survival hub.",
+    "DZN Network connects DayZ servers, live ADM stats, server-vs-server leaderboards, factions, and community reputation in one premium competition hub.",
 };
 
 export default function RootLayout({

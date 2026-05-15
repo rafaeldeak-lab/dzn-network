@@ -22,6 +22,7 @@ type TopServerRow = {
   guild_name: string | null;
   server_type: string | null;
   total_kills: number | null;
+  total_deaths: number | null;
   unique_players: number | null;
   stats_active: number | null;
 };
@@ -207,6 +208,7 @@ async function getTopServers(db: D1Database) {
         linked_servers.server_type,
         discord_guilds.name AS guild_name,
         COALESCE(server_stats.total_kills, 0) AS total_kills,
+        COALESCE(server_stats.total_deaths, 0) AS total_deaths,
         COALESCE(server_stats.unique_players, 0) AS unique_players,
         CASE
           WHEN COALESCE(server_stats.total_joins, 0) > 0
@@ -233,6 +235,7 @@ async function getTopServers(db: D1Database) {
     guild_name: row.guild_name,
     server_type: row.server_type,
     total_kills: numberOrZero(row.total_kills),
+    total_deaths: numberOrZero(row.total_deaths),
     unique_players: numberOrZero(row.unique_players),
     stats_active: Number(row.stats_active) === 1,
   }));
@@ -369,7 +372,7 @@ async function getRecentActivity(db: D1Database) {
 function activityTitle(row: RecentActivityRow) {
   if (row.source === "kill") {
     const weapon = row.weapon ? ` with ${row.weapon}` : "";
-    return `${row.killer_name ?? "Survivor"} eliminated ${row.victim_name ?? "a survivor"}${weapon}`;
+    return `${row.killer_name ?? "Player"} eliminated ${row.victim_name ?? "a player"}${weapon}`;
   }
   if (row.event_type === "player_connected") return `${row.player_name ?? "A player"} connected`;
   if (row.event_type === "player_disconnected") return `${row.player_name ?? "A player"} disconnected`;

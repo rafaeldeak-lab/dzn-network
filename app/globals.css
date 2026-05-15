@@ -89,6 +89,127 @@ body {
   z-index: 1;
 }
 
+.dzn-brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  position: relative;
+  isolation: isolate;
+  flex-shrink: 0;
+}
+
+.dzn-logo-frame {
+  position: relative;
+  width: 128px;
+  height: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  padding: 8px 12px;
+  overflow: visible;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(168, 85, 247, 0.22), transparent 45%),
+    linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(14, 18, 35, 0.02));
+  filter: drop-shadow(0 0 18px rgba(138, 76, 255, 0.35));
+}
+
+.dzn-logo-frame--compact {
+  width: 120px;
+  height: 54px;
+}
+
+.dzn-logo-frame--hero {
+  width: 220px;
+  height: 112px;
+  border-radius: 22px;
+  padding: 12px 18px;
+}
+
+.dzn-logo-frame::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 18px;
+  padding: 1px;
+  background:
+    conic-gradient(
+      from var(--dzn-spin, 0deg),
+      transparent 0deg,
+      transparent 55deg,
+      rgba(168, 85, 247, 0.2) 80deg,
+      rgba(216, 180, 254, 1) 105deg,
+      rgba(124, 58, 237, 0.7) 130deg,
+      transparent 165deg,
+      transparent 360deg
+    );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: dznLogoSpin 5.5s linear infinite;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.dzn-logo-frame--hero::before {
+  border-radius: 24px;
+}
+
+.dzn-logo-frame::after {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(168, 85, 247, 0.42), transparent 18%),
+    radial-gradient(circle at 100% 55%, rgba(99, 102, 241, 0.3), transparent 22%),
+    radial-gradient(circle at 10% 80%, rgba(236, 72, 153, 0.22), transparent 20%);
+  filter: blur(16px);
+  opacity: 0.5;
+  animation: dznLogoPulse 3.8s ease-in-out infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.dzn-logo-img {
+  width: 100%;
+  max-width: 108px;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  position: relative;
+  z-index: 2;
+  transform: translateZ(0);
+}
+
+.dzn-logo-frame--compact .dzn-logo-img {
+  max-width: 100px;
+}
+
+.dzn-logo-frame--hero .dzn-logo-img {
+  max-width: 190px;
+}
+
+.dzn-logo-sparkle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #e9d5ff;
+  box-shadow:
+    0 0 8px rgba(233, 213, 255, 1),
+    0 0 18px rgba(168, 85, 247, 0.95),
+    0 0 30px rgba(124, 58, 237, 0.75);
+  offset-path: inset(-4px round 18px);
+  offset-distance: 0%;
+  animation: dznSparkleOrbit 5.5s linear infinite;
+  z-index: 4;
+  pointer-events: none;
+}
+
 .dzn-hero-image {
   transform-origin: 58% 52%;
   animation: hero-breathe 15s ease-in-out infinite;
@@ -311,6 +432,44 @@ body {
   }
 }
 
+@keyframes dznLogoSpin {
+  to {
+    --dzn-spin: 360deg;
+  }
+}
+
+@keyframes dznLogoPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes dznSparkleOrbit {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
 .auth-hero-breathe {
   animation: auth-hero-breathe 18s ease-in-out infinite;
 }
@@ -445,8 +604,35 @@ body {
   .auth-radar::before,
   .auth-radar::after,
   .auth-spark,
+  .dzn-logo-frame::before,
+  .dzn-logo-frame::after,
+  .dzn-logo-sparkle,
   .scanline,
   .animated-border::before {
     animation: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .dzn-logo-frame,
+  .dzn-logo-frame--compact {
+    width: 100px;
+    height: 48px;
+    padding: 6px 8px;
+  }
+
+  .dzn-logo-frame--hero {
+    width: 150px;
+    height: 78px;
+    padding: 8px 12px;
+  }
+
+  .dzn-logo-img,
+  .dzn-logo-frame--compact .dzn-logo-img {
+    max-width: 86px;
+  }
+
+  .dzn-logo-frame--hero .dzn-logo-img {
+    max-width: 126px;
   }
 }
