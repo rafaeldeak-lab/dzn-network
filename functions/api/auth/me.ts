@@ -1,4 +1,4 @@
-import { ensureMockUser, getCurrentLinkedServer, getSessionUser } from "../../_lib/db";
+import { ensureMockUser, getCurrentLinkedServer, getLinkedServersForUser, getSessionUser } from "../../_lib/db";
 import { json } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
 import { isMetadataStale, refreshMetadataIfStale } from "../../_lib/server-metadata";
@@ -31,5 +31,6 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     await refreshMetadataIfStale(env, linkedServer.id, user.id);
     linkedServer = await getCurrentLinkedServer(env, user.id);
   }
-  return json({ authenticated: true, user, linkedServer });
+  const linkedServers = await getLinkedServersForUser(env, user.id);
+  return json({ authenticated: true, user, linkedServer, linkedServers });
 };

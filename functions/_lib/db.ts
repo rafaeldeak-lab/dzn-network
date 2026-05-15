@@ -203,10 +203,15 @@ export async function ensureMockUser(env: Env) {
 }
 
 export async function getCurrentLinkedServer(env: Env, userId: string, options: { includePrivateAdmPath?: boolean } = {}) {
-  if (!env.DB) return null;
+  const servers = await getLinkedServersForUser(env, userId, options);
+  return servers?.[0] ?? null;
+}
+
+export async function getLinkedServersForUser(env: Env, userId: string, options: { includePrivateAdmPath?: boolean } = {}) {
+  if (!env.DB) return [];
   await ensureLinkedServerMetadataColumns(env);
   await ensureServerLogConfigTable(env);
-  const server = await env.DB
+  const result = await env.DB
     .prepare(
       `SELECT
         linked_servers.*,
@@ -220,39 +225,41 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
        LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
        LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
        WHERE linked_servers.user_id = ?
-       ORDER BY linked_servers.updated_at DESC
-       LIMIT 1`,
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
+       ORDER BY linked_servers.updated_at DESC, linked_servers.created_at DESC, linked_servers.id DESC`,
     )
     .bind(userId)
-    .first<Record<string, unknown>>();
+    .all<Record<string, unknown>>();
 
-  if (!server) return null;
+  const servers = result.results ?? [];
 
-  if (!server.public_slug && typeof server.id === "string") {
-    const slug = await ensureLinkedServerPublicSlug(
-      env,
-      server.id,
-      firstString(server.guild_name, server.server_name, server.nitrado_service_name, server.guild_id) ?? "dayz-server",
-    );
-    server.public_slug = slug;
+  for (const server of servers) {
+    if (!server.public_slug && typeof server.id === "string") {
+      const slug = await ensureLinkedServerPublicSlug(
+        env,
+        server.id,
+        firstString(server.guild_name, server.server_name, server.nitrado_service_name, server.guild_id) ?? "dayz-server",
+      );
+      server.public_slug = slug;
+    }
+
+    const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
+    server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
+    server.adm_status = Number(server.adm_logs_found) === 1
+      ? "Connected"
+      : rawAdmPath
+        ? "Discovered, read pending"
+        : "Needs review";
+    if (!options.includePrivateAdmPath && rawAdmPath) {
+      server.adm_path = maskNitradoApiPath(rawAdmPath);
+    }
+    server.original_owner_is_current_user = server.user_id === userId;
+    if (!options.includePrivateAdmPath) {
+      delete server.user_id;
+    }
   }
 
-  const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
-  server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
-  server.adm_status = Number(server.adm_logs_found) === 1
-    ? "Connected"
-    : rawAdmPath
-      ? "Discovered, read pending"
-      : "Needs review";
-  if (!options.includePrivateAdmPath && rawAdmPath) {
-    server.adm_path = maskNitradoApiPath(rawAdmPath);
-  }
-  server.original_owner_is_current_user = server.user_id === userId;
-  if (!options.includePrivateAdmPath) {
-    delete server.user_id;
-  }
-
-  return server;
+  return servers;
 }
 
 export async function ensureLinkedServerMetadataColumns(env: Env) {

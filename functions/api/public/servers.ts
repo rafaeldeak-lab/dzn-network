@@ -87,6 +87,21 @@ type SafePublicServer = {
   unique_players: number;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
+  pvp_leaderboard?: PublicLeaderboardPlayer[];
+  tags?: string[];
+  stats?: {
+    total_kills: number;
+    total_deaths: number;
+    total_joins: number;
+    total_disconnects: number;
+    unique_players: number;
+  };
+  network_status?: {
+    adm_status: "Connected" | "Discovered" | "Needs Review";
+    stats_sync: "Active" | "Pending" | "Not Started";
+    public_listing: "Active";
+    last_sync_at: string | null;
+  };
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -119,7 +134,9 @@ export async function getPublicServersPayload(env: Env, slug: string | null) {
       return { ok: true, server: findPublicServerBySlug(mockPublicServers(), slug) ?? null };
     }
     if (servers[0] && publicRows[0]?.id) {
-      servers[0].top_players = await getPublicServerLeaderboardById(env, publicRows[0].id, 5);
+      const leaderboard = await getPublicServerLeaderboardById(env, publicRows[0].id, 10);
+      servers[0].top_players = leaderboard.slice(0, 5);
+      servers[0].pvp_leaderboard = leaderboard;
     }
     return { ok: true, server: servers[0] ?? null };
   }
@@ -221,14 +238,17 @@ async function queryPublicServers(env: Env) {
 }
 
 async function findPublicServerRowsBySlug(env: Env, rows: PublicServerRow[], slug: string) {
-  const directMatch = rows.find((row) => publicServerRowMatchesSlug(row, slug));
-  if (directMatch) return [directMatch];
+  const exactPublicSlugMatch = rows.find((row) => sanitizeSlug(row.public_slug) === slug);
+  if (exactPublicSlugMatch) return [exactPublicSlugMatch];
 
   const aliasServerId = await resolveSlugAliasLinkedServerId(env, slug).catch(() => null);
-  if (!aliasServerId) return [];
+  if (aliasServerId) {
+    const aliasMatch = rows.find((row) => row.id === aliasServerId);
+    if (aliasMatch) return [aliasMatch];
+  }
 
-  const aliasMatch = rows.find((row) => row.id === aliasServerId);
-  return aliasMatch ? [aliasMatch] : [];
+  const directMatch = rows.find((row) => publicServerRowMatchesSlug(row, slug));
+  return directMatch ? [directMatch] : [];
 }
 
 async function resolveSlugAliasLinkedServerId(env: Env, slug: string) {
@@ -299,6 +319,8 @@ async function ensureServerLogConfigTable(env: Env) {
 
 async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafePublicServer | null> {
   if (!row.public_slug) return null;
+  const tagsJson = normalizePublicTagsJson(row.tags_json);
+  const tags = parsePublicTags(tagsJson);
   const latestAdmPath = row.adm_sync_latest_path ?? row.adm_path;
   const latestAdmFile = row.adm_sync_latest_file ?? fileNameFromPath(latestAdmPath);
   const hasActivity =
@@ -316,11 +338,20 @@ async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafeP
     : latestAdmFile || row.adm_path
       ? "Pending"
       : "Not Started";
+  const lastSyncAt = row.latest_success_sync_at ?? row.adm_sync_at;
+  const stats = {
+    total_kills: numberOrZero(row.total_kills),
+    total_deaths: numberOrZero(row.total_deaths),
+    total_joins: numberOrZero(row.total_joins),
+    total_disconnects: numberOrZero(row.total_disconnects),
+    unique_players: numberOrZero(row.unique_players),
+  };
   return {
     public_slug: row.public_slug,
     server_name: row.server_name,
     server_type: row.server_type,
-    tags_json: normalizePublicTagsJson(row.tags_json),
+    tags_json: tagsJson,
+    tags,
     status: row.status,
     nitrado_service_name: row.nitrado_service_name,
     guild_name: row.guild_name,
@@ -334,14 +365,17 @@ async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafeP
     mission: row.mission,
     server_status: row.server_status,
     is_online: Number(row.is_online) === 1,
-    last_sync_at: row.latest_success_sync_at ?? row.adm_sync_at,
+    last_sync_at: lastSyncAt,
     metadata_last_checked_at: row.metadata_last_checked_at,
     created_at: row.created_at,
-    total_kills: numberOrZero(row.total_kills),
-    total_deaths: numberOrZero(row.total_deaths),
-    total_joins: numberOrZero(row.total_joins),
-    total_disconnects: numberOrZero(row.total_disconnects),
-    unique_players: numberOrZero(row.unique_players),
+    ...stats,
+    stats,
+    network_status: {
+      adm_status: admStatus,
+      stats_sync: statsSync,
+      public_listing: "Active",
+      last_sync_at: lastSyncAt,
+    },
     recent_events: await getPublicRecentEvents(env, row.id),
   } satisfies SafePublicServer;
 }
@@ -504,6 +538,15 @@ function normalizePublicTagsJson(value: string | null) {
     return JSON.stringify(parsed.filter((item): item is string => typeof item === "string").slice(0, 5));
   } catch {
     return "[]";
+  }
+}
+
+function parsePublicTags(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
   }
 }
 

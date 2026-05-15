@@ -61,13 +61,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       body.serverType,
       tags,
     );
-    await storePendingNitradoToken(env, user.id, linkedServerId, token);
 
     if (service) {
-      await saveLinkedServerNitradoService(env, linkedServerId, service, body.serverType, tags);
-      return json({ tokenValid: true, linkedServerId, service });
+      const savedLinkedServerId = await saveLinkedServerNitradoService(env, linkedServerId, service, body.serverType, tags);
+      await storePendingNitradoToken(env, user.id, savedLinkedServerId, token);
+      return json({ tokenValid: true, linkedServerId: savedLinkedServerId, service });
     }
 
+    await storePendingNitradoToken(env, user.id, linkedServerId, token);
     return json({ tokenValid: true, linkedServerId });
   } catch (error) {
     if (error instanceof NitradoServiceLookupError) {

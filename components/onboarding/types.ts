@@ -7,6 +7,7 @@ export type AuthResponse = {
     avatar: string | null;
   };
   linkedServer?: LinkedServer | null;
+  linkedServers?: LinkedServer[];
 };
 
 export type DiscordGuild = {

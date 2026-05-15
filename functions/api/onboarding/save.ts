@@ -3,7 +3,9 @@ import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { fetchMockNitradoServices, fetchNitradoServices } from "../../_lib/nitrado";
 import {
+  countLinkedServersForUser,
   findService,
+  getServerLinkLimitForUser,
   getLatestNitradoToken,
   linkLatestNitradoConnection,
   normalizeTags,
@@ -50,14 +52,28 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!service) return json({ error: "DayZ Nitrado service not found" }, { status: 400 });
 
   const tags = normalizeTags(body.tags);
-  const existing = await db
-    .prepare("SELECT id FROM linked_servers WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1")
-    .bind(userId)
+  const existingSameService = await db
+    .prepare("SELECT id FROM linked_servers WHERE user_id = ? AND nitrado_service_id = ? LIMIT 1")
+    .bind(userId, service.id)
     .first<{ id: string }>();
+  const existingDraft = existingSameService
+    ? null
+    : await db
+        .prepare(
+          `SELECT id
+           FROM linked_servers
+           WHERE user_id = ?
+             AND lower(COALESCE(status, 'pending')) = 'pending'
+             AND (nitrado_service_id IS NULL OR nitrado_service_id = '')
+           ORDER BY updated_at DESC, id DESC
+           LIMIT 1`,
+        )
+        .bind(userId)
+        .first<{ id: string }>();
 
   let linkedServerId: string;
-  if (existing) {
-    linkedServerId = existing.id;
+  if (existingSameService || existingDraft) {
+    linkedServerId = (existingSameService ?? existingDraft)?.id ?? "";
     const slug = await uniquePublicSlug(env, service.name, linkedServerId);
     await db
       .prepare(
@@ -97,6 +113,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       )
       .run();
   } else {
+    const limit = await getServerLinkLimitForUser(env, userId);
+    const currentCount = await countLinkedServersForUser(env, userId);
+    if (typeof limit === "number" && currentCount >= limit) {
+      return json({ error: "Server link limit reached. Upgrade your plan to add another server." }, { status: 402 });
+    }
+
     linkedServerId = crypto.randomUUID();
     const slug = await uniquePublicSlug(env, service.name, linkedServerId);
     await db

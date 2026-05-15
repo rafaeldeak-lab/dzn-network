@@ -35,10 +35,12 @@ import { clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, de
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
+let hasLoggedMultiServerReady = false;
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
 
   useEffect(() => {
     getMe()
@@ -52,6 +54,14 @@ export function Dashboard() {
       window.location.href = "/login?returnTo=/dashboard";
     }
   }, [auth, loading]);
+
+  useEffect(() => {
+    if (!auth?.authenticated) return;
+    if (!hasLoggedMultiServerReady) {
+      console.log("DZN MULTI SERVER LINKING READY");
+      hasLoggedMultiServerReady = true;
+    }
+  }, [auth?.authenticated]);
 
   async function signOut() {
     clearClientAuthState();
@@ -79,15 +89,37 @@ export function Dashboard() {
     );
   }
 
-  const server = auth.linkedServer;
+  const manageableServers = auth.linkedServers?.length ? auth.linkedServers : auth.linkedServer ? [auth.linkedServer] : [];
+  const server = manageableServers.find((item) => item.id === selectedServerId) ?? auth.linkedServer ?? manageableServers[0] ?? null;
+
   return (
-    <DashboardFrame onLogout={signOut} serverName={server?.server_name ?? server?.guild_name ?? null}>
-      {server ? <ServerDashboard server={server} onRefresh={async () => setAuth(await getMe())} /> : <EmptyDashboard />}
+    <DashboardFrame
+      onLogout={signOut}
+      serverName={server?.server_name ?? server?.guild_name ?? null}
+      servers={manageableServers}
+      selectedServerId={server?.id ?? null}
+      onSelectServer={setSelectedServerId}
+    >
+      {server ? <ServerDashboard key={server.id} server={server} onRefresh={async () => setAuth(await getMe())} /> : <EmptyDashboard />}
     </DashboardFrame>
   );
 }
 
-function DashboardFrame({ children, onLogout, serverName }: { children: React.ReactNode; onLogout?: () => void; serverName?: string | null }) {
+function DashboardFrame({
+  children,
+  onLogout,
+  serverName,
+  servers = [],
+  selectedServerId,
+  onSelectServer,
+}: {
+  children: React.ReactNode;
+  onLogout?: () => void;
+  serverName?: string | null;
+  servers?: LinkedServer[];
+  selectedServerId?: string | null;
+  onSelectServer?: (serverId: string) => void;
+}) {
   const navItems = [
     { label: "Dashboard", href: "/dashboard" },
     { label: "Servers", href: "/servers" },
@@ -119,10 +151,28 @@ function DashboardFrame({ children, onLogout, serverName }: { children: React.Re
             <button type="button" aria-label="Notifications" className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-200">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
-              {serverName ?? "Server"}
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
+            {servers.length > 1 && onSelectServer ? (
+              <label className="relative inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
+                <select
+                  value={selectedServerId ?? ""}
+                  onChange={(event) => onSelectServer(event.target.value)}
+                  className="max-w-[220px] appearance-none bg-transparent pr-5 text-[11px] font-black uppercase text-white outline-none"
+                  aria-label="Select dashboard server"
+                >
+                  {servers.map((server) => (
+                    <option key={server.id} value={server.id} className="bg-[#080b16] text-white">
+                      {server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 h-3.5 w-3.5" />
+              </label>
+            ) : (
+              <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
+                {serverName ?? "Server"}
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            )}
             {onLogout ? (
               <button type="button" onClick={onLogout} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
                 <LogOut className="inline h-4 w-4" /> Logout

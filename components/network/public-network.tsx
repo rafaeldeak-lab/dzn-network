@@ -61,6 +61,7 @@ type PublicServer = {
   unique_players: number;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
+  pvp_leaderboard?: PublicLeaderboardPlayer[];
 };
 
 type PublicRecentEvent = {
@@ -119,33 +120,46 @@ export function PublicNetwork() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
+    const requestedSlug = slug;
+
     async function load() {
       setLoading(true);
       setError("");
+      setServer(null);
+      setServers([]);
+      setStats(null);
       try {
-        const endpoint = slug ? `/api/public/servers?slug=${encodeURIComponent(slug)}` : "/api/public/servers";
-        const response = await fetch(endpoint, { cache: "no-store", headers: { accept: "application/json" } });
+        const endpoint = requestedSlug ? `/api/public/servers?slug=${encodeURIComponent(requestedSlug)}` : "/api/public/servers";
+        const response = await fetch(endpoint, { cache: "no-store", headers: { accept: "application/json" }, signal: controller.signal });
         const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
         if (!response.ok) throw new Error(data.error || "Unable to load public servers");
+        if (controller.signal.aborted || requestedSlug !== slug) return;
 
-        if (slug) {
-          const matchedServer = data.server ?? (await fetchPublicServerFallback(slug));
+        if (requestedSlug) {
+          const matchedServer = data.server ?? (await fetchPublicServerFallback(requestedSlug, controller.signal));
+          if (controller.signal.aborted || requestedSlug !== slug) return;
           setServer(matchedServer);
           setServers([]);
           setStats(null);
+          if (matchedServer) console.log("DZN SERVER PROFILE SCOPED DATA LOADED");
         } else {
           setServers(Array.isArray(data.servers) ? data.servers : []);
           setStats(data.stats ?? null);
           setServer(null);
+          console.log("DZN PUBLIC SERVERS FRESH DATA LOADED");
         }
       } catch (loadError) {
+        if (controller.signal.aborted) return;
         setError(loadError instanceof Error ? loadError.message : "Unable to load public servers");
       } finally {
+        if (controller.signal.aborted) return;
         setLoading(false);
       }
     }
 
     load();
+    return () => controller.abort();
   }, [slug]);
 
   const sortedServers = useMemo(() => [...servers].sort((a, b) => serverSortRank(a) - serverSortRank(b)), [servers]);
@@ -400,6 +414,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const statsPending = server.stats_sync === "Pending";
   const statsActiveWithoutKills = server.stats_sync === "Active" && server.total_kills === 0;
   const players = server.top_players ?? [];
+  const pvpLeaderboard = server.pvp_leaderboard ?? players;
   const kd = calculateServerKd(server.total_kills, server.total_deaths);
 
   useEffect(() => {
@@ -477,7 +492,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
         <div className="grid gap-5">
           <ServerTagsPanel tags={tags} />
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <PvpLeaderboardPanel players={players} />
+            <PvpLeaderboardPanel players={pvpLeaderboard} />
             <RecentEventsPanel server={server} />
           </div>
 
@@ -554,8 +569,36 @@ function MessagePanel({ message }: { message: string }) {
 }
 
 function subscribeToPath(onStoreChange: () => void) {
+  ensureHistoryNavigationEvents();
   window.addEventListener("popstate", onStoreChange);
-  return () => window.removeEventListener("popstate", onStoreChange);
+  window.addEventListener("dzn:navigation", onStoreChange);
+  return () => {
+    window.removeEventListener("popstate", onStoreChange);
+    window.removeEventListener("dzn:navigation", onStoreChange);
+  };
+}
+
+let historyEventsPatched = false;
+
+function ensureHistoryNavigationEvents() {
+  if (historyEventsPatched || typeof window === "undefined") return;
+  historyEventsPatched = true;
+
+  const notify = () => window.dispatchEvent(new Event("dzn:navigation"));
+  const originalPushState = window.history.pushState;
+  const originalReplaceState = window.history.replaceState;
+
+  window.history.pushState = function pushState(...args) {
+    const result = originalPushState.apply(this, args);
+    notify();
+    return result;
+  };
+
+  window.history.replaceState = function replaceState(...args) {
+    const result = originalReplaceState.apply(this, args);
+    notify();
+    return result;
+  };
 }
 
 function getCurrentSlug() {
@@ -911,8 +954,8 @@ function publicServerProfileHref(slug: string) {
   return `/servers/profile?slug=${encodeURIComponent(slug)}`;
 }
 
-async function fetchPublicServerFallback(slug: string) {
-  const response = await fetch("/api/public/servers", { cache: "no-store", headers: { accept: "application/json" } });
+async function fetchPublicServerFallback(slug: string, signal?: AbortSignal) {
+  const response = await fetch("/api/public/servers", { cache: "no-store", headers: { accept: "application/json" }, signal });
   const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
   if (!response.ok || !Array.isArray(data.servers)) return null;
   return data.servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;

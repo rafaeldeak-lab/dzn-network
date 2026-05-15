@@ -70,12 +70,20 @@ export async function ensureDraftLinkedServer(
 
   if (!guild) throw new Error("Discord guild not found");
 
-  const existing = await db
-    .prepare("SELECT id FROM linked_servers WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1")
+  const existingDraft = await db
+    .prepare(
+      `SELECT id
+       FROM linked_servers
+       WHERE user_id = ?
+         AND lower(COALESCE(status, 'pending')) = 'pending'
+         AND (nitrado_service_id IS NULL OR nitrado_service_id = '')
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+    )
     .bind(userId)
     .first<{ id: string }>();
 
-  if (existing) {
+  if (existingDraft) {
     await db
       .prepare(
         `UPDATE linked_servers SET
@@ -88,9 +96,9 @@ export async function ensureDraftLinkedServer(
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`,
       )
-      .bind(guild.guild_id, guild.id, "Pending Nitrado Service", serverType, JSON.stringify(tags), existing.id)
+      .bind(guild.guild_id, guild.id, "Pending Nitrado Service", serverType, JSON.stringify(tags), existingDraft.id)
       .run();
-    return existing.id;
+    return existingDraft.id;
   }
 
   const linkedServerId = crypto.randomUUID();
@@ -112,6 +120,26 @@ export async function ensureDraftLinkedServer(
     .run();
 
   return linkedServerId;
+}
+
+export async function getServerLinkLimitForUser(env: Env, userId: string) {
+  void env;
+  void userId;
+  return null as number | null;
+}
+
+export async function countLinkedServersForUser(env: Env, userId: string) {
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM linked_servers
+       WHERE user_id = ?
+         AND lower(COALESCE(status, 'pending')) != 'deleted'`,
+    )
+    .bind(userId)
+    .first<{ count: number }>();
+  return Number(row?.count ?? 0);
 }
 
 export async function storePendingNitradoToken(env: Env, userId: string, linkedServerId: string, token: string) {
@@ -176,7 +204,26 @@ export async function saveLinkedServerNitradoService(
 ) {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
-  const slug = await uniquePublicSlug(env, service.name, linkedServerId);
+  const draft = await db
+    .prepare("SELECT id, user_id FROM linked_servers WHERE id = ? LIMIT 1")
+    .bind(linkedServerId)
+    .first<{ id: string; user_id: string }>();
+  if (!draft) throw new Error("Linked server draft not found");
+
+  const existingService = await db
+    .prepare(
+      `SELECT id
+       FROM linked_servers
+       WHERE user_id = ?
+         AND nitrado_service_id = ?
+         AND id != ?
+       LIMIT 1`,
+    )
+    .bind(draft.user_id, service.id, linkedServerId)
+    .first<{ id: string }>();
+
+  const targetLinkedServerId = existingService?.id ?? linkedServerId;
+  const slug = await uniquePublicSlug(env, service.name, targetLinkedServerId);
   await db
     .prepare(
       `UPDATE linked_servers SET
@@ -207,7 +254,22 @@ export async function saveLinkedServerNitradoService(
       service.ipAddress ?? null,
       service.playerSlots ?? null,
       slug,
-      linkedServerId,
+      targetLinkedServerId,
     )
     .run();
+
+  if (existingService) {
+    await db
+      .prepare(
+        `DELETE FROM linked_servers
+         WHERE id = ?
+           AND user_id = ?
+           AND lower(COALESCE(status, 'pending')) = 'pending'
+           AND (nitrado_service_id IS NULL OR nitrado_service_id = '')`,
+      )
+      .bind(linkedServerId, draft.user_id)
+      .run();
+  }
+
+  return targetLinkedServerId;
 }

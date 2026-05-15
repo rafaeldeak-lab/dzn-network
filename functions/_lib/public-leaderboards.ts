@@ -493,6 +493,9 @@ async function resolvePublicLinkedServerId(env: Env, slug: string) {
   const normalized = sanitizeSlug(slug);
   if (!normalized) return null;
 
+  const exactPublicSlugMatch = (rows.results ?? []).find((row) => sanitizeSlug(row.public_slug) === normalized);
+  if (exactPublicSlugMatch) return exactPublicSlugMatch.id;
+
   for (const row of rows.results ?? []) {
     if (publicSlugCandidates(row.public_slug, row.server_name, row.nitrado_service_name, row.guild_name).has(normalized)) {
       return row.id;
