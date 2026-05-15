@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { calculateKd, calculateServerScore, rankLongestKills, rankPublicPlayers } from "../functions/_lib/public-leaderboards";
+import { calculateKd, calculateServerScore, rankLongestKills, rankPublicPlayers, selectLatestKill } from "../functions/_lib/public-leaderboards";
 
 const players = rankPublicPlayers([
   {
@@ -37,8 +37,19 @@ assert.deepEqual(calculateKd(0, 0), { value: null, label: "Awaiting data" });
 assert.deepEqual(calculateKd(4, 0), { value: 4, label: "Flawless" });
 assert.deepEqual(calculateKd(2, 8), { value: 0.25, label: "0.25" });
 
-const longestKills = rankLongestKills([
+const killRows = [
   {
+    player_key: "6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q=",
+    player_name: "xAKA-MINI_KickAs",
+    victim_name: "Netfl1xAndK1II",
+    server_name: "NukeTown DEATHMATCH",
+    server_slug: "nuketown-deathmatch",
+    weapon: "M4-A1",
+    distance: 9.97779,
+    occurred_at: "2026-05-15T19:47:32.000Z",
+  },
+  {
+    player_key: "A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk=",
     player_name: "Netfl1xAndK1II",
     victim_name: "xAKA-MINI_KickAs",
     server_name: "NukeTown DEATHMATCH",
@@ -48,6 +59,7 @@ const longestKills = rankLongestKills([
     occurred_at: "2026-05-15T19:45:34.000Z",
   },
   {
+    player_key: "6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q=",
     player_name: "xAKA-MINI_KickAs",
     victim_name: "Netfl1xAndK1II",
     server_name: "NukeTown DEATHMATCH",
@@ -56,11 +68,29 @@ const longestKills = rankLongestKills([
     distance: 17.4068,
     occurred_at: "2026-05-15T19:54:19.000Z",
   },
-]);
+  {
+    player_key: "runner_9_5",
+    player_name: "runner_9_5",
+    victim_name: "femboi_fkcerxX",
+    server_name: "NukeTown DEATHMATCH",
+    server_slug: "nuketown-deathmatch",
+    weapon: "M4-A1",
+    distance: 2.4,
+    occurred_at: "2026-05-15T19:59:19.000Z",
+  },
+];
+
+const longestKills = rankLongestKills(killRows);
 
 assert.equal(longestKills[0].player_name, "xAKA-MINI_KickAs");
 assert.equal(longestKills[0].distance, 17.4);
 assert.equal(longestKills[0].weapon, "M4-A1");
+assert.equal(longestKills.filter((kill) => kill.player_name === "xAKA-MINI_KickAs").length, 1);
+assert.equal(new Set(longestKills.map((kill) => kill.player_name)).size, longestKills.length);
+
+const latestKill = selectLatestKill(killRows);
+assert.equal(latestKill?.player_name, "runner_9_5");
+assert.equal(latestKill?.victim_name, "femboi_fkcerxX");
 
 const score = calculateServerScore({
   kills: 11,

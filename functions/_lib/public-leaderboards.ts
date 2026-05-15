@@ -43,6 +43,8 @@ export type PublicLongestKill = {
   occurred_at: string | null;
 };
 
+export type PublicKillHighlight = Omit<PublicLongestKill, "rank">;
+
 export type PublicPlayerStatInput = {
   playerName: string | null;
   serverName: string | null;
@@ -87,7 +89,8 @@ type PublicPlayerDeathRow = {
   last_seen: string | null;
 };
 
-type PublicLongestKillRow = {
+export type PublicLongestKillRow = {
+  player_key?: string | null;
   player_name: string | null;
   victim_name: string | null;
   server_name: string | null;
@@ -95,6 +98,7 @@ type PublicLongestKillRow = {
   weapon: string | null;
   distance: number | null;
   occurred_at: string | null;
+  created_at?: string | null;
 };
 
 type PublicServerLookupRow = {
@@ -110,17 +114,20 @@ export async function getPublicLeaderboardsPayload(env: Env) {
 
   await ensurePublicLeaderboardSchema(env);
 
-  const [topServers, topPlayers, longestKills] = await Promise.all([
+  const [topServers, topPlayers, killSummary] = await Promise.all([
     getTopServers(env, 25),
     getTopPlayers(env, 50),
-    getLongestKills(env, 50),
+    getLongestKillSummary(env, 20),
   ]);
 
   return {
     ok: true,
     top_servers: topServers,
     top_players: topPlayers,
-    longest_kills: longestKills,
+    best_overall_kill: killSummary.bestOverallKill,
+    latest_kill: killSummary.latestKill,
+    personal_best_kills: killSummary.personalBestKills,
+    longest_kills: killSummary.personalBestKills,
     updated_at: new Date().toISOString(),
   };
 }
@@ -259,18 +266,20 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string) {
   return rankPublicPlayers(mergePlayerRows(killRows.results ?? [], deathRows.results ?? []), limit);
 }
 
-async function getLongestKills(env: Env, limit: number) {
+async function getLongestKillSummary(env: Env, limit: number) {
   const db = requireDb(env);
-  const result = await db
+  const distanceResult = await db
     .prepare(
       `SELECT
+        COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
         kill_events.killer_name AS player_name,
         kill_events.victim_name,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         linked_servers.public_slug AS server_slug,
         kill_events.weapon,
         kill_events.distance,
-        COALESCE(kill_events.occurred_at, kill_events.created_at) AS occurred_at
+        COALESCE(kill_events.occurred_at, kill_events.created_at) AS occurred_at,
+        kill_events.created_at
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
@@ -282,10 +291,40 @@ async function getLongestKills(env: Env, limit: number) {
        ORDER BY kill_events.distance DESC, occurred_at DESC
        LIMIT ?`,
     )
-    .bind(limit)
+    .bind(Math.max(limit * 8, 100))
     .all<PublicLongestKillRow>();
 
-  return rankLongestKills(result.results ?? []);
+  const latestKill = await db
+    .prepare(
+      `SELECT
+        COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
+        kill_events.killer_name AS player_name,
+        kill_events.victim_name,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        linked_servers.public_slug AS server_slug,
+        kill_events.weapon,
+        kill_events.distance,
+        COALESCE(kill_events.occurred_at, kill_events.created_at) AS occurred_at,
+        kill_events.created_at
+       FROM kill_events
+       INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND kill_events.killer_name IS NOT NULL
+         AND kill_events.victim_name IS NOT NULL
+         AND ${mockNameFilterSql("kill_events.killer_name")}
+         AND ${mockNameFilterSql("kill_events.victim_name")}
+       ORDER BY datetime(COALESCE(kill_events.occurred_at, kill_events.created_at)) DESC, kill_events.created_at DESC
+       LIMIT 1`,
+    )
+    .first<PublicLongestKillRow>();
+
+  const rows = distanceResult.results ?? [];
+  const bestOverall = rows[0] ? toKillHighlight(rows[0]) : null;
+  return {
+    bestOverallKill: bestOverall,
+    latestKill: latestKill ? toKillHighlight(latestKill) : null,
+    personalBestKills: rankLongestKills(rows, limit),
+  };
 }
 
 function mergePlayerRows(kills: PublicPlayerKillRow[], deaths: PublicPlayerDeathRow[]) {
@@ -364,13 +403,24 @@ export function rankPublicPlayers(players: PublicPlayerStatInput[], limit = 50) 
 }
 
 export function rankLongestKills(rows: PublicLongestKillRow[], limit = 50) {
-  return rows
+  const seenKillers = new Set<string>();
+  const personalBests: PublicLongestKillRow[] = [];
+
+  for (const row of rows
     .filter((row) => numberOrZero(row.distance) > 0)
     .sort((a, b) => {
       const distanceDiff = numberOrZero(b.distance) - numberOrZero(a.distance);
       if (distanceDiff) return distanceDiff;
       return dateValue(b.occurred_at) - dateValue(a.occurred_at);
-    })
+    })) {
+    const playerKey = row.player_key || row.player_name?.toLowerCase() || `unknown:${personalBests.length}`;
+    if (seenKillers.has(playerKey)) continue;
+    seenKillers.add(playerKey);
+    personalBests.push(row);
+    if (personalBests.length >= limit) break;
+  }
+
+  return personalBests
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
@@ -382,6 +432,25 @@ export function rankLongestKills(rows: PublicLongestKillRow[], limit = 50) {
       distance: roundOne(numberOrZero(row.distance)),
       occurred_at: row.occurred_at ?? null,
     } satisfies PublicLongestKill));
+}
+
+export function selectLatestKill(rows: PublicLongestKillRow[]) {
+  const row = [...rows]
+    .filter((item) => item.player_name && item.victim_name)
+    .sort((a, b) => dateValue(b.occurred_at ?? b.created_at ?? null) - dateValue(a.occurred_at ?? a.created_at ?? null))[0];
+  return row ? toKillHighlight(row) : null;
+}
+
+function toKillHighlight(row: PublicLongestKillRow): PublicKillHighlight {
+  return {
+    player_name: row.player_name ?? "Unknown Player",
+    victim_name: row.victim_name ?? "Unknown Player",
+    server_name: row.server_name ?? "Unnamed DZN Server",
+    server_slug: row.server_slug ?? null,
+    weapon: row.weapon ?? "Unknown weapon",
+    distance: roundOne(numberOrZero(row.distance)),
+    occurred_at: row.occurred_at ?? row.created_at ?? null,
+  };
 }
 
 export function calculateKd(kills: number, deaths: number) {
@@ -492,6 +561,9 @@ function emptyPublicLeaderboards() {
     ok: true,
     top_servers: [],
     top_players: [],
+    best_overall_kill: null,
+    latest_kill: null,
+    personal_best_kills: [],
     longest_kills: [],
     updated_at: new Date().toISOString(),
   };

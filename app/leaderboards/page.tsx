@@ -50,6 +50,9 @@ type LeaderboardsPayload = {
   ok?: boolean;
   top_servers?: LeaderboardServer[];
   top_players?: LeaderboardPlayer[];
+  best_overall_kill?: Omit<LongestKill, "rank"> | null;
+  latest_kill?: Omit<LongestKill, "rank"> | null;
+  personal_best_kills?: LongestKill[];
   longest_kills?: LongestKill[];
   updated_at?: string;
   error?: string;
@@ -58,6 +61,9 @@ type LeaderboardsPayload = {
 const emptyPayload = {
   top_servers: [],
   top_players: [],
+  best_overall_kill: null,
+  latest_kill: null,
+  personal_best_kills: [],
   longest_kills: [],
   updated_at: null,
 };
@@ -66,6 +72,9 @@ export default function LeaderboardsPage() {
   const [payload, setPayload] = useState<{
     top_servers: LeaderboardServer[];
     top_players: LeaderboardPlayer[];
+    best_overall_kill: Omit<LongestKill, "rank"> | null;
+    latest_kill: Omit<LongestKill, "rank"> | null;
+    personal_best_kills: LongestKill[];
     longest_kills: LongestKill[];
     updated_at: string | null;
   }>(emptyPayload);
@@ -75,6 +84,7 @@ export default function LeaderboardsPage() {
 
   useEffect(() => {
     console.log("DZN LIVE LEADERBOARDS LOADED");
+    console.log("DZN CLEAN LONGEST KILLS LEADERBOARD LOADED");
   }, []);
 
   useEffect(() => {
@@ -111,7 +121,7 @@ export default function LeaderboardsPage() {
 
   const totalKills = useMemo(() => payload.top_servers.reduce((total, server) => total + server.kills, 0), [payload.top_servers]);
   const totalPlayers = payload.top_players.length;
-  const longestKill = payload.longest_kills[0]?.distance ?? 0;
+  const longestKill = payload.best_overall_kill?.distance ?? payload.personal_best_kills[0]?.distance ?? 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-6 text-white sm:px-6 lg:px-8">
@@ -193,24 +203,112 @@ export default function LeaderboardsPage() {
               ])}
             />
 
-            <LeaderboardTable
-              title="Longest Kills"
-              icon={Skull}
-              empty="No confirmed kill distances yet."
-              headers={["Rank", "Player", "Server", "Weapon", "Distance", "Time"]}
-              rows={payload.longest_kills.map((kill) => [
-                `#${kill.rank}`,
-                `${kill.player_name} eliminated ${kill.victim_name}`,
-                <ServerLink key="server" slug={kill.server_slug} label={kill.server_name} />,
-                kill.weapon,
-                formatDistance(kill.distance),
-                formatDateTime(kill.occurred_at),
-              ])}
+            <LongestKillsSection
+              bestOverall={payload.best_overall_kill}
+              latestKill={payload.latest_kill}
+              personalBests={payload.personal_best_kills.length ? payload.personal_best_kills : payload.longest_kills}
             />
           </div>
         ) : null}
       </div>
     </main>
+  );
+}
+
+function LongestKillsSection({
+  bestOverall,
+  latestKill,
+  personalBests,
+}: {
+  bestOverall: Omit<LongestKill, "rank"> | null;
+  latestKill: Omit<LongestKill, "rank"> | null;
+  personalBests: LongestKill[];
+}) {
+  const hasKills = Boolean(bestOverall || latestKill || personalBests.length);
+  return (
+    <section className="glass-surface animated-border rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex items-center gap-3">
+          <Skull className="h-6 w-6 text-violet-200" />
+          <h2 className="text-2xl font-black uppercase text-white">Longest Kills</h2>
+        </div>
+
+        {hasKills ? (
+          <>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <KillHighlightCard title="Best Overall" kill={bestOverall} tone="violet" />
+              <KillHighlightCard title="Latest Confirmed" kill={latestKill} tone="cyan" />
+            </div>
+
+            <div className="mt-6">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-black uppercase tracking-[0.16em] text-zinc-300">Personal Bests</h3>
+                <p className="text-xs font-bold uppercase text-zinc-500">One best kill per player</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-y-2 text-left">
+                  <thead>
+                    <tr>
+                      {["Rank", "Player", "Victim", "Server", "Weapon", "Best Distance", "Time"].map((header) => (
+                        <th key={header} className="px-3 py-2 text-xs font-black uppercase text-zinc-500">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {personalBests.map((kill) => (
+                      <tr key={`${kill.rank}-${kill.player_name}-${kill.distance}`} className="rounded-lg bg-black/24">
+                        <td className="border-y border-l border-white/10 px-3 py-3 first:rounded-l-lg">
+                          <span className="inline-flex rounded-md border border-violet-300/25 bg-violet-400/10 px-2 py-1 text-xs font-black text-violet-100">#{kill.rank}</span>
+                        </td>
+                        <td className="border-y border-white/10 px-3 py-3 text-sm font-black text-white">{kill.player_name}</td>
+                        <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">{kill.victim_name}</td>
+                        <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">
+                          <ServerLink slug={kill.server_slug} label={kill.server_name} />
+                        </td>
+                        <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">{kill.weapon}</td>
+                        <td className="border-y border-white/10 px-3 py-3 text-sm font-black text-cyan-100">{formatDistance(kill.distance)}</td>
+                        <td className="rounded-r-lg border-y border-r border-white/10 px-3 py-3 text-sm font-bold text-zinc-300">{formatDateTime(kill.occurred_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-5 text-sm font-bold text-zinc-400">
+            No confirmed long kills yet. Long-kill records will appear once connected servers sync PvP kills.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<LongestKill, "rank"> | null; tone: "violet" | "cyan" }) {
+  const toneClass = tone === "violet"
+    ? "border-violet-300/25 bg-violet-500/10 text-violet-100"
+    : "border-cyan-300/25 bg-cyan-400/10 text-cyan-100";
+  return (
+    <div className={`rounded-lg border p-4 ${toneClass}`}>
+      <p className="text-xs font-black uppercase tracking-[0.16em] opacity-80">{title}</p>
+      {kill ? (
+        <>
+          <p className="mt-3 text-2xl font-black text-white">{formatDistance(kill.distance)}</p>
+          <p className="mt-2 text-sm font-bold leading-6 text-zinc-200">
+            {kill.player_name} eliminated {kill.victim_name} with {kill.weapon}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-zinc-400">
+            <ServerLink slug={kill.server_slug} label={kill.server_name} />
+            <span>{formatDateTime(kill.occurred_at)}</span>
+          </div>
+        </>
+      ) : (
+        <p className="mt-3 text-sm font-bold text-zinc-400">No confirmed kill yet.</p>
+      )}
+    </div>
   );
 }
 
@@ -315,10 +413,18 @@ function LoadingGrid() {
 }
 
 function normalizePayload(data: LeaderboardsPayload) {
+  const personalBestKills = Array.isArray(data.personal_best_kills)
+    ? data.personal_best_kills.map(normalizeLongestKill)
+    : Array.isArray(data.longest_kills)
+      ? data.longest_kills.map(normalizeLongestKill)
+      : [];
   return {
     top_servers: Array.isArray(data.top_servers) ? data.top_servers.map(normalizeServer) : [],
     top_players: Array.isArray(data.top_players) ? data.top_players.map(normalizePlayer) : [],
-    longest_kills: Array.isArray(data.longest_kills) ? data.longest_kills.map(normalizeLongestKill) : [],
+    best_overall_kill: data.best_overall_kill ? normalizeKillHighlight(data.best_overall_kill) : null,
+    latest_kill: data.latest_kill ? normalizeKillHighlight(data.latest_kill) : null,
+    personal_best_kills: personalBestKills,
+    longest_kills: personalBestKills,
     updated_at: data.updated_at ?? new Date().toISOString(),
   };
 }
@@ -358,6 +464,18 @@ function normalizePlayer(player: LeaderboardPlayer): LeaderboardPlayer {
 function normalizeLongestKill(kill: LongestKill): LongestKill {
   return {
     rank: numberOrZero(kill.rank),
+    player_name: kill.player_name || "Unknown Player",
+    victim_name: kill.victim_name || "Unknown Player",
+    server_name: kill.server_name || "Unnamed DZN Server",
+    server_slug: kill.server_slug ?? null,
+    weapon: kill.weapon || "Unknown weapon",
+    distance: numberOrZero(kill.distance),
+    occurred_at: kill.occurred_at ?? null,
+  };
+}
+
+function normalizeKillHighlight(kill: Omit<LongestKill, "rank">): Omit<LongestKill, "rank"> {
+  return {
     player_name: kill.player_name || "Unknown Player",
     victim_name: kill.victim_name || "Unknown Player",
     server_name: kill.server_name || "Unnamed DZN Server",
