@@ -16,7 +16,9 @@ export function secureHeaders(headers?: HeadersInit) {
 export function json(data: unknown, init: ResponseInit = {}) {
   const headers = secureHeaders(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
-  headers.set("cache-control", "no-store");
+  headers.set("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  headers.set("pragma", "no-cache");
+  headers.set("expires", "0");
 
   return new Response(JSON.stringify(data), {
     ...init,
@@ -31,7 +33,9 @@ export function methodNotAllowed() {
 export function redirect(location: string, headers?: HeadersInit) {
   const nextHeaders = secureHeaders(headers);
   nextHeaders.set("location", location);
-  nextHeaders.set("cache-control", "no-store");
+  nextHeaders.set("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  nextHeaders.set("pragma", "no-cache");
+  nextHeaders.set("expires", "0");
 
   return new Response(null, {
     status: 302,

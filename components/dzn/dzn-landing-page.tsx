@@ -45,6 +45,7 @@ import {
   serverStats,
 } from "./data";
 import { DznLogo } from "./dzn-logo";
+import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 
 const iconMap: Record<string, LucideIcon> = {
   Activity,
@@ -164,12 +165,9 @@ function Navbar() {
   }, []);
 
   async function signOut() {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-    }).catch(() => null);
+    clearClientAuthState();
     setAuthenticated(false);
+    await logoutAndRedirect();
   }
 
   return (

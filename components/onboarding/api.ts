@@ -133,7 +133,28 @@ export async function goLive() {
 }
 
 export async function logout() {
-  return request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+  return request<{ ok: boolean; redirect?: string }>("/api/auth/logout", { method: "POST" });
+}
+
+export function clearClientAuthState() {
+  if (typeof window === "undefined") return;
+
+  const keys = ["active_server", "dzn_auth", "dzn_user", "dzn_session", "auth", "user"];
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      for (const key of keys) {
+        storage.removeItem(key);
+      }
+    } catch {
+      // Storage can be unavailable in hardened/private browser contexts.
+    }
+  }
+}
+
+export async function logoutAndRedirect() {
+  await logout().catch(() => null);
+  clearClientAuthState();
+  window.location.href = "/";
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

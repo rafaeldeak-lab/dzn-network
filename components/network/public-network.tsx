@@ -22,6 +22,7 @@ import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { DznLogo } from "@/components/dzn/dzn-logo";
+import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 
 type PublicServer = {
   public_slug: string;
@@ -66,6 +67,14 @@ type PublicStats = {
   statsSyncPending: number;
 };
 
+type PublicServersResponse = {
+  ok?: boolean;
+  server?: PublicServer | null;
+  servers?: PublicServer[];
+  stats?: PublicStats;
+  error?: string;
+};
+
 const filters = ["All", "PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
 
 export function PublicNetwork() {
@@ -83,12 +92,13 @@ export function PublicNetwork() {
       setError("");
       try {
         const endpoint = slug ? `/api/public/servers?slug=${encodeURIComponent(slug)}` : "/api/public/servers";
-        const response = await fetch(endpoint, { headers: { accept: "application/json" } });
-        const data = await response.json().catch(() => ({}));
+        const response = await fetch(endpoint, { cache: "no-store", headers: { accept: "application/json" } });
+        const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
         if (!response.ok) throw new Error(data.error || "Unable to load public servers");
 
         if (slug) {
-          setServer(data.server ?? null);
+          const matchedServer = data.server ?? (await fetchPublicServerFallback(slug));
+          setServer(matchedServer);
           setServers([]);
           setStats(null);
         } else {
@@ -138,12 +148,9 @@ function PublicNav() {
   }, []);
 
   async function signOut() {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-    }).catch(() => null);
+    clearClientAuthState();
     setAuthenticated(false);
+    await logoutAndRedirect();
   }
 
   return (
@@ -657,6 +664,37 @@ function serverSortRank(server: PublicServer) {
 
 function publicServerProfileHref(slug: string) {
   return `/servers/profile?slug=${encodeURIComponent(slug)}`;
+}
+
+async function fetchPublicServerFallback(slug: string) {
+  const response = await fetch("/api/public/servers", { cache: "no-store", headers: { accept: "application/json" } });
+  const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
+  if (!response.ok || !Array.isArray(data.servers)) return null;
+  return data.servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;
+}
+
+function publicServerMatchesSlug(server: PublicServer, slug: string) {
+  const candidates = publicSlugCandidates(server.public_slug, server.server_name, server.nitrado_service_name, server.guild_name);
+  return slugCandidates(slug).some((candidate) => candidates.has(candidate));
+}
+
+function publicSlugCandidates(...values: Array<string | null>) {
+  const candidates = new Set<string>();
+  for (const value of values) {
+    for (const candidate of slugCandidates(value)) {
+      candidates.add(candidate);
+    }
+  }
+  return candidates;
+}
+
+function slugCandidates(value: string | null) {
+  if (!value) return [];
+  const normalized = value.trim().toLowerCase();
+  const compact = normalized.replace(/[^a-z0-9]/g, "").slice(0, 90);
+  const hyphenated = normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+  const preservedHyphen = normalized.replace(/[^a-z0-9-]/g, "").slice(0, 90);
+  return Array.from(new Set([compact, hyphenated, preservedHyphen].filter(Boolean)));
 }
 
 function sanitizePublicSlug(value: string) {

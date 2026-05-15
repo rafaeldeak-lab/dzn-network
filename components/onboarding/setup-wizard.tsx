@@ -28,11 +28,12 @@ import {
 import Link from "next/link";
 
 import {
+  clearClientAuthState,
   getGuilds,
   getMe,
   getNitradoServices,
   goLive,
-  logout,
+  logoutAndRedirect,
   saveOnboarding,
   testAdmPath,
   testOnboarding,
@@ -261,8 +262,8 @@ export function SetupWizard() {
   }
 
   async function signOut() {
-    await logout().catch(() => null);
-    window.location.href = "/";
+    clearClientAuthState();
+    await logoutAndRedirect();
   }
 
   function toggleTag(tag: string) {

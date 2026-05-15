@@ -31,7 +31,7 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logout, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
+import { clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logoutAndRedirect, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -47,9 +47,15 @@ export function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!loading && auth && !auth.authenticated) {
+      window.location.href = "/login?returnTo=/dashboard";
+    }
+  }, [auth, loading]);
+
   async function signOut() {
-    await logout().catch(() => null);
-    window.location.href = "/";
+    clearClientAuthState();
+    await logoutAndRedirect();
   }
 
   if (loading) {

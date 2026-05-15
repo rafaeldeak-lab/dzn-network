@@ -76,12 +76,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const url = new URL(request.url);
   const slug = sanitizeSlug(url.searchParams.get("slug"));
+  return json(await getPublicServersPayload(env, slug));
+};
 
+export async function getPublicServersPayload(env: Env, slug: string | null) {
   if (!env.DB) {
     const mockServers = shouldShowMockServers(env) ? mockPublicServers() : [];
     return slug
-      ? json({ server: mockServers.find((server) => server.public_slug === slug) ?? null })
-      : json({ servers: mockServers, stats: buildPublicStats(mockServers) });
+      ? { ok: true, server: findPublicServerBySlug(mockServers, slug) ?? null }
+      : { ok: true, servers: mockServers, stats: buildPublicStats(mockServers) };
   }
 
   await ensureLinkedServerMetadataColumns(env);
@@ -89,22 +92,26 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   await ensureAdmSyncSchema(env);
   await ensurePublicSlugsForLiveServers(env);
 
-  const rows = await queryPublicServers(env, slug);
-  const servers = (await Promise.all(rows.map((row) => toSafePublicServer(env, row)))).filter((server): server is SafePublicServer => Boolean(server));
+  const rows = await queryPublicServers(env);
+  const publicRows = slug ? await findPublicServerRowsBySlug(env, rows, slug) : rows;
+  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row)))).filter((server): server is SafePublicServer => Boolean(server));
 
   if (slug) {
-    return json({ server: servers[0] ?? null });
+    if (servers.length === 0 && shouldShowMockServers(env)) {
+      return { ok: true, server: findPublicServerBySlug(mockPublicServers(), slug) ?? null };
+    }
+    return { ok: true, server: servers[0] ?? null };
   }
 
   if (servers.length === 0 && shouldShowMockServers(env)) {
     const mockServers = mockPublicServers();
-    return json({ servers: mockServers, stats: buildPublicStats(mockServers), mock: true });
+    return { ok: true, servers: mockServers, stats: buildPublicStats(mockServers), mock: true };
   }
 
-  return json({ servers, stats: buildPublicStats(servers) });
-};
+  return { ok: true, servers, stats: buildPublicStats(servers) };
+}
 
-async function queryPublicServers(env: Env, slug: string | null) {
+async function queryPublicServers(env: Env) {
   const db = requireDb(env);
   const baseQuery = `
     SELECT
@@ -167,14 +174,6 @@ async function queryPublicServers(env: Env, slug: string | null) {
     WHERE lower(linked_servers.status) = 'live'
   `;
 
-  if (slug) {
-    const result = await db
-      .prepare(`${baseQuery} AND linked_servers.public_slug = ? LIMIT 1`)
-      .bind(slug)
-      .all<PublicServerRow>();
-    return result.results ?? [];
-  }
-
   const result = await db
     .prepare(
       `${baseQuery}
@@ -186,10 +185,41 @@ async function queryPublicServers(env: Env, slug: string | null) {
          END ASC,
          linked_servers.updated_at DESC,
          linked_servers.created_at DESC
-       LIMIT 100`,
+       LIMIT 500`,
     )
     .all<PublicServerRow>();
   return result.results ?? [];
+}
+
+async function findPublicServerRowsBySlug(env: Env, rows: PublicServerRow[], slug: string) {
+  const directMatch = rows.find((row) => publicServerRowMatchesSlug(row, slug));
+  if (directMatch) return [directMatch];
+
+  const aliasServerId = await resolveSlugAliasLinkedServerId(env, slug).catch(() => null);
+  if (!aliasServerId) return [];
+
+  const aliasMatch = rows.find((row) => row.id === aliasServerId);
+  return aliasMatch ? [aliasMatch] : [];
+}
+
+async function resolveSlugAliasLinkedServerId(env: Env, slug: string) {
+  const db = requireDb(env);
+  const table = await db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'server_slug_aliases'")
+    .first<{ name: string }>();
+  if (!table) return null;
+
+  const columnResult = await db.prepare("PRAGMA table_info(server_slug_aliases)").all<{ name: string }>();
+  const columnNames = new Set((columnResult.results ?? []).map((column) => column.name));
+  const slugColumn = ["slug", "alias", "public_slug"].find((column) => columnNames.has(column));
+  const serverColumn = ["linked_server_id", "server_id"].find((column) => columnNames.has(column));
+  if (!slugColumn || !serverColumn) return null;
+
+  const row = await db
+    .prepare(`SELECT ${serverColumn} AS linked_server_id FROM server_slug_aliases WHERE lower(${slugColumn}) = ? LIMIT 1`)
+    .bind(slug)
+    .first<{ linked_server_id: string }>();
+  return row?.linked_server_id ?? null;
 }
 
 async function ensurePublicSlugsForLiveServers(env: Env) {
@@ -288,6 +318,10 @@ function buildPublicStats(servers: SafePublicServer[]) {
     statsSyncActive: servers.filter((server) => server.stats_sync === "Active").length,
     statsSyncPending: servers.filter((server) => server.stats_sync !== "Active").length,
   };
+}
+
+function findPublicServerBySlug(servers: SafePublicServer[], slug: string) {
+  return servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;
 }
 
 function mockPublicServers(): SafePublicServer[] {
@@ -451,6 +485,35 @@ function sanitizeSlug(value: string | null) {
   if (!value) return null;
   const slug = value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 90);
   return slug || null;
+}
+
+function publicServerRowMatchesSlug(row: PublicServerRow, slug: string) {
+  const candidates = publicSlugCandidates(row.public_slug, row.server_name, row.nitrado_service_name, row.guild_name);
+  return slugCandidates(slug).some((candidate) => candidates.has(candidate));
+}
+
+function publicServerMatchesSlug(server: SafePublicServer, slug: string) {
+  const candidates = publicSlugCandidates(server.public_slug, server.server_name, server.nitrado_service_name, server.guild_name);
+  return slugCandidates(slug).some((candidate) => candidates.has(candidate));
+}
+
+function publicSlugCandidates(...values: Array<string | null>) {
+  const candidates = new Set<string>();
+  for (const value of values) {
+    for (const candidate of slugCandidates(value)) {
+      candidates.add(candidate);
+    }
+  }
+  return candidates;
+}
+
+function slugCandidates(value: string | null) {
+  if (!value) return [];
+  const normalized = value.trim().toLowerCase();
+  const compact = normalized.replace(/[^a-z0-9]/g, "").slice(0, 90);
+  const hyphenated = normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+  const preservedHyphen = normalized.replace(/[^a-z0-9-]/g, "").slice(0, 90);
+  return Array.from(new Set([compact, hyphenated, preservedHyphen].filter(Boolean)));
 }
 
 function firstString(...values: unknown[]) {
