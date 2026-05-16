@@ -1,6 +1,12 @@
 "use client";
 
+import { geoContains, geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
+import type { GeoProjection } from "d3-geo";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { feature } from "topojson-client";
+import type { FeatureCollection, Geometry } from "geojson";
+import type { GeometryCollection, Topology } from "topojson-specification";
+import land50m from "world-atlas/land-50m.json";
 
 export type DznOperationalGlobeNode = {
   id: string;
@@ -53,57 +59,11 @@ type DecorPoint = {
 };
 
 type LonLat = [number, number];
+type LandTopology = Topology<{ land: GeometryCollection }>;
 
+const LAND_TOPOLOGY = land50m as unknown as LandTopology;
+const LAND_FEATURE = feature(LAND_TOPOLOGY, LAND_TOPOLOGY.objects.land) as FeatureCollection<Geometry>;
 const WORLD_DOTS = buildWorldDotMatrix();
-
-const LAND_POLYGONS: LonLat[][] = [
-  [
-    [-168, 71], [-154, 64], [-142, 59], [-132, 54], [-124, 49], [-124, 43], [-116, 36], [-108, 30],
-    [-99, 24], [-91, 18], [-84, 16], [-80, 22], [-75, 25], [-70, 31], [-62, 41], [-69, 47],
-    [-81, 45], [-90, 49], [-102, 51], [-113, 49], [-123, 52], [-135, 57], [-148, 60], [-160, 64],
-  ],
-  [
-    [-101, 23], [-92, 20], [-87, 16], [-82, 12], [-78, 9], [-81, 7], [-88, 10], [-96, 15], [-105, 20],
-  ],
-  [
-    [-81, 12], [-73, 9], [-64, 5], [-55, -2], [-47, -9], [-39, -18], [-43, -27], [-50, -35],
-    [-54, -45], [-62, -54], [-70, -50], [-73, -40], [-70, -30], [-74, -20], [-79, -8], [-82, 2],
-  ],
-  [
-    [-54, 82], [-32, 78], [-20, 72], [-27, 64], [-43, 60], [-57, 65], [-63, 73],
-  ],
-  [
-    [-11, 36], [-9, 44], [-4, 51], [3, 57], [12, 56], [20, 52], [28, 55], [35, 50],
-    [31, 44], [22, 41], [14, 38], [6, 36], [-2, 36],
-  ],
-  [
-    [-8, 58], [2, 61], [12, 66], [24, 70], [32, 65], [26, 58], [15, 55], [5, 56],
-  ],
-  [
-    [-17, 34], [-7, 36], [8, 34], [24, 30], [35, 20], [43, 8], [40, -5], [33, -18],
-    [26, -31], [18, -35], [8, -33], [-3, -27], [-11, -16], [-15, -3], [-14, 14],
-  ],
-  [
-    [31, 40], [45, 48], [63, 54], [82, 55], [100, 58], [120, 53], [139, 48], [153, 40],
-    [145, 30], [132, 27], [122, 18], [108, 20], [96, 14], [84, 20], [73, 17], [62, 25],
-    [51, 27], [42, 32], [35, 36],
-  ],
-  [
-    [67, 24], [76, 30], [87, 24], [84, 13], [78, 6], [72, 12],
-  ],
-  [
-    [95, 18], [105, 15], [114, 7], [121, 1], [118, -8], [108, -5], [101, 4],
-  ],
-  [
-    [126, 37], [141, 41], [146, 36], [142, 31], [130, 31],
-  ],
-  [
-    [112, -12], [127, -14], [141, -18], [153, -28], [148, -39], [132, -36], [116, -31], [110, -21],
-  ],
-  [
-    [43, -12], [50, -17], [49, -25], [43, -25], [39, -18],
-  ],
-];
 
 const TEXTURE_NETWORK_NODES: LonLat[] = [
   [-122, 37], [-96, 35], [-74, 40], [-47, -23], [-3, 52], [2, 48], [10, 51], [13, 41],
@@ -152,6 +112,7 @@ export function DznOperationalGlobe({ nodes }: { nodes: DznOperationalGlobeNode[
             if (!loggedRef.current) {
               console.log("DZN ROTATING GLOBE MAP LOADED");
               console.log("DZN ROTATING GLOBE LANDMASSES LOADED");
+              console.log("DZN PREMIUM GLOBE TEXTURE LOADED");
               loggedRef.current = true;
             }
           },
@@ -256,14 +217,15 @@ function createThreeGlobe({
   globeTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4);
 
   const earth = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 80, 80),
+    new THREE.SphereGeometry(1, 88, 88),
     new THREE.MeshStandardMaterial({
       map: globeTexture,
-      color: 0xd9e2ff,
-      emissive: 0x180738,
-      emissiveIntensity: 0.42,
-      roughness: 0.74,
-      metalness: 0.06,
+      emissiveMap: globeTexture,
+      color: 0xe7efff,
+      emissive: 0x16043d,
+      emissiveIntensity: 0.28,
+      roughness: 0.82,
+      metalness: 0.05,
       transparent: true,
       opacity: 0.98,
     }),
@@ -629,14 +591,27 @@ function createDznGlobeTexture(THREE: typeof import("three")) {
   ctx.fillStyle = ocean;
   ctx.fillRect(0, 0, width, height);
 
-  drawTextureGrid(ctx, width, height);
-  drawTextureLand(ctx, width, height);
-  drawTextureNetwork(ctx, width, height);
+  const projection = geoEquirectangular()
+    .translate([width / 2, height / 2])
+    .scale(width / (2 * Math.PI))
+    .precision(0.16);
+  const path = geoPath(projection, ctx);
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskCtx = maskCanvas.getContext("2d");
+
+  drawTextureGrid(ctx, path);
+  if (maskCtx) drawLandMask(maskCtx, path, width, height);
+  drawTextureLand(ctx, path);
+  if (maskCtx) drawTextureLandDots(ctx, maskCtx, width, height);
+  const maskData = maskCtx ? maskCtx.getImageData(0, 0, width, height).data : null;
+  drawTextureNetwork(ctx, projection, maskData, width);
 
   const vignette = ctx.createRadialGradient(width * 0.5, height * 0.48, height * 0.12, width * 0.5, height * 0.48, width * 0.62);
   vignette.addColorStop(0, "rgba(147, 197, 253, 0.05)");
   vignette.addColorStop(0.6, "rgba(2, 7, 19, 0)");
-  vignette.addColorStop(1, "rgba(2, 7, 19, 0.46)");
+  vignette.addColorStop(1, "rgba(2, 7, 19, 0.34)");
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, width, height);
 
@@ -648,131 +623,146 @@ function createDznGlobeTexture(THREE: typeof import("three")) {
   return texture;
 }
 
-function drawTextureGrid(ctx: CanvasRenderingContext2D, width: number, height: number) {
+function drawTextureGrid(ctx: CanvasRenderingContext2D, path: ReturnType<typeof geoPath>) {
   ctx.save();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "rgba(96, 165, 250, 0.16)";
-
-  for (let lon = -180; lon <= 180; lon += 15) {
-    const { x } = projectLonLat(lon, 0, width, height);
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
-  }
-
-  for (let lat = -75; lat <= 75; lat += 15) {
-    const { y } = projectLonLat(0, lat, width, height);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-  }
-
-  ctx.globalAlpha = 0.52;
-  ctx.fillStyle = "rgba(103, 232, 249, 0.16)";
-  for (let lon = -172.5; lon <= 172.5; lon += 15) {
-    for (let lat = -67.5; lat <= 67.5; lat += 15) {
-      const { x, y } = projectLonLat(lon, lat, width, height);
-      ctx.fillRect(x - 1, y - 1, 2, 2);
-    }
-  }
-  ctx.restore();
-}
-
-function drawTextureLand(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  ctx.save();
-  ctx.shadowColor = "rgba(168, 85, 247, 0.92)";
-  ctx.shadowBlur = 18;
-  ctx.fillStyle = "rgba(43, 57, 137, 0.78)";
-  ctx.strokeStyle = "rgba(191, 219, 254, 0.72)";
-  ctx.lineWidth = 2.6;
-  for (const polygon of LAND_POLYGONS) {
-    drawLandPolygon(ctx, polygon, width, height);
-  }
-  ctx.restore();
-
-  ctx.save();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(168, 85, 247, 0.7)";
-  ctx.lineWidth = 1.3;
-  ctx.setLineDash([8, 7]);
-  for (const polygon of LAND_POLYGONS) {
-    strokeLandPolygon(ctx, polygon, width, height);
-  }
-  ctx.restore();
-
-  ctx.save();
-  ctx.globalAlpha = 0.88;
-  for (const dot of WORLD_DOTS) {
-    const { x, y } = projectLonLat(dot.lng, dot.lat, width, height);
-    const glow = ((Math.round(x + y) % 7) + 1) / 7;
-    ctx.fillStyle = glow > 0.72 ? "rgba(216, 180, 254, 0.86)" : "rgba(147, 197, 253, 0.38)";
-    ctx.beginPath();
-    ctx.arc(x, y, glow > 0.72 ? 1.55 : 1.05, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawTextureNetwork(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  const projected = TEXTURE_NETWORK_NODES.map(([lon, lat]) => projectLonLat(lon, lat, width, height));
-
-  ctx.save();
-  ctx.lineWidth = 1.25;
-  ctx.strokeStyle = "rgba(168, 85, 247, 0.28)";
-  ctx.shadowColor = "rgba(168, 85, 247, 0.65)";
-  ctx.shadowBlur = 10;
-  for (let index = 0; index < projected.length - 1; index += 1) {
-    if (index % 4 === 3) continue;
-    const start = projected[index];
-    const end = projected[index + 1];
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  ctx.save();
-  for (const [index, point] of projected.entries()) {
-    const strong = index % 3 === 0;
-    ctx.fillStyle = strong ? "rgba(233, 213, 255, 0.95)" : "rgba(168, 85, 247, 0.72)";
-    ctx.shadowColor = strong ? "rgba(233, 213, 255, 0.95)" : "rgba(168, 85, 247, 0.75)";
-    ctx.shadowBlur = strong ? 20 : 12;
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, strong ? 4.5 : 3.2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawLandPolygon(ctx: CanvasRenderingContext2D, points: LonLat[], width: number, height: number) {
-  pathLandPolygon(ctx, points, width, height);
-  ctx.fill();
-  ctx.stroke();
-}
-
-function strokeLandPolygon(ctx: CanvasRenderingContext2D, points: LonLat[], width: number, height: number) {
-  pathLandPolygon(ctx, points, width, height);
-  ctx.stroke();
-}
-
-function pathLandPolygon(ctx: CanvasRenderingContext2D, points: LonLat[], width: number, height: number) {
   ctx.beginPath();
-  points.forEach(([lon, lat], index) => {
-    const { x, y } = projectLonLat(lon, lat, width, height);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.closePath();
+  path(geoGraticule10());
+  ctx.strokeStyle = "rgba(96, 165, 250, 0.18)";
+  ctx.lineWidth = 1.15;
+  ctx.stroke();
+  ctx.restore();
 }
 
-function projectLonLat(lon: number, lat: number, width: number, height: number) {
-  return {
-    x: ((lon + 180) / 360) * width,
-    y: ((90 - lat) / 180) * height,
-  };
+function drawLandMask(ctx: CanvasRenderingContext2D, path: ReturnType<typeof geoPath>, width: number, height: number) {
+  ctx.clearRect(0, 0, width, height);
+  ctx.save();
+  ctx.beginPath();
+  path(LAND_FEATURE);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawTextureLand(ctx: CanvasRenderingContext2D, path: ReturnType<typeof geoPath>) {
+  ctx.save();
+  ctx.beginPath();
+  path(LAND_FEATURE);
+  ctx.shadowColor = "rgba(103, 232, 249, 0.74)";
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = "rgba(30, 42, 115, 0.84)";
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  path(LAND_FEATURE);
+  ctx.fillStyle = "rgba(88, 28, 135, 0.24)";
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  path(LAND_FEATURE);
+  ctx.shadowColor = "rgba(168, 85, 247, 0.96)";
+  ctx.shadowBlur = 20;
+  ctx.strokeStyle = "rgba(168, 85, 247, 0.62)";
+  ctx.lineWidth = 7;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  path(LAND_FEATURE);
+  ctx.shadowColor = "rgba(191, 219, 254, 0.9)";
+  ctx.shadowBlur = 11;
+  ctx.strokeStyle = "rgba(191, 219, 254, 0.78)";
+  ctx.lineWidth = 2.2;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  path(LAND_FEATURE);
+  ctx.strokeStyle = "rgba(103, 232, 249, 0.44)";
+  ctx.lineWidth = 0.9;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawTextureLandDots(
+  ctx: CanvasRenderingContext2D,
+  maskCtx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+) {
+  const mask = maskCtx.getImageData(0, 0, width, height).data;
+  const random = seededRandom(872341);
+  let accepted = 0;
+  let attempts = 0;
+
+  ctx.save();
+  while (accepted < 4200 && attempts < 42000) {
+    attempts += 1;
+    const x = Math.floor(random() * width);
+    const y = Math.floor((0.05 + random() * 0.82) * height);
+    if (!isMaskLand(mask, width, x, y)) continue;
+    const bright = random() > 0.91;
+    const cyan = random() > 0.72;
+    const radius = bright ? 1.45 + random() * 1.1 : 0.55 + random() * 0.75;
+    ctx.fillStyle = bright
+      ? "rgba(233, 213, 255, 0.9)"
+      : cyan
+        ? "rgba(103, 232, 249, 0.38)"
+        : "rgba(168, 85, 247, 0.46)";
+    ctx.shadowColor = cyan ? "rgba(103, 232, 249, 0.55)" : "rgba(168, 85, 247, 0.62)";
+    ctx.shadowBlur = bright ? 11 : 4;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    accepted += 1;
+  }
+  ctx.restore();
+}
+
+function drawTextureNetwork(
+  ctx: CanvasRenderingContext2D,
+  projection: GeoProjection,
+  maskData: Uint8ClampedArray | null,
+  width: number,
+) {
+  const projected = TEXTURE_NETWORK_NODES.map(([lon, lat]) => projection([lon, lat]));
+  const valid = projected.filter((point): point is [number, number] => Boolean(point));
+
+  ctx.save();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(168, 85, 247, 0.24)";
+  ctx.shadowColor = "rgba(168, 85, 247, 0.55)";
+  ctx.shadowBlur = 9;
+  for (let index = 0; index < valid.length - 1; index += 1) {
+    if (index % 4 === 3) continue;
+    const start = valid[index];
+    const end = valid[index + 1];
+    ctx.beginPath();
+    ctx.moveTo(start[0], start[1]);
+    ctx.lineTo(end[0], end[1]);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  for (const [index, point] of valid.entries()) {
+    const x = point[0];
+    const y = point[1];
+    if (maskData && !isMaskLand(maskData, width, Math.round(x), Math.round(y))) continue;
+    const strong = index % 3 === 0;
+    ctx.fillStyle = strong ? "rgba(233, 213, 255, 0.96)" : "rgba(168, 85, 247, 0.78)";
+    ctx.shadowColor = strong ? "rgba(233, 213, 255, 0.95)" : "rgba(168, 85, 247, 0.85)";
+    ctx.shadowBlur = strong ? 24 : 14;
+    ctx.beginPath();
+    ctx.arc(x, y, strong ? 5.4 : 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function latLngToVector(THREE: typeof import("three"), lat: number, lng: number, radius: number) {
@@ -844,51 +834,37 @@ function duplicateOffset(index: number) {
 
 function buildWorldDotMatrix() {
   const dots: WorldDot[] = [];
-  addEllipseDots(dots, 210, 158, 132, 66, 13, -8);
-  addEllipseDots(dots, 286, 196, 86, 52, 13, 6);
-  addEllipseDots(dots, 314, 298, 54, 104, 13, 14);
-  addEllipseDots(dots, 468, 153, 48, 26, 12, -8);
-  addEllipseDots(dots, 520, 242, 72, 98, 13, -2);
-  addEllipseDots(dots, 652, 172, 172, 72, 13, 4);
-  addEllipseDots(dots, 742, 226, 102, 54, 13, 10);
-  addEllipseDots(dots, 786, 322, 64, 34, 12, 6);
-  addEllipseDots(dots, 344, 92, 42, 18, 12, 0);
-  return dots.filter((dot) => !isCutOut(dot));
-}
-
-function addEllipseDots(dots: WorldDot[], cx: number, cy: number, rx: number, ry: number, step: number, slant = 0) {
-  for (let y = cy - ry; y <= cy + ry; y += step) {
-    const rowShift = Math.round((y - (cy - ry)) / step) % 2 === 0 ? 0 : step / 2;
-    for (let x = cx - rx; x <= cx + rx; x += step) {
-      const shiftedX = x + rowShift + ((y - cy) / ry) * slant;
-      const dx = (shiftedX - cx) / rx;
-      const dy = (y - cy) / ry;
-      if (dx * dx + dy * dy <= 1) {
-        dots.push({
-          lng: (shiftedX / 1000) * 360 - 180,
-          lat: 90 - (y / 420) * 180,
-        });
+  const random = seededRandom(412789);
+  for (let lat = -58; lat <= 74; lat += 3.25) {
+    for (let lng = -178; lng <= 178; lng += 3.25) {
+      const point: [number, number] = [
+        lng + (random() - 0.5) * 1.65,
+        lat + (random() - 0.5) * 1.65,
+      ];
+      if (geoContains(LAND_FEATURE, point)) {
+        dots.push({ lng: point[0], lat: point[1] });
       }
     }
   }
+  return dots;
 }
 
-function isCutOut(dot: WorldDot) {
-  const x = ((dot.lng + 180) / 360) * 1000;
-  const y = ((90 - dot.lat) / 180) * 420;
-  const cuts = [
-    { cx: 265, cy: 139, rx: 34, ry: 24 },
-    { cx: 250, cy: 232, rx: 54, ry: 28 },
-    { cx: 573, cy: 163, rx: 38, ry: 26 },
-    { cx: 595, cy: 260, rx: 40, ry: 38 },
-    { cx: 718, cy: 152, rx: 52, ry: 30 },
-    { cx: 704, cy: 252, rx: 42, ry: 24 },
-  ];
-  return cuts.some((cut) => {
-    const dx = (x - cut.cx) / cut.rx;
-    const dy = (y - cut.cy) / cut.ry;
-    return dx * dx + dy * dy < 1;
-  });
+function isMaskLand(mask: Uint8ClampedArray, width: number, x: number, y: number) {
+  if (x < 0 || y < 0 || x >= width) return false;
+  const index = (y * width + x) * 4 + 3;
+  if (index < 0 || index >= mask.length) return false;
+  return mask[index] > 0;
+}
+
+function seededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function disposeScene(scene: import("three").Scene) {
