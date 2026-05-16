@@ -97,6 +97,7 @@ type HomeStats = {
     publicSlug: string | null;
     occurredAt: string | null;
   }>;
+  map_nodes: Array<MapNode>;
   gameModes: {
     pvp: number;
     pve: number;
@@ -143,6 +144,24 @@ type ActivityPanelRow = {
   tone: string;
 };
 
+type MapNode = {
+  id: string;
+  name: string;
+  slug: string | null;
+  mode: string | null;
+  status: string;
+  sync_status: "active" | "pending" | string;
+  region: string | null;
+  country: string | null;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  x: number;
+  y: number;
+  active: boolean;
+  approximate?: boolean;
+};
+
 const emptyHomeStats: HomeStats = {
   totals: {
     serversLinked: 0,
@@ -156,6 +175,7 @@ const emptyHomeStats: HomeStats = {
   topServers: [],
   topPlayers: [],
   recentActivity: [],
+  map_nodes: [],
   gameModes: {
     pvp: 0,
     pve: 0,
@@ -279,6 +299,7 @@ export function DznLandingPage() {
     console.log("DZN SERVER COMPETITION HOMEPAGE WITH ANIMATED LOGO LOADED");
     console.log("DZN SERVER RANKING SYSTEM LOADED");
     console.log("DZN LIVE HOMEPAGE EXPERIENCE LOADED");
+    console.log("DZN HOMEPAGE WORLD MAP LIVE");
   }, []);
 
   useEffect(() => {
@@ -300,7 +321,7 @@ export function DznLandingPage() {
           initial="hidden"
           animate="show"
           variants={stagger}
-          className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-8 pt-4 sm:px-6 lg:px-8"
+          className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 pb-8 pt-3 sm:px-6 lg:px-8"
         >
           <HeroDashboard
             homeStats={liveStats.data}
@@ -473,11 +494,11 @@ function HeroDashboard({
   return (
     <motion.section
       variants={stagger}
-      className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.55fr)_430px]"
+      className="grid items-start gap-[18px] xl:grid-cols-[minmax(0,1.55fr)_430px]"
     >
       <motion.div
         variants={fadeUp}
-        className="dzn-home-hero-card relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#060a15]/64 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:min-h-[438px]"
+        className="dzn-home-hero-card relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#060a15]/64 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:min-h-[430px]"
       >
         <div className="dzn-home-energy-beam" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#02030a] via-[#02030a]/54 to-transparent" />
@@ -549,7 +570,7 @@ function HeroDashboard({
         </div>
       </motion.div>
 
-      <motion.div variants={fadeUp} className="grid gap-4">
+      <motion.div variants={fadeUp} className="flex flex-col gap-[18px]">
         <TopServersPanel rows={serverRows} />
         <RecentActivityPanel rows={activityRows} />
         <LiveMapPanel homeStats={homeStats} />
@@ -569,7 +590,7 @@ function TopServersPanel({ rows }: { rows: TopServerPanelRow[] }) {
         <span className="hidden text-right sm:block">Score</span>
       </div>
       <div className="mt-2 grid gap-1.5">
-        {rows.slice(0, 5).map((row) => (
+        {rows.slice(0, 4).map((row) => (
           <a
             key={`${row.rank}-${row.server}`}
             href={row.href}
@@ -618,8 +639,7 @@ function RecentActivityPanel({ rows }: { rows: ActivityPanelRow[] }) {
 }
 
 function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
-  const dots = Math.max(homeStats.totals.serversLinked, 1);
-  const nodeCount = Math.min(Math.max(dots + homeStats.syncHealth.active, 4), 10);
+  const nodes = homeStats.map_nodes;
 
   return (
     <div className="dzn-home-panel relative overflow-hidden rounded-xl border border-cyan-300/15 bg-cyan-300/[0.045] p-4 shadow-[0_0_38px_rgba(14,165,233,0.08)]">
@@ -636,28 +656,84 @@ function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
               : "Public server signals connected"}
           </p>
         </div>
-        <div className="dzn-home-map">
-          <span className="dzn-home-map-scan" />
-          <span className="dzn-home-map-ring dzn-home-map-ring-one" />
-          <span className="dzn-home-map-ring dzn-home-map-ring-two" />
-          {Array.from({ length: nodeCount }).map((_, index) => (
-            <span
-              key={index}
-              className="dzn-home-map-node"
-              style={{
-                left: `${12 + ((index * 17) % 76)}%`,
-                top: `${18 + ((index * 29) % 58)}%`,
-                animationDelay: `${index * 0.24}s`,
-              }}
-            />
-          ))}
-        </div>
+        <WorldServerMap nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
         <MiniMetric label="Sync Active" value={formatNumber(homeStats.syncHealth.active)} />
         <MiniMetric label="Pending" value={formatNumber(homeStats.syncHealth.pending)} />
         <MiniMetric label="Events" value={formatNumber(homeStats.totals.recentEventsCount)} />
       </div>
+    </div>
+  );
+}
+
+function WorldServerMap({ nodes }: { nodes: MapNode[] }) {
+  const safeNodes = nodes.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
+  const anchor = safeNodes[0] ?? null;
+
+  return (
+    <div className="dzn-home-map" aria-label="Live public server world map">
+      <svg className="dzn-home-map-svg" viewBox="0 0 100 58" role="img" aria-label="DZN public server network map">
+        <defs>
+          <linearGradient id="dznMapLine" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="rgba(103,232,249,0)" />
+            <stop offset="48%" stopColor="rgba(168,85,247,0.72)" />
+            <stop offset="100%" stopColor="rgba(103,232,249,0)" />
+          </linearGradient>
+          <filter id="dznMapGlow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="1.6" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        <path className="dzn-home-map-continent" d="M9 19l7-5 9 2 6-4 8 5-3 6 5 5-8 4-5 8-11-1-4-7-7-2 4-5z" />
+        <path className="dzn-home-map-continent" d="M24 39l8 2 4 7-3 7-7-2-5-7z" />
+        <path className="dzn-home-map-continent" d="M44 18l8-5 11 3 8-2 8 6-6 5 8 4-5 7-13-1-7 5-10-4 4-7z" />
+        <path className="dzn-home-map-continent" d="M65 35l9 1 6 6-4 9-8-3-5-6z" />
+        <path className="dzn-home-map-continent" d="M79 38l7 2 5 6-5 5-8-3z" />
+        <path className="dzn-home-map-continent" d="M83 17l8 1 4 5-6 3-8-2z" />
+
+        {anchor
+          ? safeNodes.slice(1).map((node) => (
+              <line
+                key={`line-${node.id}`}
+                className="dzn-home-map-line"
+                x1={anchor.x}
+                y1={anchor.y}
+                x2={node.x}
+                y2={node.y}
+              />
+            ))
+          : null}
+
+        {safeNodes.length === 0 ? (
+          <g className="dzn-home-map-empty">
+            <circle cx="50" cy="29" r="3.2" />
+            <text x="50" y="38" textAnchor="middle">Awaiting public nodes</text>
+          </g>
+        ) : null}
+
+        {safeNodes.map((node, index) => {
+          const href = node.slug ? `/servers/profile?slug=${encodeURIComponent(node.slug)}` : "/servers";
+          const title = `${node.name} - ${node.active ? "Sync active" : "Pending"} - ${node.region ?? "Location awaiting metadata"}${node.approximate ? " (approx. region)" : ""}`;
+          return (
+            <a key={node.id} href={href} aria-label={title}>
+              <g
+                className={node.active ? "dzn-home-map-server dzn-home-map-server--active" : "dzn-home-map-server dzn-home-map-server--pending"}
+                style={{ animationDelay: `${index * 0.24}s` }}
+              >
+                <title>{title}</title>
+                {node.active ? <circle className="dzn-home-map-server-pulse" cx={node.x} cy={node.y} r="4.2" /> : null}
+                <circle className="dzn-home-map-server-dot" cx={node.x} cy={node.y} r={node.active ? 1.45 : 1.25} />
+              </g>
+            </a>
+          );
+        })}
+      </svg>
+      <span className="dzn-home-map-scan" />
     </div>
   );
 }
@@ -672,7 +748,7 @@ function FeatureStrip() {
             key={feature.title}
             id={feature.title === "Server vs Server Events" ? "server-events" : undefined}
             whileHover={{ y: -4 }}
-            className="dzn-home-card group relative scroll-mt-28 overflow-hidden rounded-xl border border-white/10 bg-[#070b16]/74 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl transition duration-300 hover:border-violet-300/32"
+            className="dzn-home-card group relative min-h-[176px] scroll-mt-28 overflow-hidden rounded-xl border border-white/10 bg-[#070b16]/74 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl transition duration-300 hover:border-violet-300/32"
           >
             <div className={`absolute inset-0 bg-gradient-to-br ${feature.accent} opacity-0 transition duration-300 group-hover:opacity-100`} />
             <div className="relative z-10">
@@ -741,7 +817,7 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
             <Link
               key={mode.title}
               href="/servers"
-              className="dzn-home-card group relative overflow-hidden rounded-lg border border-white/10 bg-white/[0.035] p-4 transition duration-300 hover:-translate-y-1 hover:border-violet-300/34 hover:bg-white/[0.06]"
+              className="dzn-home-card group relative min-h-[154px] overflow-hidden rounded-lg border border-white/10 bg-white/[0.035] p-4 transition duration-300 hover:-translate-y-1 hover:border-violet-300/34 hover:bg-white/[0.06]"
             >
               <div className={`absolute inset-0 bg-gradient-to-br ${mode.tint} opacity-80`} />
               <div className="relative z-10">
@@ -791,7 +867,7 @@ function StatsRow({ homeStats }: { homeStats: HomeStats }) {
       {stats.map((stat) => {
         const Icon = stat.icon;
         return (
-          <div key={stat.label} className="dzn-home-stat-card flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.035] p-4">
+          <div key={stat.label} className="dzn-home-stat-card flex min-h-[86px] items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.035] p-4">
             <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-cyan-300/18 bg-cyan-300/8 text-cyan-100">
               <Icon className="h-5 w-5" />
             </span>
@@ -915,6 +991,25 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       : [],
     topPlayers: Array.isArray(payload.topPlayers) ? payload.topPlayers : [],
     recentActivity: Array.isArray(payload.recentActivity) ? payload.recentActivity : [],
+    map_nodes: Array.isArray(payload.map_nodes)
+      ? payload.map_nodes.map((node, index) => ({
+          id: typeof node.id === "string" && node.id.trim() ? node.id : `server-${index + 1}`,
+          name: typeof node.name === "string" && node.name.trim() ? node.name : "Unnamed DZN Server",
+          slug: typeof node.slug === "string" && node.slug.trim() ? node.slug : null,
+          mode: typeof node.mode === "string" ? node.mode : null,
+          status: typeof node.status === "string" ? node.status : "live",
+          sync_status: typeof node.sync_status === "string" ? node.sync_status : "pending",
+          region: typeof node.region === "string" && node.region.trim() ? node.region : "Location awaiting metadata",
+          country: typeof node.country === "string" ? node.country : null,
+          city: typeof node.city === "string" ? node.city : null,
+          latitude: finiteNumberOrNull(node.latitude),
+          longitude: finiteNumberOrNull(node.longitude),
+          x: clamp(numberOrZero(node.x), 5, 95),
+          y: clamp(numberOrZero(node.y), 8, 90),
+          active: Boolean(node.active),
+          approximate: Boolean(node.approximate),
+        }))
+      : [],
     gameModes: {
       pvp: numberOrZero(payload.gameModes?.pvp),
       pve: numberOrZero(payload.gameModes?.pve),
@@ -1052,4 +1147,13 @@ function formatAgo(value: string | null) {
 
 function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
+}
+
+function finiteNumberOrNull(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
