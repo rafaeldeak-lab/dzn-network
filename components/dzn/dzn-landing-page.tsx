@@ -830,13 +830,8 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 
 function Footer() {
   return (
-    <footer className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 pb-7 pt-3 text-xs text-zinc-500 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+    <footer className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-7 pt-3 text-xs text-zinc-500 sm:px-6 lg:px-8">
       <p>Copyright {new Date().getFullYear()} DZN Network. Server competition intelligence for connected DayZ communities.</p>
-      <div className="flex flex-wrap gap-4">
-        <Link href="/servers" className="transition hover:text-white">Servers</Link>
-        <a href="/leaderboards" className="transition hover:text-white">Leaderboards</a>
-        <a href="/signup" className="transition hover:text-white">Add Your Server</a>
-      </div>
     </footer>
   );
 }
