@@ -45,6 +45,7 @@ type TooltipState = {
   name: string;
   status: string;
   region: string;
+  tone: "active" | "pending";
 } | null;
 
 type LandTopology = Topology<{ land: GeometryCollection }>;
@@ -62,13 +63,14 @@ type PointerState = {
 const LAND_TOPOLOGY = land50m as unknown as LandTopology;
 const LAND_FEATURE = feature(LAND_TOPOLOGY, LAND_TOPOLOGY.objects.land) as FeatureCollection<Geometry>;
 let cachedDznGlobeTextureCanvas: HTMLCanvasElement | null = null;
+let cachedCoastlinePositions: Float32Array | null = null;
 const DEFAULT_GLOBE_ROTATION_X = -0.1;
 const DEFAULT_GLOBE_ROTATION_Y = -0.42;
 const DEFAULT_GLOBE_ZOOM = 1;
-const MIN_GLOBE_ZOOM = 0.82;
-const MAX_GLOBE_ZOOM = 1.35;
+const MIN_GLOBE_ZOOM = 0.75;
+const MAX_GLOBE_ZOOM = 1.85;
 const GLOBE_ZOOM_STEP = 0.08;
-const BASE_CAMERA_Z = 3.15;
+const BASE_CAMERA_Z = 2.7;
 const AUTO_ROTATE_SPEED = 0.00155;
 const DRAG_ROTATE_X_SPEED = 0.006;
 const DRAG_ROTATE_Y_SPEED = 0.0035;
@@ -95,6 +97,10 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
+    console.log("DZN globe real server markers:", {
+      mapNodes: nodes.length,
+      renderedServerMarkers: globePoints.length,
+    });
     console.log("DZN globe map nodes");
     console.table(
       globePoints.map((point) => ({
@@ -107,7 +113,7 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
         slug: point.node.slug,
       })),
     );
-  }, [globePoints]);
+  }, [globePoints, nodes.length]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -140,6 +146,7 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
               console.log("DZN GLOBE DRAG ROTATION ENABLED");
               console.log("DZN GLOBE FREE ROTATE AND ZOOM READY");
               console.log("DZN GLOBE REAL SERVER NODES ONLY");
+              console.log("DZN HD GEO GLOBE READY");
               loggedRef.current = true;
             }
           },
@@ -189,7 +196,9 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
         >
           <strong>{tooltip.name}</strong>
           <span>{tooltip.region}</span>
-          <em>{tooltip.status}</em>
+          <em className={`dzn-operational-globe-tooltip-status dzn-operational-globe-tooltip-status--${tooltip.tone}`}>
+            {tooltip.status}
+          </em>
         </span>
       ) : null}
       <div
@@ -249,7 +258,7 @@ function createThreeGlobe({
   onReady: () => void;
 }) {
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 20);
+  const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 20);
   camera.position.set(0, 0, BASE_CAMERA_Z / zoomRef.current);
 
   const renderer = new THREE.WebGLRenderer({
@@ -258,7 +267,7 @@ function createThreeGlobe({
     powerPreference: "low-power",
   });
   renderer.setClearColor(0x000000, 0);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.domElement.className = "dzn-operational-globe-canvas";
   stage.appendChild(renderer.domElement);
 
@@ -283,15 +292,15 @@ function createThreeGlobe({
   globeTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4);
 
   const earth = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 88, 88),
+    new THREE.SphereGeometry(1, 96, 96),
     new THREE.MeshStandardMaterial({
       map: globeTexture,
       emissiveMap: globeTexture,
-      color: 0xe7efff,
-      emissive: 0x16043d,
-      emissiveIntensity: 0.28,
-      roughness: 0.82,
-      metalness: 0.05,
+      color: 0xcdd9ff,
+      emissive: 0x1d0757,
+      emissiveIntensity: 0.34,
+      roughness: 0.76,
+      metalness: 0.08,
       transparent: true,
       opacity: 0.98,
     }),
@@ -316,7 +325,7 @@ function createThreeGlobe({
     new THREE.MeshBasicMaterial({
       color: 0x67e8f9,
       transparent: true,
-      opacity: 0.035,
+      opacity: 0.026,
       wireframe: true,
       depthWrite: false,
     }),
@@ -324,6 +333,7 @@ function createThreeGlobe({
   globeGroup.add(surfaceGlow);
 
   addGlobeGrid(THREE, globeGroup);
+  addLandCoastlineOverlay(THREE, globeGroup);
 
   const { targetMeshes, pulseMeshes } = addServerNodes(THREE, globeGroup, points);
   addServerConnectionLines(THREE, globeGroup, points);
@@ -513,7 +523,8 @@ function createThreeGlobe({
       y: Math.min(Math.max(event.clientY - rect.top + 12, 10), rect.height - 82),
       name: point.node.display_name || point.node.name,
       region: point.region,
-      status: point.active ? "Sync active" : "Pending",
+      status: point.active ? "Active" : "Pending",
+      tone: point.active ? "active" : "pending",
     });
     return point;
   }
@@ -550,6 +561,80 @@ function addGlobeGrid(THREE: typeof import("three"), group: import("three").Grou
   }
 }
 
+function addLandCoastlineOverlay(THREE: typeof import("three"), group: import("three").Group) {
+  const positions = cachedCoastlinePositions ?? buildCoastlinePositions(THREE);
+  cachedCoastlinePositions = positions;
+  if (positions.length === 0) return;
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+
+  const purpleGlow = new THREE.LineSegments(
+    geometry,
+    new THREE.LineBasicMaterial({
+      color: 0xa855f7,
+      transparent: true,
+      opacity: 0.38,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  group.add(purpleGlow);
+
+  const cyanEdge = new THREE.LineSegments(
+    geometry.clone(),
+    new THREE.LineBasicMaterial({
+      color: 0x67e8f9,
+      transparent: true,
+      opacity: 0.2,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  group.add(cyanEdge);
+}
+
+function buildCoastlinePositions(THREE: typeof import("three")) {
+  const positions: number[] = [];
+  for (const item of LAND_FEATURE.features) {
+    collectGeometryRings(item.geometry, (ring) => {
+      for (let index = 1; index < ring.length; index += 1) {
+        const previous = ring[index - 1];
+        const current = ring[index];
+        if (!validLonLat(previous) || !validLonLat(current)) continue;
+        if (Math.abs(previous[0] - current[0]) > 35) continue;
+        const start = latLngToVector(THREE, previous[1], previous[0], 1.026);
+        const end = latLngToVector(THREE, current[1], current[0], 1.026);
+        positions.push(start.x, start.y, start.z, end.x, end.y, end.z);
+      }
+    });
+  }
+  return new Float32Array(positions);
+}
+
+function collectGeometryRings(geometry: Geometry, visit: (ring: number[][]) => void) {
+  if (geometry.type === "Polygon") {
+    geometry.coordinates.forEach((ring) => visit(ring as number[][]));
+    return;
+  }
+  if (geometry.type === "MultiPolygon") {
+    geometry.coordinates.forEach((polygon) => polygon.forEach((ring) => visit(ring as number[][])));
+    return;
+  }
+  if (geometry.type === "GeometryCollection") {
+    geometry.geometries.forEach((child) => collectGeometryRings(child as Geometry, visit));
+  }
+}
+
+function validLonLat(value: unknown): value is [number, number] {
+  return Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number" &&
+    Number.isFinite(value[0]) &&
+    Number.isFinite(value[1]);
+}
+
 function addServerNodes(THREE: typeof import("three"), group: import("three").Group, points: GlobePoint[]) {
   const targetMeshes: import("three").Object3D[] = [];
   const pulseMeshes: Array<{
@@ -560,16 +645,60 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
   }> = [];
 
   points.forEach((point, index) => {
-    const position = latLngToVector(THREE, point.lat, point.lng, 1.108);
-    const nodeMaterial = new THREE.MeshBasicMaterial({
-      color: point.active ? 0xffffff : 0xc084fc,
+    const surface = latLngToVector(THREE, point.lat, point.lng, 1.08);
+    const position = latLngToVector(THREE, point.lat, point.lng, 1.145);
+    const normal = position.clone().normalize();
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: point.active ? 0xa855f7 : 0xf59e0b,
       transparent: true,
-      opacity: point.active ? 1 : 0.68,
+      opacity: point.active ? 0.42 : 0.24,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ringMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(point.active ? 0.09 : 0.068, point.active ? 0.0045 : 0.0035, 8, 42),
+      ringMaterial,
+    );
+    ringMesh.position.copy(surface);
+    ringMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    group.add(ringMesh);
+
+    const beamMaterial = new THREE.LineBasicMaterial({
+      color: point.active ? 0xc084fc : 0xf59e0b,
+      transparent: true,
+      opacity: point.active ? 0.62 : 0.34,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const beamGeometry = new THREE.BufferGeometry().setFromPoints([
+      latLngToVector(THREE, point.lat, point.lng, 1.09),
+      latLngToVector(THREE, point.lat, point.lng, point.active ? 1.32 : 1.23),
+    ]);
+    group.add(new THREE.Line(beamGeometry, beamMaterial));
+
+    const outerGlowMaterial = new THREE.MeshBasicMaterial({
+      color: point.active ? 0x67e8f9 : 0xf59e0b,
+      transparent: true,
+      opacity: point.active ? 0.18 : 0.1,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const outerGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(point.active ? 0.105 : 0.072, 18, 18),
+      outerGlowMaterial,
+    );
+    outerGlow.position.copy(position);
+    group.add(outerGlow);
+
+    const nodeMaterial = new THREE.MeshBasicMaterial({
+      color: point.active ? 0xc084fc : 0xf59e0b,
+      transparent: true,
+      opacity: point.active ? 0.98 : 0.72,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const nodeMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.058 : 0.044, 18, 18),
+      new THREE.SphereGeometry(point.active ? 0.052 : 0.04, 18, 18),
       nodeMaterial,
     );
     nodeMesh.position.copy(position);
@@ -578,9 +707,9 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
     targetMeshes.push(nodeMesh);
 
     const pulseMaterial = new THREE.MeshBasicMaterial({
-      color: point.active ? 0xa855f7 : 0x8b5cf6,
+      color: point.active ? 0xa855f7 : 0xf59e0b,
       transparent: true,
-      opacity: point.active ? 0.34 : 0.08,
+      opacity: point.active ? 0.3 : 0.09,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -651,10 +780,18 @@ function createDznGlobeTextureCanvas() {
 
   const { width, height } = canvas;
   const ocean = ctx.createLinearGradient(0, 0, 0, height);
-  ocean.addColorStop(0, "#08142e");
-  ocean.addColorStop(0.42, "#030b1f");
-  ocean.addColorStop(1, "#081332");
+  ocean.addColorStop(0, "#0a1838");
+  ocean.addColorStop(0.36, "#031027");
+  ocean.addColorStop(0.72, "#020816");
+  ocean.addColorStop(1, "#08163a");
   ctx.fillStyle = ocean;
+  ctx.fillRect(0, 0, width, height);
+
+  const oceanGlow = ctx.createRadialGradient(width * 0.54, height * 0.45, height * 0.08, width * 0.54, height * 0.45, width * 0.58);
+  oceanGlow.addColorStop(0, "rgba(59, 130, 246, 0.1)");
+  oceanGlow.addColorStop(0.52, "rgba(124, 58, 237, 0.05)");
+  oceanGlow.addColorStop(1, "rgba(2, 6, 23, 0)");
+  ctx.fillStyle = oceanGlow;
   ctx.fillRect(0, 0, width, height);
 
   const projection = geoEquirectangular()
@@ -706,36 +843,36 @@ function drawTextureLand(ctx: CanvasRenderingContext2D, path: ReturnType<typeof 
   ctx.save();
   ctx.beginPath();
   path(LAND_FEATURE);
-  ctx.shadowColor = "rgba(103, 232, 249, 0.74)";
-  ctx.shadowBlur = 30;
-  ctx.fillStyle = "rgba(30, 42, 115, 0.84)";
+  ctx.shadowColor = "rgba(103, 232, 249, 0.48)";
+  ctx.shadowBlur = 34;
+  ctx.fillStyle = "rgba(20, 31, 74, 0.94)";
   ctx.fill();
   ctx.restore();
 
   ctx.save();
   ctx.beginPath();
   path(LAND_FEATURE);
-  ctx.fillStyle = "rgba(88, 28, 135, 0.24)";
+  ctx.fillStyle = "rgba(88, 28, 135, 0.28)";
   ctx.fill();
   ctx.restore();
 
   ctx.save();
   ctx.beginPath();
   path(LAND_FEATURE);
-  ctx.shadowColor = "rgba(168, 85, 247, 0.96)";
-  ctx.shadowBlur = 20;
-  ctx.strokeStyle = "rgba(168, 85, 247, 0.62)";
-  ctx.lineWidth = 7;
+  ctx.shadowColor = "rgba(168, 85, 247, 0.9)";
+  ctx.shadowBlur = 18;
+  ctx.strokeStyle = "rgba(168, 85, 247, 0.55)";
+  ctx.lineWidth = 5.5;
   ctx.stroke();
   ctx.restore();
 
   ctx.save();
   ctx.beginPath();
   path(LAND_FEATURE);
-  ctx.shadowColor = "rgba(191, 219, 254, 0.9)";
-  ctx.shadowBlur = 11;
-  ctx.strokeStyle = "rgba(191, 219, 254, 0.78)";
-  ctx.lineWidth = 2.2;
+  ctx.shadowColor = "rgba(103, 232, 249, 0.74)";
+  ctx.shadowBlur = 9;
+  ctx.strokeStyle = "rgba(191, 219, 254, 0.74)";
+  ctx.lineWidth = 1.8;
   ctx.stroke();
   ctx.restore();
 
@@ -760,16 +897,16 @@ function drawTextureLandDots(
   let attempts = 0;
 
   ctx.save();
-  while (accepted < 700 && attempts < 16000) {
+  while (accepted < 1800 && attempts < 32000) {
     attempts += 1;
     const x = Math.floor(random() * width);
     const y = Math.floor((0.05 + random() * 0.82) * height);
     if (!isMaskLand(mask, width, x, y)) continue;
     const cyan = random() > 0.72;
-    const radius = 0.35 + random() * 0.38;
-    ctx.fillStyle = cyan ? "rgba(103, 232, 249, 0.14)" : "rgba(168, 85, 247, 0.16)";
-    ctx.shadowColor = cyan ? "rgba(103, 232, 249, 0.14)" : "rgba(168, 85, 247, 0.16)";
-    ctx.shadowBlur = 1.5;
+    const radius = 0.22 + random() * 0.32;
+    ctx.fillStyle = cyan ? "rgba(103, 232, 249, 0.1)" : "rgba(168, 85, 247, 0.12)";
+    ctx.shadowColor = cyan ? "rgba(103, 232, 249, 0.12)" : "rgba(168, 85, 247, 0.14)";
+    ctx.shadowBlur = 0.7;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();

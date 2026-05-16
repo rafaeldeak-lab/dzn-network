@@ -584,6 +584,16 @@ body {
   color: #c4b5fd;
 }
 
+.dzn-operational-globe-tooltip-status--active {
+  color: #67e8f9;
+  text-shadow: 0 0 10px rgba(103, 232, 249, 0.42);
+}
+
+.dzn-operational-globe-tooltip-status--pending {
+  color: #fbbf24;
+  text-shadow: 0 0 10px rgba(251, 191, 36, 0.35);
+}
+
 .dzn-operational-globe-controls {
   position: absolute;
   right: 0.7rem;
