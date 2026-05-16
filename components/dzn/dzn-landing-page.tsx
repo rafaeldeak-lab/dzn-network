@@ -303,6 +303,7 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE PERFORMANCE OPTIMIZED");
     console.log("DZN GAME MODE CARDS UPGRADED");
     console.log("DZN HOMEPAGE STATS ROW UPGRADED");
+    console.log("DZN TOP SERVERS PANEL UPGRADED");
   }, []);
 
   useEffect(() => {
@@ -585,33 +586,50 @@ function HeroDashboard({
 
 function TopServersPanel({ rows }: { rows: TopServerPanelRow[] }) {
   return (
-    <PanelShell title="Top Servers" href="/servers" icon={Trophy}>
-      <div className="grid grid-cols-[28px_minmax(0,1fr)_72px_46px] gap-2 border-b border-white/10 pb-2 text-[0.6rem] font-black uppercase tracking-[0.12em] text-zinc-500 sm:grid-cols-[28px_minmax(136px,1fr)_86px_48px_62px]">
-        <span>#</span>
-        <span>Server</span>
-        <span className="text-right">K/D</span>
-        <span className="text-right">Kills</span>
-        <span className="hidden text-right sm:block">Score</span>
+    <section className="dzn-home-panel dzn-top-servers-panel">
+      <div className="dzn-top-servers-header">
+        <div className="dzn-top-servers-title-group">
+          <span className="dzn-top-servers-icon" aria-hidden="true">
+            <Trophy className="h-4 w-4" />
+          </span>
+          <h2>Top Servers</h2>
+        </div>
+        <a href="/leaderboards" className="dzn-top-servers-view">
+          View All <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </a>
       </div>
-      <div className="mt-2 grid gap-1.5">
-        {rows.slice(0, 3).map((row) => (
-          <a
-            key={`${row.rank}-${row.server}`}
-            href={row.href}
-            title={row.server}
-            className="grid grid-cols-[28px_minmax(0,1fr)_72px_46px] items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.035] px-2 py-1.5 text-xs transition duration-300 hover:border-violet-300/35 hover:bg-violet-300/8 sm:grid-cols-[28px_minmax(136px,1fr)_86px_48px_62px]"
-          >
-            <span className="font-black text-violet-200">{row.rank}</span>
-            <span className="min-w-0 break-words text-[0.76rem] font-bold leading-4 text-white sm:max-w-[180px]">{row.server}</span>
-            <span className="text-right text-[0.68rem] font-bold leading-3 text-zinc-300">{row.kd}</span>
-            <span className="text-right font-bold text-zinc-300">{row.kills}</span>
-            <span title={row.scoreTitle} className={row.active ? "hidden text-right font-black text-emerald-200 sm:block" : "hidden text-right font-bold text-zinc-500 sm:block"}>
-              {row.score}
-            </span>
-          </a>
-        ))}
+
+      <div className="dzn-top-servers-table">
+        <div className="dzn-top-servers-columns" aria-hidden="true">
+          <span>#</span>
+          <span>Server</span>
+          <span>K/D</span>
+          <span>Kills</span>
+          <span>Score</span>
+        </div>
+        <div className="dzn-top-servers-rows">
+          {rows.slice(0, 3).map((row) => (
+            <a
+              key={`${row.rank}-${row.server}`}
+              href={row.href}
+              title={row.server}
+              className="dzn-top-server-row"
+            >
+              <span className="dzn-top-server-rank">{row.rank}</span>
+              <span className="dzn-top-server-name">{row.server}</span>
+              <span title={row.kd} className="dzn-top-server-stat dzn-top-server-kd">{row.kd}</span>
+              <span className="dzn-top-server-stat dzn-top-server-kills">{row.kills}</span>
+              <span
+                title={row.scoreTitle}
+                className={row.active ? "dzn-top-server-score" : "dzn-top-server-score dzn-top-server-score--pending"}
+              >
+                {row.score}
+              </span>
+            </a>
+          ))}
+        </div>
       </div>
-    </PanelShell>
+    </section>
   );
 }
 
