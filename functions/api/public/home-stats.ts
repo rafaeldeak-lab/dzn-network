@@ -62,18 +62,21 @@ export type MapNodeRow = {
 };
 
 const MOCK_PLAYER_PREFIXES = ["MockSurvivor", "MockBandit", "MockRunner"];
+const PUBLIC_CACHE_HEADERS = {
+  "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+};
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
 
   if (!env.DB) {
-    return json(emptyHomeStats());
+    return json(emptyHomeStats(), { headers: PUBLIC_CACHE_HEADERS });
   }
 
   await ensureLinkedServerMetadataColumns(env);
   await ensureAdmSyncSchema(env);
   const data = await buildHomeStats(env);
-  return json(data);
+  return json(data, { headers: PUBLIC_CACHE_HEADERS });
 };
 
 async function buildHomeStats(env: Env) {

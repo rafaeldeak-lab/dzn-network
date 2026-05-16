@@ -2,7 +2,7 @@
 
 import { geoContains, geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
 import type { GeoProjection } from "d3-geo";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { feature } from "topojson-client";
 import type { FeatureCollection, Geometry } from "geojson";
@@ -76,6 +76,7 @@ type PointerState = {
 const LAND_TOPOLOGY = land50m as unknown as LandTopology;
 const LAND_FEATURE = feature(LAND_TOPOLOGY, LAND_TOPOLOGY.objects.land) as FeatureCollection<Geometry>;
 const WORLD_DOTS = buildWorldDotMatrix();
+let cachedDznGlobeTextureCanvas: HTMLCanvasElement | null = null;
 const DEFAULT_GLOBE_ROTATION_X = -0.1;
 const DEFAULT_GLOBE_ROTATION_Y = -0.42;
 const DEFAULT_GLOBE_ZOOM = 1;
@@ -104,7 +105,7 @@ const DECOR_POINTS: DecorPoint[] = [
   { lat: -25, lng: 134, size: 0.02, color: 0xa855f7 },
 ];
 
-export function DznOperationalGlobe({ nodes }: { nodes: DznOperationalGlobeNode[] }) {
+function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNode[] }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const loggedRef = useRef(false);
   const globeControlsRef = useRef<GlobeControls | null>(null);
@@ -711,11 +712,26 @@ function createArcGeometry(
 }
 
 function createDznGlobeTexture(THREE: typeof import("three")) {
+  const canvas = cachedDznGlobeTextureCanvas ?? createDznGlobeTextureCanvas();
+  cachedDznGlobeTextureCanvas = canvas;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+export const DznOperationalGlobe = memo(DznOperationalGlobeComponent, (previous, next) => (
+  globeNodeIdentityKey(previous.nodes) === globeNodeIdentityKey(next.nodes)
+));
+
+function createDznGlobeTextureCanvas() {
   const canvas = document.createElement("canvas");
   canvas.width = 2048;
   canvas.height = 1024;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) return canvas;
 
   const { width, height } = canvas;
   const ocean = ctx.createLinearGradient(0, 0, 0, height);
@@ -749,12 +765,7 @@ function createDznGlobeTexture(THREE: typeof import("three")) {
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, width, height);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.needsUpdate = true;
-  return texture;
+  return canvas;
 }
 
 function drawTextureGrid(ctx: CanvasRenderingContext2D, path: ReturnType<typeof geoPath>) {
@@ -928,6 +939,22 @@ function buildGlobePoints(nodes: DznOperationalGlobeNode[]) {
       };
     })
     .filter((point): point is GlobePoint => Boolean(point));
+}
+
+function globeNodeIdentityKey(nodes: DznOperationalGlobeNode[]) {
+  return nodes
+    .map((node) => [
+      node.id,
+      node.slug,
+      node.display_name ?? node.name,
+      node.sync_status,
+      node.status,
+      node.active ? "1" : "0",
+      node.latitude ?? node.lat ?? "",
+      node.longitude ?? node.lng ?? "",
+      node.location_label ?? node.region ?? "",
+    ].join(":"))
+    .join("|");
 }
 
 function nodeLocation(node: DznOperationalGlobeNode) {

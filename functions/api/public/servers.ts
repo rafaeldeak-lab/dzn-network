@@ -7,6 +7,10 @@ import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLead
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
 
+const PUBLIC_CACHE_HEADERS = {
+  "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+};
+
 type PublicServerRow = {
   id: string;
   public_slug: string | null;
@@ -125,7 +129,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const url = new URL(request.url);
   const slug = sanitizeSlug(url.searchParams.get("slug"));
-  return json(await getPublicServersPayload(env, slug));
+  return json(await getPublicServersPayload(env, slug), { headers: PUBLIC_CACHE_HEADERS });
 };
 
 export async function getPublicServersPayload(env: Env, slug: string | null) {

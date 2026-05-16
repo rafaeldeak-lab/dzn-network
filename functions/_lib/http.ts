@@ -16,9 +16,14 @@ export function secureHeaders(headers?: HeadersInit) {
 export function json(data: unknown, init: ResponseInit = {}) {
   const headers = secureHeaders(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
-  headers.set("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  headers.set("pragma", "no-cache");
-  headers.set("expires", "0");
+  if (!headers.has("cache-control")) {
+    headers.set("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    headers.set("pragma", "no-cache");
+    headers.set("expires", "0");
+  } else {
+    headers.delete("pragma");
+    headers.delete("expires");
+  }
 
   return new Response(JSON.stringify(data), {
     ...init,

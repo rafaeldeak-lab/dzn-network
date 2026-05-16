@@ -20,6 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   AnimatePresence,
@@ -33,7 +34,6 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 import { DznLogo } from "./dzn-logo";
-import { DznOperationalGlobe } from "./dzn-operational-globe";
 import type { DznOperationalGlobeNode } from "./dzn-operational-globe";
 
 const fadeUp: Variants = {
@@ -174,6 +174,13 @@ const emptyHomeStats: HomeStats = {
 
 const HOME_STATS_REFRESH_MS = 30000;
 const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
+const DznOperationalGlobe = dynamic(
+  () => import("./dzn-operational-globe").then((module) => module.DznOperationalGlobe),
+  {
+    ssr: false,
+    loading: () => <DznOperationalGlobePlaceholder />,
+  },
+);
 
 const navItems = [
   { label: "Features", href: "#features" },
@@ -238,6 +245,7 @@ function useHomeStats() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState("");
   const inFlight = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -245,10 +253,13 @@ function useHomeStats() {
     async function load() {
       if (inFlight.current) return;
       inFlight.current = true;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
         const response = await fetch("/api/public/home-stats", {
-          cache: "no-store",
           headers: { accept: "application/json" },
+          signal: controller.signal,
         });
         const payload = (await response.json().catch(() => ({}))) as HomeStatsResponse;
         if (!response.ok) throw new Error(payload.error || "Live stats unavailable");
@@ -256,9 +267,11 @@ function useHomeStats() {
         setData(normalizeHomeStats(payload));
         setLastUpdated(new Date());
         setError("");
-      } catch {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         if (active) setError("Live stats temporarily unavailable.");
       } finally {
+        if (abortRef.current === controller) abortRef.current = null;
         inFlight.current = false;
       }
     }
@@ -267,6 +280,7 @@ function useHomeStats() {
     const interval = window.setInterval(load, HOME_STATS_REFRESH_MS);
     return () => {
       active = false;
+      abortRef.current?.abort();
       window.clearInterval(interval);
     };
   }, []);
@@ -286,6 +300,7 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE WORLD MAP LIVE");
     console.log("DZN HOMEPAGE MAP AND LAYOUT FINALIZED");
     console.log("DZN WORLD MAP VISUAL MATCHED");
+    console.log("DZN HOMEPAGE PERFORMANCE OPTIMIZED");
   }, []);
 
   useEffect(() => {
@@ -650,6 +665,23 @@ function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
         <MiniMetric label="Pending" value={formatNumber(homeStats.syncHealth.pending)} />
         <MiniMetric label="Events" value={formatNumber(homeStats.totals.recentEventsCount)} />
       </div>
+    </div>
+  );
+}
+
+function DznOperationalGlobePlaceholder() {
+  return (
+    <div
+      className="dzn-operational-globe-stage dzn-operational-globe-stage--placeholder"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading live DZN operational globe"
+    >
+      <span className="dzn-operational-globe-orbit dzn-operational-globe-orbit-one" aria-hidden="true" />
+      <span className="dzn-operational-globe-orbit dzn-operational-globe-orbit-two" aria-hidden="true" />
+      <span className="dzn-operational-globe-floor-glow" aria-hidden="true" />
+      <span className="dzn-operational-globe-placeholder-sphere" aria-hidden="true" />
+      <span className="dzn-operational-globe-fallback">Loading live globe...</span>
     </div>
   );
 }
