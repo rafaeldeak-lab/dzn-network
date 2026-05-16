@@ -416,9 +416,10 @@ async function getMapNodes(db: D1Database) {
     .all<MapNodeRow>();
 
   const coordinateCounts = new Map<string, number>();
-  return (result.results ?? []).map((row, index) => {
+  return (result.results ?? []).flatMap((row, index) => {
     const serverName = firstString(row.server_name, row.guild_name) ?? "Unnamed DZN Server";
     const placement = mapPlacementFor(row);
+    if (!placement.usable) return [];
     const key = `${Math.round(placement.x)}:${Math.round(placement.y)}`;
     const count = coordinateCounts.get(key) ?? 0;
     coordinateCounts.set(key, count + 1);
@@ -430,15 +431,19 @@ async function getMapNodes(db: D1Database) {
     return {
       id: row.public_slug ?? `server-${index + 1}`,
       name: serverName,
+      display_name: serverName,
       slug: row.public_slug,
       mode: normalizeText(row.server_type, "UNKNOWN"),
-      status: "live",
+      server_type: normalizeText(row.server_type, "UNKNOWN"),
+      status: Number(row.stats_active) === 1 ? "active" : "pending",
       sync_status: Number(row.stats_active) === 1 ? "active" : "pending",
       region: regionLabel,
       country: null,
       city: null,
       latitude: null,
       longitude: null,
+      lat: null,
+      lng: null,
       x: roundOne(x),
       y: roundOne(y),
       active: Number(row.stats_active) === 1,
@@ -462,6 +467,7 @@ function mapPlacementFor(row: MapNodeRow) {
       y: location.y,
       regionLabel: publicRegion ?? location.label,
       approximate: true,
+      usable: true,
     };
   }
 
@@ -470,6 +476,7 @@ function mapPlacementFor(row: MapNodeRow) {
     y: 50,
     regionLabel: publicRegion ?? "Location awaiting metadata",
     approximate: true,
+    usable: false,
   };
 }
 

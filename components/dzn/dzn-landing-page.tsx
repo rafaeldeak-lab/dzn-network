@@ -33,8 +33,8 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 import { DznLogo } from "./dzn-logo";
-import { DznWorldMap } from "./dzn-world-map";
-import type { DznWorldMapNode } from "./dzn-world-map";
+import { DznOperationalGlobe } from "./dzn-operational-globe";
+import type { DznOperationalGlobeNode } from "./dzn-operational-globe";
 
 const fadeUp: Variants = {
   hidden: { opacity: 0, y: 24 },
@@ -99,7 +99,7 @@ type HomeStats = {
     publicSlug: string | null;
     occurredAt: string | null;
   }>;
-  map_nodes: Array<DznWorldMapNode>;
+  map_nodes: Array<DznOperationalGlobeNode>;
   gameModes: {
     pvp: number;
     pve: number;
@@ -643,7 +643,7 @@ function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
               : "Public server signals connected"}
           </p>
         </div>
-        <DznWorldMap nodes={nodes} />
+        <DznOperationalGlobe nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
         <MiniMetric label="Sync Active" value={formatNumber(homeStats.syncHealth.active)} />
@@ -908,23 +908,42 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
     topPlayers: Array.isArray(payload.topPlayers) ? payload.topPlayers : [],
     recentActivity: Array.isArray(payload.recentActivity) ? payload.recentActivity : [],
     map_nodes: Array.isArray(payload.map_nodes)
-      ? payload.map_nodes.map((node, index) => ({
-          id: typeof node.id === "string" && node.id.trim() ? node.id : `server-${index + 1}`,
-          name: typeof node.name === "string" && node.name.trim() ? node.name : "Unnamed DZN Server",
-          slug: typeof node.slug === "string" && node.slug.trim() ? node.slug : null,
-          mode: typeof node.mode === "string" ? node.mode : null,
-          status: typeof node.status === "string" ? node.status : "live",
-          sync_status: typeof node.sync_status === "string" ? node.sync_status : "pending",
-          region: typeof node.region === "string" && node.region.trim() ? node.region : "Location awaiting metadata",
-          country: typeof node.country === "string" ? node.country : null,
-          city: typeof node.city === "string" ? node.city : null,
-          latitude: finiteNumberOrNull(node.latitude),
-          longitude: finiteNumberOrNull(node.longitude),
-          x: clamp(numberOrZero(node.x), 5, 95),
-          y: clamp(numberOrZero(node.y), 8, 90),
-          active: Boolean(node.active),
-          approximate: Boolean(node.approximate),
-        }))
+      ? payload.map_nodes.map((node, index) => {
+          const rawNode = node as DznOperationalGlobeNode & {
+            display_name?: unknown;
+            lat?: unknown;
+            lng?: unknown;
+            server_type?: unknown;
+          };
+          const displayName =
+            typeof rawNode.display_name === "string" && rawNode.display_name.trim()
+              ? rawNode.display_name.trim()
+              : typeof rawNode.name === "string" && rawNode.name.trim()
+                ? rawNode.name.trim()
+                : "Unnamed DZN Server";
+
+          return {
+            id: typeof rawNode.id === "string" && rawNode.id.trim() ? rawNode.id : `server-${index + 1}`,
+            name: displayName,
+            display_name: displayName,
+            slug: typeof rawNode.slug === "string" && rawNode.slug.trim() ? rawNode.slug : null,
+            mode: typeof rawNode.mode === "string" ? rawNode.mode : typeof rawNode.server_type === "string" ? rawNode.server_type : null,
+            server_type: typeof rawNode.server_type === "string" ? rawNode.server_type : null,
+            status: typeof rawNode.status === "string" ? rawNode.status : "pending",
+            sync_status: typeof rawNode.sync_status === "string" ? rawNode.sync_status : "pending",
+            region: typeof rawNode.region === "string" && rawNode.region.trim() ? rawNode.region : "Location awaiting metadata",
+            country: typeof rawNode.country === "string" ? rawNode.country : null,
+            city: typeof rawNode.city === "string" ? rawNode.city : null,
+            latitude: finiteNumberOrNull(rawNode.latitude),
+            longitude: finiteNumberOrNull(rawNode.longitude),
+            lat: finiteNumberOrNull(rawNode.lat),
+            lng: finiteNumberOrNull(rawNode.lng),
+            x: clamp(numberOrZero(rawNode.x), 5, 95),
+            y: clamp(numberOrZero(rawNode.y), 8, 90),
+            active: Boolean(rawNode.active) || rawNode.sync_status === "active" || rawNode.status === "active",
+            approximate: Boolean(rawNode.approximate),
+          };
+        })
       : [],
     gameModes: {
       pvp: numberOrZero(payload.gameModes?.pvp),
