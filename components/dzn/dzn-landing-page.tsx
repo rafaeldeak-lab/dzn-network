@@ -301,6 +301,7 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE MAP AND LAYOUT FINALIZED");
     console.log("DZN WORLD MAP VISUAL MATCHED");
     console.log("DZN HOMEPAGE PERFORMANCE OPTIMIZED");
+    console.log("DZN GAME MODE CARDS UPGRADED");
   }, []);
 
   useEffect(() => {
@@ -722,61 +723,67 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
       count: counts.pvp,
       description: "High-risk servers competing on confirmed kills, K/D, and longest shots.",
       icon: Crosshair,
-      tint: "from-red-500/20 to-violet-500/8",
+      theme: "pvp",
     },
     {
       title: "DEATHMATCH",
       count: counts.deathmatch,
       description: "Fast combat communities pushing activity, volume, and clean kill tracking.",
       icon: Skull,
-      tint: "from-cyan-400/16 to-blue-500/8",
+      theme: "deathmatch",
     },
     {
       title: "PVE",
       count: counts.pve,
       description: "Survival-focused servers building longevity, events, and community reputation.",
       icon: Shield,
-      tint: "from-emerald-400/16 to-cyan-500/8",
+      theme: "pve",
     },
     {
       title: "PVP / PVE",
       count: counts.pvpPve,
       description: "Hybrid worlds where factions, raids, survival, and competition all count.",
       icon: Swords,
-      tint: "from-violet-400/18 to-fuchsia-500/8",
+      theme: "hybrid",
     },
   ];
 
   return (
-    <motion.section variants={fadeUp} className="dzn-home-panel rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
+    <motion.section variants={fadeUp} className="dzn-home-panel dzn-game-modes-section rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
           <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-200">Game Modes</p>
           <h2 className="text-xl font-black uppercase text-white">Find your battleground</h2>
         </div>
-        <Link href="/servers" className="text-[0.68rem] font-black uppercase tracking-[0.14em] text-cyan-200 hover:text-white">
-          View servers
+        <Link href="/servers" className="dzn-game-modes-view-all text-[0.68rem] font-black uppercase tracking-[0.14em] text-cyan-200 hover:text-white">
+          View servers <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {modes.map((mode) => {
           const Icon = mode.icon;
+          const count = numberOrZero(mode.count);
           return (
             <Link
               key={mode.title}
               href="/servers"
-              className="dzn-home-card group relative min-h-[154px] overflow-hidden rounded-lg border border-white/10 bg-white/[0.035] p-4 transition duration-300 hover:-translate-y-1 hover:border-violet-300/34 hover:bg-white/[0.06]"
+              className={`dzn-game-mode-card dzn-game-mode-card--${mode.theme} group`}
             >
-              <div className={`absolute inset-0 bg-gradient-to-br ${mode.tint} opacity-80`} />
-              <div className="relative z-10">
-                <div className="flex items-center justify-between gap-3">
-                  <Icon className="h-7 w-7 text-violet-100 transition group-hover:scale-110" />
-                  <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[0.65rem] font-black uppercase text-zinc-200">
-                    {formatNumber(mode.count)} servers
+              <div className="relative z-10 flex h-full flex-col">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="dzn-game-mode-icon" aria-hidden="true">
+                    <Icon className="h-6 w-6" />
+                  </span>
+                  <span className="dzn-game-mode-count">
+                    {formatModeServerCount(count)}
                   </span>
                 </div>
-                <h3 className="mt-6 text-lg font-black uppercase text-white">{mode.title}</h3>
-                <p className="mt-2 text-xs leading-5 text-zinc-400">{mode.description}</p>
+                <h3 className="dzn-game-mode-title">{mode.title}</h3>
+                <span className="dzn-game-mode-rule" aria-hidden="true" />
+                <p className="dzn-game-mode-description">{mode.description}</p>
+                <span className="dzn-game-mode-action">
+                  View servers <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
               </div>
             </Link>
           );
@@ -1097,6 +1104,11 @@ function formatServerDisplayName(value: string) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(numberOrZero(value));
+}
+
+function formatModeServerCount(value: number) {
+  const count = numberOrZero(value);
+  return `${formatNumber(count)} ${count === 1 ? "SERVER" : "SERVERS"}`;
 }
 
 function formatAgo(value: string | null) {

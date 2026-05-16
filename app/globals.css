@@ -387,6 +387,234 @@ body {
   background: rgba(255, 255, 255, 0.055);
 }
 
+.dzn-game-modes-section {
+  border-color: rgba(168, 85, 247, 0.18);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(124, 58, 237, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(6, 11, 27, 0.78), rgba(3, 7, 18, 0.72));
+}
+
+.dzn-game-modes-section::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.18), transparent),
+    radial-gradient(circle at 82% 10%, rgba(103, 232, 249, 0.12), transparent 24%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.dzn-game-modes-section > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dzn-game-modes-view-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  text-decoration: none;
+}
+
+.dzn-game-modes-view-all svg,
+.dzn-game-mode-action svg {
+  transition: transform 220ms ease;
+}
+
+.dzn-game-modes-view-all:hover svg,
+.dzn-game-mode-card:hover .dzn-game-mode-action svg {
+  transform: translateX(3px);
+}
+
+.dzn-game-mode-card {
+  --mode-accent: #a855f7;
+  --mode-accent-2: #22d3ee;
+  --mode-accent-soft: rgba(168, 85, 247, 0.16);
+  --mode-border: rgba(168, 85, 247, 0.34);
+  --mode-shadow: rgba(168, 85, 247, 0.22);
+  position: relative;
+  display: flex;
+  min-height: 190px;
+  overflow: hidden;
+  border: 1px solid var(--mode-border);
+  border-radius: 0.75rem;
+  padding: 1.05rem;
+  color: #ffffff;
+  text-decoration: none;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 18% 16%, var(--mode-accent-soft), transparent 28%),
+    radial-gradient(circle at 92% 88%, rgba(255, 255, 255, 0.045), transparent 26%),
+    linear-gradient(145deg, rgba(8, 13, 31, 0.95), rgba(3, 7, 18, 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 color-mix(in srgb, var(--mode-accent) 28%, transparent),
+    0 18px 38px rgba(0, 0, 0, 0.28);
+  transition:
+    transform 240ms ease,
+    border-color 240ms ease,
+    box-shadow 240ms ease,
+    background 240ms ease;
+}
+
+.dzn-game-mode-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.65), transparent 88%);
+  opacity: 0.34;
+  pointer-events: none;
+}
+
+.dzn-game-mode-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background:
+    linear-gradient(118deg, transparent 0%, rgba(255, 255, 255, 0.18) 44%, transparent 58%),
+    radial-gradient(circle at 18% 100%, color-mix(in srgb, var(--mode-accent) 34%, transparent), transparent 34%);
+  opacity: 0;
+  transform: translateX(-32%);
+  transition:
+    opacity 260ms ease,
+    transform 420ms ease;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dzn-game-mode-card:hover {
+  transform: translateY(-5px);
+  border-color: color-mix(in srgb, var(--mode-accent) 72%, rgba(255, 255, 255, 0.22));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 color-mix(in srgb, var(--mode-accent) 42%, transparent),
+    0 22px 44px rgba(0, 0, 0, 0.34),
+    0 0 28px var(--mode-shadow);
+}
+
+.dzn-game-mode-card:hover::after {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.dzn-game-mode-card--pvp {
+  --mode-accent: #f43f5e;
+  --mode-accent-2: #a855f7;
+  --mode-accent-soft: rgba(244, 63, 94, 0.18);
+  --mode-border: rgba(244, 63, 94, 0.32);
+  --mode-shadow: rgba(244, 63, 94, 0.22);
+}
+
+.dzn-game-mode-card--deathmatch {
+  --mode-accent: #38bdf8;
+  --mode-accent-2: #2563eb;
+  --mode-accent-soft: rgba(56, 189, 248, 0.17);
+  --mode-border: rgba(56, 189, 248, 0.31);
+  --mode-shadow: rgba(56, 189, 248, 0.22);
+}
+
+.dzn-game-mode-card--pve {
+  --mode-accent: #34d399;
+  --mode-accent-2: #14b8a6;
+  --mode-accent-soft: rgba(52, 211, 153, 0.15);
+  --mode-border: rgba(52, 211, 153, 0.3);
+  --mode-shadow: rgba(52, 211, 153, 0.18);
+}
+
+.dzn-game-mode-card--hybrid {
+  --mode-accent: #a855f7;
+  --mode-accent-2: #fb923c;
+  --mode-accent-soft: rgba(168, 85, 247, 0.17);
+  --mode-border: rgba(251, 146, 60, 0.3);
+  --mode-shadow: rgba(168, 85, 247, 0.2);
+}
+
+.dzn-game-mode-icon {
+  display: grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--mode-accent) 58%, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--mode-accent) 82%, white);
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--mode-accent) 24%, transparent), transparent 64%),
+    rgba(3, 7, 18, 0.58);
+  box-shadow:
+    inset 0 0 18px color-mix(in srgb, var(--mode-accent) 14%, transparent),
+    0 0 26px color-mix(in srgb, var(--mode-accent) 34%, transparent);
+  transition:
+    transform 240ms ease,
+    color 240ms ease,
+    box-shadow 240ms ease;
+}
+
+.dzn-game-mode-card:hover .dzn-game-mode-icon {
+  transform: scale(1.06);
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 20px color-mix(in srgb, var(--mode-accent) 22%, transparent),
+    0 0 32px color-mix(in srgb, var(--mode-accent) 48%, transparent),
+    0 0 18px color-mix(in srgb, var(--mode-accent-2) 22%, transparent);
+}
+
+.dzn-game-mode-count {
+  border: 1px solid color-mix(in srgb, var(--mode-accent) 42%, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  padding: 0.34rem 0.55rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--mode-accent) 14%, rgba(0, 0, 0, 0.56)), rgba(0, 0, 0, 0.28));
+  color: #f8fafc;
+  font-size: 0.62rem;
+  font-weight: 950;
+  line-height: 1;
+  text-transform: uppercase;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--mode-accent) 18%, transparent);
+}
+
+.dzn-game-mode-title {
+  margin-top: 1.35rem;
+  font-size: clamp(1.15rem, 1.55vw, 1.5rem);
+  font-weight: 950;
+  line-height: 1;
+  text-transform: uppercase;
+  color: #ffffff;
+}
+
+.dzn-game-mode-rule {
+  display: block;
+  width: 2.7rem;
+  height: 2px;
+  margin-top: 0.65rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--mode-accent), var(--mode-accent-2), transparent);
+  box-shadow: 0 0 18px var(--mode-shadow);
+}
+
+.dzn-game-mode-description {
+  margin-top: 0.8rem;
+  color: #b8c0d4;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.dzn-game-mode-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: auto;
+  padding-top: 1.1rem;
+  color: color-mix(in srgb, var(--mode-accent) 74%, #ffffff);
+  font-size: 0.68rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
 .dzn-operational-globe-stage {
   position: relative;
   height: clamp(205px, 18vw, 238px);
@@ -1172,9 +1400,26 @@ body {
   .dzn-operational-globe-floor-glow,
   .dzn-operational-globe-placeholder-sphere::after,
   .dzn-home-cta::after,
+  .dzn-game-mode-card::after,
   .scanline,
   .animated-border::before {
     animation: none !important;
+  }
+
+  .dzn-game-mode-card,
+  .dzn-game-mode-card::after,
+  .dzn-game-mode-icon,
+  .dzn-game-mode-action svg,
+  .dzn-game-modes-view-all svg {
+    transition: none !important;
+  }
+
+  .dzn-game-mode-card:hover,
+  .dzn-game-mode-card:hover .dzn-game-mode-icon,
+  .dzn-game-mode-card:hover::after,
+  .dzn-game-mode-card:hover .dzn-game-mode-action svg,
+  .dzn-game-modes-view-all:hover svg {
+    transform: none !important;
   }
 }
 
