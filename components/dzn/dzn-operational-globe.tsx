@@ -74,6 +74,9 @@ const BASE_CAMERA_Z = 2.7;
 const AUTO_ROTATE_SPEED = 0.00155;
 const DRAG_ROTATE_X_SPEED = 0.006;
 const DRAG_ROTATE_Y_SPEED = 0.0035;
+const BASE_MARKER_SCALE = 1;
+const MIN_MARKER_SCALE = 0.56;
+const MAX_MARKER_SCALE = 1.04;
 
 function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNode[] }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -97,9 +100,10 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
-    console.log("DZN globe real server markers:", {
+    console.log("DZN globe markers refined:", {
       mapNodes: nodes.length,
-      renderedServerMarkers: globePoints.length,
+      renderedMarkers: globePoints.length,
+      zoomRange: `${MIN_GLOBE_ZOOM}-${MAX_GLOBE_ZOOM}`,
     });
     console.log("DZN globe map nodes");
     console.table(
@@ -147,6 +151,8 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
               console.log("DZN GLOBE FREE ROTATE AND ZOOM READY");
               console.log("DZN GLOBE REAL SERVER NODES ONLY");
               console.log("DZN HD GEO GLOBE READY");
+              console.log("DZN HD GLOBE LAND DETAIL ACTIVE");
+              console.log("DZN HD GLOBE PINS REFINED");
               loggedRef.current = true;
             }
           },
@@ -335,7 +341,7 @@ function createThreeGlobe({
   addGlobeGrid(THREE, globeGroup);
   addLandCoastlineOverlay(THREE, globeGroup);
 
-  const { targetMeshes, pulseMeshes } = addServerNodes(THREE, globeGroup, points);
+  const { targetMeshes, pulseMeshes, markerGroups } = addServerNodes(THREE, globeGroup, points);
   addServerConnectionLines(THREE, globeGroup, points);
 
   const raycaster = new THREE.Raycaster();
@@ -350,6 +356,7 @@ function createThreeGlobe({
     zoomBy: (amount: number) => setZoom(zoomRef.current + amount),
     resetZoom: () => setZoom(DEFAULT_GLOBE_ZOOM),
   };
+  applyMarkerScale();
 
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(stage);
@@ -416,8 +423,8 @@ function createThreeGlobe({
 
     for (const item of pulseMeshes) {
       const wave = (Math.sin(elapsed * 2.2 + item.delay) + 1) / 2;
-      item.mesh.scale.setScalar(0.88 + wave * 0.72);
-      item.material.opacity = item.active ? 0.12 + (1 - wave) * 0.16 : 0.055;
+      item.mesh.scale.setScalar(0.9 + wave * 0.44);
+      item.material.opacity = item.active ? 0.1 + (1 - wave) * 0.12 : 0.035;
     }
 
     renderer.render(scene, camera);
@@ -499,7 +506,15 @@ function createThreeGlobe({
     zoomRef.current = clamp(nextZoom, MIN_GLOBE_ZOOM, MAX_GLOBE_ZOOM);
     camera.position.z = BASE_CAMERA_Z / zoomRef.current;
     camera.updateProjectionMatrix();
+    applyMarkerScale();
     renderer.render(scene, camera);
+  }
+
+  function applyMarkerScale() {
+    const markerScale = markerScaleForZoom(zoomRef.current);
+    for (const marker of markerGroups) {
+      marker.scale.setScalar(markerScale);
+    }
   }
 
   function pickNode(event: PointerEvent) {
@@ -637,6 +652,7 @@ function validLonLat(value: unknown): value is [number, number] {
 
 function addServerNodes(THREE: typeof import("three"), group: import("three").Group, points: GlobePoint[]) {
   const targetMeshes: import("three").Object3D[] = [];
+  const markerGroups: import("three").Group[] = [];
   const pulseMeshes: Array<{
     mesh: import("three").Mesh;
     material: import("three").MeshBasicMaterial;
@@ -645,84 +661,102 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
   }> = [];
 
   points.forEach((point, index) => {
-    const surface = latLngToVector(THREE, point.lat, point.lng, 1.08);
-    const position = latLngToVector(THREE, point.lat, point.lng, 1.145);
+    const position = latLngToVector(THREE, point.lat, point.lng, 1.116);
     const normal = position.clone().normalize();
+    const markerGroup = new THREE.Group();
+    markerGroup.position.copy(position);
+    markerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: point.active ? 0xa855f7 : 0xf59e0b,
+      color: point.active ? 0x22d3ee : 0xf59e0b,
       transparent: true,
-      opacity: point.active ? 0.42 : 0.24,
+      opacity: point.active ? 0.58 : 0.34,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const ringMesh = new THREE.Mesh(
-      new THREE.TorusGeometry(point.active ? 0.09 : 0.068, point.active ? 0.0045 : 0.0035, 8, 42),
+      new THREE.TorusGeometry(point.active ? 0.025 : 0.019, point.active ? 0.0016 : 0.0012, 8, 38),
       ringMaterial,
     );
-    ringMesh.position.copy(surface);
-    ringMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-    group.add(ringMesh);
+    ringMesh.position.set(0, 0, 0.004);
+    markerGroup.add(ringMesh);
 
     const beamMaterial = new THREE.LineBasicMaterial({
       color: point.active ? 0xc084fc : 0xf59e0b,
       transparent: true,
-      opacity: point.active ? 0.62 : 0.34,
+      opacity: point.active ? 0.42 : 0.2,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const beamGeometry = new THREE.BufferGeometry().setFromPoints([
-      latLngToVector(THREE, point.lat, point.lng, 1.09),
-      latLngToVector(THREE, point.lat, point.lng, point.active ? 1.32 : 1.23),
+      new THREE.Vector3(0, 0, 0.006),
+      new THREE.Vector3(0, 0, point.active ? 0.105 : 0.074),
     ]);
-    group.add(new THREE.Line(beamGeometry, beamMaterial));
+    markerGroup.add(new THREE.Line(beamGeometry, beamMaterial));
 
     const outerGlowMaterial = new THREE.MeshBasicMaterial({
       color: point.active ? 0x67e8f9 : 0xf59e0b,
       transparent: true,
-      opacity: point.active ? 0.18 : 0.1,
+      opacity: point.active ? 0.18 : 0.08,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const outerGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.105 : 0.072, 18, 18),
+      new THREE.SphereGeometry(point.active ? 0.024 : 0.018, 18, 18),
       outerGlowMaterial,
     );
-    outerGlow.position.copy(position);
-    group.add(outerGlow);
+    outerGlow.position.set(0, 0, 0.04);
+    markerGroup.add(outerGlow);
 
     const nodeMaterial = new THREE.MeshBasicMaterial({
-      color: point.active ? 0xc084fc : 0xf59e0b,
+      color: point.active ? 0xc084fc : 0x8b5cf6,
       transparent: true,
-      opacity: point.active ? 0.98 : 0.72,
+      opacity: point.active ? 0.92 : 0.58,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const nodeMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.052 : 0.04, 18, 18),
+      new THREE.SphereGeometry(point.active ? 0.011 : 0.0085, 18, 18),
       nodeMaterial,
     );
-    nodeMesh.position.copy(position);
+    nodeMesh.position.set(0, 0, 0.052);
     nodeMesh.userData.dznPoint = point;
-    group.add(nodeMesh);
-    targetMeshes.push(nodeMesh);
+    markerGroup.add(nodeMesh);
 
     const pulseMaterial = new THREE.MeshBasicMaterial({
       color: point.active ? 0xa855f7 : 0xf59e0b,
       transparent: true,
-      opacity: point.active ? 0.3 : 0.09,
+      opacity: point.active ? 0.22 : 0.05,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const pulseMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.13 : 0.07, 22, 22),
+      new THREE.TorusGeometry(point.active ? 0.035 : 0.023, point.active ? 0.0014 : 0.001, 8, 42),
       pulseMaterial,
     );
-    pulseMesh.position.copy(position);
-    group.add(pulseMesh);
+    pulseMesh.position.set(0, 0, 0.008);
+    markerGroup.add(pulseMesh);
     pulseMeshes.push({ mesh: pulseMesh, material: pulseMaterial, delay: index * 0.55, active: point.active });
+
+    const hitMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(point.active ? 0.055 : 0.045, 12, 12),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }),
+    );
+    hitMesh.position.set(0, 0, 0.052);
+    hitMesh.userData.dznPoint = point;
+    markerGroup.add(hitMesh);
+    targetMeshes.push(hitMesh);
+
+    markerGroups.push(markerGroup);
+    group.add(markerGroup);
   });
 
-  return { targetMeshes, pulseMeshes };
+  return { targetMeshes, pulseMeshes, markerGroups };
 }
 
 function addServerConnectionLines(THREE: typeof import("three"), group: import("three").Group, points: GlobePoint[]) {
@@ -923,6 +957,10 @@ function latLngToVector(THREE: typeof import("three"), lat: number, lng: number,
     radius * Math.cos(phi),
     radius * Math.sin(phi) * Math.sin(theta),
   );
+}
+
+function markerScaleForZoom(zoom: number) {
+  return clamp(BASE_MARKER_SCALE / Math.pow(zoom, 0.85), MIN_MARKER_SCALE, MAX_MARKER_SCALE);
 }
 
 function buildGlobePoints(nodes: DznOperationalGlobeNode[]) {
