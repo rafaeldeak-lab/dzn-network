@@ -52,7 +52,63 @@ type DecorPoint = {
   color: number;
 };
 
+type LonLat = [number, number];
+
 const WORLD_DOTS = buildWorldDotMatrix();
+
+const LAND_POLYGONS: LonLat[][] = [
+  [
+    [-168, 71], [-154, 64], [-142, 59], [-132, 54], [-124, 49], [-124, 43], [-116, 36], [-108, 30],
+    [-99, 24], [-91, 18], [-84, 16], [-80, 22], [-75, 25], [-70, 31], [-62, 41], [-69, 47],
+    [-81, 45], [-90, 49], [-102, 51], [-113, 49], [-123, 52], [-135, 57], [-148, 60], [-160, 64],
+  ],
+  [
+    [-101, 23], [-92, 20], [-87, 16], [-82, 12], [-78, 9], [-81, 7], [-88, 10], [-96, 15], [-105, 20],
+  ],
+  [
+    [-81, 12], [-73, 9], [-64, 5], [-55, -2], [-47, -9], [-39, -18], [-43, -27], [-50, -35],
+    [-54, -45], [-62, -54], [-70, -50], [-73, -40], [-70, -30], [-74, -20], [-79, -8], [-82, 2],
+  ],
+  [
+    [-54, 82], [-32, 78], [-20, 72], [-27, 64], [-43, 60], [-57, 65], [-63, 73],
+  ],
+  [
+    [-11, 36], [-9, 44], [-4, 51], [3, 57], [12, 56], [20, 52], [28, 55], [35, 50],
+    [31, 44], [22, 41], [14, 38], [6, 36], [-2, 36],
+  ],
+  [
+    [-8, 58], [2, 61], [12, 66], [24, 70], [32, 65], [26, 58], [15, 55], [5, 56],
+  ],
+  [
+    [-17, 34], [-7, 36], [8, 34], [24, 30], [35, 20], [43, 8], [40, -5], [33, -18],
+    [26, -31], [18, -35], [8, -33], [-3, -27], [-11, -16], [-15, -3], [-14, 14],
+  ],
+  [
+    [31, 40], [45, 48], [63, 54], [82, 55], [100, 58], [120, 53], [139, 48], [153, 40],
+    [145, 30], [132, 27], [122, 18], [108, 20], [96, 14], [84, 20], [73, 17], [62, 25],
+    [51, 27], [42, 32], [35, 36],
+  ],
+  [
+    [67, 24], [76, 30], [87, 24], [84, 13], [78, 6], [72, 12],
+  ],
+  [
+    [95, 18], [105, 15], [114, 7], [121, 1], [118, -8], [108, -5], [101, 4],
+  ],
+  [
+    [126, 37], [141, 41], [146, 36], [142, 31], [130, 31],
+  ],
+  [
+    [112, -12], [127, -14], [141, -18], [153, -28], [148, -39], [132, -36], [116, -31], [110, -21],
+  ],
+  [
+    [43, -12], [50, -17], [49, -25], [43, -25], [39, -18],
+  ],
+];
+
+const TEXTURE_NETWORK_NODES: LonLat[] = [
+  [-122, 37], [-96, 35], [-74, 40], [-47, -23], [-3, 52], [2, 48], [10, 51], [13, 41],
+  [31, 30], [28, -26], [39, -6], [55, 25], [77, 28], [103, 1], [121, 14], [139, 35], [151, -33],
+];
 
 const DECOR_POINTS: DecorPoint[] = [
   { lat: 43, lng: -105, size: 0.022, color: 0xa855f7 },
@@ -95,6 +151,7 @@ export function DznOperationalGlobe({ nodes }: { nodes: DznOperationalGlobeNode[
             setReady(true);
             if (!loggedRef.current) {
               console.log("DZN ROTATING GLOBE MAP LOADED");
+              console.log("DZN ROTATING GLOBE LANDMASSES LOADED");
               loggedRef.current = true;
             }
           },
@@ -193,14 +250,22 @@ function createThreeGlobe({
   rimLight.position.set(1.8, -0.4, 2.1);
   scene.add(rimLight);
 
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const globeTexture = createDznGlobeTexture(THREE);
+  globeTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4);
+
   const earth = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 72, 72),
-    new THREE.MeshPhongMaterial({
-      color: 0x061025,
-      emissive: 0x11051d,
-      emissiveIntensity: 0.82,
-      specular: 0x7c3aed,
-      shininess: 34,
+    new THREE.SphereGeometry(1, 80, 80),
+    new THREE.MeshStandardMaterial({
+      map: globeTexture,
+      color: 0xd9e2ff,
+      emissive: 0x180738,
+      emissiveIntensity: 0.42,
+      roughness: 0.74,
+      metalness: 0.06,
+      transparent: true,
+      opacity: 0.98,
     }),
   );
   globeGroup.add(earth);
@@ -549,6 +614,167 @@ function createArcGeometry(
   return new THREE.BufferGeometry().setFromPoints(curve.getPoints(28));
 }
 
+function createDznGlobeTexture(THREE: typeof import("three")) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2048;
+  canvas.height = 1024;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  const { width, height } = canvas;
+  const ocean = ctx.createLinearGradient(0, 0, 0, height);
+  ocean.addColorStop(0, "#08142e");
+  ocean.addColorStop(0.42, "#030b1f");
+  ocean.addColorStop(1, "#081332");
+  ctx.fillStyle = ocean;
+  ctx.fillRect(0, 0, width, height);
+
+  drawTextureGrid(ctx, width, height);
+  drawTextureLand(ctx, width, height);
+  drawTextureNetwork(ctx, width, height);
+
+  const vignette = ctx.createRadialGradient(width * 0.5, height * 0.48, height * 0.12, width * 0.5, height * 0.48, width * 0.62);
+  vignette.addColorStop(0, "rgba(147, 197, 253, 0.05)");
+  vignette.addColorStop(0.6, "rgba(2, 7, 19, 0)");
+  vignette.addColorStop(1, "rgba(2, 7, 19, 0.46)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, width, height);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function drawTextureGrid(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(96, 165, 250, 0.16)";
+
+  for (let lon = -180; lon <= 180; lon += 15) {
+    const { x } = projectLonLat(lon, 0, width, height);
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+
+  for (let lat = -75; lat <= 75; lat += 15) {
+    const { y } = projectLonLat(0, lat, width, height);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 0.52;
+  ctx.fillStyle = "rgba(103, 232, 249, 0.16)";
+  for (let lon = -172.5; lon <= 172.5; lon += 15) {
+    for (let lat = -67.5; lat <= 67.5; lat += 15) {
+      const { x, y } = projectLonLat(lon, lat, width, height);
+      ctx.fillRect(x - 1, y - 1, 2, 2);
+    }
+  }
+  ctx.restore();
+}
+
+function drawTextureLand(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.save();
+  ctx.shadowColor = "rgba(168, 85, 247, 0.92)";
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = "rgba(43, 57, 137, 0.78)";
+  ctx.strokeStyle = "rgba(191, 219, 254, 0.72)";
+  ctx.lineWidth = 2.6;
+  for (const polygon of LAND_POLYGONS) {
+    drawLandPolygon(ctx, polygon, width, height);
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(168, 85, 247, 0.7)";
+  ctx.lineWidth = 1.3;
+  ctx.setLineDash([8, 7]);
+  for (const polygon of LAND_POLYGONS) {
+    strokeLandPolygon(ctx, polygon, width, height);
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = 0.88;
+  for (const dot of WORLD_DOTS) {
+    const { x, y } = projectLonLat(dot.lng, dot.lat, width, height);
+    const glow = ((Math.round(x + y) % 7) + 1) / 7;
+    ctx.fillStyle = glow > 0.72 ? "rgba(216, 180, 254, 0.86)" : "rgba(147, 197, 253, 0.38)";
+    ctx.beginPath();
+    ctx.arc(x, y, glow > 0.72 ? 1.55 : 1.05, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawTextureNetwork(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  const projected = TEXTURE_NETWORK_NODES.map(([lon, lat]) => projectLonLat(lon, lat, width, height));
+
+  ctx.save();
+  ctx.lineWidth = 1.25;
+  ctx.strokeStyle = "rgba(168, 85, 247, 0.28)";
+  ctx.shadowColor = "rgba(168, 85, 247, 0.65)";
+  ctx.shadowBlur = 10;
+  for (let index = 0; index < projected.length - 1; index += 1) {
+    if (index % 4 === 3) continue;
+    const start = projected[index];
+    const end = projected[index + 1];
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  for (const [index, point] of projected.entries()) {
+    const strong = index % 3 === 0;
+    ctx.fillStyle = strong ? "rgba(233, 213, 255, 0.95)" : "rgba(168, 85, 247, 0.72)";
+    ctx.shadowColor = strong ? "rgba(233, 213, 255, 0.95)" : "rgba(168, 85, 247, 0.75)";
+    ctx.shadowBlur = strong ? 20 : 12;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, strong ? 4.5 : 3.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawLandPolygon(ctx: CanvasRenderingContext2D, points: LonLat[], width: number, height: number) {
+  pathLandPolygon(ctx, points, width, height);
+  ctx.fill();
+  ctx.stroke();
+}
+
+function strokeLandPolygon(ctx: CanvasRenderingContext2D, points: LonLat[], width: number, height: number) {
+  pathLandPolygon(ctx, points, width, height);
+  ctx.stroke();
+}
+
+function pathLandPolygon(ctx: CanvasRenderingContext2D, points: LonLat[], width: number, height: number) {
+  ctx.beginPath();
+  points.forEach(([lon, lat], index) => {
+    const { x, y } = projectLonLat(lon, lat, width, height);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+}
+
+function projectLonLat(lon: number, lat: number, width: number, height: number) {
+  return {
+    x: ((lon + 180) / 360) * width,
+    y: ((90 - lat) / 180) * height,
+  };
+}
+
 function latLngToVector(THREE: typeof import("three"), lat: number, lng: number, radius: number) {
   const latRad = (lat * Math.PI) / 180;
   const lngRad = (lng * Math.PI) / 180;
@@ -669,7 +895,7 @@ function disposeScene(scene: import("three").Scene) {
   scene.traverse((object) => {
     const renderable = object as {
       geometry?: { dispose?: () => void };
-      material?: { dispose?: () => void } | Array<{ dispose?: () => void }>;
+      material?: DisposableMaterial | DisposableMaterial[];
     };
     if (renderable.geometry) {
       renderable.geometry.dispose?.();
@@ -677,12 +903,34 @@ function disposeScene(scene: import("three").Scene) {
     if (renderable.material) {
       const material = renderable.material;
       if (Array.isArray(material)) {
-        material.forEach((entry) => entry.dispose?.());
+        material.forEach(disposeMaterial);
       } else if (typeof material === "object") {
-        material.dispose?.();
+        disposeMaterial(material);
       }
     }
   });
+}
+
+type DisposableMaterial = {
+  dispose?: () => void;
+  map?: { dispose?: () => void } | null;
+  emissiveMap?: { dispose?: () => void } | null;
+  alphaMap?: { dispose?: () => void } | null;
+  bumpMap?: { dispose?: () => void } | null;
+  normalMap?: { dispose?: () => void } | null;
+  roughnessMap?: { dispose?: () => void } | null;
+  metalnessMap?: { dispose?: () => void } | null;
+};
+
+function disposeMaterial(material: DisposableMaterial) {
+  material.map?.dispose?.();
+  material.emissiveMap?.dispose?.();
+  material.alphaMap?.dispose?.();
+  material.bumpMap?.dispose?.();
+  material.normalMap?.dispose?.();
+  material.roughnessMap?.dispose?.();
+  material.metalnessMap?.dispose?.();
+  material.dispose?.();
 }
 
 function finiteNumber(value: unknown) {
