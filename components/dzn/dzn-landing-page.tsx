@@ -302,6 +302,7 @@ export function DznLandingPage() {
     console.log("DZN WORLD MAP VISUAL MATCHED");
     console.log("DZN HOMEPAGE PERFORMANCE OPTIMIZED");
     console.log("DZN GAME MODE CARDS UPGRADED");
+    console.log("DZN HOMEPAGE STATS ROW UPGRADED");
   }, []);
 
   useEffect(() => {
@@ -797,38 +798,42 @@ function StatsRow({ homeStats }: { homeStats: HomeStats }) {
   const stats = [
     {
       icon: Users,
-      label: "Players Seen",
-      value: homeStats.totals.playersSeen > 0 ? formatNumber(homeStats.totals.playersSeen) : "Awaiting activity",
+      label: "Players",
+      value: formatNumber(homeStats.totals.playersSeen),
+      theme: "players",
     },
     {
       icon: Server,
       label: "Servers Linked",
       value: formatNumber(homeStats.totals.serversLinked),
+      theme: "servers",
     },
     {
       icon: Crosshair,
       label: "Kills Tracked",
-      value: homeStats.totals.killsTracked > 0 ? formatNumber(homeStats.totals.killsTracked) : "Awaiting PvP data",
+      value: formatNumber(homeStats.totals.killsTracked),
+      theme: "kills",
     },
     {
       icon: Wifi,
       label: "Active Servers",
-      value: homeStats.syncHealth.active > 0 ? `${formatNumber(homeStats.syncHealth.active)} active` : "Live sync active",
+      value: `${formatNumber(homeStats.syncHealth.active)} active`,
+      theme: "active",
     },
   ];
 
   return (
-    <motion.section variants={fadeUp} id="stats" className="dzn-home-panel grid gap-3 rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl sm:grid-cols-2 lg:grid-cols-4">
+    <motion.section variants={fadeUp} id="stats" className="dzn-home-panel dzn-stats-strip grid gap-3 rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl sm:grid-cols-2 lg:grid-cols-4">
       {stats.map((stat) => {
         const Icon = stat.icon;
         return (
-          <div key={stat.label} className="dzn-home-stat-card flex min-h-[86px] items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.035] p-4">
-            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-cyan-300/18 bg-cyan-300/8 text-cyan-100">
+          <div key={stat.label} className={`dzn-stat-card dzn-stat-card--${stat.theme}`}>
+            <span className="dzn-stat-icon" aria-hidden="true">
               <Icon className="h-5 w-5" />
             </span>
-            <div className="min-w-0">
-              <p className="break-words text-base font-black uppercase leading-tight text-white sm:text-lg">{stat.value}</p>
-              <p className="text-[0.67rem] font-bold uppercase tracking-[0.14em] text-zinc-500">{stat.label}</p>
+            <div className="dzn-stat-copy">
+              <p className="dzn-stat-value">{stat.value}</p>
+              <p className="dzn-stat-label">{stat.label}</p>
             </div>
           </div>
         );

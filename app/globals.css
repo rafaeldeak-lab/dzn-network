@@ -615,6 +615,207 @@ body {
   text-transform: uppercase;
 }
 
+.dzn-stats-strip {
+  border-color: rgba(103, 232, 249, 0.16);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(168, 85, 247, 0.2), transparent 32%),
+    radial-gradient(circle at 84% 100%, rgba(34, 211, 238, 0.14), transparent 28%),
+    linear-gradient(180deg, rgba(4, 9, 24, 0.82), rgba(3, 7, 18, 0.74));
+  box-shadow:
+    0 18px 54px rgba(0, 0, 0, 0.34),
+    0 0 34px rgba(34, 211, 238, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.dzn-stats-strip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(103, 232, 249, 0.13) 48%, transparent 100%),
+    linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: auto, 100% 18px;
+  opacity: 0.34;
+  pointer-events: none;
+}
+
+.dzn-stats-strip > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dzn-stat-card {
+  --stat-accent: #a855f7;
+  --stat-accent-2: #67e8f9;
+  --stat-soft: rgba(168, 85, 247, 0.14);
+  --stat-border: rgba(168, 85, 247, 0.3);
+  --stat-shadow: rgba(168, 85, 247, 0.2);
+  position: relative;
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  gap: 0.9rem;
+  overflow: hidden;
+  border: 1px solid var(--stat-border);
+  border-radius: 1rem;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 14% 22%, var(--stat-soft), transparent 32%),
+    linear-gradient(135deg, rgba(8, 14, 34, 0.92), rgba(4, 8, 21, 0.86));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 color-mix(in srgb, var(--stat-accent) 22%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.26);
+  transition:
+    transform 240ms ease,
+    border-color 240ms ease,
+    box-shadow 240ms ease,
+    background 240ms ease;
+}
+
+.dzn-stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--stat-accent) 18%, transparent), transparent 34%),
+    linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.13) 45%, transparent 58%);
+  opacity: 0;
+  transform: translateX(-30%);
+  transition:
+    opacity 260ms ease,
+    transform 420ms ease;
+  pointer-events: none;
+}
+
+.dzn-stat-card::after {
+  content: "";
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.65rem;
+  left: 4.9rem;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--stat-accent), var(--stat-accent-2), transparent);
+  box-shadow: 0 0 18px var(--stat-shadow);
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.dzn-stat-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--stat-accent) 68%, rgba(255, 255, 255, 0.22));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 color-mix(in srgb, var(--stat-accent) 34%, transparent),
+    0 20px 38px rgba(0, 0, 0, 0.32),
+    0 0 28px var(--stat-shadow);
+}
+
+.dzn-stat-card:hover::before {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.dzn-stat-card--players {
+  --stat-accent: #a855f7;
+  --stat-accent-2: #c084fc;
+  --stat-soft: rgba(168, 85, 247, 0.17);
+  --stat-border: rgba(168, 85, 247, 0.34);
+  --stat-shadow: rgba(168, 85, 247, 0.2);
+}
+
+.dzn-stat-card--servers {
+  --stat-accent: #22d3ee;
+  --stat-accent-2: #3b82f6;
+  --stat-soft: rgba(34, 211, 238, 0.15);
+  --stat-border: rgba(34, 211, 238, 0.31);
+  --stat-shadow: rgba(34, 211, 238, 0.18);
+}
+
+.dzn-stat-card--kills {
+  --stat-accent: #8b5cf6;
+  --stat-accent-2: #60a5fa;
+  --stat-soft: rgba(139, 92, 246, 0.16);
+  --stat-border: rgba(139, 92, 246, 0.32);
+  --stat-shadow: rgba(96, 165, 250, 0.17);
+}
+
+.dzn-stat-card--active {
+  --stat-accent: #2dd4bf;
+  --stat-accent-2: #67e8f9;
+  --stat-soft: rgba(45, 212, 191, 0.15);
+  --stat-border: rgba(45, 212, 191, 0.31);
+  --stat-shadow: rgba(45, 212, 191, 0.18);
+}
+
+.dzn-stat-icon {
+  position: relative;
+  display: grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: color-mix(in srgb, var(--stat-accent) 82%, white);
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--stat-accent) 24%, transparent), transparent 68%),
+    rgba(3, 7, 18, 0.62);
+  border: 1px solid color-mix(in srgb, var(--stat-accent) 58%, rgba(255, 255, 255, 0.14));
+  border-radius: 0.9rem;
+  clip-path: polygon(15% 0, 85% 0, 100% 24%, 100% 76%, 85% 100%, 15% 100%, 0 76%, 0 24%);
+  box-shadow:
+    inset 0 0 18px color-mix(in srgb, var(--stat-accent) 14%, transparent),
+    0 0 24px color-mix(in srgb, var(--stat-accent) 34%, transparent);
+  transition:
+    transform 240ms ease,
+    color 240ms ease,
+    box-shadow 240ms ease;
+}
+
+.dzn-stat-icon::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 1px solid color-mix(in srgb, var(--stat-accent-2) 34%, transparent);
+  border-radius: 0.58rem;
+  clip-path: inherit;
+  opacity: 0.62;
+}
+
+.dzn-stat-card:hover .dzn-stat-icon {
+  transform: scale(1.05);
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 20px color-mix(in srgb, var(--stat-accent) 24%, transparent),
+    0 0 32px color-mix(in srgb, var(--stat-accent) 48%, transparent),
+    0 0 18px color-mix(in srgb, var(--stat-accent-2) 22%, transparent);
+}
+
+.dzn-stat-copy {
+  min-width: 0;
+}
+
+.dzn-stat-value {
+  color: #ffffff;
+  font-size: clamp(1.35rem, 2.4vw, 2.05rem);
+  font-weight: 950;
+  line-height: 0.95;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 16px color-mix(in srgb, var(--stat-accent) 34%, transparent),
+    0 0 28px rgba(255, 255, 255, 0.08);
+}
+
+.dzn-stat-label {
+  margin-top: 0.42rem;
+  color: #96a0b8;
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.15em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
 .dzn-operational-globe-stage {
   position: relative;
   height: clamp(205px, 18vw, 238px);
@@ -1407,6 +1608,9 @@ body {
   }
 
   .dzn-game-mode-card,
+  .dzn-stat-card,
+  .dzn-stat-card::before,
+  .dzn-stat-icon,
   .dzn-game-mode-card::after,
   .dzn-game-mode-icon,
   .dzn-game-mode-action svg,
@@ -1415,6 +1619,9 @@ body {
   }
 
   .dzn-game-mode-card:hover,
+  .dzn-stat-card:hover,
+  .dzn-stat-card:hover::before,
+  .dzn-stat-card:hover .dzn-stat-icon,
   .dzn-game-mode-card:hover .dzn-game-mode-icon,
   .dzn-game-mode-card:hover::after,
   .dzn-game-mode-card:hover .dzn-game-mode-action svg,
