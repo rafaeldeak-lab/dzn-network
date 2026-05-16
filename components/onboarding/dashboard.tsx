@@ -251,6 +251,9 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
   const activityCount = (syncStatus?.total_joins ?? 0) + (syncStatus?.total_disconnects ?? 0) + (syncStatus?.total_deaths ?? 0);
   const noPvpKillsYet = statsSyncActive && (syncStatus?.total_kills ?? 0) === 0;
+  const globalRankLabel = formatGlobalRank(server.global_rank ?? server.rank ?? null);
+  const scoreLabel = server.score_label ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : "Pending");
+  const scoreTitle = scoreBreakdownTitle(server.score_breakdown ?? null);
   const syncBanner = getSyncBanner({
     active: statsSyncActive,
     readPending: effectiveSyncStatus === "read_pending",
@@ -534,7 +537,7 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <HeroMetric icon={<Gauge className="h-4 w-4" />} label={networkAddressLabel} value={networkAddress} />
                 <HeroMetric icon={<Users className="h-4 w-4" />} label="Players" value={server.player_slots ? `0 / ${server.player_slots}` : "Tracking"} />
-                <HeroMetric icon={<BarChart3 className="h-4 w-4" />} label="Rank" value="#--" />
+                <HeroMetric icon={<BarChart3 className="h-4 w-4" />} label="Rank" value={globalRankLabel} title={scoreTitle} />
                 <HeroMetric icon={<CircleCheck className="h-4 w-4" />} label="Status" value={statsSyncActive ? "Synced" : formatSyncStatus(effectiveSyncStatus)} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -586,6 +589,8 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                 <CompactRow label="Latest ADM File" value={latestAdmFile} />
                 <CompactRow label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
                 <CompactRow label="Next Scheduled Sync" value={nextScheduledSync} />
+                <CompactRow label="Global Rank" value={globalRankLabel} />
+                <CompactRow label="Server Score" value={scoreLabel} />
               </div>
               <div className="mt-4 flex flex-col gap-3 rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm font-bold text-cyan-50">
@@ -1025,9 +1030,9 @@ function PanelHeader({ icon, title }: { icon: React.ReactNode; title: string }) 
   );
 }
 
-function HeroMetric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function HeroMetric({ icon, label, value, title }: { icon: React.ReactNode; label: string; value: string; title?: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
+    <div title={title} className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
       <div className="flex items-center gap-2 text-zinc-500">
         {icon}
         <p className="text-[10px] font-black uppercase">{label}</p>
@@ -1608,6 +1613,26 @@ function formatSyncTrigger(value: string | null | undefined) {
   if (value === "manual") return "Manual";
   if (value === "scheduled") return "Scheduled";
   return "Not recorded";
+}
+
+function formatGlobalRank(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? `#${value}` : "Pending";
+}
+
+function scoreBreakdownTitle(breakdown: LinkedServer["score_breakdown"]) {
+  if (!breakdown) {
+    return "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.";
+  }
+  return [
+    "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
+    `Kills: ${breakdown.kills_points}`,
+    `Unique players: ${breakdown.unique_players_points}`,
+    `Joins: ${breakdown.joins_points}`,
+    `Longest kill: ${breakdown.longest_kill_points}`,
+    `Sync bonus: ${breakdown.sync_bonus}`,
+    `Death penalty: -${breakdown.death_penalty}`,
+    `Final score: ${breakdown.final_score}`,
+  ].join("\n");
 }
 
 function getAdmState(server: LinkedServer) {

@@ -19,6 +19,18 @@ export type SyncLinkedServer = {
   user_id: string;
   nitrado_service_id: string | null;
   adm_path: string | null;
+  server_name?: string | null;
+  display_name?: string | null;
+  hostname?: string | null;
+  nitrado_service_name?: string | null;
+};
+
+export type AdmSyncContext = {
+  linkedServerId: string;
+  nitradoServiceId: string;
+  serverName: string;
+  admFileName: string | null;
+  syncRunId?: string;
 };
 
 type AdmSyncState = {
@@ -143,7 +155,7 @@ export type ReadableAdmLinesResult = {
   message: string;
 };
 
-function verifyAdmServerScope(linkedServer: SyncLinkedServer) {
+function verifyAdmServerScope(linkedServer: SyncLinkedServer, syncRunId: string): AdmSyncContext {
   if (!linkedServer.id) throw new Error("ADM sync cannot run without a linked server id");
   if (!linkedServer.nitrado_service_id) throw new Error("No Nitrado service selected");
   console.log("DZN ADM SERVER SCOPE VERIFIED", {
@@ -153,12 +165,43 @@ function verifyAdmServerScope(linkedServer: SyncLinkedServer) {
   return {
     linkedServerId: linkedServer.id,
     nitradoServiceId: linkedServer.nitrado_service_id,
+    serverName: firstString(linkedServer.display_name, linkedServer.hostname, linkedServer.server_name, linkedServer.nitrado_service_name) ?? linkedServer.id,
+    admFileName: null,
+    syncRunId,
   };
 }
 
-function assertAdmLinkedServerId(linkedServerId: string, target: string) {
-  if (!linkedServerId) {
+function withAdmFile(context: AdmSyncContext, admFileName: string | null): AdmSyncContext {
+  return {
+    ...context,
+    admFileName,
+  };
+}
+
+export function assertAdmWriteScope(
+  context: AdmSyncContext,
+  row: {
+    linkedServerId?: string | null;
+    sourceServiceId?: string | null;
+    sourceAdmFile?: string | null;
+  },
+  target: string,
+) {
+  if (!row.linkedServerId) {
+    console.log("DZN ADM WRITE BLOCKED MISSING SERVER SCOPE", { target, context });
     throw new Error(`ADM sync refused to write ${target} without linked_server_id`);
+  }
+  if (row.linkedServerId !== context.linkedServerId) {
+    console.log("DZN ADM SERVER SCOPE VIOLATION BLOCKED", { target, expected: context.linkedServerId, actual: row.linkedServerId });
+    throw new Error(`ADM sync refused to write ${target} for the wrong linked_server_id`);
+  }
+  if (row.sourceServiceId && row.sourceServiceId !== context.nitradoServiceId) {
+    console.log("DZN ADM SERVER SCOPE VIOLATION BLOCKED", { target, expected: context.nitradoServiceId, actual: row.sourceServiceId });
+    throw new Error(`ADM sync refused to write ${target} for the wrong Nitrado service id`);
+  }
+  if (context.admFileName && row.sourceAdmFile && row.sourceAdmFile !== context.admFileName) {
+    console.log("DZN ADM SERVER SCOPE VIOLATION BLOCKED", { target, expected: context.admFileName, actual: row.sourceAdmFile });
+    throw new Error(`ADM sync refused to write ${target} for the wrong ADM file`);
   }
 }
 
@@ -170,20 +213,21 @@ export async function runAdmSync(
 ): Promise<AdmSyncResult> {
   const syncStartedAt = Date.now();
   const syncStartedAtIso = new Date(syncStartedAt).toISOString();
+  const syncRunId = crypto.randomUUID();
   const triggerType = options.triggerType ?? "manual";
   const maxLinesPerRun = clampPositiveInteger(options.maxLinesPerRun ?? 50000, 50000);
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
-  const scope = verifyAdmServerScope(linkedServer);
-  const nitradoServiceId = scope.nitradoServiceId;
+  const initialScope = verifyAdmServerScope(linkedServer, syncRunId);
+  const nitradoServiceId = initialScope.nitradoServiceId;
   await refreshNitradoServerMetadata(env, {
-    linkedServerId: scope.linkedServerId,
+    linkedServerId: initialScope.linkedServerId,
     userId: linkedServer.user_id,
     force: triggerType === "manual",
   }).catch(() => null);
 
-  const existingState = await getSyncState(env, scope.linkedServerId);
+  const existingState = await getSyncState(env, initialScope.linkedServerId);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const now = new Date().toISOString();
   const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock, readMode: "full" });
@@ -198,8 +242,9 @@ export async function runAdmSync(
   const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? linkedServer.adm_path ?? null;
   const latestAdmFile = readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? fileNameFromPath(latestAdmPath);
   if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath) {
-    await saveServerAdmPath(env, scope.linkedServerId, latestAdmPath.replace(/^\/+/, ""));
+    await saveServerAdmPath(env, initialScope.linkedServerId, latestAdmPath.replace(/^\/+/, ""));
   }
+  const scope = withAdmFile(initialScope, latestAdmFile);
 
   const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog?.debug?.samplePreview ?? null);
   if (!lines.length) {
@@ -210,6 +255,7 @@ export async function runAdmSync(
     await upsertSyncState(env, scope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
+      sourceServiceId: scope.nitradoServiceId,
       lastProcessedFile: existingState?.last_processed_file ?? null,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
@@ -230,7 +276,9 @@ export async function runAdmSync(
     });
     const syncDurationMs = Date.now() - syncStartedAt;
     await recordSyncRun(env, {
+      id: syncRunId,
       linkedServerId: scope.linkedServerId,
+      sourceServiceId: scope.nitradoServiceId,
       triggerType,
       status: admAvailable ? "read_pending" : "not_started",
       message,
@@ -294,45 +342,63 @@ export async function runAdmSync(
     }
   }
 
-  const backfillResult = await backfillMissingCreditedKills(
-    env,
-    scope.linkedServerId,
-    latestAdmFile,
-    parsedLines,
-    lastProcessedLine,
-    recentDeathLines,
-  );
-  eventsCreated += backfillResult.eventsCreated;
-  killEventsStored += backfillResult.killEventsCreated;
-  killsCreated += backfillResult.killsCreated;
-  deathsCreated += backfillResult.deathsCreated;
-  duplicateLines += backfillResult.duplicatesSkipped;
-  if (backfillResult.lastEventAt) lastEventAt = backfillResult.lastEventAt;
-
-  for (let index = 0; index < pendingParsedEvents.length; index += 1) {
-    const parsed = pendingParsedEvents[index];
-    const rawLine = parsed.rawLine;
-    const lineNumber = lastProcessedLine + index + 1;
-    const rawInserted = await insertRawEvent(env, scope.linkedServerId, latestAdmFile, lineNumber, rawLine, parsed);
-    processedOffset += rawLine.length + 1;
-    if (!rawInserted) {
-      duplicateLines += 1;
-      continue;
-    }
-    rawEventsStored += 1;
-    if (parsed.eventType === "unknown") unknownLines += 1;
-
-    const eventResult = await persistParsedEvent(env, scope.linkedServerId, latestAdmFile, lineNumber, parsed, {
+  try {
+    const backfillResult = await backfillMissingCreditedKills(
+      env,
+      scope,
+      parsedLines,
+      lastProcessedLine,
       recentDeathLines,
+    );
+    eventsCreated += backfillResult.eventsCreated;
+    killEventsStored += backfillResult.killEventsCreated;
+    killsCreated += backfillResult.killsCreated;
+    deathsCreated += backfillResult.deathsCreated;
+    duplicateLines += backfillResult.duplicatesSkipped;
+    if (backfillResult.lastEventAt) lastEventAt = backfillResult.lastEventAt;
+
+    for (let index = 0; index < pendingParsedEvents.length; index += 1) {
+      const parsed = pendingParsedEvents[index];
+      const rawLine = parsed.rawLine;
+      const lineNumber = lastProcessedLine + index + 1;
+      const rawInserted = await insertRawEvent(env, scope, lineNumber, rawLine, parsed);
+      processedOffset += rawLine.length + 1;
+      if (!rawInserted) {
+        duplicateLines += 1;
+        continue;
+      }
+      rawEventsStored += 1;
+      if (parsed.eventType === "unknown") unknownLines += 1;
+
+      const eventResult = await persistParsedEvent(env, scope, lineNumber, parsed, {
+        recentDeathLines,
+      });
+      eventsCreated += eventResult.eventsCreated;
+      playerEventsStored += eventResult.playerEventsCreated;
+      killEventsStored += eventResult.killEventsCreated;
+      killsCreated += eventResult.killsCreated;
+      joinsCreated += eventResult.joinsCreated;
+      disconnectsCreated += eventResult.disconnectsCreated;
+      deathsCreated += eventResult.deathsCreated;
+      lastEventAt = parsed.occurredAt ?? now;
+    }
+  } catch (error) {
+    await recordSyncRun(env, {
+      id: syncRunId,
+      linkedServerId: scope.linkedServerId,
+      sourceServiceId: scope.nitradoServiceId,
+      triggerType,
+      status: "error",
+      message: safeSyncErrorMessage(error),
+      linesRead: lines.length,
+      linesProcessed: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      startedAt: syncStartedAtIso,
+      finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - syncStartedAt,
     });
-    eventsCreated += eventResult.eventsCreated;
-    playerEventsStored += eventResult.playerEventsCreated;
-    killEventsStored += eventResult.killEventsCreated;
-    killsCreated += eventResult.killsCreated;
-    joinsCreated += eventResult.joinsCreated;
-    disconnectsCreated += eventResult.disconnectsCreated;
-    deathsCreated += eventResult.deathsCreated;
-    lastEventAt = parsed.occurredAt ?? now;
+    throw error;
   }
 
   const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
@@ -347,6 +413,7 @@ export async function runAdmSync(
     ? `${triggerType === "manual" ? "Manual sync" : "Scheduled sync"} complete. Lines scanned: ${lines.length}. Kills found: ${creditedKillLinesFound}. New kills created: ${killsCreated}. Duplicates skipped: ${duplicateKillsSkipped}. Players updated: ${uniquePlayers}.`
     : "No new ADM lines to process";
   await upsertServerStats(env, scope.linkedServerId, {
+    sourceServiceId: scope.nitradoServiceId,
     kills: killsCreated,
     deaths: deathsCreated,
     joins: joinsCreated,
@@ -357,6 +424,7 @@ export async function runAdmSync(
   await upsertSyncState(env, scope.linkedServerId, {
     latestAdmFile,
     latestAdmPath,
+    sourceServiceId: scope.nitradoServiceId,
     lastProcessedFile: latestAdmFile,
     lastProcessedLine: nextProcessedLine,
     lastProcessedOffset: processedOffset,
@@ -376,7 +444,9 @@ export async function runAdmSync(
     readableRoute: readable.readableRouteUsed,
   });
   await recordSyncRun(env, {
+    id: syncRunId,
     linkedServerId: scope.linkedServerId,
+    sourceServiceId: scope.nitradoServiceId,
     triggerType,
     status,
     message,
@@ -813,6 +883,7 @@ export async function runScheduledAdmSync(
       failed += 1;
       await recordSyncRun(env, {
         linkedServerId: server.id,
+        sourceServiceId: server.nitrado_service_id,
         triggerType: "scheduled",
         status: "error",
         message: safeSyncErrorMessage(error),
@@ -862,7 +933,15 @@ async function getOwnedLinkedServer(env: Env, userId: string, linkedServerId?: s
   const db = requireDb(env);
   return db
     .prepare(
-      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.nitrado_service_id, server_log_config.adm_path AS adm_path
+      `SELECT
+         linked_servers.id,
+         linked_servers.user_id,
+         linked_servers.nitrado_service_id,
+         linked_servers.server_name,
+         linked_servers.display_name,
+         linked_servers.hostname,
+         linked_servers.nitrado_service_name,
+         server_log_config.adm_path AS adm_path
        FROM linked_servers
        LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
        WHERE linked_servers.id = ? AND linked_servers.user_id = ?
@@ -877,7 +956,15 @@ async function getEligibleScheduledSyncServers(env: Env, limit: number, minSyncI
   const minSyncIntervalSeconds = Math.max(1, Math.floor(minSyncIntervalMs / 1000));
   const result = await db
     .prepare(
-      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.nitrado_service_id, server_log_config.adm_path AS adm_path
+      `SELECT
+         linked_servers.id,
+         linked_servers.user_id,
+         linked_servers.nitrado_service_id,
+         linked_servers.server_name,
+         linked_servers.display_name,
+         linked_servers.hostname,
+         linked_servers.nitrado_service_name,
+         server_log_config.adm_path AS adm_path
        FROM linked_servers
        LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
        LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
@@ -906,9 +993,7 @@ async function getEligibleScheduledSyncServers(env: Env, limit: number, minSyncI
 
 async function ensureAdmSyncDetailColumns(env: Env) {
   const db = requireDb(env);
-  const columns = await db.prepare("PRAGMA table_info(adm_sync_state)").all<{ name: string }>();
-  const existing = new Set((columns.results ?? []).map((column) => column.name));
-  const missingColumns = [
+  await ensureMissingColumns(db, "adm_sync_state", [
     ["last_lines_read", "INTEGER DEFAULT 0"],
     ["last_lines_processed", "INTEGER DEFAULT 0"],
     ["last_raw_events_stored", "INTEGER DEFAULT 0"],
@@ -920,10 +1005,41 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["last_duplicate_lines", "INTEGER DEFAULT 0"],
     ["last_sync_duration_ms", "INTEGER"],
     ["last_readable_route", "TEXT"],
-  ].filter(([name]) => !existing.has(name));
+    ["source_service_id", "TEXT"],
+  ]);
+  await ensureMissingColumns(db, "adm_raw_events", [
+    ["source_service_id", "TEXT"],
+    ["source_adm_file", "TEXT"],
+    ["source_line_number", "INTEGER"],
+    ["source_sync_run_id", "TEXT"],
+  ]);
+  await ensureMissingColumns(db, "player_events", [
+    ["source_service_id", "TEXT"],
+    ["source_adm_file", "TEXT"],
+    ["source_line_number", "INTEGER"],
+    ["source_sync_run_id", "TEXT"],
+  ]);
+  await ensureMissingColumns(db, "kill_events", [
+    ["source_service_id", "TEXT"],
+    ["source_adm_file", "TEXT"],
+    ["source_line_number", "INTEGER"],
+    ["source_sync_run_id", "TEXT"],
+  ]);
+  await ensureMissingColumns(db, "player_profiles", [["source_service_id", "TEXT"]]);
+  await ensureMissingColumns(db, "server_stats", [["source_service_id", "TEXT"]]);
+  await ensureMissingColumns(db, "sync_runs", [["source_service_id", "TEXT"]]);
+  for (const statement of ADM_SYNC_SCOPE_INDEX_STATEMENTS) {
+    await db.prepare(statement).run();
+  }
+}
 
-  for (const [name, type] of missingColumns) {
-    await db.prepare(`ALTER TABLE adm_sync_state ADD COLUMN ${name} ${type}`).run();
+async function ensureMissingColumns(db: D1Database, table: string, columns: string[][]) {
+  const result = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+  const existing = new Set((result.results ?? []).map((column) => column.name));
+  for (const [name, type] of columns) {
+    if (!existing.has(name)) {
+      await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`).run();
+    }
   }
 }
 
@@ -941,6 +1057,7 @@ async function upsertSyncState(
   values: {
     latestAdmFile: string | null;
     latestAdmPath: string | null;
+    sourceServiceId: string;
     lastProcessedFile: string | null;
     lastProcessedLine: number;
     lastProcessedOffset: number;
@@ -964,14 +1081,15 @@ async function upsertSyncState(
   await db
     .prepare(
       `INSERT INTO adm_sync_state (
-        id, linked_server_id, latest_adm_file, latest_adm_path, last_processed_file,
+        id, linked_server_id, source_service_id, latest_adm_file, latest_adm_path, last_processed_file,
         last_processed_line, last_processed_offset, last_sync_status, last_sync_message,
         last_sync_at, last_lines_read, last_lines_processed, last_raw_events_stored,
         last_player_events_stored, last_kill_events_stored, last_events_created,
         last_kills_created, last_unknown_lines, last_duplicate_lines, last_sync_duration_ms,
         last_readable_route, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(linked_server_id) DO UPDATE SET
+        source_service_id = COALESCE(excluded.source_service_id, adm_sync_state.source_service_id),
         latest_adm_file = excluded.latest_adm_file,
         latest_adm_path = excluded.latest_adm_path,
         last_processed_file = excluded.last_processed_file,
@@ -996,6 +1114,7 @@ async function upsertSyncState(
     .bind(
       crypto.randomUUID(),
       linkedServerId,
+      values.sourceServiceId,
       values.latestAdmFile,
       values.latestAdmPath,
       values.lastProcessedFile,
@@ -1021,26 +1140,35 @@ async function upsertSyncState(
 
 async function insertRawEvent(
   env: Env,
-  linkedServerId: string,
-  admFile: string | null,
+  context: AdmSyncContext,
   lineNumber: number,
   rawLine: string,
   parsed: ParsedAdmEvent,
 ) {
-  assertAdmLinkedServerId(linkedServerId, "adm_raw_events");
+  const admFile = context.admFileName;
+  assertAdmWriteScope(context, {
+    linkedServerId: context.linkedServerId,
+    sourceServiceId: context.nitradoServiceId,
+    sourceAdmFile: admFile,
+  }, "adm_raw_events");
   const db = requireDb(env);
-  const id = await stableSyncId("raw", linkedServerId, admFile, lineNumber);
+  const id = await stableSyncId("raw", context.linkedServerId, admFile, lineNumber);
   const result = await db
     .prepare(
       `INSERT OR IGNORE INTO adm_raw_events (
-        id, linked_server_id, adm_file, line_number, raw_line, event_type, parsed, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        id, linked_server_id, source_service_id, adm_file, source_adm_file, line_number,
+        source_line_number, source_sync_run_id, raw_line, event_type, parsed, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
       id,
-      linkedServerId,
+      context.linkedServerId,
+      context.nitradoServiceId,
+      admFile,
       admFile,
       lineNumber,
+      lineNumber,
+      context.syncRunId ?? null,
       rawLine,
       parsed.eventType,
       parsed.eventType === "unknown" ? 0 : 1,
@@ -1051,11 +1179,10 @@ async function insertRawEvent(
 
 async function persistParsedEvent(
   env: Env,
-  linkedServerId: string,
-  admFile: string | null,
+  syncContext: AdmSyncContext,
   lineNumber: number,
   parsed: ParsedAdmEvent,
-  context: { recentDeathLines: Map<string, number> },
+  deathContext: { recentDeathLines: Map<string, number> },
 ) {
   if (
     parsed.eventType === "admin_log_started" ||
@@ -1069,9 +1196,9 @@ async function persistParsedEvent(
   if (parsed.eventType === "playerlist_entry" || parsed.eventType === "plain_player_state") {
     let playerProfileId: string | null = null;
     if (parsed.playerName) {
-      playerProfileId = await upsertPlayerProfile(env, linkedServerId, parsed.playerName, parsed.playerId, parsed.occurredAt);
+      playerProfileId = await upsertPlayerProfile(env, syncContext, parsed.playerName, parsed.playerId, parsed.occurredAt);
     }
-    const inserted = await insertPlayerEvent(env, linkedServerId, playerProfileId, admFile, lineNumber, parsed);
+    const inserted = await insertPlayerEvent(env, syncContext, playerProfileId, lineNumber, parsed);
     return {
       ...emptyPersistResult(),
       eventsCreated: inserted ? 1 : 0,
@@ -1083,12 +1210,12 @@ async function persistParsedEvent(
 
   if (parsed.eventType === "player_killed" && parsed.isCreditedKill) {
     const killerProfileId = parsed.killerName
-      ? await upsertPlayerProfile(env, linkedServerId, parsed.killerName, parsed.killerId, parsed.occurredAt)
+      ? await upsertPlayerProfile(env, syncContext, parsed.killerName, parsed.killerId, parsed.occurredAt)
       : null;
     const victimProfileId = parsed.victimName
-      ? await upsertPlayerProfile(env, linkedServerId, parsed.victimName, parsed.victimId, parsed.occurredAt)
+      ? await upsertPlayerProfile(env, syncContext, parsed.victimName, parsed.victimId, parsed.occurredAt)
       : null;
-    const inserted = await insertKillEvent(env, linkedServerId, killerProfileId, victimProfileId, admFile, lineNumber, parsed);
+    const inserted = await insertKillEvent(env, syncContext, killerProfileId, victimProfileId, lineNumber, parsed);
     if (inserted) {
       await updateProfilesForDeath(env, {
         killerProfileId,
@@ -1102,17 +1229,17 @@ async function persistParsedEvent(
       result.killsCreated = 1;
       result.deathsCreated = 1;
     }
-    markDeathCounted(context.recentDeathLines, parsed, lineNumber);
+    markDeathCounted(deathContext.recentDeathLines, parsed, lineNumber);
     return result;
   }
 
   const eventPlayer = getPlayerForPlayerEvent(parsed);
   let playerProfileId: string | null = null;
   if (eventPlayer.name) {
-    playerProfileId = await upsertPlayerProfile(env, linkedServerId, eventPlayer.name, eventPlayer.id, parsed.occurredAt);
+    playerProfileId = await upsertPlayerProfile(env, syncContext, eventPlayer.name, eventPlayer.id, parsed.occurredAt);
   }
 
-  const inserted = await insertPlayerEvent(env, linkedServerId, playerProfileId, admFile, lineNumber, parsed);
+  const inserted = await insertPlayerEvent(env, syncContext, playerProfileId, lineNumber, parsed);
   if (!inserted) return result;
 
   result.eventsCreated = 1;
@@ -1123,7 +1250,7 @@ async function persistParsedEvent(
 
   if (parsed.eventType === "player_killed_environment" || parsed.eventType === "player_suicide") {
     const victimProfileId = eventPlayer.name
-      ? await upsertPlayerProfile(env, linkedServerId, eventPlayer.name, eventPlayer.id, parsed.occurredAt)
+      ? await upsertPlayerProfile(env, syncContext, eventPlayer.name, eventPlayer.id, parsed.occurredAt)
       : playerProfileId;
     await updateProfilesForDeath(env, {
       killerProfileId: null,
@@ -1132,12 +1259,12 @@ async function persistParsedEvent(
       suicide: parsed.eventType === "player_suicide",
       distance: null,
     });
-    markDeathCounted(context.recentDeathLines, parsed, lineNumber);
+    markDeathCounted(deathContext.recentDeathLines, parsed, lineNumber);
     result.deathsCreated = 1;
   }
 
   if (parsed.eventType === "player_died_stats") {
-    const deathAlreadyCounted = wasDeathRecentlyCounted(context.recentDeathLines, parsed, lineNumber);
+    const deathAlreadyCounted = wasDeathRecentlyCounted(deathContext.recentDeathLines, parsed, lineNumber);
     if (!deathAlreadyCounted) {
       await updateProfilesForDeath(env, {
         killerProfileId: null,
@@ -1146,7 +1273,7 @@ async function persistParsedEvent(
         suicide: false,
         distance: null,
       });
-      markDeathCounted(context.recentDeathLines, parsed, lineNumber);
+      markDeathCounted(deathContext.recentDeathLines, parsed, lineNumber);
       result.deathsCreated = 1;
     }
   }
@@ -1156,8 +1283,7 @@ async function persistParsedEvent(
 
 async function backfillMissingCreditedKills(
   env: Env,
-  linkedServerId: string,
-  admFile: string | null,
+  context: AdmSyncContext,
   parsedLines: ParsedAdmEvent[],
   processedLineCount: number,
   recentDeathLines: Map<string, number>,
@@ -1177,7 +1303,7 @@ async function backfillMissingCreditedKills(
     if (!parsed || !isCreditedKillEvent(parsed)) continue;
 
     const lineNumber = index + 1;
-    const eventResult = await persistParsedEvent(env, linkedServerId, admFile, lineNumber, parsed, { recentDeathLines });
+    const eventResult = await persistParsedEvent(env, context, lineNumber, parsed, { recentDeathLines });
     if (eventResult.killsCreated > 0) {
       result.eventsCreated += eventResult.eventsCreated;
       result.killEventsCreated += eventResult.killEventsCreated;
@@ -1194,25 +1320,32 @@ async function backfillMissingCreditedKills(
 
 async function insertPlayerEvent(
   env: Env,
-  linkedServerId: string,
+  context: AdmSyncContext,
   playerProfileId: string | null,
-  admFile: string | null,
   lineNumber: number,
   parsed: ParsedAdmEvent,
 ) {
-  assertAdmLinkedServerId(linkedServerId, "player_events");
+  const admFile = context.admFileName;
+  assertAdmWriteScope(context, {
+    linkedServerId: context.linkedServerId,
+    sourceServiceId: context.nitradoServiceId,
+    sourceAdmFile: admFile,
+  }, "player_events");
   const db = requireDb(env);
-  const id = await stableSyncId("player-event", linkedServerId, admFile, lineNumber, parsed.eventType);
+  const id = await stableSyncId("player-event", context.linkedServerId, admFile, lineNumber, parsed.eventType);
   const result = await db
     .prepare(
       `INSERT OR IGNORE INTO player_events (
-        id, linked_server_id, player_profile_id, player_name, player_id, event_type,
-        position_x, position_y, position_z, adm_file, line_number, occurred_at, raw_line, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        id, linked_server_id, source_service_id, source_sync_run_id, player_profile_id,
+        player_name, player_id, event_type, position_x, position_y, position_z,
+        adm_file, source_adm_file, line_number, source_line_number, occurred_at, raw_line, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
       id,
-      linkedServerId,
+      context.linkedServerId,
+      context.nitradoServiceId,
+      context.syncRunId ?? null,
       playerProfileId,
       parsed.playerName,
       parsed.playerId,
@@ -1221,6 +1354,8 @@ async function insertPlayerEvent(
       parsed.position?.y ?? null,
       parsed.position?.z ?? null,
       admFile,
+      admFile,
+      lineNumber,
       lineNumber,
       parsed.occurredAt,
       parsed.rawLine,
@@ -1231,28 +1366,35 @@ async function insertPlayerEvent(
 
 async function insertKillEvent(
   env: Env,
-  linkedServerId: string,
+  context: AdmSyncContext,
   killerProfileId: string | null,
   victimProfileId: string | null,
-  admFile: string | null,
   lineNumber: number,
   parsed: ParsedAdmEvent,
 ) {
-  assertAdmLinkedServerId(linkedServerId, "kill_events");
+  const admFile = context.admFileName;
+  assertAdmWriteScope(context, {
+    linkedServerId: context.linkedServerId,
+    sourceServiceId: context.nitradoServiceId,
+    sourceAdmFile: admFile,
+  }, "kill_events");
   const db = requireDb(env);
-  if (await hasExistingKillEventByFallback(env, linkedServerId, parsed)) return false;
-  const id = await stableSyncId("kill-event", linkedServerId, admFile, lineNumber);
+  if (await hasExistingKillEventByFallback(env, context, parsed)) return false;
+  const id = await stableSyncId("kill-event", context.linkedServerId, admFile, lineNumber);
   const result = await db
     .prepare(
       `INSERT OR IGNORE INTO kill_events (
-        id, linked_server_id, killer_profile_id, victim_profile_id, killer_name, victim_name,
-        killer_id, victim_id, weapon, distance, position_x, position_y, position_z,
-        adm_file, line_number, occurred_at, raw_line, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        id, linked_server_id, source_service_id, source_sync_run_id, killer_profile_id,
+        victim_profile_id, killer_name, victim_name, killer_id, victim_id, weapon,
+        distance, position_x, position_y, position_z, adm_file, source_adm_file,
+        line_number, source_line_number, occurred_at, raw_line, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
       id,
-      linkedServerId,
+      context.linkedServerId,
+      context.nitradoServiceId,
+      context.syncRunId ?? null,
       killerProfileId,
       victimProfileId,
       parsed.killerName ?? parsed.playerName,
@@ -1265,6 +1407,8 @@ async function insertKillEvent(
       parsed.killerPosition?.y ?? parsed.position?.y ?? null,
       parsed.killerPosition?.z ?? parsed.position?.z ?? null,
       admFile,
+      admFile,
+      lineNumber,
       lineNumber,
       parsed.occurredAt,
       parsed.rawLine,
@@ -1273,7 +1417,7 @@ async function insertKillEvent(
   return didMutate(result);
 }
 
-async function hasExistingKillEventByFallback(env: Env, linkedServerId: string, parsed: ParsedAdmEvent) {
+async function hasExistingKillEventByFallback(env: Env, context: AdmSyncContext, parsed: ParsedAdmEvent) {
   const killer = parsed.killerId ?? parsed.killerName ?? parsed.playerId ?? parsed.playerName ?? "";
   const victim = parsed.victimId ?? parsed.victimName ?? "";
   if (!killer || !victim) return false;
@@ -1285,6 +1429,7 @@ async function hasExistingKillEventByFallback(env: Env, linkedServerId: string, 
       `SELECT id
        FROM kill_events
        WHERE linked_server_id = ?
+         AND COALESCE(source_service_id, ?) = ?
          AND COALESCE(occurred_at, '') = COALESCE(?, '')
          AND COALESCE(killer_id, killer_name, '') = ?
          AND COALESCE(victim_id, victim_name, '') = ?
@@ -1296,7 +1441,9 @@ async function hasExistingKillEventByFallback(env: Env, linkedServerId: string, 
        LIMIT 1`,
     )
     .bind(
-      linkedServerId,
+      context.linkedServerId,
+      context.nitradoServiceId,
+      context.nitradoServiceId,
       parsed.occurredAt,
       killer,
       victim,
@@ -1311,21 +1458,24 @@ async function hasExistingKillEventByFallback(env: Env, linkedServerId: string, 
 
 async function upsertPlayerProfile(
   env: Env,
-  linkedServerId: string,
+  context: AdmSyncContext,
   playerName: string,
   playerId: string | null,
   lastSeenAt: string | null,
 ) {
-  assertAdmLinkedServerId(linkedServerId, "player_profiles");
+  assertAdmWriteScope(context, {
+    linkedServerId: context.linkedServerId,
+    sourceServiceId: context.nitradoServiceId,
+  }, "player_profiles");
   const db = requireDb(env);
   const existing = playerId
     ? await db
       .prepare("SELECT id FROM player_profiles WHERE linked_server_id = ? AND player_id = ? LIMIT 1")
-      .bind(linkedServerId, playerId)
+      .bind(context.linkedServerId, playerId)
       .first<{ id: string }>()
     : await db
       .prepare("SELECT id FROM player_profiles WHERE linked_server_id = ? AND lower(player_name) = lower(?) LIMIT 1")
-      .bind(linkedServerId, playerName)
+      .bind(context.linkedServerId, playerName)
       .first<{ id: string }>();
 
   if (existing) {
@@ -1334,11 +1484,12 @@ async function upsertPlayerProfile(
         `UPDATE player_profiles SET
           player_name = ?,
           player_id = COALESCE(?, player_id),
+          source_service_id = COALESCE(source_service_id, ?),
           last_seen_at = COALESCE(?, last_seen_at),
           updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
       )
-      .bind(playerName, playerId, lastSeenAt, existing.id)
+      .bind(playerName, playerId, context.nitradoServiceId, lastSeenAt, existing.id)
       .run();
     return existing.id;
   }
@@ -1347,10 +1498,10 @@ async function upsertPlayerProfile(
   await db
     .prepare(
       `INSERT INTO player_profiles (
-        id, linked_server_id, player_name, player_id, last_seen_at, first_seen_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        id, linked_server_id, source_service_id, player_name, player_id, last_seen_at, first_seen_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     )
-    .bind(id, linkedServerId, playerName, playerId, lastSeenAt)
+    .bind(id, context.linkedServerId, context.nitradoServiceId, playerName, playerId, lastSeenAt)
     .run();
   return id;
 }
@@ -1396,6 +1547,7 @@ async function upsertServerStats(
   env: Env,
   linkedServerId: string,
   increments: {
+    sourceServiceId: string;
     kills: number;
     deaths: number;
     joins: number;
@@ -1404,15 +1556,25 @@ async function upsertServerStats(
     lastEventAt: string | null;
   },
 ) {
-  assertAdmLinkedServerId(linkedServerId, "server_stats");
+  const context = {
+    linkedServerId,
+    nitradoServiceId: increments.sourceServiceId,
+    serverName: linkedServerId,
+    admFileName: null,
+  };
+  assertAdmWriteScope(context, {
+    linkedServerId,
+    sourceServiceId: increments.sourceServiceId,
+  }, "server_stats");
   const db = requireDb(env);
   await db
     .prepare(
       `INSERT INTO server_stats (
-        id, linked_server_id, total_kills, total_deaths, total_joins, total_disconnects,
+        id, linked_server_id, source_service_id, total_kills, total_deaths, total_joins, total_disconnects,
         unique_players, last_event_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(linked_server_id) DO UPDATE SET
+        source_service_id = COALESCE(excluded.source_service_id, server_stats.source_service_id),
         total_kills = total_kills + excluded.total_kills,
         total_deaths = total_deaths + excluded.total_deaths,
         total_joins = total_joins + excluded.total_joins,
@@ -1424,6 +1586,7 @@ async function upsertServerStats(
     .bind(
       crypto.randomUUID(),
       linkedServerId,
+      increments.sourceServiceId,
       increments.kills,
       increments.deaths,
       increments.joins,
@@ -1474,7 +1637,8 @@ async function countRemainingSyncRows(env: Env, linkedServerId: string) {
 
 async function rebuildServerStats(env: Env, linkedServerId: string) {
   const db = requireDb(env);
-  const [kills, deathsFromKills, deathsFromPlayerEvents, joins, disconnects, uniquePlayers, lastEvent] = await Promise.all([
+  const [server, kills, deathsFromKills, deathsFromPlayerEvents, joins, disconnects, uniquePlayers, lastEvent] = await Promise.all([
+    db.prepare("SELECT nitrado_service_id FROM linked_servers WHERE id = ? LIMIT 1").bind(linkedServerId).first<{ nitrado_service_id: string | null }>(),
     db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ? AND victim_name IS NOT NULL").bind(linkedServerId).first<{ count: number }>(),
     db
@@ -1505,10 +1669,11 @@ async function rebuildServerStats(env: Env, linkedServerId: string) {
   await db
     .prepare(
       `INSERT INTO server_stats (
-        id, linked_server_id, total_kills, total_deaths, total_joins, total_disconnects,
+        id, linked_server_id, source_service_id, total_kills, total_deaths, total_joins, total_disconnects,
         unique_players, last_event_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(linked_server_id) DO UPDATE SET
+        source_service_id = COALESCE(excluded.source_service_id, server_stats.source_service_id),
         total_kills = excluded.total_kills,
         total_deaths = excluded.total_deaths,
         total_joins = excluded.total_joins,
@@ -1520,6 +1685,7 @@ async function rebuildServerStats(env: Env, linkedServerId: string) {
     .bind(
       crypto.randomUUID(),
       linkedServerId,
+      server?.nitrado_service_id ?? null,
       numberOrZero(kills?.count),
       numberOrZero(deathsFromKills?.count) + numberOrZero(deathsFromPlayerEvents?.count),
       numberOrZero(joins?.count),
@@ -1533,7 +1699,9 @@ async function rebuildServerStats(env: Env, linkedServerId: string) {
 export async function recordSyncRun(
   env: Env,
   values: {
+    id?: string;
     linkedServerId: string | null;
+    sourceServiceId?: string | null;
     triggerType: "manual" | "scheduled";
     status: string;
     message: string | null;
@@ -1551,13 +1719,14 @@ export async function recordSyncRun(
   await db
     .prepare(
       `INSERT INTO sync_runs (
-        id, linked_server_id, trigger_type, status, message, lines_read, lines_processed,
+        id, linked_server_id, source_service_id, trigger_type, status, message, lines_read, lines_processed,
         events_created, kills_created, started_at, finished_at, duration_ms, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
-      crypto.randomUUID(),
+      values.id ?? crypto.randomUUID(),
       values.linkedServerId,
+      values.sourceServiceId ?? null,
       values.triggerType,
       values.status,
       values.message,
@@ -1786,6 +1955,13 @@ function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
 }
 
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 function clampPositiveInteger(value: number, fallback: number) {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(1, Math.trunc(value));
@@ -1930,4 +2106,42 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_linked_server_id ON sync_runs(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_created_at ON sync_runs(created_at)",
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_status ON sync_runs(status)",
+];
+
+const ADM_SYNC_SCOPE_INDEX_STATEMENTS = [
+  `UPDATE adm_raw_events
+   SET source_service_id = COALESCE(source_service_id, (SELECT nitrado_service_id FROM linked_servers WHERE linked_servers.id = adm_raw_events.linked_server_id)),
+       source_adm_file = COALESCE(source_adm_file, adm_file),
+       source_line_number = COALESCE(source_line_number, line_number)
+   WHERE source_service_id IS NULL OR source_adm_file IS NULL OR source_line_number IS NULL`,
+  `UPDATE player_events
+   SET source_service_id = COALESCE(source_service_id, (SELECT nitrado_service_id FROM linked_servers WHERE linked_servers.id = player_events.linked_server_id)),
+       source_adm_file = COALESCE(source_adm_file, adm_file),
+       source_line_number = COALESCE(source_line_number, line_number)
+   WHERE source_service_id IS NULL OR source_adm_file IS NULL OR source_line_number IS NULL`,
+  `UPDATE kill_events
+   SET source_service_id = COALESCE(source_service_id, (SELECT nitrado_service_id FROM linked_servers WHERE linked_servers.id = kill_events.linked_server_id)),
+       source_adm_file = COALESCE(source_adm_file, adm_file),
+       source_line_number = COALESCE(source_line_number, line_number)
+   WHERE source_service_id IS NULL OR source_adm_file IS NULL OR source_line_number IS NULL`,
+  `UPDATE player_profiles
+   SET source_service_id = COALESCE(source_service_id, (SELECT nitrado_service_id FROM linked_servers WHERE linked_servers.id = player_profiles.linked_server_id))
+   WHERE source_service_id IS NULL`,
+  `UPDATE server_stats
+   SET source_service_id = COALESCE(source_service_id, (SELECT nitrado_service_id FROM linked_servers WHERE linked_servers.id = server_stats.linked_server_id))
+   WHERE source_service_id IS NULL`,
+  `UPDATE adm_sync_state
+   SET source_service_id = COALESCE(source_service_id, (SELECT nitrado_service_id FROM linked_servers WHERE linked_servers.id = adm_sync_state.linked_server_id))
+   WHERE source_service_id IS NULL`,
+  `UPDATE sync_runs
+   SET source_service_id = COALESCE(source_service_id, (SELECT nitrado_service_id FROM linked_servers WHERE linked_servers.id = sync_runs.linked_server_id))
+   WHERE source_service_id IS NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_kill_events_service_file_line
+   ON kill_events(source_service_id, source_adm_file, source_line_number)
+   WHERE source_service_id IS NOT NULL AND source_adm_file IS NOT NULL AND source_line_number IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_adm_raw_events_service_file_line
+   ON adm_raw_events(source_service_id, source_adm_file, source_line_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_player_events_service_file_line
+   ON player_events(source_service_id, source_adm_file, source_line_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_sync_runs_source_service_id ON sync_runs(source_service_id)`,
 ];

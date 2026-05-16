@@ -65,7 +65,13 @@ type HomeStats = {
     total_kills: number;
     total_deaths?: number;
     unique_players: number;
+    total_joins?: number;
+    longest_kill?: number;
     stats_active: boolean;
+    rank?: number;
+    score?: number;
+    score_label?: string;
+    score_breakdown?: ScoreBreakdown | null;
   }>;
   recentActivity: Array<{
     source: "kill" | "player" | "sync" | "server";
@@ -98,6 +104,17 @@ type TopServerRow = {
   kd: string;
   kills: string;
   score: string;
+  scoreTitle: string;
+};
+
+type ScoreBreakdown = {
+  kills_points: number;
+  unique_players_points: number;
+  joins_points: number;
+  longest_kill_points: number;
+  sync_bonus: number;
+  death_penalty: number;
+  final_score: number;
 };
 
 type RecentRow = {
@@ -136,7 +153,8 @@ const fallbackTopServers: TopServerRow[] = [
     server: "DayZQuest Bot Test Server",
     kd: "Awaiting data",
     kills: "0",
-    score: "130",
+    score: "Pending",
+    scoreTitle: "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
   },
   {
     rank: 2,
@@ -144,6 +162,7 @@ const fallbackTopServers: TopServerRow[] = [
     kd: "Awaiting data",
     kills: "0",
     score: "Pending",
+    scoreTitle: "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
   },
 ];
 
@@ -358,7 +377,7 @@ function TopServersPanel({ rows }: { rows: TopServerRow[] }) {
             <span className="min-w-0 break-words text-[0.72rem] font-bold leading-4 text-white">{row.server}</span>
             <span className="text-right text-[0.62rem] font-bold leading-3 text-slate-300">{row.kd}</span>
             <span className="text-right font-bold text-slate-300">{row.kills}</span>
-            <span className="text-right font-black text-emerald-200">{row.score}</span>
+            <span title={row.scoreTitle} className="text-right font-black text-emerald-200">{row.score}</span>
           </div>
         ))}
       </div>
@@ -708,13 +727,14 @@ function buildTopServers(stats: HomeStats): TopServerRow[] {
   const rows = stats.topServers.slice(0, 5).map((server, index) => {
     const kills = numberOrZero(server.total_kills);
     const deaths = numberOrZero(server.total_deaths);
-    const score = kills * 10 + numberOrZero(server.unique_players) * 5 + (server.stats_active ? 100 : 0);
+    const scoreLabel = server.score_label ?? (numberOrZero(server.score) > 0 ? formatNumber(numberOrZero(server.score)) : "Pending");
     return {
-      rank: index + 1,
+      rank: numberOrZero(server.rank) || index + 1,
       server: formatServerDisplayName(server.server_name || server.guild_name || "Unnamed DZN Server"),
       kd: kills === 0 ? "Awaiting data" : deaths > 0 ? (kills / deaths).toFixed(2) : kills.toFixed(2),
       kills: formatNumber(kills),
-      score: score > 0 ? formatNumber(score) : "Pending",
+      score: scoreLabel === "Pending" ? "Pending" : formatNumber(numberOrZero(server.score)),
+      scoreTitle: scoreBreakdownTitle(server.score_breakdown),
     };
   });
 
@@ -757,7 +777,13 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
           total_kills: numberOrZero(server.total_kills),
           total_deaths: numberOrZero(server.total_deaths),
           unique_players: numberOrZero(server.unique_players),
+          total_joins: numberOrZero(server.total_joins),
+          longest_kill: numberOrZero(server.longest_kill),
           stats_active: Boolean(server.stats_active),
+          rank: numberOrZero(server.rank),
+          score: numberOrZero(server.score),
+          score_label: typeof server.score_label === "string" ? server.score_label : undefined,
+          score_breakdown: isScoreBreakdown(server.score_breakdown) ? server.score_breakdown : null,
         }))
       : [],
     recentActivity: Array.isArray(payload.recentActivity) ? payload.recentActivity : [],
@@ -772,6 +798,26 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       pending: numberOrZero(payload.syncHealth?.pending),
     },
   };
+}
+
+function isScoreBreakdown(value: unknown): value is ScoreBreakdown {
+  return Boolean(value && typeof value === "object" && "final_score" in value);
+}
+
+function scoreBreakdownTitle(breakdown: ScoreBreakdown | null | undefined) {
+  if (!breakdown) {
+    return "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.";
+  }
+  return [
+    "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
+    `Kills: ${breakdown.kills_points}`,
+    `Unique players: ${breakdown.unique_players_points}`,
+    `Joins: ${breakdown.joins_points}`,
+    `Longest kill: ${breakdown.longest_kill_points}`,
+    `Sync bonus: ${breakdown.sync_bonus}`,
+    `Death penalty: -${breakdown.death_penalty}`,
+    `Final score: ${breakdown.final_score}`,
+  ].join("\n");
 }
 
 function formatServerDisplayName(value: string) {

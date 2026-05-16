@@ -1,5 +1,6 @@
 import { hmacSha256, randomToken } from "./crypto";
 import { mockGuilds, mockUser } from "./mock";
+import { rankServers } from "./server-ranking";
 import type { DiscordGuild, DiscordUser, Env, SessionUser } from "./types";
 import type { DiscordTokenResponse } from "./discord";
 
@@ -243,8 +244,34 @@ export async function getLinkedServersForUser(env: Env, userId: string, options:
     .all<Record<string, unknown>>();
 
   const servers = result.results ?? [];
+  const rankingById = await getGlobalServerRankingMap(env).catch(() => new Map());
 
   for (const server of servers) {
+    const ranking = typeof server.id === "string" ? rankingById.get(server.id) : null;
+    if (ranking) {
+      server.global_rank = ranking.rank;
+      server.rank = ranking.rank;
+      server.server_score = ranking.score;
+      server.score = ranking.score;
+      server.score_label = ranking.score_label;
+      server.score_breakdown = ranking.score_breakdown;
+      server.kd = ranking.kd;
+      server.kd_label = ranking.kd_label;
+      server.longest_kill = ranking.longest_kill;
+      server.stats_sync_active = ranking.stats_sync_active;
+    } else {
+      server.global_rank = null;
+      server.rank = null;
+      server.server_score = 0;
+      server.score = 0;
+      server.score_label = "Pending";
+      server.score_breakdown = null;
+      server.kd = null;
+      server.kd_label = "Awaiting data";
+      server.longest_kill = 0;
+      server.stats_sync_active = false;
+    }
+
     if (!server.public_slug && typeof server.id === "string") {
       const slug = await ensureLinkedServerPublicSlug(
         env,
@@ -271,6 +298,90 @@ export async function getLinkedServersForUser(env: Env, userId: string, options:
   }
 
   return servers;
+}
+
+type GlobalServerRankingRow = {
+  id: string;
+  kills: number | null;
+  deaths: number | null;
+  unique_players: number | null;
+  total_joins: number | null;
+  longest_kill: number | null;
+  stats_active: number | null;
+  last_activity_at: string | null;
+};
+
+async function getGlobalServerRankingMap(env: Env) {
+  const db = requireDb(env);
+  const result = await db
+    .prepare(
+      `SELECT
+        linked_servers.id,
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS kills,
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL) AS deaths,
+        COALESCE(server_stats.unique_players, (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id), 0) AS unique_players,
+        COALESCE(server_stats.total_joins, 0) AS total_joins,
+        COALESCE((SELECT MAX(distance) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill,
+        CASE
+          WHEN COALESCE(server_stats.total_joins, 0) > 0
+            OR COALESCE(server_stats.total_disconnects, 0) > 0
+            OR COALESCE(server_stats.total_deaths, 0) > 0
+            OR COALESCE(server_stats.total_kills, 0) > 0
+            OR COALESCE(server_stats.unique_players, 0) > 0
+            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
+          THEN 1 ELSE 0
+        END AS stats_active,
+        COALESCE(
+          server_stats.last_event_at,
+          (
+            SELECT MAX(COALESCE(kill_events.occurred_at, kill_events.created_at))
+            FROM kill_events
+            WHERE kill_events.linked_server_id = linked_servers.id
+          ),
+          linked_servers.updated_at,
+          linked_servers.created_at
+        ) AS last_activity_at
+       FROM linked_servers
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       LIMIT 500`,
+    )
+    .all<GlobalServerRankingRow>();
+
+  const ranked = rankServers((result.results ?? []).map((row) => {
+    const kills = numberOrZero(row.kills);
+    const deaths = numberOrZero(row.deaths);
+    return {
+      id: row.id,
+      kills,
+      deaths,
+      uniquePlayers: numberOrZero(row.unique_players),
+      joins: numberOrZero(row.total_joins),
+      longestKill: numberOrZero(row.longest_kill),
+      statsSyncActive: Number(row.stats_active) === 1,
+      lastActivityAt: row.last_activity_at,
+      kd: calculateRankKd(kills, deaths).value,
+      kd_label: calculateRankKd(kills, deaths).label,
+      longest_kill: numberOrZero(row.longest_kill),
+    };
+  }));
+
+  return new Map(ranked.map((server) => [server.id, server]));
+}
+
+function calculateRankKd(kills: number, deaths: number) {
+  const safeKills = numberOrZero(kills);
+  const safeDeaths = numberOrZero(deaths);
+  if (safeKills === 0 && safeDeaths === 0) return { value: null, label: "Awaiting data" };
+  if (safeKills > 0 && safeDeaths === 0) return { value: safeKills, label: "Flawless" };
+  const value = safeDeaths > 0 ? Math.round((safeKills / safeDeaths) * 100) / 100 : 0;
+  return { value, label: value.toFixed(2) };
+}
+
+function numberOrZero(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
 }
 
 export async function ensureLinkedServerMetadataColumns(env: Env) {

@@ -18,7 +18,22 @@ type LeaderboardServer = {
   kd: number | null;
   kd_label: string;
   longest_kill: number;
+  unique_players?: number;
+  joins?: number;
+  stats_sync_active?: boolean;
   score: number;
+  score_label: string;
+  score_breakdown: ScoreBreakdown | null;
+};
+
+type ScoreBreakdown = {
+  kills_points: number;
+  unique_players_points: number;
+  joins_points: number;
+  longest_kill_points: number;
+  sync_bonus: number;
+  death_penalty: number;
+  final_score: number;
 };
 
 type LeaderboardPlayer = {
@@ -85,6 +100,7 @@ export default function LeaderboardsPage() {
   useEffect(() => {
     console.log("DZN LIVE LEADERBOARDS LOADED");
     console.log("DZN CLEAN LONGEST KILLS LEADERBOARD LOADED");
+    console.log("DZN SERVER RANKING SYSTEM LOADED");
   }, []);
 
   useEffect(() => {
@@ -183,7 +199,7 @@ export default function LeaderboardsPage() {
                 formatNumber(server.deaths),
                 formatKd(server),
                 formatDistance(server.longest_kill),
-                formatNumber(server.score),
+                <span key="score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
               ])}
             />
 
@@ -441,7 +457,12 @@ function normalizeServer(server: LeaderboardServer): LeaderboardServer {
     kd: typeof server.kd === "number" && Number.isFinite(server.kd) ? server.kd : null,
     kd_label: server.kd_label || "Awaiting data",
     longest_kill: numberOrZero(server.longest_kill),
+    unique_players: numberOrZero(server.unique_players),
+    joins: numberOrZero(server.joins),
+    stats_sync_active: Boolean(server.stats_sync_active),
     score: numberOrZero(server.score),
+    score_label: typeof server.score_label === "string" ? server.score_label : numberOrZero(server.score) > 0 ? String(numberOrZero(server.score)) : "Pending",
+    score_breakdown: isScoreBreakdown(server.score_breakdown) ? server.score_breakdown : null,
   };
 }
 
@@ -504,6 +525,26 @@ function formatDateTime(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Pending";
   return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function isScoreBreakdown(value: unknown): value is ScoreBreakdown {
+  return Boolean(value && typeof value === "object" && "final_score" in value);
+}
+
+function scoreBreakdownTitle(breakdown: ScoreBreakdown | null) {
+  if (!breakdown) {
+    return "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.";
+  }
+  return [
+    "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
+    `Kills: ${breakdown.kills_points}`,
+    `Unique players: ${breakdown.unique_players_points}`,
+    `Joins: ${breakdown.joins_points}`,
+    `Longest kill: ${breakdown.longest_kill_points}`,
+    `Sync bonus: ${breakdown.sync_bonus}`,
+    `Death penalty: -${breakdown.death_penalty}`,
+    `Final score: ${breakdown.final_score}`,
+  ].join("\n");
 }
 
 function numberOrZero(value: unknown) {

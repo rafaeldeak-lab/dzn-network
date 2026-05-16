@@ -12,6 +12,7 @@ import {
   Crosshair,
   Crown,
   Flame,
+  Gauge,
   Gamepad2,
   LogOut,
   Map,
@@ -59,9 +60,27 @@ type PublicServer = {
   total_joins: number;
   total_disconnects: number;
   unique_players: number;
+  longest_kill: number;
+  kd: number | null;
+  kd_label: string;
+  rank: number | null;
+  score: number;
+  score_label: string;
+  score_breakdown: ScoreBreakdown | null;
+  stats_sync_active: boolean;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
+};
+
+type ScoreBreakdown = {
+  kills_points: number;
+  unique_players_points: number;
+  joins_points: number;
+  longest_kill_points: number;
+  sync_bonus: number;
+  death_penalty: number;
+  final_score: number;
 };
 
 type PublicRecentEvent = {
@@ -344,6 +363,7 @@ function StatsRow({ stats }: { stats: PublicStats }) {
 
 function ServerCard({ server, index }: { server: PublicServer; index: number }) {
   const tags = parseTags(server.tags_json);
+  const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
   return (
     <motion.article
       initial={{ opacity: 0, y: 18 }}
@@ -369,6 +389,10 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           <StatusPill label="Verified Owner" tone="cyan" />
           <StatusPill label="DZN Verified" tone="violet" />
           <StatusPill label={server.server_type} tone="violet" />
+          <StatusPill label={server.rank ? `Rank #${server.rank}` : "Rank Pending"} tone={server.rank ? "emerald" : "zinc"} />
+          <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
+            Score {server.score_label}
+          </span>
           <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
           <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
           {server.player_slots ? <StatusPill label={`${server.player_slots} slots`} tone="zinc" /> : null}
@@ -415,7 +439,8 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const statsActiveWithoutKills = server.stats_sync === "Active" && server.total_kills === 0;
   const players = server.top_players ?? [];
   const pvpLeaderboard = server.pvp_leaderboard ?? players;
-  const kd = calculateServerKd(server.total_kills, server.total_deaths);
+  const kd = server.kd_label || calculateServerKd(server.total_kills, server.total_deaths);
+  const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
 
   useEffect(() => {
     console.log("DZN LIVE SERVER PROFILE LOADED");
@@ -468,6 +493,8 @@ function ServerProfile({ server }: { server: PublicServer }) {
               <HeroStat label="Total Kills" value={String(server.total_kills)} icon={Crosshair} />
               <HeroStat label="Total Deaths" value={String(server.total_deaths)} icon={Skull} />
               <HeroStat label="K/D Ratio" value={kd} icon={BarChart3} />
+              <HeroStat label="Global Rank" value={server.rank ? `#${server.rank}` : "Pending"} icon={Trophy} />
+              <HeroStat label="Server Score" value={server.score_label} icon={Gauge} title={scoreTitle} />
             </div>
             <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
               <p className="text-[10px] font-black uppercase text-cyan-200/70">Last Sync</p>
@@ -660,9 +687,9 @@ function MetaChip({ icon: Icon, label }: { icon: typeof Activity; label: string 
   );
 }
 
-function HeroStat({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
+function HeroStat({ icon: Icon, label, value, title }: { icon: typeof Activity; label: string; value: string; title?: string }) {
   return (
-    <div className="min-w-0 rounded-lg border border-white/10 bg-black/28 p-3 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/25 hover:bg-cyan-300/[0.06]">
+    <div title={title} className="min-w-0 rounded-lg border border-white/10 bg-black/28 p-3 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/25 hover:bg-cyan-300/[0.06]">
       <div className="flex items-center gap-2">
         <Icon className="h-4 w-4 text-cyan-200" />
         <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
@@ -943,11 +970,12 @@ function parseTags(value: string) {
 }
 
 function serverSortRank(server: PublicServer) {
-  if (server.stats_sync === "Active") return 0;
-  if (server.adm_status === "Connected") return 1;
-  if (server.adm_status === "Discovered") return 2;
-  if (server.stats_sync === "Pending") return 3;
-  return 4;
+  if (typeof server.rank === "number" && server.rank > 0) return server.rank;
+  if (server.stats_sync === "Active") return 1000;
+  if (server.adm_status === "Connected") return 1001;
+  if (server.adm_status === "Discovered") return 1002;
+  if (server.stats_sync === "Pending") return 1003;
+  return 1004;
 }
 
 function publicServerProfileHref(slug: string) {
@@ -1023,6 +1051,22 @@ function calculateServerKd(kills: number, deaths: number) {
   if (kills === 0 && deaths === 0) return "Awaiting data";
   if (kills > 0 && deaths === 0) return "Flawless";
   return deaths > 0 ? (kills / deaths).toFixed(2) : "0.00";
+}
+
+function scoreBreakdownTitle(breakdown: ScoreBreakdown | null) {
+  if (!breakdown) {
+    return "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.";
+  }
+  return [
+    "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
+    `Kills: ${breakdown.kills_points}`,
+    `Unique players: ${breakdown.unique_players_points}`,
+    `Joins: ${breakdown.joins_points}`,
+    `Longest kill: ${breakdown.longest_kill_points}`,
+    `Sync bonus: ${breakdown.sync_bonus}`,
+    `Death penalty: -${breakdown.death_penalty}`,
+    `Final score: ${breakdown.final_score}`,
+  ].join("\n");
 }
 
 function formatPlayers(server: PublicServer) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import { calculateKd, calculateServerScore, rankLongestKills, rankPublicPlayers, selectLatestKill } from "../functions/_lib/public-leaderboards";
+import { calculateKd, calculateServerScore, calculateServerScoreBreakdown, rankLongestKills, rankPublicPlayers, selectLatestKill } from "../functions/_lib/public-leaderboards";
+import { rankServers } from "../functions/_lib/server-ranking";
 
 const players = rankPublicPlayers([
   {
@@ -94,12 +95,50 @@ assert.equal(latestKill?.victim_name, "femboi_fkcerxX");
 
 const score = calculateServerScore({
   kills: 11,
+  deaths: 11,
   longestKill: 17.4068,
-  uniquePlayers: 2,
-  totalJoins: 5,
-  totalDisconnects: 2,
+  uniquePlayers: 9,
+  joins: 22,
+  statsSyncActive: true,
 });
-assert.equal(score, 144);
+assert.equal(score, 219);
+
+const scoreBreakdown = calculateServerScoreBreakdown({
+  kills: 11,
+  deaths: 11,
+  longestKill: 17.4068,
+  uniquePlayers: 9,
+  joins: 22,
+  statsSyncActive: true,
+});
+assert.deepEqual(scoreBreakdown, {
+  kills_points: 110,
+  unique_players_points: 45,
+  joins_points: 44,
+  longest_kill_points: 17,
+  sync_bonus: 25,
+  death_penalty: 22,
+  final_score: 219,
+});
+
+const rankedServers = rankServers([
+  { id: "low", kills: 2, deaths: 1, uniquePlayers: 1, joins: 0, longestKill: 10, statsSyncActive: true, lastActivityAt: "2026-05-15T19:00:00.000Z" },
+  { id: "high", kills: 11, deaths: 11, uniquePlayers: 9, joins: 22, longestKill: 17.4068, statsSyncActive: true, lastActivityAt: "2026-05-15T20:00:00.000Z" },
+]);
+assert.equal(rankedServers[0].id, "high");
+assert.equal(rankedServers[0].rank, 1);
+assert.equal(rankedServers[0].score, 219);
+
+const tiedServers = rankServers([
+  { id: "kd", kills: 10, deaths: 2, uniquePlayers: 0, joins: 0, longestKill: 0, statsSyncActive: false, lastActivityAt: "2026-05-15T19:00:00.000Z" },
+  { id: "kills", kills: 11, deaths: 7, uniquePlayers: 0, joins: 0, longestKill: 0, statsSyncActive: false, lastActivityAt: "2026-05-15T18:00:00.000Z" },
+]);
+assert.equal(tiedServers[0].id, "kills");
+
+const noDataServer = rankServers([
+  { id: "pending", kills: 0, deaths: 0, uniquePlayers: 0, joins: 0, longestKill: 0, statsSyncActive: false, lastActivityAt: null },
+])[0];
+assert.equal(noDataServer.score_label, "Pending");
 
 assert.equal(rankPublicPlayers([]).length, 0);
 

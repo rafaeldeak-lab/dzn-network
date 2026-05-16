@@ -3,7 +3,8 @@ import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { uniquePublicSlug } from "../../_lib/onboarding";
-import { getPublicServerLeaderboardById, type PublicLeaderboardPlayer } from "../../_lib/public-leaderboards";
+import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
+import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type PublicServerRow = {
@@ -86,6 +87,14 @@ type SafePublicServer = {
   total_joins: number;
   total_disconnects: number;
   unique_players: number;
+  longest_kill: number;
+  kd: number | null;
+  kd_label: string;
+  rank: number | null;
+  score: number;
+  score_label: string;
+  score_breakdown: ServerScoreBreakdown | null;
+  stats_sync_active: boolean;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -96,6 +105,12 @@ type SafePublicServer = {
     total_joins: number;
     total_disconnects: number;
     unique_players: number;
+    longest_kill: number;
+    kd: number | null;
+    kd_label: string;
+    rank: number | null;
+    score: number;
+    score_label: string;
   };
   network_status?: {
     adm_status: "Connected" | "Discovered" | "Needs Review";
@@ -126,20 +141,16 @@ export async function getPublicServersPayload(env: Env, slug: string | null) {
   await ensureAdmSyncSchema(env);
   await ensurePublicSlugsForLiveServers(env);
 
-  const rows = await queryPublicServers(env);
+  const [rows, rankedServers] = await Promise.all([queryPublicServers(env), getRankedPublicServers(env, 500)]);
+  const rankingById = new Map(rankedServers.map((server) => [server.server_id, server]));
   const publicRows = slug ? await findPublicServerRowsBySlug(env, rows, slug) : rows;
-  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row)))).filter((server): server is SafePublicServer => Boolean(server));
+  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row, rankingById.get(row.id) ?? null)))).filter((server): server is SafePublicServer => Boolean(server));
 
   if (slug) {
     if (servers.length === 0 && shouldShowMockServers(env)) {
       return { ok: true, server: findPublicServerBySlug(mockPublicServers(), slug) ?? null };
     }
-    if (servers[0] && publicRows[0]?.id) {
-      const leaderboard = await getPublicServerLeaderboardById(env, publicRows[0].id, 10);
-      servers[0].top_players = leaderboard.slice(0, 5);
-      servers[0].pvp_leaderboard = leaderboard;
-    }
-    return { ok: true, server: servers[0] ?? null };
+    return getPublicServerProfileBySlug(env, publicRows[0] ?? null, servers[0] ?? null);
   }
 
   if (servers.length === 0 && shouldShowMockServers(env)) {
@@ -148,6 +159,24 @@ export async function getPublicServersPayload(env: Env, slug: string | null) {
   }
 
   return { ok: true, servers, stats: buildPublicStats(servers) };
+}
+
+async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | null, server: SafePublicServer | null) {
+  if (!row || !server) return { ok: true, server: null };
+
+  // Public profile pages are server-scoped. Global leaderboards are only used by
+  // global pages; child profile data must always query by this resolved server id.
+  const leaderboard = await getPublicServerLeaderboardById(env, row.id, 10);
+  server.top_players = leaderboard.slice(0, 5);
+  server.pvp_leaderboard = leaderboard;
+
+  return {
+    ok: true,
+    server,
+    selected_server_id: row.id,
+    selected_slug: row.public_slug,
+    selected_service_id: row.nitrado_service_id,
+  };
 }
 
 async function queryPublicServers(env: Env) {
@@ -352,7 +381,7 @@ async function ensureServerLogConfigTable(env: Env) {
     .run();
 }
 
-async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafePublicServer | null> {
+async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: PublicLeaderboardServer | null): Promise<SafePublicServer | null> {
   if (!row.public_slug) return null;
   const tagsJson = normalizePublicTagsJson(row.tags_json);
   const tags = parsePublicTags(tagsJson);
@@ -380,6 +409,12 @@ async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafeP
     total_joins: numberOrZero(row.total_joins),
     total_disconnects: numberOrZero(row.total_disconnects),
     unique_players: numberOrZero(row.unique_players),
+    longest_kill: numberOrZero(ranking?.longest_kill),
+    kd: ranking?.kd ?? null,
+    kd_label: ranking?.kd_label ?? calculatePublicServerKd(numberOrZero(row.total_kills), numberOrZero(row.total_deaths)).label,
+    rank: ranking?.rank ?? null,
+    score: ranking?.score ?? 0,
+    score_label: ranking?.score_label ?? "Pending",
   };
   return {
     public_slug: row.public_slug,
@@ -404,6 +439,8 @@ async function toSafePublicServer(env: Env, row: PublicServerRow): Promise<SafeP
     metadata_last_checked_at: row.metadata_last_checked_at,
     created_at: row.created_at,
     ...stats,
+    score_breakdown: ranking?.score_breakdown ?? null,
+    stats_sync_active: ranking?.stats_sync_active ?? statsSync === "Active",
     stats,
     network_status: {
       adm_status: admStatus,
@@ -458,6 +495,14 @@ function mockPublicServers(): SafePublicServer[] {
       total_joins: 0,
       total_disconnects: 0,
       unique_players: 0,
+      longest_kill: 0,
+      kd: null,
+      kd_label: "Awaiting data",
+      rank: null,
+      score: 0,
+      score_label: "Pending",
+      score_breakdown: null,
+      stats_sync_active: false,
       recent_events: [],
     },
     {
@@ -486,6 +531,14 @@ function mockPublicServers(): SafePublicServer[] {
       total_joins: 42,
       total_disconnects: 36,
       unique_players: 14,
+      longest_kill: 0,
+      kd: 0.67,
+      kd_label: "0.67",
+      rank: 1,
+      score: 0,
+      score_label: "Pending",
+      score_breakdown: null,
+      stats_sync_active: true,
       recent_events: [],
     },
     {
@@ -514,6 +567,14 @@ function mockPublicServers(): SafePublicServer[] {
       total_joins: 0,
       total_disconnects: 0,
       unique_players: 0,
+      longest_kill: 0,
+      kd: null,
+      kd_label: "Awaiting data",
+      rank: null,
+      score: 0,
+      score_label: "Pending",
+      score_breakdown: null,
+      stats_sync_active: false,
       recent_events: [],
     },
   ];
@@ -614,6 +675,15 @@ function fileNameFromPath(path: string | null) {
 
 function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
+}
+
+function calculatePublicServerKd(kills: number, deaths: number) {
+  const safeKills = numberOrZero(kills);
+  const safeDeaths = numberOrZero(deaths);
+  if (safeKills === 0 && safeDeaths === 0) return { value: null, label: "Awaiting data" };
+  if (safeKills > 0 && safeDeaths === 0) return { value: safeKills, label: "Flawless" };
+  const value = safeDeaths > 0 ? Math.round((safeKills / safeDeaths) * 100) / 100 : 0;
+  return { value, label: value.toFixed(2) };
 }
 
 function stringEquals(value: string | null, expected: string) {

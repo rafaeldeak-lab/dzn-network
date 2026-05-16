@@ -72,7 +72,13 @@ type HomeStats = {
     total_kills: number;
     total_deaths?: number;
     unique_players: number;
+    total_joins?: number;
+    longest_kill?: number;
     stats_active: boolean;
+    rank?: number;
+    score?: number;
+    score_label?: string;
+    score_breakdown?: ScoreBreakdown | null;
   }>;
   topPlayers: Array<{
     rank: number;
@@ -115,8 +121,19 @@ type TopServerPanelRow = {
   kd: string;
   kills: string;
   score: string;
+  scoreTitle: string;
   href: string;
   active: boolean;
+};
+
+type ScoreBreakdown = {
+  kills_points: number;
+  unique_players_points: number;
+  joins_points: number;
+  longest_kill_points: number;
+  sync_bonus: number;
+  death_penalty: number;
+  final_score: number;
 };
 
 type ActivityPanelRow = {
@@ -174,6 +191,7 @@ const fallbackTopServers = [
   kd: "Awaiting data",
   kills: "0",
   score: "Pending",
+  scoreTitle: "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
   href: "/servers",
   active: false,
 }));
@@ -259,6 +277,7 @@ export function DznLandingPage() {
 
   useEffect(() => {
     console.log("DZN SERVER COMPETITION HOMEPAGE WITH ANIMATED LOGO LOADED");
+    console.log("DZN SERVER RANKING SYSTEM LOADED");
   }, []);
 
   useEffect(() => {
@@ -535,7 +554,7 @@ function TopServersPanel({ rows }: { rows: TopServerPanelRow[] }) {
             <span className="min-w-0 break-words text-[0.76rem] font-bold leading-4 text-white sm:max-w-[180px]">{row.server}</span>
             <span className="text-right text-[0.68rem] font-bold leading-3 text-zinc-300">{row.kd}</span>
             <span className="text-right font-bold text-zinc-300">{row.kills}</span>
-            <span className={row.active ? "hidden text-right font-black text-emerald-200 sm:block" : "hidden text-right font-bold text-zinc-500 sm:block"}>
+            <span title={row.scoreTitle} className={row.active ? "hidden text-right font-black text-emerald-200 sm:block" : "hidden text-right font-bold text-zinc-500 sm:block"}>
               {row.score}
             </span>
           </a>
@@ -856,7 +875,13 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
           total_kills: numberOrZero(server.total_kills),
           total_deaths: numberOrZero(server.total_deaths),
           unique_players: numberOrZero(server.unique_players),
+          total_joins: numberOrZero(server.total_joins),
+          longest_kill: numberOrZero(server.longest_kill),
           stats_active: Boolean(server.stats_active),
+          rank: numberOrZero(server.rank),
+          score: numberOrZero(server.score),
+          score_label: typeof server.score_label === "string" ? server.score_label : undefined,
+          score_breakdown: isScoreBreakdown(server.score_breakdown) ? server.score_breakdown : null,
         }))
       : [],
     topPlayers: Array.isArray(payload.topPlayers) ? payload.topPlayers : [],
@@ -878,21 +903,42 @@ function buildTopServerRows(homeStats: HomeStats): TopServerPanelRow[] {
   const rows = homeStats.topServers.slice(0, 5).map((server, index) => {
     const kills = numberOrZero(server.total_kills);
     const deaths = numberOrZero(server.total_deaths);
-    const score = kills * 10 + numberOrZero(server.unique_players) * 5 + (server.stats_active ? 100 : 0);
     const kd = kills === 0 ? "Awaiting data" : deaths > 0 ? (kills / deaths).toFixed(2) : kills.toFixed(2);
+    const scoreLabel = server.score_label ?? (numberOrZero(server.score) > 0 ? formatNumber(numberOrZero(server.score)) : "Pending");
 
     return {
-      rank: index + 1,
+      rank: numberOrZero(server.rank) || index + 1,
       server: formatServerDisplayName(server.server_name || server.guild_name || "Unnamed DZN Server"),
       kd,
       kills: formatNumber(kills),
-      score: score > 0 ? formatNumber(score) : "Pending",
+      score: scoreLabel === "Pending" ? "Pending" : formatNumber(numberOrZero(server.score)),
+      scoreTitle: scoreBreakdownTitle(server.score_breakdown),
       href: server.public_slug ? `/servers/profile?slug=${encodeURIComponent(server.public_slug)}` : "/servers",
       active: server.stats_active,
     };
   });
 
   return rows.length > 0 ? rows : fallbackTopServers;
+}
+
+function isScoreBreakdown(value: unknown): value is ScoreBreakdown {
+  return Boolean(value && typeof value === "object" && "final_score" in value);
+}
+
+function scoreBreakdownTitle(breakdown: ScoreBreakdown | null | undefined) {
+  if (!breakdown) {
+    return "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.";
+  }
+  return [
+    "Score is based on confirmed kills, unique players, joins, longest kill, deaths, and sync health.",
+    `Kills: ${breakdown.kills_points}`,
+    `Unique players: ${breakdown.unique_players_points}`,
+    `Joins: ${breakdown.joins_points}`,
+    `Longest kill: ${breakdown.longest_kill_points}`,
+    `Sync bonus: ${breakdown.sync_bonus}`,
+    `Death penalty: -${breakdown.death_penalty}`,
+    `Final score: ${breakdown.final_score}`,
+  ].join("\n");
 }
 
 function buildActivityRows(homeStats: HomeStats): ActivityPanelRow[] {

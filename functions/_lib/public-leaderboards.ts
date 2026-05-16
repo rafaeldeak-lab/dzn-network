@@ -1,6 +1,9 @@
 import { ensureAdmSyncSchema } from "./adm-sync";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
+import { calculateServerScore, calculateServerScoreBreakdown, rankServers, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
+
+export { calculateServerScore, calculateServerScoreBreakdown };
 
 const MOCK_PLAYER_PREFIXES = ["MockSurvivor", "MockBandit", "MockRunner"];
 
@@ -29,7 +32,12 @@ export type PublicLeaderboardServer = {
   kd: number | null;
   kd_label: string;
   longest_kill: number;
+  unique_players: number;
+  joins: number;
+  stats_sync_active: boolean;
   score: number;
+  score_label: string;
+  score_breakdown: ServerScoreBreakdown;
 };
 
 export type PublicLongestKill = {
@@ -66,6 +74,8 @@ type PublicServerStatRow = {
   total_joins: number | null;
   total_disconnects: number | null;
   longest_kill: number | null;
+  stats_active: number | null;
+  last_activity_at: string | null;
 };
 
 type PublicPlayerKillRow = {
@@ -115,7 +125,7 @@ export async function getPublicLeaderboardsPayload(env: Env) {
   await ensurePublicLeaderboardSchema(env);
 
   const [topServers, topPlayers, killSummary] = await Promise.all([
-    getTopServers(env, 25),
+    getRankedPublicServers(env, 25),
     getTopPlayers(env, 50),
     getLongestKillSummary(env, 20),
   ]);
@@ -144,6 +154,8 @@ export async function getPublicServerLeaderboardPayload(env: Env, options: { ser
     return { ok: true, players: [], updated_at: new Date().toISOString() };
   }
 
+  // Server profile leaderboards must be scoped by the resolved linked_server_id.
+  // Omit linkedServerId only on global leaderboard/homepage surfaces.
   const players = await getTopPlayers(env, options.limit ?? 10, linkedServerId);
   return {
     ok: true,
@@ -163,7 +175,7 @@ async function ensurePublicLeaderboardSchema(env: Env) {
   await ensureAdmSyncSchema(env);
 }
 
-async function getTopServers(env: Env, limit: number) {
+export async function getRankedPublicServers(env: Env, limit: number) {
   const db = requireDb(env);
   const result = await db
     .prepare(
@@ -177,24 +189,52 @@ async function getTopServers(env: Env, limit: number) {
         COALESCE(server_stats.unique_players, (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id), 0) AS unique_players,
         COALESCE(server_stats.total_joins, 0) AS total_joins,
         COALESCE(server_stats.total_disconnects, 0) AS total_disconnects,
-        COALESCE((SELECT MAX(distance) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill
+        COALESCE((SELECT MAX(distance) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill,
+        CASE
+          WHEN COALESCE(server_stats.total_joins, 0) > 0
+            OR COALESCE(server_stats.total_disconnects, 0) > 0
+            OR COALESCE(server_stats.total_deaths, 0) > 0
+            OR COALESCE(server_stats.total_kills, 0) > 0
+            OR COALESCE(server_stats.unique_players, 0) > 0
+            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
+            OR EXISTS (
+              SELECT 1
+              FROM sync_runs
+              WHERE sync_runs.linked_server_id = linked_servers.id
+                AND lower(sync_runs.status) IN ('completed', 'idle')
+              LIMIT 1
+            )
+          THEN 1 ELSE 0
+        END AS stats_active,
+        COALESCE(
+          server_stats.last_event_at,
+          (
+            SELECT MAX(COALESCE(kill_events.occurred_at, kill_events.created_at))
+            FROM kill_events
+            WHERE kill_events.linked_server_id = linked_servers.id
+          ),
+          linked_servers.updated_at,
+          linked_servers.created_at
+        ) AS last_activity_at
        FROM linked_servers
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-       ORDER BY kills DESC, longest_kill DESC, unique_players DESC, linked_servers.created_at DESC
-       LIMIT ?`,
+       LIMIT 500`,
     )
-    .bind(limit)
     .all<PublicServerStatRow>();
 
-  return (result.results ?? []).map((row, index) => {
+  const candidates = (result.results ?? []).map((row) => {
     const kills = numberOrZero(row.kills);
     const deaths = numberOrZero(row.deaths);
     const longestKill = numberOrZero(row.longest_kill);
+    const uniquePlayers = numberOrZero(row.unique_players);
+    const joins = numberOrZero(row.total_joins);
+    const statsSyncActive = Number(row.stats_active) === 1;
     const kd = calculateKd(kills, deaths);
     return {
-      rank: index + 1,
+      id: row.server_id,
       server_id: row.server_id,
       server_name: row.server_name ?? "Unnamed DZN Server",
       slug: row.slug,
@@ -204,13 +244,34 @@ async function getTopServers(env: Env, limit: number) {
       kd: kd.value,
       kd_label: kd.label,
       longest_kill: longestKill,
-      score: calculateServerScore({
-        kills,
-        longestKill,
-        uniquePlayers: numberOrZero(row.unique_players),
-        totalJoins: numberOrZero(row.total_joins),
-        totalDisconnects: numberOrZero(row.total_disconnects),
-      }),
+      unique_players: uniquePlayers,
+      joins,
+      statsSyncActive,
+      stats_sync_active: statsSyncActive,
+      lastActivityAt: row.last_activity_at,
+      longestKill,
+      uniquePlayers,
+    };
+  });
+
+  return rankServers(candidates, limit).map((server) => {
+    return {
+      rank: server.rank,
+      server_id: server.server_id,
+      server_name: server.server_name,
+      slug: server.slug,
+      mode: server.mode,
+      kills: server.kills,
+      deaths: server.deaths,
+      kd: server.kd,
+      kd_label: server.kd_label,
+      longest_kill: server.longest_kill,
+      unique_players: server.unique_players,
+      joins: server.joins,
+      stats_sync_active: server.stats_sync_active,
+      score: server.score,
+      score_label: server.score_label,
+      score_breakdown: server.score_breakdown,
     } satisfies PublicLeaderboardServer;
   });
 }
@@ -465,17 +526,6 @@ export function calculateKd(kills: number, deaths: number) {
   if (safeKills > 0 && safeDeaths === 0) return { value: safeKills, label: "Flawless" };
   const value = safeDeaths > 0 ? roundTwo(safeKills / safeDeaths) : 0;
   return { value, label: value.toFixed(2) };
-}
-
-export function calculateServerScore(input: {
-  kills: number;
-  longestKill: number;
-  uniquePlayers: number;
-  totalJoins?: number;
-  totalDisconnects?: number;
-}) {
-  const activityScore = Math.min(numberOrZero(input.totalJoins) + numberOrZero(input.totalDisconnects), 500);
-  return Math.round(numberOrZero(input.kills) * 10 + numberOrZero(input.longestKill) + numberOrZero(input.uniquePlayers) * 5 + activityScore);
 }
 
 async function resolvePublicLinkedServerId(env: Env, slug: string) {

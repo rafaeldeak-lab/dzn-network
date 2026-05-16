@@ -584,30 +584,30 @@ function buildAdmInsertSql(linkedServerId: string, missingKills: KillCandidate[]
   const statements: string[] = [];
   for (const profile of profilePlan.inserts) {
     statements.push(
-      `INSERT OR IGNORE INTO player_profiles (id, linked_server_id, player_name, player_id, first_seen_at, created_at, updated_at)
-       VALUES (${sqlValue(profile.id)}, ${sqlValue(linkedServerId)}, ${sqlValue(profile.player_name)}, ${sqlValue(profile.player_id)}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT OR IGNORE INTO player_profiles (id, linked_server_id, source_service_id, player_name, player_id, first_seen_at, created_at, updated_at)
+       VALUES (${sqlValue(profile.id)}, ${sqlValue(linkedServerId)}, (SELECT nitrado_service_id FROM linked_servers WHERE id = ${sqlValue(linkedServerId)}), ${sqlValue(profile.player_name)}, ${sqlValue(profile.player_id)}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     );
   }
   for (const candidate of missingKills) {
     const profileIds = profilePlan.profileIdsByKill.get(candidate);
     statements.push(
-      `INSERT OR IGNORE INTO adm_raw_events (id, linked_server_id, adm_file, line_number, raw_line, event_type, parsed, created_at)
-       VALUES (${sqlValue(stableSyncId("raw", linkedServerId, candidate.admFile, candidate.lineNumber))}, ${sqlValue(linkedServerId)}, ${sqlValue(candidate.admFile)}, ${candidate.lineNumber}, ${sqlValue(candidate.parsed.rawLine)}, ${sqlValue(candidate.parsed.eventType)}, 1, CURRENT_TIMESTAMP)`,
+      `INSERT OR IGNORE INTO adm_raw_events (id, linked_server_id, source_service_id, adm_file, source_adm_file, line_number, source_line_number, raw_line, event_type, parsed, created_at)
+       VALUES (${sqlValue(stableSyncId("raw", linkedServerId, candidate.admFile, candidate.lineNumber))}, ${sqlValue(linkedServerId)}, (SELECT nitrado_service_id FROM linked_servers WHERE id = ${sqlValue(linkedServerId)}), ${sqlValue(candidate.admFile)}, ${sqlValue(candidate.admFile)}, ${candidate.lineNumber}, ${candidate.lineNumber}, ${sqlValue(candidate.parsed.rawLine)}, ${sqlValue(candidate.parsed.eventType)}, 1, CURRENT_TIMESTAMP)`,
     );
     statements.push(
       `INSERT OR IGNORE INTO kill_events (
-         id, linked_server_id, killer_profile_id, victim_profile_id, killer_name, victim_name,
+         id, linked_server_id, source_service_id, killer_profile_id, victim_profile_id, killer_name, victim_name,
          killer_id, victim_id, weapon, distance, position_x, position_y, position_z,
-         adm_file, line_number, occurred_at, raw_line, created_at
+         adm_file, source_adm_file, line_number, source_line_number, occurred_at, raw_line, created_at
        ) VALUES (
-         ${sqlValue(candidate.primaryId)}, ${sqlValue(linkedServerId)}, ${sqlValue(profileIds?.killerProfileId ?? null)}, ${sqlValue(profileIds?.victimProfileId ?? null)},
+         ${sqlValue(candidate.primaryId)}, ${sqlValue(linkedServerId)}, (SELECT nitrado_service_id FROM linked_servers WHERE id = ${sqlValue(linkedServerId)}), ${sqlValue(profileIds?.killerProfileId ?? null)}, ${sqlValue(profileIds?.victimProfileId ?? null)},
          ${sqlValue(candidate.parsed.killerName ?? candidate.parsed.playerName)}, ${sqlValue(candidate.parsed.victimName)},
          ${sqlValue(candidate.parsed.killerId ?? candidate.parsed.playerId)}, ${sqlValue(candidate.parsed.victimId)},
          ${sqlValue(candidate.parsed.weapon)}, ${sqlValue(candidate.parsed.distance)},
          ${sqlValue(candidate.parsed.killerPosition?.x ?? candidate.parsed.position?.x ?? null)},
          ${sqlValue(candidate.parsed.killerPosition?.y ?? candidate.parsed.position?.y ?? null)},
          ${sqlValue(candidate.parsed.killerPosition?.z ?? candidate.parsed.position?.z ?? null)},
-         ${sqlValue(candidate.admFile)}, ${candidate.lineNumber}, ${sqlValue(candidate.parsed.occurredAt)}, ${sqlValue(candidate.parsed.rawLine)},
+         ${sqlValue(candidate.admFile)}, ${sqlValue(candidate.admFile)}, ${candidate.lineNumber}, ${candidate.lineNumber}, ${sqlValue(candidate.parsed.occurredAt)}, ${sqlValue(candidate.parsed.rawLine)},
          CURRENT_TIMESTAMP
        )`,
     );
@@ -669,8 +669,8 @@ function buildRebuildSql(linkedServerId: string) {
           AND COALESCE(player_id, lower(player_name)) = ${playerKey}
       );
 
-    INSERT INTO player_profiles (id, linked_server_id, player_name, player_id, kills, deaths, longest_kill_distance, first_seen_at, created_at, updated_at)
-    SELECT 'scope-repair-profile-' || lower(hex(randomblob(16))), ${sqlString(linkedServerId)}, player_name, player_id, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    INSERT INTO player_profiles (id, linked_server_id, source_service_id, player_name, player_id, kills, deaths, longest_kill_distance, first_seen_at, created_at, updated_at)
+    SELECT 'scope-repair-profile-' || lower(hex(randomblob(16))), ${sqlString(linkedServerId)}, (SELECT nitrado_service_id FROM linked_servers WHERE id = ${sqlString(linkedServerId)}), player_name, player_id, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     FROM (
       SELECT killer_name AS player_name, killer_id AS player_id, COALESCE(killer_id, lower(killer_name)) AS player_key
       FROM kill_events
@@ -727,10 +727,11 @@ function buildRebuildSql(linkedServerId: string) {
       updated_at = CURRENT_TIMESTAMP
     WHERE linked_server_id = ${sqlString(linkedServerId)};
 
-    INSERT INTO server_stats (id, linked_server_id, total_kills, total_deaths, total_joins, total_disconnects, unique_players, last_event_at, updated_at)
+    INSERT INTO server_stats (id, linked_server_id, source_service_id, total_kills, total_deaths, total_joins, total_disconnects, unique_players, last_event_at, updated_at)
     VALUES (
       ${sqlString(`server-stats-${linkedServerId}`)},
       ${sqlString(linkedServerId)},
+      (SELECT nitrado_service_id FROM linked_servers WHERE id = ${sqlString(linkedServerId)}),
       (SELECT COUNT(*) FROM kill_events WHERE linked_server_id = ${sqlString(linkedServerId)}),
       (SELECT COUNT(*) FROM kill_events WHERE linked_server_id = ${sqlString(linkedServerId)} AND victim_name IS NOT NULL)
         + (SELECT COUNT(*) FROM player_events WHERE linked_server_id = ${sqlString(linkedServerId)} AND event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats')),
@@ -755,6 +756,7 @@ function buildRebuildSql(linkedServerId: string) {
       CURRENT_TIMESTAMP
     )
     ON CONFLICT(linked_server_id) DO UPDATE SET
+      source_service_id = COALESCE(excluded.source_service_id, server_stats.source_service_id),
       total_kills = excluded.total_kills,
       total_deaths = excluded.total_deaths,
       total_joins = excluded.total_joins,

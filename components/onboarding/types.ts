@@ -203,6 +203,26 @@ export type LinkedServer = {
   adm_last_checked_at?: string | null;
   adm_logs_found?: number | null;
   original_owner_is_current_user?: boolean;
+  global_rank?: number | null;
+  rank?: number | null;
+  server_score?: number | null;
+  score?: number | null;
+  score_label?: string | null;
+  score_breakdown?: ScoreBreakdown | null;
+  kd?: number | null;
+  kd_label?: string | null;
+  longest_kill?: number | null;
+  stats_sync_active?: boolean | null;
+};
+
+export type ScoreBreakdown = {
+  kills_points: number;
+  unique_players_points: number;
+  joins_points: number;
+  longest_kill_points: number;
+  sync_bonus: number;
+  death_penalty: number;
+  final_score: number;
 };
 
 export type AdmSyncStatus = {

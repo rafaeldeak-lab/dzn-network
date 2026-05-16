@@ -1,6 +1,7 @@
 import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
+import { getRankedPublicServers } from "../../_lib/public-leaderboards";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type TotalsRow = {
@@ -15,17 +16,6 @@ type TotalsRow = {
 type GameModeRow = {
   server_type: string | null;
   count: number | null;
-};
-
-type TopServerRow = {
-  public_slug: string | null;
-  server_name: string;
-  guild_name: string | null;
-  server_type: string | null;
-  total_kills: number | null;
-  total_deaths: number | null;
-  unique_players: number | null;
-  stats_active: number | null;
 };
 
 type TopPlayerRow = {
@@ -73,7 +63,7 @@ async function buildHomeStats(env: Env) {
     getPlayerProfileCount(db),
     getRecentEventsCount(db),
     getGameModes(db),
-    getTopServers(db),
+    getTopServers(env),
     getTopPlayers(db),
     getRecentActivity(db),
   ]);
@@ -221,46 +211,23 @@ async function getGameModes(db: D1Database) {
   return counts;
 }
 
-async function getTopServers(db: D1Database) {
-  const result = await db
-    .prepare(
-      `SELECT
-        linked_servers.public_slug,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
-        discord_guilds.name AS guild_name,
-        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS total_kills,
-        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL) AS total_deaths,
-        COALESCE(server_stats.unique_players, 0) AS unique_players,
-        CASE
-          WHEN COALESCE(server_stats.total_joins, 0) > 0
-            OR COALESCE(server_stats.total_disconnects, 0) > 0
-            OR COALESCE(server_stats.total_deaths, 0) > 0
-            OR COALESCE(server_stats.total_kills, 0) > 0
-            OR COALESCE(server_stats.unique_players, 0) > 0
-            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
-          THEN 1 ELSE 0
-        END AS stats_active
-       FROM linked_servers
-       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
-       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
-       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
-       WHERE lower(linked_servers.status) = 'live'
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-       ORDER BY stats_active DESC, total_kills DESC, COALESCE(server_stats.unique_players, 0) DESC, linked_servers.created_at DESC
-       LIMIT 6`,
-    )
-    .all<TopServerRow>();
-
-  return (result.results ?? []).map((row) => ({
-    public_slug: row.public_slug,
-    server_name: row.server_name,
-    guild_name: row.guild_name,
-    server_type: row.server_type,
-    total_kills: numberOrZero(row.total_kills),
-    total_deaths: numberOrZero(row.total_deaths),
-    unique_players: numberOrZero(row.unique_players),
-    stats_active: Number(row.stats_active) === 1,
+async function getTopServers(env: Env) {
+  const ranked = await getRankedPublicServers(env, 6);
+  return ranked.map((server) => ({
+    public_slug: server.slug,
+    server_name: server.server_name,
+    guild_name: null,
+    server_type: server.mode,
+    total_kills: server.kills,
+    total_deaths: server.deaths,
+    unique_players: server.unique_players,
+    total_joins: server.joins,
+    longest_kill: server.longest_kill,
+    stats_active: server.stats_sync_active ? 1 : 0,
+    rank: server.rank,
+    score: server.score,
+    score_label: server.score_label,
+    score_breakdown: server.score_breakdown,
   }));
 }
 
