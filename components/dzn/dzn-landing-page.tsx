@@ -33,6 +33,8 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 import { DznLogo } from "./dzn-logo";
+import { DznWorldMap } from "./dzn-world-map";
+import type { DznWorldMapNode } from "./dzn-world-map";
 
 const fadeUp: Variants = {
   hidden: { opacity: 0, y: 24 },
@@ -97,7 +99,7 @@ type HomeStats = {
     publicSlug: string | null;
     occurredAt: string | null;
   }>;
-  map_nodes: Array<MapNode>;
+  map_nodes: Array<DznWorldMapNode>;
   gameModes: {
     pvp: number;
     pve: number;
@@ -142,24 +144,6 @@ type ActivityPanelRow = {
   time: string;
   icon: LucideIcon;
   tone: string;
-};
-
-type MapNode = {
-  id: string;
-  name: string;
-  slug: string | null;
-  mode: string | null;
-  status: string;
-  sync_status: "active" | "pending" | string;
-  region: string | null;
-  country: string | null;
-  city: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  x: number;
-  y: number;
-  active: boolean;
-  approximate?: boolean;
 };
 
 const emptyHomeStats: HomeStats = {
@@ -300,6 +284,7 @@ export function DznLandingPage() {
     console.log("DZN SERVER RANKING SYSTEM LOADED");
     console.log("DZN LIVE HOMEPAGE EXPERIENCE LOADED");
     console.log("DZN HOMEPAGE WORLD MAP LIVE");
+    console.log("DZN HOMEPAGE MAP AND LAYOUT FINALIZED");
   }, []);
 
   useEffect(() => {
@@ -321,14 +306,13 @@ export function DznLandingPage() {
           initial="hidden"
           animate="show"
           variants={stagger}
-          className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 pb-8 pt-3 sm:px-6 lg:px-8"
+          className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-col gap-[18px] px-4 pb-7 pt-3 sm:px-6 lg:px-8"
         >
           <HeroDashboard
             homeStats={liveStats.data}
             lastUpdated={liveStats.lastUpdated}
             error={liveStats.error}
           />
-          <FeatureStrip />
           <GameModeGrid counts={liveStats.data.gameModes} />
           <StatsRow homeStats={liveStats.data} />
           <BottomCta />
@@ -494,11 +478,11 @@ function HeroDashboard({
   return (
     <motion.section
       variants={stagger}
-      className="grid items-start gap-[18px] xl:grid-cols-[minmax(0,1.55fr)_430px]"
+      className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.85fr)]"
     >
       <motion.div
         variants={fadeUp}
-        className="dzn-home-hero-card relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#060a15]/64 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:min-h-[430px]"
+        className="dzn-home-hero-card order-1 relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#060a15]/64 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:min-h-[430px] xl:col-start-1 xl:row-start-1"
       >
         <div className="dzn-home-energy-beam" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#02030a] via-[#02030a]/54 to-transparent" />
@@ -570,11 +554,13 @@ function HeroDashboard({
         </div>
       </motion.div>
 
-      <motion.div variants={fadeUp} className="flex flex-col gap-[18px]">
+      <motion.div variants={fadeUp} className="order-2 flex flex-col gap-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
         <TopServersPanel rows={serverRows} />
         <RecentActivityPanel rows={activityRows} />
         <LiveMapPanel homeStats={homeStats} />
       </motion.div>
+
+      <FeatureStrip className="order-3 xl:col-start-1 xl:row-start-2" />
     </motion.section>
   );
 }
@@ -590,12 +576,12 @@ function TopServersPanel({ rows }: { rows: TopServerPanelRow[] }) {
         <span className="hidden text-right sm:block">Score</span>
       </div>
       <div className="mt-2 grid gap-1.5">
-        {rows.slice(0, 4).map((row) => (
+        {rows.slice(0, 3).map((row) => (
           <a
             key={`${row.rank}-${row.server}`}
             href={row.href}
             title={row.server}
-            className="grid grid-cols-[28px_minmax(0,1fr)_72px_46px] items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.035] px-2 py-2 text-xs transition duration-300 hover:border-violet-300/35 hover:bg-violet-300/8 sm:grid-cols-[28px_minmax(136px,1fr)_86px_48px_62px]"
+            className="grid grid-cols-[28px_minmax(0,1fr)_72px_46px] items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.035] px-2 py-1.5 text-xs transition duration-300 hover:border-violet-300/35 hover:bg-violet-300/8 sm:grid-cols-[28px_minmax(136px,1fr)_86px_48px_62px]"
           >
             <span className="font-black text-violet-200">{row.rank}</span>
             <span className="min-w-0 break-words text-[0.76rem] font-bold leading-4 text-white sm:max-w-[180px]">{row.server}</span>
@@ -615,15 +601,15 @@ function RecentActivityPanel({ rows }: { rows: ActivityPanelRow[] }) {
   return (
     <PanelShell title="Recent Activity" href="/servers" icon={Activity}>
       <div className="grid gap-2">
-        {rows.slice(0, 5).map((row, index) => {
+        {rows.slice(0, 4).map((row, index) => {
           const Icon = row.icon;
           return (
             <div
               key={`${row.title}-${index}`}
-              className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.035] px-3 py-2.5"
+              className="flex items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.035] px-2.5 py-1.5"
             >
-              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${row.tone}`}>
-                <Icon className="h-4 w-4" />
+              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border ${row.tone}`}>
+                <Icon className="h-3.5 w-3.5" />
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-black uppercase text-white">{row.title}</p>
@@ -656,7 +642,7 @@ function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
               : "Public server signals connected"}
           </p>
         </div>
-        <WorldServerMap nodes={nodes} />
+        <DznWorldMap nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
         <MiniMetric label="Sync Active" value={formatNumber(homeStats.syncHealth.active)} />
@@ -667,80 +653,9 @@ function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
   );
 }
 
-function WorldServerMap({ nodes }: { nodes: MapNode[] }) {
-  const safeNodes = nodes.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
-  const anchor = safeNodes[0] ?? null;
-
+function FeatureStrip({ className = "" }: { className?: string }) {
   return (
-    <div className="dzn-home-map" aria-label="Live public server world map">
-      <svg className="dzn-home-map-svg" viewBox="0 0 100 58" role="img" aria-label="DZN public server network map">
-        <defs>
-          <linearGradient id="dznMapLine" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="rgba(103,232,249,0)" />
-            <stop offset="48%" stopColor="rgba(168,85,247,0.72)" />
-            <stop offset="100%" stopColor="rgba(103,232,249,0)" />
-          </linearGradient>
-          <filter id="dznMapGlow" x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="1.6" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-
-        <path className="dzn-home-map-continent" d="M9 19l7-5 9 2 6-4 8 5-3 6 5 5-8 4-5 8-11-1-4-7-7-2 4-5z" />
-        <path className="dzn-home-map-continent" d="M24 39l8 2 4 7-3 7-7-2-5-7z" />
-        <path className="dzn-home-map-continent" d="M44 18l8-5 11 3 8-2 8 6-6 5 8 4-5 7-13-1-7 5-10-4 4-7z" />
-        <path className="dzn-home-map-continent" d="M65 35l9 1 6 6-4 9-8-3-5-6z" />
-        <path className="dzn-home-map-continent" d="M79 38l7 2 5 6-5 5-8-3z" />
-        <path className="dzn-home-map-continent" d="M83 17l8 1 4 5-6 3-8-2z" />
-
-        {anchor
-          ? safeNodes.slice(1).map((node) => (
-              <line
-                key={`line-${node.id}`}
-                className="dzn-home-map-line"
-                x1={anchor.x}
-                y1={anchor.y}
-                x2={node.x}
-                y2={node.y}
-              />
-            ))
-          : null}
-
-        {safeNodes.length === 0 ? (
-          <g className="dzn-home-map-empty">
-            <circle cx="50" cy="29" r="3.2" />
-            <text x="50" y="38" textAnchor="middle">Awaiting public nodes</text>
-          </g>
-        ) : null}
-
-        {safeNodes.map((node, index) => {
-          const href = node.slug ? `/servers/profile?slug=${encodeURIComponent(node.slug)}` : "/servers";
-          const title = `${node.name} - ${node.active ? "Sync active" : "Pending"} - ${node.region ?? "Location awaiting metadata"}${node.approximate ? " (approx. region)" : ""}`;
-          return (
-            <a key={node.id} href={href} aria-label={title}>
-              <g
-                className={node.active ? "dzn-home-map-server dzn-home-map-server--active" : "dzn-home-map-server dzn-home-map-server--pending"}
-                style={{ animationDelay: `${index * 0.24}s` }}
-              >
-                <title>{title}</title>
-                {node.active ? <circle className="dzn-home-map-server-pulse" cx={node.x} cy={node.y} r="4.2" /> : null}
-                <circle className="dzn-home-map-server-dot" cx={node.x} cy={node.y} r={node.active ? 1.45 : 1.25} />
-              </g>
-            </a>
-          );
-        })}
-      </svg>
-      <span className="dzn-home-map-scan" />
-    </div>
-  );
-}
-
-function FeatureStrip() {
-  return (
-    <motion.section variants={fadeUp} id="features" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <motion.section variants={fadeUp} id="features" className={`grid gap-3 sm:grid-cols-2 lg:grid-cols-5 ${className}`}>
       {featureCards.map((feature) => {
         const Icon = feature.icon;
         return (
