@@ -143,6 +143,25 @@ export type ReadableAdmLinesResult = {
   message: string;
 };
 
+function verifyAdmServerScope(linkedServer: SyncLinkedServer) {
+  if (!linkedServer.id) throw new Error("ADM sync cannot run without a linked server id");
+  if (!linkedServer.nitrado_service_id) throw new Error("No Nitrado service selected");
+  console.log("DZN ADM SERVER SCOPE VERIFIED", {
+    linkedServerId: linkedServer.id,
+    serviceId: linkedServer.nitrado_service_id,
+  });
+  return {
+    linkedServerId: linkedServer.id,
+    nitradoServiceId: linkedServer.nitrado_service_id,
+  };
+}
+
+function assertAdmLinkedServerId(linkedServerId: string, target: string) {
+  if (!linkedServerId) {
+    throw new Error(`ADM sync refused to write ${target} without linked_server_id`);
+  }
+}
+
 export async function runAdmSync(
   env: Env,
   userId: string,
@@ -156,15 +175,15 @@ export async function runAdmSync(
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
-  const nitradoServiceId = linkedServer.nitrado_service_id;
-  if (!nitradoServiceId) throw new Error("No Nitrado service selected");
+  const scope = verifyAdmServerScope(linkedServer);
+  const nitradoServiceId = scope.nitradoServiceId;
   await refreshNitradoServerMetadata(env, {
-    linkedServerId: linkedServer.id,
+    linkedServerId: scope.linkedServerId,
     userId: linkedServer.user_id,
     force: triggerType === "manual",
   }).catch(() => null);
 
-  const existingState = await getSyncState(env, linkedServer.id);
+  const existingState = await getSyncState(env, scope.linkedServerId);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const now = new Date().toISOString();
   const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock, readMode: "full" });
@@ -179,7 +198,7 @@ export async function runAdmSync(
   const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? linkedServer.adm_path ?? null;
   const latestAdmFile = readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? fileNameFromPath(latestAdmPath);
   if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath) {
-    await saveServerAdmPath(env, linkedServer.id, latestAdmPath.replace(/^\/+/, ""));
+    await saveServerAdmPath(env, scope.linkedServerId, latestAdmPath.replace(/^\/+/, ""));
   }
 
   const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog?.debug?.samplePreview ?? null);
@@ -188,7 +207,7 @@ export async function runAdmSync(
     const message = admAvailable
       ? readable.message
       : "No ADM file is available for sync yet";
-    await upsertSyncState(env, linkedServer.id, {
+    await upsertSyncState(env, scope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
       lastProcessedFile: existingState?.last_processed_file ?? null,
@@ -211,7 +230,7 @@ export async function runAdmSync(
     });
     const syncDurationMs = Date.now() - syncStartedAt;
     await recordSyncRun(env, {
-      linkedServerId: linkedServer.id,
+      linkedServerId: scope.linkedServerId,
       triggerType,
       status: admAvailable ? "read_pending" : "not_started",
       message,
@@ -277,7 +296,7 @@ export async function runAdmSync(
 
   const backfillResult = await backfillMissingCreditedKills(
     env,
-    linkedServer.id,
+    scope.linkedServerId,
     latestAdmFile,
     parsedLines,
     lastProcessedLine,
@@ -294,7 +313,7 @@ export async function runAdmSync(
     const parsed = pendingParsedEvents[index];
     const rawLine = parsed.rawLine;
     const lineNumber = lastProcessedLine + index + 1;
-    const rawInserted = await insertRawEvent(env, linkedServer.id, latestAdmFile, lineNumber, rawLine, parsed);
+    const rawInserted = await insertRawEvent(env, scope.linkedServerId, latestAdmFile, lineNumber, rawLine, parsed);
     processedOffset += rawLine.length + 1;
     if (!rawInserted) {
       duplicateLines += 1;
@@ -303,7 +322,7 @@ export async function runAdmSync(
     rawEventsStored += 1;
     if (parsed.eventType === "unknown") unknownLines += 1;
 
-    const eventResult = await persistParsedEvent(env, linkedServer.id, latestAdmFile, lineNumber, parsed, {
+    const eventResult = await persistParsedEvent(env, scope.linkedServerId, latestAdmFile, lineNumber, parsed, {
       recentDeathLines,
     });
     eventsCreated += eventResult.eventsCreated;
@@ -318,7 +337,7 @@ export async function runAdmSync(
 
   const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
   const syncDurationMs = Date.now() - syncStartedAt;
-  const uniquePlayers = await countUniquePlayers(env, linkedServer.id);
+  const uniquePlayers = await countUniquePlayers(env, scope.linkedServerId);
   const creditedKillLinesConsidered =
     parsedLines.slice(0, lastProcessedLine).filter(isCreditedKillEvent).length +
     pendingParsedEvents.filter(isCreditedKillEvent).length;
@@ -327,7 +346,7 @@ export async function runAdmSync(
   const message = status === "completed"
     ? `${triggerType === "manual" ? "Manual sync" : "Scheduled sync"} complete. Lines scanned: ${lines.length}. Kills found: ${creditedKillLinesFound}. New kills created: ${killsCreated}. Duplicates skipped: ${duplicateKillsSkipped}. Players updated: ${uniquePlayers}.`
     : "No new ADM lines to process";
-  await upsertServerStats(env, linkedServer.id, {
+  await upsertServerStats(env, scope.linkedServerId, {
     kills: killsCreated,
     deaths: deathsCreated,
     joins: joinsCreated,
@@ -335,7 +354,7 @@ export async function runAdmSync(
     uniquePlayers,
     lastEventAt,
   });
-  await upsertSyncState(env, linkedServer.id, {
+  await upsertSyncState(env, scope.linkedServerId, {
     latestAdmFile,
     latestAdmPath,
     lastProcessedFile: latestAdmFile,
@@ -357,7 +376,7 @@ export async function runAdmSync(
     readableRoute: readable.readableRouteUsed,
   });
   await recordSyncRun(env, {
-    linkedServerId: linkedServer.id,
+    linkedServerId: scope.linkedServerId,
     triggerType,
     status,
     message,
@@ -369,7 +388,7 @@ export async function runAdmSync(
     finishedAt: new Date().toISOString(),
     durationMs: syncDurationMs,
   });
-  await rebuildServerStats(env, linkedServer.id);
+  await rebuildServerStats(env, scope.linkedServerId);
   console.log("DZN ADM FULL SYNC COMPLETE");
 
   return {
@@ -1008,6 +1027,7 @@ async function insertRawEvent(
   rawLine: string,
   parsed: ParsedAdmEvent,
 ) {
+  assertAdmLinkedServerId(linkedServerId, "adm_raw_events");
   const db = requireDb(env);
   const id = await stableSyncId("raw", linkedServerId, admFile, lineNumber);
   const result = await db
@@ -1180,6 +1200,7 @@ async function insertPlayerEvent(
   lineNumber: number,
   parsed: ParsedAdmEvent,
 ) {
+  assertAdmLinkedServerId(linkedServerId, "player_events");
   const db = requireDb(env);
   const id = await stableSyncId("player-event", linkedServerId, admFile, lineNumber, parsed.eventType);
   const result = await db
@@ -1217,6 +1238,7 @@ async function insertKillEvent(
   lineNumber: number,
   parsed: ParsedAdmEvent,
 ) {
+  assertAdmLinkedServerId(linkedServerId, "kill_events");
   const db = requireDb(env);
   if (await hasExistingKillEventByFallback(env, linkedServerId, parsed)) return false;
   const id = await stableSyncId("kill-event", linkedServerId, admFile, lineNumber);
@@ -1294,6 +1316,7 @@ async function upsertPlayerProfile(
   playerId: string | null,
   lastSeenAt: string | null,
 ) {
+  assertAdmLinkedServerId(linkedServerId, "player_profiles");
   const db = requireDb(env);
   const existing = playerId
     ? await db
@@ -1381,6 +1404,7 @@ async function upsertServerStats(
     lastEventAt: string | null;
   },
 ) {
+  assertAdmLinkedServerId(linkedServerId, "server_stats");
   const db = requireDb(env);
   await db
     .prepare(

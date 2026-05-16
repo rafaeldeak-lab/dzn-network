@@ -135,4 +135,30 @@ assert.equal(nuketownScopedPlayers.length, 1);
 assert.equal(nuketownScopedPlayers[0].server_slug, "nuketown-deathmatch");
 assert.equal(nuketownScopedPlayers.some((player) => player.server_slug === "pandora-dayz"), false);
 
+const sameNameDifferentServers = rankPublicPlayers([
+  {
+    playerName: "SharedPlayer",
+    serverName: "Pandora DayZ",
+    serverSlug: "pandora-dayz",
+    kills: 1,
+    deaths: 3,
+    longestKill: 11,
+    lastSeen: "2026-05-15T21:00:00.000Z",
+  },
+  {
+    playerName: "SharedPlayer",
+    serverName: "NukeTown DEATHMATCH",
+    serverSlug: "nuketown-deathmatch",
+    kills: 6,
+    deaths: 1,
+    longestKill: 18,
+    lastSeen: "2026-05-15T22:00:00.000Z",
+  },
+]);
+
+assert.equal(sameNameDifferentServers.length, 2);
+assert.equal(new Set(sameNameDifferentServers.map((player) => player.server_slug)).size, 2);
+assert.equal(sameNameDifferentServers.find((player) => player.server_slug === "pandora-dayz")?.kills, 1);
+assert.equal(sameNameDifferentServers.find((player) => player.server_slug === "nuketown-deathmatch")?.kills, 6);
+
 console.log("Public leaderboard ranking tests passed.");
