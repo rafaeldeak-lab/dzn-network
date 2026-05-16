@@ -1,4 +1,10 @@
 import { parseAdmLine, parseAdmLines, type ParsedAdmEvent } from "./adm-parser";
+import {
+  classifyParsedBuildEvent,
+  ensureBuildEventSchema,
+  isParsedBuildEvent,
+  rebuildServerBuildStats,
+} from "./build-events";
 import { getCurrentLinkedServer, requireDb, saveServerAdmPath } from "./db";
 import { isMockNitrado } from "./mock";
 import {
@@ -75,6 +81,7 @@ export type AdmSyncResult = {
   rawEventsStored: number;
   playerEventsStored: number;
   killEventsStored: number;
+  buildEventsStored: number;
   unknownLines: number;
   skippedDuplicateLines: number;
   syncDurationMs: number;
@@ -130,7 +137,7 @@ export type AdmSyncStatus = {
 };
 
 export type AdmRecentSyncEvent = {
-  source: "kill" | "player";
+  source: "kill" | "player" | "build";
   event_type: string;
   player_name: string | null;
   killer_name: string | null;
@@ -310,6 +317,7 @@ export async function runAdmSync(
       rawEventsStored: 0,
       playerEventsStored: 0,
       killEventsStored: 0,
+      buildEventsStored: 0,
       unknownLines: 0,
       skippedDuplicateLines: 0,
       syncDurationMs,
@@ -329,6 +337,7 @@ export async function runAdmSync(
   let rawEventsStored = 0;
   let playerEventsStored = 0;
   let killEventsStored = 0;
+  let buildEventsStored = 0;
   let unknownLines = 0;
   let duplicateLines = 0;
   let processedOffset = isSameAdmFile ? Number(existingState?.last_processed_offset ?? 0) : 0;
@@ -376,6 +385,7 @@ export async function runAdmSync(
       eventsCreated += eventResult.eventsCreated;
       playerEventsStored += eventResult.playerEventsCreated;
       killEventsStored += eventResult.killEventsCreated;
+      buildEventsStored += eventResult.buildEventsCreated;
       killsCreated += eventResult.killsCreated;
       joinsCreated += eventResult.joinsCreated;
       disconnectsCreated += eventResult.disconnectsCreated;
@@ -408,9 +418,9 @@ export async function runAdmSync(
     parsedLines.slice(0, lastProcessedLine).filter(isCreditedKillEvent).length +
     pendingParsedEvents.filter(isCreditedKillEvent).length;
   const duplicateKillsSkipped = Math.max(0, creditedKillLinesConsidered - killsCreated);
-  const status = pendingParsedEvents.length || killsCreated ? "completed" : "idle";
+  const status = pendingParsedEvents.length || killsCreated || buildEventsStored ? "completed" : "idle";
   const message = status === "completed"
-    ? `${triggerType === "manual" ? "Manual sync" : "Scheduled sync"} complete. Lines scanned: ${lines.length}. Kills found: ${creditedKillLinesFound}. New kills created: ${killsCreated}. Duplicates skipped: ${duplicateKillsSkipped}. Players updated: ${uniquePlayers}.`
+    ? `${triggerType === "manual" ? "Manual sync" : "Scheduled sync"} complete. Lines scanned: ${lines.length}. Kills found: ${creditedKillLinesFound}. New kills created: ${killsCreated}. Build events created: ${buildEventsStored}. Duplicates skipped: ${duplicateKillsSkipped}. Players updated: ${uniquePlayers}.`
     : "No new ADM lines to process";
   await upsertServerStats(env, scope.linkedServerId, {
     sourceServiceId: scope.nitradoServiceId,
@@ -421,6 +431,8 @@ export async function runAdmSync(
     uniquePlayers,
     lastEventAt,
   });
+  await rebuildServerBuildStats(env, scope.linkedServerId);
+  if (buildEventsStored > 0) console.log("DZN ADM BUILD EVENTS SYNCED", { linkedServerId: scope.linkedServerId, buildEventsStored });
   await upsertSyncState(env, scope.linkedServerId, {
     latestAdmFile,
     latestAdmPath,
@@ -481,6 +493,7 @@ export async function runAdmSync(
     rawEventsStored,
     playerEventsStored,
     killEventsStored,
+    buildEventsStored,
     unknownLines,
     skippedDuplicateLines: duplicateLines,
     syncDurationMs,
@@ -620,6 +633,31 @@ export async function getRecentAdmSyncEvents(
            COALESCE(occurred_at, created_at) AS sort_time
        FROM player_events
        WHERE linked_server_id = ?
+         AND (
+            ? = 1
+            OR (
+              COALESCE(player_name, '') NOT LIKE 'MockSurvivor%'
+              AND COALESCE(player_name, '') NOT LIKE 'MockBandit%'
+              AND COALESCE(player_name, '') NOT LIKE 'MockRunner%'
+            )
+          )
+
+         UNION ALL
+
+         SELECT
+           'build' AS source,
+           event_type,
+           player_name,
+           NULL AS killer_name,
+           NULL AS victim_name,
+           COALESCE(tool, placed_class, build_part) AS weapon,
+           NULL AS distance,
+           occurred_at,
+           created_at,
+           raw_line,
+           COALESCE(occurred_at, created_at) AS sort_time
+       FROM build_events
+       WHERE linked_server_id = ?
           AND (
             ? = 1
             OR (
@@ -632,7 +670,15 @@ export async function getRecentAdmSyncEvents(
        ORDER BY sort_time DESC, created_at DESC
        LIMIT ?`,
     )
-    .bind(linkedServer.id, isMockNitrado(env.MOCK_NITRADO) ? 1 : 0, linkedServer.id, isMockNitrado(env.MOCK_NITRADO) ? 1 : 0, safeLimit)
+    .bind(
+      linkedServer.id,
+      isMockNitrado(env.MOCK_NITRADO) ? 1 : 0,
+      linkedServer.id,
+      isMockNitrado(env.MOCK_NITRADO) ? 1 : 0,
+      linkedServer.id,
+      isMockNitrado(env.MOCK_NITRADO) ? 1 : 0,
+      safeLimit,
+    )
     .all<AdmRecentSyncEvent & { raw_line?: string | null }>();
 
   return (result.results ?? []).map(toSafeRecentSyncEvent);
@@ -647,7 +693,7 @@ function toSafeRecentSyncEvent(row: AdmRecentSyncEvent & { raw_line?: string | n
   const weapon = row.weapon ?? parsed?.weapon ?? null;
   const distance = row.distance ?? parsed?.distance ?? null;
   const cause = parsed?.cause ?? syncEventCause(eventType);
-  const objectType = parsed?.objectType ?? null;
+  const objectType = parsed?.placedObject ?? parsed?.placedClass ?? parsed?.buildPart ?? parsed?.objectType ?? null;
   const isKill = row.source === "kill" || eventType === "player_killed";
 
   return {
@@ -671,6 +717,7 @@ function toSafeRecentSyncEvent(row: AdmRecentSyncEvent & { raw_line?: string | n
       weapon,
       cause,
       objectType,
+      tool: parsed?.tool ?? row.weapon ?? null,
     }),
     cause,
     object_type: objectType,
@@ -685,6 +732,11 @@ function syncEventLabel(eventType: string, isKill: boolean) {
     player_disconnected: "Disconnected",
     player_died_stats: "Died",
     player_killed_environment: "Died",
+    built: "Built Structure",
+    placed: "Placed Build Item",
+    dismantled: "Dismantled",
+    player_built_structure: "Built Structure",
+    player_dismantled_structure: "Dismantled",
     player_suicide: "Suicide",
     player_hit: "Hit",
     player_hit_explosion: "Hit",
@@ -717,6 +769,7 @@ function syncEventDetail(values: {
   weapon: string | null;
   cause: string | null;
   objectType: string | null;
+  tool?: string | null;
 }) {
   if (values.isKill) return `${values.killerName ?? "Unknown"} -> ${values.victimName ?? "Unknown"}`;
   if (values.eventType === "player_hit") return `${values.attackerName ?? "Unknown"} hit ${values.victimName ?? values.playerName ?? "Unknown"}`;
@@ -724,6 +777,15 @@ function syncEventDetail(values: {
   if (values.eventType === "player_hit_unknown_attacker") return `${values.playerName ?? values.victimName ?? "Unknown"} hit by unknown attacker`;
   if (values.eventType === "player_killed_environment") return `${values.victimName ?? values.playerName ?? "Unknown"} died${values.cause ? `: ${values.cause}` : ""}`;
   if (values.eventType === "player_suicide") return `${values.playerName ?? "Unknown"} committed suicide`;
+  if (values.eventType === "built" || values.eventType === "player_built_structure") {
+    return `${values.playerName ?? "Unknown"} built ${values.objectType ?? "a structure"}${values.tool ? ` with ${values.tool}` : ""}`;
+  }
+  if (values.eventType === "placed" || values.eventType === "player_placed_object") {
+    return `${values.playerName ?? "Unknown"} placed ${values.objectType ?? "a build item"}`;
+  }
+  if (values.eventType === "dismantled" || values.eventType === "player_dismantled_structure") {
+    return `${values.playerName ?? "Unknown"} dismantled ${values.objectType ?? "a structure"}${values.tool ? ` with ${values.tool}` : ""}`;
+  }
   if (values.eventType === "player_placed_object") return `${values.playerName ?? "Unknown"} placed ${values.objectType ?? "an object"}`;
   return values.playerName ?? values.victimName ?? null;
 }
@@ -786,6 +848,18 @@ export async function clearMockTestSyncData(env: Env, userId: string, linkedServ
     .run();
   await db
     .prepare(
+      `DELETE FROM build_events
+       WHERE linked_server_id = ?
+         AND (
+           COALESCE(player_name, '') LIKE 'MockSurvivor%'
+           OR COALESCE(player_name, '') LIKE 'MockBandit%'
+           OR COALESCE(player_name, '') LIKE 'MockRunner%'
+         )`,
+    )
+    .bind(linkedServer.id)
+    .run();
+  await db
+    .prepare(
       `DELETE FROM player_profiles
        WHERE linked_server_id = ?
          AND (
@@ -801,9 +875,11 @@ export async function clearMockTestSyncData(env: Env, userId: string, linkedServ
   const remaining = await countRemainingSyncRows(env, linkedServer.id);
   if (remaining === 0) {
     await db.prepare("DELETE FROM server_stats WHERE linked_server_id = ?").bind(linkedServer.id).run();
+    await db.prepare("DELETE FROM server_build_stats WHERE linked_server_id = ?").bind(linkedServer.id).run();
     await db.prepare("DELETE FROM adm_sync_state WHERE linked_server_id = ?").bind(linkedServer.id).run();
   } else {
     await rebuildServerStats(env, linkedServer.id);
+    await rebuildServerBuildStats(env, linkedServer.id);
   }
 
   return { ok: true, remainingRows: remaining };
@@ -916,6 +992,7 @@ export async function ensureAdmSyncSchema(env: Env) {
     await db.prepare(statement).run();
   }
   await ensureAdmSyncDetailColumns(env);
+  await ensureBuildEventSchema(env);
 }
 
 async function getOwnedLinkedServer(env: Env, userId: string, linkedServerId?: string | null): Promise<SyncLinkedServer | null> {
@@ -1233,6 +1310,18 @@ async function persistParsedEvent(
     return result;
   }
 
+  if (isParsedBuildEvent(parsed)) {
+    if (parsed.playerName) {
+      await upsertPlayerProfile(env, syncContext, parsed.playerName, parsed.playerId, parsed.occurredAt);
+    }
+    const inserted = await insertBuildEvent(env, syncContext, lineNumber, parsed);
+    if (inserted) {
+      result.eventsCreated = 1;
+      result.buildEventsCreated = 1;
+    }
+    return result;
+  }
+
   const eventPlayer = getPlayerForPlayerEvent(parsed);
   let playerProfileId: string | null = null;
   if (eventPlayer.name) {
@@ -1358,6 +1447,54 @@ async function insertPlayerEvent(
       lineNumber,
       lineNumber,
       parsed.occurredAt,
+      parsed.rawLine,
+    )
+    .run();
+  return didMutate(result);
+}
+
+async function insertBuildEvent(
+  env: Env,
+  context: AdmSyncContext,
+  lineNumber: number,
+  parsed: ParsedAdmEvent,
+) {
+  const build = classifyParsedBuildEvent(parsed);
+  if (!build) return false;
+  const admFile = context.admFileName ?? "unknown-adm";
+  assertAdmWriteScope(context, {
+    linkedServerId: context.linkedServerId,
+    sourceServiceId: context.nitradoServiceId,
+    sourceAdmFile: admFile,
+  }, "build_events");
+  const db = requireDb(env);
+  const id = await stableSyncId("build-event", context.linkedServerId, admFile, lineNumber);
+  const result = await db
+    .prepare(
+      `INSERT OR IGNORE INTO build_events (
+        id, linked_server_id, nitrado_service_id, player_id, player_name, event_type,
+        build_part, target_object, tool, placed_object, placed_class, pos_x, pos_y, pos_z,
+        source_adm_file, source_line_number, occurred_at, raw_line, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    )
+    .bind(
+      id,
+      context.linkedServerId,
+      context.nitradoServiceId,
+      parsed.playerId,
+      parsed.playerName,
+      build.eventType,
+      build.buildPart,
+      build.targetObject,
+      build.tool,
+      build.placedObject,
+      build.placedClass,
+      parsed.position?.x ?? null,
+      parsed.position?.y ?? null,
+      parsed.position?.z ?? null,
+      admFile,
+      lineNumber,
+      parsed.occurredAt ?? new Date().toISOString(),
       parsed.rawLine,
     )
     .run();
@@ -1626,13 +1763,20 @@ async function getNitradoTokenForLinkedServer(env: Env, linkedServer: SyncLinked
 
 async function countRemainingSyncRows(env: Env, linkedServerId: string) {
   const db = requireDb(env);
-  const [raw, playerEvents, killEvents, profiles] = await Promise.all([
+  const [raw, playerEvents, killEvents, buildEvents, profiles] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS count FROM adm_raw_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM player_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM build_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM player_profiles WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
   ]);
-  return numberOrZero(raw?.count) + numberOrZero(playerEvents?.count) + numberOrZero(killEvents?.count) + numberOrZero(profiles?.count);
+  return (
+    numberOrZero(raw?.count) +
+    numberOrZero(playerEvents?.count) +
+    numberOrZero(killEvents?.count) +
+    numberOrZero(buildEvents?.count) +
+    numberOrZero(profiles?.count)
+  );
 }
 
 async function rebuildServerStats(env: Env, linkedServerId: string) {
@@ -1660,9 +1804,11 @@ async function rebuildServerStats(env: Env, linkedServerId: string) {
            SELECT occurred_at, created_at FROM player_events WHERE linked_server_id = ?
            UNION ALL
            SELECT occurred_at, created_at FROM kill_events WHERE linked_server_id = ?
+           UNION ALL
+           SELECT occurred_at, created_at FROM build_events WHERE linked_server_id = ?
          )`,
       )
-      .bind(linkedServerId, linkedServerId)
+      .bind(linkedServerId, linkedServerId, linkedServerId)
       .first<{ last_event_at: string | null }>(),
   ]);
 
@@ -1940,6 +2086,7 @@ function emptyPersistResult() {
     eventsCreated: 0,
     playerEventsCreated: 0,
     killEventsCreated: 0,
+    buildEventsCreated: 0,
     killsCreated: 0,
     joinsCreated: 0,
     disconnectsCreated: 0,

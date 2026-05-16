@@ -1,4 +1,5 @@
 import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
+import { ensureBuildEventSchema, getRankedBuildServers } from "../../_lib/build-events";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
@@ -12,6 +13,9 @@ type TotalsRow = {
   killsTracked: number | null;
   deathsTracked: number | null;
   joinsTracked: number | null;
+  longestKill: number | null;
+  structuresBuilt: number | null;
+  buildScore: number | null;
 };
 
 type GameModeRow = {
@@ -29,7 +33,7 @@ type TopPlayerRow = {
 };
 
 type RecentActivityRow = {
-  source: "kill" | "player" | "sync" | "server";
+  source: "kill" | "player" | "build" | "sync" | "server";
   event_type: string;
   server_name: string | null;
   public_slug: string | null;
@@ -38,6 +42,9 @@ type RecentActivityRow = {
   victim_name: string | null;
   weapon: string | null;
   distance: number | null;
+  build_part?: string | null;
+  placed_object?: string | null;
+  placed_class?: string | null;
   occurred_at: string | null;
   created_at: string | null;
 };
@@ -77,13 +84,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   await ensureLinkedServerMetadataColumns(env);
   await ensureAdmSyncSchema(env);
+  await ensureBuildEventSchema(env);
   const data = await buildHomeStats(env);
   return json(data, { headers: PUBLIC_CACHE_HEADERS });
 };
 
 async function buildHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes] = await Promise.all([
+  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers] = await Promise.all([
     getTotals(db),
     getPlayerProfileCount(db),
     getRecentEventsCount(db),
@@ -92,6 +100,7 @@ async function buildHomeStats(env: Env) {
     getTopPlayers(db),
     getRecentActivity(db),
     getMapNodes(db),
+    getRankedBuildServers(env, 5),
   ]);
 
   const playersSeen = Math.max(numberOrZero(totals.playersSeenFromStats), profileCount);
@@ -107,8 +116,24 @@ async function buildHomeStats(env: Env) {
       killsTracked: numberOrZero(totals.killsTracked),
       deathsTracked: numberOrZero(totals.deathsTracked),
       joinsTracked: numberOrZero(totals.joinsTracked),
+      longestKill: numberOrZero(totals.longestKill),
       recentEventsCount,
+      structuresBuilt: numberOrZero(totals.structuresBuilt),
+      buildScore: numberOrZero(totals.buildScore),
     },
+    network_pulse: {
+      active_servers: syncActive,
+      events: recentEventsCount,
+      top_server: topServers[0] ?? null,
+      best_kd: topServers[0]?.total_deaths
+        ? Number((numberOrZero(topServers[0]?.total_kills) / numberOrZero(topServers[0]?.total_deaths)).toFixed(2))
+        : topServers[0] && numberOrZero(topServers[0]?.total_kills) > 0
+          ? null
+          : null,
+      current_event: getCurrentPublicEvent(),
+    },
+    event_leaderboard: null,
+    top_build_servers: topBuildServers,
     topServers,
     topPlayers,
     recentActivity,
@@ -133,6 +158,8 @@ async function getTotals(db: D1Database) {
               OR COALESCE(server_stats.total_deaths, 0) > 0
               OR COALESCE(server_stats.total_kills, 0) > 0
               OR COALESCE(server_stats.unique_players, 0) > 0
+              OR COALESCE(server_build_stats.build_score, 0) > 0
+              OR COALESCE(server_build_stats.structures_built, 0) > 0
               OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
               OR EXISTS (
                 SELECT 1
@@ -160,9 +187,19 @@ async function getTotals(db: D1Database) {
             AND (live_death_servers.merged_into_server_id IS NULL OR live_death_servers.merged_into_server_id = '')
             AND kill_events.victim_name IS NOT NULL
         ) AS deathsTracked,
-        SUM(COALESCE(server_stats.total_joins, 0)) AS joinsTracked
+        SUM(COALESCE(server_stats.total_joins, 0)) AS joinsTracked,
+        (
+          SELECT MAX(COALESCE(kill_events.distance, 0))
+          FROM kill_events
+          INNER JOIN linked_servers AS live_longest_servers ON live_longest_servers.id = kill_events.linked_server_id
+          WHERE lower(live_longest_servers.status) = 'live'
+            AND (live_longest_servers.merged_into_server_id IS NULL OR live_longest_servers.merged_into_server_id = '')
+        ) AS longestKill,
+        SUM(COALESCE(server_build_stats.structures_built, 0)) AS structuresBuilt,
+        SUM(COALESCE(server_build_stats.build_score, 0)) AS buildScore
        FROM linked_servers
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN server_build_stats ON server_build_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
@@ -175,6 +212,9 @@ async function getTotals(db: D1Database) {
     killsTracked: 0,
     deathsTracked: 0,
     joinsTracked: 0,
+    longestKill: 0,
+    structuresBuilt: 0,
+    buildScore: 0,
   };
 }
 
@@ -195,13 +235,33 @@ async function getPlayerProfileCount(db: D1Database) {
 async function getRecentEventsCount(db: D1Database) {
   const row = await db
     .prepare(
-      `SELECT COUNT(*) AS count
-       FROM player_events
-       INNER JOIN linked_servers ON linked_servers.id = player_events.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND COALESCE(player_events.occurred_at, player_events.created_at) >= datetime('now', '-1 day')
-         AND ${mockNameFilterSql("player_events.player_name")}`,
+      `SELECT SUM(count) AS count
+       FROM (
+         SELECT COUNT(*) AS count
+         FROM player_events
+         INNER JOIN linked_servers ON linked_servers.id = player_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND COALESCE(player_events.occurred_at, player_events.created_at) >= datetime('now', '-1 day')
+           AND ${mockNameFilterSql("player_events.player_name")}
+         UNION ALL
+         SELECT COUNT(*) AS count
+         FROM kill_events
+         INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND COALESCE(kill_events.occurred_at, kill_events.created_at) >= datetime('now', '-1 day')
+           AND ${mockNameFilterSql("kill_events.killer_name")}
+           AND ${mockNameFilterSql("kill_events.victim_name")}
+         UNION ALL
+         SELECT COUNT(*) AS count
+         FROM build_events
+         INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND COALESCE(build_events.occurred_at, build_events.created_at) >= datetime('now', '-1 day')
+           AND ${mockNameFilterSql("build_events.player_name")}
+       )`,
     )
     .first<{ count: number | null }>();
   return numberOrZero(row?.count);
@@ -311,6 +371,9 @@ async function getRecentActivity(db: D1Database) {
            kill_events.victim_name,
            kill_events.weapon,
            kill_events.distance,
+           NULL AS build_part,
+           NULL AS placed_object,
+           NULL AS placed_class,
            kill_events.occurred_at,
            kill_events.created_at,
            COALESCE(kill_events.occurred_at, kill_events.created_at) AS sort_time
@@ -331,6 +394,9 @@ async function getRecentActivity(db: D1Database) {
            NULL AS victim_name,
            NULL AS weapon,
            NULL AS distance,
+           NULL AS build_part,
+           NULL AS placed_object,
+           NULL AS placed_class,
            player_events.occurred_at,
            player_events.created_at,
            COALESCE(player_events.occurred_at, player_events.created_at) AS sort_time
@@ -339,6 +405,28 @@ async function getRecentActivity(db: D1Database) {
          WHERE lower(linked_servers.status) = 'live'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("player_events.player_name")}
+         UNION ALL
+         SELECT
+           'build' AS source,
+           build_events.event_type,
+           COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+           linked_servers.public_slug,
+           build_events.player_name,
+           NULL AS killer_name,
+           NULL AS victim_name,
+           build_events.tool AS weapon,
+           NULL AS distance,
+           build_events.build_part,
+           build_events.placed_object,
+           build_events.placed_class,
+           build_events.occurred_at,
+           build_events.created_at,
+           COALESCE(build_events.occurred_at, build_events.created_at) AS sort_time
+         FROM build_events
+         INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND ${mockNameFilterSql("build_events.player_name")}
          UNION ALL
          SELECT
            'sync' AS source,
@@ -350,6 +438,9 @@ async function getRecentActivity(db: D1Database) {
            NULL AS victim_name,
            NULL AS weapon,
            NULL AS distance,
+           NULL AS build_part,
+           NULL AS placed_object,
+           NULL AS placed_class,
            COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) AS occurred_at,
            sync_runs.created_at,
            COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) AS sort_time
@@ -369,6 +460,9 @@ async function getRecentActivity(db: D1Database) {
            NULL AS victim_name,
            NULL AS weapon,
            NULL AS distance,
+           NULL AS build_part,
+           NULL AS placed_object,
+           NULL AS placed_class,
            linked_servers.created_at AS occurred_at,
            linked_servers.created_at,
            linked_servers.created_at AS sort_time
@@ -418,6 +512,8 @@ async function getMapNodes(db: D1Database) {
             OR COALESCE(server_stats.total_deaths, 0) > 0
             OR COALESCE(server_stats.total_kills, 0) > 0
             OR COALESCE(server_stats.unique_players, 0) > 0
+            OR COALESCE(server_build_stats.build_score, 0) > 0
+            OR COALESCE(server_build_stats.structures_built, 0) > 0
             OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
             OR EXISTS (
               SELECT 1
@@ -431,6 +527,7 @@ async function getMapNodes(db: D1Database) {
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN server_build_stats ON server_build_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
@@ -586,10 +683,24 @@ function nodeLatLngOffset(index: number) {
   return offsets[index % offsets.length];
 }
 
+function getCurrentPublicEvent() {
+  return null;
+}
+
 function activityTitle(row: RecentActivityRow) {
   if (row.source === "kill") {
     const weapon = row.weapon ? ` with ${row.weapon}` : "";
     return `${row.killer_name ?? "Player"} eliminated ${row.victim_name ?? "a player"}${weapon}`;
+  }
+  if (row.source === "build") {
+    if (row.event_type === "built") {
+      const part = row.build_part ? row.build_part.replace(/_/g, " ") : "a structure";
+      return `${row.player_name ?? "A player"} built ${part}`;
+    }
+    if (row.event_type === "placed") {
+      return `${row.player_name ?? "A player"} placed ${row.placed_object ?? row.placed_class ?? "a build item"}`;
+    }
+    if (row.event_type === "dismantled") return `${row.player_name ?? "A player"} dismantled a structure`;
   }
   if (row.event_type === "player_connected") return `${row.player_name ?? "A player"} connected`;
   if (row.event_type === "player_disconnected") return `${row.player_name ?? "A player"} disconnected`;
@@ -649,8 +760,20 @@ function emptyHomeStats() {
       killsTracked: 0,
       deathsTracked: 0,
       joinsTracked: 0,
+      longestKill: 0,
       recentEventsCount: 0,
+      structuresBuilt: 0,
+      buildScore: 0,
     },
+    network_pulse: {
+      active_servers: 0,
+      events: 0,
+      top_server: null,
+      best_kd: null,
+      current_event: null,
+    },
+    event_leaderboard: null,
+    top_build_servers: [],
     topServers: [],
     topPlayers: [],
     recentActivity: [],

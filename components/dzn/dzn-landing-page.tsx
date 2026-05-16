@@ -7,6 +7,7 @@ import {
   Crosshair,
   Flag,
   Globe2,
+  Hammer,
   MessageCircle,
   Play,
   Radio,
@@ -17,6 +18,7 @@ import {
   Trophy,
   Users,
   Wifi,
+  Timer,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -55,6 +57,23 @@ const stagger: Variants = {
   },
 };
 
+type HomeTopServer = {
+  public_slug: string | null;
+  server_name: string;
+  guild_name: string | null;
+  server_type: string | null;
+  total_kills: number;
+  total_deaths?: number;
+  unique_players: number;
+  total_joins?: number;
+  longest_kill?: number;
+  stats_active: boolean;
+  rank?: number;
+  score?: number;
+  score_label?: string;
+  score_breakdown?: ScoreBreakdown | null;
+};
+
 type HomeStats = {
   totals: {
     serversLinked: number;
@@ -63,24 +82,21 @@ type HomeStats = {
     killsTracked: number;
     deathsTracked: number;
     joinsTracked: number;
+    longestKill: number;
     recentEventsCount: number;
+    structuresBuilt: number;
+    buildScore: number;
   };
-  topServers: Array<{
-    public_slug: string | null;
-    server_name: string;
-    guild_name: string | null;
-    server_type: string | null;
-    total_kills: number;
-    total_deaths?: number;
-    unique_players: number;
-    total_joins?: number;
-    longest_kill?: number;
-    stats_active: boolean;
-    rank?: number;
-    score?: number;
-    score_label?: string;
-    score_breakdown?: ScoreBreakdown | null;
-  }>;
+  network_pulse: {
+    active_servers: number;
+    events: number;
+    top_server: HomeTopServer | null;
+    best_kd: number | null;
+    current_event: PublicNetworkEvent | null;
+  };
+  event_leaderboard: PublicEventLeaderboard | null;
+  top_build_servers: PublicBuildServer[];
+  topServers: HomeTopServer[];
   topPlayers: Array<{
     rank: number;
     playerName: string;
@@ -92,7 +108,7 @@ type HomeStats = {
     longestKill: number;
   }>;
   recentActivity: Array<{
-    source: "kill" | "player" | "sync" | "server";
+    source: "kill" | "player" | "build" | "sync" | "server";
     eventType: string;
     title: string;
     serverName: string | null;
@@ -110,6 +126,36 @@ type HomeStats = {
     active: number;
     pending: number;
   };
+};
+
+type PublicNetworkEvent = {
+  id?: string;
+  type: "build" | "pvp" | "survival" | "faction" | "activity" | string;
+  title: string;
+  status?: "active" | "coming_soon" | string;
+  description?: string | null;
+  ends_at?: string | null;
+};
+
+type PublicBuildServer = {
+  rank: number;
+  server_id: string;
+  server_name: string;
+  slug: string | null;
+  structures_built: number;
+  build_items_placed: number;
+  storage_items_placed: number;
+  traps_placed: number;
+  build_score: number;
+  top_builder_name: string | null;
+  top_builder_count: number;
+  last_build_at: string | null;
+};
+
+type PublicEventLeaderboard = {
+  event_type: string;
+  title: string;
+  rows: Array<Record<string, unknown>>;
 };
 
 type HomeStatsResponse = Partial<HomeStats> & {
@@ -154,8 +200,20 @@ const emptyHomeStats: HomeStats = {
     killsTracked: 0,
     deathsTracked: 0,
     joinsTracked: 0,
+    longestKill: 0,
     recentEventsCount: 0,
+    structuresBuilt: 0,
+    buildScore: 0,
   },
+  network_pulse: {
+    active_servers: 0,
+    events: 0,
+    top_server: null,
+    best_kd: null,
+    current_event: null,
+  },
+  event_leaderboard: null,
+  top_build_servers: [],
   topServers: [],
   topPlayers: [],
   recentActivity: [],
@@ -333,7 +391,9 @@ export function DznLandingPage() {
             error={liveStats.error}
           />
           <GameModeGrid counts={liveStats.data.gameModes} />
-          <StatsRow homeStats={liveStats.data} />
+          <NetworkOverview homeStats={liveStats.data} />
+          <NetworkPulse homeStats={liveStats.data} />
+          <EventLeaderboardPanel homeStats={liveStats.data} />
           <BottomCta />
         </motion.main>
 
@@ -812,7 +872,8 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
   );
 }
 
-function StatsRow({ homeStats }: { homeStats: HomeStats }) {
+function NetworkOverview({ homeStats }: { homeStats: HomeStats }) {
+  const longestKill = numberOrZero(homeStats.totals.longestKill);
   const stats = [
     {
       icon: Users,
@@ -828,34 +889,185 @@ function StatsRow({ homeStats }: { homeStats: HomeStats }) {
     },
     {
       icon: Crosshair,
-      label: "Kills Tracked",
+      label: "Kills",
       value: formatNumber(homeStats.totals.killsTracked),
       theme: "kills",
     },
     {
-      icon: Wifi,
-      label: "Active Servers",
-      value: `${formatNumber(homeStats.syncHealth.active)} active`,
-      theme: "active",
+      icon: Trophy,
+      label: "Longest Kill",
+      value: longestKill > 0 ? `${formatDecimal(longestKill)}m` : "Awaiting data",
+      theme: "longest",
     },
   ];
 
   return (
-    <motion.section variants={fadeUp} id="stats" className="dzn-home-panel dzn-stats-strip grid gap-3 rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl sm:grid-cols-2 lg:grid-cols-4">
-      {stats.map((stat) => {
-        const Icon = stat.icon;
-        return (
-          <div key={stat.label} className={`dzn-stat-card dzn-stat-card--${stat.theme}`}>
-            <span className="dzn-stat-icon" aria-hidden="true">
-              <Icon className="h-5 w-5" />
-            </span>
-            <div className="dzn-stat-copy">
-              <p className="dzn-stat-value">{stat.value}</p>
-              <p className="dzn-stat-label">{stat.label}</p>
+    <motion.section variants={fadeUp} id="stats" className="dzn-home-panel dzn-stats-strip rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <div>
+          <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Network Overview</p>
+          <h2 className="text-xl font-black uppercase text-white">Live server intelligence</h2>
+        </div>
+        <span className="rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-[0.62rem] font-black uppercase tracking-[0.16em] text-emerald-200">
+          Live pulse
+        </span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.label} className={`dzn-stat-card dzn-stat-card--${stat.theme}`}>
+              <span className="dzn-stat-icon" aria-hidden="true">
+                <Icon className="h-5 w-5" />
+              </span>
+              <div className="dzn-stat-copy">
+                <p className="dzn-stat-value">{stat.value}</p>
+                <p className="dzn-stat-label">{stat.label}</p>
+              </div>
             </div>
+          );
+        })}
+      </div>
+    </motion.section>
+  );
+}
+
+function NetworkPulse({ homeStats }: { homeStats: HomeStats }) {
+  const topServer = homeStats.network_pulse.top_server ?? homeStats.topServers[0] ?? null;
+  const currentEvent = homeStats.network_pulse.current_event;
+  const topKills = numberOrZero(topServer?.total_kills);
+  const topDeaths = numberOrZero(topServer?.total_deaths);
+  const topKd = topServer ? (topKills === 0 ? "Awaiting data" : topDeaths > 0 ? (topKills / topDeaths).toFixed(2) : "Flawless") : "Pending";
+  const pulseCards = [
+    {
+      icon: Wifi,
+      eyebrow: "Active Servers",
+      value: `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
+      detail: "Live and online right now",
+      theme: "active",
+    },
+    {
+      icon: Activity,
+      eyebrow: "Events",
+      value: `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
+      detail: "Tracked across the network",
+      theme: "events",
+    },
+    {
+      icon: Trophy,
+      eyebrow: "Top Server",
+      value: topServer ? formatServerDisplayName(topServer.server_name) : "Pending",
+      detail: topServer ? `Score: ${topServer.score_label ?? formatNumber(topServer.score ?? 0)} | K/D: ${topKd}` : "Waiting for leaderboard data",
+      theme: "top",
+    },
+    {
+      icon: Timer,
+      eyebrow: "Current Event",
+      value: currentEvent ? currentEvent.title : "No event live",
+      detail: currentEvent?.description ?? "Next event coming soon",
+      theme: "event",
+    },
+  ];
+
+  return (
+    <motion.section variants={fadeUp} className="dzn-home-panel dzn-network-pulse rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-200">Network Pulse</p>
+          <h2 className="text-xl font-black uppercase text-white">Competition modes online</h2>
+        </div>
+        <span className="dzn-pulse-live-pill">Live</span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {pulseCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <article key={card.eyebrow} className={`dzn-pulse-card dzn-pulse-card--${card.theme}`}>
+              <span className="dzn-pulse-icon" aria-hidden="true">
+                <Icon className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="dzn-pulse-eyebrow">{card.eyebrow}</p>
+                <p className="dzn-pulse-value">{card.value}</p>
+                <p className="dzn-pulse-detail">{card.detail}</p>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </motion.section>
+  );
+}
+
+function EventLeaderboardPanel({ homeStats }: { homeStats: HomeStats }) {
+  const currentEvent = homeStats.network_pulse.current_event;
+  const buildRows = homeStats.top_build_servers.filter((row) => numberOrZero(row.build_score) > 0).slice(0, 4);
+  const shouldShowBuildPreview = !currentEvent && buildRows.length > 0;
+
+  return (
+    <motion.section variants={fadeUp} className="dzn-home-panel dzn-event-leaderboard rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-orange-200">Event Leaderboard</p>
+          <h2 className="text-xl font-black uppercase text-white">
+            {currentEvent ? currentEvent.title : shouldShowBuildPreview ? "Build tracking ready" : "Server-vs-server events"}
+          </h2>
+        </div>
+        <span className="text-[0.68rem] font-black uppercase tracking-[0.14em] text-zinc-400">
+          {currentEvent ? `${currentEvent.type} event` : "More events coming soon"}
+        </span>
+      </div>
+
+      {currentEvent?.type === "pvp" && homeStats.topServers.length > 0 ? (
+        <div className="dzn-event-table">
+          <div className="dzn-event-row dzn-event-row--head">
+            <span>Rank</span>
+            <span>Server</span>
+            <span>Kills</span>
+            <span>K/D</span>
+            <span>Score</span>
           </div>
-        );
-      })}
+          {homeStats.topServers.slice(0, 4).map((server, index) => {
+            const kills = numberOrZero(server.total_kills);
+            const deaths = numberOrZero(server.total_deaths);
+            const kd = kills === 0 ? "Awaiting" : deaths > 0 ? (kills / deaths).toFixed(2) : "Flawless";
+            return (
+              <a key={`${server.public_slug ?? server.server_name}-${index}`} href={server.public_slug ? `/servers/profile?slug=${encodeURIComponent(server.public_slug)}` : "/servers"} className="dzn-event-row">
+                <span>#{numberOrZero(server.rank) || index + 1}</span>
+                <span>{formatServerDisplayName(server.server_name)}</span>
+                <span>{formatNumber(kills)}</span>
+                <span>{kd}</span>
+                <span>{server.score_label ?? formatNumber(server.score ?? 0)}</span>
+              </a>
+            );
+          })}
+        </div>
+      ) : shouldShowBuildPreview || currentEvent?.type === "build" ? (
+        <div className="dzn-event-table dzn-event-table--build">
+          <div className="dzn-event-row dzn-event-row--head">
+            <span>Rank</span>
+            <span>Server</span>
+            <span>Structures Built</span>
+            <span>Build Score</span>
+          </div>
+          {(buildRows.length ? buildRows : homeStats.top_build_servers.slice(0, 4)).map((row, index) => (
+            <a key={row.server_id} href={row.slug ? `/servers/profile?slug=${encodeURIComponent(row.slug)}` : "/servers"} className="dzn-event-row">
+              <span>#{row.rank || index + 1}</span>
+              <span>{formatServerDisplayName(row.server_name)}</span>
+              <span>{formatNumber(row.structures_built)}</span>
+              <span>{formatNumber(row.build_score)}</span>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <div className="dzn-event-empty">
+          <Hammer className="h-5 w-5" />
+          <div>
+            <p>More events coming soon. Stay tuned.</p>
+            <span>Build, survival, faction, PvP, and activity events will rank servers here.</span>
+          </div>
+        </div>
+      )}
     </motion.section>
   );
 }
@@ -947,8 +1159,35 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       killsTracked: numberOrZero(payload.totals?.killsTracked),
       deathsTracked: numberOrZero(payload.totals?.deathsTracked),
       joinsTracked: numberOrZero(payload.totals?.joinsTracked),
+      longestKill: numberOrZero(payload.totals?.longestKill),
       recentEventsCount: numberOrZero(payload.totals?.recentEventsCount),
+      structuresBuilt: numberOrZero(payload.totals?.structuresBuilt),
+      buildScore: numberOrZero(payload.totals?.buildScore),
     },
+    network_pulse: {
+      active_servers: numberOrZero(payload.network_pulse?.active_servers),
+      events: numberOrZero(payload.network_pulse?.events),
+      top_server: normalizeTopServer(payload.network_pulse?.top_server),
+      best_kd: finiteNumberOrNull(payload.network_pulse?.best_kd),
+      current_event: normalizeNetworkEvent(payload.network_pulse?.current_event),
+    },
+    event_leaderboard: normalizeEventLeaderboard(payload.event_leaderboard),
+    top_build_servers: Array.isArray(payload.top_build_servers)
+      ? payload.top_build_servers.map((row) => ({
+          rank: numberOrZero(row.rank),
+          server_id: typeof row.server_id === "string" ? row.server_id : "",
+          server_name: typeof row.server_name === "string" && row.server_name.trim() ? row.server_name : "Unnamed DZN Server",
+          slug: typeof row.slug === "string" && row.slug.trim() ? row.slug : null,
+          structures_built: numberOrZero(row.structures_built),
+          build_items_placed: numberOrZero(row.build_items_placed),
+          storage_items_placed: numberOrZero(row.storage_items_placed),
+          traps_placed: numberOrZero(row.traps_placed),
+          build_score: numberOrZero(row.build_score),
+          top_builder_name: typeof row.top_builder_name === "string" ? row.top_builder_name : null,
+          top_builder_count: numberOrZero(row.top_builder_count),
+          last_build_at: typeof row.last_build_at === "string" ? row.last_build_at : null,
+        }))
+      : [],
     topServers: Array.isArray(payload.topServers)
       ? payload.topServers.map((server) => ({
           public_slug: server.public_slug ?? null,
@@ -1020,6 +1259,52 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
   };
 }
 
+function normalizeTopServer(value: unknown): HomeTopServer | null {
+  if (!value || typeof value !== "object") return null;
+  const server = value as Partial<HomeTopServer>;
+  return {
+    public_slug: typeof server.public_slug === "string" ? server.public_slug : null,
+    server_name: typeof server.server_name === "string" && server.server_name.trim() ? server.server_name : "Unnamed DZN Server",
+    guild_name: typeof server.guild_name === "string" ? server.guild_name : null,
+    server_type: typeof server.server_type === "string" ? server.server_type : null,
+    total_kills: numberOrZero(server.total_kills),
+    total_deaths: numberOrZero(server.total_deaths),
+    unique_players: numberOrZero(server.unique_players),
+    total_joins: numberOrZero(server.total_joins),
+    longest_kill: numberOrZero(server.longest_kill),
+    stats_active: Boolean(server.stats_active),
+    rank: numberOrZero(server.rank),
+    score: numberOrZero(server.score),
+    score_label: typeof server.score_label === "string" ? server.score_label : undefined,
+    score_breakdown: isScoreBreakdown(server.score_breakdown) ? server.score_breakdown : null,
+  };
+}
+
+function normalizeNetworkEvent(value: unknown): PublicNetworkEvent | null {
+  if (!value || typeof value !== "object") return null;
+  const event = value as Partial<PublicNetworkEvent>;
+  if (typeof event.title !== "string" || !event.title.trim()) return null;
+  return {
+    id: typeof event.id === "string" ? event.id : undefined,
+    type: typeof event.type === "string" && event.type.trim() ? event.type : "activity",
+    title: event.title.trim(),
+    status: typeof event.status === "string" ? event.status : undefined,
+    description: typeof event.description === "string" ? event.description : null,
+    ends_at: typeof event.ends_at === "string" ? event.ends_at : null,
+  };
+}
+
+function normalizeEventLeaderboard(value: unknown): PublicEventLeaderboard | null {
+  if (!value || typeof value !== "object") return null;
+  const leaderboard = value as Partial<PublicEventLeaderboard>;
+  if (typeof leaderboard.event_type !== "string" || typeof leaderboard.title !== "string") return null;
+  return {
+    event_type: leaderboard.event_type,
+    title: leaderboard.title,
+    rows: Array.isArray(leaderboard.rows) ? leaderboard.rows : [],
+  };
+}
+
 function buildTopServerRows(homeStats: HomeStats): TopServerPanelRow[] {
   const rows = homeStats.topServers.slice(0, 5).map((server, index) => {
     const kills = numberOrZero(server.total_kills);
@@ -1067,10 +1352,12 @@ function buildActivityRows(homeStats: HomeStats): ActivityPanelRow[] {
     title: activity.title || "Server activity synced",
     detail: activity.serverName || "DZN Network",
     time: formatAgo(activity.occurredAt),
-    icon: activity.source === "kill" ? Crosshair : activity.source === "sync" ? Radio : activity.source === "server" ? Server : Activity,
+    icon: activity.source === "kill" ? Crosshair : activity.source === "build" ? Hammer : activity.source === "sync" ? Radio : activity.source === "server" ? Server : Activity,
     tone:
       activity.source === "kill"
         ? "border-red-300/18 bg-red-400/10 text-red-100"
+        : activity.source === "build"
+          ? "border-orange-300/18 bg-orange-300/10 text-orange-100"
         : activity.source === "sync"
           ? "border-cyan-300/18 bg-cyan-300/10 text-cyan-100"
           : activity.source === "server"
@@ -1127,6 +1414,11 @@ function formatServerDisplayName(value: string) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(numberOrZero(value));
+}
+
+function formatDecimal(value: number) {
+  const safe = numberOrZero(value);
+  return safe % 1 === 0 ? formatNumber(safe) : safe.toFixed(1);
 }
 
 function formatModeServerCount(value: number) {

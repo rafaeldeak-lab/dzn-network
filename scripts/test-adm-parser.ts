@@ -152,6 +152,43 @@ const placed = parseAdmLine(
 assert.equal(placed.eventType, "player_placed_object");
 assert.equal(placed.objectType, "Fireplace");
 
+const placedFenceKit = parseAdmLine(
+  '19:58:57 | Player "romekczerepowicz" (id=6f1_FexaEOgH1953a17uuuLQRMndd_up8aWIYWzcjAY= pos=<22.3, 7892.5, 303.1>) placed Fence Kit<FenceKit>',
+  context,
+);
+assert.equal(placedFenceKit.eventType, "player_placed_object");
+assert.equal(placedFenceKit.playerName, "romekczerepowicz");
+assert.equal(placedFenceKit.placedObject, "Fence Kit");
+assert.equal(placedFenceKit.placedClass, "FenceKit");
+assert.deepEqual(placedFenceKit.position, { x: 22.3, y: 7892.5, z: 303.1 });
+
+const builtBase = parseAdmLine(
+  '19:59:30 | Player "romekczerepowicz" (id=6f1_FexaEOgH1953a17uuuLQRMndd_up8aWIYWzcjAY= pos=<22.4, 7891.1, 303.0>)Built base on Fence with Shovel',
+  context,
+);
+assert.equal(builtBase.eventType, "player_built_structure");
+assert.equal(builtBase.buildPart, "base");
+assert.equal(builtBase.targetObject, "Fence");
+assert.equal(builtBase.tool, "Shovel");
+
+const builtWallBaseUp = parseAdmLine(
+  '20:00:27 | Player "romekczerepowicz" (id=6f1_FexaEOgH1953a17uuuLQRMndd_up8aWIYWzcjAY= pos=<22.3, 7891.3, 303.1>) Built wall_base_up on Fence with Hatchet',
+  context,
+);
+assert.equal(builtWallBaseUp.eventType, "player_built_structure");
+assert.equal(builtWallBaseUp.buildPart, "wall_base_up");
+assert.equal(builtWallBaseUp.targetObject, "Fence");
+assert.equal(builtWallBaseUp.tool, "Hatchet");
+
+const builtGate = parseAdmLine(
+  '20:01:27 | Player "romekczerepowicz" (id=6f1_FexaEOgH1953a17uuuLQRMndd_up8aWIYWzcjAY= pos=<22.4, 7891.5, 303.1>)Built wall_gate on Gate with Pliers',
+  context,
+);
+assert.equal(builtGate.eventType, "player_built_structure");
+assert.equal(builtGate.buildPart, "wall_gate");
+assert.equal(builtGate.targetObject, "Gate");
+assert.equal(builtGate.tool, "Pliers");
+
 const invalidPosition = parseAdmLine(
   '11:43:32 | Player "ExamplePlayer" (id=PLAYER_ID pos=<-340282346638528859811704183484516925440.0, 10326.4, 339.3>) is connected',
   context,

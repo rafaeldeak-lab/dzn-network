@@ -25,6 +25,8 @@ export type AdmEventType =
   | "player_suicide"
   | "player_died_stats"
   | "player_performed_action"
+  | "player_built_structure"
+  | "player_dismantled_structure"
   | "playerlist_snapshot"
   | "playerlist_delimiter"
   | "playerlist_entry"
@@ -63,6 +65,11 @@ export type ParsedAdmEvent = {
   action: string | null;
   itemOrWeapon: string | null;
   objectType: string | null;
+  buildPart: string | null;
+  targetObject: string | null;
+  tool: string | null;
+  placedObject: string | null;
+  placedClass: string | null;
   isDead: boolean;
   victimDead: boolean;
   isPvpKill: boolean;
@@ -260,6 +267,8 @@ export function classifyAdmEvent(rawLine: string, context: AdmParseContext = {})
   if (/\bcommitted suicide\b/i.test(body)) return "player_suicide";
   if (/\bdied\.?\s+Stats>/i.test(body)) return "player_died_stats";
   if (/\bperformed\b/i.test(body)) return "player_performed_action";
+  if (/\bBuilt\s+.+?\s+on\s+/i.test(body)) return "player_built_structure";
+  if (/\bDismantled\s+.+?\s+on\s+/i.test(body)) return "player_dismantled_structure";
   if (/\bis choosing to respawn\b/i.test(body)) return "player_choosing_respawn";
   if (/\bplaced\b/i.test(body)) return "player_placed_object";
   if (context.inPlayerList && /^Player\s+"/i.test(body)) return "playerlist_entry";
@@ -459,11 +468,26 @@ function parseSinglePlayerEvent(
     };
   }
 
-  if (eventType === "player_placed_object") {
-    const placed = /\bplaced\s+(.+)$/i.exec(timestamp.body);
+  if (eventType === "player_built_structure" || eventType === "player_dismantled_structure") {
+    const built = /\b(?:Built|Dismantled)\s+(.+?)\s+on\s+(.+?)(?:\s+with\s+(.+))?$/i.exec(timestamp.body);
     return {
       ...base,
-      objectType: placed?.[1]?.trim() ?? null,
+      buildPart: built?.[1]?.trim() ?? null,
+      targetObject: built?.[2]?.trim() ?? null,
+      tool: normaliseWeaponName(built?.[3]) ?? null,
+      objectType: built?.[2]?.trim() ?? null,
+    };
+  }
+
+  if (eventType === "player_placed_object") {
+    const placed = /\bplaced\s+(.+?)(?:<([^<>]+)>)?\s*$/i.exec(timestamp.body);
+    const placedObject = placed?.[1]?.trim() ?? null;
+    const placedClass = placed?.[2]?.trim() ?? null;
+    return {
+      ...base,
+      objectType: placedClass ?? placedObject,
+      placedObject,
+      placedClass,
     };
   }
 
@@ -543,6 +567,11 @@ function createBaseEvent(
     action: overrides.action ?? null,
     itemOrWeapon: overrides.itemOrWeapon ?? null,
     objectType: overrides.objectType ?? null,
+    buildPart: overrides.buildPart ?? null,
+    targetObject: overrides.targetObject ?? null,
+    tool: overrides.tool ?? null,
+    placedObject: overrides.placedObject ?? null,
+    placedClass: overrides.placedClass ?? null,
     isDead: overrides.isDead ?? false,
     victimDead: overrides.victimDead ?? false,
     isPvpKill: overrides.isPvpKill ?? false,

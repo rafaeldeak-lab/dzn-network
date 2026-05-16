@@ -1,4 +1,5 @@
 import { ensureAdmSyncSchema } from "./adm-sync";
+import { getRankedBuildServers, type PublicBuildLeaderboardRow } from "./build-events";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { calculateServerScore, calculateServerScoreBreakdown, rankServers, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
@@ -52,6 +53,8 @@ export type PublicLongestKill = {
 };
 
 export type PublicKillHighlight = Omit<PublicLongestKill, "rank">;
+
+export type { PublicBuildLeaderboardRow };
 
 export type PublicPlayerStatInput = {
   playerName: string | null;
@@ -124,10 +127,11 @@ export async function getPublicLeaderboardsPayload(env: Env) {
 
   await ensurePublicLeaderboardSchema(env);
 
-  const [topServers, topPlayers, killSummary] = await Promise.all([
+  const [topServers, topPlayers, killSummary, buildLeaderboard] = await Promise.all([
     getRankedPublicServers(env, 25),
     getTopPlayers(env, 50),
     getLongestKillSummary(env, 20),
+    getRankedBuildServers(env, 25),
   ]);
 
   return {
@@ -138,6 +142,7 @@ export async function getPublicLeaderboardsPayload(env: Env) {
     latest_kill: killSummary.latestKill,
     personal_best_kills: killSummary.personalBestKills,
     longest_kills: killSummary.personalBestKills,
+    build_leaderboard: buildLeaderboard,
     updated_at: new Date().toISOString(),
   };
 }
@@ -624,6 +629,7 @@ function emptyPublicLeaderboards() {
     latest_kill: null,
     personal_best_kills: [],
     longest_kills: [],
+    build_leaderboard: [],
     updated_at: new Date().toISOString(),
   };
 }
