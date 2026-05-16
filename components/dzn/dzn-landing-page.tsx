@@ -29,10 +29,9 @@ import {
 } from "framer-motion";
 import type { Variants } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
-import { AnimatedBackground } from "./animated-background";
 import { DznLogo } from "./dzn-logo";
 
 const fadeUp: Variants = {
@@ -170,6 +169,7 @@ const emptyHomeStats: HomeStats = {
 };
 
 const HOME_STATS_REFRESH_MS = 30000;
+const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
 
 const navItems = [
   { label: "Features", href: "#features" },
@@ -222,7 +222,7 @@ const featureCards = [
     accent: "from-fuchsia-400/20 to-violet-500/10",
   },
   {
-    title: "Server Vs Server Events",
+    title: "Server vs Server Events",
     description: "Monthly server wars and seasonal stat battles are coming soon across kills, K/D, longest kills, factions, activity, and score.",
     icon: Swords,
     accent: "from-orange-300/16 to-violet-500/12",
@@ -278,6 +278,7 @@ export function DznLandingPage() {
   useEffect(() => {
     console.log("DZN SERVER COMPETITION HOMEPAGE WITH ANIMATED LOGO LOADED");
     console.log("DZN SERVER RANKING SYSTEM LOADED");
+    console.log("DZN LIVE HOMEPAGE EXPERIENCE LOADED");
   }, []);
 
   useEffect(() => {
@@ -287,8 +288,11 @@ export function DznLandingPage() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="relative isolate min-h-screen overflow-hidden bg-[#02030a] text-zinc-100">
-        <AnimatedBackground />
+      <div
+        className="dzn-home-page relative isolate min-h-screen overflow-hidden bg-[#02030a] text-zinc-100"
+        style={{ "--dzn-home-bg": `url("${CINEMATIC_BG}")` } as CSSProperties}
+      >
+        <HomeAliveBackground reducedMotion={Boolean(reduceMotion)} />
         <LoadingOverlay isVisible={isLoading} />
         <Navbar />
 
@@ -296,7 +300,7 @@ export function DznLandingPage() {
           initial="hidden"
           animate="show"
           variants={stagger}
-          className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 pb-8 pt-4 sm:px-6 lg:px-8"
+          className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-8 pt-4 sm:px-6 lg:px-8"
         >
           <HeroDashboard
             homeStats={liveStats.data}
@@ -312,6 +316,35 @@ export function DznLandingPage() {
         <Footer />
       </div>
     </MotionConfig>
+  );
+}
+
+function HomeAliveBackground({ reducedMotion }: { reducedMotion: boolean }) {
+  return (
+    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+      <div className="dzn-home-bg-image" />
+      <div className="dzn-home-haze" />
+      <div className="dzn-home-grid" />
+      <div className="dzn-home-horizon-glow" />
+      {reducedMotion ? null : (
+        <>
+          <div className="dzn-home-smoke dzn-home-smoke-one" />
+          <div className="dzn-home-smoke dzn-home-smoke-two" />
+          {Array.from({ length: 48 }).map((_, index) => (
+            <span
+              key={index}
+              className="dzn-home-particle"
+              style={{
+                left: `${(index * 29) % 100}%`,
+                top: `${(index * 43) % 100}%`,
+                animationDelay: `${(index % 16) * 0.32}s`,
+                animationDuration: `${12 + (index % 9)}s`,
+              }}
+            />
+          ))}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -369,11 +402,11 @@ function Navbar() {
       initial={{ opacity: 0, y: -18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.65, ease: "easeOut" }}
-      className="sticky top-0 z-50 border-b border-white/10 bg-[#02030a]/72 backdrop-blur-2xl"
+      className="sticky top-0 z-50 border-b border-white/10 bg-[#020713]/72 shadow-[0_10px_42px_rgba(0,0,0,0.28)] backdrop-blur-2xl"
     >
       <nav
         aria-label="Primary navigation"
-        className="mx-auto flex min-h-[104px] w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8"
+        className="mx-auto flex min-h-[104px] w-full max-w-[1440px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8"
       >
         <DznLogo compact className="-ml-2" />
         <div className="hidden flex-1 items-center justify-center gap-1 lg:flex">
@@ -412,20 +445,12 @@ function Navbar() {
               </button>
             </>
           ) : (
-            <>
-              <a
-                href="/login"
-                className="rounded-lg border border-white/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white"
-              >
-                Login
-              </a>
-              <a
-                href="/signup"
-                className="rounded-lg border border-violet-300/35 bg-violet-500/20 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-white shadow-[0_0_24px_rgba(139,92,246,0.28)] transition duration-300 hover:border-violet-200/70 hover:bg-violet-500/32"
-              >
-                Sign Up
-              </a>
-            </>
+            <a
+              href="/login"
+              className="rounded-lg border border-white/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white"
+            >
+              Login
+            </a>
           )}
         </div>
       </nav>
@@ -448,27 +473,28 @@ function HeroDashboard({
   return (
     <motion.section
       variants={stagger}
-      className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.55fr)_420px]"
+      className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.55fr)_430px]"
     >
       <motion.div
         variants={fadeUp}
-        className="relative overflow-hidden rounded-xl border border-white/10 bg-[#060a15]/64 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:min-h-[410px]"
+        className="dzn-home-hero-card relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#060a15]/64 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:min-h-[438px]"
       >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(124,58,237,0.18),transparent_32%),radial-gradient(circle_at_78%_14%,rgba(14,165,233,0.1),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.04),transparent_52%)]" />
+        <div className="dzn-home-energy-beam" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#02030a] via-[#02030a]/54 to-transparent" />
 
         <div className="relative z-10 flex h-full flex-col justify-between gap-7">
           <div className="max-w-3xl">
             <motion.div
               variants={fadeUp}
-              className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[0.65rem] font-black uppercase tracking-[0.22em] text-violet-100"
+              className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[0.65rem] font-black uppercase tracking-[0.22em] text-violet-100 shadow-[0_0_26px_rgba(139,92,246,0.18)]"
             >
               <Shield className="h-3.5 w-3.5" />
               The universal DayZ server network
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.95)]" />
             </motion.div>
             <motion.h1
               variants={fadeUp}
-              className="max-w-4xl text-5xl font-black uppercase leading-[0.9] tracking-normal text-white drop-shadow-[0_0_28px_rgba(139,92,246,0.3)] sm:text-6xl lg:text-7xl"
+              className="max-w-4xl text-5xl font-black uppercase leading-[0.9] tracking-normal text-white drop-shadow-[0_0_28px_rgba(139,92,246,0.3)] sm:text-6xl lg:text-7xl xl:text-[5.35rem]"
             >
               One Network.
               <span className="block bg-gradient-to-r from-violet-200 via-violet-400 to-cyan-200 bg-clip-text text-transparent">
@@ -593,11 +619,12 @@ function RecentActivityPanel({ rows }: { rows: ActivityPanelRow[] }) {
 
 function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
   const dots = Math.max(homeStats.totals.serversLinked, 1);
+  const nodeCount = Math.min(Math.max(dots + homeStats.syncHealth.active, 4), 10);
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-cyan-300/15 bg-cyan-300/[0.045] p-4 shadow-[0_0_38px_rgba(14,165,233,0.08)]">
+    <div className="dzn-home-panel relative overflow-hidden rounded-xl border border-cyan-300/15 bg-cyan-300/[0.045] p-4 shadow-[0_0_38px_rgba(14,165,233,0.08)]">
       <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent,rgba(34,211,238,0.08),transparent)] opacity-60" />
-      <div className="relative flex items-center justify-between gap-3">
+      <div className="relative grid gap-3">
         <div>
           <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">
             Live Operational Map
@@ -609,19 +636,21 @@ function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
               : "Public server signals connected"}
           </p>
         </div>
-        <div className="relative h-20 w-28 overflow-hidden rounded-lg border border-white/10 bg-[#02030a]/55">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(34,211,238,0.18),transparent_40%)]" />
-          {Array.from({ length: Math.min(dots, 5) }).map((_, index) => (
+        <div className="dzn-home-map">
+          <span className="dzn-home-map-scan" />
+          <span className="dzn-home-map-ring dzn-home-map-ring-one" />
+          <span className="dzn-home-map-ring dzn-home-map-ring-two" />
+          {Array.from({ length: nodeCount }).map((_, index) => (
             <span
               key={index}
-              className="absolute h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,0.9)]"
+              className="dzn-home-map-node"
               style={{
-                left: `${18 + index * 15}%`,
-                top: `${28 + (index % 3) * 18}%`,
+                left: `${12 + ((index * 17) % 76)}%`,
+                top: `${18 + ((index * 29) % 58)}%`,
+                animationDelay: `${index * 0.24}s`,
               }}
             />
           ))}
-          <span className="absolute inset-4 rounded-full border border-cyan-200/20" />
         </div>
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
@@ -641,9 +670,9 @@ function FeatureStrip() {
         return (
           <motion.article
             key={feature.title}
-            id={feature.title === "Server Vs Server Events" ? "server-events" : undefined}
+            id={feature.title === "Server vs Server Events" ? "server-events" : undefined}
             whileHover={{ y: -4 }}
-            className="group relative scroll-mt-28 overflow-hidden rounded-xl border border-white/10 bg-[#070b16]/74 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl transition duration-300 hover:border-violet-300/32"
+            className="dzn-home-card group relative scroll-mt-28 overflow-hidden rounded-xl border border-white/10 bg-[#070b16]/74 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl transition duration-300 hover:border-violet-300/32"
           >
             <div className={`absolute inset-0 bg-gradient-to-br ${feature.accent} opacity-0 transition duration-300 group-hover:opacity-100`} />
             <div className="relative z-10">
@@ -695,7 +724,7 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
   ];
 
   return (
-    <motion.section variants={fadeUp} className="rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
+    <motion.section variants={fadeUp} className="dzn-home-panel rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
           <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-200">Game Modes</p>
@@ -712,7 +741,7 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
             <Link
               key={mode.title}
               href="/servers"
-              className="group relative overflow-hidden rounded-lg border border-white/10 bg-white/[0.035] p-4 transition duration-300 hover:-translate-y-1 hover:border-violet-300/34 hover:bg-white/[0.06]"
+              className="dzn-home-card group relative overflow-hidden rounded-lg border border-white/10 bg-white/[0.035] p-4 transition duration-300 hover:-translate-y-1 hover:border-violet-300/34 hover:bg-white/[0.06]"
             >
               <div className={`absolute inset-0 bg-gradient-to-br ${mode.tint} opacity-80`} />
               <div className="relative z-10">
@@ -758,11 +787,11 @@ function StatsRow({ homeStats }: { homeStats: HomeStats }) {
   ];
 
   return (
-    <motion.section variants={fadeUp} id="stats" className="grid gap-3 rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl sm:grid-cols-2 lg:grid-cols-4">
+    <motion.section variants={fadeUp} id="stats" className="dzn-home-panel grid gap-3 rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl sm:grid-cols-2 lg:grid-cols-4">
       {stats.map((stat) => {
         const Icon = stat.icon;
         return (
-          <div key={stat.label} className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.035] p-4">
+          <div key={stat.label} className="dzn-home-stat-card flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.035] p-4">
             <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-cyan-300/18 bg-cyan-300/8 text-cyan-100">
               <Icon className="h-5 w-5" />
             </span>
@@ -782,7 +811,7 @@ function BottomCta() {
     <motion.section
       variants={fadeUp}
       id="events"
-      className="relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#080b16]/74 p-5 backdrop-blur-xl sm:p-6"
+      className="dzn-home-cta relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#080b16]/74 p-5 backdrop-blur-xl sm:p-6"
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_10%_20%,rgba(124,58,237,0.2),transparent_30%),radial-gradient(circle_at_90%_20%,rgba(34,211,238,0.12),transparent_26%)]" />
       <div className="relative z-10 flex flex-col items-start justify-between gap-5 lg:flex-row lg:items-center">
@@ -821,7 +850,7 @@ function PanelShell({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-[#060a15]/72 p-4 shadow-[0_18px_58px_rgba(0,0,0,0.32)] backdrop-blur-xl">
+    <div className="dzn-home-panel rounded-xl border border-white/10 bg-[#060a15]/72 p-4 shadow-[0_18px_58px_rgba(0,0,0,0.32)] backdrop-blur-xl">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg border border-violet-300/18 bg-violet-400/10 text-violet-100">
@@ -849,7 +878,7 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 
 function Footer() {
   return (
-    <footer className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-7 pt-3 text-xs text-zinc-500 sm:px-6 lg:px-8">
+    <footer className="relative z-10 mx-auto w-full max-w-[1440px] border-t border-white/8 px-4 pb-7 pt-4 text-xs text-zinc-500 sm:px-6 lg:px-8">
       <p>Copyright {new Date().getFullYear()} DZN Network. Server competition intelligence for connected DayZ communities.</p>
     </footer>
   );

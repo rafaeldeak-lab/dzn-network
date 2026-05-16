@@ -208,6 +208,271 @@ body {
   pointer-events: none;
 }
 
+.dzn-home-page {
+  --dzn-home-panel-glow: rgba(139, 92, 246, 0.22);
+}
+
+.dzn-home-bg-image {
+  position: absolute;
+  inset: -3%;
+  background-image: var(--dzn-home-bg, none);
+  background-size: cover;
+  background-position: 50% 46%;
+  opacity: 0.46;
+  filter: saturate(1.18) contrast(1.12) brightness(0.72);
+  transform-origin: center;
+  animation: dznHomeBgDrift 28s ease-in-out infinite alternate;
+}
+
+.dzn-home-haze {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 24% 14%, rgba(139, 92, 246, 0.22), transparent 24%),
+    radial-gradient(circle at 68% 16%, rgba(59, 130, 246, 0.18), transparent 28%),
+    radial-gradient(circle at 84% 72%, rgba(168, 85, 247, 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(2, 3, 10, 0.18), rgba(2, 3, 10, 0.68) 55%, rgba(2, 3, 10, 0.96));
+}
+
+.dzn-home-grid {
+  position: absolute;
+  inset: 52% -12% -12% -12%;
+  background:
+    linear-gradient(rgba(168, 85, 247, 0.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(103, 232, 249, 0.09) 1px, transparent 1px);
+  background-size: 72px 72px;
+  transform: perspective(620px) rotateX(61deg);
+  transform-origin: 50% 0;
+  opacity: 0.24;
+  mask-image: linear-gradient(to bottom, transparent, black 22%, black 64%, transparent);
+  animation: dznHomeGridDrift 18s linear infinite;
+}
+
+.dzn-home-horizon-glow {
+  position: absolute;
+  left: -6%;
+  right: -6%;
+  bottom: 8%;
+  height: 24%;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(168, 85, 247, 0.4), transparent 58%),
+    linear-gradient(90deg, transparent, rgba(103, 232, 249, 0.16), transparent);
+  filter: blur(28px);
+  opacity: 0.54;
+}
+
+.dzn-home-smoke {
+  position: absolute;
+  width: 70vw;
+  height: 28vh;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.12), transparent);
+  filter: blur(26px);
+  opacity: 0.46;
+  mix-blend-mode: screen;
+  animation: dznHomeSmoke 25s ease-in-out infinite alternate;
+}
+
+.dzn-home-smoke-one {
+  left: -18%;
+  top: 18%;
+}
+
+.dzn-home-smoke-two {
+  right: -20%;
+  bottom: 22%;
+  animation-duration: 34s;
+  animation-direction: alternate-reverse;
+}
+
+.dzn-home-particle {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(251, 146, 60, 0.78);
+  box-shadow:
+    0 0 10px rgba(251, 146, 60, 0.62),
+    0 0 18px rgba(168, 85, 247, 0.42);
+  opacity: 0;
+  animation: dznHomeParticleFloat 15s linear infinite;
+}
+
+.dzn-home-hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--dzn-home-bg, none);
+  background-size: cover;
+  background-position: 62% 46%;
+  opacity: 0.68;
+  filter: saturate(1.16) contrast(1.12) brightness(0.82);
+  transform-origin: 62% 46%;
+  animation: dznHomeHeroBreathe 19s ease-in-out infinite alternate;
+}
+
+.dzn-home-hero-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 65% 18%, rgba(103, 232, 249, 0.16), transparent 24%),
+    radial-gradient(circle at 74% 30%, rgba(168, 85, 247, 0.32), transparent 18%),
+    radial-gradient(circle at 28% 20%, rgba(139, 92, 246, 0.2), transparent 32%),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.94), rgba(2, 3, 10, 0.58) 54%, rgba(2, 3, 10, 0.86));
+  pointer-events: none;
+}
+
+.dzn-home-energy-beam {
+  position: absolute;
+  top: -10%;
+  bottom: -18%;
+  left: 68%;
+  width: 4px;
+  background: linear-gradient(180deg, transparent, rgba(233, 213, 255, 0.95), rgba(124, 58, 237, 0.35), transparent);
+  box-shadow:
+    0 0 26px rgba(168, 85, 247, 0.9),
+    0 0 58px rgba(59, 130, 246, 0.42);
+  opacity: 0.76;
+  transform: rotate(1deg);
+  animation: dznHomeBeamPulse 4.8s ease-in-out infinite;
+  z-index: 1;
+}
+
+.dzn-home-panel {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 18px 58px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.dzn-home-panel::before,
+.dzn-home-card::before,
+.dzn-home-stat-card::before,
+.dzn-home-cta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 14% 10%, rgba(168, 85, 247, 0.16), transparent 28%),
+    linear-gradient(135deg, rgba(103, 232, 249, 0.045), transparent 42%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+  pointer-events: none;
+}
+
+.dzn-home-panel:hover::before,
+.dzn-home-card:hover::before,
+.dzn-home-stat-card:hover::before,
+.dzn-home-cta:hover::before {
+  opacity: 1;
+}
+
+.dzn-home-card,
+.dzn-home-stat-card {
+  position: relative;
+}
+
+.dzn-home-stat-card {
+  transition:
+    transform 240ms ease,
+    border-color 240ms ease,
+    background 240ms ease;
+}
+
+.dzn-home-stat-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(103, 232, 249, 0.24);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.dzn-home-map {
+  position: relative;
+  min-height: 122px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(103, 232, 249, 0.14);
+  background:
+    radial-gradient(circle at 52% 48%, rgba(103, 232, 249, 0.16), transparent 28%),
+    linear-gradient(rgba(103, 232, 249, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168, 85, 247, 0.08) 1px, transparent 1px),
+    rgba(2, 7, 19, 0.58);
+  background-size: 100% 100%, 26px 26px, 26px 26px, 100% 100%;
+  box-shadow:
+    inset 0 0 34px rgba(103, 232, 249, 0.08),
+    0 0 28px rgba(34, 211, 238, 0.08);
+}
+
+.dzn-home-map::before {
+  content: "";
+  position: absolute;
+  inset: 18% 8%;
+  opacity: 0.62;
+  background:
+    radial-gradient(ellipse at 24% 60%, rgba(168, 85, 247, 0.55), transparent 12%),
+    radial-gradient(ellipse at 44% 43%, rgba(103, 232, 249, 0.32), transparent 13%),
+    radial-gradient(ellipse at 70% 58%, rgba(168, 85, 247, 0.42), transparent 13%),
+    linear-gradient(8deg, transparent 42%, rgba(168, 85, 247, 0.32) 43%, transparent 47%),
+    linear-gradient(-14deg, transparent 44%, rgba(103, 232, 249, 0.22) 45%, transparent 50%);
+  filter: blur(0.5px);
+}
+
+.dzn-home-map-scan {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(103, 232, 249, 0.0) 35%, rgba(103, 232, 249, 0.26) 50%, rgba(168, 85, 247, 0.18) 55%, transparent 70%);
+  transform: translateX(-100%);
+  animation: dznHomeMapScan 4.8s linear infinite;
+}
+
+.dzn-home-map-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(99, 246, 167, 0.28);
+  transform: translate(-50%, -50%);
+  animation: dznHomeMapRing 3.6s ease-out infinite;
+}
+
+.dzn-home-map-ring-two {
+  animation-delay: 1.2s;
+}
+
+.dzn-home-map-node {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #63f6a7;
+  box-shadow:
+    0 0 12px rgba(99, 246, 167, 0.9),
+    0 0 28px rgba(168, 85, 247, 0.56);
+  animation: dznHomeNodePulse 2.4s ease-in-out infinite;
+}
+
+.dzn-home-cta {
+  box-shadow:
+    0 0 42px rgba(124, 58, 237, 0.15),
+    inset 0 -1px 0 rgba(168, 85, 247, 0.3);
+}
+
+.dzn-home-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--dzn-home-bg, none);
+  background-size: cover;
+  background-position: 54% 76%;
+  opacity: 0.18;
+  filter: saturate(1.16) contrast(1.1);
+  pointer-events: none;
+  animation: dznHomeCtaDrift 20s ease-in-out infinite alternate;
+}
+
 .dzn-test-bg-image {
   position: absolute;
   inset: -3%;
@@ -697,6 +962,104 @@ body {
   }
 }
 
+@keyframes dznHomeBgDrift {
+  0% {
+    transform: scale(1.02) translate3d(-0.6%, -0.4%, 0);
+  }
+  100% {
+    transform: scale(1.08) translate3d(0.8%, 0.5%, 0);
+  }
+}
+
+@keyframes dznHomeGridDrift {
+  to {
+    background-position: 0 72px, 72px 0;
+  }
+}
+
+@keyframes dznHomeSmoke {
+  0% {
+    transform: translate3d(-6%, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(9%, -11%, 0) scale(1.08);
+  }
+}
+
+@keyframes dznHomeParticleFloat {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 28px, 0) scale(0.75);
+  }
+  12%,
+  78% {
+    opacity: 0.88;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(26px, -78px, 0) scale(1.15);
+  }
+}
+
+@keyframes dznHomeHeroBreathe {
+  0% {
+    transform: scale(1.02) translate3d(-0.3%, 0, 0);
+  }
+  100% {
+    transform: scale(1.08) translate3d(0.8%, -0.6%, 0);
+  }
+}
+
+@keyframes dznHomeBeamPulse {
+  0%,
+  100% {
+    opacity: 0.42;
+    filter: blur(0);
+  }
+  45% {
+    opacity: 0.9;
+    filter: blur(0.5px);
+  }
+}
+
+@keyframes dznHomeMapScan {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes dznHomeMapRing {
+  0% {
+    opacity: 0.64;
+    transform: translate(-50%, -50%) scale(0.32);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.6);
+  }
+}
+
+@keyframes dznHomeNodePulse {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: scale(0.78);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes dznHomeCtaDrift {
+  0% {
+    transform: scale(1.02) translate3d(-0.4%, 0, 0);
+  }
+  100% {
+    transform: scale(1.08) translate3d(0.6%, -0.6%, 0);
+  }
+}
+
 @keyframes dznTestImageBreathe {
   0% {
     transform: scale(1.02) translate3d(-0.4%, 0, 0);
@@ -883,6 +1246,16 @@ body {
   .dzn-test-radar-ring,
   .dzn-test-radar-sweep,
   .dzn-test-radar-dot,
+  .dzn-home-bg-image,
+  .dzn-home-grid,
+  .dzn-home-smoke,
+  .dzn-home-particle,
+  .dzn-home-hero-card::before,
+  .dzn-home-energy-beam,
+  .dzn-home-map-scan,
+  .dzn-home-map-ring,
+  .dzn-home-map-node,
+  .dzn-home-cta::after,
   .scanline,
   .animated-border::before {
     animation: none !important;
