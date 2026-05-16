@@ -1,7 +1,6 @@
 "use client";
 
-import { geoContains, geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
-import type { GeoProjection } from "d3-geo";
+import { geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { feature } from "topojson-client";
@@ -48,19 +47,6 @@ type TooltipState = {
   region: string;
 } | null;
 
-type WorldDot = {
-  lat: number;
-  lng: number;
-};
-
-type DecorPoint = {
-  lat: number;
-  lng: number;
-  size: number;
-  color: number;
-};
-
-type LonLat = [number, number];
 type LandTopology = Topology<{ land: GeometryCollection }>;
 type GlobeControls = {
   zoomBy: (amount: number) => void;
@@ -75,7 +61,6 @@ type PointerState = {
 
 const LAND_TOPOLOGY = land50m as unknown as LandTopology;
 const LAND_FEATURE = feature(LAND_TOPOLOGY, LAND_TOPOLOGY.objects.land) as FeatureCollection<Geometry>;
-const WORLD_DOTS = buildWorldDotMatrix();
 let cachedDznGlobeTextureCanvas: HTMLCanvasElement | null = null;
 const DEFAULT_GLOBE_ROTATION_X = -0.1;
 const DEFAULT_GLOBE_ROTATION_Y = -0.42;
@@ -87,23 +72,6 @@ const BASE_CAMERA_Z = 3.15;
 const AUTO_ROTATE_SPEED = 0.00155;
 const DRAG_ROTATE_X_SPEED = 0.006;
 const DRAG_ROTATE_Y_SPEED = 0.0035;
-
-const TEXTURE_NETWORK_NODES: LonLat[] = [
-  [-122, 37], [-96, 35], [-74, 40], [-47, -23], [-3, 52], [2, 48], [10, 51], [13, 41],
-  [31, 30], [28, -26], [39, -6], [55, 25], [77, 28], [103, 1], [121, 14], [139, 35], [151, -33],
-];
-
-const DECOR_POINTS: DecorPoint[] = [
-  { lat: 43, lng: -105, size: 0.022, color: 0xa855f7 },
-  { lat: 30, lng: -74, size: 0.018, color: 0x67e8f9 },
-  { lat: -15, lng: -58, size: 0.018, color: 0xa855f7 },
-  { lat: 52, lng: -2, size: 0.024, color: 0xe9d5ff },
-  { lat: 48, lng: 11, size: 0.021, color: 0xa855f7 },
-  { lat: 4, lng: 21, size: 0.017, color: 0x67e8f9 },
-  { lat: 35, lng: 78, size: 0.022, color: 0xa855f7 },
-  { lat: 1, lng: 104, size: 0.019, color: 0x67e8f9 },
-  { lat: -25, lng: 134, size: 0.02, color: 0xa855f7 },
-];
 
 function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNode[] }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -124,6 +92,22 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
   const [failed, setFailed] = useState(false);
 
   const globePoints = useMemo(() => buildGlobePoints(nodes), [nodes]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    console.log("DZN globe map nodes");
+    console.table(
+      globePoints.map((point) => ({
+        name: point.node.display_name || point.node.name,
+        status: point.active ? "active" : "pending",
+        lat: point.lat,
+        lng: point.lng,
+        location_label: point.region,
+        approximate: Boolean(point.node.approximate),
+        slug: point.node.slug,
+      })),
+    );
+  }, [globePoints]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -155,6 +139,7 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
               console.log("DZN PREMIUM GLOBE TEXTURE LOADED");
               console.log("DZN GLOBE DRAG ROTATION ENABLED");
               console.log("DZN GLOBE FREE ROTATE AND ZOOM READY");
+              console.log("DZN GLOBE REAL SERVER NODES ONLY");
               loggedRef.current = true;
             }
           },
@@ -339,11 +324,9 @@ function createThreeGlobe({
   globeGroup.add(surfaceGlow);
 
   addGlobeGrid(THREE, globeGroup);
-  addWorldDots(THREE, globeGroup);
 
-  const decorNodeMeshes = addDecorativeNetwork(THREE, globeGroup);
   const { targetMeshes, pulseMeshes } = addServerNodes(THREE, globeGroup, points);
-  addConnectionLines(THREE, globeGroup, decorNodeMeshes.map((entry) => entry.position), points);
+  addServerConnectionLines(THREE, globeGroup, points);
 
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -425,11 +408,6 @@ function createThreeGlobe({
       const wave = (Math.sin(elapsed * 2.2 + item.delay) + 1) / 2;
       item.mesh.scale.setScalar(0.88 + wave * 0.72);
       item.material.opacity = item.active ? 0.12 + (1 - wave) * 0.16 : 0.055;
-    }
-
-    for (const item of decorNodeMeshes) {
-      const glow = (Math.sin(elapsed * 1.9 + item.delay) + 1) / 2;
-      item.mesh.scale.setScalar(0.92 + glow * 0.22);
     }
 
     renderer.render(scene, camera);
@@ -572,52 +550,6 @@ function addGlobeGrid(THREE: typeof import("three"), group: import("three").Grou
   }
 }
 
-function addWorldDots(THREE: typeof import("three"), group: import("three").Group) {
-  const geometry = new THREE.SphereGeometry(0.008, 5, 5);
-  const material = new THREE.MeshBasicMaterial({
-    color: 0xb7c7ff,
-    transparent: true,
-    opacity: 0.42,
-    depthWrite: false,
-  });
-  const mesh = new THREE.InstancedMesh(geometry, material, WORLD_DOTS.length);
-  const matrix = new THREE.Matrix4();
-
-  WORLD_DOTS.forEach((dot, index) => {
-    matrix.identity();
-    matrix.setPosition(latLngToVector(THREE, dot.lat, dot.lng, 1.029));
-    mesh.setMatrixAt(index, matrix);
-  });
-
-  mesh.instanceMatrix.needsUpdate = true;
-  group.add(mesh);
-}
-
-function addDecorativeNetwork(THREE: typeof import("three"), group: import("three").Group) {
-  const entries: Array<{
-    mesh: import("three").Mesh;
-    position: import("three").Vector3;
-    delay: number;
-  }> = [];
-
-  DECOR_POINTS.forEach((point, index) => {
-    const position = latLngToVector(THREE, point.lat, point.lng, 1.07);
-    const material = new THREE.MeshBasicMaterial({
-      color: point.color,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(point.size, 12, 12), material);
-    mesh.position.copy(position);
-    group.add(mesh);
-    entries.push({ mesh, position, delay: index * 0.42 });
-  });
-
-  return entries;
-}
-
 function addServerNodes(THREE: typeof import("three"), group: import("three").Group, points: GlobePoint[]) {
   const targetMeshes: import("three").Object3D[] = [];
   const pulseMeshes: Array<{
@@ -628,16 +560,16 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
   }> = [];
 
   points.forEach((point, index) => {
-    const position = latLngToVector(THREE, point.lat, point.lng, 1.096);
+    const position = latLngToVector(THREE, point.lat, point.lng, 1.108);
     const nodeMaterial = new THREE.MeshBasicMaterial({
-      color: point.active ? 0xe9d5ff : 0x8b7bbd,
+      color: point.active ? 0xffffff : 0xc084fc,
       transparent: true,
-      opacity: point.active ? 1 : 0.56,
+      opacity: point.active ? 1 : 0.68,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const nodeMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.037 : 0.028, 16, 16),
+      new THREE.SphereGeometry(point.active ? 0.058 : 0.044, 18, 18),
       nodeMaterial,
     );
     nodeMesh.position.copy(position);
@@ -646,14 +578,14 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
     targetMeshes.push(nodeMesh);
 
     const pulseMaterial = new THREE.MeshBasicMaterial({
-      color: point.active ? 0xa855f7 : 0x64748b,
+      color: point.active ? 0xa855f7 : 0x8b5cf6,
       transparent: true,
-      opacity: point.active ? 0.22 : 0.06,
+      opacity: point.active ? 0.34 : 0.08,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const pulseMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.076 : 0.052, 18, 18),
+      new THREE.SphereGeometry(point.active ? 0.13 : 0.07, 22, 22),
       pulseMaterial,
     );
     pulseMesh.position.copy(position);
@@ -664,41 +596,25 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
   return { targetMeshes, pulseMeshes };
 }
 
-function addConnectionLines(
-  THREE: typeof import("three"),
-  group: import("three").Group,
-  decorPositions: import("three").Vector3[],
-  points: GlobePoint[],
-) {
+function addServerConnectionLines(THREE: typeof import("three"), group: import("three").Group, points: GlobePoint[]) {
+  const activePoints = points.filter((point) => point.active);
+  if (activePoints.length < 2) return;
+
   const lineMaterial = new THREE.LineBasicMaterial({
     color: 0xa855f7,
     transparent: true,
-    opacity: 0.24,
+    opacity: 0.16,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
 
-  const decorConnections = [
-    [0, 1],
-    [1, 3],
-    [3, 4],
-    [4, 6],
-    [6, 7],
-    [7, 8],
-    [4, 5],
-  ];
-
-  for (const [from, to] of decorConnections) {
-    const start = decorPositions[from];
-    const end = decorPositions[to];
-    if (start && end) group.add(new THREE.Line(createArcGeometry(THREE, start, end), lineMaterial.clone()));
+  for (let index = 0; index < activePoints.length - 1; index += 1) {
+    const startPoint = activePoints[index];
+    const endPoint = activePoints[index + 1];
+    const start = latLngToVector(THREE, startPoint.lat, startPoint.lng, 1.112);
+    const end = latLngToVector(THREE, endPoint.lat, endPoint.lng, 1.112);
+    group.add(new THREE.Line(createArcGeometry(THREE, start, end), lineMaterial.clone()));
   }
-
-  points.forEach((point, index) => {
-    const start = decorPositions[index % decorPositions.length];
-    const end = latLngToVector(THREE, point.lat, point.lng, 1.105);
-    if (start) group.add(new THREE.Line(createArcGeometry(THREE, start, end), lineMaterial.clone()));
-  });
 }
 
 function createArcGeometry(
@@ -755,8 +671,6 @@ function createDznGlobeTextureCanvas() {
   if (maskCtx) drawLandMask(maskCtx, path, width, height);
   drawTextureLand(ctx, path);
   if (maskCtx) drawTextureLandDots(ctx, maskCtx, width, height);
-  const maskData = maskCtx ? maskCtx.getImageData(0, 0, width, height).data : null;
-  drawTextureNetwork(ctx, projection, maskData, width);
 
   const vignette = ctx.createRadialGradient(width * 0.5, height * 0.48, height * 0.12, width * 0.5, height * 0.48, width * 0.62);
   vignette.addColorStop(0, "rgba(147, 197, 253, 0.05)");
@@ -846,66 +760,20 @@ function drawTextureLandDots(
   let attempts = 0;
 
   ctx.save();
-  while (accepted < 4200 && attempts < 42000) {
+  while (accepted < 700 && attempts < 16000) {
     attempts += 1;
     const x = Math.floor(random() * width);
     const y = Math.floor((0.05 + random() * 0.82) * height);
     if (!isMaskLand(mask, width, x, y)) continue;
-    const bright = random() > 0.91;
     const cyan = random() > 0.72;
-    const radius = bright ? 1.45 + random() * 1.1 : 0.55 + random() * 0.75;
-    ctx.fillStyle = bright
-      ? "rgba(233, 213, 255, 0.9)"
-      : cyan
-        ? "rgba(103, 232, 249, 0.38)"
-        : "rgba(168, 85, 247, 0.46)";
-    ctx.shadowColor = cyan ? "rgba(103, 232, 249, 0.55)" : "rgba(168, 85, 247, 0.62)";
-    ctx.shadowBlur = bright ? 11 : 4;
+    const radius = 0.35 + random() * 0.38;
+    ctx.fillStyle = cyan ? "rgba(103, 232, 249, 0.14)" : "rgba(168, 85, 247, 0.16)";
+    ctx.shadowColor = cyan ? "rgba(103, 232, 249, 0.14)" : "rgba(168, 85, 247, 0.16)";
+    ctx.shadowBlur = 1.5;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
     accepted += 1;
-  }
-  ctx.restore();
-}
-
-function drawTextureNetwork(
-  ctx: CanvasRenderingContext2D,
-  projection: GeoProjection,
-  maskData: Uint8ClampedArray | null,
-  width: number,
-) {
-  const projected = TEXTURE_NETWORK_NODES.map(([lon, lat]) => projection([lon, lat]));
-  const valid = projected.filter((point): point is [number, number] => Boolean(point));
-
-  ctx.save();
-  ctx.lineWidth = 1.2;
-  ctx.strokeStyle = "rgba(168, 85, 247, 0.24)";
-  ctx.shadowColor = "rgba(168, 85, 247, 0.55)";
-  ctx.shadowBlur = 9;
-  for (let index = 0; index < valid.length - 1; index += 1) {
-    if (index % 4 === 3) continue;
-    const start = valid[index];
-    const end = valid[index + 1];
-    ctx.beginPath();
-    ctx.moveTo(start[0], start[1]);
-    ctx.lineTo(end[0], end[1]);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  ctx.save();
-  for (const [index, point] of valid.entries()) {
-    const x = point[0];
-    const y = point[1];
-    if (maskData && !isMaskLand(maskData, width, Math.round(x), Math.round(y))) continue;
-    const strong = index % 3 === 0;
-    ctx.fillStyle = strong ? "rgba(233, 213, 255, 0.96)" : "rgba(168, 85, 247, 0.78)";
-    ctx.shadowColor = strong ? "rgba(233, 213, 255, 0.95)" : "rgba(168, 85, 247, 0.85)";
-    ctx.shadowBlur = strong ? 24 : 14;
-    ctx.beginPath();
-    ctx.arc(x, y, strong ? 5.4 : 3.5, 0, Math.PI * 2);
-    ctx.fill();
   }
   ctx.restore();
 }
@@ -991,23 +859,6 @@ function duplicateOffset(index: number) {
     { lat: -1.5, lng: 3.4 },
   ];
   return offsets[index % offsets.length];
-}
-
-function buildWorldDotMatrix() {
-  const dots: WorldDot[] = [];
-  const random = seededRandom(412789);
-  for (let lat = -58; lat <= 74; lat += 3.25) {
-    for (let lng = -178; lng <= 178; lng += 3.25) {
-      const point: [number, number] = [
-        lng + (random() - 0.5) * 1.65,
-        lat + (random() - 0.5) * 1.65,
-      ];
-      if (geoContains(LAND_FEATURE, point)) {
-        dots.push({ lng: point[0], lat: point[1] });
-      }
-    }
-  }
-  return dots;
 }
 
 function isMaskLand(mask: Uint8ClampedArray, width: number, x: number, y: number) {

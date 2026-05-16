@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { buildPublicMapNodeFromRow, type MapNodeRow } from "../functions/api/public/home-stats";
+import { buildPublicMapNodeFromRow, buildPublicMapNodesFromRows, type MapNodeRow } from "../functions/api/public/home-stats";
 import { geolocateServerIp } from "../functions/_lib/geoip";
 
 main().catch((error) => {
@@ -73,7 +73,11 @@ async function main() {
     geo_timezone: null,
     geo_source: null,
   });
-  assert.equal(unknownNode, null);
+  assert.ok(unknownNode);
+  assert.equal(unknownNode.location_label, "Location awaiting metadata");
+  assert.equal(unknownNode.approximate, true);
+  assert.equal(unknownNode.latitude, 20);
+  assert.equal(unknownNode.longitude, 0);
 
   const coordinateCounts = new Map<string, number>();
   const firstNode = buildPublicMapNodeFromRow(baseRow, 0, coordinateCounts);
@@ -81,6 +85,38 @@ async function main() {
   assert.ok(firstNode);
   assert.ok(secondNode);
   assert.notEqual(`${firstNode.latitude}:${firstNode.longitude}`, `${secondNode.latitude}:${secondNode.longitude}`);
+
+  const publicRows: MapNodeRow[] = [
+    { ...baseRow, id: "pandora", public_slug: "pandora-dayz", server_name: "PANDORA DayZ" },
+    { ...baseRow, id: "nuketown", public_slug: "nuketown-deathmatch", server_name: "NukeTown DEATHMATCH", geo_latitude: 54.3, geo_longitude: -2.5 },
+    {
+      ...baseRow,
+      id: "warlords",
+      public_slug: "warlords-pvp",
+      server_name: "Warlords PvP",
+      stats_active: 0,
+      geo_latitude: null,
+      geo_longitude: null,
+      geo_country: null,
+      geo_region: null,
+      geo_city: null,
+      geo_timezone: null,
+      geo_source: null,
+    },
+  ];
+  const publicNodes = buildPublicMapNodesFromRows(publicRows);
+  assert.equal(publicNodes.length, 3);
+  assert.deepEqual(publicNodes.map((item) => item.name), ["PANDORA DayZ", "NukeTown DEATHMATCH", "Warlords PvP"]);
+  assert.equal(publicNodes[2].sync_status, "pending");
+  assert.equal(publicNodes[2].location_label, "Location awaiting metadata");
+  assert.equal(JSON.stringify(publicNodes).includes("ip_address"), false);
+
+  const filteredNodes = buildPublicMapNodesFromRows([
+    ...publicRows,
+    { ...baseRow, id: "private", status: "private", public_slug: "private-server", server_name: "Private Server" },
+    { ...baseRow, id: "merged", merged_into_server_id: "canonical", public_slug: "merged-server", server_name: "Merged Server" },
+  ]);
+  assert.equal(filteredNodes.length, 3);
 
   console.log("GeoIP and public map node tests passed.");
 }

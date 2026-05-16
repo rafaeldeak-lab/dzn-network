@@ -44,6 +44,8 @@ type RecentActivityRow = {
 
 export type MapNodeRow = {
   id: string;
+  status?: string | null;
+  merged_into_server_id?: string | null;
   public_slug: string | null;
   server_name: string | null;
   guild_name: string | null;
@@ -394,6 +396,8 @@ async function getMapNodes(db: D1Database) {
     .prepare(
       `SELECT
         linked_servers.id,
+        linked_servers.status,
+        linked_servers.merged_into_server_id,
         linked_servers.public_slug,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         discord_guilds.name AS guild_name,
@@ -435,17 +439,27 @@ async function getMapNodes(db: D1Database) {
     )
     .all<MapNodeRow>();
 
+  return buildPublicMapNodesFromRows(result.results ?? []);
+}
+
+export function buildPublicMapNodesFromRows(rows: MapNodeRow[]) {
   const coordinateCounts = new Map<string, number>();
-  return (result.results ?? []).flatMap((row, index) => {
+  return rows.flatMap((row, index) => {
+    if (!publicMapNodeRowIsVisible(row)) return [];
     const node = buildPublicMapNodeFromRow(row, index, coordinateCounts);
     return node ? [node] : [];
   });
 }
 
+function publicMapNodeRowIsVisible(row: MapNodeRow) {
+  const status = (row.status ?? "live").toLowerCase();
+  const mergedInto = row.merged_into_server_id?.trim();
+  return status === "live" && !mergedInto;
+}
+
 export function buildPublicMapNodeFromRow(row: MapNodeRow, index = 0, coordinateCounts = new Map<string, number>()) {
   const serverName = firstString(row.server_name, row.guild_name) ?? "Unnamed DZN Server";
   const placement = mapPlacementFor(row);
-  if (!placement.usable) return null;
 
   const key = `${Math.round(placement.latitude * 10) / 10}:${Math.round(placement.longitude * 10) / 10}`;
   const count = coordinateCounts.get(key) ?? 0;
@@ -497,7 +511,6 @@ function mapPlacementFor(row: MapNodeRow) {
     return {
       ...location,
       locationLabel: formatLocationLabel(location),
-      usable: true,
     };
   }
 
@@ -522,19 +535,17 @@ function mapPlacementFor(row: MapNodeRow) {
       ...fallbackLocation,
       locationLabel: formatLocationLabel(fallbackLocation),
       approximate: true,
-      usable: true,
     };
   }
 
   return {
-    latitude: 0,
+    latitude: 20,
     longitude: 0,
     country: null,
-    region: publicRegion,
+    region: null,
     city: null,
-    locationLabel: publicRegion ?? "Location awaiting metadata",
+    locationLabel: "Location awaiting metadata",
     approximate: true,
-    usable: false,
   };
 }
 
