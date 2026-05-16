@@ -285,6 +285,7 @@ export function DznLandingPage() {
     console.log("DZN LIVE HOMEPAGE EXPERIENCE LOADED");
     console.log("DZN HOMEPAGE WORLD MAP LIVE");
     console.log("DZN HOMEPAGE MAP AND LAYOUT FINALIZED");
+    console.log("DZN WORLD MAP VISUAL MATCHED");
   }, []);
 
   useEffect(() => {
