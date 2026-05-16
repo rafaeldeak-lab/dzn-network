@@ -72,6 +72,16 @@ const tags = [
   "Modded",
 ];
 
+type PublicListingForm = {
+  public_short_description: string;
+  public_description: string;
+  public_discord_invite: string;
+  public_website_url: string;
+  public_rules: string;
+  public_language: string;
+  public_region_label: string;
+};
+
 export function SetupWizard() {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -81,6 +91,7 @@ export function SetupWizard() {
   const [selectedGuild, setSelectedGuild] = useState("");
   const [serverType, setServerType] = useState("PVP");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [publicListing, setPublicListing] = useState<PublicListingForm>(() => emptyPublicListing());
   const [tokenInput, setTokenInput] = useState("");
   const [tokenValid, setTokenValid] = useState(false);
   const [serviceIdInput, setServiceIdInput] = useState("");
@@ -136,6 +147,7 @@ export function SetupWizard() {
           };
           setServerType(linkedServer.server_type || "PVP");
           setSelectedTags(parseLinkedServerTags(linkedServer.tags_json));
+          setPublicListing(publicListingFromLinkedServer(linkedServer));
           setServices([existingService]);
           setValidatedService(existingService);
           setSelectedService(existingService.id);
@@ -245,6 +257,7 @@ export function SetupWizard() {
         discordGuildId: selectedGuild,
         serverType,
         tags: selectedTags,
+        ...publicListing,
         nitradoServiceId: selectedService,
       });
       setStep(4);
@@ -392,7 +405,7 @@ export function SetupWizard() {
                   />
                 ) : null}
                 {step === 1 ? (
-                  <TypeStep serverType={serverType} setServerType={setServerType} selectedTags={selectedTags} toggleTag={toggleTag} onNext={() => setStep(2)} />
+                <TypeStep serverType={serverType} setServerType={setServerType} selectedTags={selectedTags} toggleTag={toggleTag} publicListing={publicListing} setPublicListing={setPublicListing} onNext={() => setStep(2)} />
                 ) : null}
                 {step === 2 ? (
                   <TokenStep
@@ -567,7 +580,27 @@ function GuildStep({
   );
 }
 
-function TypeStep({ serverType, setServerType, selectedTags, toggleTag, onNext }: { serverType: string; setServerType: (value: string) => void; selectedTags: string[]; toggleTag: (tag: string) => void; onNext: () => void }) {
+function TypeStep({
+  serverType,
+  setServerType,
+  selectedTags,
+  toggleTag,
+  publicListing,
+  setPublicListing,
+  onNext,
+}: {
+  serverType: string;
+  setServerType: (value: string) => void;
+  selectedTags: string[];
+  toggleTag: (tag: string) => void;
+  publicListing: PublicListingForm;
+  setPublicListing: (value: PublicListingForm | ((current: PublicListingForm) => PublicListingForm)) => void;
+  onNext: () => void;
+}) {
+  const updateListingField = (field: keyof PublicListingForm, value: string) => {
+    setPublicListing((current) => ({ ...current, [field]: value }));
+  };
+
   return (
     <Step title="Server Type & Categories" icon={Tags} description="Choose the primary mode and up to five tags that describe your server.">
       <div className="grid gap-3 sm:grid-cols-4">
@@ -576,6 +609,78 @@ function TypeStep({ serverType, setServerType, selectedTags, toggleTag, onNext }
             {type}
           </button>
         ))}
+      </div>
+      <div className="mt-6 rounded-xl border border-violet-300/20 bg-[radial-gradient(circle_at_20%_0%,rgba(139,92,246,0.18),transparent_34%),rgba(5,10,24,0.68)] p-4 shadow-[0_0_36px_rgba(139,92,246,0.12)]">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-100">Public Server Listing</p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">
+              This information appears on your public server page so players can decide if they want to join your community.
+            </p>
+          </div>
+          <span className="rounded-md border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+            Optional
+          </span>
+        </div>
+        <div className="mt-4 grid gap-4">
+          <ListingTextInput
+            label="Server Tagline / Short Description"
+            maxLength={160}
+            value={publicListing.public_short_description}
+            onChange={(value) => updateListingField("public_short_description", value)}
+            placeholder="High-action PvP server with events, traders, factions, and weekend raids."
+          />
+          <ListingTextarea
+            label="Full Server Description"
+            maxLength={1500}
+            rows={5}
+            value={publicListing.public_description}
+            onChange={(value) => updateListingField("public_description", value)}
+            placeholder="Tell players what makes your server worth joining. Mention events, raid rules, economy, factions, traders, loot style, wipe schedule, and community vibe."
+          />
+          <div className="grid gap-4 md:grid-cols-2">
+            <ListingTextInput
+              label="Discord Invite Link"
+              maxLength={200}
+              value={publicListing.public_discord_invite}
+              onChange={(value) => updateListingField("public_discord_invite", value)}
+              placeholder="https://discord.gg/yourinvite"
+            />
+            <ListingTextInput
+              label="Website / Rules Link (optional)"
+              maxLength={300}
+              value={publicListing.public_website_url}
+              onChange={(value) => updateListingField("public_website_url", value)}
+              placeholder="https://your-server-rules.com"
+            />
+          </div>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
+            <ListingTextarea
+              label="Server Rules / Notes (optional)"
+              maxLength={1000}
+              rows={4}
+              value={publicListing.public_rules}
+              onChange={(value) => updateListingField("public_rules", value)}
+              placeholder="Raid weekends Friday-Sunday. No cheating/exploits. Respect event rules."
+            />
+            <div className="grid gap-4 content-start">
+              <ListingTextInput
+                label="Language (optional)"
+                maxLength={40}
+                value={publicListing.public_language}
+                onChange={(value) => updateListingField("public_language", value)}
+                placeholder="English"
+              />
+              <ListingTextInput
+                label="Region (optional)"
+                maxLength={80}
+                value={publicListing.public_region_label}
+                onChange={(value) => updateListingField("public_region_label", value)}
+                placeholder="UK / EU"
+              />
+            </div>
+          </div>
+        </div>
       </div>
       <p className="mt-6 text-xs font-black uppercase text-zinc-500">{selectedTags.length}/5 optional tags selected</p>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -587,6 +692,45 @@ function TypeStep({ serverType, setServerType, selectedTags, toggleTag, onNext }
       </div>
       <WizardButton onClick={onNext}>Continue</WizardButton>
     </Step>
+  );
+}
+
+function ListingTextInput({ label, value, maxLength, placeholder, onChange }: { label: string; value: string; maxLength: number; placeholder: string; onChange: (value: string) => void }) {
+  return (
+    <label className="block">
+      <span className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
+        {label}
+        <span className={value.length > maxLength ? "text-red-200" : "text-zinc-500"}>{value.length} / {maxLength}</span>
+      </span>
+      <input
+        value={value}
+        maxLength={maxLength + 40}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/28 px-3 text-sm font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-cyan-300/45 focus:bg-cyan-300/[0.04]"
+      />
+      {value.length > maxLength ? <span className="mt-1 block text-xs font-bold text-red-200">Keep this field under {maxLength} characters.</span> : null}
+    </label>
+  );
+}
+
+function ListingTextarea({ label, value, maxLength, placeholder, rows, onChange }: { label: string; value: string; maxLength: number; placeholder: string; rows: number; onChange: (value: string) => void }) {
+  return (
+    <label className="block">
+      <span className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
+        {label}
+        <span className={value.length > maxLength ? "text-red-200" : "text-zinc-500"}>{value.length} / {maxLength}</span>
+      </span>
+      <textarea
+        value={value}
+        rows={rows}
+        maxLength={maxLength + 100}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 w-full resize-y rounded-lg border border-white/10 bg-black/28 px-3 py-3 text-sm font-bold leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 focus:bg-violet-300/[0.04]"
+      />
+      {value.length > maxLength ? <span className="mt-1 block text-xs font-bold text-red-200">Keep this field under {maxLength} characters.</span> : null}
+    </label>
   );
 }
 
@@ -1617,4 +1761,28 @@ function parseLinkedServerTags(value: string) {
   } catch {
     return [];
   }
+}
+
+function emptyPublicListing(): PublicListingForm {
+  return {
+    public_short_description: "",
+    public_description: "",
+    public_discord_invite: "",
+    public_website_url: "",
+    public_rules: "",
+    public_language: "",
+    public_region_label: "",
+  };
+}
+
+function publicListingFromLinkedServer(server: LinkedServer): PublicListingForm {
+  return {
+    public_short_description: server.public_short_description ?? "",
+    public_description: server.public_description ?? "",
+    public_discord_invite: server.public_discord_invite ?? "",
+    public_website_url: server.public_website_url ?? "",
+    public_rules: server.public_rules ?? "",
+    public_language: server.public_language ?? "",
+    public_region_label: server.public_region_label ?? "",
+  };
 }

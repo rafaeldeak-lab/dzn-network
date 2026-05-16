@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -11,18 +11,22 @@ import {
   Clock3,
   Crosshair,
   Crown,
+  ExternalLink,
   Flame,
   Gauge,
   Gamepad2,
+  Globe2,
   LogOut,
   Map,
   MapPin,
   Medal,
+  MessageSquare,
   RadioTower,
   Search,
   ShieldCheck,
   Skull,
   Sparkles,
+  Star,
   Target,
   Trophy,
   UserRound,
@@ -35,6 +39,7 @@ import { DznLogo } from "@/components/dzn/dzn-logo";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 
 type PublicServer = {
+  linked_server_id: string;
   public_slug: string;
   server_name: string;
   server_type: string;
@@ -54,6 +59,14 @@ type PublicServer = {
   is_online: boolean;
   last_sync_at: string | null;
   metadata_last_checked_at: string | null;
+  public_short_description: string | null;
+  public_description: string | null;
+  public_discord_invite: string | null;
+  public_website_url: string | null;
+  public_rules: string | null;
+  public_language: string | null;
+  public_region_label: string | null;
+  public_listing_updated_at: string | null;
   created_at: string | null;
   total_kills: number;
   total_deaths: number;
@@ -124,6 +137,33 @@ type PublicServersResponse = {
   server?: PublicServer | null;
   servers?: PublicServer[];
   stats?: PublicStats;
+  error?: string;
+};
+
+type PublicReview = {
+  id: string;
+  reviewer_name: string | null;
+  reviewer_avatar_url: string | null;
+  rating: number;
+  title: string | null;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  is_own_review?: boolean;
+};
+
+type ReviewsResponse = {
+  average_rating: number;
+  review_count: number;
+  rating_breakdown: Record<"1" | "2" | "3" | "4" | "5", number>;
+  reviews: PublicReview[];
+  viewer?: {
+    authenticated: boolean;
+    can_review: boolean;
+    reason: "login_required" | "owner" | "cooldown" | "server_not_found" | null;
+    cooldown_until: string | null;
+    existing_review_id: string | null;
+  };
   error?: string;
 };
 
@@ -518,6 +558,8 @@ function ServerProfile({ server }: { server: PublicServer }) {
       <section className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-5">
           <ServerTagsPanel tags={tags} />
+          <CommunityInfoPanel server={server} />
+          <ReviewsPanel server={server} />
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
             <PvpLeaderboardPanel players={pvpLeaderboard} />
             <RecentEventsPanel server={server} />
@@ -695,6 +737,290 @@ function HeroStat({ icon: Icon, label, value, title }: { icon: typeof Activity; 
         <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
       </div>
       <p className="mt-2 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{value}</p>
+    </div>
+  );
+}
+
+function CommunityInfoPanel({ server }: { server: PublicServer }) {
+  const hasDescription = Boolean(server.public_short_description || server.public_description || server.public_rules || server.public_language || server.public_region_label || server.public_discord_invite || server.public_website_url);
+
+  return (
+    <GlassPanel title="Community Info" icon={MessageSquare}>
+      <div className="grid gap-4">
+        {hasDescription ? (
+          <>
+            {server.public_short_description ? <p className="text-base font-black leading-7 text-white">{server.public_short_description}</p> : null}
+            {server.public_description ? <p className="whitespace-pre-line text-sm font-medium leading-7 text-zinc-300">{server.public_description}</p> : <p className="text-sm leading-6 text-zinc-500">This server has not added a full public description yet.</p>}
+            <div className="grid gap-3 md:grid-cols-2">
+              <CommunityDetail label="Language / Region" value={[server.public_language, server.public_region_label].filter(Boolean).join(" / ") || "Not added yet"} />
+              <CommunityDetail label="Rules / Notes" value={server.public_rules || "No rules or notes added yet."} multiline />
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              {server.public_discord_invite ? (
+                <a href={server.public_discord_invite} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.32)] transition hover:bg-violet-400">
+                  Join Discord
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              ) : (
+                <span className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black uppercase text-zinc-400">
+                  Discord invite not added yet
+                </span>
+              )}
+              {server.public_website_url ? (
+                <a href={server.public_website_url} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-200/55 hover:bg-cyan-400/18">
+                  View Rules
+                  <Globe2 className="h-4 w-4" />
+                </a>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm leading-6 text-zinc-400">This server has not added a public description yet.</p>
+        )}
+      </div>
+    </GlassPanel>
+  );
+}
+
+function CommunityDetail({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+      <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+      <p className={`mt-2 text-sm font-bold leading-6 text-zinc-200 ${multiline ? "whitespace-pre-line" : ""}`}>{value}</p>
+    </div>
+  );
+}
+
+function ReviewsPanel({ server }: { server: PublicServer }) {
+  const [data, setData] = useState<ReviewsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const wordCount = countWords(body);
+
+  const loadReviews = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/public/server-reviews?slug=${encodeURIComponent(server.public_slug)}`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+        signal,
+      });
+      const payload = (await response.json().catch(() => ({}))) as ReviewsResponse;
+      if (!response.ok) throw new Error(payload.error || "Unable to load reviews");
+      setData(payload);
+    } catch (loadError) {
+      if (signal?.aborted) return;
+      setError(loadError instanceof Error ? loadError.message : "Unable to load reviews");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [server.public_slug]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.resolve().then(() => loadReviews(controller.signal));
+    console.log("DZN SERVER REVIEWS READY");
+    return () => controller.abort();
+  }, [loadReviews]);
+
+  async function submitReview() {
+    setMessage("");
+    setError("");
+    if (rating < 1) {
+      setError("Choose a rating before submitting.");
+      return;
+    }
+    if (body.trim().length < 20) {
+      setError("Review must be at least 20 characters.");
+      return;
+    }
+    if (wordCount > 250) {
+      setError("Review must be 250 words or fewer.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const response = await fetch(`/api/servers/${encodeURIComponent(server.linked_server_id)}/reviews`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ rating, title, body }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as ReviewsResponse & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not submit review.");
+      setMessage("Review submitted.");
+      setShowForm(false);
+      setTitle("");
+      setBody("");
+      setRating(0);
+      await loadReviews();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Could not submit review.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <GlassPanel title="Ratings & Reviews" icon={Star}>
+      <div className="grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="rounded-xl border border-yellow-300/20 bg-yellow-300/[0.06] p-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-yellow-100/75">Community Rating</p>
+          <p className="mt-3 text-5xl font-black text-white">{loading ? "..." : (data?.average_rating ?? 0).toFixed(1)}</p>
+          <Stars rating={data?.average_rating ?? 0} />
+          <p className="mt-2 text-xs font-bold text-zinc-400">Based on {data?.review_count ?? 0} reviews</p>
+          <div className="mt-4 grid gap-1.5">
+            {[5, 4, 3, 2, 1].map((item) => (
+              <RatingBar key={item} rating={item} count={Number(data?.rating_breakdown?.[String(item) as "1" | "2" | "3" | "4" | "5"] ?? 0)} total={data?.review_count ?? 0} />
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm leading-6 text-zinc-400">
+              Reviews are moderated and scoped to this server only.
+            </p>
+            {data?.viewer?.authenticated && data.viewer.can_review ? (
+              <button type="button" onClick={() => setShowForm((value) => !value)} className="inline-flex items-center justify-center rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400">
+                Leave a Review
+              </button>
+            ) : null}
+          </div>
+
+          {viewerReviewMessage(data) ? <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">{viewerReviewMessage(data)}</p> : null}
+          {showForm ? (
+            <div className="rounded-xl border border-violet-300/20 bg-black/30 p-4">
+              <p className="text-sm font-black uppercase text-white">Leave a Review</p>
+              <StarSelector value={rating} onChange={setRating} />
+              <label className="mt-4 block">
+                <span className="text-[10px] font-black uppercase text-zinc-500">Review Title</span>
+                <input value={title} maxLength={80} onChange={(event) => setTitle(event.target.value)} placeholder="Amazing server!" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm font-bold text-white outline-none focus:border-violet-300/45" />
+              </label>
+              <label className="mt-4 block">
+                <span className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-500">
+                  Your Review
+                  <span className={wordCount > 250 ? "text-red-200" : "text-zinc-500"}>{wordCount} / 250 words</span>
+                </span>
+                <textarea value={body} maxLength={1500} rows={5} onChange={(event) => setBody(event.target.value)} placeholder="Tell players what your experience was like." className="mt-2 w-full resize-y rounded-lg border border-white/10 bg-black/30 px-3 py-3 text-sm font-bold leading-6 text-white outline-none focus:border-cyan-300/45" />
+              </label>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button type="button" onClick={() => setShowForm(false)} className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black uppercase text-zinc-200">Cancel</button>
+                <button type="button" disabled={submitting || rating < 1 || body.trim().length < 20 || wordCount > 250} onClick={submitReview} className="rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-55">
+                  {submitting ? "Submitting..." : "Submit Review"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {message ? <p className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3 text-sm font-bold text-emerald-50">{message}</p> : null}
+          {error ? <p className="rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-3 text-sm font-bold text-red-50">{error}</p> : null}
+          {loading ? <p className="text-sm text-zinc-500">Loading reviews...</p> : null}
+          {!loading && !error && data && data.reviews.length === 0 ? <p className="text-sm leading-6 text-zinc-400">No reviews yet. Be the first to review this server.</p> : null}
+          {!loading && data?.reviews.length ? (
+            <div className="grid gap-3">
+              {data.reviews.slice(0, 5).map((review) => (
+                <ReviewCard key={review.id} review={review} onReported={() => loadReviews()} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </GlassPanel>
+  );
+}
+
+function ReviewCard({ review, onReported }: { review: PublicReview; onReported: () => void }) {
+  const [reporting, setReporting] = useState(false);
+  const [reported, setReported] = useState(false);
+
+  async function reportReview() {
+    setReporting(true);
+    try {
+      const response = await fetch(`/api/public/server-reviews/${encodeURIComponent(review.id)}/report`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "Unsafe or abusive review" }),
+      });
+      if (response.ok) {
+        setReported(true);
+        onReported();
+      }
+    } finally {
+      setReporting(false);
+    }
+  }
+
+  return (
+    <article className="rounded-xl border border-white/10 bg-black/24 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          {review.reviewer_avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={review.reviewer_avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+          ) : (
+            <span className="grid h-10 w-10 rounded-full border border-violet-300/25 bg-violet-500/15 place-items-center text-sm font-black text-violet-100">{(review.reviewer_name ?? "P")[0]}</span>
+          )}
+          <div className="min-w-0">
+            <p className="break-words text-sm font-black text-white">{review.reviewer_name ?? "DZN player"}</p>
+            <p className="mt-1 text-[10px] font-black uppercase text-zinc-500">{formatRelativeTime(review.created_at)}</p>
+          </div>
+        </div>
+        <Stars rating={review.rating} compact />
+      </div>
+      {review.title ? <h3 className="mt-3 break-words text-sm font-black text-white">{review.title}</h3> : null}
+      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-300">{review.body}</p>
+      {!review.is_own_review ? (
+        <button type="button" disabled={reporting || reported} onClick={reportReview} className="mt-3 text-[10px] font-black uppercase text-zinc-500 transition hover:text-orange-200 disabled:opacity-50">
+          {reported ? "Reported" : reporting ? "Reporting..." : "Report"}
+        </button>
+      ) : null}
+    </article>
+  );
+}
+
+function Stars({ rating, compact = false }: { rating: number; compact?: boolean }) {
+  const rounded = Math.round(rating);
+  return (
+    <div className={`mt-2 flex ${compact ? "gap-0.5" : "gap-1"}`} aria-label={`${rating} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((item) => (
+        <Star key={item} className={`${compact ? "h-3.5 w-3.5" : "h-4 w-4"} ${item <= rounded ? "fill-yellow-300 text-yellow-300" : "text-zinc-600"}`} />
+      ))}
+    </div>
+  );
+}
+
+function StarSelector({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  return (
+    <div className="mt-3 flex gap-2" role="radiogroup" aria-label="Your rating">
+      {[1, 2, 3, 4, 5].map((item) => (
+        <button key={item} type="button" onClick={() => onChange(item)} className="text-yellow-300 transition hover:scale-110">
+          <Star className={`h-7 w-7 ${item <= value ? "fill-yellow-300" : ""}`} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RatingBar({ rating, count, total }: { rating: number; count: number; total: number }) {
+  const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+  return (
+    <div className="grid grid-cols-[28px_1fr_24px] items-center gap-2 text-[10px] font-black uppercase text-zinc-500">
+      <span>{rating} star</span>
+      <span className="h-1.5 overflow-hidden rounded-full bg-white/10">
+        <span className="block h-full bg-yellow-300" style={{ width: `${percent}%` }} />
+      </span>
+      <span className="text-right">{count}</span>
     </div>
   );
 }
@@ -1045,6 +1371,28 @@ function eventIcon(event: PublicRecentEvent) {
 
 function formatKdLabel(player: PublicLeaderboardPlayer) {
   return player.kd_label || (typeof player.kd === "number" ? player.kd.toFixed(2) : "Awaiting data");
+}
+
+function countWords(value: string) {
+  return value.trim() ? value.trim().split(/\s+/).filter(Boolean).length : 0;
+}
+
+function viewerReviewMessage(data: ReviewsResponse | null) {
+  const viewer = data?.viewer;
+  if (!viewer) return "";
+  if (!viewer.authenticated) return "Log in with Discord to leave a review.";
+  if (viewer.reason === "owner") return "Owners cannot review their own server.";
+  if (viewer.reason === "cooldown" && viewer.cooldown_until) return `You can update your review again in ${formatFutureDistance(viewer.cooldown_until)}.`;
+  return "";
+}
+
+function formatFutureDistance(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "24 hours";
+  const diffMs = date.getTime() - Date.now();
+  if (diffMs <= 0) return "a few minutes";
+  const hours = Math.ceil(diffMs / (60 * 60 * 1000));
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 function calculateServerKd(kills: number, deaths: number) {

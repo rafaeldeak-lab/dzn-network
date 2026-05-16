@@ -420,6 +420,14 @@ export async function ensureLinkedServerMetadataColumns(env: Env) {
     ["geo_timezone", "TEXT"],
     ["geo_source", "TEXT"],
     ["geo_last_checked_at", "TEXT"],
+    ["public_short_description", "TEXT"],
+    ["public_description", "TEXT"],
+    ["public_discord_invite", "TEXT"],
+    ["public_website_url", "TEXT"],
+    ["public_rules", "TEXT"],
+    ["public_language", "TEXT"],
+    ["public_region_label", "TEXT"],
+    ["public_listing_updated_at", "TEXT"],
   ].filter(([name]) => !existing.has(name));
 
   for (const [name, type] of missingColumns) {

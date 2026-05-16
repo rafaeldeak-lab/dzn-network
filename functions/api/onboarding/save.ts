@@ -13,6 +13,7 @@ import {
   uniquePublicSlug,
   validateServerType,
 } from "../../_lib/onboarding";
+import { validatePublicListingInput, type PublicListingInput } from "../../_lib/review-moderation";
 import type { PagesFunction } from "../../_lib/types";
 
 type SaveBody = {
@@ -20,7 +21,7 @@ type SaveBody = {
   serverType?: string;
   tags?: string[];
   nitradoServiceId?: string;
-};
+} & PublicListingInput;
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "POST") return methodNotAllowed();
@@ -53,6 +54,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!service) return json({ error: "DayZ Nitrado service not found" }, { status: 400 });
 
   const tags = normalizeTags(body.tags);
+  const publicListing = validatePublicListingInput(body);
+  if (!publicListing.ok) return json({ error: publicListing.error }, { status: 400 });
+  const publicListingUpdatedAt = hasPublicListingValue(publicListing.value) ? new Date().toISOString() : null;
   const serviceRegion = publicRegionForService(service.region, service.ipAddress);
   const geo = await geolocateServerIp(service.ipAddress ?? null, { regionHint: serviceRegion }).catch((error) => {
     console.warn("DZN server GeoIP lookup skipped", error instanceof Error ? error.message : "unknown error");
@@ -116,6 +120,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
           geo_timezone = ?,
           geo_source = ?,
           geo_last_checked_at = ?,
+          public_short_description = ?,
+          public_description = ?,
+          public_discord_invite = ?,
+          public_website_url = ?,
+          public_rules = ?,
+          public_language = ?,
+          public_region_label = ?,
+          public_listing_updated_at = ?,
           status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
           public_slug = ?,
           updated_at = CURRENT_TIMESTAMP
@@ -143,6 +155,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         geo?.timezone ?? null,
         geo?.source ?? null,
         geo ? new Date().toISOString() : null,
+        publicListing.value.public_short_description,
+        publicListing.value.public_description,
+        publicListing.value.public_discord_invite,
+        publicListing.value.public_website_url,
+        publicListing.value.public_rules,
+        publicListing.value.public_language,
+        publicListing.value.public_region_label,
+        publicListingUpdatedAt,
         slug,
         linkedServerId,
       )
@@ -163,8 +183,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
           id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
           server_name, server_type, tags_json, region, game, platform, ip_address, player_slots,
           geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone, geo_source, geo_last_checked_at,
+          public_short_description, public_description, public_discord_invite, public_website_url, public_rules,
+          public_language, public_region_label, public_listing_updated_at,
           status, public_slug, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
       .bind(
         linkedServerId,
@@ -189,6 +211,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         geo?.timezone ?? null,
         geo?.source ?? null,
         geo ? new Date().toISOString() : null,
+        publicListing.value.public_short_description,
+        publicListing.value.public_description,
+        publicListing.value.public_discord_invite,
+        publicListing.value.public_website_url,
+        publicListing.value.public_rules,
+        publicListing.value.public_language,
+        publicListing.value.public_region_label,
+        publicListingUpdatedAt,
         slug,
       )
       .run();
@@ -203,4 +233,16 @@ function publicRegionForService(region: string | null | undefined, ipAddress: st
   const trimmed = typeof region === "string" ? region.trim() : "";
   if (!trimmed) return null;
   return normalizeIp(trimmed) === normalizeIp(ipAddress) ? null : trimmed;
+}
+
+function hasPublicListingValue(value: {
+  public_short_description: string | null;
+  public_description: string | null;
+  public_discord_invite: string | null;
+  public_website_url: string | null;
+  public_rules: string | null;
+  public_language: string | null;
+  public_region_label: string | null;
+}) {
+  return Object.values(value).some((item) => typeof item === "string" && item.trim());
 }

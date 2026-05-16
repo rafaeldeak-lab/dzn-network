@@ -197,6 +197,14 @@ export type LinkedServer = {
   metadata_hash?: string | null;
   metadata_last_checked_at?: string | null;
   metadata_last_changed_at?: string | null;
+  public_short_description?: string | null;
+  public_description?: string | null;
+  public_discord_invite?: string | null;
+  public_website_url?: string | null;
+  public_rules?: string | null;
+  public_language?: string | null;
+  public_region_label?: string | null;
+  public_listing_updated_at?: string | null;
   adm_path?: string | null;
   adm_status?: "Connected" | "Discovered, read pending" | "Needs review" | string | null;
   adm_latest_file?: string | null;

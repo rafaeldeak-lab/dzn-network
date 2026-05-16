@@ -31,7 +31,7 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding } from "./api";
+import { clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding, updateServerPublicListing } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -687,6 +687,20 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
             </DashboardPanel>
           </div>
 
+          <PublicListingEditor
+            key={`${server.id}-public-listing`}
+            server={server}
+            onSaved={(listing) => {
+              setServerInfoOverride((current) => ({
+                serverId: server.id,
+                patch: {
+                  ...(current?.serverId === server.id ? current.patch : {}),
+                  ...listing,
+                },
+              }));
+            }}
+          />
+
           <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
             <DashboardPanel className="p-4">
               <div className="flex items-center justify-between gap-3">
@@ -766,6 +780,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               <LogDiagnosticsPanel diagnostics={logDiagnostics} open={diagnosticsOpen} onToggle={() => setDiagnosticsOpen((value) => !value)} />
             ) : null}
           </DashboardPanel>
+          {server.public_slug ? <DashboardPublicReviewsSummary slug={server.public_slug} /> : null}
           <DangerZonePanel
             isOriginalOwner={isOriginalOwner}
             onRemoveServer={() => setDangerAction("server")}
@@ -1135,6 +1150,171 @@ function MetricTile({ label, value }: { label: string; value: number }) {
   );
 }
 
+type PublicListingForm = {
+  public_short_description: string;
+  public_description: string;
+  public_discord_invite: string;
+  public_website_url: string;
+  public_rules: string;
+  public_language: string;
+  public_region_label: string;
+};
+
+type DashboardReviewSummary = {
+  average_rating: number;
+  review_count: number;
+  reviews: Array<{
+    id: string;
+    reviewer_name: string | null;
+    rating: number;
+    title: string | null;
+    body: string;
+    created_at: string;
+  }>;
+};
+
+function DashboardPublicReviewsSummary({ slug }: { slug: string }) {
+  const [summary, setSummary] = useState<DashboardReviewSummary | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/public/server-reviews?slug=${encodeURIComponent(slug)}`, {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (!controller.signal.aborted) setSummary(payload as DashboardReviewSummary | null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setSummary(null);
+      });
+    return () => controller.abort();
+  }, [slug]);
+
+  return (
+    <DashboardPanel className="p-4">
+      <PanelHeader icon={<Bell className="h-5 w-5" />} title="Public Reviews" />
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MiniInfo label="Average Rating" value={summary ? summary.average_rating.toFixed(1) : "Loading"} />
+        <MiniInfo label="Review Count" value={String(summary?.review_count ?? 0)} />
+      </div>
+      <div className="mt-4 grid gap-2">
+        {summary?.reviews?.slice(0, 3).map((review) => (
+          <div key={review.id} className="rounded-lg border border-white/10 bg-black/24 p-3">
+            <p className="text-xs font-black text-white">{review.title || `${review.rating}/5 review`}</p>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-400">{review.body}</p>
+          </div>
+        ))}
+        {summary && summary.reviews.length === 0 ? <p className="text-sm text-zinc-400">No public reviews yet.</p> : null}
+      </div>
+      <ActionLink href={publicServerProfileHref(slug)} icon={<ExternalLink className="h-4 w-4" />} label="View Public Page" tone="emerald" />
+    </DashboardPanel>
+  );
+}
+
+function PublicListingEditor({ server, onSaved }: { server: LinkedServer; onSaved: (listing: Partial<LinkedServer>) => void }) {
+  const [form, setForm] = useState(() => publicListingFormFromServer(server));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function saveListing() {
+    setSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const result = await updateServerPublicListing(server.id, form);
+      onSaved(result.listing);
+      setForm((current) => ({ ...current, ...listingFormFromPartial(result.listing) }));
+      setMessage("Public listing updated.");
+    } catch {
+      setError("Could not update listing. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const update = (field: keyof PublicListingForm, value: string) => setForm((current) => ({ ...current, [field]: value }));
+
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <PanelHeader icon={<Settings className="h-5 w-5" />} title="Public Listing & Discord" />
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+            Update how your server appears on its public DZN profile.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={saveListing}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.32)] transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? "Saving..." : "Save Public Listing"}
+        </button>
+      </div>
+      <div className="mt-5 grid gap-4">
+        <DashboardListingInput label="Server Tagline" value={form.public_short_description} maxLength={160} placeholder="High-action PvP server with events, traders, factions, and weekend raids." onChange={(value) => update("public_short_description", value)} />
+        <DashboardListingTextarea label="Full Description" value={form.public_description} maxLength={1500} rows={4} placeholder="Tell players what makes your community worth joining." onChange={(value) => update("public_description", value)} />
+        <div className="grid gap-4 md:grid-cols-2">
+          <DashboardListingInput label="Discord Invite Link" value={form.public_discord_invite} maxLength={200} placeholder="https://discord.gg/yourinvite" onChange={(value) => update("public_discord_invite", value)} />
+          <DashboardListingInput label="Website / Rules Link (optional)" value={form.public_website_url} maxLength={300} placeholder="https://your-server-rules.com" onChange={(value) => update("public_website_url", value)} />
+        </div>
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
+          <DashboardListingTextarea label="Server Rules / Notes (optional)" value={form.public_rules} maxLength={1000} rows={4} placeholder="Raid weekends Friday-Sunday. No cheating/exploits. Respect event rules." onChange={(value) => update("public_rules", value)} />
+          <div className="grid content-start gap-4">
+            <DashboardListingInput label="Language (optional)" value={form.public_language} maxLength={40} placeholder="English" onChange={(value) => update("public_language", value)} />
+            <DashboardListingInput label="Region (optional)" value={form.public_region_label} maxLength={80} placeholder="UK / EU" onChange={(value) => update("public_region_label", value)} />
+          </div>
+        </div>
+      </div>
+      {message ? <p className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3 text-sm font-bold text-emerald-50">{message}</p> : null}
+      {error ? <p className="mt-4 rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-3 text-sm font-bold text-red-50">{error}</p> : null}
+    </DashboardPanel>
+  );
+}
+
+function DashboardListingInput({ label, value, maxLength, placeholder, onChange }: { label: string; value: string; maxLength: number; placeholder: string; onChange: (value: string) => void }) {
+  return (
+    <label className="block">
+      <span className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">
+        {label}
+        <span className={value.length > maxLength ? "text-red-200" : "text-zinc-500"}>{value.length} / {maxLength}</span>
+      </span>
+      <input
+        value={value}
+        maxLength={maxLength + 40}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/28 px-3 text-sm font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-cyan-300/45 focus:bg-cyan-300/[0.04]"
+      />
+    </label>
+  );
+}
+
+function DashboardListingTextarea({ label, value, maxLength, placeholder, rows, onChange }: { label: string; value: string; maxLength: number; placeholder: string; rows: number; onChange: (value: string) => void }) {
+  return (
+    <label className="block">
+      <span className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">
+        {label}
+        <span className={value.length > maxLength ? "text-red-200" : "text-zinc-500"}>{value.length} / {maxLength}</span>
+      </span>
+      <textarea
+        value={value}
+        rows={rows}
+        maxLength={maxLength + 100}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 w-full resize-y rounded-lg border border-white/10 bg-black/28 px-3 py-3 text-sm font-bold leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 focus:bg-violet-300/[0.04]"
+      />
+    </label>
+  );
+}
+
 function ActionLink({ href, icon, label, tone = "zinc" }: { href: string; icon: React.ReactNode; label: string; tone?: "zinc" | "emerald" }) {
   const className = tone === "emerald"
     ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-50 hover:border-emerald-300/45"
@@ -1459,6 +1639,30 @@ function numberOrNull(value: unknown) {
 
 function booleanNumberOrNull(value: unknown) {
   return typeof value === "boolean" || value === 0 || value === 1 ? value : null;
+}
+
+function publicListingFormFromServer(server: LinkedServer): PublicListingForm {
+  return {
+    public_short_description: server.public_short_description ?? "",
+    public_description: server.public_description ?? "",
+    public_discord_invite: server.public_discord_invite ?? "",
+    public_website_url: server.public_website_url ?? "",
+    public_rules: server.public_rules ?? "",
+    public_language: server.public_language ?? "",
+    public_region_label: server.public_region_label ?? "",
+  };
+}
+
+function listingFormFromPartial(listing: Partial<LinkedServer>): Partial<PublicListingForm> {
+  return {
+    public_short_description: listing.public_short_description ?? "",
+    public_description: listing.public_description ?? "",
+    public_discord_invite: listing.public_discord_invite ?? "",
+    public_website_url: listing.public_website_url ?? "",
+    public_rules: listing.public_rules ?? "",
+    public_language: listing.public_language ?? "",
+    public_region_label: listing.public_region_label ?? "",
+  };
 }
 
 function getManualSyncMessage(result: AdmSyncRunResult) {

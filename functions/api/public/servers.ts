@@ -50,6 +50,14 @@ type PublicServerRow = {
   latest_success_sync_status: string | null;
   latest_success_sync_trigger: string | null;
   latest_success_sync_at: string | null;
+  public_short_description: string | null;
+  public_description: string | null;
+  public_discord_invite: string | null;
+  public_website_url: string | null;
+  public_rules: string | null;
+  public_language: string | null;
+  public_region_label: string | null;
+  public_listing_updated_at: string | null;
 };
 
 type PublicRecentEvent = {
@@ -66,6 +74,7 @@ type PublicRecentEvent = {
 };
 
 type SafePublicServer = {
+  linked_server_id: string;
   public_slug: string;
   server_name: string;
   server_type: string;
@@ -85,6 +94,14 @@ type SafePublicServer = {
   is_online: boolean;
   last_sync_at: string | null;
   metadata_last_checked_at: string | null;
+  public_short_description: string | null;
+  public_description: string | null;
+  public_discord_invite: string | null;
+  public_website_url: string | null;
+  public_rules: string | null;
+  public_language: string | null;
+  public_region_label: string | null;
+  public_listing_updated_at: string | null;
   created_at: string | null;
   total_kills: number;
   total_deaths: number;
@@ -245,7 +262,15 @@ async function queryPublicServers(env: Env) {
           AND lower(sync_runs.status) IN ('completed', 'idle')
         ORDER BY COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) DESC
         LIMIT 1
-      ) AS latest_success_sync_at
+      ) AS latest_success_sync_at,
+      linked_servers.public_short_description,
+      linked_servers.public_description,
+      linked_servers.public_discord_invite,
+      linked_servers.public_website_url,
+      linked_servers.public_rules,
+      linked_servers.public_language,
+      linked_servers.public_region_label,
+      linked_servers.public_listing_updated_at
     FROM linked_servers
     LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
     LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
@@ -421,6 +446,7 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     score_label: ranking?.score_label ?? "Pending",
   };
   return {
+    linked_server_id: row.id,
     public_slug: row.public_slug,
     server_name: row.server_name,
     server_type: row.server_type,
@@ -441,6 +467,14 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     is_online: Number(row.is_online) === 1,
     last_sync_at: lastSyncAt,
     metadata_last_checked_at: row.metadata_last_checked_at,
+    public_short_description: row.public_short_description,
+    public_description: row.public_description,
+    public_discord_invite: row.public_discord_invite,
+    public_website_url: row.public_website_url,
+    public_rules: row.public_rules,
+    public_language: row.public_language,
+    public_region_label: row.public_region_label,
+    public_listing_updated_at: row.public_listing_updated_at,
     created_at: row.created_at,
     ...stats,
     score_breakdown: ranking?.score_breakdown ?? null,
@@ -474,6 +508,7 @@ function findPublicServerBySlug(servers: SafePublicServer[], slug: string) {
 function mockPublicServers(): SafePublicServer[] {
   return [
     {
+      linked_server_id: "mock-pandora-dayz",
       public_slug: "pandora-dayz",
       server_name: "Pandora DayZ",
       server_type: "PVP / PVE",
@@ -507,9 +542,11 @@ function mockPublicServers(): SafePublicServer[] {
       score_label: "Pending",
       score_breakdown: null,
       stats_sync_active: false,
+      ...mockListingFields("Hybrid PvP/PvE community with factions, events, traders, and weekend raids."),
       recent_events: [],
     },
     {
+      linked_server_id: "mock-warlords-pvp",
       public_slug: "warlords-pvp",
       server_name: "Warlords PvP",
       server_type: "PVP",
@@ -543,9 +580,11 @@ function mockPublicServers(): SafePublicServer[] {
       score_label: "Pending",
       score_breakdown: null,
       stats_sync_active: true,
+      ...mockListingFields("Raid-focused PvP server with active factions and competitive stat tracking."),
       recent_events: [],
     },
     {
+      linked_server_id: "mock-apocalypse-dm",
       public_slug: "apocalypse-dm",
       server_name: "Apocalypse DM",
       server_type: "DEATHMATCH",
@@ -579,9 +618,23 @@ function mockPublicServers(): SafePublicServer[] {
       score_label: "Pending",
       score_breakdown: null,
       stats_sync_active: false,
+      ...mockListingFields("Fast respawn deathmatch arena for clean fights and leaderboard runs."),
       recent_events: [],
     },
   ];
+}
+
+function mockListingFields(shortDescription: string) {
+  return {
+    public_short_description: shortDescription,
+    public_description: null,
+    public_discord_invite: null,
+    public_website_url: null,
+    public_rules: null,
+    public_language: "English",
+    public_region_label: "Community region",
+    public_listing_updated_at: new Date().toISOString(),
+  };
 }
 
 async function getPublicRecentEvents(env: Env, linkedServerId: string) {

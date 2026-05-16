@@ -41,9 +41,31 @@ export async function saveOnboarding(data: {
   serverType: string;
   tags: string[];
   nitradoServiceId: string;
+  public_short_description?: string | null;
+  public_description?: string | null;
+  public_discord_invite?: string | null;
+  public_website_url?: string | null;
+  public_rules?: string | null;
+  public_language?: string | null;
+  public_region_label?: string | null;
 }) {
   return request<{ ok: boolean; linkedServerId: string }>("/api/onboarding/save", {
     method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateServerPublicListing(linkedServerId: string, data: {
+  public_short_description?: string | null;
+  public_description?: string | null;
+  public_discord_invite?: string | null;
+  public_website_url?: string | null;
+  public_rules?: string | null;
+  public_language?: string | null;
+  public_region_label?: string | null;
+}) {
+  return request<{ ok: boolean; listing: Partial<LinkedServer> }>(`/api/servers/${encodeURIComponent(linkedServerId)}/public-listing`, {
+    method: "PATCH",
     body: JSON.stringify(data),
   });
 }
