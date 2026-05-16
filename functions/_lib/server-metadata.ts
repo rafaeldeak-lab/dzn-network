@@ -48,6 +48,7 @@ type LinkedServerMetadataRow = {
   server_mode_source: string | null;
   metadata_hash: string | null;
   metadata_last_checked_at: string | null;
+  metadata_last_changed_at: string | null;
   geo_latitude: number | null;
   geo_longitude: number | null;
   geo_country: string | null;
@@ -79,6 +80,9 @@ export async function refreshNitradoServerMetadata(
       changed: false,
       skipped: true,
       message: "Server metadata is fresh",
+      metadata_last_checked_at: linkedServer.metadata_last_checked_at,
+      metadata_last_changed_at: linkedServer.metadata_last_changed_at,
+      metadata_source: "nitrado",
       metadata: rowToMetadata(linkedServer),
     };
   }
@@ -86,6 +90,7 @@ export async function refreshNitradoServerMetadata(
   const metadata = isMockNitrado(env.MOCK_NITRADO)
     ? await mockMetadata(linkedServer, now)
     : await fetchNitradoServerMetadata(env, linkedServer, now);
+  const metadataSource = isMockNitrado(env.MOCK_NITRADO) ? "mock_nitrado" : "nitrado";
   const geo = await resolveGeoUpdate(linkedServer, metadata.ip_address, now);
   const displayName = firstString(metadata.hostname, linkedServer.nitrado_service_name, linkedServer.server_name) ?? "DayZ Server";
   const changes = buildMetadataChanges(linkedServer, metadata, displayName);
@@ -207,9 +212,25 @@ export async function refreshNitradoServerMetadata(
     changed,
     skipped: false,
     message: changed ? "Server info updated from Nitrado" : "Server info checked; no changes found",
+    metadata_last_checked_at: metadata.metadata_last_checked_at,
+    metadata_last_changed_at: changed ? metadata.metadata_last_checked_at : linkedServer.metadata_last_changed_at,
+    metadata_source: metadataSource,
     metadata: {
-      ...metadata,
+      hostname: metadata.hostname,
       display_name: displayName,
+      current_players: metadata.current_players,
+      max_players: metadata.max_players,
+      server_mode: metadata.server_mode,
+      server_mode_source: metadata.server_mode_source,
+      server_status: metadata.server_status,
+      game: metadata.game,
+      platform: metadata.platform,
+      map_name: metadata.map_name,
+      mission: metadata.mission,
+      is_online: metadata.is_online,
+      metadata_last_checked_at: metadata.metadata_last_checked_at,
+      metadata_last_changed_at: changed ? metadata.metadata_last_checked_at : linkedServer.metadata_last_changed_at,
+      metadata_source: metadataSource,
       changed_fields: changes.map((change) => change.field),
     },
   };
@@ -282,6 +303,7 @@ async function getLinkedServerMetadataRow(env: Env, linkedServerId: string, user
       `SELECT id, user_id, nitrado_service_id, nitrado_service_name, server_name, server_type,
               tags_json, region, platform, display_name, hostname, max_players, current_players, ip_address,
               server_status, server_mode, server_mode_source, metadata_hash, metadata_last_checked_at,
+              metadata_last_changed_at,
               geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone,
               geo_source, geo_last_checked_at
        FROM linked_servers
@@ -523,6 +545,8 @@ function rowToMetadata(row: LinkedServerMetadataRow) {
     server_mode: row.server_mode ?? row.server_type,
     server_mode_source: row.server_mode_source ?? null,
     metadata_last_checked_at: row.metadata_last_checked_at,
+    metadata_last_changed_at: row.metadata_last_changed_at,
+    metadata_source: "nitrado",
   };
 }
 

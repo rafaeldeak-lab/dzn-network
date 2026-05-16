@@ -59,6 +59,7 @@ export function Dashboard() {
     if (!auth?.authenticated) return;
     if (!hasLoggedMultiServerReady) {
       console.log("DZN MULTI SERVER LINKING READY");
+      console.log("DZN DASHBOARD METADATA REFRESH UI FIXED");
       hasLoggedMultiServerReady = true;
     }
   }, [auth?.authenticated]);
@@ -204,7 +205,7 @@ function EmptyDashboard() {
   );
 }
 
-function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefresh: () => Promise<void> }) {
+function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServer; onRefresh: () => Promise<void> }) {
   const [checkingLogs, setCheckingLogs] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
@@ -224,8 +225,17 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
+  const server = useMemo(
+    () => ({
+      ...serverProp,
+      ...(serverInfoOverride?.serverId === serverProp.id ? serverInfoOverride.patch : {}),
+    }),
+    [serverInfoOverride, serverProp],
+  );
+
   const tags = useMemo(() => {
     try {
       return JSON.parse(server.tags_json) as string[];
@@ -267,6 +277,8 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
   const processedPercent = getProcessedPercent(syncStatus);
   const nextScheduledSync = getNextScheduledSync(syncStatus?.last_scheduled_sync_at ?? null);
   const isOriginalOwner = server.original_owner_is_current_user !== false;
+  const metadataCheckedLabel = server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "not checked yet";
+  const metadataChangedLabel = server.metadata_last_changed_at ? formatRelativeTime(server.metadata_last_changed_at) : null;
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -341,10 +353,17 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
     setActionMessage("");
     try {
       const result = await refreshServerMetadata(server.id);
+      setServerInfoOverride((current) => ({
+        serverId: server.id,
+        patch: {
+          ...(current?.serverId === server.id ? current.patch : {}),
+          ...metadataPatchFromRefreshResult(result),
+        },
+      }));
       await onRefresh();
-      setActionMessage(result.message || "Server info refreshed from Nitrado.");
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to refresh server info.");
+      setActionMessage("Server info checked from Nitrado just now.");
+    } catch {
+      setActionMessage("Could not refresh server info. Try again.");
     } finally {
       setRefreshingServerInfo(false);
     }
@@ -593,10 +612,14 @@ function ServerDashboard({ server, onRefresh }: { server: LinkedServer; onRefres
                 <CompactRow label="Server Score" value={scoreLabel} />
               </div>
               <div className="mt-4 flex flex-col gap-3 rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm font-bold text-cyan-50">
-                  Server info auto-synced from Nitrado.
-                  {server.metadata_last_changed_at ? <span className="text-zinc-300"> Last changed {formatRelativeTime(server.metadata_last_changed_at)}.</span> : null}
-                </p>
+                <div className="text-sm font-bold leading-6 text-cyan-50">
+                  <p>Server info checked from Nitrado.</p>
+                  <p className="text-zinc-300">
+                    Last checked {metadataCheckedLabel}.
+                    {" "}
+                    {metadataChangedLabel ? `Last actual change ${metadataChangedLabel}.` : "No metadata changes detected yet."}
+                  </p>
+                </div>
                 <button
                   type="button"
                   disabled={refreshingServerInfo}
@@ -1366,6 +1389,30 @@ function formatDashboardDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function metadataPatchFromRefreshResult(result: Awaited<ReturnType<typeof refreshServerMetadata>>): Partial<LinkedServer> {
+  const metadata = result.metadata ?? {};
+  const patch: Partial<LinkedServer> = {
+    metadata_last_checked_at: stringOrNull(result.metadata_last_checked_at ?? metadata.metadata_last_checked_at) ?? new Date().toISOString(),
+  };
+  const nextChangedAt = stringOrNull(result.metadata_last_changed_at ?? metadata.metadata_last_changed_at);
+
+  if (result.metadata_last_changed_at !== undefined || "metadata_last_changed_at" in metadata) patch.metadata_last_changed_at = nextChangedAt;
+  if ("display_name" in metadata) patch.display_name = stringOrNull(metadata.display_name);
+  if ("hostname" in metadata) patch.hostname = stringOrNull(metadata.hostname);
+  if ("current_players" in metadata) patch.current_players = numberOrNull(metadata.current_players);
+  if ("max_players" in metadata) patch.max_players = numberOrNull(metadata.max_players);
+  if ("server_mode" in metadata) patch.server_mode = stringOrNull(metadata.server_mode);
+  if ("server_mode_source" in metadata) patch.server_mode_source = stringOrNull(metadata.server_mode_source);
+  if ("server_status" in metadata) patch.server_status = stringOrNull(metadata.server_status);
+  if ("game" in metadata) patch.game = stringOrNull(metadata.game);
+  if ("platform" in metadata) patch.platform = stringOrNull(metadata.platform);
+  if ("map_name" in metadata) patch.map_name = stringOrNull(metadata.map_name);
+  if ("mission" in metadata) patch.mission = stringOrNull(metadata.mission);
+  if ("is_online" in metadata) patch.is_online = booleanNumberOrNull(metadata.is_online);
+
+  return patch;
+}
+
 function formatRelativeTime(value: string) {
   const date = new Date(value);
   const deltaMs = Date.now() - date.getTime();
@@ -1398,6 +1445,20 @@ function formatNitradoServerStatus(status: string | null | undefined, online: bo
   if (online === true || online === 1) return "Online";
   if (online === false || online === 0) return "Offline";
   return "Unknown";
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function numberOrNull(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return null;
+}
+
+function booleanNumberOrNull(value: unknown) {
+  return typeof value === "boolean" || value === 0 || value === 1 ? value : null;
 }
 
 function getManualSyncMessage(result: AdmSyncRunResult) {

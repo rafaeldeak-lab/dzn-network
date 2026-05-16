@@ -4,13 +4,14 @@ import type {
   AdmSyncStatus,
   AuthResponse,
   DiscordGuild,
+  LinkedServer,
   NitradoLogAccessDiagnostics,
   NitradoService,
   OnboardingChecks,
 } from "./types";
 
 export async function getMe() {
-  return request<AuthResponse>("/api/auth/me");
+  return request<AuthResponse>("/api/auth/me", { cache: "no-store" });
 }
 
 export async function getGuilds(options: { fresh?: boolean } = {}) {
@@ -91,9 +92,16 @@ export async function refreshServerMetadata(linkedServerId: string) {
     changed: boolean;
     skipped?: boolean;
     message: string;
-    metadata?: Record<string, unknown>;
+    metadata_last_checked_at?: string | null;
+    metadata_last_changed_at?: string | null;
+    metadata_source?: string | null;
+    metadata?: Partial<LinkedServer> & {
+      metadata_source?: string | null;
+      changed_fields?: string[];
+    };
   }>(`/api/servers/${encodeURIComponent(linkedServerId)}/refresh-metadata`, {
     method: "POST",
+    cache: "no-store",
   });
 }
 
@@ -172,6 +180,7 @@ export async function logoutAndRedirect() {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
+    cache: init.cache ?? "no-store",
     credentials: "include",
     headers: {
       "content-type": "application/json",
