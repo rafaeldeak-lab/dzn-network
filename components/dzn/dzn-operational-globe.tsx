@@ -3,6 +3,7 @@
 import { geoContains, geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
 import type { GeoProjection } from "d3-geo";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 import { feature } from "topojson-client";
 import type { FeatureCollection, Geometry } from "geojson";
 import type { GeometryCollection, Topology } from "topojson-specification";
@@ -20,6 +21,7 @@ export type DznOperationalGlobeNode = {
   region: string | null;
   country: string | null;
   city: string | null;
+  location_label?: string | null;
   latitude: number | null;
   longitude: number | null;
   lat?: number | null;
@@ -60,10 +62,30 @@ type DecorPoint = {
 
 type LonLat = [number, number];
 type LandTopology = Topology<{ land: GeometryCollection }>;
+type GlobeControls = {
+  zoomBy: (amount: number) => void;
+  resetZoom: () => void;
+};
+type PointerState = {
+  x: number;
+  y: number;
+  hasDragged: boolean;
+  pointerId: number | null;
+};
 
 const LAND_TOPOLOGY = land50m as unknown as LandTopology;
 const LAND_FEATURE = feature(LAND_TOPOLOGY, LAND_TOPOLOGY.objects.land) as FeatureCollection<Geometry>;
 const WORLD_DOTS = buildWorldDotMatrix();
+const DEFAULT_GLOBE_ROTATION_X = -0.1;
+const DEFAULT_GLOBE_ROTATION_Y = -0.42;
+const DEFAULT_GLOBE_ZOOM = 1;
+const MIN_GLOBE_ZOOM = 0.82;
+const MAX_GLOBE_ZOOM = 1.35;
+const GLOBE_ZOOM_STEP = 0.08;
+const BASE_CAMERA_Z = 3.15;
+const AUTO_ROTATE_SPEED = 0.00155;
+const DRAG_ROTATE_X_SPEED = 0.006;
+const DRAG_ROTATE_Y_SPEED = 0.0035;
 
 const TEXTURE_NETWORK_NODES: LonLat[] = [
   [-122, 37], [-96, 35], [-74, 40], [-47, -23], [-3, 52], [2, 48], [10, 51], [13, 41],
@@ -85,6 +107,17 @@ const DECOR_POINTS: DecorPoint[] = [
 export function DznOperationalGlobe({ nodes }: { nodes: DznOperationalGlobeNode[] }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const loggedRef = useRef(false);
+  const globeControlsRef = useRef<GlobeControls | null>(null);
+  const rotationXRef = useRef(DEFAULT_GLOBE_ROTATION_X);
+  const rotationYRef = useRef(DEFAULT_GLOBE_ROTATION_Y);
+  const zoomRef = useRef(DEFAULT_GLOBE_ZOOM);
+  const isDraggingRef = useRef(false);
+  const lastPointerRef = useRef<PointerState>({
+    x: 0,
+    y: 0,
+    hasDragged: false,
+    pointerId: null,
+  });
   const [tooltip, setTooltip] = useState<TooltipState>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -106,6 +139,12 @@ export function DznOperationalGlobe({ nodes }: { nodes: DznOperationalGlobeNode[
           THREE,
           stage: stageRef.current,
           points: globePoints,
+          controlsRef: globeControlsRef,
+          rotationXRef,
+          rotationYRef,
+          zoomRef,
+          isDraggingRef,
+          lastPointerRef,
           onTooltip: setTooltip,
           onReady: () => {
             setReady(true);
@@ -113,6 +152,8 @@ export function DznOperationalGlobe({ nodes }: { nodes: DznOperationalGlobeNode[
               console.log("DZN ROTATING GLOBE MAP LOADED");
               console.log("DZN ROTATING GLOBE LANDMASSES LOADED");
               console.log("DZN PREMIUM GLOBE TEXTURE LOADED");
+              console.log("DZN GLOBE DRAG ROTATION ENABLED");
+              console.log("DZN GLOBE FREE ROTATE AND ZOOM READY");
               loggedRef.current = true;
             }
           },
@@ -165,6 +206,33 @@ export function DznOperationalGlobe({ nodes }: { nodes: DznOperationalGlobeNode[
           <em>{tooltip.status}</em>
         </span>
       ) : null}
+      <div
+        className="dzn-operational-globe-controls"
+        aria-label="Globe view controls"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          aria-label="Zoom globe in"
+          onClick={() => globeControlsRef.current?.zoomBy(GLOBE_ZOOM_STEP)}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom globe out"
+          onClick={() => globeControlsRef.current?.zoomBy(-GLOBE_ZOOM_STEP)}
+        >
+          -
+        </button>
+        <button
+          type="button"
+          aria-label="Reset globe zoom"
+          onClick={() => globeControlsRef.current?.resetZoom()}
+        >
+          Reset
+        </button>
+      </div>
     </div>
   );
 }
@@ -173,18 +241,30 @@ function createThreeGlobe({
   THREE,
   stage,
   points,
+  controlsRef,
+  rotationXRef,
+  rotationYRef,
+  zoomRef,
+  isDraggingRef,
+  lastPointerRef,
   onTooltip,
   onReady,
 }: {
   THREE: typeof import("three");
   stage: HTMLDivElement;
   points: GlobePoint[];
+  controlsRef: MutableRefObject<GlobeControls | null>;
+  rotationXRef: MutableRefObject<number>;
+  rotationYRef: MutableRefObject<number>;
+  zoomRef: MutableRefObject<number>;
+  isDraggingRef: MutableRefObject<boolean>;
+  lastPointerRef: MutableRefObject<PointerState>;
   onTooltip: (tooltip: TooltipState) => void;
   onReady: () => void;
 }) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 20);
-  camera.position.set(0, 0, 3.15);
+  camera.position.set(0, 0, BASE_CAMERA_Z / zoomRef.current);
 
   const renderer = new THREE.WebGLRenderer({
     alpha: true,
@@ -197,7 +277,7 @@ function createThreeGlobe({
   stage.appendChild(renderer.domElement);
 
   const globeGroup = new THREE.Group();
-  globeGroup.rotation.set(-0.1, -0.42, 0);
+  globeGroup.rotation.set(rotationXRef.current, rotationYRef.current, 0);
   scene.add(globeGroup);
 
   const ambient = new THREE.AmbientLight(0x8ea2ff, 0.95);
@@ -270,10 +350,12 @@ function createThreeGlobe({
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let animationFrame = 0;
   let visible = true;
-  let pointerDown = false;
-  let hasDragged = false;
-  let lastX = 0;
-  let lastY = 0;
+  let pageVisible = !document.hidden;
+
+  controlsRef.current = {
+    zoomBy: (amount: number) => setZoom(zoomRef.current + amount),
+    resetZoom: () => setZoom(DEFAULT_GLOBE_ZOOM),
+  };
 
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(stage);
@@ -293,7 +375,10 @@ function createThreeGlobe({
   stage.addEventListener("pointerdown", handlePointerDown);
   stage.addEventListener("pointermove", handlePointerMove);
   stage.addEventListener("pointerup", handlePointerUp);
+  stage.addEventListener("pointercancel", handlePointerCancel);
   stage.addEventListener("pointerleave", handlePointerLeave);
+  stage.addEventListener("wheel", handleWheel, { passive: false });
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 
   onReady();
   animate();
@@ -305,7 +390,12 @@ function createThreeGlobe({
     stage.removeEventListener("pointerdown", handlePointerDown);
     stage.removeEventListener("pointermove", handlePointerMove);
     stage.removeEventListener("pointerup", handlePointerUp);
+    stage.removeEventListener("pointercancel", handlePointerCancel);
     stage.removeEventListener("pointerleave", handlePointerLeave);
+    stage.removeEventListener("wheel", handleWheel);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    controlsRef.current = null;
+    isDraggingRef.current = false;
     onTooltip(null);
     disposeScene(scene);
     renderer.dispose();
@@ -322,13 +412,13 @@ function createThreeGlobe({
 
   function animate() {
     animationFrame = requestAnimationFrame(animate);
-    if (!visible) return;
+    if (!visible || !pageVisible) return;
 
     const elapsed = clock.getElapsedTime();
-    if (!prefersReducedMotion && !pointerDown) {
-      globeGroup.rotation.y += 0.00155;
-      globeGroup.rotation.x = Math.sin(elapsed * 0.22) * 0.035 - 0.08;
+    if (!prefersReducedMotion && !isDraggingRef.current) {
+      rotationYRef.current += AUTO_ROTATE_SPEED;
     }
+    globeGroup.rotation.set(rotationXRef.current, rotationYRef.current, 0);
 
     for (const item of pulseMeshes) {
       const wave = (Math.sin(elapsed * 2.2 + item.delay) + 1) / 2;
@@ -345,23 +435,33 @@ function createThreeGlobe({
   }
 
   function handlePointerDown(event: PointerEvent) {
-    pointerDown = true;
-    hasDragged = false;
-    lastX = event.clientX;
-    lastY = event.clientY;
+    if (isGlobeControlEvent(event)) return;
+    event.preventDefault();
+    isDraggingRef.current = true;
+    lastPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      hasDragged: false,
+      pointerId: event.pointerId,
+    };
     stage.classList.add("is-dragging");
     stage.setPointerCapture?.(event.pointerId);
   }
 
   function handlePointerMove(event: PointerEvent) {
-    if (pointerDown) {
-      const dx = event.clientX - lastX;
-      const dy = event.clientY - lastY;
-      if (Math.abs(dx) + Math.abs(dy) > 2) hasDragged = true;
-      globeGroup.rotation.y += dx * 0.006;
-      globeGroup.rotation.x = clamp(globeGroup.rotation.x + dy * 0.0035, -0.62, 0.42);
-      lastX = event.clientX;
-      lastY = event.clientY;
+    if (isDraggingRef.current) {
+      const dx = event.clientX - lastPointerRef.current.x;
+      const dy = event.clientY - lastPointerRef.current.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) lastPointerRef.current.hasDragged = true;
+      rotationYRef.current += dx * DRAG_ROTATE_X_SPEED;
+      rotationXRef.current = clamp(
+        rotationXRef.current + dy * DRAG_ROTATE_Y_SPEED,
+        -1.05,
+        1.05,
+      );
+      globeGroup.rotation.set(rotationXRef.current, rotationYRef.current, 0);
+      lastPointerRef.current.x = event.clientX;
+      lastPointerRef.current.y = event.clientY;
       return;
     }
 
@@ -369,19 +469,48 @@ function createThreeGlobe({
   }
 
   function handlePointerUp(event: PointerEvent) {
-    pointerDown = false;
+    if (isGlobeControlEvent(event)) return;
+    const wasDragClick = !lastPointerRef.current.hasDragged;
+    isDraggingRef.current = false;
+    lastPointerRef.current.pointerId = null;
     stage.classList.remove("is-dragging");
     stage.releasePointerCapture?.(event.pointerId);
     const picked = pickNode(event);
-    if (!hasDragged && picked?.node.slug) {
+    if (wasDragClick && picked?.node.slug) {
       window.location.href = `/servers/profile?slug=${encodeURIComponent(picked.node.slug)}`;
     }
   }
 
-  function handlePointerLeave() {
-    pointerDown = false;
+  function handlePointerCancel(event: PointerEvent) {
+    isDraggingRef.current = false;
+    lastPointerRef.current.pointerId = null;
     stage.classList.remove("is-dragging");
+    stage.releasePointerCapture?.(event.pointerId);
+  }
+
+  function handlePointerLeave() {
+    if (!isDraggingRef.current) {
+      stage.classList.remove("has-node-hover");
+    }
     onTooltip(null);
+  }
+
+  function handleWheel(event: WheelEvent) {
+    if (isGlobeControlEvent(event)) return;
+    event.preventDefault();
+    const direction = event.deltaY < 0 ? 1 : -1;
+    setZoom(zoomRef.current + direction * GLOBE_ZOOM_STEP);
+  }
+
+  function handleVisibilityChange() {
+    pageVisible = !document.hidden;
+  }
+
+  function setZoom(nextZoom: number) {
+    zoomRef.current = clamp(nextZoom, MIN_GLOBE_ZOOM, MAX_GLOBE_ZOOM);
+    camera.position.z = BASE_CAMERA_Z / zoomRef.current;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
   }
 
   function pickNode(event: PointerEvent) {
@@ -408,6 +537,11 @@ function createThreeGlobe({
       status: point.active ? "Sync active" : "Pending",
     });
     return point;
+  }
+
+  function isGlobeControlEvent(event: Event) {
+    const target = event.target;
+    return target instanceof Element && Boolean(target.closest(".dzn-operational-globe-controls"));
   }
 }
 
@@ -766,12 +900,12 @@ function drawTextureNetwork(
 }
 
 function latLngToVector(THREE: typeof import("three"), lat: number, lng: number, radius: number) {
-  const latRad = (lat * Math.PI) / 180;
-  const lngRad = (lng * Math.PI) / 180;
+  const phi = THREE.MathUtils.degToRad(90 - lat);
+  const theta = THREE.MathUtils.degToRad(lng + 180);
   return new THREE.Vector3(
-    radius * Math.cos(latRad) * Math.sin(lngRad),
-    radius * Math.sin(latRad),
-    radius * Math.cos(latRad) * Math.cos(lngRad),
+    -radius * Math.sin(phi) * Math.cos(theta),
+    radius * Math.cos(phi),
+    radius * Math.sin(phi) * Math.sin(theta),
   );
 }
 
@@ -789,7 +923,7 @@ function buildGlobePoints(nodes: DznOperationalGlobeNode[]) {
         node,
         lat: clamp(location.lat + offset.lat, -76, 76),
         lng: clamp(location.lng + offset.lng, -178, 178),
-        region: node.region || node.country || node.city || "Approx. region",
+        region: node.location_label || node.city || node.region || node.country || "Location awaiting metadata",
         active: Boolean(node.active) || node.sync_status === "active" || node.status === "active",
       };
     })
@@ -910,6 +1044,7 @@ function disposeMaterial(material: DisposableMaterial) {
 }
 
 function finiteNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? number : null;
 }

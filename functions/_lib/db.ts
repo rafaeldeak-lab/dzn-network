@@ -412,6 +412,14 @@ export async function ensureLinkedServerMetadataColumns(env: Env) {
     ["raw_metadata_json", "TEXT"],
     ["merged_into_server_id", "TEXT"],
     ["merged_at", "TEXT"],
+    ["geo_latitude", "REAL"],
+    ["geo_longitude", "REAL"],
+    ["geo_country", "TEXT"],
+    ["geo_region", "TEXT"],
+    ["geo_city", "TEXT"],
+    ["geo_timezone", "TEXT"],
+    ["geo_source", "TEXT"],
+    ["geo_last_checked_at", "TEXT"],
   ].filter(([name]) => !existing.has(name));
 
   for (const [name, type] of missingColumns) {

@@ -1,5 +1,6 @@
 import { decryptToken, sha256 } from "./crypto";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
+import { geolocateServerIp, shouldRefreshServerGeo } from "./geoip";
 import { isMockNitrado } from "./mock";
 import type { Env } from "./types";
 
@@ -35,6 +36,8 @@ type LinkedServerMetadataRow = {
   server_name: string | null;
   server_type: string | null;
   tags_json: string | null;
+  region: string | null;
+  platform: string | null;
   display_name: string | null;
   hostname: string | null;
   max_players: number | null;
@@ -45,6 +48,14 @@ type LinkedServerMetadataRow = {
   server_mode_source: string | null;
   metadata_hash: string | null;
   metadata_last_checked_at: string | null;
+  geo_latitude: number | null;
+  geo_longitude: number | null;
+  geo_country: string | null;
+  geo_region: string | null;
+  geo_city: string | null;
+  geo_timezone: string | null;
+  geo_source: string | null;
+  geo_last_checked_at: string | null;
 };
 
 export async function refreshNitradoServerMetadata(
@@ -59,7 +70,10 @@ export async function refreshNitradoServerMetadata(
   if (!linkedServer) throw new Error("Linked server not found");
   if (!linkedServer.nitrado_service_id) throw new Error("No Nitrado service selected");
 
+  const now = new Date().toISOString();
   if (!options.force && !isMetadataStale(linkedServer.metadata_last_checked_at)) {
+    const geo = await resolveGeoUpdate(linkedServer, linkedServer.ip_address, now);
+    if (geo) await updateLinkedServerGeo(db, linkedServer.id, geo, now);
     return {
       ok: true,
       changed: false,
@@ -69,10 +83,10 @@ export async function refreshNitradoServerMetadata(
     };
   }
 
-  const now = new Date().toISOString();
   const metadata = isMockNitrado(env.MOCK_NITRADO)
     ? await mockMetadata(linkedServer, now)
     : await fetchNitradoServerMetadata(env, linkedServer, now);
+  const geo = await resolveGeoUpdate(linkedServer, metadata.ip_address, now);
   const displayName = firstString(metadata.hostname, linkedServer.nitrado_service_name, linkedServer.server_name) ?? "DayZ Server";
   const changes = buildMetadataChanges(linkedServer, metadata, displayName);
   const changed = changes.length > 0 || linkedServer.metadata_hash !== metadata.metadata_hash;
@@ -105,6 +119,14 @@ export async function refreshNitradoServerMetadata(
         player_slots = COALESCE(?, player_slots),
         game = COALESCE(?, game),
         platform = COALESCE(?, platform),
+        geo_latitude = CASE WHEN ? THEN ? ELSE geo_latitude END,
+        geo_longitude = CASE WHEN ? THEN ? ELSE geo_longitude END,
+        geo_country = CASE WHEN ? THEN ? ELSE geo_country END,
+        geo_region = CASE WHEN ? THEN ? ELSE geo_region END,
+        geo_city = CASE WHEN ? THEN ? ELSE geo_city END,
+        geo_timezone = CASE WHEN ? THEN ? ELSE geo_timezone END,
+        geo_source = CASE WHEN ? THEN ? ELSE geo_source END,
+        geo_last_checked_at = CASE WHEN ? THEN ? ELSE geo_last_checked_at END,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     )
@@ -138,9 +160,35 @@ export async function refreshNitradoServerMetadata(
       metadata.max_players,
       metadata.game,
       metadata.platform,
+      geo ? 1 : 0,
+      geo?.latitude ?? null,
+      geo ? 1 : 0,
+      geo?.longitude ?? null,
+      geo ? 1 : 0,
+      geo?.country ?? null,
+      geo ? 1 : 0,
+      geo?.region ?? null,
+      geo ? 1 : 0,
+      geo?.city ?? null,
+      geo ? 1 : 0,
+      geo?.timezone ?? null,
+      geo ? 1 : 0,
+      geo?.source ?? null,
+      geo ? 1 : 0,
+      geo ? now : null,
       linkedServer.id,
     )
     .run();
+
+  if (geo) {
+    console.log("DZN SERVER GEO LOCATION UPDATED", {
+      linkedServerId: linkedServer.id,
+      serviceId: linkedServer.nitrado_service_id,
+      source: geo.source,
+      approximate: geo.approximate,
+      hasCoordinates: geo.latitude !== null && geo.longitude !== null,
+    });
+  }
 
   if (changed && metadata.metadata_hash !== previousHash) {
     await db
@@ -165,6 +213,42 @@ export async function refreshNitradoServerMetadata(
       changed_fields: changes.map((change) => change.field),
     },
   };
+}
+
+async function updateLinkedServerGeo(db: D1Database, linkedServerId: string, geo: Awaited<ReturnType<typeof geolocateServerIp>>, now: string) {
+  await db
+    .prepare(
+      `UPDATE linked_servers SET
+        geo_latitude = ?,
+        geo_longitude = ?,
+        geo_country = ?,
+        geo_region = ?,
+        geo_city = ?,
+        geo_timezone = ?,
+        geo_source = ?,
+        geo_last_checked_at = ?,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(
+      geo.latitude,
+      geo.longitude,
+      geo.country,
+      geo.region,
+      geo.city,
+      geo.timezone,
+      geo.source,
+      now,
+      linkedServerId,
+    )
+    .run();
+
+  console.log("DZN SERVER GEO LOCATION UPDATED", {
+    linkedServerId,
+    source: geo.source,
+    approximate: geo.approximate,
+    hasCoordinates: geo.latitude !== null && geo.longitude !== null,
+  });
 }
 
 export async function refreshMetadataIfStale(env: Env, linkedServerId: string, userId?: string | null) {
@@ -196,14 +280,28 @@ async function getLinkedServerMetadataRow(env: Env, linkedServerId: string, user
   return db
     .prepare(
       `SELECT id, user_id, nitrado_service_id, nitrado_service_name, server_name, server_type,
-              tags_json, display_name, hostname, max_players, current_players, ip_address,
-              server_status, server_mode, server_mode_source, metadata_hash, metadata_last_checked_at
+              tags_json, region, platform, display_name, hostname, max_players, current_players, ip_address,
+              server_status, server_mode, server_mode_source, metadata_hash, metadata_last_checked_at,
+              geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone,
+              geo_source, geo_last_checked_at
        FROM linked_servers
        WHERE ${where}
        LIMIT 1`,
     )
     .bind(...values)
     .first<LinkedServerMetadataRow>();
+}
+
+async function resolveGeoUpdate(linkedServer: LinkedServerMetadataRow, ipAddress: string | null, now: string) {
+  if (!shouldRefreshServerGeo(linkedServer, ipAddress, Date.parse(now))) return null;
+  try {
+    return await geolocateServerIp(ipAddress, {
+      regionHint: firstString(linkedServer.region, linkedServer.platform, linkedServer.server_name, linkedServer.nitrado_service_name),
+    });
+  } catch (error) {
+    console.warn("DZN server GeoIP lookup skipped", error instanceof Error ? error.message : "unknown error");
+    return null;
+  }
 }
 
 async function fetchNitradoServerMetadata(env: Env, linkedServer: LinkedServerMetadataRow, now: string) {

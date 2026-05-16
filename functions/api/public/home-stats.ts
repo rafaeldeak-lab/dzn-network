@@ -1,5 +1,6 @@
 import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
+import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { getRankedPublicServers } from "../../_lib/public-leaderboards";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -41,7 +42,8 @@ type RecentActivityRow = {
   created_at: string | null;
 };
 
-type MapNodeRow = {
+export type MapNodeRow = {
+  id: string;
   public_slug: string | null;
   server_name: string | null;
   guild_name: string | null;
@@ -49,6 +51,13 @@ type MapNodeRow = {
   region: string | null;
   platform: string | null;
   map_name: string | null;
+  geo_latitude: number | null;
+  geo_longitude: number | null;
+  geo_country: string | null;
+  geo_region: string | null;
+  geo_city: string | null;
+  geo_timezone: string | null;
+  geo_source: string | null;
   stats_active: number | null;
 };
 
@@ -381,6 +390,7 @@ async function getMapNodes(db: D1Database) {
   const result = await db
     .prepare(
       `SELECT
+        linked_servers.id,
         linked_servers.public_slug,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         discord_guilds.name AS guild_name,
@@ -388,6 +398,13 @@ async function getMapNodes(db: D1Database) {
         linked_servers.region,
         linked_servers.platform,
         linked_servers.map_name,
+        linked_servers.geo_latitude,
+        linked_servers.geo_longitude,
+        linked_servers.geo_country,
+        linked_servers.geo_region,
+        linked_servers.geo_city,
+        linked_servers.geo_timezone,
+        linked_servers.geo_source,
         CASE
           WHEN COALESCE(server_stats.total_joins, 0) > 0
             OR COALESCE(server_stats.total_disconnects, 0) > 0
@@ -417,42 +434,70 @@ async function getMapNodes(db: D1Database) {
 
   const coordinateCounts = new Map<string, number>();
   return (result.results ?? []).flatMap((row, index) => {
-    const serverName = firstString(row.server_name, row.guild_name) ?? "Unnamed DZN Server";
-    const placement = mapPlacementFor(row);
-    if (!placement.usable) return [];
-    const key = `${Math.round(placement.x)}:${Math.round(placement.y)}`;
-    const count = coordinateCounts.get(key) ?? 0;
-    coordinateCounts.set(key, count + 1);
-    const offset = nodeOffset(count);
-    const x = clamp(placement.x + offset.x, 6, 94);
-    const y = clamp(placement.y + offset.y, 9, 88);
-    const regionLabel = placement.regionLabel;
-
-    return {
-      id: row.public_slug ?? `server-${index + 1}`,
-      name: serverName,
-      display_name: serverName,
-      slug: row.public_slug,
-      mode: normalizeText(row.server_type, "UNKNOWN"),
-      server_type: normalizeText(row.server_type, "UNKNOWN"),
-      status: Number(row.stats_active) === 1 ? "active" : "pending",
-      sync_status: Number(row.stats_active) === 1 ? "active" : "pending",
-      region: regionLabel,
-      country: null,
-      city: null,
-      latitude: null,
-      longitude: null,
-      lat: null,
-      lng: null,
-      x: roundOne(x),
-      y: roundOne(y),
-      active: Number(row.stats_active) === 1,
-      approximate: placement.approximate,
-    };
+    const node = buildPublicMapNodeFromRow(row, index, coordinateCounts);
+    return node ? [node] : [];
   });
 }
 
+export function buildPublicMapNodeFromRow(row: MapNodeRow, index = 0, coordinateCounts = new Map<string, number>()) {
+  const serverName = firstString(row.server_name, row.guild_name) ?? "Unnamed DZN Server";
+  const placement = mapPlacementFor(row);
+  if (!placement.usable) return null;
+
+  const key = `${Math.round(placement.latitude * 10) / 10}:${Math.round(placement.longitude * 10) / 10}`;
+  const count = coordinateCounts.get(key) ?? 0;
+  coordinateCounts.set(key, count + 1);
+  const offset = nodeLatLngOffset(count);
+  const latitude = clamp(placement.latitude + offset.latitude, -82, 82);
+  const longitude = clamp(placement.longitude + offset.longitude, -180, 180);
+  const active = Number(row.stats_active) === 1;
+  const x = ((longitude + 180) / 360) * 100;
+  const y = ((90 - latitude) / 180) * 100;
+
+  return {
+    id: row.public_slug ?? row.id ?? `server-${index + 1}`,
+    name: serverName,
+    display_name: serverName,
+    slug: row.public_slug,
+    mode: normalizeText(row.server_type, "UNKNOWN"),
+    server_type: normalizeText(row.server_type, "UNKNOWN"),
+    status: active ? "active" : "pending",
+    sync_status: active ? "active" : "pending",
+    active,
+    latitude: roundFour(latitude),
+    longitude: roundFour(longitude),
+    lat: roundFour(latitude),
+    lng: roundFour(longitude),
+    x: roundOne(clamp(x, 5, 95)),
+    y: roundOne(clamp(y, 8, 90)),
+    country: placement.country,
+    region: placement.locationLabel,
+    city: placement.city,
+    approximate: placement.approximate,
+    location_label: placement.locationLabel,
+  };
+}
+
 function mapPlacementFor(row: MapNodeRow) {
+  const geoLatitude = finiteNumber(row.geo_latitude);
+  const geoLongitude = finiteNumber(row.geo_longitude);
+  if (geoLatitude !== null && geoLongitude !== null) {
+    const approximate = row.geo_source === "region-fallback";
+    const location = {
+      latitude: clamp(geoLatitude, -90, 90),
+      longitude: clamp(geoLongitude, -180, 180),
+      country: row.geo_country,
+      region: row.geo_region,
+      city: row.geo_city,
+      approximate,
+    };
+    return {
+      ...location,
+      locationLabel: formatLocationLabel(location),
+      usable: true,
+    };
+  }
+
   const rawRegion = firstString(row.region);
   const publicRegion = safePublicRegion(rawRegion);
   const searchable = [publicRegion, row.server_name, row.guild_name, row.platform, row.map_name]
@@ -462,33 +507,43 @@ function mapPlacementFor(row: MapNodeRow) {
 
   const location = approximateRegion(searchable);
   if (location) {
+    const fallbackLocation = {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      country: location.country,
+      region: publicRegion ?? location.label,
+      city: null,
+      approximate: true,
+    };
     return {
-      x: location.x,
-      y: location.y,
-      regionLabel: publicRegion ?? location.label,
+      ...fallbackLocation,
+      locationLabel: formatLocationLabel(fallbackLocation),
       approximate: true,
       usable: true,
     };
   }
 
   return {
-    x: 50,
-    y: 50,
-    regionLabel: publicRegion ?? "Location awaiting metadata",
+    latitude: 0,
+    longitude: 0,
+    country: null,
+    region: publicRegion,
+    city: null,
+    locationLabel: publicRegion ?? "Location awaiting metadata",
     approximate: true,
     usable: false,
   };
 }
 
 function approximateRegion(value: string) {
-  const checks: Array<{ terms: string[]; x: number; y: number; label: string }> = [
-    { terms: ["united kingdom", "great britain", " britain", " gb ", " uk ", "london", "england", "scotland", "wales"], x: 48, y: 34, label: "United Kingdom" },
-    { terms: ["germany", "deutschland", "berlin", "frankfurt", "eu-central"], x: 52, y: 36, label: "Europe" },
-    { terms: ["europe", " eu ", "eu-west", "france", "spain", "italy", "netherlands", "poland"], x: 51, y: 37, label: "Europe" },
-    { terms: ["north america", " usa", " us ", "united states", "america", "canada", "mexico", "us-east", "us-west"], x: 24, y: 40, label: "North America" },
-    { terms: ["south america", "brazil", "argentina", "chile"], x: 34, y: 66, label: "South America" },
-    { terms: ["asia", "singapore", "japan", "korea", "china", "india"], x: 70, y: 42, label: "Asia" },
-    { terms: ["oceania", "australia", "sydney", "new zealand"], x: 78, y: 72, label: "Oceania" },
+  const checks: Array<{ terms: string[]; latitude: number; longitude: number; label: string; country: string | null }> = [
+    { terms: ["united kingdom", "great britain", " britain", " gb ", " uk ", "london", "england", "scotland", "wales"], latitude: 54.3, longitude: -2.5, label: "United Kingdom", country: "United Kingdom" },
+    { terms: ["germany", "deutschland", "berlin", "frankfurt", "eu-central"], latitude: 50.8, longitude: 10.2, label: "Europe", country: null },
+    { terms: ["europe", " eu ", "eu-west", "france", "spain", "italy", "netherlands", "poland"], latitude: 50.8, longitude: 10.2, label: "Europe", country: null },
+    { terms: ["north america", " usa", " us ", "united states", "america", "canada", "mexico", "us-east", "us-west"], latitude: 39.5, longitude: -98.35, label: "North America", country: null },
+    { terms: ["south america", "brazil", "argentina", "chile"], latitude: -15.7, longitude: -58.4, label: "South America", country: null },
+    { terms: ["asia", "singapore", "japan", "korea", "china", "india"], latitude: 32.4, longitude: 88.2, label: "Asia", country: null },
+    { terms: ["oceania", "australia", "sydney", "new zealand"], latitude: -25.3, longitude: 134.5, label: "Oceania", country: null },
   ];
 
   const padded = ` ${value} `;
@@ -504,15 +559,15 @@ function safePublicRegion(value: string | null) {
   return trimmed.slice(0, 80);
 }
 
-function nodeOffset(index: number) {
+function nodeLatLngOffset(index: number) {
   const offsets = [
-    { x: 0, y: 0 },
-    { x: 2.2, y: -1.8 },
-    { x: -2.1, y: 1.7 },
-    { x: 2.5, y: 2.4 },
-    { x: -2.4, y: -2.2 },
-    { x: 4.1, y: 0.3 },
-    { x: -4, y: -0.2 },
+    { latitude: 0, longitude: 0 },
+    { latitude: 1.2, longitude: 1.7 },
+    { latitude: -1.2, longitude: -1.7 },
+    { latitude: 0.9, longitude: -2.1 },
+    { latitude: -0.9, longitude: 2.1 },
+    { latitude: 1.9, longitude: 0.4 },
+    { latitude: -1.9, longitude: -0.4 },
   ];
   return offsets[index % offsets.length];
 }
@@ -540,6 +595,12 @@ function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
 }
 
+function finiteNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function firstString(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -554,6 +615,10 @@ function normalizeText(value: string | null, fallback: string) {
 
 function roundOne(value: number) {
   return Math.round(numberOrZero(value) * 10) / 10;
+}
+
+function roundFour(value: number) {
+  return Math.round(numberOrZero(value) * 10000) / 10000;
 }
 
 function clamp(value: number, min: number, max: number) {

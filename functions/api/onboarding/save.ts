@@ -1,4 +1,5 @@
 import { ensureLinkedServerMetadataColumns, getSessionUser, requireDb } from "../../_lib/db";
+import { geolocateServerIp, normalizeIp } from "../../_lib/geoip";
 import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { fetchMockNitradoServices, fetchNitradoServices } from "../../_lib/nitrado";
@@ -52,6 +53,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!service) return json({ error: "DayZ Nitrado service not found" }, { status: 400 });
 
   const tags = normalizeTags(body.tags);
+  const serviceRegion = publicRegionForService(service.region, service.ipAddress);
+  const geo = await geolocateServerIp(service.ipAddress ?? null, { regionHint: serviceRegion }).catch((error) => {
+    console.warn("DZN server GeoIP lookup skipped", error instanceof Error ? error.message : "unknown error");
+    return null;
+  });
   const existingSameService = await db
     .prepare(
       `SELECT id
@@ -102,6 +108,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
           platform = ?,
           ip_address = ?,
           player_slots = ?,
+          geo_latitude = ?,
+          geo_longitude = ?,
+          geo_country = ?,
+          geo_region = ?,
+          geo_city = ?,
+          geo_timezone = ?,
+          geo_source = ?,
+          geo_last_checked_at = ?,
           status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
           public_slug = ?,
           updated_at = CURRENT_TIMESTAMP
@@ -116,15 +130,24 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.name,
         body.serverType,
         JSON.stringify(tags),
-        service.ipAddress ?? service.region ?? null,
+        serviceRegion,
         service.game ?? null,
         service.platform ?? null,
         service.ipAddress ?? null,
         service.playerSlots ?? null,
+        geo?.latitude ?? null,
+        geo?.longitude ?? null,
+        geo?.country ?? null,
+        geo?.region ?? null,
+        geo?.city ?? null,
+        geo?.timezone ?? null,
+        geo?.source ?? null,
+        geo ? new Date().toISOString() : null,
         slug,
         linkedServerId,
       )
       .run();
+    if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
   } else {
     const limit = await getServerLinkLimitForUser(env, userId);
     const currentCount = await countLinkedServersForUser(env, userId);
@@ -139,8 +162,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         `INSERT INTO linked_servers (
           id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
           server_name, server_type, tags_json, region, game, platform, ip_address, player_slots,
+          geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone, geo_source, geo_last_checked_at,
           status, public_slug, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
       .bind(
         linkedServerId,
@@ -152,16 +176,31 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.name,
         body.serverType,
         JSON.stringify(tags),
-        service.ipAddress ?? service.region ?? null,
+        serviceRegion,
         service.game ?? null,
         service.platform ?? null,
         service.ipAddress ?? null,
         service.playerSlots ?? null,
+        geo?.latitude ?? null,
+        geo?.longitude ?? null,
+        geo?.country ?? null,
+        geo?.region ?? null,
+        geo?.city ?? null,
+        geo?.timezone ?? null,
+        geo?.source ?? null,
+        geo ? new Date().toISOString() : null,
         slug,
       )
       .run();
+    if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
   }
 
   await linkLatestNitradoConnection(env, userId, linkedServerId);
   return json({ ok: true, linkedServerId });
 };
+
+function publicRegionForService(region: string | null | undefined, ipAddress: string | null | undefined) {
+  const trimmed = typeof region === "string" ? region.trim() : "";
+  if (!trimmed) return null;
+  return normalizeIp(trimmed) === normalizeIp(ipAddress) ? null : trimmed;
+}
