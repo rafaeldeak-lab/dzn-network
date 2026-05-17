@@ -1127,10 +1127,14 @@ body {
   border: 1px solid rgba(168, 85, 247, 0.26);
   border-radius: 1rem;
   padding: 1rem;
-  background:
-    linear-gradient(90deg, rgba(15, 23, 42, 0.48), rgba(2, 6, 23, 0.56)),
+  background-image:
+    linear-gradient(90deg, rgba(2, 6, 23, 0.9), rgba(2, 6, 23, 0.5) 46%, rgba(2, 6, 23, 0.88)),
+    var(--build-hero-image, radial-gradient(circle at 24% 20%, rgba(168, 85, 247, 0.28), transparent 32%)),
     radial-gradient(circle at 24% 20%, rgba(168, 85, 247, 0.28), transparent 32%),
     linear-gradient(135deg, rgba(76, 29, 149, 0.42), rgba(8, 13, 28, 0.86));
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
 .dzn-build-hero-main {
@@ -1268,12 +1272,30 @@ body {
   border: 1px solid rgba(168, 85, 247, 0.24);
   border-radius: 0.95rem;
   padding: 0.85rem;
-  background:
+  background-image:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.08), rgba(2, 6, 23, 0.72) 68%, rgba(2, 6, 23, 0.92)),
+    var(--build-card-image, radial-gradient(circle at 18% 14%, rgba(168, 85, 247, 0.32), transparent 34%)),
     radial-gradient(circle at 18% 14%, rgba(168, 85, 247, 0.32), transparent 28%),
     linear-gradient(135deg, rgba(30, 41, 59, 0.64), rgba(2, 6, 23, 0.86));
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
   box-shadow:
     inset 0 0 28px rgba(124, 58, 237, 0.08),
     0 0 22px rgba(124, 58, 237, 0.12);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.dzn-build-breakdown-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(192, 132, 252, 0.46);
+  box-shadow:
+    inset 0 0 30px rgba(124, 58, 237, 0.1),
+    0 0 28px rgba(168, 85, 247, 0.22),
+    0 0 20px rgba(34, 211, 238, 0.1);
 }
 
 .dzn-build-breakdown-card::before {
@@ -1288,25 +1310,33 @@ body {
 }
 
 .dzn-build-breakdown-card--walls {
-  background:
+  background-image:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.04), rgba(2, 6, 23, 0.74) 68%, rgba(2, 6, 23, 0.94)),
+    var(--build-card-image, radial-gradient(circle at 16% 10%, rgba(168, 85, 247, 0.34), transparent 32%)),
     radial-gradient(circle at 16% 10%, rgba(168, 85, 247, 0.34), transparent 28%),
     linear-gradient(135deg, rgba(42, 22, 74, 0.78), rgba(8, 13, 28, 0.9));
 }
 
 .dzn-build-breakdown-card--watchtowers {
-  background:
+  background-image:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.04), rgba(2, 6, 23, 0.74) 68%, rgba(2, 6, 23, 0.94)),
+    var(--build-card-image, radial-gradient(circle at 82% 8%, rgba(34, 211, 238, 0.28), transparent 34%)),
     radial-gradient(circle at 82% 8%, rgba(34, 211, 238, 0.28), transparent 30%),
     linear-gradient(135deg, rgba(15, 23, 42, 0.86), rgba(25, 34, 55, 0.78));
 }
 
 .dzn-build-breakdown-card--gates {
-  background:
+  background-image:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.04), rgba(2, 6, 23, 0.74) 68%, rgba(2, 6, 23, 0.94)),
+    var(--build-card-image, radial-gradient(circle at 18% 12%, rgba(250, 204, 21, 0.2), transparent 34%)),
     radial-gradient(circle at 18% 12%, rgba(250, 204, 21, 0.2), transparent 30%),
     linear-gradient(135deg, rgba(76, 29, 149, 0.62), rgba(2, 6, 23, 0.88));
 }
 
 .dzn-build-breakdown-card--storage {
-  background:
+  background-image:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.04), rgba(2, 6, 23, 0.74) 68%, rgba(2, 6, 23, 0.94)),
+    var(--build-card-image, radial-gradient(circle at 80% 16%, rgba(16, 185, 129, 0.18), transparent 34%)),
     radial-gradient(circle at 80% 16%, rgba(16, 185, 129, 0.18), transparent 30%),
     linear-gradient(135deg, rgba(15, 23, 42, 0.86), rgba(4, 12, 23, 0.9));
 }

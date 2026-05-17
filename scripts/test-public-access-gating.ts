@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 import { applyLeaderboardsAccess, applyServerLeaderboardAccess } from "../functions/_lib/public-leaderboards";
 import { applyHomeStatsAccess, buildPublicBuildEventLeaderboardRows } from "../functions/api/public/home-stats";
@@ -450,6 +450,17 @@ const buildLeaderboardCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-build-leaderboard"),
   globalsSource.indexOf(".dzn-game-modes-section"),
 );
+const buildImageAssets = [
+  "public/dzn/build/full-walls.webp",
+  "public/dzn/build/watchtower.webp",
+  "public/dzn/build/gates-fence.webp",
+  "public/dzn/build/storage-expansion.webp",
+  "public/dzn/build/build-hero.webp",
+];
+for (const asset of buildImageAssets) {
+  assert.equal(existsSync(asset), true);
+  assert.equal(statSync(asset).size > 1000, true);
+}
 assert.equal(homepageSource.includes("Players Online"), true);
 assert.equal(homepageSource.includes("currentPlayersOnline"), true);
 assert.equal(homepageSource.includes("playersOnline"), true);
@@ -503,10 +514,20 @@ assert.equal(buildLeaderboardBlock.includes("dzn-build-breakdown-grid"), true);
 assert.equal(buildLeaderboardBlock.includes("dzn-build-top10"), true);
 assert.equal(buildLeaderboardBlock.includes("View Full Stats"), true);
 assert.equal(buildLeaderboardBlock.includes("rows.slice(0, 10)"), true);
+assert.equal(buildLeaderboardBlock.includes("/dzn/build/full-walls.webp"), true);
+assert.equal(buildLeaderboardBlock.includes("/dzn/build/watchtower.webp"), true);
+assert.equal(buildLeaderboardBlock.includes("/dzn/build/gates-fence.webp"), true);
+assert.equal(buildLeaderboardBlock.includes("/dzn/build/storage-expansion.webp"), true);
+assert.equal(buildLeaderboardBlock.includes("/dzn/build/build-hero.webp"), true);
+assert.equal(buildLeaderboardBlock.includes("--build-card-image"), true);
+assert.equal(buildLeaderboardBlock.includes("--build-hero-image"), true);
 assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--walls"), true);
 assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--watchtowers"), true);
 assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--gates"), true);
 assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--storage"), true);
+assert.equal(buildLeaderboardCssBlock.includes("var(--build-card-image"), true);
+assert.equal(buildLeaderboardCssBlock.includes("var(--build-hero-image"), true);
+assert.equal(buildLeaderboardCssBlock.includes("background-size: cover;"), true);
 assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-row"), true);
 assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-title"), true);
 assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-meta"), true);

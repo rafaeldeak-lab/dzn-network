@@ -1260,6 +1260,8 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.full_walls_built ?? 0,
       subtext: "Most used structure",
       icon: Hammer,
+      image: "/dzn/build/full-walls.webp",
+      cssKey: "walls",
     },
     {
       key: "watchtowers",
@@ -1267,6 +1269,8 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.watchtowers_built ?? 0,
       subtext: "High ground control",
       icon: Flag,
+      image: "/dzn/build/watchtower.webp",
+      cssKey: "watchtower",
     },
     {
       key: "gates",
@@ -1274,6 +1278,8 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.gates_fence_kits_built ?? 0,
       subtext: "Secure your perimeter",
       icon: Shield,
+      image: "/dzn/build/gates-fence.webp",
+      cssKey: "gates",
     },
     {
       key: "storage",
@@ -1281,6 +1287,8 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.storage_expansion_built ?? 0,
       subtext: "Expand & store",
       icon: Server,
+      image: "/dzn/build/storage-expansion.webp",
+      cssKey: "storage",
     },
   ];
 
@@ -1302,7 +1310,10 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
 
       {topServer ? (
         <>
-          <div className="dzn-build-leaderboard__hero">
+          <div
+            className="dzn-build-leaderboard__hero dzn-build-hero"
+            style={{ "--build-hero-image": 'url("/dzn/build/build-hero.webp")' } as CSSProperties}
+          >
             <div className="dzn-build-hero-main">
               <span className="dzn-build-rank-shield">#1</span>
               <div className="min-w-0">
@@ -1339,7 +1350,11 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
             {breakdownCards.map((card) => {
               const Icon = card.icon;
               return (
-                <article key={card.key} className={`dzn-build-breakdown-card dzn-build-breakdown-card--${card.key}`}>
+                <article
+                  key={card.key}
+                  className={`dzn-build-breakdown-card dzn-build-card--${card.cssKey} dzn-build-breakdown-card--${card.key}`}
+                  style={{ "--build-card-image": `url("${card.image}")` } as CSSProperties}
+                >
                   <div className="dzn-build-breakdown-overlay" />
                   <Icon className="dzn-build-breakdown-icon" aria-hidden="true" />
                   <div className="dzn-build-breakdown-content">
