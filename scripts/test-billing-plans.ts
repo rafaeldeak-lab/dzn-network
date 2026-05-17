@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
-import { getBillingPlanSummaries, getCheckoutConfigured, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
+import { getBillingPlanSummaries, getCheckoutConfigured, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
 import { onRequest as billingPlansHandler } from "../functions/api/billing/plans";
 import { onRequest as checkoutHandler } from "../functions/api/billing/create-checkout-session";
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
@@ -199,19 +199,83 @@ async function run() {
       },
     },
   });
+  const checkoutPeriodStart = Math.floor(Date.parse("2026-05-17T00:00:00.000Z") / 1000);
+  const checkoutPeriodEnd = Math.floor(Date.parse("2026-06-17T00:00:00.000Z") / 1000);
   const webhookBindings: unknown[][] = [];
   const webhookEnv = createFakeEnv({ bindings: webhookBindings }) as Env;
-  const signedWebhook = await webhookHandler(makeContext(
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    id: "sub_test",
+    object: "subscription",
+    customer: "cus_test",
+    status: "active",
+    cancel_at_period_end: false,
+    items: {
+      data: [{
+        current_period_start: checkoutPeriodStart,
+        current_period_end: checkoutPeriodEnd,
+        price: { id: "price_1TY4dDJPrnZ0cnkH4OhfEHmW" },
+      }],
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+  try {
+    const signedWebhook = await webhookHandler(makeContext(
+      webhookHandler,
+      new Request("https://local.test/api/stripe/webhook", {
+        method: "POST",
+        body: webhookPayload,
+        headers: { "stripe-signature": await stripeSignatureHeader(webhookPayload, "whsec_test") },
+      }),
+      {
+        ...webhookEnv,
+        STRIPE_SECRET_KEY: "sk_test_placeholder",
+        STRIPE_WEBHOOK_SECRET: "whsec_test",
+        NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
+      } as Env,
+    ));
+    assert.equal(signedWebhook.status, 200);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(webhookBindings.some((values) => values.includes("discord-webhook") && values.includes("pro")), true);
+  assert.equal(webhookBindings.some((values) => values.includes("2026-06-17T00:00:00.000Z")), true);
+
+  const rootPeriodBindings: unknown[][] = [];
+  const rootPeriodPayload = JSON.stringify({
+    id: "evt_created",
+    type: "customer.subscription.created",
+    data: {
+      object: {
+        id: "sub_created",
+        object: "subscription",
+        customer: "cus_created",
+        status: "active",
+        current_period_start: checkoutPeriodStart,
+        current_period_end: checkoutPeriodEnd,
+        cancel_at_period_end: true,
+        metadata: { discord_user_id: "discord-created", plan_key: "pro" },
+        items: { data: [{ price: { id: "price_1TY4dDJPrnZ0cnkH4OhfEHmW" } }] },
+      },
+    },
+  });
+  const rootPeriodResponse = await webhookHandler(makeContext(
     webhookHandler,
     new Request("https://local.test/api/stripe/webhook", {
       method: "POST",
-      body: webhookPayload,
-      headers: { "stripe-signature": await stripeSignatureHeader(webhookPayload, "whsec_test") },
+      body: rootPeriodPayload,
+      headers: { "stripe-signature": await stripeSignatureHeader(rootPeriodPayload, "whsec_test") },
     }),
-    { ...webhookEnv, STRIPE_WEBHOOK_SECRET: "whsec_test" } as Env,
+    {
+      ...createFakeEnv({ bindings: rootPeriodBindings }),
+      STRIPE_WEBHOOK_SECRET: "whsec_test",
+      NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
+    } as Env,
   ));
-  assert.equal(signedWebhook.status, 200);
-  assert.equal(webhookBindings.some((values) => values.includes("discord-webhook") && values.includes("pro")), true);
+  assert.equal(rootPeriodResponse.status, 200);
+  assert.equal(rootPeriodBindings.some((values) => values.includes("2026-06-17T00:00:00.000Z")), true);
+  assert.equal(rootPeriodBindings.some((values) => values.includes(1)), true);
 
   const deletedBindings: unknown[][] = [];
   const deletedEnv = createFakeEnv({
@@ -256,6 +320,61 @@ async function run() {
   ));
   assert.equal(deletedResponse.status, 200);
   assert.equal(deletedBindings.some((values) => values.includes("discord-deleted") && values.includes("free")), true);
+
+  const activeStatus = await getOwnerBillingStatus(createFakeEnv({
+    account: {
+      discord_user_id: "discord-active",
+      plan_key: "pro",
+      plan_status: "active",
+      current_period_start: "2026-05-17T00:00:00.000Z",
+      current_period_end: "2026-06-17T00:00:00.000Z",
+      cancel_at_period_end: 0,
+      stripe_customer_id: "cus_active",
+    },
+  }) as Env, {
+    id: "user-active",
+    discord_id: "discord-active",
+    username: "Active",
+    avatar: null,
+  });
+  assert.equal(activeStatus.plan_key, "pro");
+  assert.equal(activeStatus.current_period_end, "2026-06-17T00:00:00.000Z");
+  assert.equal(activeStatus.current_period_end_label, "17 Jun 2026");
+
+  const cancelStatus = await getOwnerBillingStatus(createFakeEnv({
+    account: {
+      discord_user_id: "discord-cancel",
+      plan_key: "pro",
+      plan_status: "active",
+      current_period_end: "2026-06-17T00:00:00.000Z",
+      cancel_at_period_end: 1,
+      stripe_customer_id: "cus_cancel",
+    },
+  }) as Env, {
+    id: "user-cancel",
+    discord_id: "discord-cancel",
+    username: "Cancel",
+    avatar: null,
+  });
+  assert.equal(cancelStatus.cancel_at_period_end, true);
+  assert.equal(cancelStatus.current_period_end_label, "17 Jun 2026");
+
+  const missingPeriodStatus = await getOwnerBillingStatus(createFakeEnv({
+    account: {
+      discord_user_id: "discord-missing-period",
+      plan_key: "pro",
+      plan_status: "active",
+      current_period_end: null,
+      cancel_at_period_end: 0,
+      stripe_customer_id: "cus_missing",
+    },
+  }) as Env, {
+    id: "user-missing",
+    discord_id: "discord-missing-period",
+    username: "Missing",
+    avatar: null,
+  });
+  assert.equal(missingPeriodStatus.current_period_end_label, "Awaiting Stripe update");
 
   console.log("Billing plan and advertising tests passed.");
 }

@@ -226,7 +226,9 @@ export type LinkedServer = {
 export type BillingStatus = {
   plan_key: "free" | "starter" | "pro" | "network" | "partner";
   plan_status: string;
+  current_period_start: string | null;
   current_period_end: string | null;
+  current_period_end_label: string;
   cancel_at_period_end: boolean;
   entitlements: {
     plan_key: "free" | "starter" | "pro" | "network" | "partner";

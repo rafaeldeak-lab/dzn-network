@@ -6,9 +6,11 @@ import {
   upsertBillingAccount,
 } from "../../_lib/plans";
 import {
+  retrieveStripeSubscription,
   stripeId,
+  stripeSubscriptionPeriodEnd,
+  stripeSubscriptionPeriodStart,
   stripeSubscriptionPriceId,
-  stripeTimestamp,
   verifyStripeWebhook,
   type StripeSubscription,
 } from "../../_lib/stripe";
@@ -48,18 +50,20 @@ async function handleCheckoutCompleted(env: Env, object: Record<string, unknown>
   const metadata = metadataRecord(object.metadata);
   const discordUserId = metadata.discord_user_id;
   if (!discordUserId) return;
-  const planKey = normalizePlanKey(metadata.plan_key);
-  const customerId = stripeId(object.customer);
   const subscriptionId = stripeId(object.subscription);
+  const subscription = await resolveSubscription(env, object);
+  const pricePlan = subscription ? getPlanFromStripePriceId(env, stripeSubscriptionPriceId(subscription)) : "free";
+  const planKey = pricePlan === "free" ? normalizePlanKey(metadata.plan_key) : pricePlan;
+  const customerId = stripeId(subscription?.customer) ?? stripeId(object.customer);
   await upsertBillingAccount(env, {
     discordUserId,
     stripeCustomerId: customerId,
     stripeSubscriptionId: subscriptionId,
     planKey,
-    planStatus: "active",
-    currentPeriodStart: null,
-    currentPeriodEnd: null,
-    cancelAtPeriodEnd: false,
+    planStatus: subscription?.status || "active",
+    currentPeriodStart: subscription ? stripeSubscriptionPeriodStart(subscription) : null,
+    currentPeriodEnd: subscription ? stripeSubscriptionPeriodEnd(subscription) : null,
+    cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end),
   });
 }
 
@@ -87,8 +91,8 @@ async function handleSubscriptionLikeEvent(env: Env, object: Record<string, unkn
     stripeSubscriptionId: subscriptionId,
     planKey,
     planStatus: status,
-    currentPeriodStart: stripeTimestamp(subscription.current_period_start),
-    currentPeriodEnd: stripeTimestamp(subscription.current_period_end),
+    currentPeriodStart: stripeSubscriptionPeriodStart(subscription),
+    currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
   });
 }
@@ -122,6 +126,17 @@ function subscriptionFromEventObject(object: Record<string, unknown>): StripeSub
     return subscription as StripeSubscription;
   }
   return null;
+}
+
+async function resolveSubscription(env: Env, object: Record<string, unknown>): Promise<StripeSubscription | null> {
+  const expanded = subscriptionFromEventObject(object);
+  if (expanded) return expanded;
+  const subscriptionId = stripeId(object.subscription);
+  if (!subscriptionId) return null;
+  return retrieveStripeSubscription(env, subscriptionId).catch((error) => {
+    console.warn("DZN Stripe subscription retrieval skipped", error instanceof Error ? error.message : "unknown error");
+    return null;
+  });
 }
 
 function metadataRecord(value: unknown) {

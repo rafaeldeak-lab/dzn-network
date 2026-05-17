@@ -25,6 +25,12 @@ export type StripeSubscription = {
   cancel_at_period_end?: boolean;
   items?: {
     data?: Array<{
+      current_period_start?: number | null;
+      current_period_end?: number | null;
+      current_period?: {
+        start?: number | null;
+        end?: number | null;
+      } | null;
       price?: {
         id?: string | null;
       } | null;
@@ -81,6 +87,34 @@ export async function stripeFormRequest<T>(env: Env, path: string, params: Recor
   return data;
 }
 
+export async function stripeGetRequest<T>(env: Env, path: string, params: Record<string, string | number | boolean | null | undefined> = {}): Promise<T> {
+  const secret = env.STRIPE_SECRET_KEY;
+  if (!secret) throw new Error("Stripe is not configured.");
+  const url = new URL(`https://api.stripe.com/v1${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined) continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      authorization: `Bearer ${secret}`,
+      "stripe-version": STRIPE_API_VERSION,
+    },
+  });
+
+  const data = (await response.json().catch(() => ({}))) as T & { error?: { message?: string } };
+  if (!response.ok) {
+    throw new Error(data.error?.message || "Stripe request failed.");
+  }
+  return data;
+}
+
+export async function retrieveStripeSubscription(env: Env, subscriptionId: string): Promise<StripeSubscription> {
+  return stripeGetRequest<StripeSubscription>(env, `/subscriptions/${encodeURIComponent(subscriptionId)}`);
+}
+
 export async function verifyStripeWebhook(request: Request, webhookSecret: string): Promise<StripeEvent> {
   const signature = request.headers.get("stripe-signature");
   if (!signature) throw new Error("Missing Stripe signature.");
@@ -125,6 +159,16 @@ export function stripeTimestamp(value: unknown) {
 
 export function stripeSubscriptionPriceId(subscription: StripeSubscription) {
   return subscription.items?.data?.[0]?.price?.id ?? null;
+}
+
+export function stripeSubscriptionPeriodStart(subscription: StripeSubscription) {
+  const item = subscription.items?.data?.[0];
+  return stripeTimestamp(subscription.current_period_start ?? item?.current_period_start ?? item?.current_period?.start);
+}
+
+export function stripeSubscriptionPeriodEnd(subscription: StripeSubscription) {
+  const item = subscription.items?.data?.[0];
+  return stripeTimestamp(subscription.current_period_end ?? item?.current_period_end ?? item?.current_period?.end);
 }
 
 function timingSafeEqual(a: string, b: string) {

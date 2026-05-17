@@ -23,6 +23,7 @@ export type BillingStatus = {
   plan_status: string;
   current_period_start: string | null;
   current_period_end: string | null;
+  current_period_end_label: string;
   cancel_at_period_end: boolean;
   entitlements: PlanEntitlements;
   linked_server_count: number;
@@ -356,6 +357,7 @@ export async function getOwnerBillingStatus(env: Env, user: SessionUser): Promis
     plan_status: planStatus,
     current_period_start: stringOrNull(account?.current_period_start),
     current_period_end: stringOrNull(account?.current_period_end),
+    current_period_end_label: formatBillingPeriodEndLabel(account?.current_period_end),
     cancel_at_period_end: Number(account?.cancel_at_period_end ?? 0) === 1,
     entitlements,
     linked_server_count: linkedServerCount,
@@ -388,8 +390,8 @@ export async function upsertBillingAccount(env: Env, input: {
         stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, owner_billing_accounts.stripe_subscription_id),
         plan_key = excluded.plan_key,
         plan_status = excluded.plan_status,
-        current_period_start = excluded.current_period_start,
-        current_period_end = excluded.current_period_end,
+        current_period_start = COALESCE(excluded.current_period_start, owner_billing_accounts.current_period_start),
+        current_period_end = COALESCE(excluded.current_period_end, owner_billing_accounts.current_period_end),
         cancel_at_period_end = excluded.cancel_at_period_end,
         updated_at = excluded.updated_at`,
     )
@@ -461,4 +463,17 @@ function boolInt(value: boolean) {
 
 function cleanEnvString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function formatBillingPeriodEndLabel(value: unknown) {
+  const dateValue = stringOrNull(value);
+  if (!dateValue) return "Awaiting Stripe update";
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "Awaiting Stripe update";
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }

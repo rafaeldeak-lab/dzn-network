@@ -1262,7 +1262,7 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
         <MiniInfo label="Servers Used" value={billing ? `${billing.linked_server_count} / ${billing.entitlements.max_linked_servers}` : "Loading"} />
         <MiniInfo label="Plan Status" value={billing?.plan_status ?? "Loading"} />
         <MiniInfo label="Bumps / Month" value={String(billing?.entitlements.included_bumps_per_month ?? 0)} />
-        <MiniInfo label="Renews" value={billing?.current_period_end ? formatDashboardDate(billing.current_period_end) : "No renewal"} />
+        <MiniInfo label={billing?.cancel_at_period_end ? "Cancels On" : "Renews"} value={billingRenewalLabel(billing)} />
       </div>
 
       <div className="mt-4 grid gap-2">
@@ -1824,6 +1824,11 @@ function planLabel(value: string) {
   if (value === "network") return "Network";
   if (value === "partner") return "Partner";
   return "Free";
+}
+
+function billingRenewalLabel(billing: BillingStatus | null) {
+  if (!billing) return "Loading";
+  return billing.current_period_end_label || (billing.current_period_end ? formatDashboardDate(billing.current_period_end) : "Awaiting Stripe update");
 }
 
 function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSummary {
