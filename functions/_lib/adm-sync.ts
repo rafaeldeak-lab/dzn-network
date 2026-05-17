@@ -257,7 +257,14 @@ export async function runAdmSync(
   let admLog = isMock ? mockAdmLogDetection() : null;
   let readable: ReadableAdmLinesResult;
   try {
-    readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock, readMode: "full" });
+    const preferredAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
+    const preferredAdmFileName = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
+    readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, {
+      isMock,
+      readMode: "full",
+      preferredAdmFileName,
+      preferredAdmPath,
+    });
     if (!readable.lines.length && !isMock) {
       const token = await getNitradoTokenForLinkedServer(env, linkedServer);
       admLog = linkedServer.adm_path
@@ -310,6 +317,7 @@ export async function runAdmSync(
       durationMs: syncDurationMs,
     });
     console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
+    console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, preservedLastProcessedLine: Number(existingState?.last_processed_line ?? 0) });
     return emptyAdmSyncResult({
       status,
       message,
@@ -320,8 +328,8 @@ export async function runAdmSync(
     });
   }
 
-  const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? linkedServer.adm_path ?? null;
-  const latestAdmFile = readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? fileNameFromPath(latestAdmPath);
+  const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
+  const latestAdmFile = readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? existingState?.latest_adm_file ?? fileNameFromPath(latestAdmPath);
   if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath) {
     await saveServerAdmPath(env, initialScope.linkedServerId, latestAdmPath.replace(/^\/+/, ""));
   }
@@ -373,6 +381,7 @@ export async function runAdmSync(
       durationMs: syncDurationMs,
     });
     console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
+    console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, preservedLastProcessedLine: Number(existingState?.last_processed_line ?? 0) });
     return {
       status,
       message,
@@ -595,6 +604,7 @@ export async function runAdmSync(
   });
   await rebuildServerStats(env, scope.linkedServerId);
   console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
+  console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, linesRead: lines.length, eventsCreated, killsCreated });
   console.log("DZN ADM FULL SYNC COMPLETE");
 
   return {
@@ -637,6 +647,10 @@ export function classifyAdmSyncOutcome(values: {
 
 export function isAdmSyncErrorStatus(status: string | null | undefined) {
   return ["nitrado_error", "parser_error", "write_error", "error", "failed"].includes(String(status ?? "").toLowerCase());
+}
+
+export function isAdmSyncTemporarilyUnavailableStatus(status: string | null | undefined) {
+  return ["adm_file_unreadable", "nitrado_file_unavailable"].includes(String(status ?? "").toLowerCase());
 }
 
 function buildSyncRunMessage(values: {
@@ -1129,6 +1143,7 @@ export type ScheduledAdmSyncResult = {
   processed: number;
   succeeded: number;
   failed: number;
+  unavailable: number;
   skipped: number;
   cron: string | null;
   maxServers: number;
@@ -1151,6 +1166,7 @@ export async function runScheduledAdmSync(
   const eligibleServers = await getEligibleScheduledSyncServers(env, maxServers, minSyncIntervalMs);
   let succeeded = 0;
   let failed = 0;
+  let unavailable = 0;
 
   for (const server of eligibleServers) {
     try {
@@ -1159,7 +1175,10 @@ export async function runScheduledAdmSync(
         maxLinesPerRun: maxLinesPerServer,
       });
       if (isAdmSyncErrorStatus(result.status)) failed += 1;
-      else succeeded += 1;
+      else {
+        if (isAdmSyncTemporarilyUnavailableStatus(result.status)) unavailable += 1;
+        succeeded += 1;
+      }
     } catch (error) {
       failed += 1;
       await recordSyncRun(env, {
@@ -1184,6 +1203,7 @@ export async function runScheduledAdmSync(
     processed: eligibleServers.length,
     succeeded,
     failed,
+    unavailable,
     skipped: Math.max(0, maxServers - eligibleServers.length),
     cron: options.cron ?? null,
     maxServers,
@@ -1623,6 +1643,7 @@ async function insertPlayerEvent(
     sourceAdmFile: admFile,
   }, "player_events");
   const db = requireDb(env);
+  if (await hasExistingPlayerEventBySourceLine(env, context, lineNumber)) return false;
   const id = await stableSyncId("player-event", context.linkedServerId, admFile, lineNumber, parsed.eventType);
   const result = await db
     .prepare(
@@ -1653,6 +1674,29 @@ async function insertPlayerEvent(
     )
     .run();
   return didMutate(result);
+}
+
+async function hasExistingPlayerEventBySourceLine(env: Env, context: AdmSyncContext, lineNumber: number) {
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT id
+       FROM player_events
+       WHERE linked_server_id = ?
+         AND COALESCE(source_service_id, ?) = ?
+         AND COALESCE(source_adm_file, adm_file, '') = COALESCE(?, '')
+         AND COALESCE(source_line_number, line_number) = ?
+       LIMIT 1`,
+    )
+    .bind(
+      context.linkedServerId,
+      context.nitradoServiceId,
+      context.nitradoServiceId,
+      context.admFileName,
+      lineNumber,
+    )
+    .first<{ id: string }>();
+  return Boolean(row?.id);
 }
 
 async function insertBuildEvent(
@@ -2169,7 +2213,7 @@ function getReadableAdmLines(samplePreview: string | null) {
 export async function getReadableAdmLinesForLinkedServer(
   env: Env,
   linkedServer: SyncLinkedServer,
-  options: { isMock?: boolean; readMode?: "sample" | "full" } = {},
+  options: { isMock?: boolean; readMode?: "sample" | "full"; preferredAdmFileName?: string | null; preferredAdmPath?: string | null } = {},
 ): Promise<ReadableAdmLinesResult> {
   const isMock = options.isMock ?? isMockNitrado(env.MOCK_NITRADO);
   if (isMock) {
@@ -2196,7 +2240,11 @@ export async function getReadableAdmLinesForLinkedServer(
   }
 
   const token = await getNitradoTokenForLinkedServer(env, linkedServer);
-  const readable = await fetchReadableNitradoAdmLines(token, linkedServer.nitrado_service_id, { mode: options.readMode ?? "sample" });
+  const readable = await fetchReadableNitradoAdmLines(token, linkedServer.nitrado_service_id, {
+    mode: options.readMode ?? "sample",
+    preferredAdmFileName: options.preferredAdmFileName ?? undefined,
+    preferredAdmPath: options.preferredAdmPath ?? linkedServer.adm_path,
+  });
   if (readable.diagnostics.readable.found && !readable.lines.length) {
     throw new Error("Diagnostics could read ADM lines, but sync helper failed to process them.");
   }

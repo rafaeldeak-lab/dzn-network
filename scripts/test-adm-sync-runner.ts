@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { classifyAdmSyncOutcome, classifyUnavailableAdmFileStatus, isAdmSyncErrorStatus } from "../functions/_lib/adm-sync";
+import { classifyAdmSyncOutcome, classifyUnavailableAdmFileStatus, isAdmSyncErrorStatus, isAdmSyncTemporarilyUnavailableStatus } from "../functions/_lib/adm-sync";
 import { parseAdmLines } from "../functions/_lib/adm-parser";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -39,13 +39,23 @@ assert.deepEqual(connectionOnlyLines.map((line) => line.eventType), [
   "player_connected",
   "player_disconnected",
 ]);
+assert.equal(connectionOnlyLines.some((line) => line.eventType === "player_killed"), false);
 
 assert.equal(isAdmSyncErrorStatus("nitrado_error"), true);
 assert.equal(isAdmSyncErrorStatus("write_error"), true);
 assert.equal(isAdmSyncErrorStatus("no_new_lines"), false);
+assert.equal(isAdmSyncErrorStatus("adm_file_unreadable"), false);
+assert.equal(isAdmSyncTemporarilyUnavailableStatus("adm_file_unreadable"), true);
 assert.equal(classifyUnavailableAdmFileStatus(null, false), "no_adm_file");
 assert.equal(classifyUnavailableAdmFileStatus("DayZServer_PS4_x64_2026-05-17_16-02-20.ADM", false), "adm_file_unreadable");
 assert.equal(classifyUnavailableAdmFileStatus(null, true), "adm_file_unreadable");
+
+const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
+assert.equal(admSyncSource.includes("hasExistingPlayerEventBySourceLine"), true);
+assert.equal(admSyncSource.includes("DZN ADM FEED SYNC STATUS IMPROVED"), true);
+assert.equal(admSyncSource.includes("preferredAdmFileName"), true);
+const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
+assert.equal(nitradoSource.includes("DZN ADM FILE READ VARIANT USED"), true);
 
 const env = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
@@ -63,6 +73,9 @@ assert.equal(dashboardApi.includes("/api/sync/adm/run"), true);
 const dashboardUi = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardUi.includes("No ADM File"), false);
 assert.equal(dashboardUi.includes("ADM File Temporarily Unavailable"), true);
+assert.equal(dashboardUi.includes("ADM sync checked Nitrado, but the latest ADM file was not readable this time."), true);
+assert.equal(dashboardUi.includes("Feed last updated"), true);
+assert.equal(dashboardUi.includes("getDashboardSyncStatusBanner"), true);
 
 runEndpointTests()
   .then(() => {
@@ -87,6 +100,7 @@ async function runEndpointTests() {
       processed: 1,
       succeeded: 1,
       failed: 0,
+      unavailable: 0,
       skipped: 0,
       cron: null,
       maxServers: 25,
@@ -108,6 +122,7 @@ async function runEndpointTests() {
       processed: 0,
       succeeded: 0,
       failed: 0,
+      unavailable: 0,
       skipped: 0,
       cron: null,
       maxServers: 25,
@@ -128,6 +143,7 @@ async function runEndpointTests() {
       processed: 0,
       succeeded: 0,
       failed: 0,
+      unavailable: 0,
       skipped: 0,
       cron: null,
       maxServers: 25,

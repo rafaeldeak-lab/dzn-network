@@ -36,6 +36,7 @@ type AdmReadMode = "sample" | "full";
 type AdmReadOptions = {
   mode?: AdmReadMode;
   preferredAdmFileName?: string;
+  preferredAdmPath?: string | null;
 };
 
 type NitradoRawService = {
@@ -1025,6 +1026,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
   let readableLines: string[] = [];
   let readableSourceLabel: string | null = null;
   let readableMethod: string | null = null;
+  let readablePath: string | null = null;
   let routeRecommendation: string | null = null;
 
   const base = `/services/${encodeURIComponent(serviceId)}/gameservers`;
@@ -1032,7 +1034,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
   attempts.push(serviceProbe.attempt);
 
   const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
-  const selectedGameSpecificLogs = withPreferredAdmFile(gameSpecificLogs, options.preferredAdmFileName);
+  const selectedGameSpecificLogs = withPreferredAdmFile(gameSpecificLogs, options.preferredAdmFileName, options.preferredAdmPath);
   const pathVariants = buildAdmReadPathVariants(selectedGameSpecificLogs);
   const pathVariantLabels = createPathVariantLabelMap(pathVariants);
   const testedPathVariants = pathVariants.map((variant) => maskNitradoUsernameInPath(variant.path, selectedGameSpecificLogs.username));
@@ -1058,6 +1060,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
       readableLines = lines;
       readableSourceLabel = endpoint.label;
       readableMethod = "admin_logs";
+      readablePath = endpoint.path;
       routeRecommendation = endpoint.path.replace(base, "/services/{serviceId}/gameservers");
     }
   }
@@ -1082,6 +1085,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
       readableLines = downloadLines;
       readableSourceLabel = `J download ${variant.label}`;
       readableMethod = "file_server/download";
+      readablePath = variant.path;
       routeRecommendation = "/services/{serviceId}/gameservers/file_server/download";
     }
 
@@ -1093,6 +1097,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
       readableLines = seekLines;
       readableSourceLabel = `K seek ${variant.label}`;
       readableMethod = "file_server/seek";
+      readablePath = variant.path;
       routeRecommendation = "/services/{serviceId}/gameservers/file_server/seek";
     }
 
@@ -1121,6 +1126,19 @@ async function runNitradoLogAccessDiagnosticsInternal(
     },
     attempts,
   };
+
+  if (readableLines.length) {
+    console.log("DZN ADM FILE READ VARIANT USED", {
+      serviceId,
+      sourceLabel: readableSourceLabel,
+      method: readableMethod,
+      path: readablePath
+        ? maskNitradoUsernameInPath(redactServiceIdInPath(readablePath), selectedGameSpecificLogs.username)
+        : null,
+      routeRecommendation,
+      lineCount: readableLines.length,
+    });
+  }
 
   return { lines: readableLines, diagnostics };
 }
@@ -2096,7 +2114,7 @@ function extractGameSpecificLogDetails(payload: unknown): GameSpecificLogDetails
   };
 }
 
-function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: string): AdmPathVariant[] {
+function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: string | null): AdmPathVariant[] {
   const sources = dedupeStrings([
     ...(details.selectedAdmFile ? [details.selectedAdmFile.path] : []),
     ...(manualPath ? [manualPath] : []),
@@ -2115,6 +2133,8 @@ function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: 
     variants.push({ label: "B", path: `/${fileName}` });
     variants.push({ label: "C", path: visiblePath });
     variants.push({ label: "D", path: `/${visiblePath}` });
+    variants.push({ label: "C1", path: `config/${fileName}` });
+    variants.push({ label: "D1", path: `/config/${fileName}` });
 
     if (!details.username) continue;
 
@@ -2131,29 +2151,58 @@ function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: 
   return dedupePathVariants(variants).slice(0, 80);
 }
 
-function withPreferredAdmFile(details: GameSpecificLogDetails, preferredAdmFileName?: string): GameSpecificLogDetails {
+function withPreferredAdmFile(
+  details: GameSpecificLogDetails,
+  preferredAdmFileName?: string,
+  preferredAdmPath?: string | null,
+): GameSpecificLogDetails {
   const preferred = preferredAdmFileName?.trim().toLowerCase();
-  if (!preferred) return details;
+  const preferredPath = preferredAdmPath ? normalizeRemotePath(preferredAdmPath).toLowerCase() : null;
+  const preferredPathName = preferredPath?.split("/").filter(Boolean).at(-1) ?? null;
+  const preferredEntries = buildPreferredAdmEntries(preferredAdmFileName, preferredAdmPath);
+  if (!preferred && !preferredEntries.length) return details;
   const selectedAdmFile = details.admLogFiles.find((entry) => {
     const name = entry.name.toLowerCase();
+    const path = normalizeRemotePath(entry.path).toLowerCase();
     const pathName = entry.path.split("/").filter(Boolean).at(-1)?.toLowerCase();
-    return name === preferred || pathName === preferred;
+    return name === preferred || pathName === preferred || path === preferredPath || pathName === preferredPathName;
   });
-  if (selectedAdmFile) return { ...details, selectedAdmFile };
+  if (selectedAdmFile) {
+    return {
+      ...details,
+      admLogFiles: dedupeFileEntries([selectedAdmFile, ...preferredEntries, ...details.admLogFiles]),
+      selectedAdmFile,
+    };
+  }
 
-  const forcedFileName = preferredAdmFileName?.trim();
-  if (!forcedFileName || !/\.adm$/i.test(forcedFileName)) return details;
-  const forcedEntry = {
-    name: forcedFileName,
-    path: `dayzps/config/${forcedFileName}`,
-    type: "file",
-  };
+  if (!preferredEntries.length) return details;
 
   return {
     ...details,
-    admLogFiles: [forcedEntry, ...details.admLogFiles],
-    selectedAdmFile: forcedEntry,
+    admLogFiles: dedupeFileEntries([...preferredEntries, ...details.admLogFiles]),
+    selectedAdmFile: preferredEntries[0],
   };
+}
+
+function buildPreferredAdmEntries(preferredAdmFileName?: string, preferredAdmPath?: string | null): NitradoFileEntry[] {
+  const entries: NitradoFileEntry[] = [];
+  const preferredPath = preferredAdmPath?.trim();
+  if (preferredPath && /\.adm$/i.test(preferredPath)) {
+    const path = normalizeRemotePath(preferredPath);
+    const name = path.split("/").filter(Boolean).at(-1) ?? preferredPath;
+    entries.push({ name, path, type: "file" });
+  }
+
+  const preferredFileName = preferredAdmFileName?.trim();
+  if (preferredFileName && /\.adm$/i.test(preferredFileName)) {
+    entries.push({
+      name: preferredFileName,
+      path: `dayzps/config/${preferredFileName}`,
+      type: "file",
+    });
+  }
+
+  return dedupeFileEntries(entries);
 }
 
 function createServiceDetailsDebug(

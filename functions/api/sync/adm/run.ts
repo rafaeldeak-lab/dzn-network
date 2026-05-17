@@ -57,6 +57,7 @@ export async function handleAdmSyncRun(
       processed: result.processed,
       succeeded: result.succeeded,
       failed: result.failed,
+      unavailable: result.unavailable,
     });
     return json(result);
   }

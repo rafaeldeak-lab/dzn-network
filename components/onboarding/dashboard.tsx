@@ -299,6 +299,10 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const recentEventsAreMock = recentEvents.some((event) => event.is_mock || [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
   const syncRuns = getPrioritizedSyncRuns(syncStatus?.recent_sync_runs ?? []);
   const syncHealth = getSyncHealth(syncStatus?.recent_sync_runs ?? [], effectiveSyncStatus, syncStatus?.last_sync_message ?? null);
+  const dashboardSyncBanner = getDashboardSyncStatusBanner(syncBanner, syncHealth, effectiveSyncStatus);
+  const latestAdmReadable = getLatestAdmReadableLabel(effectiveSyncStatus);
+  const recentFeedStatus = getRecentFeedStatus(syncStatus, effectiveSyncStatus, recentEvents.length);
+  const recentFeedBadge = getRecentFeedBadge(recentEventsAreMock, effectiveSyncStatus);
   const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
   const processedPercent = getProcessedPercent(syncStatus);
   const nextScheduledSync = getNextScheduledSync(syncStatus?.last_scheduled_sync_at ?? null);
@@ -601,14 +605,14 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
             <HealthCard icon={<ListChecks className="h-4 w-4" />} label="ADM" value={admState.badge} tone="cyan" />
             <HealthCard icon={<Zap className="h-4 w-4" />} label="Sync Engine" value={syncHealth.status === "error" ? "Needs Action" : "Active"} tone="violet" />
           </div>
-          <div className={`rounded-lg border p-4 ${syncHealth.status === "error" ? "border-orange-300/25 bg-orange-400/10" : syncBanner.className}`}>
+          <div className={`rounded-lg border p-4 ${dashboardSyncBanner.className}`}>
             <div className="flex items-start gap-3">
-              <Activity className={`mt-1 h-5 w-5 shrink-0 ${syncHealth.status === "error" ? "text-orange-100" : "text-cyan-100"}`} />
+              <Activity className={`mt-1 h-5 w-5 shrink-0 ${dashboardSyncBanner.iconClassName}`} />
               <div>
-                <p className="text-xs font-black uppercase opacity-75">{syncHealth.status === "error" ? syncHealth.title : syncBanner.title}</p>
-                <p className="mt-1 text-sm font-black leading-6 text-white">{syncHealth.status === "error" ? syncHealth.message : syncBanner.message}</p>
+                <p className="text-xs font-black uppercase opacity-75">{dashboardSyncBanner.title}</p>
+                <p className="mt-1 text-sm font-black leading-6 text-white">{dashboardSyncBanner.message}</p>
                 <p className="mt-1 text-sm leading-6 text-zinc-300">
-                  {syncHealth.status === "error" ? syncHealth.detail : syncBanner.detail ?? "Player activity, kills, deaths and more are being synced in real time."}
+                  {dashboardSyncBanner.detail ?? "Player activity, kills, deaths and more are being synced in real time."}
                 </p>
               </div>
             </div>
@@ -677,18 +681,19 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 <MiniInfo label="Auto-refresh" value="On (15s)" />
                 <MiniInfo label="Last Refreshed" value={lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "Starting..."} />
-                <MiniInfo label="Sync Status" value={syncHealth.status === "error" ? "Needs Action" : formatSyncStatus(effectiveSyncStatus)} />
+                <MiniInfo label="Status" value={syncHealth.status === "error" ? "Needs Action" : formatSyncStatus(effectiveSyncStatus)} />
                 <MiniInfo label="Latest ADM File" value={latestAdmFile} />
+                <MiniInfo label="Latest File Readable" value={latestAdmReadable} />
                 <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
-                <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
-                <MiniInfo label="Last Successful Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced"} />
+                <MiniInfo label="Last Checked" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not checked"} />
+                <MiniInfo label="Last Successful Feed Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(syncStatus.last_manual_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
                 <MiniInfo label="Last Sync Duration" value={formatDuration(lastSyncDuration)} />
                 <MiniInfo label="Next Action" value={syncHealth.status === "error" ? syncHealth.nextAction : "Continue syncing after fresh ADM activity"} />
-                <MiniInfo label="Lines Read" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
-                <MiniInfo label="Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
+                <MiniInfo label="Lines Read This Check" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
+                <MiniInfo label="New Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
                 <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
                 <MiniInfo label="Kills Created" value={String(syncStatus?.last_kills_created ?? lastSyncResult?.killsCreated ?? 0)} />
               </div>
@@ -732,8 +737,13 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
             <DashboardPanel className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <PanelHeader icon={<Activity className="h-5 w-5" />} title="Recent Synced Events" />
-                {recentEventsAreMock ? <SmallBadge tone="orange">Mock Sync Data</SmallBadge> : <SmallBadge tone="emerald">Live Feed Active</SmallBadge>}
+                <SmallBadge tone={recentFeedBadge.tone}>{recentFeedBadge.label}</SmallBadge>
               </div>
+              {recentFeedStatus ? (
+                <p className={`mt-3 rounded-lg border px-3 py-2 text-xs font-bold leading-5 ${recentFeedStatus.className}`}>
+                  {recentFeedStatus.message}
+                </p>
+              ) : null}
               <div className="mt-4 grid max-h-[430px] gap-2 overflow-auto pr-1">
                 {recentEvents.length ? (
                   recentEvents.map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)
@@ -2060,6 +2070,106 @@ function getSyncBanner(values: {
   };
 }
 
+function getDashboardSyncStatusBanner(
+  syncBanner: ReturnType<typeof getSyncBanner>,
+  syncHealth: ReturnType<typeof getSyncHealth>,
+  currentStatus: string,
+) {
+  const normalizedStatus = currentStatus.toLowerCase();
+  const useStatusBanner =
+    syncHealth.status === "error" ||
+    syncHealth.status === "pending" ||
+    ["no_new_lines", "no_supported_events"].includes(normalizedStatus);
+
+  if (!useStatusBanner) {
+    return {
+      ...syncBanner,
+      iconClassName: "text-cyan-100",
+    };
+  }
+
+  return {
+    title: syncHealth.title,
+    message: syncHealth.message,
+    detail: syncHealth.detail,
+    className: syncHealth.status === "error"
+      ? "border-orange-300/25 bg-orange-400/10"
+      : syncHealth.status === "pending"
+        ? "border-orange-300/20 bg-orange-400/10"
+        : "border-cyan-300/20 bg-cyan-400/10",
+    iconClassName: syncHealth.status === "error" || syncHealth.status === "pending" ? "text-orange-100" : "text-cyan-100",
+  };
+}
+
+function getLatestAdmReadableLabel(currentStatus: string) {
+  const normalizedStatus = currentStatus.toLowerCase();
+  if (["adm_file_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) return "Temporarily unavailable";
+  if (normalizedStatus === "no_adm_file") return "No ADM file found";
+  if (["completed", "no_new_lines", "no_supported_events"].includes(normalizedStatus)) return "Yes";
+  if (normalizedStatus === "read_pending") return "Waiting for readable content";
+  return "Unknown";
+}
+
+function getRecentFeedBadge(recentEventsAreMock: boolean, currentStatus: string): { label: string; tone: "emerald" | "orange" | "zinc" } {
+  if (recentEventsAreMock) return { label: "Mock Sync Data", tone: "orange" };
+  const normalizedStatus = currentStatus.toLowerCase();
+  if (["adm_file_unreadable", "nitrado_file_unavailable", "no_adm_file", "nitrado_error", "parser_error", "write_error"].includes(normalizedStatus)) {
+    return { label: "Feed Check Issue", tone: "orange" };
+  }
+  if (["no_new_lines", "no_supported_events"].includes(normalizedStatus)) return { label: "Feed Checked", tone: "zinc" };
+  return { label: "Live Feed Active", tone: "emerald" };
+}
+
+function getRecentFeedStatus(syncStatus: AdmSyncStatus | null, currentStatus: string, recentEventCount: number) {
+  const normalizedStatus = currentStatus.toLowerCase();
+  const lastChecked = syncStatus?.last_sync_at ? formatRelativeTime(syncStatus.last_sync_at) : "not checked yet";
+  const lastSuccessful = syncStatus?.last_successful_sync_at ? formatRelativeTime(syncStatus.last_successful_sync_at) : null;
+
+  if (normalizedStatus === "no_new_lines") {
+    return {
+      message: `Feed checked ${lastChecked}. No new ADM lines.`,
+      className: "border-cyan-300/15 bg-cyan-400/8 text-cyan-50",
+    };
+  }
+
+  if (normalizedStatus === "no_supported_events") {
+    return {
+      message: `Feed checked ${lastChecked}. No supported player activity found in the latest lines.`,
+      className: "border-cyan-300/15 bg-cyan-400/8 text-cyan-50",
+    };
+  }
+
+  if (["adm_file_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) {
+    return {
+      message: `Feed last updated ${lastSuccessful ?? "previously"}. Latest ADM file was temporarily unavailable from Nitrado.`,
+      className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
+    };
+  }
+
+  if (normalizedStatus === "no_adm_file") {
+    return {
+      message: "Waiting for next ADM file from Nitrado. Existing feed data remains preserved.",
+      className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
+    };
+  }
+
+  if (["nitrado_error", "parser_error", "write_error", "error", "failed"].includes(normalizedStatus)) {
+    return {
+      message: `Feed last updated ${lastSuccessful ?? "previously"}. Latest ADM sync needs attention.`,
+      className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
+    };
+  }
+
+  if (normalizedStatus === "completed" && recentEventCount <= 0) {
+    return {
+      message: "ADM sync completed, but no recent player events are available yet.",
+      className: "border-white/10 bg-white/[0.04] text-zinc-300",
+    };
+  }
+
+  return null;
+}
+
 function getRecentEventSecondary(event: AdmRecentSyncEvent, isKill: boolean) {
   if (isKill) {
     return [event.weapon, event.distance !== null ? `${event.distance.toFixed(1)}m` : null].filter(Boolean).join(" / ") || "Credited PvP kill";
@@ -2128,8 +2238,10 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     return {
       status: "pending" as const,
       title: "ADM File Temporarily Unavailable",
-      message: "Latest ADM file found, but readable log content was not returned.",
-      detail: "Nitrado exposed an ADM filename, but the file content was unavailable during this sync check.",
+      message: "ADM sync checked Nitrado, but the latest ADM file was not readable this time.",
+      detail: latestSuccessTime
+        ? `The last successful feed sync remains active from ${formatDashboardDate(latestSuccessTime)}.`
+        : "The last successful feed sync remains active when available.",
       nextAction: "Wait for the next ADM sync run",
       latestSuccessTime,
     };
@@ -2161,8 +2273,8 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     return {
       status: "active" as const,
       title: "Sync Checked",
-      message: "Latest ADM checked.",
-      detail: "No new ADM lines since last sync.",
+      message: "ADM sync checked successfully. No new ADM lines since the last sync.",
+      detail: "The latest readable ADM file was checked and the previous feed remains current.",
       nextAction: "Continue syncing after fresh ADM activity",
       latestSuccessTime,
     };
@@ -2172,8 +2284,8 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     return {
       status: "active" as const,
       title: "Sync Checked",
-      message: "Latest ADM checked.",
-      detail: "No supported ADM events found in the latest processed lines.",
+      message: "ADM sync checked successfully. No supported player activity found in the latest lines.",
+      detail: "DZN found readable ADM lines, but none matched supported activity, kill, or build patterns.",
       nextAction: "Continue syncing after fresh ADM activity",
       latestSuccessTime,
     };
