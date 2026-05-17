@@ -92,6 +92,21 @@ export type AdmSyncOptions = {
   maxLinesPerRun?: number;
 };
 
+export type AdmSyncStatusCode =
+  | "completed"
+  | "no_new_lines"
+  | "no_supported_events"
+  | "no_adm_file"
+  | "nitrado_error"
+  | "parser_error"
+  | "write_error"
+  | "read_pending"
+  | "not_started"
+  | "active"
+  | "idle"
+  | "error"
+  | "failed";
+
 export type AdmSyncRunSummary = {
   id: string;
   trigger_type: "manual" | "scheduled" | string;
@@ -237,13 +252,66 @@ export async function runAdmSync(
   const existingState = await getSyncState(env, initialScope.linkedServerId);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const now = new Date().toISOString();
-  const readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock, readMode: "full" });
   let admLog = isMock ? mockAdmLogDetection() : null;
-  if (!readable.lines.length && !isMock) {
-    const token = await getNitradoTokenForLinkedServer(env, linkedServer);
-    admLog = linkedServer.adm_path
-      ? await testExactNitradoAdmPath(token, nitradoServiceId, linkedServer.adm_path)
-      : await detectNitradoAdmLogs(token, nitradoServiceId);
+  let readable: ReadableAdmLinesResult;
+  try {
+    readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, { isMock, readMode: "full" });
+    if (!readable.lines.length && !isMock) {
+      const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+      admLog = linkedServer.adm_path
+        ? await testExactNitradoAdmPath(token, nitradoServiceId, linkedServer.adm_path)
+        : await detectNitradoAdmLogs(token, nitradoServiceId);
+    }
+  } catch (error) {
+    const syncDurationMs = Date.now() - syncStartedAt;
+    const message = `Nitrado log access failed. ${safeSyncErrorMessage(error)}`;
+    const latestAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
+    const latestAdmFile = existingState?.latest_adm_file ?? fileNameFromPath(latestAdmPath);
+    await upsertSyncState(env, initialScope.linkedServerId, {
+      latestAdmFile,
+      latestAdmPath,
+      sourceServiceId: initialScope.nitradoServiceId,
+      lastProcessedFile: existingState?.last_processed_file ?? null,
+      lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
+      lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
+      status: "nitrado_error",
+      message,
+      lastSyncAt: now,
+      linesRead: 0,
+      linesProcessed: 0,
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      unknownLines: 0,
+      duplicateLines: 0,
+      syncDurationMs,
+      readableRoute: null,
+    });
+    await recordSyncRun(env, {
+      id: syncRunId,
+      linkedServerId: initialScope.linkedServerId,
+      sourceServiceId: initialScope.nitradoServiceId,
+      triggerType,
+      status: "nitrado_error",
+      message,
+      linesRead: 0,
+      linesProcessed: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      startedAt: syncStartedAtIso,
+      finishedAt: new Date().toISOString(),
+      durationMs: syncDurationMs,
+    });
+    return emptyAdmSyncResult({
+      status: "nitrado_error",
+      message,
+      latestAdmFile,
+      lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
+      lastSyncAt: now,
+      syncDurationMs,
+    });
   }
 
   const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? linkedServer.adm_path ?? null;
@@ -256,9 +324,10 @@ export async function runAdmSync(
   const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog?.debug?.samplePreview ?? null);
   if (!lines.length) {
     const admAvailable = Boolean(admLog?.admFileExists || readable.newestAdmFileName);
+    const status = admAvailable ? "nitrado_error" : "no_adm_file";
     const message = admAvailable
-      ? readable.message
-      : "No ADM file is available for sync yet";
+      ? `Latest ADM discovered, but readable content was unavailable. ${readable.message}`
+      : "Sync checked Nitrado. Waiting for next ADM file from Nitrado.";
     await upsertSyncState(env, scope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
@@ -266,7 +335,7 @@ export async function runAdmSync(
       lastProcessedFile: existingState?.last_processed_file ?? null,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
-      status: admAvailable ? "read_pending" : "not_started",
+      status,
       message,
       lastSyncAt: now,
       linesRead: 0,
@@ -287,7 +356,7 @@ export async function runAdmSync(
       linkedServerId: scope.linkedServerId,
       sourceServiceId: scope.nitradoServiceId,
       triggerType,
-      status: admAvailable ? "read_pending" : "not_started",
+      status,
       message,
       linesRead: 0,
       linesProcessed: 0,
@@ -298,7 +367,7 @@ export async function runAdmSync(
       durationMs: syncDurationMs,
     });
     return {
-      status: admAvailable ? "read_pending" : "not_started",
+      status,
       message,
       linesSeen: 0,
       linesProcessed: 0,
@@ -313,7 +382,7 @@ export async function runAdmSync(
       lastSyncAt: now,
       readableRouteUsed: readable.readableRouteUsed,
       linesRead: 0,
-      syncStatus: admAvailable ? "read_pending" : "not_started",
+      syncStatus: status,
       rawEventsStored: 0,
       playerEventsStored: 0,
       killEventsStored: 0,
@@ -393,22 +462,55 @@ export async function runAdmSync(
       lastEventAt = parsed.occurredAt ?? now;
     }
   } catch (error) {
+    const syncDurationMs = Date.now() - syncStartedAt;
+    const message = `ADM write failed. ${safeSyncErrorMessage(error)}`;
+    await upsertSyncState(env, scope.linkedServerId, {
+      latestAdmFile,
+      latestAdmPath,
+      sourceServiceId: scope.nitradoServiceId,
+      lastProcessedFile: existingState?.last_processed_file ?? null,
+      lastProcessedLine,
+      lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
+      status: "write_error",
+      message,
+      lastSyncAt: now,
+      linesRead: lines.length,
+      linesProcessed: 0,
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      unknownLines: 0,
+      duplicateLines: 0,
+      syncDurationMs,
+      readableRoute: readable.readableRouteUsed,
+    });
     await recordSyncRun(env, {
       id: syncRunId,
       linkedServerId: scope.linkedServerId,
       sourceServiceId: scope.nitradoServiceId,
       triggerType,
-      status: "error",
-      message: safeSyncErrorMessage(error),
+      status: "write_error",
+      message,
       linesRead: lines.length,
       linesProcessed: 0,
       eventsCreated: 0,
       killsCreated: 0,
       startedAt: syncStartedAtIso,
       finishedAt: new Date().toISOString(),
-      durationMs: Date.now() - syncStartedAt,
+      durationMs: syncDurationMs,
     });
-    throw error;
+    return emptyAdmSyncResult({
+      status: "write_error",
+      message,
+      latestAdmFile,
+      lastProcessedLine,
+      lastSyncAt: now,
+      readableRouteUsed: readable.readableRouteUsed,
+      linesRead: lines.length,
+      syncDurationMs,
+    });
   }
 
   const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
@@ -418,10 +520,24 @@ export async function runAdmSync(
     parsedLines.slice(0, lastProcessedLine).filter(isCreditedKillEvent).length +
     pendingParsedEvents.filter(isCreditedKillEvent).length;
   const duplicateKillsSkipped = Math.max(0, creditedKillLinesConsidered - killsCreated);
-  const status = pendingParsedEvents.length || killsCreated || buildEventsStored ? "completed" : "idle";
-  const message = status === "completed"
-    ? `${triggerType === "manual" ? "Manual sync" : "Scheduled sync"} complete. Lines scanned: ${lines.length}. Kills found: ${creditedKillLinesFound}. New kills created: ${killsCreated}. Build events created: ${buildEventsStored}. Duplicates skipped: ${duplicateKillsSkipped}. Players updated: ${uniquePlayers}.`
-    : "No new ADM lines to process";
+  const status = classifyAdmSyncOutcome({
+    pendingLineCount: pendingParsedEvents.length,
+    eventsCreated,
+    killsCreated,
+    buildEventsStored,
+  });
+  const message = buildSyncRunMessage({
+    triggerType,
+    status,
+    linesRead: lines.length,
+    linesProcessed: pendingParsedEvents.length,
+    creditedKillLinesFound,
+    killsCreated,
+    buildEventsStored,
+    duplicateKillsSkipped,
+    uniquePlayers,
+    eventsCreated,
+  });
   await upsertServerStats(env, scope.linkedServerId, {
     sourceServiceId: scope.nitradoServiceId,
     kills: killsCreated,
@@ -497,6 +613,80 @@ export async function runAdmSync(
     unknownLines,
     skippedDuplicateLines: duplicateLines,
     syncDurationMs,
+  };
+}
+
+export function classifyAdmSyncOutcome(values: {
+  pendingLineCount: number;
+  eventsCreated: number;
+  killsCreated: number;
+  buildEventsStored: number;
+}): AdmSyncStatusCode {
+  if (values.pendingLineCount <= 0) return "no_new_lines";
+  if (values.eventsCreated <= 0 && values.killsCreated <= 0 && values.buildEventsStored <= 0) return "no_supported_events";
+  return "completed";
+}
+
+export function isAdmSyncErrorStatus(status: string | null | undefined) {
+  return ["nitrado_error", "parser_error", "write_error", "error", "failed"].includes(String(status ?? "").toLowerCase());
+}
+
+function buildSyncRunMessage(values: {
+  triggerType: "manual" | "scheduled" | string;
+  status: AdmSyncStatusCode;
+  linesRead: number;
+  linesProcessed: number;
+  creditedKillLinesFound: number;
+  killsCreated: number;
+  buildEventsStored: number;
+  duplicateKillsSkipped: number;
+  uniquePlayers: number;
+  eventsCreated: number;
+}) {
+  const prefix = values.triggerType === "manual" ? "Manual sync" : "Scheduled sync";
+  if (values.status === "no_new_lines") {
+    return `${prefix} checked latest ADM. No new ADM lines found. Lines scanned: ${values.linesRead}.`;
+  }
+  if (values.status === "no_supported_events") {
+    return `${prefix} checked latest ADM. No new supported ADM events found. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}.`;
+  }
+  return `${prefix} active. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}. Activity events created: ${values.eventsCreated}. Kills found: ${values.creditedKillLinesFound}. New kills created: ${values.killsCreated}. Build events created: ${values.buildEventsStored}. Duplicates skipped: ${values.duplicateKillsSkipped}. Players updated: ${values.uniquePlayers}.`;
+}
+
+function emptyAdmSyncResult(values: {
+  status: AdmSyncStatusCode;
+  message: string;
+  latestAdmFile: string | null;
+  lastProcessedLine: number;
+  lastSyncAt: string;
+  readableRouteUsed?: string | null;
+  linesRead?: number;
+  syncDurationMs: number;
+}): AdmSyncResult {
+  return {
+    status: values.status,
+    message: values.message,
+    linesSeen: values.linesRead ?? 0,
+    linesProcessed: 0,
+    eventsCreated: 0,
+    killsCreated: 0,
+    killsFound: 0,
+    newKillsCreated: 0,
+    duplicateKillsSkipped: 0,
+    playersUpdated: 0,
+    latestAdmFile: values.latestAdmFile,
+    lastProcessedLine: values.lastProcessedLine,
+    lastSyncAt: values.lastSyncAt,
+    readableRouteUsed: values.readableRouteUsed ?? null,
+    linesRead: values.linesRead ?? 0,
+    syncStatus: values.status,
+    rawEventsStored: 0,
+    playerEventsStored: 0,
+    killEventsStored: 0,
+    buildEventsStored: 0,
+    unknownLines: 0,
+    skippedDuplicateLines: 0,
+    syncDurationMs: values.syncDurationMs,
   };
 }
 
@@ -896,7 +1086,7 @@ export async function clearOldFailedSyncRuns(env: Env, userId: string, linkedSer
       `SELECT COALESCE(finished_at, started_at, created_at) AS sync_time
        FROM sync_runs
        WHERE linked_server_id = ?
-         AND lower(status) IN ('completed', 'idle')
+         AND lower(status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
        ORDER BY COALESCE(finished_at, started_at, created_at) DESC
        LIMIT 1`,
     )
@@ -950,11 +1140,12 @@ export async function runScheduledAdmSync(
 
   for (const server of eligibleServers) {
     try {
-      await runAdmSync(env, server.user_id, server.id, {
+      const result = await runAdmSync(env, server.user_id, server.id, {
         triggerType: "scheduled",
         maxLinesPerRun: maxLinesPerServer,
       });
-      succeeded += 1;
+      if (isAdmSyncErrorStatus(result.status)) failed += 1;
+      else succeeded += 1;
     } catch (error) {
       failed += 1;
       await recordSyncRun(env, {
@@ -1049,11 +1240,8 @@ async function getEligibleScheduledSyncServers(env: Env, limit: number, minSyncI
        WHERE lower(linked_servers.status) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-         AND (
-           server_log_config.adm_path IS NOT NULL
-           OR onboarding_checks.adm_logs_found = 1
-           OR adm_sync_state.last_sync_status IN ('completed', 'idle', 'read_pending', 'active')
-         )
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND (
            adm_sync_state.last_sync_at IS NULL
            OR (strftime('%s', 'now') - strftime('%s', adm_sync_state.last_sync_at)) >= ?

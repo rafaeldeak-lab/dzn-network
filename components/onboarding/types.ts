@@ -332,7 +332,7 @@ export type SyncRunSummary = {
 };
 
 export type AdmRecentSyncEvent = {
-  source: "kill" | "player";
+  source: "kill" | "player" | "build";
   event_type: string;
   player_name: string | null;
   killer_name: string | null;
@@ -406,6 +406,7 @@ export type AdmSyncRunResult = {
   rawEventsStored: number;
   playerEventsStored: number;
   killEventsStored: number;
+  buildEventsStored: number;
   unknownLines: number;
   skippedDuplicateLines: number;
   syncDurationMs: number;

@@ -280,7 +280,7 @@ async function queryPublicServers(env: Env) {
         SELECT status
         FROM sync_runs
         WHERE sync_runs.linked_server_id = linked_servers.id
-          AND lower(sync_runs.status) IN ('completed', 'idle')
+          AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
         ORDER BY COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) DESC
         LIMIT 1
       ) AS latest_success_sync_status,
@@ -288,7 +288,7 @@ async function queryPublicServers(env: Env) {
         SELECT trigger_type
         FROM sync_runs
         WHERE sync_runs.linked_server_id = linked_servers.id
-          AND lower(sync_runs.status) IN ('completed', 'idle')
+          AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
         ORDER BY COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) DESC
         LIMIT 1
       ) AS latest_success_sync_trigger,
@@ -296,7 +296,7 @@ async function queryPublicServers(env: Env) {
         SELECT COALESCE(finished_at, started_at, created_at)
         FROM sync_runs
         WHERE sync_runs.linked_server_id = linked_servers.id
-          AND lower(sync_runs.status) IN ('completed', 'idle')
+          AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
         ORDER BY COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) DESC
         LIMIT 1
       ) AS latest_success_sync_at,
@@ -370,7 +370,7 @@ function publicCanonicalScore(row: PublicServerRow) {
   return numberOrZero(row.total_kills) * 1000 +
     numberOrZero(row.unique_players) * 100 +
     (row.public_slug ? 20 : 0) +
-    (stringEquals(row.latest_success_sync_status, "completed") || stringEquals(row.adm_sync_status, "completed") ? 10 : 0) +
+    (isSuccessfulAdmSyncStatus(row.latest_success_sync_status) || isSuccessfulAdmSyncStatus(row.adm_sync_status) ? 10 : 0) +
     (Number(row.adm_logs_found) === 1 ? 5 : 0);
 }
 
@@ -466,8 +466,8 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     numberOrZero(row.total_deaths) > 0 ||
     numberOrZero(row.total_kills) > 0 ||
     numberOrZero(row.unique_players) > 0;
-  const latestSyncCompleted = stringEquals(row.latest_success_sync_status, "completed") || stringEquals(row.latest_success_sync_status, "idle");
-  const admSyncCompleted = stringEquals(row.adm_sync_status, "completed") || stringEquals(row.adm_sync_status, "idle");
+  const latestSyncCompleted = isSuccessfulAdmSyncStatus(row.latest_success_sync_status);
+  const admSyncCompleted = isSuccessfulAdmSyncStatus(row.adm_sync_status);
   const readable = latestSyncCompleted || admSyncCompleted || hasActivity || Number(row.adm_logs_found) === 1;
   const admStatus = readable ? "Connected" : latestAdmFile || row.adm_path ? "Discovered" : "Needs Review";
   const statsSync = latestSyncCompleted || admSyncCompleted || hasActivity || (readable && latestSyncCompleted)
@@ -957,8 +957,8 @@ function calculatePublicServerKd(kills: number, deaths: number) {
   return { value, label: value.toFixed(2) };
 }
 
-function stringEquals(value: string | null, expected: string) {
-  return typeof value === "string" && value.toLowerCase() === expected;
+function isSuccessfulAdmSyncStatus(value: string | null) {
+  return ["completed", "idle", "no_new_lines", "no_supported_events"].includes(String(value ?? "").toLowerCase());
 }
 
 function dateValue(value: string | null) {

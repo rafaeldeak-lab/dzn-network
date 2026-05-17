@@ -201,12 +201,12 @@ export async function getRankedPublicServers(env: Env, limit: number) {
             OR COALESCE(server_stats.total_deaths, 0) > 0
             OR COALESCE(server_stats.total_kills, 0) > 0
             OR COALESCE(server_stats.unique_players, 0) > 0
-            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
+            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
             OR EXISTS (
               SELECT 1
               FROM sync_runs
               WHERE sync_runs.linked_server_id = linked_servers.id
-                AND lower(sync_runs.status) IN ('completed', 'idle')
+                AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
               LIMIT 1
             )
           THEN 1 ELSE 0

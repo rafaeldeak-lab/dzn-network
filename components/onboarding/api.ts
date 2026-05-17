@@ -136,7 +136,7 @@ export async function runLogAccessDiagnostics() {
 }
 
 export async function runManualSync(linkedServerId?: string) {
-  return request<AdmSyncRunResult>("/api/sync/run", {
+  return request<AdmSyncRunResult>("/api/sync/adm/run", {
     method: "POST",
     body: JSON.stringify(linkedServerId ? { linked_server_id: linkedServerId } : {}),
   });

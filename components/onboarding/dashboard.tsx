@@ -368,7 +368,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       await onRefresh();
     }
     const refreshed = await refreshSyncData({ manual: true, warnOnError: true });
-    if (refreshed) setActionMessage("Dashboard sync data refreshed.");
+    if (refreshed) setActionMessage("Dashboard sync status refreshed. Use Run Manual Sync to process ADM log lines now.");
   }
 
   async function refreshServerInfo() {
@@ -668,7 +668,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                   className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
-                  {manualRefreshing ? "Refreshing..." : "Refresh Now"}
+                  {manualRefreshing ? "Refreshing..." : "Refresh Status"}
                 </button>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1598,6 +1598,7 @@ function LastSyncDetails({
     rawEventsStored: syncStatus?.last_raw_events_stored ?? lastSyncResult?.rawEventsStored ?? 0,
     playerEventsStored: syncStatus?.last_player_events_stored ?? lastSyncResult?.playerEventsStored ?? 0,
     killEventsStored: syncStatus?.last_kill_events_stored ?? lastSyncResult?.killEventsStored ?? 0,
+    buildEventsStored: lastSyncResult?.buildEventsStored ?? 0,
     unknownLines: syncStatus?.last_unknown_lines ?? lastSyncResult?.unknownLines ?? 0,
     duplicateLines: syncStatus?.last_duplicate_lines ?? lastSyncResult?.skippedDuplicateLines ?? 0,
   };
@@ -1620,6 +1621,7 @@ function LastSyncDetails({
           <MiniInfo label="Raw Events Stored" value={String(values.rawEventsStored)} />
           <MiniInfo label="Player Events Stored" value={String(values.playerEventsStored)} />
           <MiniInfo label="Kill Events Stored" value={String(values.killEventsStored)} />
+          <MiniInfo label="Build Events Stored" value={String(values.buildEventsStored)} />
           <MiniInfo label="Parser Unknown Lines" value={String(values.unknownLines)} />
           <MiniInfo label="Skipped Duplicate Lines" value={String(values.duplicateLines)} />
         </div>
@@ -1979,6 +1981,18 @@ function listingFormFromPartial(listing: Partial<LinkedServer>): Partial<PublicL
 }
 
 function getManualSyncMessage(result: AdmSyncRunResult) {
+  if (result.status === "no_new_lines") {
+    return "Sync checked latest ADM just now. No new ADM lines found.";
+  }
+  if (result.status === "no_supported_events") {
+    return "Sync checked latest ADM just now. No new supported ADM events found.";
+  }
+  if (result.status === "no_adm_file") {
+    return "Sync checked Nitrado. Waiting for the next ADM file.";
+  }
+  if (["nitrado_error", "parser_error", "write_error"].includes(result.status)) {
+    return result.message || "ADM sync needs attention.";
+  }
   if (result.status === "completed" && result.killsCreated === 0) {
     return result.eventsCreated > 0
       ? "Player activity synced successfully. No PvP kills found in the latest processed lines."
@@ -2072,6 +2086,7 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
   const failureIsCurrent = Boolean(latestFailureTime && (!latestSuccessTime || Date.parse(latestFailureTime) > Date.parse(latestSuccessTime)));
   const message = latestFailure?.message ?? currentMessage ?? "";
   const reconnectRequired = failureIsCurrent && /decrypt|cipher|padding|cryptokey|aes-gcm|token/i.test(message);
+  const normalizedStatus = currentStatus.toLowerCase();
 
   if (failureIsCurrent) {
     return {
@@ -2084,13 +2099,57 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     };
   }
 
-  if (currentStatus === "read_pending") {
+  if (["nitrado_error", "parser_error", "write_error", "error", "failed"].includes(normalizedStatus)) {
+    return {
+      status: "error" as const,
+      title: normalizedStatus === "nitrado_error" ? "Nitrado Log Access Failed" : "Sync Needs Attention",
+      message: normalizedStatus === "write_error" ? "ADM write failed." : "Latest sync run needs attention.",
+      detail: currentMessage || "Review the latest sync run.",
+      nextAction: normalizedStatus === "nitrado_error" ? "Run diagnostics" : "Review latest sync error",
+      latestSuccessTime,
+    };
+  }
+
+  if (normalizedStatus === "no_adm_file") {
     return {
       status: "pending" as const,
-      title: "ADM Read Pending",
-      message: "ADM discovered, waiting for readable log content.",
-      detail: "Your server can stay live while DZN waits for readable ADM data.",
-      nextAction: "Waiting for readable ADM content",
+      title: "Waiting For ADM File",
+      message: "Sync checked Nitrado. No ADM file is available yet.",
+      detail: "DZN will process activity when Nitrado exposes the next ADM log file.",
+      nextAction: "Waiting for next ADM file",
+      latestSuccessTime,
+    };
+  }
+
+  if (normalizedStatus === "read_pending") {
+    return {
+      status: "pending" as const,
+      title: "Latest ADM Discovered",
+      message: "Latest ADM discovered. Waiting for readable log content.",
+      detail: "Refresh Server Info only updates metadata. ADM stats update during manual or scheduled ADM sync runs.",
+      nextAction: "Waiting for ADM sync runner",
+      latestSuccessTime,
+    };
+  }
+
+  if (normalizedStatus === "no_new_lines") {
+    return {
+      status: "active" as const,
+      title: "Sync Checked",
+      message: "Sync checked just now.",
+      detail: "No new ADM lines found in the latest checked file.",
+      nextAction: "Continue syncing after fresh ADM activity",
+      latestSuccessTime,
+    };
+  }
+
+  if (normalizedStatus === "no_supported_events") {
+    return {
+      status: "active" as const,
+      title: "Sync Checked",
+      message: "Sync checked just now.",
+      detail: "No new supported ADM events found in the latest processed lines.",
+      nextAction: "Continue syncing after fresh ADM activity",
       latestSuccessTime,
     };
   }
@@ -2106,6 +2165,7 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
 }
 
 function getProcessedPercent(syncStatus: AdmSyncStatus | null) {
+  if (syncStatus?.last_sync_status === "no_new_lines") return 100;
   const linesRead = syncStatus?.last_lines_read ?? 0;
   const linesProcessed = syncStatus?.last_lines_processed ?? 0;
   if (linesRead > 0) return Math.min(100, (linesProcessed / linesRead) * 100);
@@ -2120,11 +2180,11 @@ function getNextScheduledSync(lastScheduledSync: string | null) {
 }
 
 function isSuccessfulRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
-  return ["completed", "idle"].includes(run.status.toLowerCase());
+  return ["completed", "idle", "no_new_lines", "no_supported_events"].includes(run.status.toLowerCase());
 }
 
 function isFailedRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
-  return ["error", "failed"].includes(run.status.toLowerCase());
+  return ["error", "failed", "nitrado_error", "parser_error", "write_error"].includes(run.status.toLowerCase());
 }
 
 function isHistoricalFailedRun(run: AdmSyncStatus["recent_sync_runs"][number], latestSuccessTime: string | null) {
@@ -2182,6 +2242,12 @@ function formatSyncStatus(value: string) {
   if (value === "read_pending") return "Read Pending";
   if (value === "completed") return "Completed";
   if (value === "idle") return "Idle";
+  if (value === "no_new_lines") return "No New Lines";
+  if (value === "no_supported_events") return "No Supported Events";
+  if (value === "no_adm_file") return "No ADM File";
+  if (value === "nitrado_error") return "Nitrado Error";
+  if (value === "parser_error") return "Parser Error";
+  if (value === "write_error") return "Write Error";
   if (value === "active") return "Active";
   if (value === "not_started") return "Not Started";
   return value.replace(/_/g, " ");

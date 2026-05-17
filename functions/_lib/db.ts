@@ -328,7 +328,7 @@ async function getGlobalServerRankingMap(env: Env) {
             OR COALESCE(server_stats.total_deaths, 0) > 0
             OR COALESCE(server_stats.total_kills, 0) > 0
             OR COALESCE(server_stats.unique_players, 0) > 0
-            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
+            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
           THEN 1 ELSE 0
         END AS stats_active,
         COALESCE(

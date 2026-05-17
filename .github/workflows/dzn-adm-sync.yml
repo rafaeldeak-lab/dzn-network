@@ -1,0 +1,25 @@
+name: DZN ADM Sync
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  adm-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger scheduled ADM sync
+        env:
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+        run: |
+          if [ -z "$SYNC_CRON_SECRET" ]; then
+            echo "SYNC_CRON_SECRET is not configured."
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            -X POST "https://dzn-network.pages.dev/api/sync/adm/run" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data '{"max_servers":25,"max_lines_per_server":50000}'

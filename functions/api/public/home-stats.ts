@@ -158,12 +158,12 @@ async function getTotals(db: D1Database) {
               OR COALESCE(server_stats.unique_players, 0) > 0
               OR COALESCE(server_build_stats.build_score, 0) > 0
               OR COALESCE(server_build_stats.structures_built, 0) > 0
-              OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
+              OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
               OR EXISTS (
                 SELECT 1
                 FROM sync_runs
                 WHERE sync_runs.linked_server_id = linked_servers.id
-                  AND lower(sync_runs.status) IN ('completed', 'idle')
+                  AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
                 LIMIT 1
               )
             THEN 1 ELSE 0
@@ -446,7 +446,7 @@ async function getRecentActivity(db: D1Database) {
          INNER JOIN linked_servers ON linked_servers.id = sync_runs.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-           AND lower(sync_runs.status) IN ('completed', 'idle')
+           AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
          UNION ALL
          SELECT
            'server' AS source,
@@ -512,12 +512,12 @@ async function getMapNodes(db: D1Database) {
             OR COALESCE(server_stats.unique_players, 0) > 0
             OR COALESCE(server_build_stats.build_score, 0) > 0
             OR COALESCE(server_build_stats.structures_built, 0) > 0
-            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle')
+            OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
             OR EXISTS (
               SELECT 1
               FROM sync_runs
               WHERE sync_runs.linked_server_id = linked_servers.id
-                AND lower(sync_runs.status) IN ('completed', 'idle')
+                AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
               LIMIT 1
             )
           THEN 1 ELSE 0
