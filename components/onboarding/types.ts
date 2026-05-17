@@ -314,6 +314,14 @@ export type AdmSyncStatus = {
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;
   last_successful_sync_at: string | null;
+  adm_health_label: string;
+  latest_adm_processed: string | null;
+  newest_unprocessed_adm_file: string | null;
+  unreadable_files_queued: number;
+  raw_kill_lines_found: number;
+  parsed_kill_lines_found: number;
+  parser_skipped_lines: number;
+  current_recovery_action: string;
   recent_sync_runs: SyncRunSummary[];
 };
 

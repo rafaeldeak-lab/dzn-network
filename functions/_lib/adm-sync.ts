@@ -14,6 +14,7 @@ import {
   getAdmLogStoragePath,
   mockAdmLogDetection,
   mockNitradoLogAccessDiagnostics,
+  type NitradoDiscoveredAdmFile,
   type NitradoReadableAdmFile,
   type NitradoLogAccessDiagnostics,
   testExactNitradoAdmPath,
@@ -61,6 +62,11 @@ type AdmSyncState = {
   last_duplicate_lines: number | null;
   last_sync_duration_ms: number | null;
   last_readable_route: string | null;
+  last_raw_kill_lines_found: number | null;
+  last_parsed_kill_lines_found: number | null;
+  last_parser_skipped_lines: number | null;
+  last_unreadable_files_queued: number | null;
+  last_newest_unprocessed_adm_file: string | null;
 };
 
 export type AdmSyncResult = {
@@ -98,8 +104,15 @@ export type AdmSyncStatusCode =
   | "completed"
   | "no_new_lines"
   | "no_supported_events"
-  | "no_adm_file"
+  | "adm_not_generated_yet"
   | "adm_file_unreadable"
+  | "nitrado_down"
+  | "nitrado_auth_invalid"
+  | "nitrado_rate_limited"
+  | "dzn_parser_error"
+  | "dzn_write_error"
+  | "dzn_scope_blocked"
+  | "no_adm_file"
   | "nitrado_error"
   | "parser_error"
   | "write_error"
@@ -152,6 +165,14 @@ export type AdmSyncStatus = {
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;
   last_successful_sync_at: string | null;
+  adm_health_label: string;
+  latest_adm_processed: string | null;
+  newest_unprocessed_adm_file: string | null;
+  unreadable_files_queued: number;
+  raw_kill_lines_found: number;
+  parsed_kill_lines_found: number;
+  parser_skipped_lines: number;
+  current_recovery_action: string;
   recent_sync_runs: AdmSyncRunSummary[];
 };
 
@@ -186,6 +207,12 @@ type ReadableAdmFileForSync = {
   path: string | null;
   lines: string[];
   readableRouteUsed: string | null;
+};
+
+type DiscoveredAdmFileForSync = {
+  name: string;
+  path: string | null;
+  timestamp: number | null;
 };
 
 function verifyAdmServerScope(linkedServer: SyncLinkedServer, syncRunId: string): AdmSyncContext {
@@ -266,8 +293,10 @@ export async function runAdmSync(
   let admLog = isMock ? mockAdmLogDetection() : null;
   let readable: ReadableAdmLinesResult;
   let readableFiles: ReadableAdmFileForSync[] = [];
+  let discoveredAdmFiles: DiscoveredAdmFileForSync[] = [];
   let discoveredNewestAdmFile: string | null = null;
   let discoveredFilesFound = 0;
+  let discoveryApiStatus: string | null = null;
   try {
     const preferredAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
     const preferredAdmFileName = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
@@ -279,8 +308,10 @@ export async function runAdmSync(
       maxFiles: 12,
     });
     readableFiles = batch.files;
+    discoveredAdmFiles = batch.candidates;
     discoveredNewestAdmFile = batch.newestAdmFileName;
     discoveredFilesFound = batch.filesFound;
+    discoveryApiStatus = batch.apiStatus;
     const newestReadableFile = readableFiles.at(-1) ?? null;
     readable = {
       lines: newestReadableFile?.lines ?? [],
@@ -300,10 +331,10 @@ export async function runAdmSync(
     const syncDurationMs = Date.now() - syncStartedAt;
     const latestAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
     const latestAdmFile = existingState?.latest_adm_file ?? fileNameFromPath(latestAdmPath);
-    const status = latestAdmFile ? "adm_file_unreadable" : "nitrado_error";
-    const message = latestAdmFile
-      ? "Latest ADM file found, but Nitrado did not return readable log content during this sync."
-      : `Nitrado log access failed. ${safeSyncErrorMessage(error)}`;
+    const status = classifyNitradoExceptionStatus(error, latestAdmFile);
+    const message = status === "adm_file_unreadable"
+      ? "Latest ADM file found, but Nitrado did not return readable log content during this sync. DZN will retry automatically."
+      : getUnavailableAdmMessage(status);
     await upsertSyncState(env, initialScope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
@@ -325,6 +356,11 @@ export async function runAdmSync(
       duplicateLines: 0,
       syncDurationMs,
       readableRoute: null,
+      rawKillLinesFound: 0,
+      parsedKillLinesFound: 0,
+      parserSkippedLines: 0,
+      unreadableFilesQueued: await countQueuedUnreadableAdmFiles(env, initialScope.linkedServerId),
+      newestUnprocessedAdmFile: latestAdmFile,
     });
     await recordSyncRun(env, {
       id: syncRunId,
@@ -343,6 +379,9 @@ export async function runAdmSync(
     });
     console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
     console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, preservedLastProcessedLine: Number(existingState?.last_processed_line ?? 0) });
+    if (["nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "adm_not_generated_yet", "adm_file_unreadable"].includes(status)) {
+      console.log("DZN ADM ONLY BLOCKED BY NITRADO STATUS", { status, latestAdmFile });
+    }
     return emptyAdmSyncResult({
       status,
       message,
@@ -355,6 +394,13 @@ export async function runAdmSync(
 
   const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
   const latestAdmFile = discoveredNewestAdmFile ?? readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? existingState?.latest_adm_file ?? fileNameFromPath(latestAdmPath);
+  if (!discoveredAdmFiles.length && readableFiles.length) {
+    discoveredAdmFiles = readableFiles.map((file) => ({
+      name: file.name,
+      path: file.path,
+      timestamp: extractAdmTimestampScore(file.name),
+    }));
+  }
   console.log("DZN ADM FILE DISCOVERY", {
     server: initialScope.serverName,
     serviceId: initialScope.nitradoServiceId,
@@ -362,6 +408,7 @@ export async function runAdmSync(
     newestAdmFile: latestAdmFile,
     previousLatestAdmFile: existingState?.latest_adm_file ?? null,
   });
+  await recordDiscoveredAdmFiles(env, initialScope, discoveredAdmFiles);
   if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath) {
     await saveServerAdmPath(env, initialScope.linkedServerId, latestAdmPath.replace(/^\/+/, ""));
   }
@@ -376,12 +423,24 @@ export async function runAdmSync(
       readableRouteUsed: readable.readableRouteUsed,
     }];
   }
+  const readableByName = new Map(readableFiles.map((file) => [file.name, file]));
+  const candidateQueue = selectAdmCandidatesForCursor(discoveredAdmFiles, existingState?.last_processed_file ?? null);
+  const unreadableBeforeProcessing = candidateQueue.find((candidate) => !readableByName.has(candidate.name)) ?? null;
+  if (unreadableBeforeProcessing) {
+    await recordAdmFileAttempt(env, initialScope, unreadableBeforeProcessing, {
+      status: "unreadable",
+      lineCount: 0,
+      rawKillLinesFound: 0,
+      parsedKillLinesFound: 0,
+      insertedKills: 0,
+      parserSkippedLines: 0,
+      message: "ADM filename exists, but Nitrado did not return readable content this check.",
+    });
+  }
   if (!lines.length) {
-    const admAvailable = Boolean(admLog?.admFileExists || readable.newestAdmFileName);
-    const status = classifyUnavailableAdmFileStatus(latestAdmFile, admAvailable);
-    const message = status === "adm_file_unreadable"
-      ? "Latest ADM file found, but Nitrado did not return readable log content during this sync."
-      : "Sync checked Nitrado. Waiting for next ADM file from Nitrado.";
+    const admAvailable = Boolean(admLog?.admFileExists || readable.newestAdmFileName || discoveredFilesFound > 0);
+    const status = classifyUnavailableAdmFileStatus(latestAdmFile, admAvailable, discoveryApiStatus);
+    const message = getUnavailableAdmMessage(status);
     await upsertSyncState(env, scope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
@@ -403,6 +462,11 @@ export async function runAdmSync(
       duplicateLines: 0,
       syncDurationMs: Date.now() - syncStartedAt,
       readableRoute: readable.readableRouteUsed,
+      rawKillLinesFound: 0,
+      parsedKillLinesFound: 0,
+      parserSkippedLines: 0,
+      unreadableFilesQueued: unreadableBeforeProcessing ? 1 : 0,
+      newestUnprocessedAdmFile: unreadableBeforeProcessing?.name ?? latestAdmFile,
     });
     const syncDurationMs = Date.now() - syncStartedAt;
     await recordSyncRun(env, {
@@ -422,6 +486,9 @@ export async function runAdmSync(
     });
     console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
     console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, preservedLastProcessedLine: Number(existingState?.last_processed_line ?? 0) });
+    if (["nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "adm_not_generated_yet", "adm_file_unreadable"].includes(status)) {
+      console.log("DZN ADM ONLY BLOCKED BY NITRADO STATUS", { status, latestAdmFile });
+    }
     return {
       status,
       message,
@@ -448,6 +515,66 @@ export async function runAdmSync(
       syncDurationMs,
     };
   }
+  const processableFilesBeforeUnreadable = collectReadableAdmFilesUntilUnreadable(candidateQueue, readableByName);
+  if (unreadableBeforeProcessing && !processableFilesBeforeUnreadable.length) {
+    const status: AdmSyncStatusCode = "adm_file_unreadable";
+    const message = "Latest ADM file found, but Nitrado has not returned readable content yet. DZN will retry automatically.";
+    const syncDurationMs = Date.now() - syncStartedAt;
+    await upsertSyncState(env, scope.linkedServerId, {
+      latestAdmFile,
+      latestAdmPath,
+      sourceServiceId: scope.nitradoServiceId,
+      lastProcessedFile: existingState?.last_processed_file ?? null,
+      lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
+      lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
+      status,
+      message,
+      lastSyncAt: now,
+      linesRead: 0,
+      linesProcessed: 0,
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      unknownLines: 0,
+      duplicateLines: 0,
+      syncDurationMs,
+      readableRoute: readable.readableRouteUsed,
+      rawKillLinesFound: 0,
+      parsedKillLinesFound: 0,
+      parserSkippedLines: 0,
+      unreadableFilesQueued: await countQueuedUnreadableAdmFiles(env, scope.linkedServerId),
+      newestUnprocessedAdmFile: unreadableBeforeProcessing.name,
+    });
+    await recordSyncRun(env, {
+      id: syncRunId,
+      linkedServerId: scope.linkedServerId,
+      sourceServiceId: scope.nitradoServiceId,
+      triggerType,
+      status,
+      message,
+      linesRead: 0,
+      linesProcessed: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      startedAt: syncStartedAtIso,
+      finishedAt: new Date().toISOString(),
+      durationMs: syncDurationMs,
+    });
+    console.log("DZN ADM SELF HEALING ACTIVE", { linkedServerId: scope.linkedServerId, queuedFile: unreadableBeforeProcessing.name });
+    console.log("DZN ADM ONLY BLOCKED BY NITRADO STATUS", { status, latestAdmFile });
+    return emptyAdmSyncResult({
+      status,
+      message,
+      latestAdmFile,
+      lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
+      lastSyncAt: now,
+      readableRouteUsed: readable.readableRouteUsed,
+      linesRead: 0,
+      syncDurationMs,
+    });
+  }
 
   let eventsCreated = 0;
   let killsCreated = 0;
@@ -465,14 +592,18 @@ export async function runAdmSync(
   let totalLinesRead = 0;
   let totalLinesProcessed = 0;
   let pendingLineCount = 0;
+  let rawKillLinesFound = 0;
   let creditedKillLinesFound = 0;
   let parsedKillLinesFound = 0;
+  let parserSkippedLines = 0;
   let cursorFile = existingState?.last_processed_file ?? null;
   let cursorLine = Number(existingState?.last_processed_line ?? 0);
   let cursorOffset = Number(existingState?.last_processed_offset ?? 0);
   let readableRouteUsed = readable.readableRouteUsed;
   let lastProcessedLineForError = cursorLine;
-  const filesToProcess = selectAdmFilesForCursor(readableFiles, existingState?.last_processed_file ?? null);
+  const filesToProcess = processableFilesBeforeUnreadable.length
+    ? processableFilesBeforeUnreadable
+    : selectAdmFilesForCursor(readableFiles, existingState?.last_processed_file ?? null);
 
   try {
     for (const file of filesToProcess) {
@@ -487,12 +618,35 @@ export async function runAdmSync(
         : [];
       const recentDeathLines = new Map<string, number>();
       const warmupStart = Math.max(0, fileStartLine - 5);
+      const rawKillLinesThisFile = fileLines.slice(fileStartLine).filter(hasRawPlayerKillLine).length;
+      const parsedKillLinesThisFile = pendingParsedEvents.filter(isCreditedKillEvent).length;
+      const parserSkippedThisFile = Math.max(0, rawKillLinesThisFile - parsedKillLinesThisFile);
       totalLinesRead += fileLines.length;
       pendingLineCount += pendingParsedEvents.length;
+      rawKillLinesFound += rawKillLinesThisFile;
       creditedKillLinesFound += parsedLines.filter(isCreditedKillEvent).length;
-      parsedKillLinesFound += pendingParsedEvents.filter(isCreditedKillEvent).length;
+      parsedKillLinesFound += parsedKillLinesThisFile;
+      parserSkippedLines += parserSkippedThisFile;
       readableRouteUsed = file.readableRouteUsed ?? readableRouteUsed;
       processedOffset = isSameAdmFile ? Number(existingState?.last_processed_offset ?? 0) : 0;
+      const killsBeforeFile = killsCreated;
+
+      if (rawKillLinesThisFile > 0 && parsedKillLinesThisFile <= 0) {
+        await recordAdmFileAttempt(env, fileScope, {
+          name: file.name,
+          path: file.path,
+          timestamp: extractAdmTimestampScore(file.name),
+        }, {
+          status: "parser_error",
+          lineCount: fileLines.length,
+          rawKillLinesFound: rawKillLinesThisFile,
+          parsedKillLinesFound: 0,
+          insertedKills: 0,
+          parserSkippedLines: rawKillLinesThisFile,
+          message: "Raw killed by Player lines were found but the parser did not match them.",
+        });
+        throw new AdmParserMismatchError(file.name, rawKillLinesThisFile);
+      }
 
       for (let index = warmupStart; index < fileStartLine; index += 1) {
         const previousEvent = parsedLines[index];
@@ -544,11 +698,32 @@ export async function runAdmSync(
       cursorLine = fileStartLine + pendingParsedEvents.length;
       cursorOffset = processedOffset;
       lastProcessedLineForError = cursorLine;
+      await recordAdmFileAttempt(env, fileScope, {
+        name: file.name,
+        path: file.path,
+        timestamp: extractAdmTimestampScore(file.name),
+      }, {
+        status: cursorLine >= fileLines.length ? "processed" : "partial",
+        lineCount: fileLines.length,
+        rawKillLinesFound: rawKillLinesThisFile,
+        parsedKillLinesFound: parsedKillLinesThisFile,
+        insertedKills: killsCreated - killsBeforeFile,
+        parserSkippedLines: parserSkippedThisFile,
+        lastLineProcessed: cursorLine,
+        message: cursorLine >= fileLines.length ? "ADM file processed successfully." : "ADM file partially processed due to per-run line budget.",
+      });
       if (totalLinesProcessed >= maxLinesPerRun) break;
     }
   } catch (error) {
     const syncDurationMs = Date.now() - syncStartedAt;
-    const message = `ADM write failed. ${safeSyncErrorMessage(error)}`;
+    const parserMismatch = error instanceof AdmParserMismatchError;
+    const scopeBlocked = /wrong linked_server_id|wrong Nitrado service id|wrong ADM file|without linked_server_id|scope/i.test(safeSyncErrorMessage(error));
+    const status: AdmSyncStatusCode = parserMismatch ? "dzn_parser_error" : scopeBlocked ? "dzn_scope_blocked" : "dzn_write_error";
+    const message = parserMismatch
+      ? `DZN found ${error.rawKillLinesFound} raw kill lines in ${error.admFile}, but the parser matched zero. Parser update required.`
+      : scopeBlocked
+        ? `ADM write blocked by server scope guardrails. ${safeSyncErrorMessage(error)}`
+        : `ADM write failed. ${safeSyncErrorMessage(error)}`;
     await upsertSyncState(env, initialScope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
@@ -556,7 +731,7 @@ export async function runAdmSync(
       lastProcessedFile: existingState?.last_processed_file ?? null,
       lastProcessedLine: lastProcessedLineForError,
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
-      status: "write_error",
+      status,
       message,
       lastSyncAt: now,
       linesRead: totalLinesRead,
@@ -570,13 +745,18 @@ export async function runAdmSync(
       duplicateLines: 0,
       syncDurationMs,
       readableRoute: readableRouteUsed,
+      rawKillLinesFound,
+      parsedKillLinesFound,
+      parserSkippedLines,
+      unreadableFilesQueued: await countQueuedUnreadableAdmFiles(env, initialScope.linkedServerId),
+      newestUnprocessedAdmFile: cursorFile,
     });
     await recordSyncRun(env, {
       id: syncRunId,
       linkedServerId: initialScope.linkedServerId,
       sourceServiceId: initialScope.nitradoServiceId,
       triggerType,
-      status: "write_error",
+      status,
       message,
       linesRead: totalLinesRead,
       linesProcessed: 0,
@@ -587,7 +767,7 @@ export async function runAdmSync(
       durationMs: syncDurationMs,
     });
     return emptyAdmSyncResult({
-      status: "write_error",
+      status,
       message,
       latestAdmFile,
       lastProcessedLine: lastProcessedLineForError,
@@ -606,6 +786,8 @@ export async function runAdmSync(
     eventsCreated,
     killsCreated,
     buildEventsStored,
+    parsedKillLinesFound,
+    duplicateKillsSkipped,
   });
   const message = buildSyncRunMessage({
     triggerType,
@@ -652,6 +834,11 @@ export async function runAdmSync(
     duplicateLines,
     syncDurationMs,
     readableRoute: readableRouteUsed,
+    rawKillLinesFound,
+    parsedKillLinesFound,
+    parserSkippedLines,
+    unreadableFilesQueued: await countQueuedUnreadableAdmFiles(env, initialScope.linkedServerId),
+    newestUnprocessedAdmFile: unreadableBeforeProcessing?.name ?? null,
   });
   await recordSyncRun(env, {
     id: syncRunId,
@@ -672,6 +859,8 @@ export async function runAdmSync(
   console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
   console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, linesRead: totalLinesRead, eventsCreated, killsCreated });
   console.log("DZN ADM FULL SYNC COMPLETE");
+  console.log("DZN ADM MISSION CRITICAL SYNC READY", { linkedServerId: initialScope.linkedServerId, status, filesProcessed: filesToProcess.length });
+  if (unreadableBeforeProcessing) console.log("DZN ADM SELF HEALING ACTIVE", { linkedServerId: initialScope.linkedServerId, queuedFile: unreadableBeforeProcessing.name });
 
   return {
     status,
@@ -705,14 +894,31 @@ export function classifyAdmSyncOutcome(values: {
   eventsCreated: number;
   killsCreated: number;
   buildEventsStored: number;
+  parsedKillLinesFound?: number;
+  duplicateKillsSkipped?: number;
 }): AdmSyncStatusCode {
   if (values.pendingLineCount <= 0) return "no_new_lines";
+  if ((values.parsedKillLinesFound ?? 0) > 0 && values.killsCreated <= 0 && (values.duplicateKillsSkipped ?? 0) >= (values.parsedKillLinesFound ?? 0)) {
+    return "completed";
+  }
   if (values.eventsCreated <= 0 && values.killsCreated <= 0 && values.buildEventsStored <= 0) return "no_supported_events";
   return "completed";
 }
 
 export function isAdmSyncErrorStatus(status: string | null | undefined) {
-  return ["nitrado_error", "parser_error", "write_error", "error", "failed"].includes(String(status ?? "").toLowerCase());
+  return [
+    "nitrado_down",
+    "nitrado_auth_invalid",
+    "nitrado_rate_limited",
+    "dzn_parser_error",
+    "dzn_write_error",
+    "dzn_scope_blocked",
+    "nitrado_error",
+    "parser_error",
+    "write_error",
+    "error",
+    "failed",
+  ].includes(String(status ?? "").toLowerCase());
 }
 
 export function isAdmSyncTemporarilyUnavailableStatus(status: string | null | undefined) {
@@ -742,8 +948,49 @@ function buildSyncRunMessage(values: {
   return `${prefix} completed successfully. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}. Activity events created: ${values.eventsCreated}. Kill lines found this check: ${values.creditedKillLinesFound}. Kill lines parsed this check: ${values.parsedKillLinesFound}. Kill events inserted this check: ${values.killsCreated}. Build events created: ${values.buildEventsStored}. Kill lines skipped this check: ${values.duplicateKillsSkipped}. Players updated: ${values.uniquePlayers}.`;
 }
 
-export function classifyUnavailableAdmFileStatus(latestAdmFile: string | null | undefined, admAvailable: boolean): "adm_file_unreadable" | "no_adm_file" {
-  return latestAdmFile || admAvailable ? "adm_file_unreadable" : "no_adm_file";
+export function classifyUnavailableAdmFileStatus(
+  latestAdmFile: string | null | undefined,
+  admAvailable: boolean,
+  apiStatus?: string | null,
+): "adm_file_unreadable" | "adm_not_generated_yet" | "nitrado_down" | "nitrado_auth_invalid" | "nitrado_rate_limited" {
+  if (apiStatus === "401" || apiStatus === "403") return "nitrado_auth_invalid";
+  if (apiStatus === "429") return "nitrado_rate_limited";
+  if (apiStatus === "error" && !latestAdmFile && !admAvailable) return "nitrado_down";
+  return latestAdmFile || admAvailable ? "adm_file_unreadable" : "adm_not_generated_yet";
+}
+
+function getUnavailableAdmMessage(status: AdmSyncStatusCode) {
+  if (status === "nitrado_auth_invalid") return "Nitrado token or service permission is invalid, expired, or forbidden.";
+  if (status === "nitrado_rate_limited") return "Nitrado rate limited ADM access. DZN will retry automatically.";
+  if (status === "nitrado_down") return "Nitrado is currently unavailable. DZN will retry automatically.";
+  if (status === "adm_file_unreadable") return "Latest ADM file found, but Nitrado has not returned readable content yet. DZN will retry automatically.";
+  return "No ADM file is available yet for this reset/window. DZN will retry automatically.";
+}
+
+function getAdmHealthLabel(status: string | null | undefined) {
+  const normalized = String(status ?? "").toLowerCase();
+  if (["completed", "no_new_lines", "no_supported_events", "active", "idle"].includes(normalized)) return "Healthy";
+  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file") return "Waiting for ADM";
+  if (normalized === "adm_file_unreadable" || normalized === "nitrado_file_unavailable") return "ADM temporarily unreadable";
+  if (normalized === "nitrado_down" || normalized === "nitrado_rate_limited" || normalized === "nitrado_error") return "Nitrado unavailable";
+  if (normalized === "nitrado_auth_invalid") return "Token/service issue";
+  if (normalized === "dzn_parser_error" || normalized === "parser_error") return "Parser attention needed";
+  if (normalized === "dzn_write_error" || normalized === "dzn_scope_blocked" || normalized === "write_error") return "Broken";
+  return "Delayed";
+}
+
+function getAdmRecoveryAction(status: string | null | undefined, unreadableQueued: number) {
+  const normalized = String(status ?? "").toLowerCase();
+  if (normalized === "nitrado_auth_invalid") return "Reconnect or refresh the server owner's Nitrado token/service permission.";
+  if (normalized === "nitrado_down") return "Nitrado is unavailable. DZN will retry automatically.";
+  if (normalized === "nitrado_rate_limited") return "Nitrado throttled requests. DZN will retry on the next scheduled run.";
+  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file") return "Waiting for Nitrado to generate or release the next ADM log.";
+  if (normalized === "adm_file_unreadable") return "ADM file is queued for retry. DZN will self-heal when Nitrado returns readable content.";
+  if (normalized === "dzn_parser_error" || normalized === "parser_error") return "Parser update required; raw kill lines are preserved for diagnosis.";
+  if (normalized === "dzn_write_error" || normalized === "write_error") return "Database write failed; cursor was not advanced and DZN will retry.";
+  if (normalized === "dzn_scope_blocked") return "Server scope guardrail blocked a write; review linked_server_id/service mapping.";
+  if (unreadableQueued > 0) return "Queued ADM files will be retried automatically.";
+  return "ADM sync healthy. Latest file processed successfully.";
 }
 
 export function compareAdmFileNamesChronological(a: string | null | undefined, b: string | null | undefined) {
@@ -755,8 +1002,34 @@ export function compareAdmFileNamesChronological(a: string | null | undefined, b
 
 function selectAdmFilesForCursor(files: ReadableAdmFileForSync[], lastProcessedFile: string | null | undefined) {
   const ordered = [...files].sort((a, b) => compareAdmFileNamesChronological(a.name, b.name));
-  if (!lastProcessedFile) return ordered.slice(-1);
+  if (!lastProcessedFile) return ordered;
   return ordered.filter((file) => compareAdmFileNamesChronological(file.name, lastProcessedFile) >= 0);
+}
+
+function selectAdmCandidatesForCursor(files: DiscoveredAdmFileForSync[], lastProcessedFile: string | null | undefined) {
+  const ordered = [...files].sort((a, b) => compareAdmFileNamesChronological(a.name, b.name));
+  if (!lastProcessedFile) return ordered;
+  return ordered.filter((file) => compareAdmFileNamesChronological(file.name, lastProcessedFile) >= 0);
+}
+
+function collectReadableAdmFilesUntilUnreadable(candidates: DiscoveredAdmFileForSync[], readableByName: Map<string, ReadableAdmFileForSync>) {
+  const files: ReadableAdmFileForSync[] = [];
+  for (const candidate of candidates) {
+    const readable = readableByName.get(candidate.name);
+    if (!readable) break;
+    files.push(readable);
+  }
+  return files;
+}
+
+function hasRawPlayerKillLine(line: string) {
+  return /\bkilled by\s+Player\s+"/i.test(line);
+}
+
+class AdmParserMismatchError extends Error {
+  constructor(public admFile: string, public rawKillLinesFound: number) {
+    super(`Raw killed by Player lines found in ${admFile}, but parser matched zero`);
+  }
 }
 
 function emptyAdmSyncResult(values: {
@@ -822,6 +1095,11 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
         adm_sync_state.last_duplicate_lines,
         adm_sync_state.last_sync_duration_ms,
         adm_sync_state.last_readable_route,
+        adm_sync_state.last_raw_kill_lines_found,
+        adm_sync_state.last_parsed_kill_lines_found,
+        adm_sync_state.last_parser_skipped_lines,
+        adm_sync_state.last_unreadable_files_queued,
+        adm_sync_state.last_newest_unprocessed_adm_file,
         server_stats.total_kills,
         server_stats.total_deaths,
         server_stats.total_joins,
@@ -835,15 +1113,18 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     )
     .bind(linkedServer.id, userId)
     .first<Record<string, unknown>>();
-  const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun] = await Promise.all([
+  const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun, unreadableQueued, newestUnprocessed] = await Promise.all([
     getRecentSyncRuns(env, linkedServer.id, 5),
     getLatestSyncRunByTrigger(env, linkedServer.id, "manual"),
     getLatestSyncRunByTrigger(env, linkedServer.id, "scheduled"),
     getLatestSuccessfulSyncRun(env, linkedServer.id),
+    countQueuedUnreadableAdmFiles(env, linkedServer.id),
+    getNewestUnprocessedAdmFile(env, linkedServer.id),
   ]);
+  const currentStatus = stringOrDefault(row?.last_sync_status, "not_started");
 
   return {
-    last_sync_status: stringOrDefault(row?.last_sync_status, "not_started"),
+    last_sync_status: currentStatus,
     last_sync_message: typeof row?.last_sync_message === "string" ? row.last_sync_message : null,
     latest_adm_file: typeof row?.latest_adm_file === "string" ? row.latest_adm_file : null,
     last_processed_file: typeof row?.last_processed_file === "string" ? row.last_processed_file : null,
@@ -869,6 +1150,14 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     last_scheduled_sync_at: lastScheduledRun?.finished_at ?? lastScheduledRun?.started_at ?? null,
     last_manual_sync_at: lastManualRun?.finished_at ?? lastManualRun?.started_at ?? null,
     last_successful_sync_at: lastSuccessfulRun?.finished_at ?? lastSuccessfulRun?.started_at ?? null,
+    adm_health_label: getAdmHealthLabel(currentStatus),
+    latest_adm_processed: typeof row?.last_processed_file === "string" ? row.last_processed_file : null,
+    newest_unprocessed_adm_file: newestUnprocessed ?? (typeof row?.last_newest_unprocessed_adm_file === "string" ? row.last_newest_unprocessed_adm_file : null),
+    unreadable_files_queued: unreadableQueued,
+    raw_kill_lines_found: numberOrZero(row?.last_raw_kill_lines_found),
+    parsed_kill_lines_found: numberOrZero(row?.last_parsed_kill_lines_found),
+    parser_skipped_lines: numberOrZero(row?.last_parser_skipped_lines),
+    current_recovery_action: getAdmRecoveryAction(currentStatus, unreadableQueued),
     recent_sync_runs: recentRuns,
   };
 }
@@ -1385,6 +1674,11 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["last_sync_duration_ms", "INTEGER"],
     ["last_readable_route", "TEXT"],
     ["source_service_id", "TEXT"],
+    ["last_raw_kill_lines_found", "INTEGER DEFAULT 0"],
+    ["last_parsed_kill_lines_found", "INTEGER DEFAULT 0"],
+    ["last_parser_skipped_lines", "INTEGER DEFAULT 0"],
+    ["last_unreadable_files_queued", "INTEGER DEFAULT 0"],
+    ["last_newest_unprocessed_adm_file", "TEXT"],
   ]);
   await ensureMissingColumns(db, "adm_raw_events", [
     ["source_service_id", "TEXT"],
@@ -1454,6 +1748,11 @@ async function upsertSyncState(
     duplicateLines: number;
     syncDurationMs: number;
     readableRoute: string | null;
+    rawKillLinesFound?: number;
+    parsedKillLinesFound?: number;
+    parserSkippedLines?: number;
+    unreadableFilesQueued?: number;
+    newestUnprocessedAdmFile?: string | null;
   },
 ) {
   const db = requireDb(env);
@@ -1465,8 +1764,10 @@ async function upsertSyncState(
         last_sync_at, last_lines_read, last_lines_processed, last_raw_events_stored,
         last_player_events_stored, last_kill_events_stored, last_events_created,
         last_kills_created, last_unknown_lines, last_duplicate_lines, last_sync_duration_ms,
-        last_readable_route, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        last_readable_route, last_raw_kill_lines_found, last_parsed_kill_lines_found,
+        last_parser_skipped_lines, last_unreadable_files_queued, last_newest_unprocessed_adm_file,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(linked_server_id) DO UPDATE SET
         source_service_id = COALESCE(excluded.source_service_id, adm_sync_state.source_service_id),
         latest_adm_file = excluded.latest_adm_file,
@@ -1488,6 +1789,11 @@ async function upsertSyncState(
         last_duplicate_lines = excluded.last_duplicate_lines,
         last_sync_duration_ms = excluded.last_sync_duration_ms,
         last_readable_route = excluded.last_readable_route,
+        last_raw_kill_lines_found = excluded.last_raw_kill_lines_found,
+        last_parsed_kill_lines_found = excluded.last_parsed_kill_lines_found,
+        last_parser_skipped_lines = excluded.last_parser_skipped_lines,
+        last_unreadable_files_queued = excluded.last_unreadable_files_queued,
+        last_newest_unprocessed_adm_file = excluded.last_newest_unprocessed_adm_file,
         updated_at = CURRENT_TIMESTAMP`,
     )
     .bind(
@@ -1513,8 +1819,131 @@ async function upsertSyncState(
       values.duplicateLines,
       values.syncDurationMs,
       values.readableRoute,
+      values.rawKillLinesFound ?? 0,
+      values.parsedKillLinesFound ?? 0,
+      values.parserSkippedLines ?? 0,
+      values.unreadableFilesQueued ?? 0,
+      values.newestUnprocessedAdmFile ?? null,
     )
     .run();
+}
+
+async function recordDiscoveredAdmFiles(env: Env, context: AdmSyncContext, files: DiscoveredAdmFileForSync[]) {
+  for (const file of files) {
+    await recordAdmFileAttempt(env, context, file, {
+      status: "discovered",
+      lineCount: 0,
+      rawKillLinesFound: 0,
+      parsedKillLinesFound: 0,
+      insertedKills: 0,
+      parserSkippedLines: 0,
+      message: null,
+    });
+  }
+}
+
+async function recordAdmFileAttempt(
+  env: Env,
+  context: AdmSyncContext,
+  file: DiscoveredAdmFileForSync,
+  values: {
+    status: "discovered" | "unreadable" | "parser_error" | "write_error" | "processed" | "partial";
+    lineCount: number;
+    rawKillLinesFound: number;
+    parsedKillLinesFound: number;
+    insertedKills: number;
+    parserSkippedLines: number;
+    lastLineProcessed?: number;
+    message: string | null;
+  },
+) {
+  const db = requireDb(env);
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO adm_sync_file_state (
+        id, linked_server_id, source_service_id, adm_file, adm_path, status,
+        first_seen_at, last_checked_at, last_readable_at, processed_at, line_count,
+        last_line_processed, raw_kill_lines_found, parsed_kill_lines_found,
+        inserted_kills, parser_skipped_lines, retry_count, last_error, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(linked_server_id, source_service_id, adm_file) DO UPDATE SET
+        adm_path = COALESCE(excluded.adm_path, adm_sync_file_state.adm_path),
+        status = CASE
+          WHEN adm_sync_file_state.ignored_at IS NOT NULL THEN adm_sync_file_state.status
+          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('processed', 'partial') THEN adm_sync_file_state.status
+          ELSE excluded.status
+        END,
+        last_checked_at = excluded.last_checked_at,
+        last_readable_at = COALESCE(excluded.last_readable_at, adm_sync_file_state.last_readable_at),
+        processed_at = COALESCE(excluded.processed_at, adm_sync_file_state.processed_at),
+        line_count = MAX(COALESCE(adm_sync_file_state.line_count, 0), excluded.line_count),
+        last_line_processed = MAX(COALESCE(adm_sync_file_state.last_line_processed, 0), excluded.last_line_processed),
+        raw_kill_lines_found = excluded.raw_kill_lines_found,
+        parsed_kill_lines_found = excluded.parsed_kill_lines_found,
+        inserted_kills = excluded.inserted_kills,
+        parser_skipped_lines = excluded.parser_skipped_lines,
+        retry_count = CASE
+          WHEN excluded.status = 'unreadable' THEN COALESCE(adm_sync_file_state.retry_count, 0) + 1
+          ELSE COALESCE(adm_sync_file_state.retry_count, 0)
+        END,
+        last_error = excluded.last_error,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      context.linkedServerId,
+      context.nitradoServiceId,
+      file.name,
+      file.path,
+      values.status,
+      now,
+      now,
+      values.status === "processed" || values.status === "partial" ? now : null,
+      values.status === "processed" ? now : null,
+      values.lineCount,
+      values.lastLineProcessed ?? 0,
+      values.rawKillLinesFound,
+      values.parsedKillLinesFound,
+      values.insertedKills,
+      values.parserSkippedLines,
+      values.status === "unreadable" ? 1 : 0,
+      values.message,
+      now,
+    )
+    .run();
+}
+
+async function countQueuedUnreadableAdmFiles(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND ignored_at IS NULL
+         AND status IN ('unreadable', 'parser_error', 'write_error', 'partial')`,
+    )
+    .bind(linkedServerId)
+    .first<{ count: number }>();
+  return numberOrZero(row?.count);
+}
+
+async function getNewestUnprocessedAdmFile(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT adm_file
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND ignored_at IS NULL
+         AND status IN ('discovered', 'unreadable', 'parser_error', 'write_error', 'partial')
+       ORDER BY adm_file DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServerId)
+    .first<{ adm_file: string }>();
+  return row?.adm_file ?? null;
 }
 
 async function insertRawEvent(
@@ -2360,7 +2789,7 @@ async function getReadableAdmFilesForLinkedServer(
     preferredAdmPath?: string | null;
     maxFiles?: number;
   } = {},
-): Promise<{ files: ReadableAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; message: string }> {
+): Promise<{ files: ReadableAdmFileForSync[]; candidates: DiscoveredAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; apiStatus: string; message: string }> {
   const isMock = options.isMock ?? isMockNitrado(env.MOCK_NITRADO);
   if (isMock) {
     const diagnostics = mockNitradoLogAccessDiagnostics(linkedServer.nitrado_service_id ?? "mock-service");
@@ -2371,8 +2800,14 @@ async function getReadableAdmFilesForLinkedServer(
         lines: mockAdmLines(),
         readableRouteUsed: diagnostics.readable.routeRecommendation,
       }],
+      candidates: [{
+        name: diagnostics.newestAdmFileName ?? "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM",
+        path: "dayzps/config/DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM",
+        timestamp: null,
+      }],
       filesFound: 1,
       newestAdmFileName: diagnostics.newestAdmFileName,
+      apiStatus: "OK",
       message: "Mock ADM file loaded through parser sync path",
     };
   }
@@ -2380,8 +2815,10 @@ async function getReadableAdmFilesForLinkedServer(
   if (!linkedServer.nitrado_service_id) {
     return {
       files: [],
+      candidates: [],
       filesFound: 0,
       newestAdmFileName: null,
+      apiStatus: "error",
       message: "No Nitrado token or service ID is available for ADM log reading.",
     };
   }
@@ -2396,8 +2833,10 @@ async function getReadableAdmFilesForLinkedServer(
 
   return {
     files: batch.files.map(mapReadableAdmFileForSync),
+    candidates: batch.candidates.map(mapDiscoveredAdmFileForSync),
     filesFound: batch.filesFound,
     newestAdmFileName: batch.newestAdmFileName,
+    apiStatus: batch.apiStatus,
     message: batch.files.length
       ? `Readable ADM files discovered: ${batch.files.map((file) => file.name).join(", ")}`
       : "ADM file list was discovered, but no readable ADM file content was returned.",
@@ -2410,6 +2849,14 @@ function mapReadableAdmFileForSync(file: NitradoReadableAdmFile): ReadableAdmFil
     path: file.path,
     lines: file.lines,
     readableRouteUsed: file.readableRouteUsed,
+  };
+}
+
+function mapDiscoveredAdmFileForSync(file: NitradoDiscoveredAdmFile): DiscoveredAdmFileForSync {
+  return {
+    name: file.name,
+    path: file.path,
+    timestamp: file.timestamp,
   };
 }
 
@@ -2540,6 +2987,14 @@ function safeSyncErrorMessage(error: unknown) {
     .slice(0, 500);
 }
 
+function classifyNitradoExceptionStatus(error: unknown, latestAdmFile: string | null): AdmSyncStatusCode {
+  const message = safeSyncErrorMessage(error).toLowerCase();
+  if (/401|403|token|unauthori[sz]ed|forbidden|permission|expired|invalid/.test(message)) return "nitrado_auth_invalid";
+  if (/429|rate limit|thrott/i.test(message)) return "nitrado_rate_limited";
+  if (latestAdmFile) return "adm_file_unreadable";
+  return "nitrado_down";
+}
+
 const ADM_SYNC_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS adm_sync_state (
     id TEXT PRIMARY KEY,
@@ -2563,7 +3018,34 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_duplicate_lines INTEGER DEFAULT 0,
     last_sync_duration_ms INTEGER,
     last_readable_route TEXT,
+    last_raw_kill_lines_found INTEGER DEFAULT 0,
+    last_parsed_kill_lines_found INTEGER DEFAULT 0,
+    last_parser_skipped_lines INTEGER DEFAULT 0,
+    last_unreadable_files_queued INTEGER DEFAULT 0,
+    last_newest_unprocessed_adm_file TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS adm_sync_file_state (
+    id TEXT PRIMARY KEY,
+    linked_server_id TEXT NOT NULL,
+    source_service_id TEXT NOT NULL,
+    adm_file TEXT NOT NULL,
+    adm_path TEXT,
+    status TEXT NOT NULL DEFAULT 'discovered',
+    first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_checked_at TEXT,
+    last_readable_at TEXT,
+    processed_at TEXT,
+    line_count INTEGER DEFAULT 0,
+    last_line_processed INTEGER DEFAULT 0,
+    raw_kill_lines_found INTEGER DEFAULT 0,
+    parsed_kill_lines_found INTEGER DEFAULT 0,
+    inserted_kills INTEGER DEFAULT 0,
+    parser_skipped_lines INTEGER DEFAULT 0,
+    retry_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    ignored_at TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS adm_raw_events (
@@ -2654,6 +3136,9 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,
   "CREATE INDEX IF NOT EXISTS idx_adm_sync_state_linked_server_id ON adm_sync_state(linked_server_id)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_adm_sync_file_state_server_file ON adm_sync_file_state(linked_server_id, source_service_id, adm_file)",
+  "CREATE INDEX IF NOT EXISTS idx_adm_sync_file_state_status ON adm_sync_file_state(status)",
+  "CREATE INDEX IF NOT EXISTS idx_adm_sync_file_state_checked ON adm_sync_file_state(last_checked_at)",
   "CREATE INDEX IF NOT EXISTS idx_adm_raw_events_linked_server_id ON adm_raw_events(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_adm_raw_events_adm_file ON adm_raw_events(adm_file)",
   "CREATE INDEX IF NOT EXISTS idx_adm_raw_events_event_type ON adm_raw_events(event_type)",

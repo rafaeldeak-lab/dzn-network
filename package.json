@@ -21,6 +21,8 @@
     "test:public-access-gating": "tsx scripts/test-public-access-gating.ts",
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
     "check:billing-config": "tsx scripts/check-billing-config.ts",
+    "adm:audit-health": "tsx scripts/adm-audit-health.ts",
+    "adm:backfill-missing": "tsx scripts/adm-backfill-missing.ts",
     "diagnose:adm-import": "tsx scripts/diagnose-adm-import.ts",
     "backfill:adm:once": "tsx scripts/one-time-adm-backfill.ts",
     "backfill:build-events": "tsx scripts/backfill-build-events.ts",

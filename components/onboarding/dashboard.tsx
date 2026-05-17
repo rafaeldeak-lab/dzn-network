@@ -684,6 +684,10 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                 <MiniInfo label="Status" value={syncHealth.status === "error" ? "Needs Action" : formatSyncStatus(effectiveSyncStatus)} />
                 <MiniInfo label="Latest ADM File" value={latestAdmFile} />
                 <MiniInfo label="Latest File Readable" value={latestAdmReadable} />
+                <MiniInfo label="ADM Health" value={syncStatus?.adm_health_label ?? "Delayed"} />
+                <MiniInfo label="Latest ADM Processed" value={syncStatus?.latest_adm_processed ?? "Not processed"} />
+                <MiniInfo label="Newest Unprocessed ADM" value={syncStatus?.newest_unprocessed_adm_file ?? "None queued"} />
+                <MiniInfo label="Unreadable Files Queued" value={String(syncStatus?.unreadable_files_queued ?? 0)} />
                 <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
                 <MiniInfo label="Last Checked" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not checked"} />
                 <MiniInfo label="Last Successful Feed Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced"} />
@@ -696,6 +700,10 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                 <MiniInfo label="New Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
                 <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
                 <MiniInfo label="Kills Created" value={String(syncStatus?.last_kills_created ?? lastSyncResult?.killsCreated ?? 0)} />
+                <MiniInfo label="Raw Kill Lines Found" value={String(syncStatus?.raw_kill_lines_found ?? 0)} />
+                <MiniInfo label="Kill Lines Parsed" value={String(syncStatus?.parsed_kill_lines_found ?? 0)} />
+                <MiniInfo label="Parser Skipped Lines" value={String(syncStatus?.parser_skipped_lines ?? 0)} />
+                <MiniInfo label="Recovery Action" value={syncStatus?.current_recovery_action ?? "ADM sync healthy"} />
               </div>
               <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_220px]">
                 <div className="space-y-3">
@@ -2001,13 +2009,13 @@ function getManualSyncMessage(result: AdmSyncRunResult) {
   if (result.status === "no_supported_events") {
     return "Latest ADM checked just now. No supported ADM events found.";
   }
-  if (result.status === "no_adm_file") {
+  if (result.status === "adm_not_generated_yet" || result.status === "no_adm_file") {
     return "Sync checked Nitrado. Waiting for the next ADM file.";
   }
   if (result.status === "adm_file_unreadable") {
     return "Latest ADM file found, but Nitrado did not return readable log content during this sync.";
   }
-  if (["nitrado_error", "parser_error", "write_error"].includes(result.status)) {
+  if (["nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error"].includes(result.status)) {
     return result.message || "ADM sync needs attention.";
   }
   if (result.status === "completed" && result.killsCreated === 0) {
@@ -2104,7 +2112,7 @@ function getDashboardSyncStatusBanner(
 function getLatestAdmReadableLabel(currentStatus: string) {
   const normalizedStatus = currentStatus.toLowerCase();
   if (["adm_file_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) return "Temporarily unavailable";
-  if (normalizedStatus === "no_adm_file") return "No ADM file found";
+  if (normalizedStatus === "adm_not_generated_yet" || normalizedStatus === "no_adm_file") return "No ADM file found";
   if (["completed", "no_new_lines", "no_supported_events"].includes(normalizedStatus)) return "Yes";
   if (normalizedStatus === "read_pending") return "Waiting for readable content";
   return "Unknown";
@@ -2113,7 +2121,7 @@ function getLatestAdmReadableLabel(currentStatus: string) {
 function getRecentFeedBadge(recentEventsAreMock: boolean, currentStatus: string): { label: string; tone: "emerald" | "orange" | "zinc" } {
   if (recentEventsAreMock) return { label: "Mock Sync Data", tone: "orange" };
   const normalizedStatus = currentStatus.toLowerCase();
-  if (["adm_file_unreadable", "nitrado_file_unavailable", "no_adm_file", "nitrado_error", "parser_error", "write_error"].includes(normalizedStatus)) {
+  if (["adm_file_unreadable", "nitrado_file_unavailable", "adm_not_generated_yet", "no_adm_file", "nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error"].includes(normalizedStatus)) {
     return { label: "Feed Check Issue", tone: "orange" };
   }
   if (["no_new_lines", "no_supported_events"].includes(normalizedStatus)) return { label: "Feed Checked", tone: "zinc" };
@@ -2146,14 +2154,14 @@ function getRecentFeedStatus(syncStatus: AdmSyncStatus | null, currentStatus: st
     };
   }
 
-  if (normalizedStatus === "no_adm_file") {
+  if (normalizedStatus === "adm_not_generated_yet" || normalizedStatus === "no_adm_file") {
     return {
       message: "Waiting for next ADM file from Nitrado. Existing feed data remains preserved.",
       className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
     };
   }
 
-  if (["nitrado_error", "parser_error", "write_error", "error", "failed"].includes(normalizedStatus)) {
+  if (["nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error", "error", "failed"].includes(normalizedStatus)) {
     return {
       message: `Feed last updated ${lastSuccessful ?? "previously"}. Latest ADM sync needs attention.`,
       className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
@@ -2223,13 +2231,13 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     };
   }
 
-  if (["nitrado_error", "parser_error", "write_error", "error", "failed"].includes(normalizedStatus)) {
+  if (["nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error", "error", "failed"].includes(normalizedStatus)) {
     return {
       status: "error" as const,
-      title: normalizedStatus === "nitrado_error" ? "Nitrado Log Access Failed" : "Sync Needs Attention",
-      message: normalizedStatus === "write_error" ? "ADM write failed." : "Latest sync run needs attention.",
+      title: ["nitrado_down", "nitrado_rate_limited", "nitrado_error"].includes(normalizedStatus) ? "Nitrado Log Access Failed" : normalizedStatus === "nitrado_auth_invalid" ? "Nitrado Token/Service Issue" : "Sync Needs Attention",
+      message: ["dzn_write_error", "write_error"].includes(normalizedStatus) ? "ADM write failed." : normalizedStatus === "dzn_parser_error" ? "DZN found kill lines but could not parse them." : "Latest sync run needs attention.",
       detail: currentMessage || "Review the latest sync run.",
-      nextAction: normalizedStatus === "nitrado_error" ? "Run diagnostics" : "Review latest sync error",
+      nextAction: ["nitrado_down", "nitrado_rate_limited", "nitrado_error"].includes(normalizedStatus) ? "DZN will retry automatically" : normalizedStatus === "nitrado_auth_invalid" ? "Reconnect Nitrado token" : "Review latest sync error",
       latestSuccessTime,
     };
   }
@@ -2247,7 +2255,7 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     };
   }
 
-  if (normalizedStatus === "no_adm_file") {
+  if (normalizedStatus === "adm_not_generated_yet" || normalizedStatus === "no_adm_file") {
     return {
       status: "pending" as const,
       title: "Waiting For ADM File",
@@ -2321,7 +2329,7 @@ function isSuccessfulRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
 }
 
 function isFailedRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
-  return ["error", "failed", "nitrado_error", "parser_error", "write_error"].includes(run.status.toLowerCase());
+  return ["error", "failed", "nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error"].includes(run.status.toLowerCase());
 }
 
 function isHistoricalFailedRun(run: AdmSyncStatus["recent_sync_runs"][number], latestSuccessTime: string | null) {
@@ -2381,8 +2389,14 @@ function formatSyncStatus(value: string) {
   if (value === "idle") return "Idle";
   if (value === "no_new_lines") return "No New Lines";
   if (value === "no_supported_events") return "No Supported Events";
-  if (value === "no_adm_file") return "Waiting For ADM File";
+  if (value === "adm_not_generated_yet" || value === "no_adm_file") return "Waiting For ADM File";
   if (value === "adm_file_unreadable") return "ADM File Temporarily Unavailable";
+  if (value === "nitrado_down") return "Nitrado Unavailable";
+  if (value === "nitrado_auth_invalid") return "Token/Service Issue";
+  if (value === "nitrado_rate_limited") return "Nitrado Rate Limited";
+  if (value === "dzn_parser_error") return "Parser Attention Needed";
+  if (value === "dzn_write_error") return "Write Error";
+  if (value === "dzn_scope_blocked") return "Scope Blocked";
   if (value === "nitrado_error") return "Nitrado Error";
   if (value === "parser_error") return "Parser Error";
   if (value === "write_error") return "Write Error";

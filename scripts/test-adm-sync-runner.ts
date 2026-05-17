@@ -52,9 +52,12 @@ assert.equal(isAdmSyncErrorStatus("write_error"), true);
 assert.equal(isAdmSyncErrorStatus("no_new_lines"), false);
 assert.equal(isAdmSyncErrorStatus("adm_file_unreadable"), false);
 assert.equal(isAdmSyncTemporarilyUnavailableStatus("adm_file_unreadable"), true);
-assert.equal(classifyUnavailableAdmFileStatus(null, false), "no_adm_file");
+assert.equal(classifyUnavailableAdmFileStatus(null, false), "adm_not_generated_yet");
 assert.equal(classifyUnavailableAdmFileStatus("DayZServer_PS4_x64_2026-05-17_16-02-20.ADM", false), "adm_file_unreadable");
 assert.equal(classifyUnavailableAdmFileStatus(null, true), "adm_file_unreadable");
+assert.equal(classifyUnavailableAdmFileStatus(null, false, "error"), "nitrado_down");
+assert.equal(classifyUnavailableAdmFileStatus(null, false, "401"), "nitrado_auth_invalid");
+assert.equal(classifyUnavailableAdmFileStatus(null, false, "429"), "nitrado_rate_limited");
 
 const admFilesChronological = [
   "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
@@ -83,8 +86,14 @@ assert.equal(nitradoSource.includes("DZN ADM LATEST FILE SELECTION FIXED"), true
 assert.equal(nitradoSource.includes("fetchReadableNitradoAdmFiles"), true);
 const packageSource = readFileSync("package.json", "utf8");
 assert.equal(packageSource.includes("diagnose:adm-import"), true);
+assert.equal(packageSource.includes("adm:audit-health"), true);
+assert.equal(packageSource.includes("adm:backfill-missing"), true);
 const diagnoseImportSource = readFileSync("scripts/diagnose-adm-import.ts", "utf8");
 assert.equal(diagnoseImportSource.includes("DZN ADM KILL IMPORT DIAGNOSTICS READY"), true);
+assert.equal(admSyncSource.includes("adm_sync_file_state"), true);
+assert.equal(admSyncSource.includes("DZN ADM SELF HEALING ACTIVE"), true);
+assert.equal(admSyncSource.includes("DZN ADM MISSION CRITICAL SYNC READY"), true);
+assert.equal(admSyncSource.includes("DZN ADM ONLY BLOCKED BY NITRADO STATUS"), true);
 
 const env = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {

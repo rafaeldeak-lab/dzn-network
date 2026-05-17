@@ -39,6 +39,7 @@ type AdmReadOptions = {
   preferredAdmPath?: string | null;
   previousLatestAdmFileName?: string | null;
   maxFiles?: number;
+  lookbackFiles?: number;
 };
 
 type NitradoRawService = {
@@ -79,7 +80,7 @@ type GameSpecificLogDetails = {
   logContextPaths: string[];
 };
 
-type SafeApiStatus = "OK" | "401" | "403" | "404" | "error";
+type SafeApiStatus = "OK" | "401" | "403" | "404" | "429" | "error";
 type SampleFetchStatus = SafeApiStatus | "not_attempted";
 
 type AdmApiResponseShape = {
@@ -269,12 +270,20 @@ export type NitradoReadableAdmFile = {
   readableRouteUsed: string | null;
 };
 
+export type NitradoDiscoveredAdmFile = {
+  name: string;
+  path: string;
+  timestamp: number | null;
+};
+
 export type NitradoReadableAdmFileBatch = {
   files: NitradoReadableAdmFile[];
+  candidates: NitradoDiscoveredAdmFile[];
   filesFound: number;
   newestAdmFileName: string | null;
   previousLatestAdmFileName: string | null;
   lastCheckedAt: string;
+  apiStatus: SafeApiStatus;
 };
 
 export async function validateNitradoToken(token: string) {
@@ -374,13 +383,15 @@ export async function fetchReadableNitradoAdmFiles(
   const previousLatestAdmFileName = options.previousLatestAdmFileName ?? null;
   const previousScore = previousLatestAdmFileName ? parseAdmTimestamp(previousLatestAdmFileName) : null;
   const maxFiles = Math.max(1, Math.min(Math.trunc(options.maxFiles ?? 8), 24));
-  const readCandidates = (previousScore
-    ? allEntries.filter((entry) => {
+  const previousIndex = previousScore
+    ? allEntries.findIndex((entry) => {
       const score = timestampScore(entry);
-      return score === null || score >= previousScore;
+      return score !== null && score >= previousScore;
     })
-    : allEntries.slice(-1)
-  ).slice(-maxFiles);
+    : -1;
+  const lookbackFiles = Math.max(1, Math.min(Math.trunc(options.lookbackFiles ?? 4), 12));
+  const readStartIndex = previousIndex >= 0 ? Math.max(0, previousIndex - lookbackFiles) : Math.max(0, allEntries.length - maxFiles);
+  const readCandidates = allEntries.slice(readStartIndex).slice(-maxFiles);
 
   console.log("DZN ADM FILE DISCOVERY", {
     serviceId,
@@ -402,10 +413,16 @@ export async function fetchReadableNitradoAdmFiles(
 
   return {
     files,
+    candidates: readCandidates.map((entry) => ({
+      name: entry.name,
+      path: entry.path,
+      timestamp: timestampScore(entry),
+    })),
     filesFound: allEntries.length,
     newestAdmFileName: newest?.name ?? null,
     previousLatestAdmFileName,
     lastCheckedAt,
+    apiStatus: serviceProbe.attempt.status,
   };
 }
 
@@ -1876,6 +1893,7 @@ function safeFileApiError(status: SafeApiStatus) {
   if (status === "401") return "Nitrado token was rejected";
   if (status === "403") return "Nitrado file browser permission denied";
   if (status === "404") return "Nitrado file path not found";
+  if (status === "429") return "Nitrado rate limit reached";
   return "Nitrado file request failed";
 }
 
@@ -2682,6 +2700,7 @@ function safeResponseStatus(response: Response): SafeApiStatus {
   if (response.status === 401) return "401";
   if (response.status === 403) return "403";
   if (response.status === 404) return "404";
+  if (response.status === 429) return "429";
   return "error";
 }
 
