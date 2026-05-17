@@ -3,6 +3,7 @@ import { ensureBuildEventSchema, getRankedBuildServers } from "../../_lib/build-
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
+import { isPublicViewerLoggedIn } from "../../_lib/public-auth";
 import { getRankedPublicServers } from "../../_lib/public-leaderboards";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -77,16 +78,17 @@ const PUBLIC_CACHE_HEADERS = {
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
+  const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
 
   if (!env.DB) {
-    return json(emptyHomeStats(), { headers: PUBLIC_CACHE_HEADERS });
+    return json(applyHomeStatsAccess(emptyHomeStats(), viewerLoggedIn), { headers: PUBLIC_CACHE_HEADERS });
   }
 
   await ensureLinkedServerMetadataColumns(env);
   await ensureAdmSyncSchema(env);
   await ensureBuildEventSchema(env);
   const data = await buildHomeStats(env);
-  return json(data, { headers: PUBLIC_CACHE_HEADERS });
+  return json(applyHomeStatsAccess(data, viewerLoggedIn), { headers: PUBLIC_CACHE_HEADERS });
 };
 
 async function buildHomeStats(env: Env) {
@@ -788,5 +790,44 @@ function emptyHomeStats() {
       active: 0,
       pending: 0,
     },
+  };
+}
+
+export function applyHomeStatsAccess<T extends {
+  topServers: Array<Record<string, unknown>>;
+  topPlayers: Array<Record<string, unknown>>;
+  recentActivity: Array<{ source?: string; serverName?: string | null; title: string } & Record<string, unknown>>;
+  top_build_servers: Array<Record<string, unknown>>;
+  event_leaderboard: unknown;
+}>(data: T, viewerLoggedIn: boolean): T & {
+  access_level: "full" | "preview";
+  is_locked: boolean;
+  locked_reason: string | null;
+} {
+  if (viewerLoggedIn) {
+    return {
+      ...data,
+      access_level: "full",
+      is_locked: false,
+      locked_reason: null,
+    };
+  }
+
+  return {
+    ...data,
+    access_level: "preview",
+    is_locked: true,
+    locked_reason: "Log in with Discord to unlock full network stats.",
+    topServers: data.topServers.slice(0, 3).map((server) => ({
+      ...server,
+      score_breakdown: null,
+    })),
+    topPlayers: [],
+    recentActivity: data.recentActivity.slice(0, 3).map((activity) => ({
+      ...activity,
+      title: activity.source === "server" ? activity.title : `${activity.serverName ?? "Server"} activity synced`,
+    })),
+    top_build_servers: [],
+    event_leaderboard: null,
   };
 }

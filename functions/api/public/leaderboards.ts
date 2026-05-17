@@ -1,5 +1,6 @@
 import { getPublicLeaderboardsPayload } from "../../_lib/public-leaderboards";
 import { json, methodNotAllowed } from "../../_lib/http";
+import { isPublicViewerLoggedIn } from "../../_lib/public-auth";
 import type { PagesFunction } from "../../_lib/types";
 
 const PUBLIC_CACHE_HEADERS = {
@@ -8,5 +9,6 @@ const PUBLIC_CACHE_HEADERS = {
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
-  return json(await getPublicLeaderboardsPayload(env), { headers: PUBLIC_CACHE_HEADERS });
+  const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
+  return json(await getPublicLeaderboardsPayload(env, viewerLoggedIn), { headers: PUBLIC_CACHE_HEADERS });
 };

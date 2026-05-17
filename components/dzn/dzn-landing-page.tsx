@@ -125,6 +125,9 @@ type HomeStats = {
     active: number;
     pending: number;
   };
+  access_level: "full" | "preview";
+  is_locked: boolean;
+  locked_reason: string | null;
 };
 
 type PublicNetworkEvent = {
@@ -227,6 +230,9 @@ const emptyHomeStats: HomeStats = {
     active: 0,
     pending: 0,
   },
+  access_level: "full",
+  is_locked: false,
+  locked_reason: null,
 };
 
 const HOME_STATS_REFRESH_MS = 30000;
@@ -318,6 +324,7 @@ function useHomeStats() {
       abortRef.current = controller;
       try {
         const response = await fetch("/api/public/home-stats", {
+          credentials: "include",
           headers: { accept: "application/json" },
           signal: controller.signal,
         });
@@ -365,6 +372,7 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE STATS ROW UPGRADED");
     console.log("DZN TOP SERVERS PANEL UPGRADED");
     console.log("DZN NAVBAR DISCORD LINK UPGRADED");
+    console.log("DZN PUBLIC ACCESS GATING READY");
   }, []);
 
   useEffect(() => {
@@ -393,6 +401,7 @@ export function DznLandingPage() {
             lastUpdated={liveStats.lastUpdated}
             error={liveStats.error}
           />
+          {liveStats.data.is_locked ? <HomepagePreviewUnlock /> : null}
           <GameModeGrid counts={liveStats.data.gameModes} />
           <NetworkOverview homeStats={liveStats.data} />
           <NetworkPulse homeStats={liveStats.data} />
@@ -657,6 +666,26 @@ function HeroDashboard({
       </motion.div>
 
       <FeatureStrip className="order-3 xl:col-start-1 xl:row-start-2" />
+    </motion.section>
+  );
+}
+
+function HomepagePreviewUnlock() {
+  return (
+    <motion.section variants={fadeUp} className="rounded-xl border border-violet-300/22 bg-[#050815]/72 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.32),0_0_28px_rgba(139,92,246,0.16)] backdrop-blur-xl">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-violet-100">Preview mode</p>
+          <h2 className="mt-1 text-xl font-black text-white">Login with Discord to unlock full network stats</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+            Public visitors can preview top servers and basic activity. Full server profiles, leaderboards, reviews, Discord invites, and detailed player stats unlock after Discord login.
+          </p>
+        </div>
+        <a href="/login?returnTo=/" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase tracking-[0.12em] text-white shadow-[0_0_24px_rgba(139,92,246,0.32)] transition hover:bg-violet-400">
+          Login with Discord
+          <ChevronRight className="h-4 w-4" />
+        </a>
+      </div>
     </motion.section>
   );
 }
@@ -1273,6 +1302,9 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       active: numberOrZero(payload.syncHealth?.active),
       pending: numberOrZero(payload.syncHealth?.pending),
     },
+    access_level: payload.access_level === "preview" ? "preview" : "full",
+    is_locked: Boolean(payload.is_locked),
+    locked_reason: typeof payload.locked_reason === "string" ? payload.locked_reason : null,
   };
 }
 

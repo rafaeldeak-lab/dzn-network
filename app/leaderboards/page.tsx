@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, Crosshair, RadioTower, Skull, Trophy, Users } from "lucide-react";
+import { Activity, ArrowRight, Crosshair, Lock, RadioTower, Skull, Trophy, Users } from "lucide-react";
 import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
@@ -70,6 +70,9 @@ type LeaderboardsPayload = {
   personal_best_kills?: LongestKill[];
   longest_kills?: LongestKill[];
   updated_at?: string;
+  access_level?: "full" | "preview";
+  is_locked?: boolean;
+  locked_reason?: string | null;
   error?: string;
 };
 
@@ -81,6 +84,9 @@ const emptyPayload = {
   personal_best_kills: [],
   longest_kills: [],
   updated_at: null,
+  access_level: "full" as const,
+  is_locked: false,
+  locked_reason: null,
 };
 
 export default function LeaderboardsPage() {
@@ -92,6 +98,9 @@ export default function LeaderboardsPage() {
     personal_best_kills: LongestKill[];
     longest_kills: LongestKill[];
     updated_at: string | null;
+    access_level: "full" | "preview";
+    is_locked: boolean;
+    locked_reason: string | null;
   }>(emptyPayload);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -112,6 +121,7 @@ export default function LeaderboardsPage() {
       try {
         const response = await fetch("/api/public/leaderboards", {
           cache: "no-store",
+          credentials: "include",
           headers: { accept: "application/json" },
         });
         const data = (await response.json().catch(() => ({}))) as LeaderboardsPayload;
@@ -182,6 +192,9 @@ export default function LeaderboardsPage() {
         </section>
 
         {error ? <MessagePanel message={error} /> : null}
+        {!loading && payload.is_locked ? (
+          <LockedLeaderboardBanner />
+        ) : null}
         {loading ? <LoadingGrid /> : null}
 
         {!loading ? (
@@ -203,27 +216,36 @@ export default function LeaderboardsPage() {
               ])}
             />
 
-            <LeaderboardTable
-              title="Top Players"
-              icon={Users}
-              empty="No ranked players yet."
-              headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
-              rows={payload.top_players.map((player) => [
-                `#${player.rank}`,
-                player.player_name,
-                <ServerLink key="server" slug={player.server_slug} label={player.server_name} />,
-                formatNumber(player.kills),
-                formatNumber(player.deaths),
-                formatKd(player),
-                formatDistance(player.longest_kill),
-              ])}
-            />
+            {payload.is_locked ? (
+              <>
+                <LockedLeaderboardPanel title="Top Players" icon={Users} text="Log in with Discord to unlock ranked players, kills, deaths, K/D, and personal records." />
+                <LockedLeaderboardPanel title="Longest Kills" icon={Skull} text="Long-kill records and detailed kill tables are available to logged-in DZN members." />
+              </>
+            ) : (
+              <>
+                <LeaderboardTable
+                  title="Top Players"
+                  icon={Users}
+                  empty="No ranked players yet."
+                  headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
+                  rows={payload.top_players.map((player) => [
+                    `#${player.rank}`,
+                    player.player_name,
+                    <ServerLink key="server" slug={player.server_slug} label={player.server_name} />,
+                    formatNumber(player.kills),
+                    formatNumber(player.deaths),
+                    formatKd(player),
+                    formatDistance(player.longest_kill),
+                  ])}
+                />
 
-            <LongestKillsSection
-              bestOverall={payload.best_overall_kill}
-              latestKill={payload.latest_kill}
-              personalBests={payload.personal_best_kills.length ? payload.personal_best_kills : payload.longest_kills}
-            />
+                <LongestKillsSection
+                  bestOverall={payload.best_overall_kill}
+                  latestKill={payload.latest_kill}
+                  personalBests={payload.personal_best_kills.length ? payload.personal_best_kills : payload.longest_kills}
+                />
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -325,6 +347,57 @@ function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<Lo
         <p className="mt-3 text-sm font-bold text-zinc-400">No confirmed kill yet.</p>
       )}
     </div>
+  );
+}
+
+function LockedLeaderboardBanner() {
+  return (
+    <section className="mb-6 glass-surface animated-border rounded-lg p-5">
+      <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-violet-300/25 bg-violet-500/15 text-violet-100">
+            <Lock className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-100">Preview mode</p>
+            <h2 className="mt-1 text-xl font-black text-white">Login with Discord to unlock full leaderboards</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">
+              Logged-out visitors can preview top servers. Full player rankings, long-kill records, and detailed tables require Discord login.
+            </p>
+          </div>
+        </div>
+        <Link href="/login?returnTo=/leaderboards" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400">
+          Login with Discord
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function LockedLeaderboardPanel({ title, icon: Icon, text }: { title: string; icon: typeof Activity; text: string }) {
+  return (
+    <section className="glass-surface animated-border rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex items-center gap-3">
+          <Icon className="h-6 w-6 text-violet-200" />
+          <h2 className="text-2xl font-black uppercase text-white">{title}</h2>
+        </div>
+        <div className="mt-5 rounded-lg border border-violet-300/20 bg-violet-500/10 p-5">
+          <div className="flex gap-3">
+            <Lock className="mt-1 h-5 w-5 shrink-0 text-violet-100" />
+            <div>
+              <p className="text-sm font-black uppercase text-violet-100">Discord login required</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">{text}</p>
+              <Link href="/login?returnTo=/leaderboards" className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2.5 text-xs font-black uppercase text-white transition hover:bg-violet-400">
+                Login to unlock
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -442,6 +515,9 @@ function normalizePayload(data: LeaderboardsPayload) {
     personal_best_kills: personalBestKills,
     longest_kills: personalBestKills,
     updated_at: data.updated_at ?? new Date().toISOString(),
+    access_level: data.access_level === "preview" ? ("preview" as const) : ("full" as const),
+    is_locked: Boolean(data.is_locked),
+    locked_reason: data.locked_reason ?? null,
   };
 }
 

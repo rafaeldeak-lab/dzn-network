@@ -16,6 +16,7 @@ import {
   Gauge,
   Gamepad2,
   Globe2,
+  Lock,
   LogOut,
   Map,
   MapPin,
@@ -87,6 +88,9 @@ type PublicServer = {
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
+  access_level?: "full" | "preview";
+  is_locked?: boolean;
+  locked_reason?: string | null;
 };
 
 type ScoreBreakdown = {
@@ -140,6 +144,8 @@ type PublicServersResponse = {
   server?: PublicServer | null;
   servers?: PublicServer[];
   stats?: PublicStats;
+  access_level?: "full" | "preview";
+  is_locked?: boolean;
   error?: string;
 };
 
@@ -160,6 +166,9 @@ type ReviewsResponse = {
   review_count: number;
   rating_breakdown: Record<"1" | "2" | "3" | "4" | "5", number>;
   reviews: PublicReview[];
+  access_level?: "full" | "preview";
+  is_locked?: boolean;
+  locked_reason?: string | null;
   viewer?: {
     authenticated: boolean;
     can_review: boolean;
@@ -193,7 +202,7 @@ export function PublicNetwork() {
       setStats(null);
       try {
         const endpoint = requestedSlug ? `/api/public/servers?slug=${encodeURIComponent(requestedSlug)}` : "/api/public/servers";
-        const response = await fetch(endpoint, { cache: "no-store", headers: { accept: "application/json" }, signal: controller.signal });
+        const response = await fetch(endpoint, { cache: "no-store", credentials: "include", headers: { accept: "application/json" }, signal: controller.signal });
         const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
         if (!response.ok) throw new Error(data.error || "Unable to load public servers");
         if (controller.signal.aborted || requestedSlug !== slug) return;
@@ -309,6 +318,7 @@ function ServerBrowser({
   loading: boolean;
   error: string;
 }) {
+  const isPreview = allServers.some((server) => server.is_locked);
   return (
     <div className="pb-16 pt-16">
       <motion.header
@@ -324,6 +334,14 @@ function ServerBrowser({
       </motion.header>
 
       <StatsRow stats={stats} />
+      {isPreview ? (
+        <LoginToUnlockBanner
+          className="mt-6"
+          returnTo="/servers"
+          title="Discord login required for full server stats"
+          text="Log in with Discord to view detailed stats, reviews, recent activity, player rankings, and server Discord invites."
+        />
+      ) : null}
 
       <section className="mt-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -405,9 +423,43 @@ function StatsRow({ stats }: { stats: PublicStats }) {
   );
 }
 
+function LoginToUnlockBanner({
+  title,
+  text,
+  returnTo,
+  className = "",
+}: {
+  title: string;
+  text: string;
+  returnTo: string;
+  className?: string;
+}) {
+  return (
+    <div className={`glass-surface animated-border rounded-xl p-5 ${className}`}>
+      <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-violet-300/25 bg-violet-500/15 text-violet-100 shadow-[0_0_24px_rgba(139,92,246,0.24)]">
+            <Lock className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-black uppercase tracking-[0.14em] text-violet-100">Discord login required</p>
+            <h2 className="mt-1 text-xl font-black text-white">{title}</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">{text}</p>
+          </div>
+        </div>
+        <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.32)] transition hover:bg-violet-400">
+          Login with Discord
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function ServerCard({ server, index }: { server: PublicServer; index: number }) {
   const tags = parseTags(server.tags_json);
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
+  const isLocked = Boolean(server.is_locked);
   return (
     <motion.article
       initial={{ opacity: 0, y: 18 }}
@@ -438,9 +490,18 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
             Score {server.score_label}
           </span>
-          <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
-          <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
-          {server.player_slots ? <StatusPill label={`${server.player_slots} slots`} tone="zinc" /> : null}
+          {isLocked ? (
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/25 bg-violet-400/10 px-3 py-1.5 text-xs font-black uppercase text-violet-100">
+              <Lock className="h-3.5 w-3.5" />
+              Login to view full stats
+            </span>
+          ) : (
+            <>
+              <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
+              <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
+              {server.player_slots ? <StatusPill label={`${server.player_slots} slots`} tone="zinc" /> : null}
+            </>
+          )}
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
@@ -528,6 +589,7 @@ function ServerProfileShell({ server, loading, error }: { server: PublicServer |
 
 function ServerProfile({ server }: { server: PublicServer }) {
   const tags = parseTags(server.tags_json);
+  const isLocked = Boolean(server.is_locked);
   const statsPending = server.stats_sync === "Pending";
   const statsActiveWithoutKills = server.stats_sync === "Active" && server.total_kills === 0;
   const players = server.top_players ?? [];
@@ -578,22 +640,26 @@ function ServerProfile({ server }: { server: PublicServer }) {
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-xl border border-white/10 bg-black/38 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="grid grid-cols-2 gap-3">
-              <HeroStat label="Players" value={formatPlayers(server)} icon={UserRound} />
-              <HeroStat label="Unique Players" value={String(server.unique_players)} icon={Users} />
-              <HeroStat label="Server Type" value={server.server_type} icon={Target} />
-              <HeroStat label="Total Kills" value={String(server.total_kills)} icon={Crosshair} />
-              <HeroStat label="Total Deaths" value={String(server.total_deaths)} icon={Skull} />
-              <HeroStat label="K/D Ratio" value={kd} icon={BarChart3} />
-              <HeroStat label="Global Rank" value={server.rank ? `#${server.rank}` : "Pending"} icon={Trophy} />
-              <HeroStat label="Server Score" value={server.score_label} icon={Gauge} title={scoreTitle} />
+          {isLocked ? (
+            <LockedProfileStats server={server} />
+          ) : (
+            <div className="grid gap-3 rounded-xl border border-white/10 bg-black/38 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+              <div className="grid grid-cols-2 gap-3">
+                <HeroStat label="Players" value={formatPlayers(server)} icon={UserRound} />
+                <HeroStat label="Unique Players" value={String(server.unique_players)} icon={Users} />
+                <HeroStat label="Server Type" value={server.server_type} icon={Target} />
+                <HeroStat label="Total Kills" value={String(server.total_kills)} icon={Crosshair} />
+                <HeroStat label="Total Deaths" value={String(server.total_deaths)} icon={Skull} />
+                <HeroStat label="K/D Ratio" value={kd} icon={BarChart3} />
+                <HeroStat label="Global Rank" value={server.rank ? `#${server.rank}` : "Pending"} icon={Trophy} />
+                <HeroStat label="Server Score" value={server.score_label} icon={Gauge} title={scoreTitle} />
+              </div>
+              <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
+                <p className="text-[10px] font-black uppercase text-cyan-200/70">Last Sync</p>
+                <p className="mt-1 text-sm font-black text-white">{formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)}</p>
+              </div>
             </div>
-            <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
-              <p className="text-[10px] font-black uppercase text-cyan-200/70">Last Sync</p>
-              <p className="mt-1 text-sm font-black text-white">{formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)}</p>
-            </div>
-          </div>
+          )}
         </div>
       </motion.header>
 
@@ -607,6 +673,14 @@ function ServerProfile({ server }: { server: PublicServer }) {
           Player activity is syncing. PvP kills will appear once detected.
         </div>
       ) : null}
+      {isLocked ? (
+        <LoginToUnlockBanner
+          className="mt-5"
+          returnTo={`/servers/profile?slug=${server.public_slug}`}
+          title="Unlock this server's full public profile"
+          text="Log in with Discord to view player stats, full leaderboards, reviews, recent activity, and server invite links."
+        />
+      ) : null}
 
       <section className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-5">
@@ -614,8 +688,17 @@ function ServerProfile({ server }: { server: PublicServer }) {
           <CommunityInfoPanel server={server} />
           <ReviewsPanel server={server} />
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <PvpLeaderboardPanel players={pvpLeaderboard} />
-            <RecentEventsPanel server={server} />
+            {isLocked ? (
+              <>
+                <LockedSectionPanel title="PvP Leaderboard" icon={Trophy} returnTo={`/servers/profile?slug=${server.public_slug}`} text="Log in to view this server's ranked players, kills, K/D, deaths, and longest kill records." />
+                <LockedSectionPanel title="Recent Activity" icon={Crosshair} returnTo={`/servers/profile?slug=${server.public_slug}`} text="Recent synced activity is available after Discord login." />
+              </>
+            ) : (
+              <>
+                <PvpLeaderboardPanel players={pvpLeaderboard} />
+                <RecentEventsPanel server={server} />
+              </>
+            )}
           </div>
 
           <div className="grid gap-5 md:grid-cols-2">
@@ -626,9 +709,17 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
         <aside className="grid content-start gap-5">
           <GlassPanel title="Top Players" icon={Flame}>
-            <TopPlayersPanel players={players} />
+            {isLocked ? (
+              <LockedInlinePanel returnTo={`/servers/profile?slug=${server.public_slug}`} text="Log in to unlock detailed player rankings." />
+            ) : (
+              <TopPlayersPanel players={players} />
+            )}
           </GlassPanel>
-          <NetworkStatusPanel server={server} />
+          {isLocked ? (
+            <LockedSectionPanel title="Network Status" icon={BarChart3} returnTo={`/servers/profile?slug=${server.public_slug}`} text="Sync health, joins, and detailed server status are available to logged-in members." />
+          ) : (
+            <NetworkStatusPanel server={server} />
+          )}
         </aside>
       </section>
     </div>
@@ -753,6 +844,34 @@ function GlassPanel({ title, icon: Icon, children }: { title: string; icon: type
   );
 }
 
+function LockedSectionPanel({ title, icon: Icon, text, returnTo }: { title: string; icon: typeof Activity; text: string; returnTo: string }) {
+  return (
+    <GlassPanel title={title} icon={Icon}>
+      <LockedInlinePanel text={text} returnTo={returnTo} />
+    </GlassPanel>
+  );
+}
+
+function LockedInlinePanel({ text, returnTo }: { text: string; returnTo: string }) {
+  return (
+    <div className="rounded-xl border border-violet-300/20 bg-[radial-gradient(circle_at_18%_0%,rgba(139,92,246,0.18),transparent_40%),rgba(0,0,0,0.24)] p-4">
+      <div className="flex gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-violet-300/25 bg-violet-500/15 text-violet-100">
+          <Lock className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-violet-100">Locked preview</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">{text}</p>
+          <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2.5 text-xs font-black uppercase text-white transition hover:bg-violet-400">
+            Login with Discord
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ServerHeroAvatar({ server }: { server: PublicServer }) {
   if (server.guild_icon_url) {
     return (
@@ -794,7 +913,25 @@ function HeroStat({ icon: Icon, label, value, title }: { icon: typeof Activity; 
   );
 }
 
+function LockedProfileStats({ server }: { server: PublicServer }) {
+  return (
+    <div className="grid gap-3 rounded-xl border border-violet-300/20 bg-black/42 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_0_28px_rgba(139,92,246,0.14)]">
+      <div className="grid grid-cols-2 gap-3">
+        <HeroStat label="Server Type" value={server.server_type} icon={Target} />
+        <HeroStat label="Global Rank" value={server.rank ? `#${server.rank}` : "Preview"} icon={Trophy} />
+        <HeroStat label="Server Score" value={server.score_label || "Preview"} icon={Gauge} />
+        <HeroStat label="Access" value="Login Required" icon={Lock} />
+      </div>
+      <div className="rounded-lg border border-violet-300/20 bg-violet-400/10 p-3">
+        <p className="text-[10px] font-black uppercase text-violet-100/75">Full profile locked</p>
+        <p className="mt-1 text-sm font-bold leading-6 text-zinc-200">Discord login unlocks player stats, K/D, recent activity, and server invite links.</p>
+      </div>
+    </div>
+  );
+}
+
 function CommunityInfoPanel({ server }: { server: PublicServer }) {
+  const isLocked = Boolean(server.is_locked);
   const hasDescription = Boolean(server.public_short_description || server.public_description || server.public_rules || server.public_language || server.public_region_label || server.public_discord_invite || server.public_website_url);
   const languageRegion = [server.public_language, server.public_region_label].filter(Boolean).join(" / ") || "Not specified";
   const hasDiscord = Boolean(server.public_discord_invite);
@@ -835,6 +972,11 @@ function CommunityInfoPanel({ server }: { server: PublicServer }) {
                   Join Discord
                   <ExternalLink className="h-4 w-4" />
                 </a>
+              ) : isLocked ? (
+                <Link href={`/login?returnTo=${encodeURIComponent(`/servers/profile?slug=${server.public_slug}`)}`} className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-4 py-3 text-xs font-black uppercase text-violet-100 transition hover:border-violet-200/55 hover:bg-violet-400/18">
+                  Login to view Discord invite
+                  <Lock className="h-4 w-4" />
+                </Link>
               ) : (
                 <span className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black uppercase text-zinc-400">
                   Discord invite not added yet
@@ -883,6 +1025,7 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const wordCount = countWords(body);
+  const reviewsLocked = Boolean(server.is_locked || data?.is_locked);
 
   const loadReviews = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -971,15 +1114,18 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
             <p className="text-sm leading-6 text-zinc-400">
               Reviews are moderated and scoped to this server only.
             </p>
-            {data?.viewer?.authenticated && data.viewer.can_review ? (
+            {!reviewsLocked && data?.viewer?.authenticated && data.viewer.can_review ? (
               <button type="button" onClick={() => setShowForm((value) => !value)} className="inline-flex items-center justify-center rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400">
                 Leave a Review
               </button>
             ) : null}
           </div>
 
-          {viewerReviewMessage(data) ? <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">{viewerReviewMessage(data)}</p> : null}
-          {showForm ? (
+          {reviewsLocked ? (
+            <LockedInlinePanel returnTo={`/servers/profile?slug=${server.public_slug}`} text="Log in with Discord to read full reviews and leave your own review for this server." />
+          ) : null}
+          {!reviewsLocked && viewerReviewMessage(data) ? <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">{viewerReviewMessage(data)}</p> : null}
+          {!reviewsLocked && showForm ? (
             <div className="rounded-xl border border-violet-300/20 bg-black/30 p-4">
               <p className="text-sm font-black uppercase text-white">Leave a Review</p>
               <StarSelector value={rating} onChange={setRating} />
@@ -1002,11 +1148,11 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
               </div>
             </div>
           ) : null}
-          {message ? <p className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3 text-sm font-bold text-emerald-50">{message}</p> : null}
-          {error ? <p className="rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-3 text-sm font-bold text-red-50">{error}</p> : null}
+          {!reviewsLocked && message ? <p className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3 text-sm font-bold text-emerald-50">{message}</p> : null}
+          {!reviewsLocked && error ? <p className="rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-3 text-sm font-bold text-red-50">{error}</p> : null}
           {loading ? <p className="text-sm text-zinc-500">Loading reviews...</p> : null}
-          {!loading && !error && data && data.reviews.length === 0 ? <p className="text-sm leading-6 text-zinc-400">No reviews yet. Be the first to review this server.</p> : null}
-          {!loading && data?.reviews.length ? (
+          {!reviewsLocked && !loading && !error && data && data.reviews.length === 0 ? <p className="text-sm leading-6 text-zinc-400">No reviews yet. Be the first to review this server.</p> : null}
+          {!reviewsLocked && !loading && data?.reviews.length ? (
             <div className="grid gap-3">
               {data.reviews.slice(0, 5).map((review) => (
                 <ReviewCard key={review.id} review={review} onReported={() => loadReviews()} />
@@ -1390,7 +1536,7 @@ function publicServerProfileHref(slug: string) {
 }
 
 async function fetchPublicServerFallback(slug: string, signal?: AbortSignal) {
-  const response = await fetch("/api/public/servers", { cache: "no-store", headers: { accept: "application/json" }, signal });
+  const response = await fetch("/api/public/servers", { cache: "no-store", credentials: "include", headers: { accept: "application/json" }, signal });
   const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
   if (!response.ok || !Array.isArray(data.servers)) return null;
   return data.servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;

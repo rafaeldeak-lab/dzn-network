@@ -38,7 +38,7 @@ export type PublicLeaderboardServer = {
   stats_sync_active: boolean;
   score: number;
   score_label: string;
-  score_breakdown: ServerScoreBreakdown;
+  score_breakdown: ServerScoreBreakdown | null;
 };
 
 export type PublicLongestKill = {
@@ -122,8 +122,8 @@ type PublicServerLookupRow = {
   guild_name: string | null;
 };
 
-export async function getPublicLeaderboardsPayload(env: Env) {
-  if (!env.DB) return emptyPublicLeaderboards();
+export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = true) {
+  if (!env.DB) return applyLeaderboardsAccess(emptyPublicLeaderboards(), viewerLoggedIn);
 
   await ensurePublicLeaderboardSchema(env);
 
@@ -134,7 +134,7 @@ export async function getPublicLeaderboardsPayload(env: Env) {
     getRankedBuildServers(env, 25),
   ]);
 
-  return {
+  return applyLeaderboardsAccess({
     ok: true,
     top_servers: topServers,
     top_players: topPlayers,
@@ -144,29 +144,29 @@ export async function getPublicLeaderboardsPayload(env: Env) {
     longest_kills: killSummary.personalBestKills,
     build_leaderboard: buildLeaderboard,
     updated_at: new Date().toISOString(),
-  };
+  }, viewerLoggedIn);
 }
 
-export async function getPublicServerLeaderboardPayload(env: Env, options: { serverId?: string | null; slug?: string | null; limit?: number }) {
+export async function getPublicServerLeaderboardPayload(env: Env, options: { serverId?: string | null; slug?: string | null; limit?: number }, viewerLoggedIn = true) {
   if (!env.DB) {
-    return { ok: true, players: [], updated_at: new Date().toISOString() };
+    return applyServerLeaderboardAccess({ ok: true, players: [], updated_at: new Date().toISOString() }, viewerLoggedIn);
   }
 
   await ensurePublicLeaderboardSchema(env);
 
   const linkedServerId = options.serverId ?? (options.slug ? await resolvePublicLinkedServerId(env, options.slug) : null);
   if (!linkedServerId) {
-    return { ok: true, players: [], updated_at: new Date().toISOString() };
+    return applyServerLeaderboardAccess({ ok: true, players: [], updated_at: new Date().toISOString() }, viewerLoggedIn);
   }
 
   // Server profile leaderboards must be scoped by the resolved linked_server_id.
   // Omit linkedServerId only on global leaderboard/homepage surfaces.
   const players = await getTopPlayers(env, options.limit ?? 10, linkedServerId);
-  return {
+  return applyServerLeaderboardAccess({
     ok: true,
     players,
     updated_at: new Date().toISOString(),
-  };
+  }, viewerLoggedIn);
 }
 
 export async function getPublicServerLeaderboardById(env: Env, linkedServerId: string, limit = 5) {
@@ -618,6 +618,69 @@ function roundOne(value: number) {
 
 function roundTwo(value: number) {
   return Math.round(numberOrZero(value) * 100) / 100;
+}
+
+export function applyLeaderboardsAccess<T extends {
+  top_servers: PublicLeaderboardServer[];
+  top_players: PublicLeaderboardPlayer[];
+  best_overall_kill: PublicKillHighlight | null;
+  latest_kill: PublicKillHighlight | null;
+  personal_best_kills: PublicLongestKill[];
+  longest_kills: PublicLongestKill[];
+  build_leaderboard: PublicBuildLeaderboardRow[];
+}>(payload: T, viewerLoggedIn: boolean): T & {
+  access_level: "full" | "preview";
+  is_locked: boolean;
+  locked_reason: string | null;
+} {
+  if (viewerLoggedIn) {
+    return {
+      ...payload,
+      access_level: "full",
+      is_locked: false,
+      locked_reason: null,
+    };
+  }
+
+  return {
+    ...payload,
+    top_servers: payload.top_servers.slice(0, 3).map((server) => ({
+      ...server,
+      score_breakdown: null,
+    })),
+    top_players: [],
+    best_overall_kill: null,
+    latest_kill: null,
+    personal_best_kills: [],
+    longest_kills: [],
+    build_leaderboard: [],
+    access_level: "preview",
+    is_locked: true,
+    locked_reason: "Log in with Discord to unlock full leaderboards.",
+  };
+}
+
+export function applyServerLeaderboardAccess<T extends { players: PublicLeaderboardPlayer[] }>(payload: T, viewerLoggedIn: boolean): T & {
+  access_level: "full" | "preview";
+  is_locked: boolean;
+  locked_reason: string | null;
+} {
+  if (viewerLoggedIn) {
+    return {
+      ...payload,
+      access_level: "full",
+      is_locked: false,
+      locked_reason: null,
+    };
+  }
+
+  return {
+    ...payload,
+    players: [],
+    access_level: "preview",
+    is_locked: true,
+    locked_reason: "Log in with Discord to unlock this server leaderboard.",
+  };
 }
 
 function emptyPublicLeaderboards() {

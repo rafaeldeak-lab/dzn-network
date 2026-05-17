@@ -3,6 +3,7 @@ import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { uniquePublicSlug } from "../../_lib/onboarding";
+import { isPublicViewerLoggedIn } from "../../_lib/public-auth";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -156,6 +157,9 @@ type SafePublicServer = {
     public_listing: "Active";
     last_sync_at: string | null;
   };
+  access_level?: "full" | "preview";
+  is_locked?: boolean;
+  locked_reason?: string | null;
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -163,15 +167,16 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const url = new URL(request.url);
   const slug = sanitizeSlug(url.searchParams.get("slug"));
-  return json(await getPublicServersPayload(env, slug), { headers: PUBLIC_CACHE_HEADERS });
+  const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
+  return json(await getPublicServersPayload(env, slug, viewerLoggedIn), { headers: PUBLIC_CACHE_HEADERS });
 };
 
-export async function getPublicServersPayload(env: Env, slug: string | null) {
+export async function getPublicServersPayload(env: Env, slug: string | null, viewerLoggedIn = true) {
   if (!env.DB) {
-    const mockServers = shouldShowMockServers(env) ? mockPublicServers() : [];
+    const mockServers = shouldShowMockServers(env) ? mockPublicServers().map((server) => applyPublicServerAccess(server, viewerLoggedIn)) : [];
     return slug
-      ? { ok: true, server: findPublicServerBySlug(mockServers, slug) ?? null }
-      : { ok: true, servers: mockServers, stats: buildPublicStats(mockServers) };
+      ? { ok: true, server: findPublicServerBySlug(mockServers, slug) ?? null, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn }
+      : { ok: true, servers: mockServers, stats: buildPublicStats(mockServers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
   }
 
   await ensureLinkedServerMetadataColumns(env);
@@ -183,38 +188,45 @@ export async function getPublicServersPayload(env: Env, slug: string | null) {
   const rankingById = new Map(rankedServers.map((server) => [server.server_id, server]));
   const publicRows = slug ? await findPublicServerRowsBySlug(env, rows, slug) : rows;
   const reviewSummaries = await getPublicServerRatingSummaries(env, publicRows.map((row) => row.id));
-  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row, rankingById.get(row.id) ?? null, reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary())))).filter((server): server is SafePublicServer => Boolean(server));
+  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row, rankingById.get(row.id) ?? null, reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary()))))
+    .filter((server): server is SafePublicServer => Boolean(server))
+    .map((server) => applyPublicServerAccess(server, viewerLoggedIn));
 
   if (slug) {
     if (servers.length === 0 && shouldShowMockServers(env)) {
-      return { ok: true, server: findPublicServerBySlug(mockPublicServers(), slug) ?? null };
+      const mockServers = mockPublicServers().map((server) => applyPublicServerAccess(server, viewerLoggedIn));
+      return { ok: true, server: findPublicServerBySlug(mockServers, slug) ?? null, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
     }
-    return getPublicServerProfileBySlug(env, publicRows[0] ?? null, servers[0] ?? null);
+    return getPublicServerProfileBySlug(env, publicRows[0] ?? null, servers[0] ?? null, viewerLoggedIn);
   }
 
   if (servers.length === 0 && shouldShowMockServers(env)) {
-    const mockServers = mockPublicServers();
-    return { ok: true, servers: mockServers, stats: buildPublicStats(mockServers), mock: true };
+    const mockServers = mockPublicServers().map((server) => applyPublicServerAccess(server, viewerLoggedIn));
+    return { ok: true, servers: mockServers, stats: buildPublicStats(mockServers), mock: true, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
   }
 
-  return { ok: true, servers, stats: buildPublicStats(servers) };
+  return { ok: true, servers, stats: buildPublicStats(servers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
 }
 
-async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | null, server: SafePublicServer | null) {
+async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | null, server: SafePublicServer | null, viewerLoggedIn: boolean) {
   if (!row || !server) return { ok: true, server: null };
 
-  // Public profile pages are server-scoped. Global leaderboards are only used by
-  // global pages; child profile data must always query by this resolved server id.
-  const leaderboard = await getPublicServerLeaderboardById(env, row.id, 10);
-  server.top_players = leaderboard.slice(0, 5);
-  server.pvp_leaderboard = leaderboard;
+  if (viewerLoggedIn) {
+    // Public profile pages are server-scoped. Global leaderboards are only used by
+    // global pages; child profile data must always query by this resolved server id.
+    const leaderboard = await getPublicServerLeaderboardById(env, row.id, 10);
+    server.top_players = leaderboard.slice(0, 5);
+    server.pvp_leaderboard = leaderboard;
+  }
 
   return {
     ok: true,
     server,
-    selected_server_id: row.id,
+    selected_server_id: viewerLoggedIn ? row.id : null,
     selected_slug: row.public_slug,
-    selected_service_id: row.nitrado_service_id,
+    selected_service_id: viewerLoggedIn ? row.nitrado_service_id : null,
+    access_level: viewerLoggedIn ? "full" : "preview",
+    is_locked: !viewerLoggedIn,
   };
 }
 
@@ -601,6 +613,61 @@ function buildPublicStats(servers: SafePublicServer[]) {
   };
 }
 
+export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn: boolean): SafePublicServer {
+  if (viewerLoggedIn) {
+    return {
+      ...server,
+      access_level: "full",
+      is_locked: false,
+      locked_reason: null,
+    };
+  }
+
+  const previewStats = {
+    total_kills: numberOrZero(server.total_kills),
+    total_deaths: 0,
+    total_joins: 0,
+    total_disconnects: 0,
+    unique_players: 0,
+    longest_kill: 0,
+    kd: null,
+    kd_label: "Login required",
+    rank: server.rank,
+    score: server.score,
+    score_label: server.score_label,
+  };
+  const publicDescription = truncateText(server.public_description, 260);
+  const tags = parsePublicTags(server.tags_json).slice(0, 3);
+
+  return {
+    ...server,
+    ...previewStats,
+    tags_json: JSON.stringify(tags),
+    tags,
+    current_players: null,
+    last_sync_at: null,
+    public_description: publicDescription,
+    public_discord_invite: null,
+    public_website_url: null,
+    public_rules: null,
+    score_breakdown: null,
+    stats_sync_active: false,
+    recent_events: [],
+    top_players: [],
+    pvp_leaderboard: [],
+    stats: previewStats,
+    network_status: {
+      adm_status: server.adm_status,
+      stats_sync: server.stats_sync,
+      public_listing: "Active",
+      last_sync_at: null,
+    },
+    access_level: "preview",
+    is_locked: true,
+    locked_reason: "Log in with Discord to view full server stats.",
+  };
+}
+
 function findPublicServerBySlug(servers: SafePublicServer[], slug: string) {
   return servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;
 }
@@ -896,4 +963,11 @@ function firstString(...values: unknown[]) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
+}
+
+function truncateText(value: string | null, maxLength: number) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }

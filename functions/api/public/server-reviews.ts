@@ -1,8 +1,8 @@
-import { ensureMockUser, getSessionUser, requireDb } from "../../_lib/db";
+import { requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { isMockAuth } from "../../_lib/mock";
+import { getOptionalDiscordUser } from "../../_lib/public-auth";
 import { getApprovedReviewSummary, getExistingActiveReview, viewerReviewState } from "../../_lib/server-reviews";
-import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
+import type { Env, PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
@@ -22,11 +22,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     });
   }
 
-  const viewer = await resolveUser(env, request);
+  const viewer = await getOptionalDiscordUser(request, env);
   const existingReview = viewer ? await getExistingActiveReview(env, server.id, viewer.discord_id) : null;
   const summary = await getApprovedReviewSummary(env, server.id, viewer);
   return json({
-    ...summary,
+    ...applyServerReviewsAccess(summary, Boolean(viewer)),
     viewer: viewerReviewState({ viewer, serverOwnerUserId: server.user_id, existingReview }),
   });
 };
@@ -47,19 +47,31 @@ async function resolveServerBySlug(env: Env, slug: string) {
     .first<{ id: string; user_id: string }>();
 }
 
-async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
-  const user = await getSessionUser(env, request);
-  if (user || !isMockAuth(env.MOCK_AUTH)) return user;
-
-  const mock = await ensureMockUser(env);
-  return {
-    id: mock.userId,
-    discord_id: mock.user.id,
-    username: mock.user.username,
-    avatar: mock.user.avatar,
-  };
-}
-
 function sanitizeSlug(value: string | null) {
   return value?.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 90) || null;
+}
+
+export function applyServerReviewsAccess<T extends {
+  reviews: unknown[];
+}>(summary: T, viewerLoggedIn: boolean): T & {
+  access_level: "full" | "preview";
+  is_locked: boolean;
+  locked_reason: string | null;
+} {
+  if (viewerLoggedIn) {
+    return {
+      ...summary,
+      access_level: "full",
+      is_locked: false,
+      locked_reason: null,
+    };
+  }
+
+  return {
+    ...summary,
+    reviews: [],
+    access_level: "preview",
+    is_locked: true,
+    locked_reason: "Log in with Discord to unlock server reviews.",
+  };
 }
