@@ -85,6 +85,13 @@ type PublicServer = {
   average_rating: number | null;
   review_count: number;
   rating_breakdown: Record<1 | 2 | 3 | 4 | 5, number>;
+  advertising?: {
+    is_featured: boolean;
+    featured_until: string | null;
+    is_boosted: boolean;
+    last_bumped_at: string | null;
+    badge_label: "FEATURED" | "BOOSTED" | "SPONSORED" | null;
+  };
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -479,7 +486,10 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
               <ServerRatingChip server={server} />
             </div>
           </div>
-          <StatusPill label="Live" tone="emerald" />
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+            {server.advertising?.badge_label ? <StatusPill label={server.advertising.badge_label} tone={server.advertising.is_featured ? "orange" : "violet"} /> : null}
+            <StatusPill label="Live" tone="emerald" />
+          </div>
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
@@ -1523,12 +1533,22 @@ function parseTags(value: string) {
 }
 
 function serverSortRank(server: PublicServer) {
+  const adScore = advertisingRank(server);
+  if (adScore > 0) return -adScore;
   if (typeof server.rank === "number" && server.rank > 0) return server.rank;
   if (server.stats_sync === "Active") return 1000;
   if (server.adm_status === "Connected") return 1001;
   if (server.adm_status === "Discovered") return 1002;
   if (server.stats_sync === "Pending") return 1003;
   return 1004;
+}
+
+function advertisingRank(server: PublicServer) {
+  const featuredUntil = server.advertising?.featured_until ? new Date(server.advertising.featured_until).getTime() : 0;
+  const lastBumpedAt = server.advertising?.last_bumped_at ? new Date(server.advertising.last_bumped_at).getTime() : 0;
+  if (server.advertising?.is_featured && Number.isFinite(featuredUntil) && featuredUntil > Date.now()) return 2_000_000_000 + featuredUntil / 1000;
+  if (server.advertising?.is_boosted && Number.isFinite(lastBumpedAt)) return 1_000_000_000 + lastBumpedAt / 1000;
+  return 0;
 }
 
 function publicServerProfileHref(slug: string) {

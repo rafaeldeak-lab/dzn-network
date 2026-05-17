@@ -1,16 +1,14 @@
 import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
+import { advertisingSortScore, publicAdvertisingFromState, type PublicAdvertising } from "../../_lib/advertising";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { uniquePublicSlug } from "../../_lib/onboarding";
-import { isPublicViewerLoggedIn } from "../../_lib/public-auth";
+import { ensureBillingSchema } from "../../_lib/plans";
+import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
-
-const PUBLIC_CACHE_HEADERS = {
-  "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
-};
 
 type PublicServerRow = {
   id: string;
@@ -59,6 +57,12 @@ type PublicServerRow = {
   public_language: string | null;
   public_region_label: string | null;
   public_listing_updated_at: string | null;
+  last_bumped_at: string | null;
+  bump_count_current_period: number | null;
+  bump_period_start: string | null;
+  bump_period_end: string | null;
+  featured_until: string | null;
+  featured_label: string | null;
 };
 
 type PublicRecentEvent = {
@@ -134,6 +138,7 @@ type SafePublicServer = {
   average_rating: number | null;
   review_count: number;
   rating_breakdown: RatingBreakdown;
+  advertising: PublicAdvertising;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -168,7 +173,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const url = new URL(request.url);
   const slug = sanitizeSlug(url.searchParams.get("slug"));
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
-  return json(await getPublicServersPayload(env, slug, viewerLoggedIn), { headers: PUBLIC_CACHE_HEADERS });
+  return json(await getPublicServersPayload(env, slug, viewerLoggedIn), { headers: publicAccessCacheHeaders(viewerLoggedIn) });
 };
 
 export async function getPublicServersPayload(env: Env, slug: string | null, viewerLoggedIn = true) {
@@ -182,6 +187,7 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
   await ensureLinkedServerMetadataColumns(env);
   await ensureServerLogConfigTable(env);
   await ensureAdmSyncSchema(env);
+  await ensureBillingSchema(env);
   await ensurePublicSlugsForLiveServers(env);
 
   const [rows, rankedServers] = await Promise.all([queryPublicServers(env), getRankedPublicServers(env, 500)]);
@@ -191,6 +197,7 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
   const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row, rankingById.get(row.id) ?? null, reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary()))))
     .filter((server): server is SafePublicServer => Boolean(server))
     .map((server) => applyPublicServerAccess(server, viewerLoggedIn));
+  sortPublicServersForDiscovery(servers);
 
   if (slug) {
     if (servers.length === 0 && shouldShowMockServers(env)) {
@@ -300,13 +307,20 @@ async function queryPublicServers(env: Env) {
       linked_servers.public_rules,
       linked_servers.public_language,
       linked_servers.public_region_label,
-      linked_servers.public_listing_updated_at
+      linked_servers.public_listing_updated_at,
+      server_advertising_state.last_bumped_at,
+      server_advertising_state.bump_count_current_period,
+      server_advertising_state.bump_period_start,
+      server_advertising_state.bump_period_end,
+      server_advertising_state.featured_until,
+      server_advertising_state.featured_label
     FROM linked_servers
     LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
     LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
     LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+    LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
     WHERE lower(linked_servers.status) = 'live'
       AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
   `;
@@ -512,6 +526,14 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     average_rating: reviewSummary.average_rating,
     review_count: reviewSummary.review_count,
     rating_breakdown: reviewSummary.rating_breakdown,
+    advertising: publicAdvertisingFromState({
+      last_bumped_at: row.last_bumped_at,
+      bump_count_current_period: numberOrZero(row.bump_count_current_period),
+      bump_period_start: row.bump_period_start,
+      bump_period_end: row.bump_period_end,
+      featured_until: row.featured_until,
+      featured_label: row.featured_label,
+    }),
     stats,
     network_status: {
       adm_status: admStatus,
@@ -613,6 +635,25 @@ function buildPublicStats(servers: SafePublicServer[]) {
   };
 }
 
+export function sortPublicServersForDiscovery<T extends {
+  advertising?: PublicAdvertising;
+  rank: number | null;
+  score: number;
+  created_at: string | null;
+}>(servers: T[]) {
+  servers.sort((a, b) => {
+    const adDiff = advertisingSortScore(b.advertising ?? publicAdvertisingFromState(null)) - advertisingSortScore(a.advertising ?? publicAdvertisingFromState(null));
+    if (adDiff) return adDiff;
+    const rankA = typeof a.rank === "number" && a.rank > 0 ? a.rank : Number.MAX_SAFE_INTEGER;
+    const rankB = typeof b.rank === "number" && b.rank > 0 ? b.rank : Number.MAX_SAFE_INTEGER;
+    if (rankA !== rankB) return rankA - rankB;
+    const scoreDiff = numberOrZero(b.score) - numberOrZero(a.score);
+    if (scoreDiff) return scoreDiff;
+    return dateValue(b.created_at) - dateValue(a.created_at);
+  });
+  return servers;
+}
+
 export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn: boolean): SafePublicServer {
   if (viewerLoggedIn) {
     return {
@@ -710,6 +751,7 @@ function mockPublicServers(): SafePublicServer[] {
       score_breakdown: null,
       stats_sync_active: false,
       ...emptyPublicServerRatingSummary(),
+      advertising: publicAdvertisingFromState(null),
       ...mockListingFields("Hybrid PvP/PvE community with factions, events, traders, and weekend raids."),
       recent_events: [],
     },
@@ -749,6 +791,7 @@ function mockPublicServers(): SafePublicServer[] {
       score_breakdown: null,
       stats_sync_active: true,
       ...emptyPublicServerRatingSummary(),
+      advertising: publicAdvertisingFromState(null),
       ...mockListingFields("Raid-focused PvP server with active factions and competitive stat tracking."),
       recent_events: [],
     },
@@ -788,6 +831,7 @@ function mockPublicServers(): SafePublicServer[] {
       score_breakdown: null,
       stats_sync_active: false,
       ...emptyPublicServerRatingSummary(),
+      advertising: publicAdvertisingFromState(null),
       ...mockListingFields("Fast respawn deathmatch arena for clean fights and leaderboard runs."),
       recent_events: [],
     },

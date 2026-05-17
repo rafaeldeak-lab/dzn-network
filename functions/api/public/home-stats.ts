@@ -3,7 +3,7 @@ import { ensureBuildEventSchema, getRankedBuildServers } from "../../_lib/build-
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { isPublicViewerLoggedIn } from "../../_lib/public-auth";
+import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import { getRankedPublicServers } from "../../_lib/public-leaderboards";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -72,23 +72,19 @@ export type MapNodeRow = {
 };
 
 const MOCK_PLAYER_PREFIXES = ["MockSurvivor", "MockBandit", "MockRunner"];
-const PUBLIC_CACHE_HEADERS = {
-  "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
-};
-
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
 
   if (!env.DB) {
-    return json(applyHomeStatsAccess(emptyHomeStats(), viewerLoggedIn), { headers: PUBLIC_CACHE_HEADERS });
+    return json(applyHomeStatsAccess(emptyHomeStats(), viewerLoggedIn), { headers: publicAccessCacheHeaders(viewerLoggedIn) });
   }
 
   await ensureLinkedServerMetadataColumns(env);
   await ensureAdmSyncSchema(env);
   await ensureBuildEventSchema(env);
   const data = await buildHomeStats(env);
-  return json(applyHomeStatsAccess(data, viewerLoggedIn), { headers: PUBLIC_CACHE_HEADERS });
+  return json(applyHomeStatsAccess(data, viewerLoggedIn), { headers: publicAccessCacheHeaders(viewerLoggedIn) });
 };
 
 async function buildHomeStats(env: Env) {

@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, deleteAccount, deleteLinkedServer, getMe, getRecentSyncEvents, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AuthResponse, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getBillingStatus, getMe, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AuthResponse, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -223,6 +223,9 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [refreshingServerInfo, setRefreshingServerInfo] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
+  const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
+  const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
@@ -243,6 +246,23 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       return [];
     }
   }, [server.tags_json]);
+
+  const refreshBilling = useCallback(async () => {
+    try {
+      const [billing, advertising] = await Promise.all([
+        getBillingStatus(),
+        getServerAdvertisingStatus(server.id).catch(() => null),
+      ]);
+      setBillingStatus(billing);
+      if (advertising?.advertising) setAdvertisingStatus(advertising.advertising);
+    } catch (error) {
+      setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
+    }
+  }, [server.id]);
+
+  useEffect(() => {
+    void Promise.resolve().then(refreshBilling);
+  }, [refreshBilling]);
 
   const serverDisplayName = server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name;
   const effectiveServerMode = server.server_mode ?? server.server_type;
@@ -725,6 +745,17 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
         </div>
 
         <aside className="grid content-start gap-5">
+          <BillingPlanPanel billing={billingStatus} message={billingMessage} onRefresh={refreshBilling} />
+          <AdvertisingBoostPanel
+            serverId={server.id}
+            billing={billingStatus}
+            advertising={advertisingStatus}
+            onBumped={(next) => {
+              setAdvertisingStatus(next);
+              setActionMessage("Server bumped. It will appear higher in public discovery.");
+              void refreshBilling();
+            }}
+          />
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions & Setup" />
             <div className="mt-4 grid gap-3">
@@ -1173,6 +1204,176 @@ type DashboardReviewSummary = {
   }>;
 };
 
+const billingPlans = [
+  { key: "starter", label: "Starter", price: "£4.99/mo", detail: "1 server, listing, reviews, 30 day stats" },
+  { key: "pro", label: "Pro", price: "£9.99/mo", detail: "3 servers, events, analytics, 3 bumps/mo" },
+  { key: "network", label: "Network", price: "£19.99/mo", detail: "10 servers, multi-server dashboard, 10 bumps/mo" },
+  { key: "partner", label: "Partner", price: "£29.99/mo", detail: "25 servers, featured eligibility, 30 bumps/mo" },
+] as const;
+
+function BillingPlanPanel({ billing, message, onRefresh }: { billing: BillingStatus | null; message: string; onRefresh: () => Promise<void> }) {
+  const [busyPlan, setBusyPlan] = useState<string | null>(null);
+  const [portalBusy, setPortalBusy] = useState(false);
+  const planKey = billing?.plan_key ?? "free";
+
+  async function upgrade(planKey: "starter" | "pro" | "network" | "partner") {
+    setBusyPlan(planKey);
+    try {
+      const session = await createCheckoutSession(planKey, "/dashboard");
+      window.location.assign(session.url);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not start checkout.");
+    } finally {
+      setBusyPlan(null);
+    }
+  }
+
+  async function manageBilling() {
+    setPortalBusy(true);
+    try {
+      const session = await createPortalSession();
+      window.location.assign(session.url);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not open billing portal.");
+    } finally {
+      setPortalBusy(false);
+    }
+  }
+
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <PanelHeader icon={<Gauge className="h-5 w-5" />} title="Billing & Plan" />
+          <p className="mt-2 text-sm leading-6 text-zinc-400">
+            Current plan: <span className="font-black uppercase text-white">{planLabel(planKey)}</span>
+          </p>
+        </div>
+        <button type="button" onClick={onRefresh} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">
+          Refresh
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MiniInfo label="Servers Used" value={billing ? `${billing.linked_server_count} / ${billing.entitlements.max_linked_servers}` : "Loading"} />
+        <MiniInfo label="Plan Status" value={billing?.plan_status ?? "Loading"} />
+        <MiniInfo label="Bumps / Month" value={String(billing?.entitlements.included_bumps_per_month ?? 0)} />
+        <MiniInfo label="Renews" value={billing?.current_period_end ? formatDashboardDate(billing.current_period_end) : "No renewal"} />
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {billingPlans.map((plan) => (
+          <div key={plan.key} className="rounded-lg border border-white/10 bg-black/24 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black uppercase text-white">{plan.label} <span className="text-violet-200">{plan.price}</span></p>
+                <p className="mt-1 text-xs leading-5 text-zinc-400">{plan.detail}</p>
+              </div>
+              <button
+                type="button"
+                disabled={busyPlan !== null || plan.key === planKey}
+                onClick={() => upgrade(plan.key)}
+                className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {plan.key === planKey ? "Current" : busyPlan === plan.key ? "Opening..." : `Upgrade`}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        disabled={portalBusy || !billing?.stripe_customer_exists}
+        onClick={manageBilling}
+        className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+      >
+        {portalBusy ? "Opening portal..." : "Manage Billing"}
+      </button>
+      {message ? <p className="mt-3 text-sm font-bold text-orange-100">{message}</p> : null}
+    </DashboardPanel>
+  );
+}
+
+function AdvertisingBoostPanel({
+  serverId,
+  billing,
+  advertising,
+  onBumped,
+}: {
+  serverId: string;
+  billing: BillingStatus | null;
+  advertising: AdvertisingBumpStatus | null;
+  onBumped: (state: AdvertisingBumpStatus) => void;
+}) {
+  const [bumping, setBumping] = useState(false);
+  const [error, setError] = useState("");
+  const entitlements = billing?.entitlements;
+  const canBump = Boolean(entitlements?.can_use_ad_bumps);
+  const used = advertising?.bump_count_current_period ?? 0;
+  const included = advertising?.included_bumps_per_month ?? entitlements?.included_bumps_per_month ?? 0;
+  const nextAvailable = nextBumpLabel(advertising);
+  const limitReached = included > 0 && used >= included;
+  const cooldownActive = nextAvailable !== "Now" && canBump;
+
+  async function bump() {
+    setBumping(true);
+    setError("");
+    try {
+      const result = await bumpServer(serverId);
+      onBumped(result.advertising);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not bump server.");
+    } finally {
+      setBumping(false);
+    }
+  }
+
+  return (
+    <DashboardPanel className="p-4">
+      <PanelHeader icon={<Zap className="h-5 w-5" />} title="Advertising Boost" />
+      {canBump ? (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <MiniInfo label="Bumps Used" value={`${used} / ${included}`} />
+            <MiniInfo label="Next Bump" value={nextAvailable} />
+            <MiniInfo label="Last Bumped" value={advertising?.last_bumped_at ? formatRelativeTime(advertising.last_bumped_at) : "Never"} />
+            <MiniInfo label="Cooldown" value={`${advertising?.bump_cooldown_hours ?? entitlements?.bump_cooldown_hours ?? 24}h`} />
+          </div>
+          <button
+            type="button"
+            disabled={bumping || limitReached || cooldownActive}
+            onClick={bump}
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            <Zap className="h-4 w-4" />
+            {bumping ? "Bumping..." : limitReached ? "Limit reached" : cooldownActive ? "Cooldown active" : "Bump Server"}
+          </button>
+          <p className="mt-3 text-xs leading-5 text-zinc-400">
+            Bumps are paid visibility only. They do not change organic rank or score.
+          </p>
+        </>
+      ) : (
+        <div className="mt-4 rounded-lg border border-violet-300/20 bg-violet-400/10 p-4">
+          <p className="text-sm font-black uppercase text-white">Upgrade required</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">Bump your server higher in public discovery with Pro or above.</p>
+          <button
+            type="button"
+            onClick={async () => {
+              const session = await createCheckoutSession("pro", "/dashboard");
+              window.location.assign(session.url);
+            }}
+            className="mt-4 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white"
+          >
+            Upgrade to Pro
+          </button>
+        </div>
+      )}
+      {error ? <p className="mt-3 rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-2 text-sm font-bold text-red-50">{error}</p> : null}
+    </DashboardPanel>
+  );
+}
+
 function DashboardPublicReviewsSummary({ slug }: { slug: string }) {
   const [summary, setSummary] = useState<DashboardReviewSummary | null>(null);
 
@@ -1604,6 +1805,24 @@ function formatRelativeTime(value: string) {
   if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
   const days = Math.round(hours / 24);
   return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function planLabel(value: string) {
+  if (value === "starter") return "Starter";
+  if (value === "pro") return "Pro";
+  if (value === "network") return "Network";
+  if (value === "partner") return "Partner";
+  return "Free";
+}
+
+function nextBumpLabel(advertising: AdvertisingBumpStatus | null) {
+  if (!advertising?.last_bumped_at) return "Now";
+  const last = new Date(advertising.last_bumped_at);
+  if (Number.isNaN(last.getTime())) return "Now";
+  const next = last.getTime() + advertising.bump_cooldown_hours * 60 * 60 * 1000;
+  if (next <= Date.now()) return "Now";
+  const hours = Math.ceil((next - Date.now()) / (60 * 60 * 1000));
+  return `In ${hours}h`;
 }
 
 function shouldRefreshServerInfo(value: string | null | undefined) {

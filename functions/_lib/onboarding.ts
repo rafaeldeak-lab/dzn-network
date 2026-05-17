@@ -1,5 +1,6 @@
 import { decryptToken, encryptToken } from "./crypto";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
+import { getOwnerEntitlements } from "./plans";
 import type { Env, NitradoService, ServerType } from "./types";
 
 export const serverTypes: ServerType[] = ["PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
@@ -122,10 +123,10 @@ export async function ensureDraftLinkedServer(
   return linkedServerId;
 }
 
-export async function getServerLinkLimitForUser(env: Env, userId: string) {
-  void env;
-  void userId;
-  return null as number | null;
+export async function getServerLinkLimitForUser(env: Env, userId: string, discordUserId?: string | null) {
+  if (!discordUserId) return 1;
+  const entitlements = await getOwnerEntitlements(env, discordUserId);
+  return entitlements.max_linked_servers;
 }
 
 export async function countLinkedServersForUser(env: Env, userId: string) {

@@ -223,6 +223,38 @@ export type LinkedServer = {
   stats_sync_active?: boolean | null;
 };
 
+export type BillingStatus = {
+  plan_key: "free" | "starter" | "pro" | "network" | "partner";
+  plan_status: string;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  entitlements: {
+    plan_key: "free" | "starter" | "pro" | "network" | "partner";
+    max_linked_servers: number;
+    can_use_reviews: boolean;
+    can_use_public_listing: boolean;
+    can_use_advanced_analytics: boolean;
+    can_join_events: boolean;
+    can_use_ad_bumps: boolean;
+    included_bumps_per_month: number;
+    bump_cooldown_hours: number;
+    can_use_featured_slots: boolean;
+    stat_history_days: number;
+  };
+  linked_server_count: number;
+  can_link_more_servers: boolean;
+  stripe_customer_exists: boolean;
+};
+
+export type AdvertisingBumpStatus = {
+  last_bumped_at: string | null;
+  bump_count_current_period: number;
+  bump_period_start: string | null;
+  bump_period_end: string | null;
+  included_bumps_per_month: number;
+  bump_cooldown_hours: number;
+};
+
 export type ScoreBreakdown = {
   kills_points: number;
   unique_players_points: number;

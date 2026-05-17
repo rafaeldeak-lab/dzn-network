@@ -12,3 +12,9 @@ export async function getOptionalDiscordUser(request: Request, env: Env): Promis
 export async function isPublicViewerLoggedIn(request: Request, env: Env) {
   return Boolean(await getOptionalDiscordUser(request, env));
 }
+
+export function publicAccessCacheHeaders(viewerLoggedIn: boolean) {
+  return viewerLoggedIn
+    ? { "cache-control": "private, no-store, no-cache, must-revalidate" }
+    : { "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60" };
+}

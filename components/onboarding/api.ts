@@ -3,6 +3,8 @@ import type {
   AdmSyncRunResult,
   AdmSyncStatus,
   AuthResponse,
+  AdvertisingBumpStatus,
+  BillingStatus,
   DiscordGuild,
   LinkedServer,
   NitradoLogAccessDiagnostics,
@@ -68,6 +70,33 @@ export async function updateServerPublicListing(linkedServerId: string, data: {
     method: "PATCH",
     body: JSON.stringify(data),
   });
+}
+
+export async function getBillingStatus() {
+  return request<BillingStatus>("/api/billing/status");
+}
+
+export async function createCheckoutSession(planKey: "starter" | "pro" | "network" | "partner", returnTo = "/dashboard") {
+  return request<{ url: string }>("/api/billing/create-checkout-session", {
+    method: "POST",
+    body: JSON.stringify({ plan_key: planKey, returnTo }),
+  });
+}
+
+export async function createPortalSession() {
+  return request<{ url: string }>("/api/billing/create-portal-session", {
+    method: "POST",
+  });
+}
+
+export async function bumpServer(linkedServerId: string) {
+  return request<{ ok: boolean; advertising: AdvertisingBumpStatus }>(`/api/servers/${encodeURIComponent(linkedServerId)}/advertising/bump`, {
+    method: "POST",
+  });
+}
+
+export async function getServerAdvertisingStatus(linkedServerId: string) {
+  return request<{ ok: boolean; advertising: AdvertisingBumpStatus }>(`/api/servers/${encodeURIComponent(linkedServerId)}/advertising/bump`);
 }
 
 export async function testOnboarding() {

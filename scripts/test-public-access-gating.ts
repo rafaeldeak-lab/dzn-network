@@ -59,6 +59,13 @@ const baseServer = {
   average_rating: 4.8,
   review_count: 23,
   rating_breakdown: { 5: 20, 4: 3, 3: 0, 2: 0, 1: 0 },
+  advertising: {
+    is_featured: false,
+    featured_until: null,
+    is_boosted: false,
+    last_bumped_at: null,
+    badge_label: null,
+  },
   recent_events: [
     {
       source: "kill",

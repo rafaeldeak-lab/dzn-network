@@ -169,10 +169,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       .run();
     if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
   } else {
-    const limit = await getServerLinkLimitForUser(env, userId);
+    const limit = await getServerLinkLimitForUser(env, userId, user.discord_id);
     const currentCount = await countLinkedServersForUser(env, userId);
     if (typeof limit === "number" && currentCount >= limit) {
-      return json({ error: "Server link limit reached. Upgrade your plan to add another server." }, { status: 402 });
+      return json({ error: `Your current plan allows ${limit} linked server${limit === 1 ? "" : "s"}. Upgrade to add more.` }, { status: 402 });
     }
 
     linkedServerId = crypto.randomUUID();
