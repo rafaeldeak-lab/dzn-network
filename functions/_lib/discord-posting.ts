@@ -36,6 +36,10 @@ type PublicCache = {
   network_rank: number | null;
 };
 
+type DiscordPayload = ReturnType<typeof renderDiscordPostPayload>;
+
+type DeliveryMode = "bot" | "webhook" | "not_configured";
+
 export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJobs?: number } = {}) {
   await ensureAutomationSchema(env);
   const maxJobs = Math.max(1, Math.min(Math.trunc(Number(options.maxJobs ?? 25)) || 25, 100));
@@ -97,7 +101,7 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<"posted" | 
     .prepare("SELECT guild_id, post_type, discord_channel_id, discord_webhook_url, enabled FROM server_posting_destinations WHERE guild_id = ? AND post_type = ? LIMIT 1")
     .bind(job.guild_id, job.post_type)
     .first<PostingDestination>();
-  if (!destination || Number(destination.enabled ?? 0) !== 1 || !destination.discord_webhook_url) return "skipped";
+  if (!destination || Number(destination.enabled ?? 0) !== 1) return "skipped";
 
   const cache = await db
     .prepare("SELECT * FROM server_public_cache WHERE guild_id = ? LIMIT 1")
@@ -111,26 +115,10 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<"posted" | 
     .first<PostingState>();
   if (state?.last_payload_hash === payloadHash) return "skipped";
 
-  const webhookUrl = destination.discord_webhook_url;
-  let discordMessageId = state?.discord_message_id ?? null;
-  if (discordMessageId) {
-    const editResponse = await fetch(`${webhookUrl}/messages/${encodeURIComponent(discordMessageId)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!editResponse.ok && editResponse.status !== 404) throw new Error(`Discord edit failed with ${editResponse.status}`);
-    if (editResponse.status === 404) discordMessageId = null;
-  }
-  if (!discordMessageId) {
-    const sendResponse = await fetch(`${webhookUrl}?wait=true`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!sendResponse.ok) throw new Error(`Discord post failed with ${sendResponse.status}`);
-    const message = await sendResponse.json().catch(() => null) as { id?: string } | null;
-    discordMessageId = typeof message?.id === "string" ? message.id : null;
+  const delivery = await deliverDiscordPayload(env, destination, payload, state?.discord_message_id ?? null);
+  if (delivery.mode === "not_configured") {
+    await recordPostingStateError(env, destination, "Configure the DZN bot token/channel permission or add a webhook URL.");
+    return "skipped";
   }
 
   const now = new Date().toISOString();
@@ -147,9 +135,157 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<"posted" | 
         last_error = NULL,
         updated_at = excluded.updated_at`,
     )
-    .bind(crypto.randomUUID(), job.guild_id, job.post_type, destination.discord_channel_id, discordMessageId, now, now, payloadHash, now, now)
+    .bind(crypto.randomUUID(), job.guild_id, job.post_type, destination.discord_channel_id, delivery.messageId, now, now, payloadHash, now, now)
     .run();
   return "posted";
+}
+
+export async function sendDiscordTestPost(env: Env, destination: {
+  guild_id: string;
+  post_type: AutoPostType;
+  discord_channel_id: string;
+  discord_webhook_url?: string | null;
+}) {
+  const payload = {
+    username: "DZN Network",
+    embeds: [
+      {
+        title: `DZN Test - ${postTitle(destination.post_type)}`,
+        description: "This channel is ready for DZN automatic updates.",
+        color: 0x22d3ee,
+        footer: { text: "DZN automation test post" },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+  const result = await deliverDiscordPayload(env, {
+    guild_id: destination.guild_id,
+    post_type: destination.post_type,
+    discord_channel_id: destination.discord_channel_id,
+    discord_webhook_url: destination.discord_webhook_url ?? null,
+    enabled: 1,
+  }, payload, null);
+  if (result.mode === "not_configured") throw new Error("Configure the DZN bot token/channel permission or add a webhook URL.");
+  return result;
+}
+
+export function getPostingDeliveryMode(env: Env, destination: {
+  discord_channel_id?: string | null;
+  discord_webhook_url?: string | null;
+}): DeliveryMode {
+  if (env.DISCORD_BOT_TOKEN && destination.discord_channel_id) return "bot";
+  if (destination.discord_webhook_url) return "webhook";
+  return "not_configured";
+}
+
+async function deliverDiscordPayload(
+  env: Env,
+  destination: PostingDestination,
+  payload: DiscordPayload,
+  existingMessageId: string | null,
+): Promise<{ mode: DeliveryMode; messageId: string | null }> {
+  const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
+  if (botToken && destination.discord_channel_id) {
+    try {
+      const messageId = await sendOrEditWithBot(botToken, destination.discord_channel_id, payload, existingMessageId);
+      return { mode: "bot", messageId };
+    } catch (error) {
+      if (!destination.discord_webhook_url) throw error;
+      console.warn("DZN DISCORD BOT POST FAILED, WEBHOOK FALLBACK", {
+        guildId: destination.guild_id,
+        postType: destination.post_type,
+        message: error instanceof Error ? error.message : "Discord bot post failed",
+      });
+    }
+  }
+
+  if (destination.discord_webhook_url) {
+    const messageId = await sendOrEditWithWebhook(destination.discord_webhook_url, payload, existingMessageId);
+    return { mode: "webhook", messageId };
+  }
+
+  return { mode: "not_configured", messageId: null };
+}
+
+async function sendOrEditWithBot(
+  botToken: string,
+  channelId: string,
+  payload: DiscordPayload,
+  existingMessageId: string | null,
+) {
+  const headers = {
+    authorization: `Bot ${botToken}`,
+    "content-type": "application/json",
+  };
+  let messageId = existingMessageId;
+  if (messageId) {
+    const editResponse = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify(stripWebhookOnlyFields(payload)),
+    });
+    if (editResponse.ok) return messageId;
+    if (![403, 404].includes(editResponse.status)) throw new Error(`Discord bot edit failed with ${editResponse.status}`);
+    messageId = null;
+  }
+
+  const sendResponse = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(stripWebhookOnlyFields(payload)),
+  });
+  if (!sendResponse.ok) throw new Error(`Discord bot post failed with ${sendResponse.status}`);
+  const message = await sendResponse.json().catch(() => null) as { id?: string } | null;
+  return typeof message?.id === "string" ? message.id : null;
+}
+
+async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload, existingMessageId: string | null) {
+  let messageId = existingMessageId;
+  if (messageId) {
+    const editResponse = await fetch(`${webhookUrl}/messages/${encodeURIComponent(messageId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (editResponse.ok) return messageId;
+    if (editResponse.status !== 404) throw new Error(`Discord webhook edit failed with ${editResponse.status}`);
+    messageId = null;
+  }
+  const sendResponse = await fetch(`${webhookUrl}?wait=true`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!sendResponse.ok) throw new Error(`Discord webhook post failed with ${sendResponse.status}`);
+  const message = await sendResponse.json().catch(() => null) as { id?: string } | null;
+  return typeof message?.id === "string" ? message.id : null;
+}
+
+function stripWebhookOnlyFields(payload: DiscordPayload) {
+  const { username: _username, ...rest } = payload;
+  void _username;
+  return rest;
+}
+
+async function recordPostingStateError(env: Env, destination: PostingDestination, message: string) {
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_posting_state (
+        id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
+        last_edited_at, last_payload_hash, last_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
+      ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
+        last_error = excluded.last_error,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, message, now, now)
+    .run();
+}
+
+function normalizeBotToken(value: string | undefined | null) {
+  if (!value?.trim()) return null;
+  return value.trim().replace(/^Bot\s+/i, "");
 }
 
 function renderDiscordPostPayload(postType: AutoPostType, cache: PublicCache | null, planKey: string) {

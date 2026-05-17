@@ -2,7 +2,8 @@ name: DZN ADM Sync
 
 on:
   schedule:
-    - cron: "* * * * *"
+    # Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -11,27 +12,29 @@ jobs:
     steps:
       - name: Trigger scheduled metadata and ADM sync
         env:
-          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          LEGACY_SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: |
-          if [ -z "$SYNC_CRON_SECRET" ]; then
-            echo "SYNC_CRON_SECRET is not configured."
+          CRON_SECRET="${DZN_CRON_SECRET:-$LEGACY_SYNC_CRON_SECRET}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "DZN_CRON_SECRET is not configured."
             exit 1
           fi
 
           curl --fail-with-body --silent --show-error \
             -X POST "https://dzn-network.pages.dev/api/sync/metadata/run" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"cron":"github-actions","max_servers":25}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "https://dzn-network.pages.dev/api/sync/adm/run" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"cron":"github-actions","max_servers":25,"max_lines_per_server":50000}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "https://dzn-network.pages.dev/api/sync/discord-posts/run" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"cron":"github-actions","max_jobs":25}'

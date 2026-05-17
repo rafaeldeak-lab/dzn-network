@@ -290,6 +290,27 @@ export type PostingDestinationSummary = {
   required_feature: string | null;
   min_plan_key: string | null;
   updated_at: string | null;
+  delivery_mode?: "bot" | "webhook" | "not_configured";
+  setup_warning?: string | null;
+  last_error?: string | null;
+  last_posted_at?: string | null;
+  last_edited_at?: string | null;
+};
+
+export type AutomationHealth = {
+  ok: boolean;
+  checked_at: string;
+  last_metadata_sync_run: string | null;
+  last_adm_sync_run: string | null;
+  last_discord_dispatcher_run: string | null;
+  due_metadata_jobs: number;
+  due_adm_jobs: number;
+  queued_discord_post_jobs: number;
+  failed_jobs: number;
+  stuck_currently_checking_status_locks: number;
+  stuck_currently_syncing_adm_locks: number;
+  server_count_by_plan: Record<string, number>;
+  subscription_count_by_status: Record<string, number>;
 };
 
 export type AdvertisingBumpStatus = {

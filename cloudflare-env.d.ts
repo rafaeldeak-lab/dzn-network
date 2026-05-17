@@ -29,8 +29,12 @@ interface CloudflareEnv {
   DISCORD_REDIRECT_URI?: string;
   SESSION_SECRET?: string;
   TOKEN_ENCRYPTION_KEY?: string;
+  DZN_CRON_SECRET?: string;
   SYNC_CRON_SECRET?: string;
   SYNC_WORKER_HEALTH_TOKEN?: string;
+  DZN_ADMIN_DISCORD_IDS?: string;
+  DZN_OWNER_DISCORD_IDS?: string;
+  DISCORD_BOT_TOKEN?: string;
   MOCK_AUTH?: string;
   MOCK_NITRADO?: string;
   STRIPE_SECRET_KEY?: string;

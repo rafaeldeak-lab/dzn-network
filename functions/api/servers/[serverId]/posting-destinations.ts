@@ -1,4 +1,5 @@
 import { getSessionUser, requireDb } from "../../../_lib/db";
+import { getPostingDeliveryMode, sendDiscordTestPost } from "../../../_lib/discord-posting";
 import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
@@ -11,6 +12,7 @@ type SavePostingDestinationBody = {
   discord_channel_id?: string;
   discord_webhook_url?: string | null;
   enabled?: boolean;
+  send_test_post?: boolean;
 };
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -68,14 +70,31 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       now,
     )
     .run();
-  return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+  let testResult: { ok: boolean; mode?: string; error?: string } | null = null;
+  if (body.send_test_post === true) {
+    try {
+      const delivery = await sendDiscordTestPost(env, {
+        guild_id: context.guildId,
+        post_type: postType,
+        discord_channel_id: channelId,
+        discord_webhook_url: webhookUrl,
+      });
+      testResult = { ok: true, mode: delivery.mode };
+    } catch (error) {
+      testResult = { ok: false, error: error instanceof Error ? error.message : "Discord test post failed." };
+    }
+  }
+  return json({
+    ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+    test_post: testResult,
+  });
 };
 
 async function getPostingDestinationPayload(env: Env, guildId: string, planKey: string) {
   await ensureAutomationSchema(env);
   const rows = await requireDb(env)
     .prepare(
-      `SELECT post_type, discord_channel_id, enabled, required_feature, min_plan_key, updated_at
+      `SELECT post_type, discord_channel_id, discord_webhook_url, enabled, required_feature, min_plan_key, updated_at
        FROM server_posting_destinations
        WHERE guild_id = ?`,
     )
@@ -83,15 +102,36 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
     .all<{
       post_type: AutoPostType;
       discord_channel_id: string;
+      discord_webhook_url?: string | null;
       enabled: number;
       required_feature: string | null;
       min_plan_key: string | null;
       updated_at: string | null;
     }>();
+  const stateRows = await requireDb(env)
+    .prepare(
+      `SELECT post_type, discord_channel_id, last_error, last_posted_at, last_edited_at
+       FROM server_posting_state
+       WHERE guild_id = ?`,
+    )
+    .bind(guildId)
+    .all<{
+      post_type: AutoPostType;
+      discord_channel_id: string;
+      last_error: string | null;
+      last_posted_at: string | null;
+      last_edited_at: string | null;
+    }>();
   const configured = new Map((rows.results ?? []).map((row) => [row.post_type, row]));
+  const states = new Map((stateRows.results ?? []).map((row) => [row.post_type, row]));
   return {
     post_types: AUTO_POST_TYPES.map((postType) => {
       const row = configured.get(postType);
+      const state = states.get(postType);
+      const deliveryMode = getPostingDeliveryMode(env, {
+        discord_channel_id: row?.discord_channel_id ?? null,
+        discord_webhook_url: row?.discord_webhook_url ?? null,
+      });
       return {
         post_type: postType,
         allowed: hasAutoPost(planKey, postType),
@@ -101,6 +141,11 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
         required_feature: row?.required_feature ?? requiredFeatureForPostType(postType),
         min_plan_key: row?.min_plan_key ?? null,
         updated_at: row?.updated_at ?? null,
+        delivery_mode: deliveryMode,
+        setup_warning: setupWarning(deliveryMode, state?.last_error ?? null),
+        last_error: state?.last_error ?? null,
+        last_posted_at: state?.last_posted_at ?? null,
+        last_edited_at: state?.last_edited_at ?? null,
       };
     }),
   };
@@ -134,6 +179,12 @@ function lockedMessage(postType: AutoPostType) {
   if (postType === "server_vs_server_embed") return "Upgrade to DZN Network to auto-post server-vs-server competition updates.";
   if (postType === "partner_featured_embed" || postType === "priority_status_embed") return "Upgrade to DZN Partner to unlock priority Discord posting.";
   return "Upgrade your DZN plan to unlock this Discord auto-post.";
+}
+
+function setupWarning(deliveryMode: string, lastError: string | null) {
+  if (lastError) return lastError;
+  if (deliveryMode === "not_configured") return "Add a channel ID for bot posting or provide a webhook fallback.";
+  return null;
 }
 
 function sanitizeLinkedServerId(value: unknown) {

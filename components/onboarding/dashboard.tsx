@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getBillingPlans, getBillingStatus, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AuthResponse, BillingPlanSummary, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics, PostingDestinationSummary } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AuthResponse, BillingPlanSummary, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics, PostingDestinationSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -227,6 +227,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const [billingPlans, setBillingPlans] = useState<BillingPlanSummary[]>([]);
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
   const [postingDestinations, setPostingDestinations] = useState<PostingDestinationSummary[]>([]);
+  const [automationHealth, setAutomationHealth] = useState<AutomationHealth | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
@@ -266,6 +267,8 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       if (plans?.plans?.length) setBillingPlans(plans.plans);
       const posting = await getPostingDestinations(server.id).catch(() => null);
       if (posting?.post_types) setPostingDestinations(posting.post_types);
+      const health = await getAutomationHealth().catch(() => null);
+      setAutomationHealth(health);
     } catch (error) {
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
     }
@@ -816,6 +819,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
             destinations={postingDestinations}
             onSaved={(next) => setPostingDestinations(next)}
           />
+          {automationHealth ? <AutomationHealthPanel health={automationHealth} /> : null}
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions & Setup" />
             <div className="mt-4 grid gap-3">
@@ -1469,6 +1473,7 @@ function DiscordAutoPostsPanel({
 }) {
   const [drafts, setDrafts] = useState<Record<string, { channel: string; webhook: string; enabled: boolean }>>({});
   const [savingType, setSavingType] = useState<string | null>(null);
+  const [testingType, setTestingType] = useState<string | null>(null);
   const [message, setMessage] = useState("");
 
   const destinationDrafts = useMemo(() => Object.fromEntries(destinations.map((item) => [
@@ -1480,9 +1485,10 @@ function DiscordAutoPostsPanel({
       },
     ])), [destinations]);
 
-  async function save(item: PostingDestinationSummary) {
+  async function save(item: PostingDestinationSummary, sendTestPost = false) {
     const draft = drafts[item.post_type] ?? destinationDrafts[item.post_type] ?? { channel: "", webhook: "", enabled: false };
-    setSavingType(item.post_type);
+    if (sendTestPost) setTestingType(item.post_type);
+    else setSavingType(item.post_type);
     setMessage("");
     try {
       const result = await savePostingDestination(serverId, {
@@ -1490,13 +1496,21 @@ function DiscordAutoPostsPanel({
         discord_channel_id: draft.channel,
         discord_webhook_url: draft.webhook || null,
         enabled: draft.enabled,
+        send_test_post: sendTestPost,
       });
       onSaved(result.post_types);
-      setMessage(`${formatPostType(item.post_type)} destination saved.`);
+      if (sendTestPost) {
+        setMessage(result.test_post?.ok
+          ? `${formatPostType(item.post_type)} test posted by ${result.test_post.mode === "bot" ? "DZN bot" : "webhook"}.`
+          : result.test_post?.error ?? "Discord test post failed.");
+      } else {
+        setMessage(`${formatPostType(item.post_type)} destination saved.`);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not save Discord posting destination.");
     } finally {
       setSavingType(null);
+      setTestingType(null);
     }
   }
 
@@ -1507,7 +1521,7 @@ function DiscordAutoPostsPanel({
     <DashboardPanel className="p-4">
       <PanelHeader icon={<Bell className="h-5 w-5" />} title="Discord Auto Posts" />
       <p className="mt-3 text-xs leading-5 text-zinc-400">
-        DZN edits existing webhook messages when data changes. No destination means that post type is skipped safely.
+        DZN uses the bot and saved channel ID first, then falls back to a webhook URL if one is supplied. No destination means that post type is skipped safely.
       </p>
       <div className="mt-4 grid gap-3">
         {allowed.map((item) => {
@@ -1516,17 +1530,22 @@ function DiscordAutoPostsPanel({
             <div key={item.post_type} className="rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-black uppercase text-white">{formatPostType(item.post_type)}</p>
-                <label className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
-                  <input
-                    type="checkbox"
-                    checked={draft.enabled}
-                    onChange={(event) => setDrafts((current) => ({
-                      ...current,
-                      [item.post_type]: { ...draft, enabled: event.target.checked },
-                    }))}
-                  />
-                  Enabled
-                </label>
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingModeClass(item.delivery_mode)}`}>
+                    {postingModeLabel(item.delivery_mode)}
+                  </span>
+                  <label className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
+                    <input
+                      type="checkbox"
+                      checked={draft.enabled}
+                      onChange={(event) => setDrafts((current) => ({
+                        ...current,
+                        [item.post_type]: { ...draft, enabled: event.target.checked },
+                      }))}
+                    />
+                    Enabled
+                  </label>
+                </div>
               </div>
               <input
                 value={draft.channel}
@@ -1546,14 +1565,25 @@ function DiscordAutoPostsPanel({
                 placeholder={item.discord_channel_id ? "Webhook URL hidden after save" : "Discord webhook URL"}
                 className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
               />
-              <button
-                type="button"
-                disabled={savingType === item.post_type || !draft.channel}
-                onClick={() => save(item)}
-                className="mt-3 rounded-lg bg-cyan-500/80 px-3 py-2 text-[10px] font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {savingType === item.post_type ? "Saving..." : "Save Destination"}
-              </button>
+              {item.setup_warning ? <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{item.setup_warning}</p> : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={savingType === item.post_type || !draft.channel}
+                  onClick={() => save(item)}
+                  className="rounded-lg bg-cyan-500/80 px-3 py-2 text-[10px] font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  {savingType === item.post_type ? "Saving..." : "Save Destination"}
+                </button>
+                <button
+                  type="button"
+                  disabled={testingType === item.post_type || !draft.channel}
+                  onClick={() => save(item, true)}
+                  className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  {testingType === item.post_type ? "Testing..." : "Send Test Post"}
+                </button>
+              </div>
             </div>
           );
         })}
@@ -1567,6 +1597,55 @@ function DiscordAutoPostsPanel({
       {message ? <p className="mt-3 text-xs font-bold text-cyan-100">{message}</p> : null}
     </DashboardPanel>
   );
+}
+
+function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
+  return (
+    <DashboardPanel className="p-4">
+      <PanelHeader icon={<Activity className="h-5 w-5" />} title="Automation Health" />
+      <p className="mt-3 text-xs leading-5 text-zinc-400">
+        Backend cron state from the database. Cloudflare Worker Cron is the primary trigger; GitHub Actions is backup only.
+      </p>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MiniInfo label="Last Metadata Run" value={health.last_metadata_sync_run ? formatDashboardDate(health.last_metadata_sync_run) : "Waiting"} />
+        <MiniInfo label="Last ADM Run" value={health.last_adm_sync_run ? formatDashboardDate(health.last_adm_sync_run) : "Waiting"} />
+        <MiniInfo label="Last Discord Dispatch" value={health.last_discord_dispatcher_run ? formatDashboardDate(health.last_discord_dispatcher_run) : "Waiting"} />
+        <MiniInfo label="Due Metadata Jobs" value={String(health.due_metadata_jobs)} />
+        <MiniInfo label="Due ADM Jobs" value={String(health.due_adm_jobs)} />
+        <MiniInfo label="Queued Discord Jobs" value={String(health.queued_discord_post_jobs)} />
+        <MiniInfo label="Failed Jobs" value={String(health.failed_jobs)} />
+        <MiniInfo label="Stuck Locks" value={`${health.stuck_currently_checking_status_locks + health.stuck_currently_syncing_adm_locks}`} />
+      </div>
+      <div className="mt-4 grid gap-2">
+        <HealthCountLine label="Plans" counts={health.server_count_by_plan} />
+        <HealthCountLine label="Subscriptions" counts={health.subscription_count_by_status} />
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function HealthCountLine({ label, counts }: { label: string; counts: Record<string, number> }) {
+  const entries = Object.entries(counts);
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2">
+      <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+      <p className="mt-1 text-xs font-bold text-zinc-200">
+        {entries.length ? entries.map(([key, value]) => `${key}: ${value}`).join(" | ") : "None"}
+      </p>
+    </div>
+  );
+}
+
+function postingModeLabel(mode: PostingDestinationSummary["delivery_mode"]) {
+  if (mode === "bot") return "Bot mode";
+  if (mode === "webhook") return "Webhook";
+  return "Setup needed";
+}
+
+function postingModeClass(mode: PostingDestinationSummary["delivery_mode"]) {
+  if (mode === "bot") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
+  if (mode === "webhook") return "border-cyan-300/30 bg-cyan-400/10 text-cyan-100";
+  return "border-amber-300/30 bg-amber-400/10 text-amber-100";
 }
 
 function DashboardPublicReviewsSummary({ slug }: { slug: string }) {

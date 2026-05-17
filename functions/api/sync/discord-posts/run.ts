@@ -1,4 +1,5 @@
 import { dispatchQueuedDiscordPostUpdates } from "../../../_lib/discord-posting";
+import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
 import { json, readJson } from "../../../_lib/http";
 import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
@@ -43,9 +44,7 @@ export async function handleDiscordPostRun(
 }
 
 export function isDiscordPostCronAuthorized(request: Request, env: Env) {
-  const expected = env.SYNC_CRON_SECRET;
-  if (!expected) return false;
-  return request.headers.get("authorization") === `Bearer ${expected}`;
+  return isCronSecretAuthorized(request, env);
 }
 
 function sanitizePositiveInteger(value: unknown, fallback: number) {

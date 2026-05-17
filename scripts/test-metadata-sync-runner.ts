@@ -10,22 +10,22 @@ import type { Env, PagesContext } from "../functions/_lib/types";
 
 const env = {
   DB: {} as D1Database,
-  SYNC_CRON_SECRET: "unit-test-secret",
+  DZN_CRON_SECRET: "unit-test-secret",
 } as Env;
 
 async function run() {
   assert.equal(isMetadataCronAuthorized(new Request("https://dzn.test", {
-    headers: { authorization: "Bearer unit-test-secret" },
+    headers: { "x-dzn-cron-secret": "unit-test-secret" },
   }), env), true);
   assert.equal(isMetadataCronAuthorized(new Request("https://dzn.test", {
-    headers: { authorization: "Bearer wrong" },
+    headers: { "x-dzn-cron-secret": "wrong" },
   }), env), false);
 
   let refreshCalled = false;
   const successResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
     method: "POST",
     headers: {
-      authorization: "Bearer unit-test-secret",
+      "x-dzn-cron-secret": "unit-test-secret",
       "content-type": "application/json",
     },
     body: JSON.stringify({ cron: "github-actions", max_servers: 25 }),
@@ -90,7 +90,7 @@ async function run() {
 
   const unauthorizedResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
     method: "POST",
-    headers: { authorization: "Bearer wrong" },
+    headers: { "x-dzn-cron-secret": "wrong" },
     body: "{}",
   }), env), {
     refreshMetadata: async () => {

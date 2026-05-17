@@ -1,4 +1,5 @@
 import { runAdmSync, runScheduledAdmSync } from "../../../_lib/adm-sync";
+import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
 import { ensureMockUser, getSessionUser } from "../../../_lib/db";
 import { json, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
@@ -80,9 +81,7 @@ export async function handleAdmSyncRun(
 }
 
 export function isCronAuthorized(request: Request, env: Env) {
-  const expected = env.SYNC_CRON_SECRET;
-  if (!expected) return false;
-  return request.headers.get("authorization") === `Bearer ${expected}`;
+  return isCronSecretAuthorized(request, env);
 }
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {

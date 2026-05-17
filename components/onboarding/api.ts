@@ -4,6 +4,7 @@ import type {
   AdmSyncStatus,
   AuthResponse,
   AdvertisingBumpStatus,
+  AutomationHealth,
   BillingPlanSummary,
   BillingStatus,
   DiscordGuild,
@@ -179,11 +180,16 @@ export async function savePostingDestination(linkedServerId: string, data: {
   discord_channel_id: string;
   discord_webhook_url?: string | null;
   enabled: boolean;
+  send_test_post?: boolean;
 }) {
-  return request<{ post_types: PostingDestinationSummary[] }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
+  return request<{ post_types: PostingDestinationSummary[]; test_post?: { ok: boolean; mode?: string; error?: string } | null }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+export async function getAutomationHealth() {
+  return request<AutomationHealth>("/api/automation/health", { cache: "no-store" });
 }
 
 export async function clearMockTestSyncData(linkedServerId?: string) {

@@ -239,6 +239,7 @@ export async function syncServerSubscriptionsForOwner(env: Env, discordUserId: s
 
 export async function getDueStatusAutomationServers(env: Env, maxServers: number): Promise<AutomationSyncServer[]> {
   await ensureAutomationRowsForLinkedServers(env);
+  await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
   const rows = await requireDb(env)
     .prepare(
@@ -348,6 +349,7 @@ export async function recordStatusCheckResult(env: Env, values: {
 
 export async function getDueAdmAutomationServers(env: Env, maxServers: number, minSyncIntervalMs: number): Promise<AutomationSyncServer[]> {
   await ensureAutomationRowsForLinkedServers(env);
+  await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
   const rows = await requireDb(env)
     .prepare(
@@ -517,6 +519,139 @@ export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string,
   }
 }
 
+export async function recoverStuckAutomationLocks(env: Env) {
+  await ensureAutomationSchema(env);
+  const db = requireDb(env);
+  const now = new Date().toISOString();
+  const statusCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const admCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const statusMessage = "Recovered stale status sync lock after 10 minutes.";
+  const admMessage = "Recovered stale ADM sync lock after 30 minutes.";
+
+  const statusResult = await db
+    .prepare(
+      `UPDATE server_sync_state SET
+        currently_checking_status = 0,
+        last_failed_status_check_at = COALESCE(last_failed_status_check_at, ?),
+        last_status_error = ?,
+        status_data_freshness = CASE WHEN status_data_freshness = 'fresh' THEN status_data_freshness ELSE 'failed' END,
+        updated_at = ?
+       WHERE COALESCE(currently_checking_status, 0) = 1
+         AND updated_at < ?`,
+    )
+    .bind(now, statusMessage, now, statusCutoff)
+    .run();
+
+  const admResult = await db
+    .prepare(
+      `UPDATE server_sync_state SET
+        currently_syncing_adm = 0,
+        last_failed_adm_pull_at = COALESCE(last_failed_adm_pull_at, ?),
+        last_adm_error = ?,
+        adm_status = CASE WHEN adm_status IN ('new_data_found', 'no_new_log_available') THEN adm_status ELSE 'failed' END,
+        updated_at = ?
+       WHERE COALESCE(currently_syncing_adm, 0) = 1
+         AND updated_at < ?`,
+    )
+    .bind(now, admMessage, now, admCutoff)
+    .run();
+
+  const statusRecovered = Number(statusResult.meta?.changes ?? 0);
+  const admRecovered = Number(admResult.meta?.changes ?? 0);
+  if (statusRecovered > 0 || admRecovered > 0) {
+    console.warn("DZN AUTOMATION STUCK LOCKS RECOVERED", {
+      statusRecovered,
+      admRecovered,
+    });
+  }
+  return { statusRecovered, admRecovered };
+}
+
+export async function getAutomationHealth(env: Env) {
+  await ensureAutomationRowsForLinkedServers(env);
+  await recoverStuckAutomationLocks(env);
+  const db = requireDb(env);
+  const now = new Date().toISOString();
+  const statusLockCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const admLockCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+  const [
+    lastRuns,
+    dueMetadata,
+    dueAdm,
+    queuedDiscord,
+    failedJobs,
+    stuckStatusLocks,
+    stuckAdmLocks,
+    planCounts,
+    statusCounts,
+  ] = await Promise.all([
+    db
+      .prepare(
+        `SELECT
+          MAX(last_status_check_at) AS last_metadata_sync_run,
+          MAX(last_adm_pull_at) AS last_adm_sync_run,
+          (SELECT MAX(updated_at) FROM automation_jobs WHERE job_type = 'discord-post-update') AS last_discord_dispatcher_run
+         FROM server_sync_state`,
+      )
+      .first<{
+        last_metadata_sync_run: string | null;
+        last_adm_sync_run: string | null;
+        last_discord_dispatcher_run: string | null;
+      }>(),
+    countFirst(db,
+      `SELECT COUNT(*) AS count
+       FROM server_subscriptions
+       JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
+       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
+         AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?`,
+      now),
+    countFirst(db,
+      `SELECT COUNT(*) AS count
+       FROM server_subscriptions
+       JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
+       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+         AND COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?`,
+      now),
+    countFirst(db, "SELECT COUNT(*) AS count FROM automation_jobs WHERE job_type = 'discord-post-update' AND status = 'queued'"),
+    countFirst(db, "SELECT COUNT(*) AS count FROM automation_jobs WHERE status = 'failed'"),
+    countFirst(db,
+      `SELECT COUNT(*) AS count FROM server_sync_state
+       WHERE COALESCE(currently_checking_status, 0) = 1
+         AND updated_at < ?`,
+      statusLockCutoff),
+    countFirst(db,
+      `SELECT COUNT(*) AS count FROM server_sync_state
+       WHERE COALESCE(currently_syncing_adm, 0) = 1
+         AND updated_at < ?`,
+      admLockCutoff),
+    db
+      .prepare("SELECT plan_key, COUNT(*) AS count FROM server_subscriptions GROUP BY plan_key")
+      .all<{ plan_key: string; count: number }>(),
+    db
+      .prepare("SELECT status, COUNT(*) AS count FROM server_subscriptions GROUP BY status")
+      .all<{ status: string; count: number }>(),
+  ]);
+
+  return {
+    ok: true,
+    checked_at: now,
+    last_metadata_sync_run: lastRuns?.last_metadata_sync_run ?? null,
+    last_adm_sync_run: lastRuns?.last_adm_sync_run ?? null,
+    last_discord_dispatcher_run: lastRuns?.last_discord_dispatcher_run ?? null,
+    due_metadata_jobs: dueMetadata,
+    due_adm_jobs: dueAdm,
+    queued_discord_post_jobs: queuedDiscord,
+    failed_jobs: failedJobs,
+    stuck_currently_checking_status_locks: stuckStatusLocks,
+    stuck_currently_syncing_adm_locks: stuckAdmLocks,
+    server_count_by_plan: rowsToCountMap(planCounts.results ?? [], "plan_key"),
+    subscription_count_by_status: rowsToCountMap(statusCounts.results ?? [], "status"),
+  };
+}
+
 export function isActiveSubscriptionStatus(status: string | null | undefined) {
   return ACTIVE_BILLING_STATUSES.includes((status ?? "").toLowerCase() as typeof ACTIVE_BILLING_STATUSES[number]);
 }
@@ -536,6 +671,16 @@ function normalizeAdmAutomationStatus(value: string) {
 
 function firstString(...values: Array<string | null | undefined>) {
   return values.find((value) => typeof value === "string" && value.trim())?.trim() ?? null;
+}
+
+async function countFirst(db: D1Database, query: string, ...bindings: unknown[]) {
+  const prepared = db.prepare(query);
+  const row = await (bindings.length ? prepared.bind(...bindings) : prepared).first<{ count: number }>();
+  return Number(row?.count ?? 0);
+}
+
+function rowsToCountMap<T extends Record<string, unknown> & { count?: unknown }>(rows: T[], key: keyof T) {
+  return Object.fromEntries(rows.map((row) => [String(row[key] ?? "unknown"), Number(row.count ?? 0)]));
 }
 
 const AUTOMATION_SCHEMA_STATEMENTS = [

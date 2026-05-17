@@ -3,10 +3,11 @@ main = "workers/adm-sync-worker.ts"
 compatibility_date = "2026-05-13"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 [vars]
 MOCK_NITRADO = "false"
+NEXT_PUBLIC_APP_URL = "https://dzn-network.pages.dev"
 
 [[d1_databases]]
 binding = "DB"

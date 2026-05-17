@@ -99,14 +99,14 @@ assert.equal(admSyncSource.includes("softFail: true"), true);
 assert.equal(admSyncSource.includes("refreshLivePlayerCountsForActiveServers"), true);
 assert.equal(admSyncSource.includes("metadata,"), true);
 
-const env = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
+const env = { DZN_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
   method: "POST",
-  headers: { authorization: "Bearer unit-test-secret" },
+  headers: { "x-dzn-cron-secret": "unit-test-secret" },
 }), env), true);
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
   method: "POST",
-  headers: { authorization: "Bearer wrong" },
+  headers: { "x-dzn-cron-secret": "wrong" },
 }), env), false);
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", { method: "POST" }), {} as Env), false);
 
@@ -132,7 +132,7 @@ async function runEndpointTests() {
   const scheduledResponse = await handleAdmSyncRun(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
     method: "POST",
     headers: {
-      authorization: "Bearer unit-test-secret",
+      "x-dzn-cron-secret": "unit-test-secret",
       "content-type": "application/json",
     },
     body: "{}",
@@ -166,7 +166,7 @@ async function runEndpointTests() {
 
   const unauthorizedResponse = await handleAdmSyncRun(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
     method: "POST",
-    headers: { authorization: "Bearer wrong" },
+    headers: { "x-dzn-cron-secret": "wrong" },
     body: "{}",
   }), env), {
     runScheduled: async () => ({
