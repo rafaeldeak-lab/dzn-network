@@ -256,6 +256,29 @@ const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
 const DZN_DISCORD_INVITE_URL =
   process.env.NEXT_PUBLIC_DZN_DISCORD_INVITE_URL ||
   "https://discord.gg/T2cgcTYPFV";
+const BUILD_IMAGE_ASSETS = {
+  hero: "/dzn/build/build-hero.webp",
+  walls: "/dzn/build/full-walls.webp",
+  watchtower: "/dzn/build/watchtower.webp",
+  gates: "/dzn/build/gates-fence.webp",
+  storage: "/dzn/build/storage-expansion.webp",
+} as const;
+
+const BUILD_LEADERBOARD_IMAGE_PATHS = Object.values(BUILD_IMAGE_ASSETS);
+
+function preloadBuildLeaderboardImages() {
+  if (typeof window === "undefined") return;
+
+  for (const src of BUILD_LEADERBOARD_IMAGE_PATHS) {
+    const image = new Image();
+    image.decoding = "async";
+    image.onerror = () => {
+      console.warn(`DZN BUILD IMAGE ASSET MISSING: ${src}`);
+    };
+    image.src = src;
+  }
+}
+
 const DznOperationalGlobe = dynamic(
   () => import("./dzn-operational-globe").then((module) => module.DznOperationalGlobe),
   {
@@ -400,6 +423,8 @@ export function DznLandingPage() {
     console.log("DZN RECENT ACTIVITY SPACING FIXED");
     console.log("DZN HOMEPAGE ADD SERVER CTA DEDUPED");
     console.log("DZN BUILD TRACKING LEADERBOARD UPGRADED");
+    console.log("DZN BUILD LEADERBOARD IMAGE ASSETS FIXED");
+    preloadBuildLeaderboardImages();
   }, []);
 
   useEffect(() => {
@@ -1260,7 +1285,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.full_walls_built ?? 0,
       subtext: "Most used structure",
       icon: Hammer,
-      image: "/dzn/build/full-walls.webp",
+      image: BUILD_IMAGE_ASSETS.walls,
       cssKey: "walls",
     },
     {
@@ -1269,7 +1294,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.watchtowers_built ?? 0,
       subtext: "High ground control",
       icon: Flag,
-      image: "/dzn/build/watchtower.webp",
+      image: BUILD_IMAGE_ASSETS.watchtower,
       cssKey: "watchtower",
     },
     {
@@ -1278,7 +1303,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.gates_fence_kits_built ?? 0,
       subtext: "Secure your perimeter",
       icon: Shield,
-      image: "/dzn/build/gates-fence.webp",
+      image: BUILD_IMAGE_ASSETS.gates,
       cssKey: "gates",
     },
     {
@@ -1287,7 +1312,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       value: topServer?.storage_expansion_built ?? 0,
       subtext: "Expand & store",
       icon: Server,
-      image: "/dzn/build/storage-expansion.webp",
+      image: BUILD_IMAGE_ASSETS.storage,
       cssKey: "storage",
     },
   ];
@@ -1312,7 +1337,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
         <>
           <div
             className="dzn-build-leaderboard__hero dzn-build-hero"
-            style={{ "--build-hero-image": 'url("/dzn/build/build-hero.webp")' } as CSSProperties}
+            style={{ "--build-hero-image": `url("${BUILD_IMAGE_ASSETS.hero}")` } as CSSProperties}
           >
             <div className="dzn-build-hero-main">
               <span className="dzn-build-rank-shield">#1</span>
