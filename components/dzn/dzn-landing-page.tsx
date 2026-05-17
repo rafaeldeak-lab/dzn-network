@@ -8,7 +8,6 @@ import {
   Flag,
   Globe2,
   Hammer,
-  MessageCircle,
   Play,
   Radio,
   Server,
@@ -232,6 +231,9 @@ const emptyHomeStats: HomeStats = {
 
 const HOME_STATS_REFRESH_MS = 30000;
 const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
+const DZN_DISCORD_INVITE_URL =
+  process.env.NEXT_PUBLIC_DZN_DISCORD_INVITE_URL ||
+  "https://discord.gg/T2cgcTYPFV";
 const DznOperationalGlobe = dynamic(
   () => import("./dzn-operational-globe").then((module) => module.DznOperationalGlobe),
   {
@@ -362,6 +364,7 @@ export function DznLandingPage() {
     console.log("DZN GAME MODE CARDS UPGRADED");
     console.log("DZN HOMEPAGE STATS ROW UPGRADED");
     console.log("DZN TOP SERVERS PANEL UPGRADED");
+    console.log("DZN NAVBAR DISCORD LINK UPGRADED");
   }, []);
 
   useEffect(() => {
@@ -486,44 +489,42 @@ function Navbar() {
       initial={{ opacity: 0, y: -18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.65, ease: "easeOut" }}
-      className="sticky top-0 z-50 border-b border-white/10 bg-[#020713]/72 shadow-[0_10px_42px_rgba(0,0,0,0.28)] backdrop-blur-2xl"
+      className="dzn-main-nav"
     >
-      <nav
-        aria-label="Primary navigation"
-        className="mx-auto flex min-h-[104px] w-full max-w-[1440px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8"
-      >
-        <DznLogo compact className="-ml-2" />
-        <div className="hidden flex-1 items-center justify-center gap-1 lg:flex">
+      <div className="dzn-main-nav-inner">
+        <DznLogo compact className="dzn-main-nav-logo" />
+        <nav aria-label="Homepage sections" className="dzn-main-nav-links">
           {navItems.map((item) => (
             <a
               key={item.href}
               href={item.href}
-              className="rounded-md px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.16em] text-zinc-300/78 transition duration-300 hover:bg-white/[0.08] hover:text-white"
             >
               {item.label}
             </a>
           ))}
-        </div>
-        <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
+        </nav>
+        <div className="dzn-main-nav-actions">
           <a
-            href="#"
-            className="hidden items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white md:inline-flex"
+            href={DZN_DISCORD_INVITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="dzn-nav-action dzn-nav-action--discord"
           >
-            <MessageCircle className="h-4 w-4 text-violet-200" />
-            Discord
+            <DiscordIcon className="dzn-nav-discord-icon" />
+            <span>Discord</span>
           </a>
           {authenticated ? (
             <>
               <a
                 href="/dashboard"
-                className="rounded-lg border border-white/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-zinc-200 transition duration-300 hover:border-cyan-300/45 hover:bg-cyan-400/10 hover:text-white sm:inline-flex"
+                className="dzn-nav-action dzn-nav-action--dashboard"
               >
                 Dashboard
               </a>
               <button
                 type="button"
                 onClick={signOut}
-                className="rounded-lg border border-white/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white"
+                className="dzn-nav-action dzn-nav-action--logout"
               >
                 Logout
               </button>
@@ -531,14 +532,30 @@ function Navbar() {
           ) : (
             <a
               href="/login?returnTo=/"
-              className="rounded-lg border border-white/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white"
+              className="dzn-nav-action dzn-nav-action--login"
             >
               Login
             </a>
           )}
         </div>
-      </nav>
+      </div>
     </motion.header>
+  );
+}
+
+function DiscordIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+      fill="currentColor"
+    >
+      <path d="M20.317 4.369A19.791 19.791 0 0 0 15.558 3c-.206.371-.446.872-.611 1.267a18.27 18.27 0 0 0-5.487 0A12.64 12.64 0 0 0 8.849 3a19.736 19.736 0 0 0-4.762 1.369C1.094 8.873.287 13.265.692 17.595A19.9 19.9 0 0 0 6.533 20.5c.472-.643.892-1.327 1.249-2.044a12.93 12.93 0 0 1-1.966-.944c.165-.12.326-.246.481-.375a14.18 14.18 0 0 0 11.406 0c.157.129.318.255.482.375-.626.37-1.287.687-1.969.945.357.716.777 1.4 1.249 2.043a19.86 19.86 0 0 0 5.844-2.905c.475-5.026-.811-9.377-2.992-13.226ZM8.02 14.934c-1.14 0-2.073-1.04-2.073-2.319 0-1.279.915-2.319 2.073-2.319 1.164 0 2.091 1.049 2.073 2.319 0 1.279-.915 2.319-2.073 2.319Zm7.96 0c-1.14 0-2.073-1.04-2.073-2.319 0-1.279.915-2.319 2.073-2.319 1.164 0 2.091 1.049 2.073 2.319 0 1.279-.909 2.319-2.073 2.319Z" />
+    </svg>
   );
 }
 
