@@ -279,8 +279,11 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const syncHasProcessedLines = (syncStatus?.last_processed_line ?? 0) > 0 && syncStatus?.last_sync_status !== "read_pending";
   const statsSyncActive = syncHasProcessedLines || admState.kind === "connected";
   const statsSyncPending = !statsSyncActive && admState.kind === "discovered_read_pending";
-  const effectiveSyncStatus = syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started");
   const latestAdmFile = syncStatus?.latest_adm_file ?? server.adm_latest_file ?? "Not detected";
+  const effectiveSyncStatus = normalizeDashboardSyncStatus(
+    syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started"),
+    latestAdmFile,
+  );
   const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
   const activityCount = (syncStatus?.total_joins ?? 0) + (syncStatus?.total_disconnects ?? 0) + (syncStatus?.total_deaths ?? 0);
   const noPvpKillsYet = statsSyncActive && (syncStatus?.total_kills ?? 0) === 0;
@@ -295,7 +298,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   });
   const recentEventsAreMock = recentEvents.some((event) => event.is_mock || [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
   const syncRuns = getPrioritizedSyncRuns(syncStatus?.recent_sync_runs ?? []);
-  const syncHealth = getSyncHealth(syncStatus?.recent_sync_runs ?? [], syncStatus?.last_sync_status ?? effectiveSyncStatus, syncStatus?.last_sync_message ?? null);
+  const syncHealth = getSyncHealth(syncStatus?.recent_sync_runs ?? [], effectiveSyncStatus, syncStatus?.last_sync_message ?? null);
   const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
   const processedPercent = getProcessedPercent(syncStatus);
   const nextScheduledSync = getNextScheduledSync(syncStatus?.last_scheduled_sync_at ?? null);
@@ -578,7 +581,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <HeroMetric icon={<Gauge className="h-4 w-4" />} label={networkAddressLabel} value={networkAddress} />
-                <HeroMetric icon={<Users className="h-4 w-4" />} label="Players" value={server.player_slots ? `0 / ${server.player_slots}` : "Tracking"} />
+                <HeroMetric icon={<Users className="h-4 w-4" />} label="Players" value={formatPlayerSlots(server.current_players, server.max_players ?? server.player_slots)} />
                 <HeroMetric icon={<BarChart3 className="h-4 w-4" />} label="Rank" value={globalRankLabel} title={scoreTitle} />
                 <HeroMetric icon={<CircleCheck className="h-4 w-4" />} label="Status" value={statsSyncActive ? "Synced" : formatSyncStatus(effectiveSyncStatus)} />
               </div>
@@ -678,6 +681,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                 <MiniInfo label="Latest ADM File" value={latestAdmFile} />
                 <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
                 <MiniInfo label="Last Sync Time" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not synced"} />
+                <MiniInfo label="Last Successful Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(syncStatus.last_manual_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
@@ -1982,13 +1986,16 @@ function listingFormFromPartial(listing: Partial<LinkedServer>): Partial<PublicL
 
 function getManualSyncMessage(result: AdmSyncRunResult) {
   if (result.status === "no_new_lines") {
-    return "Sync checked latest ADM just now. No new ADM lines found.";
+    return "Latest ADM checked just now. No new ADM lines since last sync.";
   }
   if (result.status === "no_supported_events") {
-    return "Sync checked latest ADM just now. No new supported ADM events found.";
+    return "Latest ADM checked just now. No supported ADM events found.";
   }
   if (result.status === "no_adm_file") {
     return "Sync checked Nitrado. Waiting for the next ADM file.";
+  }
+  if (result.status === "adm_file_unreadable") {
+    return "Latest ADM file found, but Nitrado did not return readable log content during this sync.";
   }
   if (["nitrado_error", "parser_error", "write_error"].includes(result.status)) {
     return result.message || "ADM sync needs attention.";
@@ -2002,6 +2009,13 @@ function getManualSyncMessage(result: AdmSyncRunResult) {
     return "Player activity synced successfully.";
   }
   return result.message;
+}
+
+function normalizeDashboardSyncStatus(status: string, latestAdmFile: string) {
+  if (status === "no_adm_file" && latestAdmFile && latestAdmFile !== "Not detected") {
+    return "adm_file_unreadable";
+  }
+  return status;
 }
 
 function publicServerProfileHref(slug: string) {
@@ -2110,6 +2124,17 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     };
   }
 
+  if (normalizedStatus === "adm_file_unreadable") {
+    return {
+      status: "pending" as const,
+      title: "ADM File Temporarily Unavailable",
+      message: "Latest ADM file found, but readable log content was not returned.",
+      detail: "Nitrado exposed an ADM filename, but the file content was unavailable during this sync check.",
+      nextAction: "Wait for the next ADM sync run",
+      latestSuccessTime,
+    };
+  }
+
   if (normalizedStatus === "no_adm_file") {
     return {
       status: "pending" as const,
@@ -2136,8 +2161,8 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     return {
       status: "active" as const,
       title: "Sync Checked",
-      message: "Sync checked just now.",
-      detail: "No new ADM lines found in the latest checked file.",
+      message: "Latest ADM checked.",
+      detail: "No new ADM lines since last sync.",
       nextAction: "Continue syncing after fresh ADM activity",
       latestSuccessTime,
     };
@@ -2147,8 +2172,8 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     return {
       status: "active" as const,
       title: "Sync Checked",
-      message: "Sync checked just now.",
-      detail: "No new supported ADM events found in the latest processed lines.",
+      message: "Latest ADM checked.",
+      detail: "No supported ADM events found in the latest processed lines.",
       nextAction: "Continue syncing after fresh ADM activity",
       latestSuccessTime,
     };
@@ -2244,7 +2269,8 @@ function formatSyncStatus(value: string) {
   if (value === "idle") return "Idle";
   if (value === "no_new_lines") return "No New Lines";
   if (value === "no_supported_events") return "No Supported Events";
-  if (value === "no_adm_file") return "No ADM File";
+  if (value === "no_adm_file") return "Waiting For ADM File";
+  if (value === "adm_file_unreadable") return "ADM File Temporarily Unavailable";
   if (value === "nitrado_error") return "Nitrado Error";
   if (value === "parser_error") return "Parser Error";
   if (value === "write_error") return "Write Error";

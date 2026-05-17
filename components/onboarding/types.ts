@@ -313,6 +313,7 @@ export type AdmSyncStatus = {
   last_sync_trigger: string | null;
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;
+  last_successful_sync_at: string | null;
   recent_sync_runs: SyncRunSummary[];
 };
 

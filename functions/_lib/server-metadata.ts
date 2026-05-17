@@ -195,6 +195,12 @@ export async function refreshNitradoServerMetadata(
     });
   }
 
+  console.log("DZN LIVE PLAYER COUNT FIXED", {
+    linkedServerId: linkedServer.id,
+    current_players: metadata.current_players,
+    max_players: metadata.max_players,
+  });
+
   if (changed && metadata.metadata_hash !== previousHash) {
     await db
       .prepare(
@@ -373,8 +379,35 @@ function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMe
 
   const hostname = firstString(config.hostname, gameserver.hostname, gameserver.name, query.name, details.name, details.server_name);
   const description = firstString(config.description, gameserver.description, details.description, gameSpecific.description);
-  const maxPlayers = firstNumber(gameserver.slots, gameserver.max_players, gameserver.maxplayers, gameserver.player_slots, config.slots, config.maxplayers, query.maxplayers, query.max_players);
-  const currentPlayers = firstNumber(query.players, query.player_current, query.current_players, gameserver.player_current, gameserver.current_players, gameserver.players_online);
+  const playerCountPair = parseNitradoPlayerCountPair(
+    query.players,
+    query.player_count,
+    query.players_online,
+    gameserver.players,
+    gameserver.player_count,
+    details.players,
+  );
+  const maxPlayers = firstNumber(
+    gameserver.slots,
+    gameserver.max_players,
+    gameserver.maxplayers,
+    gameserver.player_slots,
+    config.slots,
+    config.maxplayers,
+    query.maxplayers,
+    query.max_players,
+    playerCountPair?.max,
+  );
+  const currentPlayers = firstNumber(
+    query.player_current,
+    query.current_players,
+    query.players_current,
+    gameserver.player_current,
+    gameserver.current_players,
+    gameserver.players_online,
+    query.players,
+    playerCountPair?.current,
+  );
   const ipAddress = normalizeIpAddress(firstString(gameserver.ip, gameserver.address, query.ip, query.address, details.address));
   const gamePort = firstNumber(gameserver.port, config.port, query.port, details.port, portList.game, portList.port);
   const queryPort = firstNumber(gameserver.query_port, config.query_port, query.query_port, details.query_port, portList.query);
@@ -445,11 +478,24 @@ async function normalizeMetadataValues(values: {
     ? firstString(values.linkedServer.server_mode, values.linkedServer.server_type) ?? "PVP"
     : detectServerModeFromText([values.hostname, values.description, tags, values.mapName, values.mission]);
   const rawMetadata = safeRawMetadata(values.rawMetadata);
+  const playerCounts = resolveLivePlayerCounts({
+    currentPlayers: values.currentPlayers,
+    maxPlayers: values.maxPlayers,
+    existingCurrentPlayers: values.linkedServer.current_players,
+    existingMaxPlayers: values.linkedServer.max_players,
+  });
+  if (playerCounts.currentMissing || playerCounts.maxMissing) {
+    console.warn("DZN PLAYER COUNT METADATA MISSING", {
+      linkedServerId: values.linkedServer.id,
+      currentPlayersPresent: !playerCounts.currentMissing,
+      maxPlayersPresent: !playerCounts.maxMissing,
+    });
+  }
   const hashInput = JSON.stringify({
     hostname: values.hostname ?? null,
     description: values.description ?? null,
-    maxPlayers: values.maxPlayers ?? null,
-    currentPlayers: values.currentPlayers ?? null,
+    maxPlayers: playerCounts.max_players,
+    currentPlayers: playerCounts.current_players,
     ipAddress: values.ipAddress ?? null,
     gamePort: values.gamePort ?? null,
     queryPort: values.queryPort ?? null,
@@ -465,8 +511,8 @@ async function normalizeMetadataValues(values: {
   return {
     hostname: cleanString(values.hostname),
     description: cleanString(values.description),
-    max_players: cleanNumber(values.maxPlayers),
-    current_players: cleanNumber(values.currentPlayers),
+    max_players: playerCounts.max_players,
+    current_players: playerCounts.current_players,
     ip_address: cleanString(values.ipAddress),
     game_port: cleanNumber(values.gamePort),
     query_port: cleanNumber(values.queryPort),
@@ -583,6 +629,37 @@ function firstNumber(...values: unknown[]) {
     if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
   }
   return null;
+}
+
+export function parseNitradoPlayerCountPair(...values: unknown[]): { current: number; max: number } | null {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const match = value.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (!match) continue;
+    const current = Number(match[1]);
+    const max = Number(match[2]);
+    if (Number.isFinite(current) && Number.isFinite(max)) return { current, max };
+  }
+  return null;
+}
+
+export function resolveLivePlayerCounts(values: {
+  currentPlayers: number | null | undefined;
+  maxPlayers: number | null | undefined;
+  existingCurrentPlayers: number | null | undefined;
+  existingMaxPlayers: number | null | undefined;
+}) {
+  const rawCurrent = cleanNumber(values.currentPlayers);
+  const rawMax = cleanNumber(values.maxPlayers);
+  const currentMissing = rawCurrent === null;
+  const maxMissing = rawMax === null;
+
+  return {
+    current_players: rawCurrent ?? cleanNumber(values.existingCurrentPlayers),
+    max_players: rawMax ?? cleanNumber(values.existingMaxPlayers),
+    currentMissing,
+    maxMissing,
+  };
 }
 
 function firstBoolean(...values: unknown[]) {

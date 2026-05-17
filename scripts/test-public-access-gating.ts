@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { applyLeaderboardsAccess, applyServerLeaderboardAccess } from "../functions/_lib/public-leaderboards";
 import { applyHomeStatsAccess } from "../functions/api/public/home-stats";
@@ -18,6 +19,7 @@ const baseServer = {
   adm_status: "Connected",
   stats_sync: "Active",
   player_slots: 22,
+  max_players: 22,
   current_players: 6,
   platform: "PlayStation",
   map_name: "Chernarus",
@@ -106,7 +108,7 @@ assert.equal(previewServer.access_level, "preview");
 assert.equal(previewServer.public_discord_invite, null);
 assert.equal(previewServer.public_website_url, null);
 assert.equal(previewServer.public_rules, null);
-assert.equal(previewServer.current_players, null);
+assert.equal(previewServer.current_players, 6);
 assert.equal(previewServer.unique_players, 0);
 assert.equal(previewServer.kd_label, "Login required");
 assert.equal(previewServer.recent_events.length, 0);
@@ -116,6 +118,8 @@ assert.equal(JSON.stringify(previewServer).includes("reviewer_discord_id"), fals
 
 const fullServer = applyPublicServerAccess(baseServer, true);
 assert.equal(fullServer.is_locked, false);
+assert.equal(fullServer.current_players, 6);
+assert.equal(fullServer.max_players, 22);
 assert.equal(fullServer.public_discord_invite, "https://discord.gg/pandora");
 assert.equal(fullServer.recent_events.length, 1);
 assert.equal(fullServer.top_players?.length, 1);
@@ -219,5 +223,9 @@ assert.equal(reviewPreview.is_locked, true);
 assert.equal(reviewPreview.review_count, 23);
 assert.equal(reviewPreview.reviews.length, 0);
 assert.equal(JSON.stringify(reviewPreview).includes("reviewer_discord_id"), false);
+
+const homepageSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
+assert.equal(homepageSource.includes("Players Online"), true);
+assert.equal(homepageSource.includes("currentPlayersOnline"), true);
 
 console.log("Public access gating tests passed.");

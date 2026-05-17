@@ -53,6 +53,7 @@ type PublicServer = {
   adm_status: "Connected" | "Discovered" | "Needs Review";
   stats_sync: "Active" | "Pending" | "Not Started";
   player_slots: number | null;
+  max_players: number | null;
   current_players: number | null;
   platform: string | null;
   map_name: string | null;
@@ -479,6 +480,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
   const isLocked = Boolean(server.is_locked);
   const isAdvertised = Boolean(server.advertising?.is_featured || server.advertising?.is_boosted);
+  const playerCountLabel = formatPlayers(server);
   return (
     <motion.article
       initial={{ opacity: 0, y: 18 }}
@@ -518,6 +520,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
             Score {server.score_label}
           </span>
+          {playerCountLabel !== "Awaiting data" ? <StatusPill label={`${playerCountLabel} players`} tone="zinc" /> : null}
           {isLocked ? (
             <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/25 bg-violet-400/10 px-3 py-1.5 text-xs font-black uppercase text-violet-100">
               <Lock className="h-3.5 w-3.5" />
@@ -527,7 +530,6 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
             <>
               <StatusPill label={server.adm_status === "Discovered" ? "ADM Logs Discovered" : `ADM ${server.adm_status}`} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
               <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
-              {server.player_slots ? <StatusPill label={`${server.player_slots} slots`} tone="zinc" /> : null}
             </>
           )}
         </div>
@@ -1710,8 +1712,11 @@ function scoreBreakdownTitle(breakdown: ScoreBreakdown | null) {
 }
 
 function formatPlayers(server: PublicServer) {
-  const current = typeof server.current_players === "number" ? server.current_players : 0;
-  return server.player_slots ? `${current} / ${server.player_slots}` : "Awaiting data";
+  const current = typeof server.current_players === "number" ? server.current_players : null;
+  const maxPlayers = server.max_players ?? server.player_slots;
+  if (current !== null && maxPlayers) return `${current} / ${maxPlayers}`;
+  if (current !== null) return String(current);
+  return "Awaiting data";
 }
 
 function formatDistance(value: number) {

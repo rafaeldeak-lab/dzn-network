@@ -10,6 +10,8 @@ import type { Env, PagesFunction } from "../../_lib/types";
 type TotalsRow = {
   serversLinked: number | null;
   statsActiveServers: number | null;
+  currentPlayersOnline: number | null;
+  maxPlayersCapacity: number | null;
   playersSeenFromStats: number | null;
   killsTracked: number | null;
   deathsTracked: number | null;
@@ -110,6 +112,8 @@ async function buildHomeStats(env: Env) {
     totals: {
       serversLinked,
       statsActiveServers: syncActive,
+      currentPlayersOnline: numberOrZero(totals.currentPlayersOnline),
+      maxPlayersCapacity: numberOrZero(totals.maxPlayersCapacity),
       playersSeen,
       killsTracked: numberOrZero(totals.killsTracked),
       deathsTracked: numberOrZero(totals.deathsTracked),
@@ -149,6 +153,8 @@ async function getTotals(db: D1Database) {
     .prepare(
       `SELECT
         COUNT(linked_servers.id) AS serversLinked,
+        SUM(COALESCE(linked_servers.current_players, 0)) AS currentPlayersOnline,
+        SUM(COALESCE(linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
         SUM(
           CASE
             WHEN COALESCE(server_stats.total_joins, 0) > 0
@@ -206,6 +212,8 @@ async function getTotals(db: D1Database) {
   return row ?? {
     serversLinked: 0,
     statsActiveServers: 0,
+    currentPlayersOnline: 0,
+    maxPlayersCapacity: 0,
     playersSeenFromStats: 0,
     killsTracked: 0,
     deathsTracked: 0,
@@ -754,6 +762,8 @@ function emptyHomeStats() {
     totals: {
       serversLinked: 0,
       statsActiveServers: 0,
+      currentPlayersOnline: 0,
+      maxPlayersCapacity: 0,
       playersSeen: 0,
       killsTracked: 0,
       deathsTracked: 0,

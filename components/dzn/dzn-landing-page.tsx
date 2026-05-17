@@ -77,6 +77,8 @@ type HomeStats = {
   totals: {
     serversLinked: number;
     statsActiveServers: number;
+    currentPlayersOnline: number;
+    maxPlayersCapacity: number;
     playersSeen: number;
     killsTracked: number;
     deathsTracked: number;
@@ -198,6 +200,8 @@ const emptyHomeStats: HomeStats = {
   totals: {
     serversLinked: 0,
     statsActiveServers: 0,
+    currentPlayersOnline: 0,
+    maxPlayersCapacity: 0,
     playersSeen: 0,
     killsTracked: 0,
     deathsTracked: 0,
@@ -920,11 +924,13 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
 
 function NetworkOverview({ homeStats }: { homeStats: HomeStats }) {
   const longestKill = numberOrZero(homeStats.totals.longestKill);
+  const currentPlayersOnline = numberOrZero(homeStats.totals.currentPlayersOnline);
+  const maxPlayersCapacity = numberOrZero(homeStats.totals.maxPlayersCapacity);
   const stats = [
     {
       icon: Users,
-      label: "Players",
-      value: formatNumber(homeStats.totals.playersSeen),
+      label: "Players Online",
+      value: maxPlayersCapacity > 0 ? `${formatNumber(currentPlayersOnline)} / ${formatNumber(maxPlayersCapacity)}` : formatNumber(currentPlayersOnline),
       theme: "players",
     },
     {
@@ -1201,6 +1207,8 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
     totals: {
       serversLinked: numberOrZero(payload.totals?.serversLinked),
       statsActiveServers: numberOrZero(payload.totals?.statsActiveServers),
+      currentPlayersOnline: numberOrZero(payload.totals?.currentPlayersOnline),
+      maxPlayersCapacity: numberOrZero(payload.totals?.maxPlayersCapacity),
       playersSeen: numberOrZero(payload.totals?.playersSeen),
       killsTracked: numberOrZero(payload.totals?.killsTracked),
       deathsTracked: numberOrZero(payload.totals?.deathsTracked),

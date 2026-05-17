@@ -97,6 +97,7 @@ export type AdmSyncStatusCode =
   | "no_new_lines"
   | "no_supported_events"
   | "no_adm_file"
+  | "adm_file_unreadable"
   | "nitrado_error"
   | "parser_error"
   | "write_error"
@@ -148,6 +149,7 @@ export type AdmSyncStatus = {
   last_sync_trigger: string | null;
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;
+  last_successful_sync_at: string | null;
   recent_sync_runs: AdmSyncRunSummary[];
 };
 
@@ -264,9 +266,12 @@ export async function runAdmSync(
     }
   } catch (error) {
     const syncDurationMs = Date.now() - syncStartedAt;
-    const message = `Nitrado log access failed. ${safeSyncErrorMessage(error)}`;
     const latestAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
     const latestAdmFile = existingState?.latest_adm_file ?? fileNameFromPath(latestAdmPath);
+    const status = latestAdmFile ? "adm_file_unreadable" : "nitrado_error";
+    const message = latestAdmFile
+      ? "Latest ADM file found, but Nitrado did not return readable log content during this sync."
+      : `Nitrado log access failed. ${safeSyncErrorMessage(error)}`;
     await upsertSyncState(env, initialScope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
@@ -274,7 +279,7 @@ export async function runAdmSync(
       lastProcessedFile: existingState?.last_processed_file ?? null,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
-      status: "nitrado_error",
+      status,
       message,
       lastSyncAt: now,
       linesRead: 0,
@@ -294,7 +299,7 @@ export async function runAdmSync(
       linkedServerId: initialScope.linkedServerId,
       sourceServiceId: initialScope.nitradoServiceId,
       triggerType,
-      status: "nitrado_error",
+      status,
       message,
       linesRead: 0,
       linesProcessed: 0,
@@ -304,8 +309,9 @@ export async function runAdmSync(
       finishedAt: new Date().toISOString(),
       durationMs: syncDurationMs,
     });
+    console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
     return emptyAdmSyncResult({
-      status: "nitrado_error",
+      status,
       message,
       latestAdmFile,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
@@ -324,9 +330,9 @@ export async function runAdmSync(
   const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog?.debug?.samplePreview ?? null);
   if (!lines.length) {
     const admAvailable = Boolean(admLog?.admFileExists || readable.newestAdmFileName);
-    const status = admAvailable ? "nitrado_error" : "no_adm_file";
-    const message = admAvailable
-      ? `Latest ADM discovered, but readable content was unavailable. ${readable.message}`
+    const status = classifyUnavailableAdmFileStatus(latestAdmFile, admAvailable);
+    const message = status === "adm_file_unreadable"
+      ? "Latest ADM file found, but Nitrado did not return readable log content during this sync."
       : "Sync checked Nitrado. Waiting for next ADM file from Nitrado.";
     await upsertSyncState(env, scope.linkedServerId, {
       latestAdmFile,
@@ -366,6 +372,7 @@ export async function runAdmSync(
       finishedAt: new Date().toISOString(),
       durationMs: syncDurationMs,
     });
+    console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
     return {
       status,
       message,
@@ -587,6 +594,7 @@ export async function runAdmSync(
     durationMs: syncDurationMs,
   });
   await rebuildServerStats(env, scope.linkedServerId);
+  console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
   console.log("DZN ADM FULL SYNC COMPLETE");
 
   return {
@@ -645,12 +653,16 @@ function buildSyncRunMessage(values: {
 }) {
   const prefix = values.triggerType === "manual" ? "Manual sync" : "Scheduled sync";
   if (values.status === "no_new_lines") {
-    return `${prefix} checked latest ADM. No new ADM lines found. Lines scanned: ${values.linesRead}.`;
+    return `${prefix} checked latest ADM. No new ADM lines since last sync. Lines scanned: ${values.linesRead}.`;
   }
   if (values.status === "no_supported_events") {
-    return `${prefix} checked latest ADM. No new supported ADM events found. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}.`;
+    return `${prefix} checked latest ADM. No supported ADM events found. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}.`;
   }
-  return `${prefix} active. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}. Activity events created: ${values.eventsCreated}. Kills found: ${values.creditedKillLinesFound}. New kills created: ${values.killsCreated}. Build events created: ${values.buildEventsStored}. Duplicates skipped: ${values.duplicateKillsSkipped}. Players updated: ${values.uniquePlayers}.`;
+  return `${prefix} completed successfully. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}. Activity events created: ${values.eventsCreated}. Kills found: ${values.creditedKillLinesFound}. New kills created: ${values.killsCreated}. Build events created: ${values.buildEventsStored}. Duplicates skipped: ${values.duplicateKillsSkipped}. Players updated: ${values.uniquePlayers}.`;
+}
+
+export function classifyUnavailableAdmFileStatus(latestAdmFile: string | null | undefined, admAvailable: boolean): "adm_file_unreadable" | "no_adm_file" {
+  return latestAdmFile || admAvailable ? "adm_file_unreadable" : "no_adm_file";
 }
 
 function emptyAdmSyncResult(values: {
@@ -729,10 +741,11 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     )
     .bind(linkedServer.id, userId)
     .first<Record<string, unknown>>();
-  const [recentRuns, lastManualRun, lastScheduledRun] = await Promise.all([
+  const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun] = await Promise.all([
     getRecentSyncRuns(env, linkedServer.id, 5),
     getLatestSyncRunByTrigger(env, linkedServer.id, "manual"),
     getLatestSyncRunByTrigger(env, linkedServer.id, "scheduled"),
+    getLatestSuccessfulSyncRun(env, linkedServer.id),
   ]);
 
   return {
@@ -761,6 +774,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     last_sync_trigger: recentRuns[0]?.trigger_type ?? null,
     last_scheduled_sync_at: lastScheduledRun?.finished_at ?? lastScheduledRun?.started_at ?? null,
     last_manual_sync_at: lastManualRun?.finished_at ?? lastManualRun?.started_at ?? null,
+    last_successful_sync_at: lastSuccessfulRun?.finished_at ?? lastSuccessfulRun?.started_at ?? null,
     recent_sync_runs: recentRuns,
   };
 }
@@ -2104,6 +2118,24 @@ async function getLatestSyncRunByTrigger(env: Env, linkedServerId: string, trigg
        LIMIT 1`,
     )
     .bind(linkedServerId, triggerType)
+    .first<AdmSyncRunSummary>();
+
+  return row ? mapSyncRunSummary(row) : null;
+}
+
+async function getLatestSuccessfulSyncRun(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT id, trigger_type, status, message, lines_read, lines_processed, events_created,
+              kills_created, started_at, finished_at, duration_ms, created_at
+       FROM sync_runs
+       WHERE linked_server_id = ?
+         AND lower(status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+       ORDER BY COALESCE(finished_at, started_at, created_at) DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServerId)
     .first<AdmSyncRunSummary>();
 
   return row ? mapSyncRunSummary(row) : null;

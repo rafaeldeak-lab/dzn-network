@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { classifyAdmSyncOutcome, isAdmSyncErrorStatus } from "../functions/_lib/adm-sync";
+import { classifyAdmSyncOutcome, classifyUnavailableAdmFileStatus, isAdmSyncErrorStatus } from "../functions/_lib/adm-sync";
 import { parseAdmLines } from "../functions/_lib/adm-parser";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -43,6 +43,9 @@ assert.deepEqual(connectionOnlyLines.map((line) => line.eventType), [
 assert.equal(isAdmSyncErrorStatus("nitrado_error"), true);
 assert.equal(isAdmSyncErrorStatus("write_error"), true);
 assert.equal(isAdmSyncErrorStatus("no_new_lines"), false);
+assert.equal(classifyUnavailableAdmFileStatus(null, false), "no_adm_file");
+assert.equal(classifyUnavailableAdmFileStatus("DayZServer_PS4_x64_2026-05-17_16-02-20.ADM", false), "adm_file_unreadable");
+assert.equal(classifyUnavailableAdmFileStatus(null, true), "adm_file_unreadable");
 
 const env = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
@@ -57,6 +60,9 @@ assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
 
 const dashboardApi = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(dashboardApi.includes("/api/sync/adm/run"), true);
+const dashboardUi = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+assert.equal(dashboardUi.includes("No ADM File"), false);
+assert.equal(dashboardUi.includes("ADM File Temporarily Unavailable"), true);
 
 runEndpointTests()
   .then(() => {

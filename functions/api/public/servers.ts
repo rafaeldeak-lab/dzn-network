@@ -20,6 +20,7 @@ type PublicServerRow = {
   nitrado_service_id: string | null;
   nitrado_service_name: string | null;
   player_slots: number | null;
+  max_players: number | null;
   current_players: number | null;
   platform: string | null;
   map_name: string | null;
@@ -105,6 +106,7 @@ type SafePublicServer = {
   adm_status: "Connected" | "Discovered" | "Needs Review";
   stats_sync: "Active" | "Pending" | "Not Started";
   player_slots: number | null;
+  max_players: number | null;
   current_players: number | null;
   platform: string | null;
   map_name: string | null;
@@ -250,6 +252,7 @@ async function queryPublicServers(env: Env) {
       linked_servers.nitrado_service_id,
       linked_servers.nitrado_service_name,
       COALESCE(linked_servers.max_players, linked_servers.player_slots) AS player_slots,
+      linked_servers.max_players,
       linked_servers.current_players,
       linked_servers.platform,
       linked_servers.map_name,
@@ -503,7 +506,8 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     adm_status: admStatus,
     stats_sync: statsSync,
     player_slots: row.player_slots,
-    current_players: numberOrZero(row.current_players),
+    max_players: row.max_players ?? row.player_slots,
+    current_players: row.current_players === null ? null : numberOrZero(row.current_players),
     platform: row.platform,
     map_name: row.map_name,
     mission: row.mission,
@@ -685,7 +689,6 @@ export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn
     ...previewStats,
     tags_json: JSON.stringify(tags),
     tags,
-    current_players: null,
     last_sync_at: null,
     public_description: publicDescription,
     public_discord_invite: null,
@@ -728,6 +731,7 @@ function mockPublicServers(): SafePublicServer[] {
       adm_status: "Discovered",
       stats_sync: "Pending",
       player_slots: 60,
+      max_players: 60,
       current_players: 0,
       platform: "PlayStation",
       map_name: "Chernarus",
@@ -768,6 +772,7 @@ function mockPublicServers(): SafePublicServer[] {
       adm_status: "Connected",
       stats_sync: "Active",
       player_slots: 70,
+      max_players: 70,
       current_players: 12,
       platform: "PlayStation",
       map_name: "Chernarus",
@@ -808,6 +813,7 @@ function mockPublicServers(): SafePublicServer[] {
       adm_status: "Needs Review",
       stats_sync: "Not Started",
       player_slots: 50,
+      max_players: 50,
       current_players: 0,
       platform: "PlayStation",
       map_name: "Deathmatch Arena",
