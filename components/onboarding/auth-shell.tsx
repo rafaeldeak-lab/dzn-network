@@ -68,12 +68,14 @@ export function AuthShell({
   description,
   actionLabel = "Login with Discord",
   authStartHref = "/api/auth/discord/start",
+  hideNavActions = false,
   resolveAuthMode = false,
 }: {
   title: string;
   description: string;
   actionLabel?: string;
   authStartHref?: string;
+  hideNavActions?: boolean;
   resolveAuthMode?: boolean;
 }) {
   const [startBaseHref, setStartBaseHref] = useState(authStartHref);
@@ -84,6 +86,11 @@ export function AuthShell({
   useEffect(() => {
     console.log("DZN AUTH RETURN FLOW FIXED");
   }, []);
+
+  useEffect(() => {
+    if (!hideNavActions) return;
+    console.log("DZN LOGIN HEADER SIMPLIFIED");
+  }, [hideNavActions]);
 
   useEffect(() => {
     if (!resolveAuthMode) return;
@@ -153,7 +160,7 @@ export function AuthShell({
       <AuthMissionBackground reduceMotion={Boolean(reduceMotion)} />
       <div className="pointer-events-none absolute inset-0 z-[1] border border-violet-400/25 shadow-[inset_0_0_42px_rgba(139,92,246,0.18)]" />
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-7 lg:px-10">
-        <AuthNav authenticated={Boolean(auth?.authenticated)} onLogout={signOut} />
+        <AuthNav authenticated={Boolean(auth?.authenticated)} hideActions={hideNavActions} onLogout={signOut} />
 
         <section className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[minmax(0,0.92fr)_minmax(440px,0.78fr)] lg:gap-12">
           <motion.div
@@ -206,30 +213,40 @@ export function AuthShell({
   );
 }
 
-function AuthNav({ authenticated, onLogout }: { authenticated: boolean; onLogout: () => void }) {
+function AuthNav({
+  authenticated,
+  hideActions,
+  onLogout,
+}: {
+  authenticated: boolean;
+  hideActions: boolean;
+  onLogout: () => void;
+}) {
   return (
-    <nav className="flex min-h-[104px] items-start justify-between gap-4">
+    <nav className={`flex min-h-[104px] items-start gap-4 ${hideActions ? "justify-start" : "justify-between"}`}>
       <DznLogo size="hero" />
-      <div className="flex flex-wrap justify-end gap-2 pt-2">
-        <Link href="/servers" className="rounded-lg border border-white/10 bg-black/24 px-4 py-2 text-xs font-black uppercase text-zinc-200 backdrop-blur-xl transition hover:border-cyan-300/35 hover:text-white">
-          Servers
-        </Link>
-        {authenticated ? (
-          <>
-            <Link href="/dashboard" className="rounded-lg border border-white/10 bg-black/24 px-4 py-2 text-xs font-black uppercase text-zinc-200 backdrop-blur-xl transition hover:border-violet-300/35 hover:text-white">
-              Dashboard
-            </Link>
-            <button type="button" onClick={onLogout} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/24 px-4 py-2 text-xs font-black uppercase text-zinc-200 backdrop-blur-xl transition hover:border-red-300/35 hover:text-white">
-              <LogOut className="h-4 w-4" />
-              Logout
-            </button>
-          </>
-        ) : (
-          <Link href="/login?returnTo=/setup" className="rounded-lg border border-violet-300/35 bg-violet-500/15 px-4 py-2 text-xs font-black uppercase text-violet-50 backdrop-blur-xl transition hover:bg-violet-500/25">
-            Add Your Server
+      {hideActions ? null : (
+        <div className="flex flex-wrap justify-end gap-2 pt-2">
+          <Link href="/servers" className="rounded-lg border border-white/10 bg-black/24 px-4 py-2 text-xs font-black uppercase text-zinc-200 backdrop-blur-xl transition hover:border-cyan-300/35 hover:text-white">
+            Servers
           </Link>
-        )}
-      </div>
+          {authenticated ? (
+            <>
+              <Link href="/dashboard" className="rounded-lg border border-white/10 bg-black/24 px-4 py-2 text-xs font-black uppercase text-zinc-200 backdrop-blur-xl transition hover:border-violet-300/35 hover:text-white">
+                Dashboard
+              </Link>
+              <button type="button" onClick={onLogout} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/24 px-4 py-2 text-xs font-black uppercase text-zinc-200 backdrop-blur-xl transition hover:border-red-300/35 hover:text-white">
+                <LogOut className="h-4 w-4" />
+                Logout
+              </button>
+            </>
+          ) : (
+            <Link href="/login?returnTo=/setup" className="rounded-lg border border-violet-300/35 bg-violet-500/15 px-4 py-2 text-xs font-black uppercase text-violet-50 backdrop-blur-xl transition hover:bg-violet-500/25">
+              Add Your Server
+            </Link>
+          )}
+        </div>
+      )}
     </nav>
   );
 }
