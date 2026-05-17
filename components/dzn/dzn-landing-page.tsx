@@ -10,6 +10,7 @@ import {
   Hammer,
   Lock,
   Radio,
+  RefreshCw,
   Server,
   Shield,
   Skull,
@@ -425,6 +426,7 @@ export function DznLandingPage() {
     console.log("DZN BUILD TRACKING LEADERBOARD UPGRADED");
     console.log("DZN BUILD LEADERBOARD IMAGE ASSETS FIXED");
     console.log("DZN BUILD LEADERBOARD COMPACT POLISH READY");
+    console.log("DZN BUILD LEADERBOARD TOP TEN POLISHED");
     preloadBuildLeaderboardImages();
   }, []);
 
@@ -1328,9 +1330,12 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
             {leaderboard.subtitle || "Live build intelligence across connected servers"}
           </p>
         </div>
-        <div className="dzn-build-live-badge">
-          <span>Live Updates</span>
-          <strong>{leaderboard.refresh_label || "Refreshes every 5 minutes"}</strong>
+        <div className="dzn-build-leaderboard__live dzn-build-live-badge">
+          <RefreshCw className="dzn-build-live-icon" aria-hidden="true" />
+          <div>
+            <span><i /> Live Updates</span>
+            <strong>{leaderboard.refresh_label || "Refreshes every 5 minutes"}</strong>
+          </div>
         </div>
       </div>
 
@@ -1341,7 +1346,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
             style={{ "--build-hero-image": `url("${BUILD_IMAGE_ASSETS.hero}")` } as CSSProperties}
           >
             <div className="dzn-build-hero-main">
-              <span className="dzn-build-rank-badge" aria-label="Rank 1 top server">
+              <span className="dzn-build-rank-card" aria-label="Rank 1 top server">
                 <Trophy aria-hidden="true" />
                 <span>#1</span>
                 <strong>Top Server</strong>
@@ -1357,7 +1362,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
                 </span>
               </div>
             </div>
-            <div className="dzn-build-score-panel">
+            <div className="dzn-build-stat-panel dzn-build-score-panel">
               <div>
                 <span>Build Score</span>
                 <strong>{formatNumber(topServer.build_score)}</strong>
@@ -1403,23 +1408,43 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
             })}
           </div>
 
-          <div className="dzn-build-top10">
-            <div className="dzn-build-top10-row dzn-build-top10-row--head">
+          <div className="dzn-build-table">
+            <div className="dzn-build-table-header">
               <span>Rank</span>
               <span>Server</span>
               <span>Build Score</span>
               <span>Structures Built</span>
               <span>Action</span>
             </div>
-            {rows.map((row) => {
+            {rows.map((row, index) => {
+              const displayRank = Number.isFinite(row.rank) && row.rank > 0 ? row.rank : index + 1;
+              const rankTone = getBuildRankTone(displayRank);
               const href = row.slug ? `/servers/profile?slug=${encodeURIComponent(row.slug)}` : "/servers";
               return (
-                <div key={row.server_id} className={`dzn-build-top10-row dzn-build-top10-row--rank-${Math.min(row.rank, 3)}`}>
-                  <span className="dzn-build-top10-rank">#{row.rank}</span>
-                  <a href={href} className="dzn-build-top10-server">{formatServerDisplayName(row.server_name)}</a>
-                  <span>{formatNumber(row.build_score)}</span>
-                  <span>{formatNumber(row.structures_built)}</span>
-                  <a href={href} className="dzn-build-top10-action">View Full Stats</a>
+                <div
+                  key={row.server_id}
+                  className={`dzn-build-table-row dzn-build-table-row--rank-${rankTone}`}
+                >
+                  <span className={`dzn-build-rank-badge dzn-build-rank-badge--${rankTone}`}>
+                    {rankTone === "one" ? <Trophy aria-hidden="true" /> : null}
+                    <span>#{displayRank}</span>
+                  </span>
+                  <a href={href} className="dzn-build-table-server">
+                    <span>{formatServerDisplayName(row.server_name || "Unknown Server")}</span>
+                    <em><i /> Build tracked</em>
+                  </a>
+                  <span className="dzn-build-table-metric">
+                    <small>Build Score</small>
+                    <strong>{formatNumber(row.build_score ?? 0)}</strong>
+                  </span>
+                  <span className="dzn-build-table-metric">
+                    <small>Structures</small>
+                    <strong>{formatNumber(row.structures_built ?? 0)}</strong>
+                  </span>
+                  <a href={href} className="dzn-build-row-action">
+                    <span>View Full Stats</span>
+                    <ChevronRight aria-hidden="true" />
+                  </a>
                 </div>
               );
             })}
@@ -1436,6 +1461,13 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
       )}
     </motion.section>
   );
+}
+
+function getBuildRankTone(rank: number) {
+  if (rank === 1) return "one";
+  if (rank === 2) return "two";
+  if (rank === 3) return "three";
+  return "standard";
 }
 
 function BottomCta({ isPreview }: { isPreview: boolean }) {
