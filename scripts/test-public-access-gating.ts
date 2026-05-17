@@ -502,6 +502,7 @@ assert.equal(topServersPanelBlock.includes("dzn-top-servers-view--static"), true
 assert.equal(homepageSource.includes("DZN RECENT ACTIVITY SPACING FIXED"), true);
 assert.equal(homepageSource.includes("DZN BUILD TRACKING LEADERBOARD UPGRADED"), true);
 assert.equal(homepageSource.includes("DZN BUILD LEADERBOARD IMAGE ASSETS FIXED"), true);
+assert.equal(homepageSource.includes("DZN BUILD LEADERBOARD COMPACT POLISH READY"), true);
 assert.equal(homepageSource.includes("DZN BUILD IMAGE ASSET MISSING:"), true);
 assert.equal(homepageSource.includes("preloadBuildLeaderboardImages"), true);
 assert.equal(homepageSource.includes("BUILD_LEADERBOARD_IMAGE_PATHS"), true);
@@ -516,6 +517,9 @@ assert.equal(homeStatsSource.includes("storage_expansion_built"), true);
 assert.equal(buildLeaderboardBlock.includes("BuildTrackingLeaderboard"), true);
 assert.equal(buildLeaderboardBlock.includes("dzn-build-breakdown-grid"), true);
 assert.equal(buildLeaderboardBlock.includes("dzn-build-top10"), true);
+assert.equal(buildLeaderboardBlock.includes("dzn-build-rank-badge"), true);
+assert.equal(buildLeaderboardBlock.includes("dzn-build-rank-shield"), false);
+assert.equal(buildLeaderboardBlock.includes("Top Server"), true);
 assert.equal(buildLeaderboardBlock.includes("View Full Stats"), true);
 assert.equal(buildLeaderboardBlock.includes("rows.slice(0, 10)"), true);
 assert.equal(buildLeaderboardBlock.includes("BUILD_IMAGE_ASSETS.walls"), true);
@@ -534,6 +538,8 @@ assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--walls"
 assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--watchtowers"), true);
 assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--gates"), true);
 assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--storage"), true);
+assert.equal(buildLeaderboardCssBlock.includes(".dzn-build-rank-badge"), true);
+assert.equal(buildLeaderboardCssBlock.includes(".dzn-build-rank-shield"), false);
 assert.equal(buildLeaderboardCssBlock.includes("var(--build-card-image"), true);
 assert.equal(buildLeaderboardCssBlock.includes("var(--build-hero-image"), true);
 assert.equal(buildLeaderboardCssBlock.includes("background-size: cover;"), true);

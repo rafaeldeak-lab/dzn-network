@@ -424,6 +424,7 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE ADD SERVER CTA DEDUPED");
     console.log("DZN BUILD TRACKING LEADERBOARD UPGRADED");
     console.log("DZN BUILD LEADERBOARD IMAGE ASSETS FIXED");
+    console.log("DZN BUILD LEADERBOARD COMPACT POLISH READY");
     preloadBuildLeaderboardImages();
   }, []);
 
@@ -1340,7 +1341,11 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
             style={{ "--build-hero-image": `url("${BUILD_IMAGE_ASSETS.hero}")` } as CSSProperties}
           >
             <div className="dzn-build-hero-main">
-              <span className="dzn-build-rank-shield">#1</span>
+              <span className="dzn-build-rank-badge" aria-label="Rank 1 top server">
+                <Trophy aria-hidden="true" />
+                <span>#1</span>
+                <strong>Top Server</strong>
+              </span>
               <div className="min-w-0">
                 <a href={topServerHref} className="dzn-build-hero-name">
                   {formatServerDisplayName(topServer.server_name)}
