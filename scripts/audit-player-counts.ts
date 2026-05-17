@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const DATABASE_NAME = "dzn_network_db";
 
-type LinkedServerHealthRow = {
+type PlayerCountAuditRow = {
   id: string;
   display_name: string | null;
   server_name: string | null;
@@ -17,100 +17,51 @@ type LinkedServerHealthRow = {
   player_count_source: string | null;
   player_count_status: string | null;
   metadata_last_checked_at: string | null;
-  last_sync_status: string | null;
-  last_sync_message: string | null;
-  latest_adm_file: string | null;
-  last_processed_file: string | null;
-  last_processed_line: number | null;
-  last_sync_at: string | null;
-  total_kills: number | null;
-};
-
-type FileStateRow = {
-  adm_file: string;
-  status: string;
-  line_count: number | null;
-  raw_kill_lines_found: number | null;
-  parsed_kill_lines_found: number | null;
-  inserted_kills: number | null;
-  parser_skipped_lines: number | null;
-  retry_count: number | null;
-  last_error: string | null;
-  updated_at: string | null;
 };
 
 const args = parseArgs(process.argv.slice(2));
 const serviceId = stringArg(args, "service-id");
 
 main().catch((error) => {
-  console.error("ADM health audit failed.");
+  console.error("Player count audit failed.");
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
 
 async function main() {
-  const rows = await d1Query<LinkedServerHealthRow>(
-    `SELECT linked_servers.id, linked_servers.display_name, linked_servers.server_name, linked_servers.hostname,
-            linked_servers.nitrado_service_name, linked_servers.nitrado_service_id,
-            linked_servers.current_players, linked_servers.max_players,
-            linked_servers.player_count_last_checked_at, linked_servers.player_count_source,
-            linked_servers.player_count_status, linked_servers.metadata_last_checked_at,
-            adm_sync_state.last_sync_status, adm_sync_state.last_sync_message,
-            adm_sync_state.latest_adm_file, adm_sync_state.last_processed_file,
-            adm_sync_state.last_processed_line, adm_sync_state.last_sync_at,
-            server_stats.total_kills
+  const rows = await d1Query<PlayerCountAuditRow>(
+    `SELECT id, display_name, server_name, hostname, nitrado_service_name, nitrado_service_id,
+            current_players, max_players, player_count_last_checked_at, player_count_source,
+            player_count_status, metadata_last_checked_at
      FROM linked_servers
-     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
-     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
-     WHERE linked_servers.nitrado_service_id IS NOT NULL
-       ${serviceId ? `AND CAST(linked_servers.nitrado_service_id AS TEXT) = ${sql(serviceId)}` : ""}
-     ORDER BY linked_servers.updated_at DESC`,
+     WHERE nitrado_service_id IS NOT NULL
+       AND nitrado_service_id != ''
+       ${serviceId ? `AND CAST(nitrado_service_id AS TEXT) = ${sql(serviceId)}` : ""}
+     ORDER BY COALESCE(player_count_last_checked_at, metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
+              updated_at DESC`,
   );
 
-  console.log("DZN ADM health audit dry run.");
-  console.log("No tokens or secrets are printed.");
+  console.log("DZN player count audit dry run.");
+  console.log("No Nitrado tokens or secrets are printed.");
   console.log("");
 
   for (const server of rows) {
     const name = firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name) ?? server.id;
-    const fileStates = await getFileStates(server.id);
-    const queued = fileStates.filter((file) => ["unreadable", "parser_error", "write_error", "partial", "discovered"].includes(file.status));
+    const stale = isPlayerCountStale(server.player_count_last_checked_at);
     console.log(`Server: ${name}`);
     console.log(`Service ID: ${server.nitrado_service_id ?? "unknown"}`);
-    console.log(`Live players: ${formatPlayerFraction(server.current_players, server.max_players)}`);
+    console.log(`Current players: ${formatPlayerFraction(server.current_players, server.max_players)}`);
+    console.log(`Player count status: ${server.player_count_status ?? "unknown"}${stale ? " (stale)" : ""}`);
+    console.log(`Player count source: ${server.player_count_source ?? "unknown"}`);
     console.log(`Player count last checked: ${server.player_count_last_checked_at ?? "never"}`);
     console.log(`Metadata last checked: ${server.metadata_last_checked_at ?? "never"}`);
-    console.log(`Player count source: ${server.player_count_source ?? "unknown"}`);
-    console.log(`Player count status: ${server.player_count_status ?? "unknown"}${isPlayerCountStale(server.player_count_last_checked_at) ? " (stale)" : ""}`);
-    console.log(`Nitrado returned current players this check: ${server.player_count_status === "fresh" ? "yes" : "no"}`);
     console.log(`Last known count age: ${server.player_count_last_checked_at ? formatAge(server.player_count_last_checked_at) : "unknown"}`);
-    console.log(`Recommended player count action: ${recommendedPlayerCountAction(server)}`);
-    console.log(`Status: ${server.last_sync_status ?? "not_started"}`);
-    console.log(`Latest ADM discovered: ${server.latest_adm_file ?? "none"}`);
-    console.log(`Latest ADM processed: ${server.last_processed_file ?? "none"} line ${server.last_processed_line ?? 0}`);
-    console.log(`Last sync attempt: ${server.last_sync_at ?? "never"}`);
-    console.log(`Total kills: ${server.total_kills ?? 0}`);
-    console.log(`Queued/unprocessed ADM files: ${queued.length}`);
-    for (const file of queued.slice(0, 8)) {
-      console.log(`- ${file.adm_file} [${file.status}] raw kills ${file.raw_kill_lines_found ?? 0}, parsed ${file.parsed_kill_lines_found ?? 0}, inserted ${file.inserted_kills ?? 0}, retries ${file.retry_count ?? 0}`);
-      if (file.last_error) console.log(`  reason: ${file.last_error}`);
-    }
+    console.log(`Nitrado returned current player count: ${server.player_count_status === "fresh" ? "yes" : "no"}`);
+    console.log(`Recommended action: ${recommendedPlayerCountAction(server)}`);
     console.log("");
   }
 
   if (!rows.length) console.log(serviceId ? `No linked server found for service id ${serviceId}.` : "No linked servers with Nitrado service IDs found.");
-}
-
-async function getFileStates(linkedServerId: string) {
-  return d1Query<FileStateRow>(
-    `SELECT adm_file, status, line_count, raw_kill_lines_found, parsed_kill_lines_found,
-            inserted_kills, parser_skipped_lines, retry_count, last_error, updated_at
-     FROM adm_sync_file_state
-     WHERE linked_server_id = ${sql(linkedServerId)}
-       AND ignored_at IS NULL
-     ORDER BY adm_file DESC
-     LIMIT 20`,
-  ).catch(() => []);
 }
 
 function parseArgs(values: string[]) {
@@ -188,17 +139,17 @@ function formatAge(value: string) {
   return `${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
-function recommendedPlayerCountAction(server: LinkedServerHealthRow) {
+function recommendedPlayerCountAction(server: PlayerCountAuditRow) {
   if (server.player_count_status === "fresh" && !isPlayerCountStale(server.player_count_last_checked_at)) {
     return "No action. Live Nitrado player count is fresh.";
   }
   if (server.player_count_status === "unavailable") {
-    return "Check Nitrado availability and owner token/service permissions. DZN will keep retrying.";
+    return "Nitrado metadata was unavailable or token/service access failed. DZN will retry automatically.";
   }
   if (!server.player_count_last_checked_at) {
-    return "Run scheduled sync or Refresh Server Info to fetch the first live Nitrado player count.";
+    return "Wait for the scheduled metadata sync or run the metadata cron endpoint manually.";
   }
-  return "Scheduled metadata refresh should retry automatically; verify Nitrado returned player fields if this remains stale.";
+  return "Scheduled metadata sync should refresh this automatically; verify Nitrado is returning player count fields if it remains stale.";
 }
 
 function sql(value: string | number | null | undefined) {

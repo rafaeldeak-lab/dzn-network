@@ -1,0 +1,128 @@
+import assert from "node:assert/strict";
+
+import {
+  handleMetadataSyncRun,
+  isMetadataCronAuthorized,
+  onRequestGet,
+  onRequestOptions,
+} from "../functions/api/sync/metadata/run";
+import type { Env, PagesContext } from "../functions/_lib/types";
+
+const env = {
+  DB: {} as D1Database,
+  SYNC_CRON_SECRET: "unit-test-secret",
+} as Env;
+
+async function run() {
+  assert.equal(isMetadataCronAuthorized(new Request("https://dzn.test", {
+    headers: { authorization: "Bearer unit-test-secret" },
+  }), env), true);
+  assert.equal(isMetadataCronAuthorized(new Request("https://dzn.test", {
+    headers: { authorization: "Bearer wrong" },
+  }), env), false);
+
+  let refreshCalled = false;
+  const successResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer unit-test-secret",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ cron: "github-actions", max_servers: 25 }),
+  }), env), {
+    refreshMetadata: async (_env, options = {}) => {
+      refreshCalled = true;
+      assert.equal(options.maxServers, 25);
+      assert.equal(options.includeResults, true);
+      return {
+        processed: 3,
+        succeeded: 3,
+        failed: 0,
+        skipped: 0,
+        updated_player_counts: 2,
+        results: [
+          {
+            linked_server_id: "server-1",
+            service_id: "17428528",
+            server_name: "PANDORA DayZ",
+            status: "succeeded",
+            changed: true,
+            current_players: 0,
+            max_players: 22,
+            player_count_status: "fresh",
+            player_count_last_checked_at: new Date(0).toISOString(),
+            metadata_last_checked_at: new Date(0).toISOString(),
+            message: "Server info updated from Nitrado",
+          },
+        ],
+      };
+    },
+  });
+
+  assert.equal(refreshCalled, true);
+  assert.equal(successResponse.status, 200);
+  const successJson = await successResponse.json() as {
+    ok: boolean;
+    processed: number;
+    succeeded: number;
+    failed: number;
+    updated_player_counts: number;
+    results: Array<{ current_players: number; max_players: number }>;
+  };
+  assert.equal(successJson.ok, true);
+  assert.equal(successJson.processed, 3);
+  assert.equal(successJson.succeeded, 3);
+  assert.equal(successJson.failed, 0);
+  assert.equal(successJson.updated_player_counts, 2);
+  assert.deepEqual(successJson.results[0], {
+    linked_server_id: "server-1",
+    service_id: "17428528",
+    server_name: "PANDORA DayZ",
+    status: "succeeded",
+    changed: true,
+    current_players: 0,
+    max_players: 22,
+    player_count_status: "fresh",
+    player_count_last_checked_at: new Date(0).toISOString(),
+    metadata_last_checked_at: new Date(0).toISOString(),
+    message: "Server info updated from Nitrado",
+  });
+
+  const unauthorizedResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
+    method: "POST",
+    headers: { authorization: "Bearer wrong" },
+    body: "{}",
+  }), env), {
+    refreshMetadata: async () => {
+      throw new Error("should not run without cron secret");
+    },
+  });
+  assert.equal(unauthorizedResponse.status, 401);
+
+  const getResponse = await onRequestGet(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
+    method: "GET",
+  }), env));
+  assert.equal(getResponse.status, 405);
+  assert.equal(getResponse.headers.get("allow"), "POST");
+
+  const optionsResponse = await onRequestOptions(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
+    method: "OPTIONS",
+  }), env));
+  assert.equal(optionsResponse.status, 204);
+  assert.equal(optionsResponse.headers.get("allow"), "POST, OPTIONS");
+}
+
+function makeContext(request: Request, testEnv: Env): PagesContext {
+  return {
+    request,
+    env: testEnv,
+    params: {},
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  };
+}
+
+run().then(() => {
+  console.log("Metadata sync runner tests passed.");
+});

@@ -232,6 +232,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
+  const onRefreshRef = useRef(onRefresh);
   const server = useMemo(
     () => ({
       ...serverProp,
@@ -239,6 +240,10 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
     }),
     [serverInfoOverride, serverProp],
   );
+
+  useEffect(() => {
+    onRefreshRef.current = onRefresh;
+  }, [onRefresh]);
 
   const tags = useMemo(() => {
     try {
@@ -369,10 +374,16 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   useEffect(() => {
     let active = true;
     const initialRefresh = window.setTimeout(() => {
-      if (active) void refreshSyncData({ warnOnError: true });
+      if (active) {
+        void refreshSyncData({ warnOnError: true });
+        void onRefreshRef.current();
+      }
     }, 0);
     const interval = window.setInterval(() => {
-      if (active) void refreshSyncData({ warnOnError: true });
+      if (active) {
+        void refreshSyncData({ warnOnError: true });
+        void onRefreshRef.current();
+      }
     }, SYNC_POLL_INTERVAL_MS);
 
     return () => {
@@ -2000,7 +2011,7 @@ function formatPlayerCountFreshnessDetail(
 function isLivePlayerCountFresh(checkedAt: string | null | undefined, status: string | null | undefined) {
   if (status !== "fresh" || !checkedAt) return false;
   const checkedTime = Date.parse(checkedAt);
-  return Number.isFinite(checkedTime) && Date.now() - checkedTime <= 15 * 60 * 1000;
+  return Number.isFinite(checkedTime) && Date.now() - checkedTime <= 10 * 60 * 1000;
 }
 
 function isLivePlayerCountWarning(checkedAt: string | null | undefined, status: string | null | undefined) {

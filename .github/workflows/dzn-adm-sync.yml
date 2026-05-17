@@ -9,7 +9,7 @@ jobs:
   adm-sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger scheduled ADM sync
+      - name: Trigger scheduled metadata and ADM sync
         env:
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: |
@@ -18,8 +18,14 @@ jobs:
             exit 1
           fi
 
-          curl --fail --silent --show-error \
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://dzn-network.pages.dev/api/sync/metadata/run" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data '{"cron":"github-actions","max_servers":25}'
+
+          curl --fail-with-body --silent --show-error \
             -X POST "https://dzn-network.pages.dev/api/sync/adm/run" \
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --data '{"max_servers":25,"max_lines_per_server":50000}'
+            --data '{"cron":"github-actions","max_servers":25,"max_lines_per_server":50000}'

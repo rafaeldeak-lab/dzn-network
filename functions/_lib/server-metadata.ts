@@ -8,11 +8,27 @@ const NITRADO_API = "https://api.nitrado.net";
 const METADATA_STALE_MS = 2 * 60 * 1000;
 export type PlayerCountStatus = "fresh" | "stale" | "unavailable" | "unknown";
 
+export type ScheduledMetadataSyncServerResult = {
+  linked_server_id: string;
+  service_id: string | null;
+  server_name: string | null;
+  status: "succeeded" | "failed" | "skipped";
+  changed: boolean;
+  current_players: number | null;
+  max_players: number | null;
+  player_count_status: PlayerCountStatus;
+  player_count_last_checked_at: string | null;
+  metadata_last_checked_at: string | null;
+  message: string;
+};
+
 export type ScheduledMetadataSyncResult = {
   processed: number;
   succeeded: number;
   failed: number;
+  skipped: number;
   updated_player_counts: number;
+  results: ScheduledMetadataSyncServerResult[];
 };
 
 export type LinkedServerMetadata = {
@@ -127,7 +143,7 @@ export async function refreshNitradoServerMetadata(
         changed: false,
         skipped: false,
         message: "Nitrado metadata unavailable; keeping previous live player count",
-        metadata_last_checked_at: linkedServer.metadata_last_checked_at,
+        metadata_last_checked_at: now,
         metadata_last_changed_at: linkedServer.metadata_last_changed_at,
         metadata_source: "nitrado",
         player_count_last_checked_at: now,
@@ -135,6 +151,7 @@ export async function refreshNitradoServerMetadata(
         player_count_status: "unavailable" as const,
         metadata: {
           ...rowToMetadata(linkedServer),
+          metadata_last_checked_at: now,
           player_count_last_checked_at: now,
           player_count_source: "nitrado",
           player_count_status: "unavailable" as const,
@@ -324,10 +341,11 @@ async function updatePlayerCountFreshness(
         player_count_last_checked_at = ?,
         player_count_source = ?,
         player_count_status = ?,
+        metadata_last_checked_at = ?,
         updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     )
-    .bind(values.checkedAt, values.source, values.status, linkedServerId)
+    .bind(values.checkedAt, values.source, values.status, values.checkedAt, linkedServerId)
     .run();
 }
 
@@ -373,14 +391,19 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
 
 export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
-  options: { maxServers?: number } = {},
+  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean } = {},
 ): Promise<ScheduledMetadataSyncResult> {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
   const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
+  const skipFreshWithinMs = typeof options.skipFreshWithinMs === "number" && Number.isFinite(options.skipFreshWithinMs)
+    ? Math.max(0, options.skipFreshWithinMs)
+    : null;
   const rows = await db
     .prepare(
-      `SELECT id, user_id, current_players, max_players
+      `SELECT id, user_id, nitrado_service_id, display_name, hostname, server_name, nitrado_service_name,
+              current_players, max_players, player_count_last_checked_at, metadata_last_checked_at,
+              player_count_status
        FROM linked_servers
        WHERE lower(COALESCE(status, 'pending')) = 'live'
          AND nitrado_service_id IS NOT NULL
@@ -392,12 +415,47 @@ export async function refreshLivePlayerCountsForActiveServers(
        LIMIT ?`,
     )
     .bind(maxServers)
-    .all<{ id: string; user_id: string; current_players: number | null; max_players: number | null }>();
+    .all<{
+      id: string;
+      user_id: string;
+      nitrado_service_id: string | null;
+      display_name: string | null;
+      hostname: string | null;
+      server_name: string | null;
+      nitrado_service_name: string | null;
+      current_players: number | null;
+      max_players: number | null;
+      player_count_last_checked_at: string | null;
+      metadata_last_checked_at: string | null;
+      player_count_status: string | null;
+    }>();
 
   let succeeded = 0;
   let failed = 0;
+  let skipped = 0;
   let updatedPlayerCounts = 0;
+  const results: ScheduledMetadataSyncServerResult[] = [];
   for (const row of rows.results ?? []) {
+    const serverName = firstString(row.display_name, row.hostname, row.server_name, row.nitrado_service_name);
+    const previousCheckedAt = row.player_count_last_checked_at ?? row.metadata_last_checked_at;
+    if (skipFreshWithinMs !== null && !isMetadataStale(previousCheckedAt, skipFreshWithinMs)) {
+      skipped += 1;
+      results.push({
+        linked_server_id: row.id,
+        service_id: row.nitrado_service_id,
+        server_name: serverName,
+        status: "skipped",
+        changed: false,
+        current_players: cleanNumber(row.current_players),
+        max_players: cleanNumber(row.max_players),
+        player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        player_count_last_checked_at: row.player_count_last_checked_at,
+        metadata_last_checked_at: row.metadata_last_checked_at,
+        message: "Live player count checked recently; skipped fallback refresh",
+      });
+      continue;
+    }
+
     try {
       const beforeCurrent = cleanNumber(row.current_players);
       const beforeMax = cleanNumber(row.max_players);
@@ -411,28 +469,59 @@ export async function refreshLivePlayerCountsForActiveServers(
       else failed += 1;
       const nextCurrent = cleanNumber(result.metadata?.current_players);
       const nextMax = cleanNumber(result.metadata?.max_players);
-      if (nextCurrent !== beforeCurrent || nextMax !== beforeMax) updatedPlayerCounts += 1;
-    } catch {
+      const changed = nextCurrent !== beforeCurrent || nextMax !== beforeMax;
+      if (changed) updatedPlayerCounts += 1;
+      results.push({
+        linked_server_id: row.id,
+        service_id: row.nitrado_service_id,
+        server_name: serverName,
+        status: result.ok ? "succeeded" : "failed",
+        changed,
+        current_players: nextCurrent,
+        max_players: nextMax,
+        player_count_status: normalizePlayerCountStatus(result.player_count_status),
+        player_count_last_checked_at: result.player_count_last_checked_at ?? null,
+        metadata_last_checked_at: result.metadata_last_checked_at ?? null,
+        message: result.message,
+      });
+    } catch (error) {
       failed += 1;
+      results.push({
+        linked_server_id: row.id,
+        service_id: row.nitrado_service_id,
+        server_name: serverName,
+        status: "failed",
+        changed: false,
+        current_players: cleanNumber(row.current_players),
+        max_players: cleanNumber(row.max_players),
+        player_count_status: "unavailable",
+        player_count_last_checked_at: row.player_count_last_checked_at,
+        metadata_last_checked_at: row.metadata_last_checked_at,
+        message: error instanceof Error ? error.message : "Nitrado metadata refresh failed",
+      });
     }
   }
 
-  console.log("DZN LIVE NITRADO PLAYER COUNT SYNC FIXED", {
+  const summary = {
     processed: rows.results?.length ?? 0,
     succeeded,
     failed,
+    skipped,
     updated_player_counts: updatedPlayerCounts,
-  });
-  console.log("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM", {
-    processed: rows.results?.length ?? 0,
-    updated_player_counts: updatedPlayerCounts,
-  });
+  };
+
+  console.log("DZN LIVE PLAYER COUNT AUTO SYNC READY", summary);
+  console.log("DZN METADATA SYNC INDEPENDENT OF ADM READY", summary);
+  console.log("DZN LIVE NITRADO PLAYER COUNT SYNC FIXED", summary);
+  console.log("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM", summary);
 
   return {
     processed: rows.results?.length ?? 0,
     succeeded,
     failed,
+    skipped,
     updated_player_counts: updatedPlayerCounts,
+    results,
   };
 }
 
