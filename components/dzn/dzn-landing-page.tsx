@@ -9,7 +9,6 @@ import {
   Globe2,
   Hammer,
   Lock,
-  Play,
   Radio,
   Server,
   Shield,
@@ -393,6 +392,7 @@ export function DznLandingPage() {
     console.log("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED");
     console.log("DZN LOGGED OUT CTA CLEANUP COMPLETE");
     console.log("DZN RECENT ACTIVITY SPACING FIXED");
+    console.log("DZN HOMEPAGE ADD SERVER CTA DEDUPED");
   }, []);
 
   useEffect(() => {
@@ -684,23 +684,14 @@ function HeroDashboard({
                   </a>
                 </>
               ) : (
-                <>
-                  <a
-                    href="/leaderboards"
-                    className="group inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600/86 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_34px_rgba(124,58,237,0.42)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500"
-                  >
-                    <Trophy className="h-4 w-4" />
-                    View Leaderboards
-                    <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
-                  </a>
-                  <a
-                    href="/login?returnTo=/setup"
-                    className="group inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-cyan-300/10 hover:text-white"
-                  >
-                    <Play className="h-4 w-4" />
-                    Add Your Server
-                  </a>
-                </>
+                <a
+                  href="/leaderboards"
+                  className="group inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600/86 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_34px_rgba(124,58,237,0.42)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500"
+                >
+                  <Trophy className="h-4 w-4" />
+                  View Leaderboards
+                  <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                </a>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[0.68rem] font-bold uppercase tracking-[0.16em] text-zinc-400">
@@ -1260,13 +1251,15 @@ function BottomCta({ isPreview }: { isPreview: boolean }) {
               : "Build your community reputation, let every player and faction contribute to your server ranking, and prove your server is the best."}
           </p>
         </div>
-        <a
-          href={isPreview ? "#features" : "/login?returnTo=/setup"}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_32px_rgba(124,58,237,0.36)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500 sm:w-auto"
-        >
-          {isPreview ? "Learn More" : "Add Your Server"}
-          <ChevronRight className="h-4 w-4" />
-        </a>
+        {isPreview ? (
+          <a
+            href="#features"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_32px_rgba(124,58,237,0.36)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500 sm:w-auto"
+          >
+            Learn More
+            <ChevronRight className="h-4 w-4" />
+          </a>
+        ) : null}
       </div>
     </motion.section>
   );
