@@ -225,7 +225,17 @@ assert.equal(reviewPreview.reviews.length, 0);
 assert.equal(JSON.stringify(reviewPreview).includes("reviewer_discord_id"), false);
 
 const homepageSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
+const networkOverviewBlock = homepageSource.slice(
+  homepageSource.indexOf("function NetworkOverview"),
+  homepageSource.indexOf("function NetworkPulse"),
+);
 assert.equal(homepageSource.includes("Players Online"), true);
 assert.equal(homepageSource.includes("currentPlayersOnline"), true);
+assert.equal(homepageSource.includes("playersOnline"), true);
+assert.equal(homepageSource.includes("total slots"), false);
+assert.equal(homepageSource.includes("`${formatNumber(currentPlayersOnline)} /"), false);
+assert.equal(networkOverviewBlock.includes("maxPlayersCapacity"), false);
+assert.equal(networkOverviewBlock.toLowerCase().includes("capacity"), false);
+assert.equal(networkOverviewBlock.toLowerCase().includes("slots"), false);
 
 console.log("Public access gating tests passed.");

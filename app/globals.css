@@ -1290,6 +1290,16 @@ body {
   text-transform: uppercase;
 }
 
+.dzn-stat-detail {
+  margin-top: 0.2rem;
+  color: rgba(103, 232, 249, 0.72);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
 .dzn-network-pulse,
 .dzn-event-leaderboard {
   border-color: rgba(168, 85, 247, 0.18);

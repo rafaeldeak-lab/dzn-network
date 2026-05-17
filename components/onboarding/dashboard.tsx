@@ -309,6 +309,8 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const isOriginalOwner = server.original_owner_is_current_user !== false;
   const metadataCheckedLabel = server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "not checked yet";
   const metadataChangedLabel = server.metadata_last_changed_at ? formatRelativeTime(server.metadata_last_changed_at) : null;
+  const playerCountCheckedLabel = server.player_count_last_checked_at ? formatRelativeTime(server.player_count_last_checked_at) : "not checked yet";
+  const playerCountStatusLabel = formatPlayerCountStatus(server.player_count_status);
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -634,6 +636,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                 <CompactRow label="Game" value={server.game ?? "DayZ"} />
                 <CompactRow label="Player Slots" value={formatPlayerSlots(server.current_players, server.max_players ?? server.player_slots)} />
                 <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
+                <CompactRow label="Player Count Freshness" value={`${playerCountStatusLabel} · ${playerCountCheckedLabel}`} />
                 <CompactRow label="Metadata Last Checked" value={server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "Not checked"} />
                 <CompactRow label="Latest ADM File" value={latestAdmFile} />
                 <CompactRow label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
@@ -1827,6 +1830,15 @@ function metadataPatchFromRefreshResult(result: Awaited<ReturnType<typeof refres
   if ("hostname" in metadata) patch.hostname = stringOrNull(metadata.hostname);
   if ("current_players" in metadata) patch.current_players = numberOrNull(metadata.current_players);
   if ("max_players" in metadata) patch.max_players = numberOrNull(metadata.max_players);
+  if (result.player_count_last_checked_at !== undefined || "player_count_last_checked_at" in metadata) {
+    patch.player_count_last_checked_at = stringOrNull(result.player_count_last_checked_at ?? metadata.player_count_last_checked_at);
+  }
+  if (result.player_count_source !== undefined || "player_count_source" in metadata) {
+    patch.player_count_source = stringOrNull(result.player_count_source ?? metadata.player_count_source);
+  }
+  if (result.player_count_status !== undefined || "player_count_status" in metadata) {
+    patch.player_count_status = stringOrNull(result.player_count_status ?? metadata.player_count_status);
+  }
   if ("server_mode" in metadata) patch.server_mode = stringOrNull(metadata.server_mode);
   if ("server_mode_source" in metadata) patch.server_mode_source = stringOrNull(metadata.server_mode_source);
   if ("server_status" in metadata) patch.server_status = stringOrNull(metadata.server_status);
@@ -1961,6 +1973,13 @@ function formatNitradoServerStatus(status: string | null | undefined, online: bo
   if (typeof status === "string" && status.trim()) return status.trim();
   if (online === true || online === 1) return "Online";
   if (online === false || online === 0) return "Offline";
+  return "Unknown";
+}
+
+function formatPlayerCountStatus(value: string | null | undefined) {
+  if (value === "fresh") return "Fresh";
+  if (value === "stale") return "Stale";
+  if (value === "unavailable") return "Unavailable";
   return "Unknown";
 }
 

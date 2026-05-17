@@ -10,6 +10,7 @@ import type { Env, PagesFunction } from "../../_lib/types";
 type TotalsRow = {
   serversLinked: number | null;
   statsActiveServers: number | null;
+  players_online: number | null;
   currentPlayersOnline: number | null;
   maxPlayersCapacity: number | null;
   playersSeenFromStats: number | null;
@@ -106,13 +107,15 @@ async function buildHomeStats(env: Env) {
   const playersSeen = Math.max(numberOrZero(totals.playersSeenFromStats), profileCount);
   const syncActive = numberOrZero(totals.statsActiveServers);
   const serversLinked = numberOrZero(totals.serversLinked);
+  const playersOnline = numberOrZero(totals.players_online ?? totals.currentPlayersOnline);
 
   return {
     ok: true,
     totals: {
       serversLinked,
       statsActiveServers: syncActive,
-      currentPlayersOnline: numberOrZero(totals.currentPlayersOnline),
+      players_online: playersOnline,
+      currentPlayersOnline: playersOnline,
       maxPlayersCapacity: numberOrZero(totals.maxPlayersCapacity),
       playersSeen,
       killsTracked: numberOrZero(totals.killsTracked),
@@ -153,6 +156,7 @@ async function getTotals(db: D1Database) {
     .prepare(
       `SELECT
         COUNT(linked_servers.id) AS serversLinked,
+        SUM(COALESCE(linked_servers.current_players, 0)) AS players_online,
         SUM(COALESCE(linked_servers.current_players, 0)) AS currentPlayersOnline,
         SUM(COALESCE(linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
         SUM(
@@ -212,6 +216,7 @@ async function getTotals(db: D1Database) {
   return row ?? {
     serversLinked: 0,
     statsActiveServers: 0,
+    players_online: 0,
     currentPlayersOnline: 0,
     maxPlayersCapacity: 0,
     playersSeenFromStats: 0,
@@ -762,6 +767,7 @@ function emptyHomeStats() {
     totals: {
       serversLinked: 0,
       statsActiveServers: 0,
+      players_online: 0,
       currentPlayersOnline: 0,
       maxPlayersCapacity: 0,
       playersSeen: 0,

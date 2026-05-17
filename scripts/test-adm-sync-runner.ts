@@ -94,6 +94,8 @@ assert.equal(admSyncSource.includes("adm_sync_file_state"), true);
 assert.equal(admSyncSource.includes("DZN ADM SELF HEALING ACTIVE"), true);
 assert.equal(admSyncSource.includes("DZN ADM MISSION CRITICAL SYNC READY"), true);
 assert.equal(admSyncSource.includes("DZN ADM ONLY BLOCKED BY NITRADO STATUS"), true);
+assert.equal(admSyncSource.includes("force: triggerType === \"manual\" || triggerType === \"scheduled\""), true);
+assert.equal(admSyncSource.includes("softFail: true"), true);
 
 const env = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {

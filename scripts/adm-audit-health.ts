@@ -11,6 +11,10 @@ type LinkedServerHealthRow = {
   hostname: string | null;
   nitrado_service_name: string | null;
   nitrado_service_id: string | null;
+  current_players: number | null;
+  max_players: number | null;
+  player_count_last_checked_at: string | null;
+  player_count_status: string | null;
   last_sync_status: string | null;
   last_sync_message: string | null;
   latest_adm_file: string | null;
@@ -46,6 +50,8 @@ async function main() {
   const rows = await d1Query<LinkedServerHealthRow>(
     `SELECT linked_servers.id, linked_servers.display_name, linked_servers.server_name, linked_servers.hostname,
             linked_servers.nitrado_service_name, linked_servers.nitrado_service_id,
+            linked_servers.current_players, linked_servers.max_players,
+            linked_servers.player_count_last_checked_at, linked_servers.player_count_status,
             adm_sync_state.last_sync_status, adm_sync_state.last_sync_message,
             adm_sync_state.latest_adm_file, adm_sync_state.last_processed_file,
             adm_sync_state.last_processed_line, adm_sync_state.last_sync_at,
@@ -68,6 +74,9 @@ async function main() {
     const queued = fileStates.filter((file) => ["unreadable", "parser_error", "write_error", "partial", "discovered"].includes(file.status));
     console.log(`Server: ${name}`);
     console.log(`Service ID: ${server.nitrado_service_id ?? "unknown"}`);
+    console.log(`Live players: ${formatPlayerFraction(server.current_players, server.max_players)}`);
+    console.log(`Player count last checked: ${server.player_count_last_checked_at ?? "never"}`);
+    console.log(`Player count status: ${server.player_count_status ?? "unknown"}${isPlayerCountStale(server.player_count_last_checked_at) ? " (stale)" : ""}`);
     console.log(`Status: ${server.last_sync_status ?? "not_started"}`);
     console.log(`Latest ADM discovered: ${server.latest_adm_file ?? "none"}`);
     console.log(`Latest ADM processed: ${server.last_processed_file ?? "none"} line ${server.last_processed_line ?? 0}`);
@@ -145,6 +154,21 @@ function parseWranglerJson(output: string): Array<{ success: boolean; results?: 
 
 function firstString(...values: Array<string | null | undefined>) {
   return values.find((value) => typeof value === "string" && value.trim())?.trim() ?? null;
+}
+
+function formatPlayerFraction(current: number | null, max: number | null) {
+  const currentValue = typeof current === "number" && Number.isFinite(current) ? current : null;
+  const maxValue = typeof max === "number" && Number.isFinite(max) ? max : null;
+  if (currentValue !== null && maxValue !== null) return `${currentValue} / ${maxValue}`;
+  if (currentValue !== null) return `${currentValue} online`;
+  if (maxValue !== null) return `${maxValue} slots`;
+  return "unknown";
+}
+
+function isPlayerCountStale(value: string | null) {
+  if (!value) return true;
+  const checkedAt = Date.parse(value);
+  return !Number.isFinite(checkedAt) || Date.now() - checkedAt > 15 * 60 * 1000;
 }
 
 function sql(value: string | number | null | undefined) {

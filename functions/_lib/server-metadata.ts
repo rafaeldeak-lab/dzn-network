@@ -6,6 +6,7 @@ import type { Env } from "./types";
 
 const NITRADO_API = "https://api.nitrado.net";
 const METADATA_STALE_MS = 2 * 60 * 1000;
+export type PlayerCountStatus = "fresh" | "stale" | "unavailable" | "unknown";
 
 export type LinkedServerMetadata = {
   hostname: string | null;
@@ -26,6 +27,9 @@ export type LinkedServerMetadata = {
   raw_metadata: Record<string, unknown>;
   metadata_hash: string;
   metadata_last_checked_at: string;
+  player_count_last_checked_at: string;
+  player_count_source: "nitrado" | "mock_nitrado";
+  player_count_status: PlayerCountStatus;
 };
 
 type LinkedServerMetadataRow = {
@@ -49,6 +53,9 @@ type LinkedServerMetadataRow = {
   metadata_hash: string | null;
   metadata_last_checked_at: string | null;
   metadata_last_changed_at: string | null;
+  player_count_last_checked_at: string | null;
+  player_count_source: string | null;
+  player_count_status: string | null;
   geo_latitude: number | null;
   geo_longitude: number | null;
   geo_country: string | null;
@@ -61,7 +68,7 @@ type LinkedServerMetadataRow = {
 
 export async function refreshNitradoServerMetadata(
   env: Env,
-  options: { linkedServerId: string; userId?: string | null; force?: boolean },
+  options: { linkedServerId: string; userId?: string | null; force?: boolean; softFail?: boolean },
 ) {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
@@ -83,13 +90,52 @@ export async function refreshNitradoServerMetadata(
       metadata_last_checked_at: linkedServer.metadata_last_checked_at,
       metadata_last_changed_at: linkedServer.metadata_last_changed_at,
       metadata_source: "nitrado",
+      player_count_last_checked_at: linkedServer.player_count_last_checked_at,
+      player_count_source: linkedServer.player_count_source ?? "nitrado",
+      player_count_status: normalizePlayerCountStatus(linkedServer.player_count_status),
       metadata: rowToMetadata(linkedServer),
     };
   }
 
-  const metadata = isMockNitrado(env.MOCK_NITRADO)
-    ? await mockMetadata(linkedServer, now)
-    : await fetchNitradoServerMetadata(env, linkedServer, now);
+  let metadata: LinkedServerMetadata;
+  try {
+    metadata = isMockNitrado(env.MOCK_NITRADO)
+      ? await mockMetadata(linkedServer, now)
+      : await fetchNitradoServerMetadata(env, linkedServer, now);
+  } catch (error) {
+    await updatePlayerCountFreshness(db, linkedServer.id, {
+      checkedAt: now,
+      source: "nitrado",
+      status: "unavailable",
+    });
+    console.log("DZN LIVE PLAYER COUNT AUTO REFRESH READY", {
+      linkedServerId: linkedServer.id,
+      current_players: linkedServer.current_players,
+      max_players: linkedServer.max_players,
+      status: "unavailable",
+    });
+    if (options.softFail) {
+      return {
+        ok: false,
+        changed: false,
+        skipped: false,
+        message: "Nitrado metadata unavailable; keeping previous live player count",
+        metadata_last_checked_at: linkedServer.metadata_last_checked_at,
+        metadata_last_changed_at: linkedServer.metadata_last_changed_at,
+        metadata_source: "nitrado",
+        player_count_last_checked_at: now,
+        player_count_source: "nitrado",
+        player_count_status: "unavailable" as const,
+        metadata: {
+          ...rowToMetadata(linkedServer),
+          player_count_last_checked_at: now,
+          player_count_source: "nitrado",
+          player_count_status: "unavailable" as const,
+        },
+      };
+    }
+    throw error;
+  }
   const metadataSource = isMockNitrado(env.MOCK_NITRADO) ? "mock_nitrado" : "nitrado";
   const geo = await resolveGeoUpdate(linkedServer, metadata.ip_address, now);
   const displayName = firstString(metadata.hostname, linkedServer.nitrado_service_name, linkedServer.server_name) ?? "DayZ Server";
@@ -117,6 +163,9 @@ export async function refreshNitradoServerMetadata(
         metadata_hash = ?,
         metadata_last_checked_at = ?,
         metadata_last_changed_at = CASE WHEN ? THEN ? ELSE metadata_last_changed_at END,
+        player_count_last_checked_at = ?,
+        player_count_source = ?,
+        player_count_status = ?,
         raw_metadata_json = ?,
         server_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE server_name END,
         nitrado_service_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE nitrado_service_name END,
@@ -154,6 +203,9 @@ export async function refreshNitradoServerMetadata(
       metadata.metadata_last_checked_at,
       changed ? 1 : 0,
       changed ? metadata.metadata_last_checked_at : null,
+      metadata.player_count_last_checked_at,
+      metadata.player_count_source,
+      metadata.player_count_status,
       JSON.stringify(metadata.raw_metadata),
       displayName,
       displayName,
@@ -200,6 +252,12 @@ export async function refreshNitradoServerMetadata(
     current_players: metadata.current_players,
     max_players: metadata.max_players,
   });
+  console.log("DZN LIVE PLAYER COUNT AUTO REFRESH READY", {
+    linkedServerId: linkedServer.id,
+    current_players: metadata.current_players,
+    max_players: metadata.max_players,
+    status: metadata.player_count_status,
+  });
 
   if (changed && metadata.metadata_hash !== previousHash) {
     await db
@@ -221,6 +279,9 @@ export async function refreshNitradoServerMetadata(
     metadata_last_checked_at: metadata.metadata_last_checked_at,
     metadata_last_changed_at: changed ? metadata.metadata_last_checked_at : linkedServer.metadata_last_changed_at,
     metadata_source: metadataSource,
+    player_count_last_checked_at: metadata.player_count_last_checked_at,
+    player_count_source: metadata.player_count_source,
+    player_count_status: metadata.player_count_status,
     metadata: {
       hostname: metadata.hostname,
       display_name: displayName,
@@ -237,9 +298,30 @@ export async function refreshNitradoServerMetadata(
       metadata_last_checked_at: metadata.metadata_last_checked_at,
       metadata_last_changed_at: changed ? metadata.metadata_last_checked_at : linkedServer.metadata_last_changed_at,
       metadata_source: metadataSource,
+      player_count_last_checked_at: metadata.player_count_last_checked_at,
+      player_count_source: metadata.player_count_source,
+      player_count_status: metadata.player_count_status,
       changed_fields: changes.map((change) => change.field),
     },
   };
+}
+
+async function updatePlayerCountFreshness(
+  db: D1Database,
+  linkedServerId: string,
+  values: { checkedAt: string; source: string; status: PlayerCountStatus },
+) {
+  await db
+    .prepare(
+      `UPDATE linked_servers SET
+        player_count_last_checked_at = ?,
+        player_count_source = ?,
+        player_count_status = ?,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(values.checkedAt, values.source, values.status, linkedServerId)
+    .run();
 }
 
 async function updateLinkedServerGeo(db: D1Database, linkedServerId: string, geo: Awaited<ReturnType<typeof geolocateServerIp>>, now: string) {
@@ -279,7 +361,7 @@ async function updateLinkedServerGeo(db: D1Database, linkedServerId: string, geo
 }
 
 export async function refreshMetadataIfStale(env: Env, linkedServerId: string, userId?: string | null) {
-  return refreshNitradoServerMetadata(env, { linkedServerId, userId, force: false }).catch(() => null);
+  return refreshNitradoServerMetadata(env, { linkedServerId, userId, force: false, softFail: true }).catch(() => null);
 }
 
 export function detectServerModeFromText(values: Array<string | null | undefined>) {
@@ -309,7 +391,7 @@ async function getLinkedServerMetadataRow(env: Env, linkedServerId: string, user
       `SELECT id, user_id, nitrado_service_id, nitrado_service_name, server_name, server_type,
               tags_json, region, platform, display_name, hostname, max_players, current_players, ip_address,
               server_status, server_mode, server_mode_source, metadata_hash, metadata_last_checked_at,
-              metadata_last_changed_at,
+              metadata_last_changed_at, player_count_last_checked_at, player_count_source, player_count_status,
               geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone,
               geo_source, geo_last_checked_at
        FROM linked_servers
@@ -491,6 +573,7 @@ async function normalizeMetadataValues(values: {
       maxPlayersPresent: !playerCounts.maxMissing,
     });
   }
+  const playerCountStatus: PlayerCountStatus = playerCounts.currentMissing || playerCounts.maxMissing ? "stale" : "fresh";
   const hashInput = JSON.stringify({
     hostname: values.hostname ?? null,
     description: values.description ?? null,
@@ -527,6 +610,9 @@ async function normalizeMetadataValues(values: {
     raw_metadata: rawMetadata,
     metadata_hash: await sha256(hashInput),
     metadata_last_checked_at: values.now,
+    player_count_last_checked_at: values.now,
+    player_count_source: rawMetadata.source === "MOCK_NITRADO" ? "mock_nitrado" : "nitrado",
+    player_count_status: playerCountStatus,
   };
 }
 
@@ -593,6 +679,9 @@ function rowToMetadata(row: LinkedServerMetadataRow) {
     metadata_last_checked_at: row.metadata_last_checked_at,
     metadata_last_changed_at: row.metadata_last_changed_at,
     metadata_source: "nitrado",
+    player_count_last_checked_at: row.player_count_last_checked_at,
+    player_count_source: row.player_count_source ?? "nitrado",
+    player_count_status: normalizePlayerCountStatus(row.player_count_status),
   };
 }
 
@@ -659,7 +748,13 @@ export function resolveLivePlayerCounts(values: {
     max_players: rawMax ?? cleanNumber(values.existingMaxPlayers),
     currentMissing,
     maxMissing,
+    player_count_status: currentMissing || maxMissing ? "stale" as const : "fresh" as const,
   };
+}
+
+function normalizePlayerCountStatus(value: unknown): PlayerCountStatus {
+  if (value === "fresh" || value === "stale" || value === "unavailable" || value === "unknown") return value;
+  return "unknown";
 }
 
 function firstBoolean(...values: unknown[]) {

@@ -77,6 +77,7 @@ type HomeStats = {
   totals: {
     serversLinked: number;
     statsActiveServers: number;
+    players_online: number;
     currentPlayersOnline: number;
     maxPlayersCapacity: number;
     playersSeen: number;
@@ -200,6 +201,7 @@ const emptyHomeStats: HomeStats = {
   totals: {
     serversLinked: 0,
     statsActiveServers: 0,
+    players_online: 0,
     currentPlayersOnline: 0,
     maxPlayersCapacity: 0,
     playersSeen: 0,
@@ -377,6 +379,7 @@ export function DznLandingPage() {
     console.log("DZN TOP SERVERS PANEL UPGRADED");
     console.log("DZN NAVBAR DISCORD LINK UPGRADED");
     console.log("DZN PUBLIC ACCESS GATING READY");
+    console.log("DZN HOMEPAGE PLAYERS ONLINE ONLY");
   }, []);
 
   useEffect(() => {
@@ -924,13 +927,13 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
 
 function NetworkOverview({ homeStats }: { homeStats: HomeStats }) {
   const longestKill = numberOrZero(homeStats.totals.longestKill);
-  const currentPlayersOnline = numberOrZero(homeStats.totals.currentPlayersOnline);
-  const maxPlayersCapacity = numberOrZero(homeStats.totals.maxPlayersCapacity);
+  const playersOnline = numberOrZero(homeStats.totals.players_online ?? homeStats.totals.currentPlayersOnline);
   const stats = [
     {
       icon: Users,
       label: "Players Online",
-      value: maxPlayersCapacity > 0 ? `${formatNumber(currentPlayersOnline)} / ${formatNumber(maxPlayersCapacity)}` : formatNumber(currentPlayersOnline),
+      value: formatNumber(playersOnline),
+      detail: "Live across connected servers",
       theme: "players",
     },
     {
@@ -975,6 +978,7 @@ function NetworkOverview({ homeStats }: { homeStats: HomeStats }) {
               <div className="dzn-stat-copy">
                 <p className="dzn-stat-value">{stat.value}</p>
                 <p className="dzn-stat-label">{stat.label}</p>
+                {stat.detail ? <p className="dzn-stat-detail">{stat.detail}</p> : null}
               </div>
             </div>
           );
@@ -1207,7 +1211,8 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
     totals: {
       serversLinked: numberOrZero(payload.totals?.serversLinked),
       statsActiveServers: numberOrZero(payload.totals?.statsActiveServers),
-      currentPlayersOnline: numberOrZero(payload.totals?.currentPlayersOnline),
+      players_online: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline),
+      currentPlayersOnline: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline),
       maxPlayersCapacity: numberOrZero(payload.totals?.maxPlayersCapacity),
       playersSeen: numberOrZero(payload.totals?.playersSeen),
       killsTracked: numberOrZero(payload.totals?.killsTracked),

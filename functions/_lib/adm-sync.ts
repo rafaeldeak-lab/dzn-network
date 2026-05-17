@@ -284,7 +284,8 @@ export async function runAdmSync(
   await refreshNitradoServerMetadata(env, {
     linkedServerId: initialScope.linkedServerId,
     userId: linkedServer.user_id,
-    force: triggerType === "manual",
+    force: triggerType === "manual" || triggerType === "scheduled",
+    softFail: true,
   }).catch(() => null);
 
   const existingState = await getSyncState(env, initialScope.linkedServerId);

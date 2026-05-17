@@ -151,8 +151,14 @@ export async function refreshServerMetadata(linkedServerId: string) {
     metadata_last_checked_at?: string | null;
     metadata_last_changed_at?: string | null;
     metadata_source?: string | null;
+    player_count_last_checked_at?: string | null;
+    player_count_source?: string | null;
+    player_count_status?: string | null;
     metadata?: Partial<LinkedServer> & {
       metadata_source?: string | null;
+      player_count_last_checked_at?: string | null;
+      player_count_source?: string | null;
+      player_count_status?: string | null;
       changed_fields?: string[];
     };
   }>(`/api/servers/${encodeURIComponent(linkedServerId)}/refresh-metadata`, {
