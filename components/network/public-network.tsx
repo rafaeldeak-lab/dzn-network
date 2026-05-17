@@ -32,6 +32,7 @@ import {
   Trophy,
   UserRound,
   Users,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -90,6 +91,8 @@ type PublicServer = {
     featured_until: string | null;
     is_boosted: boolean;
     last_bumped_at: string | null;
+    boosted_until?: string | null;
+    boosted_time_left_label?: string | null;
     badge_label: "FEATURED" | "BOOSTED" | "SPONSORED" | null;
   };
   recent_events: PublicRecentEvent[];
@@ -187,6 +190,7 @@ type ReviewsResponse = {
 };
 
 const filters = ["All", "PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
+let hasLoggedBoostedServerDisplayPolished = false;
 
 export function PublicNetwork() {
   const slug = useSyncExternalStore(subscribeToPath, getCurrentSlug, getServerSlugSnapshot);
@@ -196,6 +200,13 @@ export function PublicNetwork() {
   const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!hasLoggedBoostedServerDisplayPolished) {
+      console.log("DZN BOOSTED SERVER DISPLAY POLISHED");
+      hasLoggedBoostedServerDisplayPolished = true;
+    }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -467,15 +478,17 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
   const tags = parseTags(server.tags_json);
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
   const isLocked = Boolean(server.is_locked);
+  const isAdvertised = Boolean(server.advertising?.is_featured || server.advertising?.is_boosted);
   return (
     <motion.article
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.36, delay: index * 0.05 }}
       whileHover={{ y: -5 }}
-      className="glass-surface animated-border rounded-lg p-5"
+      className={`glass-surface animated-border rounded-lg p-5 ${isAdvertised ? "dzn-server-card--boosted" : ""}`}
     >
       <div className="relative z-10">
+        {isAdvertised ? <span className="dzn-boosted-card-line" aria-hidden="true" /> : null}
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-center gap-4">
             <GuildIcon server={server} size="md" />
@@ -487,10 +500,15 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-            {server.advertising?.badge_label ? <StatusPill label={server.advertising.badge_label} tone={server.advertising.is_featured ? "orange" : "violet"} /> : null}
+            {server.advertising?.badge_label ? <BoostedBadge server={server} /> : null}
             <StatusPill label="Live" tone="emerald" />
           </div>
         </div>
+        {isAdvertised ? (
+          <p className="dzn-boosted-note mt-4" title="Paid visibility only. Organic rank and score are unchanged.">
+            Paid visibility - organic rank unchanged
+          </p>
+        ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
           <StatusPill label="Verified Owner" tone="cyan" />
@@ -1513,6 +1531,33 @@ function StatusPill({ label, tone, pulse = false }: { label: string; tone: "emer
       {label}
     </span>
   );
+}
+
+function BoostedBadge({ server }: { server: PublicServer }) {
+  const label = server.advertising?.badge_label ?? "BOOSTED";
+  const subtext = boostedBadgeSubtext(server.advertising);
+  return (
+    <span
+      className="dzn-boosted-badge"
+      title={`${label}. ${subtext}. Paid visibility only; organic rank and score are unchanged.`}
+      aria-label={`${label}. ${subtext}. Paid visibility only; organic rank and score are unchanged.`}
+    >
+      <span className="dzn-boosted-badge__icon" aria-hidden="true">
+        <Zap className="h-3.5 w-3.5" />
+      </span>
+      <span className="dzn-boosted-badge__text-wrap">
+        <span className="dzn-boosted-badge__text">{label}</span>
+        <span className="dzn-boosted-badge__subtext">{subtext}</span>
+      </span>
+    </span>
+  );
+}
+
+function boostedBadgeSubtext(advertising: PublicServer["advertising"]) {
+  if (!advertising) return "Recently bumped";
+  if (advertising.is_featured) return "Featured visibility active";
+  if (advertising.is_boosted) return advertising.boosted_time_left_label ? `Visibility active - ${advertising.boosted_time_left_label}` : "Recently bumped";
+  return "Paid visibility active";
 }
 
 function toneClass(tone: string) {

@@ -16,20 +16,28 @@ export type PublicAdvertising = {
   featured_until: string | null;
   is_boosted: boolean;
   last_bumped_at: string | null;
+  boosted_until: string | null;
+  boosted_time_left_label: string | null;
   badge_label: "FEATURED" | "BOOSTED" | "SPONSORED" | null;
 };
 
 export function publicAdvertisingFromState(state: Partial<AdvertisingState> | null | undefined, now = new Date()): PublicAdvertising {
   const featuredUntil = stringOrNull(state?.featured_until);
   const lastBumpedAt = stringOrNull(state?.last_bumped_at);
-  const isFeatured = Boolean(featuredUntil && dateValue(featuredUntil) > now.getTime());
-  const isBoosted = Boolean(lastBumpedAt && now.getTime() - dateValue(lastBumpedAt) <= BOOSTED_VISIBILITY_HOURS * 60 * 60 * 1000);
+  const nowMs = now.getTime();
+  const featuredUntilMs = dateValue(featuredUntil);
+  const lastBumpedAtMs = dateValue(lastBumpedAt);
+  const boostedUntilMs = lastBumpedAtMs ? lastBumpedAtMs + BOOSTED_VISIBILITY_HOURS * 60 * 60 * 1000 : 0;
+  const isFeatured = Boolean(featuredUntil && featuredUntilMs > nowMs);
+  const isBoosted = Boolean(lastBumpedAt && boostedUntilMs > nowMs);
   const customLabel = stringOrNull(state?.featured_label)?.toUpperCase();
   return {
     is_featured: isFeatured,
     featured_until: featuredUntil,
     is_boosted: isBoosted,
     last_bumped_at: lastBumpedAt,
+    boosted_until: isBoosted ? new Date(boostedUntilMs).toISOString() : null,
+    boosted_time_left_label: isBoosted ? formatTimeLeft(boostedUntilMs - nowMs) : null,
     badge_label: isFeatured ? (customLabel === "SPONSORED" ? "SPONSORED" : "FEATURED") : isBoosted ? "BOOSTED" : null,
   };
 }
@@ -86,4 +94,16 @@ function dateValue(value: string | null | undefined) {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function formatTimeLeft(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  const minutes = Math.ceil((ms % (60 * 60 * 1000)) / (60 * 1000));
+  if (hours >= 24) {
+    const days = Math.ceil(ms / (24 * 60 * 60 * 1000));
+    return `${days}d left`;
+  }
+  if (hours >= 1) return `${hours}h left`;
+  return `${Math.max(minutes, 1)}m left`;
 }

@@ -1325,6 +1325,7 @@ function AdvertisingBoostPanel({
   const nextAvailable = nextBumpLabel(advertising);
   const limitReached = included > 0 && used >= included;
   const cooldownActive = nextAvailable !== "Now" && canBump;
+  const nextBumpCopy = nextAvailable === "Now" ? "now" : nextAvailable.toLowerCase();
 
   async function bump() {
     setBumping(true);
@@ -1344,6 +1345,15 @@ function AdvertisingBoostPanel({
       <PanelHeader icon={<Zap className="h-5 w-5" />} title="Advertising Boost" />
       {canBump ? (
         <>
+          {cooldownActive ? (
+            <div className="dzn-ad-boost-status dzn-ad-boost-status--active mt-4">
+              <div>
+                <p className="dzn-ad-boost-status__label">BOOST ACTIVE</p>
+                <p className="dzn-ad-boost-status__copy">Your server is currently boosted in public discovery.</p>
+              </div>
+              <p className="dzn-ad-boost-status__timer">Next bump available {nextBumpCopy}</p>
+            </div>
+          ) : null}
           <div className="mt-4 grid grid-cols-2 gap-3">
             <MiniInfo label="Bumps Used" value={`${used} / ${included}`} />
             <MiniInfo label="Next Bump" value={nextAvailable} />

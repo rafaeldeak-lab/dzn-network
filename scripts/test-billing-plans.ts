@@ -49,7 +49,11 @@ const boosted = publicAdvertisingFromState({ last_bumped_at: "2026-05-17T10:00:0
 const organic = publicAdvertisingFromState(null, now);
 assert.equal(featured.badge_label, "FEATURED");
 assert.equal(boosted.badge_label, "BOOSTED");
+assert.equal(boosted.boosted_until, "2026-05-18T10:00:00.000Z");
+assert.equal(boosted.boosted_time_left_label, "22h left");
 assert.equal(organic.badge_label, null);
+assert.equal(organic.boosted_until, null);
+assert.equal(organic.boosted_time_left_label, null);
 
 const sorted = sortPublicServersForDiscovery([
   { advertising: organic, rank: 1, score: 500, created_at: "2026-05-17T00:00:00.000Z", id: "organic" },
@@ -59,7 +63,12 @@ const sorted = sortPublicServersForDiscovery([
 assert.equal(sorted[0].id, "featured");
 assert.equal(sorted[1].id, "boosted");
 assert.equal(sorted[2].id, "organic");
+assert.equal(sorted[1].rank, 9);
+assert.equal(sorted[1].score, 10);
+assert.equal(sorted[2].rank, 1);
+assert.equal(sorted[2].score, 500);
 assert.equal(JSON.stringify(sorted).includes("stripe_customer_id"), false);
+assert.equal(JSON.stringify(sorted).includes("stripe_subscription_id"), false);
 
 const env = {
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_starter",

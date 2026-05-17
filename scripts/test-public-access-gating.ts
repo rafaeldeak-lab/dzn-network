@@ -64,6 +64,8 @@ const baseServer = {
     featured_until: null,
     is_boosted: false,
     last_bumped_at: null,
+    boosted_until: null,
+    boosted_time_left_label: null,
     badge_label: null,
   },
   recent_events: [
