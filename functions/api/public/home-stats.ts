@@ -1,5 +1,6 @@
 import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
 import { ensureBuildEventSchema, getRankedBuildServers } from "../../_lib/build-events";
+import type { PublicBuildLeaderboardRow } from "../../_lib/build-events";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
@@ -53,6 +54,21 @@ type RecentActivityRow = {
   created_at: string | null;
 };
 
+type BuildBreakdownRow = {
+  linked_server_id: string;
+  full_walls_built: number | null;
+  watchtowers_built: number | null;
+  gates_fence_kits_built: number | null;
+  storage_expansion_built: number | null;
+};
+
+type BuildLeaderboardRow = PublicBuildLeaderboardRow & {
+  full_walls_built: number;
+  watchtowers_built: number;
+  gates_fence_kits_built: number;
+  storage_expansion_built: number;
+};
+
 export type MapNodeRow = {
   id: string;
   status?: string | null;
@@ -101,8 +117,9 @@ async function buildHomeStats(env: Env) {
     getTopPlayers(db),
     getRecentActivity(db),
     getMapNodes(db),
-    getRankedBuildServers(env, 5),
+    getRankedBuildServers(env, 10),
   ]);
+  const buildLeaderboardRows = await buildBuildLeaderboardRows(db, topBuildServers);
 
   const playersSeen = Math.max(numberOrZero(totals.playersSeenFromStats), profileCount);
   const syncActive = numberOrZero(totals.statsActiveServers);
@@ -137,7 +154,13 @@ async function buildHomeStats(env: Env) {
           : null,
       current_event: getCurrentPublicEvent(),
     },
-    event_leaderboard: null,
+    event_leaderboard: {
+      event_type: "build",
+      title: "Build Tracking Leaderboard",
+      subtitle: "Live build intelligence across connected servers",
+      refresh_label: "Refreshes every 5 minutes",
+      rows: buildLeaderboardRows,
+    },
     top_build_servers: topBuildServers,
     topServers,
     topPlayers,
@@ -227,6 +250,96 @@ async function getTotals(db: D1Database) {
     structuresBuilt: 0,
     buildScore: 0,
   };
+}
+
+async function buildBuildLeaderboardRows(db: D1Database, rows: PublicBuildLeaderboardRow[]) {
+  if (!rows.some((row) => numberOrZero(row.build_score) > 0 || numberOrZero(row.structures_built) > 0)) return [];
+
+  const breakdowns = await getBuildLeaderboardBreakdowns(db);
+  return buildPublicBuildEventLeaderboardRows(rows, breakdowns);
+}
+
+export function buildPublicBuildEventLeaderboardRows(rows: PublicBuildLeaderboardRow[], breakdowns = new Map<string, Partial<BuildBreakdownRow>>()) {
+  const rankedRows = rows
+    .filter((row) => numberOrZero(row.build_score) > 0 || numberOrZero(row.structures_built) > 0)
+    .sort((left, right) => {
+      const scoreDiff = numberOrZero(right.build_score) - numberOrZero(left.build_score);
+      if (scoreDiff !== 0) return scoreDiff;
+      const structuresDiff = numberOrZero(right.structures_built) - numberOrZero(left.structures_built);
+      if (structuresDiff !== 0) return structuresDiff;
+      return numberOrZero(Date.parse(right.last_build_at ?? "")) - numberOrZero(Date.parse(left.last_build_at ?? ""));
+    })
+    .slice(0, 10)
+    .map((row, index) => ({ ...row, rank: index + 1 }));
+
+  return rankedRows.map<BuildLeaderboardRow>((row) => {
+    const breakdown = breakdowns.get(row.server_id);
+    return {
+      ...row,
+      full_walls_built: numberOrZero(breakdown?.full_walls_built),
+      watchtowers_built: numberOrZero(breakdown?.watchtowers_built),
+      gates_fence_kits_built: numberOrZero(breakdown?.gates_fence_kits_built),
+      storage_expansion_built: numberOrZero(breakdown?.storage_expansion_built),
+    };
+  });
+}
+
+async function getBuildLeaderboardBreakdowns(db: D1Database) {
+  const result = await db
+    .prepare(
+      `SELECT
+        build_events.linked_server_id,
+        SUM(
+          CASE
+            WHEN build_events.event_type = 'built'
+              AND lower(COALESCE(build_events.build_part, '')) IN (
+                'wall_base_up', 'wall_base_down', 'wall_wood_up', 'wall_wood_down',
+                'wall_metal_up', 'wall_metal_down'
+              )
+            THEN 1 ELSE 0
+          END
+        ) AS full_walls_built,
+        SUM(
+          CASE
+            WHEN lower(COALESCE(build_events.build_part, '')) LIKE 'watchtower%'
+              OR lower(COALESCE(build_events.placed_class, '')) IN ('watchtowerkit')
+              OR lower(COALESCE(build_events.placed_object, '')) LIKE '%watchtower%'
+            THEN 1 ELSE 0
+          END
+        ) AS watchtowers_built,
+        SUM(
+          CASE
+            WHEN lower(COALESCE(build_events.build_part, '')) = 'wall_gate'
+              OR lower(COALESCE(build_events.placed_class, '')) IN ('fencekit')
+              OR lower(COALESCE(build_events.placed_object, '')) LIKE '%fence%kit%'
+              OR lower(COALESCE(build_events.target_object, '')) IN ('fence', 'gate')
+            THEN 1 ELSE 0
+          END
+        ) AS gates_fence_kits_built,
+        SUM(
+          CASE
+            WHEN lower(COALESCE(build_events.placed_class, '')) LIKE 'woodencrate%'
+              OR lower(COALESCE(build_events.placed_class, '')) LIKE 'barrel%'
+              OR lower(COALESCE(build_events.placed_class, '')) LIKE 'seachest%'
+              OR lower(COALESCE(build_events.placed_class, '')) LIKE '%tent%'
+              OR lower(COALESCE(build_events.placed_class, '')) LIKE '%shelter%'
+              OR lower(COALESCE(build_events.placed_object, '')) LIKE '%crate%'
+              OR lower(COALESCE(build_events.placed_object, '')) LIKE '%barrel%'
+              OR lower(COALESCE(build_events.placed_object, '')) LIKE '%sea chest%'
+              OR lower(COALESCE(build_events.placed_object, '')) LIKE '%tent%'
+              OR lower(COALESCE(build_events.placed_object, '')) LIKE '%shelter%'
+            THEN 1 ELSE 0
+          END
+        ) AS storage_expansion_built
+       FROM build_events
+       INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       GROUP BY build_events.linked_server_id`,
+    )
+    .all<BuildBreakdownRow>();
+
+  return new Map((result.results ?? []).map((row) => [row.linked_server_id, row]));
 }
 
 async function getPlayerProfileCount(db: D1Database) {

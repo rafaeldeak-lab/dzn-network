@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { applyLeaderboardsAccess, applyServerLeaderboardAccess } from "../functions/_lib/public-leaderboards";
-import { applyHomeStatsAccess } from "../functions/api/public/home-stats";
+import { applyHomeStatsAccess, buildPublicBuildEventLeaderboardRows } from "../functions/api/public/home-stats";
 import { applyServerReviewsAccess } from "../functions/api/public/server-reviews";
 import { applyPublicServerAccess } from "../functions/api/public/servers";
 
@@ -194,6 +194,123 @@ assert.equal(homeFull.recentActivity[0].weapon, "M4-A1");
 assert.equal(homeFull.recentActivity[0].distance, 41.6);
 assert.equal(homeFull.map_nodes.length, 1);
 
+const buildLeaderboardRows = buildPublicBuildEventLeaderboardRows(
+  Array.from({ length: 8 }, (_, index) => ({
+    rank: 99,
+    server_id: `build-server-${index}`,
+    server_name: `Build Server ${index}`,
+    slug: `build-server-${index}`,
+    structures_built: index === 0 ? 25 : 40 - index,
+    build_items_placed: 0,
+    storage_items_placed: 0,
+    traps_placed: 0,
+    build_score: index === 0 ? 500 : 600 - index,
+    top_builder_name: null,
+    top_builder_count: 0,
+    last_build_at: `2026-05-17T1${index % 10}:00:00.000Z`,
+  })).concat([
+    {
+      rank: 99,
+      server_id: "tie-structures-high",
+      server_name: "Tie High",
+      slug: "tie-high",
+      structures_built: 55,
+      build_items_placed: 0,
+      storage_items_placed: 0,
+      traps_placed: 0,
+      build_score: 590,
+      top_builder_name: null,
+      top_builder_count: 0,
+      last_build_at: "2026-05-17T08:00:00.000Z",
+    },
+    {
+      rank: 99,
+      server_id: "tie-structures-low",
+      server_name: "Tie Low",
+      slug: "tie-low",
+      structures_built: 12,
+      build_items_placed: 0,
+      storage_items_placed: 0,
+      traps_placed: 0,
+      build_score: 590,
+      top_builder_name: null,
+      top_builder_count: 0,
+      last_build_at: "2026-05-17T09:00:00.000Z",
+    },
+    ...Array.from({ length: 4 }, (_, index) => ({
+      rank: 99,
+      server_id: `low-build-server-${index}`,
+      server_name: `Low Build Server ${index}`,
+      slug: `low-build-server-${index}`,
+      structures_built: index + 1,
+      build_items_placed: 0,
+      storage_items_placed: 0,
+      traps_placed: 0,
+      build_score: 10 - index,
+      top_builder_name: null,
+      top_builder_count: 0,
+      last_build_at: `2026-05-17T07:0${index}:00.000Z`,
+    })),
+  ]),
+  new Map([
+    ["build-server-1", {
+      full_walls_built: 12,
+      watchtowers_built: 3,
+      gates_fence_kits_built: 7,
+      storage_expansion_built: 5,
+    }],
+  ]),
+);
+assert.equal(buildLeaderboardRows.length, 10);
+assert.equal(buildLeaderboardRows[0].server_id, "build-server-1");
+assert.equal(buildLeaderboardRows[0].rank, 1);
+assert.equal(buildLeaderboardRows[0].full_walls_built, 12);
+assert.equal(buildLeaderboardRows[0].watchtowers_built, 3);
+assert.equal(buildLeaderboardRows[0].gates_fence_kits_built, 7);
+assert.equal(buildLeaderboardRows[0].storage_expansion_built, 5);
+assert.equal(buildLeaderboardRows.findIndex((row) => row.server_id === "tie-structures-high") < buildLeaderboardRows.findIndex((row) => row.server_id === "tie-structures-low"), true);
+assert.equal(JSON.stringify(buildLeaderboardRows).includes("undefined"), false);
+assert.equal(JSON.stringify(buildLeaderboardRows).includes("null"), true);
+assert.equal(JSON.stringify(buildLeaderboardRows).includes("NaN"), false);
+
+const emptyBuildLeaderboardRows = buildPublicBuildEventLeaderboardRows([
+  {
+    rank: 1,
+    server_id: "empty",
+    server_name: "Empty",
+    slug: null,
+    structures_built: 0,
+    build_items_placed: 0,
+    storage_items_placed: 0,
+    traps_placed: 0,
+    build_score: 0,
+    top_builder_name: null,
+    top_builder_count: 0,
+    last_build_at: null,
+  },
+]);
+assert.equal(emptyBuildLeaderboardRows.length, 0);
+
+const homeFullBuild = applyHomeStatsAccess({
+  totals: { players_online: 3 },
+  network_pulse: { top_server: null, current_event: null },
+  topServers: [],
+  topPlayers: [],
+  recentActivity: [],
+  top_build_servers: [],
+  event_leaderboard: {
+    event_type: "build",
+    title: "Build Tracking Leaderboard",
+    subtitle: "Live build intelligence across connected servers",
+    refresh_label: "Refreshes every 5 minutes",
+    rows: buildLeaderboardRows,
+  },
+  map_nodes: [],
+  syncHealth: { active: 0, pending: 0 },
+}, true);
+assert.equal(homeFullBuild.event_leaderboard.rows.length, 10);
+assert.equal(homeFullBuild.event_leaderboard.rows[0].server_id, "build-server-1");
+
 const leaderboardPreview = applyLeaderboardsAccess({
   ok: true,
   top_servers: Array.from({ length: 4 }, (_, index) => ({
@@ -319,12 +436,20 @@ const bottomCtaBlock = homepageSource.slice(
   homepageSource.indexOf("function BottomCta"),
   homepageSource.indexOf("function PanelShell"),
 );
+const buildLeaderboardBlock = homepageSource.slice(
+  homepageSource.indexOf("function BuildTrackingLeaderboard"),
+  homepageSource.indexOf("function BottomCta"),
+);
 const globalsSource = readFileSync("app/globals.css", "utf8");
 const recentActivityCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-recent-activity-list"),
   globalsSource.indexOf(".dzn-game-modes-section"),
 );
 const homeStatsSource = readFileSync("functions/api/public/home-stats.ts", "utf8");
+const buildLeaderboardCssBlock = globalsSource.slice(
+  globalsSource.indexOf(".dzn-build-leaderboard"),
+  globalsSource.indexOf(".dzn-game-modes-section"),
+);
 assert.equal(homepageSource.includes("Players Online"), true);
 assert.equal(homepageSource.includes("currentPlayersOnline"), true);
 assert.equal(homepageSource.includes("playersOnline"), true);
@@ -364,6 +489,24 @@ assert.equal(lockedPreviewPanelBlock.includes("Login required"), true);
 assert.equal(topServersPanelBlock.includes("/login?returnTo=/leaderboards"), false);
 assert.equal(topServersPanelBlock.includes("dzn-top-servers-view--static"), true);
 assert.equal(homepageSource.includes("DZN RECENT ACTIVITY SPACING FIXED"), true);
+assert.equal(homepageSource.includes("DZN BUILD TRACKING LEADERBOARD UPGRADED"), true);
+assert.equal(homeStatsSource.includes("event_type: \"build\""), true);
+assert.equal(homeStatsSource.includes("Build Tracking Leaderboard"), true);
+assert.equal(homeStatsSource.includes("Refreshes every 5 minutes"), true);
+assert.equal(homeStatsSource.includes(".slice(0, 10)"), true);
+assert.equal(homeStatsSource.includes("full_walls_built"), true);
+assert.equal(homeStatsSource.includes("watchtowers_built"), true);
+assert.equal(homeStatsSource.includes("gates_fence_kits_built"), true);
+assert.equal(homeStatsSource.includes("storage_expansion_built"), true);
+assert.equal(buildLeaderboardBlock.includes("BuildTrackingLeaderboard"), true);
+assert.equal(buildLeaderboardBlock.includes("dzn-build-breakdown-grid"), true);
+assert.equal(buildLeaderboardBlock.includes("dzn-build-top10"), true);
+assert.equal(buildLeaderboardBlock.includes("View Full Stats"), true);
+assert.equal(buildLeaderboardBlock.includes("rows.slice(0, 10)"), true);
+assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--walls"), true);
+assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--watchtowers"), true);
+assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--gates"), true);
+assert.equal(buildLeaderboardCssBlock.includes("dzn-build-breakdown-card--storage"), true);
 assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-row"), true);
 assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-title"), true);
 assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-meta"), true);

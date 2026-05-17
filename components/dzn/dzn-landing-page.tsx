@@ -156,6 +156,10 @@ type PublicBuildServer = {
   storage_items_placed: number;
   traps_placed: number;
   build_score: number;
+  full_walls_built: number;
+  watchtowers_built: number;
+  gates_fence_kits_built: number;
+  storage_expansion_built: number;
   top_builder_name: string | null;
   top_builder_count: number;
   last_build_at: string | null;
@@ -164,7 +168,9 @@ type PublicBuildServer = {
 type PublicEventLeaderboard = {
   event_type: string;
   title: string;
-  rows: Array<Record<string, unknown>>;
+  subtitle: string | null;
+  refresh_label: string | null;
+  rows: PublicBuildServer[];
 };
 
 type HomeStatsResponse = Partial<HomeStats> & {
@@ -393,6 +399,7 @@ export function DznLandingPage() {
     console.log("DZN LOGGED OUT CTA CLEANUP COMPLETE");
     console.log("DZN RECENT ACTIVITY SPACING FIXED");
     console.log("DZN HOMEPAGE ADD SERVER CTA DEDUPED");
+    console.log("DZN BUILD TRACKING LEADERBOARD UPGRADED");
   }, []);
 
   useEffect(() => {
@@ -1157,7 +1164,19 @@ function NetworkPulse({ homeStats }: { homeStats: HomeStats }) {
 }
 
 function EventLeaderboardPanel({ homeStats }: { homeStats: HomeStats }) {
-  const currentEvent = homeStats.network_pulse.current_event;
+  const eventLeaderboard = homeStats.event_leaderboard;
+  if (eventLeaderboard?.event_type === "build") {
+    return <BuildTrackingLeaderboard leaderboard={eventLeaderboard} />;
+  }
+
+  const currentEvent = homeStats.network_pulse.current_event ?? (
+    eventLeaderboard
+      ? {
+          type: eventLeaderboard.event_type,
+          title: eventLeaderboard.title,
+        }
+      : null
+  );
   const buildRows = homeStats.top_build_servers.filter((row) => numberOrZero(row.build_score) > 0).slice(0, 4);
   const shouldShowBuildPreview = !currentEvent && buildRows.length > 0;
 
@@ -1222,6 +1241,151 @@ function EventLeaderboardPanel({ homeStats }: { homeStats: HomeStats }) {
           <div>
             <p>More events coming soon. Stay tuned.</p>
             <span>Build, survival, faction, PvP, and activity events will rank servers here.</span>
+          </div>
+        </div>
+      )}
+    </motion.section>
+  );
+}
+
+function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLeaderboard }) {
+  const rows = leaderboard.rows.slice(0, 10);
+  const topServer = rows[0] ?? null;
+  const topServerHref = topServer?.slug ? `/servers/profile?slug=${encodeURIComponent(topServer.slug)}` : "/servers";
+  const topRankProgress = topServer ? Math.max(1, Math.min(100, Math.round((topServer.rank / Math.max(rows.length, 1)) * 100))) : 0;
+  const breakdownCards = [
+    {
+      key: "walls",
+      label: "Full Walls",
+      value: topServer?.full_walls_built ?? 0,
+      subtext: "Most used structure",
+      icon: Hammer,
+    },
+    {
+      key: "watchtowers",
+      label: "Watchtowers",
+      value: topServer?.watchtowers_built ?? 0,
+      subtext: "High ground control",
+      icon: Flag,
+    },
+    {
+      key: "gates",
+      label: "Gates / Fence Kits",
+      value: topServer?.gates_fence_kits_built ?? 0,
+      subtext: "Secure your perimeter",
+      icon: Shield,
+    },
+    {
+      key: "storage",
+      label: "Storage / Expansion",
+      value: topServer?.storage_expansion_built ?? 0,
+      subtext: "Expand & store",
+      icon: Server,
+    },
+  ];
+
+  return (
+    <motion.section variants={fadeUp} className="dzn-build-leaderboard" id="server-events">
+      <div className="dzn-build-leaderboard__header">
+        <div className="min-w-0">
+          <p className="dzn-build-leaderboard__eyebrow">Event Leaderboard</p>
+          <h2 className="dzn-build-leaderboard__title">{leaderboard.title || "Build Tracking Leaderboard"}</h2>
+          <p className="dzn-build-leaderboard__subtitle">
+            {leaderboard.subtitle || "Live build intelligence across connected servers"}
+          </p>
+        </div>
+        <div className="dzn-build-live-badge">
+          <span>Live Updates</span>
+          <strong>{leaderboard.refresh_label || "Refreshes every 5 minutes"}</strong>
+        </div>
+      </div>
+
+      {topServer ? (
+        <>
+          <div className="dzn-build-leaderboard__hero">
+            <div className="dzn-build-hero-main">
+              <span className="dzn-build-rank-shield">#1</span>
+              <div className="min-w-0">
+                <a href={topServerHref} className="dzn-build-hero-name">
+                  {formatServerDisplayName(topServer.server_name)}
+                </a>
+                <p className="dzn-build-hero-tagline">Survive. Build. Rule.</p>
+                <span className="dzn-build-online-dot">
+                  <span />
+                  Build data live
+                </span>
+              </div>
+            </div>
+            <div className="dzn-build-score-panel">
+              <div>
+                <span>Build Score</span>
+                <strong>{formatNumber(topServer.build_score)}</strong>
+              </div>
+              <div>
+                <span>Structures Built</span>
+                <strong>{formatNumber(topServer.structures_built)}</strong>
+              </div>
+              <div>
+                <span>Rank Progress</span>
+                <strong>Top {formatNumber(topRankProgress)}%</strong>
+              </div>
+              <div className="dzn-build-progress" aria-label={`Rank progress top ${topRankProgress}%`}>
+                <span style={{ width: `${Math.max(8, 100 - topRankProgress)}%` }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="dzn-build-breakdown-grid">
+            {breakdownCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <article key={card.key} className={`dzn-build-breakdown-card dzn-build-breakdown-card--${card.key}`}>
+                  <div className="dzn-build-breakdown-overlay" />
+                  <Icon className="dzn-build-breakdown-icon" aria-hidden="true" />
+                  <div className="dzn-build-breakdown-content">
+                    <span>{card.label}</span>
+                    <strong>{formatNumber(card.value)}</strong>
+                    <em>Built</em>
+                    <p>{card.subtext}</p>
+                  </div>
+                  <div className="dzn-build-spark-bars" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="dzn-build-top10">
+            <div className="dzn-build-top10-row dzn-build-top10-row--head">
+              <span>Rank</span>
+              <span>Server</span>
+              <span>Build Score</span>
+              <span>Structures Built</span>
+              <span>Action</span>
+            </div>
+            {rows.map((row) => {
+              const href = row.slug ? `/servers/profile?slug=${encodeURIComponent(row.slug)}` : "/servers";
+              return (
+                <div key={row.server_id} className={`dzn-build-top10-row dzn-build-top10-row--rank-${Math.min(row.rank, 3)}`}>
+                  <span className="dzn-build-top10-rank">#{row.rank}</span>
+                  <a href={href} className="dzn-build-top10-server">{formatServerDisplayName(row.server_name)}</a>
+                  <span>{formatNumber(row.build_score)}</span>
+                  <span>{formatNumber(row.structures_built)}</span>
+                  <a href={href} className="dzn-build-top10-action">View Full Stats</a>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div className="dzn-build-empty">
+          <Hammer className="h-6 w-6" />
+          <div>
+            <p>Build tracking ready</p>
+            <span>No build data yet. Connected servers will appear here once ADM build activity is synced.</span>
           </div>
         </div>
       )}
@@ -1347,6 +1511,10 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
           storage_items_placed: numberOrZero(row.storage_items_placed),
           traps_placed: numberOrZero(row.traps_placed),
           build_score: numberOrZero(row.build_score),
+          full_walls_built: numberOrZero(row.full_walls_built),
+          watchtowers_built: numberOrZero(row.watchtowers_built),
+          gates_fence_kits_built: numberOrZero(row.gates_fence_kits_built),
+          storage_expansion_built: numberOrZero(row.storage_expansion_built),
           top_builder_name: typeof row.top_builder_name === "string" ? row.top_builder_name : null,
           top_builder_count: numberOrZero(row.top_builder_count),
           last_build_at: typeof row.last_build_at === "string" ? row.last_build_at : null,
@@ -1468,7 +1636,33 @@ function normalizeEventLeaderboard(value: unknown): PublicEventLeaderboard | nul
   return {
     event_type: leaderboard.event_type,
     title: leaderboard.title,
-    rows: Array.isArray(leaderboard.rows) ? leaderboard.rows : [],
+    subtitle: typeof leaderboard.subtitle === "string" ? leaderboard.subtitle : null,
+    refresh_label: typeof leaderboard.refresh_label === "string" ? leaderboard.refresh_label : null,
+    rows: Array.isArray(leaderboard.rows)
+      ? leaderboard.rows.slice(0, 10).map((row) => normalizeBuildServerRow(row))
+      : [],
+  };
+}
+
+function normalizeBuildServerRow(value: unknown): PublicBuildServer {
+  const row = value && typeof value === "object" ? value as Partial<PublicBuildServer> : {};
+  return {
+    rank: numberOrZero(row.rank),
+    server_id: typeof row.server_id === "string" ? row.server_id : "",
+    server_name: typeof row.server_name === "string" && row.server_name.trim() ? row.server_name : "Unnamed DZN Server",
+    slug: typeof row.slug === "string" && row.slug.trim() ? row.slug : null,
+    structures_built: numberOrZero(row.structures_built),
+    build_items_placed: numberOrZero(row.build_items_placed),
+    storage_items_placed: numberOrZero(row.storage_items_placed),
+    traps_placed: numberOrZero(row.traps_placed),
+    build_score: numberOrZero(row.build_score),
+    full_walls_built: numberOrZero(row.full_walls_built),
+    watchtowers_built: numberOrZero(row.watchtowers_built),
+    gates_fence_kits_built: numberOrZero(row.gates_fence_kits_built),
+    storage_expansion_built: numberOrZero(row.storage_expansion_built),
+    top_builder_name: typeof row.top_builder_name === "string" ? row.top_builder_name : null,
+    top_builder_count: numberOrZero(row.top_builder_count),
+    last_build_at: typeof row.last_build_at === "string" ? row.last_build_at : null,
   };
 }
 
