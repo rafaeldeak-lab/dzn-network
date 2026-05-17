@@ -1,8 +1,8 @@
 import { runAdmSync, runScheduledAdmSync } from "../../../_lib/adm-sync";
 import { ensureMockUser, getSessionUser } from "../../../_lib/db";
-import { json, methodNotAllowed, readJson } from "../../../_lib/http";
+import { json, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
-import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
+import type { Env, PagesContext, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type AdmSyncRunBody = {
   linked_server_id?: string;
@@ -10,16 +10,49 @@ type AdmSyncRunBody = {
   max_lines_per_server?: number;
 };
 
-export const onRequest: PagesFunction = async ({ request, env }) => {
-  if (request.method !== "POST") return methodNotAllowed();
+type AdmSyncRunHandlers = {
+  runScheduled: typeof runScheduledAdmSync;
+  runManual: typeof runAdmSync;
+  resolveUser: typeof resolveUser;
+};
 
+const DEFAULT_HANDLERS: AdmSyncRunHandlers = {
+  runScheduled: runScheduledAdmSync,
+  runManual: runAdmSync,
+  resolveUser,
+};
+
+export const onRequestPost: PagesFunction = (context) => handleAdmSyncRun(context);
+
+export const onRequestOptions: PagesFunction = () => new Response(null, {
+  status: 204,
+  headers: {
+    Allow: "POST, OPTIONS",
+  },
+});
+
+export const onRequestGet: PagesFunction = () => json(
+  { error: "Method not allowed", allowed: ["POST"] },
+  {
+    status: 405,
+    headers: {
+      Allow: "POST",
+    },
+  },
+);
+
+export async function handleAdmSyncRun(
+  { request, env }: PagesContext,
+  handlers: AdmSyncRunHandlers = DEFAULT_HANDLERS,
+) {
   const body = await readJson<AdmSyncRunBody>(request);
   if (isCronAuthorized(request, env)) {
-    const result = await runScheduledAdmSync(env, {
+    const result = await handlers.runScheduled(env, {
       maxServers: sanitizePositiveInteger(body.max_servers, 25),
       maxLinesPerServer: sanitizePositiveInteger(body.max_lines_per_server, 50000),
       minSyncIntervalMs: 0,
     });
+    console.log("DZN ADM SYNC POST ENDPOINT FIXED");
     console.log("DZN RELIABLE ADM AUTO SYNC READY", {
       processed: result.processed,
       succeeded: result.succeeded,
@@ -28,11 +61,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json(result);
   }
 
-  const user = await resolveUser(env, request);
+  const user = await handlers.resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const result = await runAdmSync(env, user.id, sanitizeLinkedServerId(body.linked_server_id), {
+    const result = await handlers.runManual(env, user.id, sanitizeLinkedServerId(body.linked_server_id), {
       triggerType: "manual",
       maxLinesPerRun: sanitizePositiveInteger(body.max_lines_per_server, 50000),
     });
@@ -40,7 +73,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "ADM sync failed" }, { status: 400 });
   }
-};
+}
 
 export function isCronAuthorized(request: Request, env: Env) {
   const expected = env.SYNC_CRON_SECRET;
