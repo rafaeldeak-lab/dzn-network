@@ -806,11 +806,15 @@ function emptyHomeStats() {
 }
 
 export function applyHomeStatsAccess<T extends {
+  totals?: Record<string, unknown>;
+  network_pulse?: Record<string, unknown>;
   topServers: Array<Record<string, unknown>>;
   topPlayers: Array<Record<string, unknown>>;
   recentActivity: Array<{ source?: string; serverName?: string | null; title: string } & Record<string, unknown>>;
   top_build_servers: Array<Record<string, unknown>>;
   event_leaderboard: unknown;
+  map_nodes?: Array<Record<string, unknown>>;
+  syncHealth?: Record<string, unknown>;
 }>(data: T, viewerLoggedIn: boolean): T & {
   access_level: "full" | "preview";
   is_locked: boolean;
@@ -830,16 +834,55 @@ export function applyHomeStatsAccess<T extends {
     access_level: "preview",
     is_locked: true,
     locked_reason: "Log in with Discord to unlock full network stats.",
+    totals: data.totals
+      ? {
+          ...data.totals,
+          players_online: 0,
+          currentPlayersOnline: 0,
+          maxPlayersCapacity: 0,
+          playersSeen: 0,
+          killsTracked: 0,
+          deathsTracked: 0,
+          joinsTracked: 0,
+          longestKill: 0,
+          recentEventsCount: 0,
+          structuresBuilt: 0,
+          buildScore: 0,
+        }
+      : data.totals,
+    network_pulse: data.network_pulse
+      ? {
+          ...data.network_pulse,
+          active_servers: 0,
+          events: 0,
+          top_server: null,
+          best_kd: null,
+          current_event: null,
+        }
+      : data.network_pulse,
     topServers: data.topServers.slice(0, 3).map((server) => ({
       ...server,
+      total_kills: 0,
+      total_deaths: 0,
+      unique_players: 0,
+      total_joins: 0,
+      longest_kill: 0,
+      score: 0,
+      score_label: "Login required",
       score_breakdown: null,
     })),
     topPlayers: [],
     recentActivity: data.recentActivity.slice(0, 3).map((activity) => ({
-      ...activity,
+      source: activity.source ?? "sync",
+      serverName: activity.serverName ?? "DZN Network",
+      publicSlug: null,
+      occurredAt: null,
       title: activity.source === "server" ? activity.title : `${activity.serverName ?? "Server"} activity synced`,
+      eventType: "locked_preview",
     })),
     top_build_servers: [],
     event_leaderboard: null,
+    map_nodes: [],
+    syncHealth: data.syncHealth ? { ...data.syncHealth, active: 0, pending: 0 } : data.syncHealth,
   };
 }

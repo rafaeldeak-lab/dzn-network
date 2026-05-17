@@ -8,6 +8,7 @@ import {
   Flag,
   Globe2,
   Hammer,
+  Lock,
   Play,
   Radio,
   Server,
@@ -236,9 +237,9 @@ const emptyHomeStats: HomeStats = {
     active: 0,
     pending: 0,
   },
-  access_level: "full",
-  is_locked: false,
-  locked_reason: null,
+  access_level: "preview",
+  is_locked: true,
+  locked_reason: "Log in with Discord to unlock full network stats.",
 };
 
 const HOME_STATS_REFRESH_MS = 30000;
@@ -260,6 +261,10 @@ const navItems = [
   { label: "Servers", href: "/servers" },
   { label: "Stats", href: "#stats" },
   { label: "Events", href: "#server-events" },
+];
+
+const loggedOutNavItems = [
+  { label: "About DZN", href: "#features" },
 ];
 
 const fallbackTopServers = [
@@ -365,6 +370,7 @@ export function DznLandingPage() {
   const reduceMotion = useReducedMotion();
   const [isLoading, setIsLoading] = useState(true);
   const liveStats = useHomeStats();
+  const isPreviewMode = liveStats.data.is_locked || liveStats.data.access_level === "preview";
 
   useEffect(() => {
     console.log("DZN SERVER COMPETITION HOMEPAGE WITH ANIMATED LOGO LOADED");
@@ -380,6 +386,7 @@ export function DznLandingPage() {
     console.log("DZN NAVBAR DISCORD LINK UPGRADED");
     console.log("DZN PUBLIC ACCESS GATING READY");
     console.log("DZN HOMEPAGE PLAYERS ONLINE ONLY");
+    console.log("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED");
   }, []);
 
   useEffect(() => {
@@ -407,13 +414,19 @@ export function DznLandingPage() {
             homeStats={liveStats.data}
             lastUpdated={liveStats.lastUpdated}
             error={liveStats.error}
+            isPreview={isPreviewMode}
           />
-          {liveStats.data.is_locked ? <HomepagePreviewUnlock /> : null}
-          <GameModeGrid counts={liveStats.data.gameModes} />
-          <NetworkOverview homeStats={liveStats.data} />
-          <NetworkPulse homeStats={liveStats.data} />
-          <EventLeaderboardPanel homeStats={liveStats.data} />
-          <BottomCta />
+          {isPreviewMode ? (
+            <HomepagePreviewUnlock />
+          ) : (
+            <>
+              <GameModeGrid counts={liveStats.data.gameModes} />
+              <NetworkOverview homeStats={liveStats.data} />
+              <NetworkPulse homeStats={liveStats.data} />
+              <EventLeaderboardPanel homeStats={liveStats.data} />
+            </>
+          )}
+          <BottomCta isPreview={isPreviewMode} />
         </motion.main>
 
         <Footer />
@@ -510,7 +523,7 @@ function Navbar() {
       <div className="dzn-main-nav-inner">
         <DznLogo compact className="dzn-main-nav-logo" />
         <nav aria-label="Homepage sections" className="dzn-main-nav-links">
-          {navItems.map((item) => (
+          {(authenticated ? navItems : loggedOutNavItems).map((item) => (
             <a
               key={item.href}
               href={item.href}
@@ -536,6 +549,12 @@ function Navbar() {
                 className="dzn-nav-action dzn-nav-action--dashboard"
               >
                 Dashboard
+              </a>
+              <a
+                href="/setup"
+                className="dzn-nav-action dzn-nav-action--dashboard"
+              >
+                Add Your Server
               </a>
               <button
                 type="button"
@@ -579,10 +598,12 @@ function HeroDashboard({
   homeStats,
   lastUpdated,
   error,
+  isPreview,
 }: {
   homeStats: HomeStats;
   lastUpdated: Date | null;
   error: string;
+  isPreview: boolean;
 }) {
   const serverRows = useMemo(() => buildTopServerRows(homeStats), [homeStats]);
   const activityRows = useMemo(() => buildActivityRows(homeStats), [homeStats]);
@@ -636,21 +657,45 @@ function HeroDashboard({
 
           <motion.div variants={fadeUp} className="flex flex-col gap-4">
             <div className="flex flex-col gap-3 sm:flex-row">
-              <a
-                href="/leaderboards"
-                className="group inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600/86 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_34px_rgba(124,58,237,0.42)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500"
-              >
-                <Trophy className="h-4 w-4" />
-                View Leaderboards
-                <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
-              </a>
-              <a
-                href="/login?returnTo=/setup"
-                className="group inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-cyan-300/10 hover:text-white"
-              >
-                <Play className="h-4 w-4" />
-                Add Your Server
-              </a>
+              {isPreview ? (
+                <>
+                  <a
+                    href="/login?returnTo=/"
+                    className="group inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600/86 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_34px_rgba(124,58,237,0.42)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500"
+                  >
+                    <Lock className="h-4 w-4" />
+                    Login with Discord
+                    <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  </a>
+                  <a
+                    href={DZN_DISCORD_INVITE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-cyan-300/10 hover:text-white"
+                  >
+                    <DiscordIcon className="h-4 w-4" />
+                    Join DZN Discord
+                  </a>
+                </>
+              ) : (
+                <>
+                  <a
+                    href="/leaderboards"
+                    className="group inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600/86 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_34px_rgba(124,58,237,0.42)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500"
+                  >
+                    <Trophy className="h-4 w-4" />
+                    View Leaderboards
+                    <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  </a>
+                  <a
+                    href="/login?returnTo=/setup"
+                    className="group inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-cyan-300/10 hover:text-white"
+                  >
+                    <Play className="h-4 w-4" />
+                    Add Your Server
+                  </a>
+                </>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[0.68rem] font-bold uppercase tracking-[0.16em] text-zinc-400">
               <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-emerald-200">
@@ -667,9 +712,28 @@ function HeroDashboard({
       </motion.div>
 
       <motion.div variants={fadeUp} className="order-2 flex flex-col gap-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
-        <TopServersPanel rows={serverRows} />
-        <RecentActivityPanel rows={activityRows} />
-        <LiveMapPanel homeStats={homeStats} />
+        <TopServersPanel rows={serverRows} locked={isPreview} />
+        {isPreview ? (
+          <>
+            <LockedPreviewPanel
+              title="Recent Activity"
+              text="Recent activity details, player names, and synced events unlock after Discord login."
+              href="/login?returnTo=/"
+              icon={Activity}
+            />
+            <LockedPreviewPanel
+              title="Live Operational Map"
+              text="Login to unlock live server map details, public sync nodes, and operational signals."
+              href="/login?returnTo=/"
+              icon={Globe2}
+            />
+          </>
+        ) : (
+          <>
+            <RecentActivityPanel rows={activityRows} />
+            <LiveMapPanel homeStats={homeStats} />
+          </>
+        )}
       </motion.div>
 
       <FeatureStrip className="order-3 xl:col-start-1 xl:row-start-2" />
@@ -697,9 +761,38 @@ function HomepagePreviewUnlock() {
   );
 }
 
-function TopServersPanel({ rows }: { rows: TopServerPanelRow[] }) {
+function LockedPreviewPanel({
+  title,
+  text,
+  href,
+  icon: Icon,
+}: {
+  title: string;
+  text: string;
+  href: string;
+  icon: LucideIcon;
+}) {
   return (
-    <section className="dzn-home-panel dzn-top-servers-panel">
+    <section className="dzn-preview-locked-panel">
+      <div className="dzn-preview-locked-panel__icon" aria-hidden="true">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-100">Discord login required</p>
+        <h2 className="mt-1 text-base font-black uppercase text-white">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-300">{text}</p>
+      </div>
+      <a href={href} className="dzn-preview-locked-panel__button">
+        Login to unlock
+        <ChevronRight className="h-3.5 w-3.5" />
+      </a>
+    </section>
+  );
+}
+
+function TopServersPanel({ rows, locked = false }: { rows: TopServerPanelRow[]; locked?: boolean }) {
+  return (
+    <section className={`dzn-home-panel dzn-top-servers-panel ${locked ? "dzn-top-servers-panel--locked" : ""}`}>
       <div className="dzn-top-servers-header">
         <div className="dzn-top-servers-title-group">
           <span className="dzn-top-servers-icon" aria-hidden="true">
@@ -707,8 +800,8 @@ function TopServersPanel({ rows }: { rows: TopServerPanelRow[] }) {
           </span>
           <h2>Top Servers</h2>
         </div>
-        <a href="/leaderboards" className="dzn-top-servers-view">
-          View All <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+        <a href={locked ? "/login?returnTo=/leaderboards" : "/leaderboards"} className="dzn-top-servers-view">
+          {locked ? "Unlock" : "View All"} <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
         </a>
       </div>
 
@@ -724,24 +817,30 @@ function TopServersPanel({ rows }: { rows: TopServerPanelRow[] }) {
           {rows.slice(0, 3).map((row) => (
             <a
               key={`${row.rank}-${row.server}`}
-              href={row.href}
-              title={row.server}
-              className="dzn-top-server-row"
+              href={locked ? "/login?returnTo=/leaderboards" : row.href}
+              title={locked ? "Login to view full rankings" : row.server}
+              className={`dzn-top-server-row ${locked ? "dzn-top-server-row--locked" : ""}`}
             >
               <span className="dzn-top-server-rank">{row.rank}</span>
               <span className="dzn-top-server-name">{row.server}</span>
-              <span title={row.kd} className="dzn-top-server-stat dzn-top-server-kd">{row.kd}</span>
-              <span className="dzn-top-server-stat dzn-top-server-kills">{row.kills}</span>
+              <span title={locked ? "Login required" : row.kd} className="dzn-top-server-stat dzn-top-server-kd">{locked ? "Locked" : row.kd}</span>
+              <span className="dzn-top-server-stat dzn-top-server-kills">{locked ? "Locked" : row.kills}</span>
               <span
-                title={row.scoreTitle}
+                title={locked ? "Login required" : row.scoreTitle}
                 className={row.active ? "dzn-top-server-score" : "dzn-top-server-score dzn-top-server-score--pending"}
               >
-                {row.score}
+                {locked ? "Login" : row.score}
               </span>
             </a>
           ))}
         </div>
       </div>
+      {locked ? (
+        <div className="dzn-top-servers-locked-note">
+          <Lock className="h-3.5 w-3.5" />
+          Login to view full rankings, score details, and server profiles.
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1128,7 +1227,7 @@ function EventLeaderboardPanel({ homeStats }: { homeStats: HomeStats }) {
   );
 }
 
-function BottomCta() {
+function BottomCta({ isPreview }: { isPreview: boolean }) {
   return (
     <motion.section
       variants={fadeUp}
@@ -1142,17 +1241,19 @@ function BottomCta() {
             Be part of something bigger
           </p>
           <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">
-            Join a growing network of DayZ servers and communities.
+            {isPreview ? "Unlock full DZN Network intelligence." : "Join a growing network of DayZ servers and communities."}
           </h2>
           <p className="mt-3 text-sm leading-6 text-zinc-300/82">
-            Build your community reputation, let every player and faction contribute to your server ranking, and prove your server is the best.
+            {isPreview
+              ? "Discord login unlocks full rankings, server profiles, reviews, activity, events, and invite links."
+              : "Build your community reputation, let every player and faction contribute to your server ranking, and prove your server is the best."}
           </p>
         </div>
         <a
-          href="/login?returnTo=/setup"
+          href={isPreview ? "/login?returnTo=/" : "/login?returnTo=/setup"}
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_32px_rgba(124,58,237,0.36)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500 sm:w-auto"
         >
-          Add Your Server
+          {isPreview ? "Login with Discord" : "Add Your Server"}
           <ChevronRight className="h-4 w-4" />
         </a>
       </div>

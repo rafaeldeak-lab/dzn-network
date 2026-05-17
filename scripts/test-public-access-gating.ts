@@ -125,6 +125,20 @@ assert.equal(fullServer.recent_events.length, 1);
 assert.equal(fullServer.top_players?.length, 1);
 
 const homePreview = applyHomeStatsAccess({
+  totals: {
+    serversLinked: 4,
+    players_online: 3,
+    currentPlayersOnline: 3,
+    killsTracked: 55,
+    recentEventsCount: 12,
+  },
+  network_pulse: {
+    active_servers: 2,
+    events: 12,
+    top_server: { server_name: "Hidden top" },
+    best_kd: 4.2,
+    current_event: { title: "Hidden event" },
+  },
   topServers: [{ server_name: "One" }, { server_name: "Two" }, { server_name: "Three" }, { server_name: "Four" }],
   topPlayers: [{ player_name: "Hidden" }],
   recentActivity: [
@@ -135,14 +149,40 @@ const homePreview = applyHomeStatsAccess({
   ],
   top_build_servers: [{ server_name: "Hidden build" }],
   event_leaderboard: { title: "Hidden event" },
+  map_nodes: [{ name: "Hidden map node", latitude: 10, longitude: 20 }],
+  syncHealth: { active: 2, pending: 1 },
 }, false);
 assert.equal(homePreview.is_locked, true);
 assert.equal(homePreview.topServers.length, 3);
+assert.equal(JSON.stringify(homePreview.topServers[0]).includes("Login required"), true);
 assert.equal(homePreview.topPlayers.length, 0);
 assert.equal(homePreview.recentActivity.length, 3);
 assert.equal(homePreview.recentActivity[0].title, "PANDORA activity synced");
+assert.equal(JSON.stringify(homePreview.recentActivity).includes("Player A"), false);
+assert.equal(homePreview.totals.players_online, 0);
+assert.equal(homePreview.totals.killsTracked, 0);
+assert.equal(homePreview.network_pulse.top_server, null);
+assert.equal(homePreview.network_pulse.current_event, null);
+assert.equal(homePreview.map_nodes.length, 0);
+assert.equal(homePreview.syncHealth.active, 0);
 assert.equal(homePreview.top_build_servers.length, 0);
 assert.equal(homePreview.event_leaderboard, null);
+
+const homeFull = applyHomeStatsAccess({
+  totals: { players_online: 3 },
+  network_pulse: { top_server: { server_name: "Pandora" }, current_event: { title: "Build War" } },
+  topServers: [{ server_name: "One", score_label: "230" }],
+  topPlayers: [{ player_name: "Visible" }],
+  recentActivity: [{ source: "kill", title: "Player A eliminated Player B", serverName: "PANDORA" }],
+  top_build_servers: [{ server_name: "Visible build" }],
+  event_leaderboard: { title: "Visible event" },
+  map_nodes: [{ name: "Visible map node" }],
+  syncHealth: { active: 2, pending: 1 },
+}, true);
+assert.equal(homeFull.is_locked, false);
+assert.equal(homeFull.access_level, "full");
+assert.equal(homeFull.recentActivity[0].title, "Player A eliminated Player B");
+assert.equal(homeFull.map_nodes.length, 1);
 
 const leaderboardPreview = applyLeaderboardsAccess({
   ok: true,
@@ -229,6 +269,18 @@ const networkOverviewBlock = homepageSource.slice(
   homepageSource.indexOf("function NetworkOverview"),
   homepageSource.indexOf("function NetworkPulse"),
 );
+const loggedOutNavBlock = homepageSource.slice(
+  homepageSource.indexOf("const loggedOutNavItems"),
+  homepageSource.indexOf("const fallbackTopServers"),
+);
+const navbarBlock = homepageSource.slice(
+  homepageSource.indexOf("function Navbar"),
+  homepageSource.indexOf("function DiscordIcon"),
+);
+const landingRenderBlock = homepageSource.slice(
+  homepageSource.indexOf("export function DznLandingPage"),
+  homepageSource.indexOf("function HomeAliveBackground"),
+);
 assert.equal(homepageSource.includes("Players Online"), true);
 assert.equal(homepageSource.includes("currentPlayersOnline"), true);
 assert.equal(homepageSource.includes("playersOnline"), true);
@@ -237,5 +289,17 @@ assert.equal(homepageSource.includes("`${formatNumber(currentPlayersOnline)} /")
 assert.equal(networkOverviewBlock.includes("maxPlayersCapacity"), false);
 assert.equal(networkOverviewBlock.toLowerCase().includes("capacity"), false);
 assert.equal(networkOverviewBlock.toLowerCase().includes("slots"), false);
+assert.equal(loggedOutNavBlock.includes("Dashboard"), false);
+assert.equal(loggedOutNavBlock.includes("Add Your Server"), false);
+assert.equal(loggedOutNavBlock.includes("Servers"), false);
+assert.equal(loggedOutNavBlock.includes("Leaderboards"), false);
+assert.equal(loggedOutNavBlock.includes("Stats"), false);
+assert.equal(loggedOutNavBlock.includes("Events"), false);
+assert.equal(navbarBlock.includes("authenticated ? navItems : loggedOutNavItems"), true);
+assert.equal(navbarBlock.includes("href=\"/login?returnTo=/\""), true);
+assert.equal(navbarBlock.includes("href=\"/setup\""), true);
+assert.equal(landingRenderBlock.includes("isPreviewMode ? ("), true);
+assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={liveStats.data} />"), true);
+assert.equal(homepageSource.includes("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED"), true);
 
 console.log("Public access gating tests passed.");
