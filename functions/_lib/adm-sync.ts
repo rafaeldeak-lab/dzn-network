@@ -21,6 +21,13 @@ import {
 } from "./nitrado";
 import { decryptToken } from "./crypto";
 import {
+  getDueAdmAutomationServers,
+  markAdmPullStarted,
+  queueDiscordPostUpdatesForGuild,
+  recordAdmPullResult,
+  upsertServerPublicCache,
+} from "./automation";
+import {
   refreshLivePlayerCountsForActiveServers,
   refreshNitradoServerMetadata,
   type ScheduledMetadataSyncResult,
@@ -1537,29 +1544,66 @@ export async function runScheduledAdmSync(
   await ensureAdmSyncSchema(env);
   const maxServers = clampPositiveInteger(options.maxServers ?? 10, 10);
   const maxLinesPerServer = clampPositiveInteger(options.maxLinesPerServer ?? 50000, 50000);
-  const minSyncIntervalMs = clampPositiveInteger(options.minSyncIntervalMs ?? 120000, 120000);
+  const minSyncIntervalMs = Math.max(clampPositiveInteger(options.minSyncIntervalMs ?? 10 * 60 * 1000, 10 * 60 * 1000), 10 * 60 * 1000);
   const metadata = await refreshLivePlayerCountsForActiveServers(env, {
     maxServers,
     skipFreshWithinMs: 5 * 60 * 1000,
   });
-  const eligibleServers = await getEligibleScheduledSyncServers(env, maxServers, minSyncIntervalMs);
+  const eligibleServers = await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs);
   let succeeded = 0;
   let failed = 0;
   let unavailable = 0;
 
   for (const server of eligibleServers) {
     try {
+      await markAdmPullStarted(env, server.guild_id);
       const result = await runAdmSync(env, server.user_id, server.id, {
         triggerType: "scheduled",
         maxLinesPerRun: maxLinesPerServer,
       });
-      if (isAdmSyncErrorStatus(result.status)) failed += 1;
+      const ok = !isAdmSyncErrorStatus(result.status);
+      if (!ok) failed += 1;
       else {
         if (isAdmSyncTemporarilyUnavailableStatus(result.status)) unavailable += 1;
         succeeded += 1;
       }
+      await recordAdmPullResult(env, {
+        guildId: server.guild_id,
+        planKey: server.plan_key,
+        ok,
+        status: result.status,
+        error: ok ? null : result.message,
+        latestAdmFile: result.latestAdmFile,
+        processedAdmFile: result.latestAdmFile,
+        processedOffset: result.lastProcessedLine,
+        newDataFound: result.eventsCreated > 0 || result.killsCreated > 0 || result.buildEventsStored > 0,
+      });
+      if (ok) {
+        await upsertServerPublicCache(env, {
+          guildId: server.guild_id,
+          planKey: server.plan_key,
+          publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
+          lastAdmUpdateAt: result.lastSyncAt,
+        });
+        if (result.eventsCreated > 0 || result.killsCreated > 0) {
+          await queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
+            "leaderboard_embed",
+            "daily_summary_embed",
+            "event_leaderboard_embed",
+            "network_ranking_embed",
+            "server_vs_server_embed",
+          ], "adm-data-change");
+        }
+      }
     } catch (error) {
       failed += 1;
+      await recordAdmPullResult(env, {
+        guildId: server.guild_id,
+        planKey: server.plan_key,
+        ok: false,
+        status: "failed",
+        error: safeSyncErrorMessage(error),
+      }).catch(() => null);
       await recordSyncRun(env, {
         linkedServerId: server.id,
         sourceServiceId: server.nitrado_service_id,
@@ -1631,43 +1675,6 @@ async function getOwnedLinkedServer(env: Env, userId: string, linkedServerId?: s
     )
     .bind(linkedServerId, userId)
     .first<SyncLinkedServer>();
-}
-
-async function getEligibleScheduledSyncServers(env: Env, limit: number, minSyncIntervalMs: number) {
-  const db = requireDb(env);
-  const minSyncIntervalSeconds = Math.max(1, Math.floor(minSyncIntervalMs / 1000));
-  const result = await db
-    .prepare(
-      `SELECT
-         linked_servers.id,
-         linked_servers.user_id,
-         linked_servers.nitrado_service_id,
-         linked_servers.server_name,
-         linked_servers.display_name,
-         linked_servers.hostname,
-         linked_servers.nitrado_service_name,
-         server_log_config.adm_path AS adm_path
-       FROM linked_servers
-       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
-       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
-       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
-       WHERE lower(linked_servers.status) = 'live'
-         AND linked_servers.nitrado_service_id IS NOT NULL
-         AND linked_servers.nitrado_service_id != ''
-         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND (
-           adm_sync_state.last_sync_at IS NULL
-           OR (strftime('%s', 'now') - strftime('%s', adm_sync_state.last_sync_at)) >= ?
-         )
-       ORDER BY COALESCE(adm_sync_state.last_sync_at, '1970-01-01T00:00:00.000Z') ASC,
-                linked_servers.updated_at DESC
-       LIMIT ?`,
-    )
-    .bind(minSyncIntervalSeconds, limit)
-    .all<SyncLinkedServer>();
-
-  return result.results ?? [];
 }
 
 async function ensureAdmSyncDetailColumns(env: Env) {

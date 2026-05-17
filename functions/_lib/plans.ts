@@ -1,11 +1,35 @@
 import { requireDb } from "./db";
 import type { Env, SessionUser } from "./types";
+import {
+  AUTO_POST_TYPES,
+  BILLING_PLAN_CONFIG,
+  PAID_PLAN_KEYS,
+  getAdmPullInterval as centralAdmPullInterval,
+  getManualRefreshCooldown as centralManualRefreshCooldown,
+  getPlanByStripePriceId,
+  getPlanPriority as centralPlanPriority,
+  getServerStatusInterval as centralServerStatusInterval,
+  hasAutoPost as centralHasAutoPost,
+  hasPlanFeature as centralHasPlanFeature,
+  normalizePlanKey as centralNormalizePlanKey,
+  type AutoPostType,
+  type PlanFeature,
+} from "../../lib/billing/plans";
 
 export type PlanKey = "free" | "starter" | "pro" | "network" | "partner";
 export type PaidPlanKey = Exclude<PlanKey, "free">;
 
 export type PlanEntitlements = {
   plan_key: PlanKey;
+  name: string;
+  monthly_price: number;
+  stripe_price_env_key: string | null;
+  server_status_interval_minutes: number;
+  adm_pull_interval_minutes: number;
+  manual_adm_refresh_cooldown_minutes: number;
+  allowed_features: PlanFeature[];
+  allowed_auto_posts: AutoPostType[];
+  priority_level: number;
   max_linked_servers: number;
   can_use_reviews: boolean;
   can_use_public_listing: boolean;
@@ -44,6 +68,7 @@ export type BillingPlanSummary = PlanEntitlements & {
 export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
   free: {
     plan_key: "free",
+    ...automationPlan("free"),
     max_linked_servers: 1,
     can_use_reviews: false,
     can_use_public_listing: true,
@@ -57,6 +82,7 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
   },
   starter: {
     plan_key: "starter",
+    ...automationPlan("starter"),
     max_linked_servers: 1,
     can_use_reviews: true,
     can_use_public_listing: true,
@@ -70,6 +96,7 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
   },
   pro: {
     plan_key: "pro",
+    ...automationPlan("pro"),
     max_linked_servers: 3,
     can_use_reviews: true,
     can_use_public_listing: true,
@@ -83,6 +110,7 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
   },
   network: {
     plan_key: "network",
+    ...automationPlan("network"),
     max_linked_servers: 10,
     can_use_reviews: true,
     can_use_public_listing: true,
@@ -96,6 +124,7 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
   },
   partner: {
     plan_key: "partner",
+    ...automationPlan("partner"),
     max_linked_servers: 25,
     can_use_reviews: true,
     can_use_public_listing: true,
@@ -108,8 +137,6 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
     stat_history_days: 365,
   },
 };
-
-const PAID_PLAN_KEYS: PaidPlanKey[] = ["starter", "pro", "network", "partner"];
 
 const PLAN_MARKETING: Record<PaidPlanKey, {
   name: string;
@@ -144,8 +171,7 @@ const PLAN_MARKETING: Record<PaidPlanKey, {
 };
 
 export function normalizePlanKey(value: unknown): PlanKey {
-  const key = typeof value === "string" ? value.toLowerCase() : "";
-  return key === "starter" || key === "pro" || key === "network" || key === "partner" ? key : "free";
+  return centralNormalizePlanKey(value);
 }
 
 export function paidPlanKey(value: unknown): PaidPlanKey | null {
@@ -158,12 +184,12 @@ export function getPlanConfig(planKey: unknown): PlanEntitlements {
 }
 
 export function getPlanFromStripePriceId(env: Env, priceId: string | null | undefined): PlanKey {
-  const price = typeof priceId === "string" ? priceId : "";
-  if (price && price === getStripePriceIdForPlan(env, "starter")) return "starter";
-  if (price && price === getStripePriceIdForPlan(env, "pro")) return "pro";
-  if (price && price === getStripePriceIdForPlan(env, "network")) return "network";
-  if (price && price === getStripePriceIdForPlan(env, "partner")) return "partner";
-  return "free";
+  return getPlanByStripePriceId(priceId, {
+    starter: getStripePriceIdForPlan(env, "starter"),
+    pro: getStripePriceIdForPlan(env, "pro"),
+    network: getStripePriceIdForPlan(env, "network"),
+    partner: getStripePriceIdForPlan(env, "partner"),
+  });
 }
 
 export function getStripePriceIdForPlan(env: Env, planKey: PlanKey) {
@@ -192,6 +218,32 @@ export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
     configured: configured[planKey],
   }));
 }
+
+export function hasPlanFeature(planKey: unknown, featureKey: PlanFeature) {
+  return centralHasPlanFeature(planKey, featureKey);
+}
+
+export function hasAutoPost(planKey: unknown, postType: AutoPostType) {
+  return centralHasAutoPost(planKey, postType);
+}
+
+export function getServerStatusInterval(planKey: unknown) {
+  return centralServerStatusInterval(planKey);
+}
+
+export function getAdmPullInterval(planKey: unknown) {
+  return centralAdmPullInterval(planKey);
+}
+
+export function getManualRefreshCooldown(planKey: unknown) {
+  return centralManualRefreshCooldown(planKey);
+}
+
+export function getPlanPriority(planKey: unknown) {
+  return centralPlanPriority(planKey);
+}
+
+export { AUTO_POST_TYPES };
 
 export function effectiveEntitlementPlan(planKey: PlanKey, status: string | null | undefined): PlanKey {
   if (planKey === "free") return "free";
@@ -435,6 +487,7 @@ export function entitlementsFromRow(row: Record<string, unknown>): PlanEntitleme
   const planKey = normalizePlanKey(row.plan_key);
   return {
     plan_key: planKey,
+    ...automationPlan(planKey),
     max_linked_servers: numberOrDefault(row.max_linked_servers, PLAN_CONFIG[planKey].max_linked_servers),
     can_use_reviews: Number(row.can_use_reviews ?? 0) === 1,
     can_use_public_listing: Number(row.can_use_public_listing ?? 1) === 1,
@@ -445,6 +498,21 @@ export function entitlementsFromRow(row: Record<string, unknown>): PlanEntitleme
     bump_cooldown_hours: numberOrDefault(row.bump_cooldown_hours, 24),
     can_use_featured_slots: Number(row.can_use_featured_slots ?? 0) === 1,
     stat_history_days: numberOrDefault(row.stat_history_days, 7),
+  };
+}
+
+function automationPlan(planKey: PlanKey) {
+  const plan = BILLING_PLAN_CONFIG[planKey];
+  return {
+    name: plan.name,
+    monthly_price: plan.monthly_price,
+    stripe_price_env_key: plan.stripe_price_env_key,
+    server_status_interval_minutes: plan.server_status_interval_minutes,
+    adm_pull_interval_minutes: plan.adm_pull_interval_minutes,
+    manual_adm_refresh_cooldown_minutes: plan.manual_adm_refresh_cooldown_minutes,
+    allowed_features: plan.allowed_features,
+    allowed_auto_posts: plan.allowed_auto_posts,
+    priority_level: plan.priority_level,
   };
 }
 

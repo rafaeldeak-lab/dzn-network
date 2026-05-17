@@ -2,7 +2,7 @@ name: DZN ADM Sync
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "* * * * *"
   workflow_dispatch:
 
 jobs:
@@ -29,3 +29,9 @@ jobs:
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"cron":"github-actions","max_servers":25,"max_lines_per_server":50000}'
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://dzn-network.pages.dev/api/sync/discord-posts/run" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data '{"cron":"github-actions","max_jobs":25}'

@@ -11,6 +11,7 @@ import type {
   NitradoLogAccessDiagnostics,
   NitradoService,
   OnboardingChecks,
+  PostingDestinationSummary,
 } from "./types";
 
 export async function getMe() {
@@ -164,6 +165,24 @@ export async function refreshServerMetadata(linkedServerId: string) {
   }>(`/api/servers/${encodeURIComponent(linkedServerId)}/refresh-metadata`, {
     method: "POST",
     cache: "no-store",
+  });
+}
+
+export async function getPostingDestinations(linkedServerId: string) {
+  return request<{ post_types: PostingDestinationSummary[] }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
+    cache: "no-store",
+  });
+}
+
+export async function savePostingDestination(linkedServerId: string, data: {
+  post_type: string;
+  discord_channel_id: string;
+  discord_webhook_url?: string | null;
+  enabled: boolean;
+}) {
+  return request<{ post_types: PostingDestinationSummary[] }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 

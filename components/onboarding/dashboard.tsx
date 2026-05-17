@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getBillingPlans, getBillingStatus, getMe, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AuthResponse, BillingPlanSummary, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getBillingPlans, getBillingStatus, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AuthResponse, BillingPlanSummary, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics, PostingDestinationSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -226,6 +226,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [billingPlans, setBillingPlans] = useState<BillingPlanSummary[]>([]);
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
+  const [postingDestinations, setPostingDestinations] = useState<PostingDestinationSummary[]>([]);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
@@ -263,6 +264,8 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       if (advertising?.advertising) setAdvertisingStatus(advertising.advertising);
       const plans = await getBillingPlans().catch(() => null);
       if (plans?.plans?.length) setBillingPlans(plans.plans);
+      const posting = await getPostingDestinations(server.id).catch(() => null);
+      if (posting?.post_types) setPostingDestinations(posting.post_types);
     } catch (error) {
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
     }
@@ -808,6 +811,11 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               void refreshBilling();
             }}
           />
+          <DiscordAutoPostsPanel
+            serverId={server.id}
+            destinations={postingDestinations}
+            onSaved={(next) => setPostingDestinations(next)}
+          />
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions & Setup" />
             <div className="mt-4 grid gap-3">
@@ -1323,6 +1331,9 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
                 <p className="mt-1 text-xs leading-5 text-zinc-400">
                   {plan.max_linked_servers} server{plan.max_linked_servers === 1 ? "" : "s"} · {plan.stat_history_days} day stats · {plan.included_bumps_per_month} bumps/mo
                 </p>
+                <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+                  Server status checked every {plan.server_status_interval_minutes ?? "?"} minutes. ADM stats checked every {plan.adm_pull_interval_minutes ?? "?"} minutes.
+                </p>
                 <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                   {plan.configured ? "Checkout configured" : "Checkout not configured"}
                 </p>
@@ -1349,6 +1360,9 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
         {portalBusy ? "Opening portal..." : "Manage Billing"}
       </button>
       {message ? <p className="mt-3 text-sm font-bold text-orange-100">{message}</p> : null}
+      <p className="mt-3 text-[11px] leading-5 text-zinc-500">
+        Nitrado controls when fresh logs are available. DZN checks automatically based on your plan, but ADM logs can appear 5-45 minutes after a restart.
+      </p>
     </DashboardPanel>
   );
 }
@@ -1440,6 +1454,117 @@ function AdvertisingBoostPanel({
         </div>
       )}
       {error ? <p className="mt-3 rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-2 text-sm font-bold text-red-50">{error}</p> : null}
+    </DashboardPanel>
+  );
+}
+
+function DiscordAutoPostsPanel({
+  serverId,
+  destinations,
+  onSaved,
+}: {
+  serverId: string;
+  destinations: PostingDestinationSummary[];
+  onSaved: (items: PostingDestinationSummary[]) => void;
+}) {
+  const [drafts, setDrafts] = useState<Record<string, { channel: string; webhook: string; enabled: boolean }>>({});
+  const [savingType, setSavingType] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+
+  const destinationDrafts = useMemo(() => Object.fromEntries(destinations.map((item) => [
+      item.post_type,
+      {
+        channel: item.discord_channel_id ?? "",
+        webhook: "",
+        enabled: item.enabled,
+      },
+    ])), [destinations]);
+
+  async function save(item: PostingDestinationSummary) {
+    const draft = drafts[item.post_type] ?? destinationDrafts[item.post_type] ?? { channel: "", webhook: "", enabled: false };
+    setSavingType(item.post_type);
+    setMessage("");
+    try {
+      const result = await savePostingDestination(serverId, {
+        post_type: item.post_type,
+        discord_channel_id: draft.channel,
+        discord_webhook_url: draft.webhook || null,
+        enabled: draft.enabled,
+      });
+      onSaved(result.post_types);
+      setMessage(`${formatPostType(item.post_type)} destination saved.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save Discord posting destination.");
+    } finally {
+      setSavingType(null);
+    }
+  }
+
+  const allowed = destinations.filter((item) => item.allowed);
+  const locked = destinations.filter((item) => !item.allowed);
+
+  return (
+    <DashboardPanel className="p-4">
+      <PanelHeader icon={<Bell className="h-5 w-5" />} title="Discord Auto Posts" />
+      <p className="mt-3 text-xs leading-5 text-zinc-400">
+        DZN edits existing webhook messages when data changes. No destination means that post type is skipped safely.
+      </p>
+      <div className="mt-4 grid gap-3">
+        {allowed.map((item) => {
+          const draft = drafts[item.post_type] ?? destinationDrafts[item.post_type] ?? { channel: item.discord_channel_id ?? "", webhook: "", enabled: item.enabled };
+          return (
+            <div key={item.post_type} className="rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-black uppercase text-white">{formatPostType(item.post_type)}</p>
+                <label className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
+                  <input
+                    type="checkbox"
+                    checked={draft.enabled}
+                    onChange={(event) => setDrafts((current) => ({
+                      ...current,
+                      [item.post_type]: { ...draft, enabled: event.target.checked },
+                    }))}
+                  />
+                  Enabled
+                </label>
+              </div>
+              <input
+                value={draft.channel}
+                onChange={(event) => setDrafts((current) => ({
+                  ...current,
+                  [item.post_type]: { ...draft, channel: event.target.value },
+                }))}
+                placeholder="Discord channel ID"
+                className="mt-3 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
+              />
+              <input
+                value={draft.webhook}
+                onChange={(event) => setDrafts((current) => ({
+                  ...current,
+                  [item.post_type]: { ...draft, webhook: event.target.value },
+                }))}
+                placeholder={item.discord_channel_id ? "Webhook URL hidden after save" : "Discord webhook URL"}
+                className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
+              />
+              <button
+                type="button"
+                disabled={savingType === item.post_type || !draft.channel}
+                onClick={() => save(item)}
+                className="mt-3 rounded-lg bg-cyan-500/80 px-3 py-2 text-[10px] font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                {savingType === item.post_type ? "Saving..." : "Save Destination"}
+              </button>
+            </div>
+          );
+        })}
+        {locked.slice(0, 3).map((item) => (
+          <div key={item.post_type} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-xs font-black uppercase text-zinc-200">{formatPostType(item.post_type)}</p>
+            <p className="mt-2 text-xs leading-5 text-zinc-500">{item.locked_message ?? "Upgrade to unlock this auto-post."}</p>
+          </div>
+        ))}
+      </div>
+      {message ? <p className="mt-3 text-xs font-bold text-cyan-100">{message}</p> : null}
     </DashboardPanel>
   );
 }
@@ -1913,6 +2038,11 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_join_events: false,
       can_use_featured_slots: false,
       monthly_price_gbp: 4.99,
+      server_status_interval_minutes: 7,
+      adm_pull_interval_minutes: 60,
+      manual_adm_refresh_cooldown_minutes: 60,
+      priority_level: 1,
+      allowed_auto_posts: ["basic_status_embed"],
     },
     pro: {
       max_linked_servers: 3,
@@ -1924,6 +2054,11 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_join_events: true,
       can_use_featured_slots: false,
       monthly_price_gbp: 9.99,
+      server_status_interval_minutes: 5,
+      adm_pull_interval_minutes: 30,
+      manual_adm_refresh_cooldown_minutes: 30,
+      priority_level: 2,
+      allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed"],
     },
     network: {
       max_linked_servers: 10,
@@ -1935,6 +2070,11 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_join_events: true,
       can_use_featured_slots: true,
       monthly_price_gbp: 19.99,
+      server_status_interval_minutes: 3,
+      adm_pull_interval_minutes: 15,
+      manual_adm_refresh_cooldown_minutes: 15,
+      priority_level: 3,
+      allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed"],
     },
     partner: {
       max_linked_servers: 25,
@@ -1946,6 +2086,11 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_join_events: true,
       can_use_featured_slots: true,
       monthly_price_gbp: 29.99,
+      server_status_interval_minutes: 1,
+      adm_pull_interval_minutes: 10,
+      manual_adm_refresh_cooldown_minutes: 10,
+      priority_level: 4,
+      allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed", "partner_featured_embed", "priority_status_embed"],
     },
   }[plan.key];
 
@@ -1966,6 +2111,11 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
     bump_cooldown_hours: base.bump_cooldown_hours,
     can_use_featured_slots: base.can_use_featured_slots,
     stat_history_days: base.stat_history_days,
+    server_status_interval_minutes: base.server_status_interval_minutes,
+    adm_pull_interval_minutes: base.adm_pull_interval_minutes,
+    manual_adm_refresh_cooldown_minutes: base.manual_adm_refresh_cooldown_minutes,
+    allowed_auto_posts: base.allowed_auto_posts,
+    priority_level: base.priority_level,
   };
 }
 
@@ -2447,6 +2597,13 @@ function formatClockTime(value: string | null) {
 function formatEventType(value: string) {
   return value
     .replace(/^player_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatPostType(value: string) {
+  return value
+    .replace(/_embed$/, "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

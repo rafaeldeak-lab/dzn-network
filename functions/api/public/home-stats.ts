@@ -183,11 +183,11 @@ async function getTotals(db: D1Database) {
     .prepare(
       `SELECT
         COUNT(linked_servers.id) AS serversLinked,
-        SUM(COALESCE(linked_servers.current_players, 0)) AS players_online,
-        SUM(COALESCE(linked_servers.current_players, 0)) AS currentPlayersOnline,
-        SUM(COALESCE(linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
-        SUM(CASE WHEN linked_servers.player_count_status = 'fresh' THEN 1 ELSE 0 END) AS playerCountFreshServers,
-        SUM(CASE WHEN linked_servers.player_count_status IS NULL OR linked_servers.player_count_status != 'fresh' THEN 1 ELSE 0 END) AS playerCountStaleServers,
+        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS players_online,
+        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS currentPlayersOnline,
+        SUM(COALESCE(server_public_cache.max_player_count, linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
+        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NOT NULL THEN 1 ELSE 0 END) AS playerCountFreshServers,
+        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NULL THEN 1 ELSE 0 END) AS playerCountStaleServers,
         SUM(
           CASE
             WHEN COALESCE(server_stats.total_joins, 0) > 0
@@ -238,6 +238,7 @@ async function getTotals(db: D1Database) {
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN server_build_stats ON server_build_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
     )

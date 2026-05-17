@@ -257,17 +257,17 @@ async function queryPublicServers(env: Env) {
       linked_servers.status,
       linked_servers.nitrado_service_id,
       linked_servers.nitrado_service_name,
-      COALESCE(linked_servers.max_players, linked_servers.player_slots) AS player_slots,
-      linked_servers.max_players,
-      linked_servers.current_players,
+      COALESCE(server_public_cache.max_player_count, linked_servers.max_players, linked_servers.player_slots) AS player_slots,
+      COALESCE(server_public_cache.max_player_count, linked_servers.max_players) AS max_players,
+      COALESCE(server_public_cache.current_player_count, linked_servers.current_players) AS current_players,
       linked_servers.platform,
       linked_servers.map_name,
       linked_servers.mission,
       linked_servers.server_mode,
-      linked_servers.server_status,
-      linked_servers.is_online,
-      linked_servers.metadata_last_checked_at,
-      linked_servers.player_count_last_checked_at,
+      COALESCE(server_public_cache.server_status, linked_servers.server_status) AS server_status,
+      COALESCE(server_public_cache.server_online, linked_servers.is_online) AS is_online,
+      COALESCE(server_public_cache.last_status_update_at, linked_servers.metadata_last_checked_at) AS metadata_last_checked_at,
+      COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) AS player_count_last_checked_at,
       linked_servers.player_count_source,
       linked_servers.player_count_status,
       linked_servers.created_at,
@@ -333,6 +333,7 @@ async function queryPublicServers(env: Env) {
     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
     LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
+    LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
     WHERE lower(linked_servers.status) = 'live'
       AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
   `;

@@ -14,6 +14,7 @@ import {
   validateServerType,
 } from "../../_lib/onboarding";
 import { validatePublicListingInput, type PublicListingInput } from "../../_lib/review-moderation";
+import { ensureAutomationRowsForLinkedServers } from "../../_lib/automation";
 import type { PagesFunction } from "../../_lib/types";
 
 type SaveBody = {
@@ -226,6 +227,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
 
   await linkLatestNitradoConnection(env, userId, linkedServerId);
+  await ensureAutomationRowsForLinkedServers(env);
   return json({ ok: true, linkedServerId });
 };
 

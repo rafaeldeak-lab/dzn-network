@@ -1,4 +1,11 @@
 import { decryptToken, sha256 } from "./crypto";
+import {
+  getDueStatusAutomationServers,
+  markStatusCheckStarted,
+  queueDiscordPostUpdatesForGuild,
+  recordStatusCheckResult,
+  upsertServerPublicCache,
+} from "./automation";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { geolocateServerIp, shouldRefreshServerGeo } from "./geoip";
 import { isMockNitrado } from "./mock";
@@ -393,49 +400,19 @@ export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
   options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean } = {},
 ): Promise<ScheduledMetadataSyncResult> {
-  const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
   const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
   const skipFreshWithinMs = typeof options.skipFreshWithinMs === "number" && Number.isFinite(options.skipFreshWithinMs)
     ? Math.max(0, options.skipFreshWithinMs)
     : null;
-  const rows = await db
-    .prepare(
-      `SELECT id, user_id, nitrado_service_id, display_name, hostname, server_name, nitrado_service_name,
-              current_players, max_players, player_count_last_checked_at, metadata_last_checked_at,
-              player_count_status
-       FROM linked_servers
-       WHERE lower(COALESCE(status, 'pending')) = 'live'
-         AND nitrado_service_id IS NOT NULL
-         AND nitrado_service_id != ''
-         AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
-         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
-       ORDER BY COALESCE(player_count_last_checked_at, metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
-                updated_at DESC
-       LIMIT ?`,
-    )
-    .bind(maxServers)
-    .all<{
-      id: string;
-      user_id: string;
-      nitrado_service_id: string | null;
-      display_name: string | null;
-      hostname: string | null;
-      server_name: string | null;
-      nitrado_service_name: string | null;
-      current_players: number | null;
-      max_players: number | null;
-      player_count_last_checked_at: string | null;
-      metadata_last_checked_at: string | null;
-      player_count_status: string | null;
-    }>();
+  const rows = await getDueStatusAutomationServers(env, maxServers);
 
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
   let updatedPlayerCounts = 0;
   const results: ScheduledMetadataSyncServerResult[] = [];
-  for (const row of rows.results ?? []) {
+  for (const row of rows) {
     const serverName = firstString(row.display_name, row.hostname, row.server_name, row.nitrado_service_name);
     const previousCheckedAt = row.player_count_last_checked_at ?? row.metadata_last_checked_at;
     if (skipFreshWithinMs !== null && !isMetadataStale(previousCheckedAt, skipFreshWithinMs)) {
@@ -457,6 +434,7 @@ export async function refreshLivePlayerCountsForActiveServers(
     }
 
     try {
+      await markStatusCheckStarted(env, row.guild_id);
       const beforeCurrent = cleanNumber(row.current_players);
       const beforeMax = cleanNumber(row.max_players);
       const result = await refreshNitradoServerMetadata(env, {
@@ -471,6 +449,29 @@ export async function refreshLivePlayerCountsForActiveServers(
       const nextMax = cleanNumber(result.metadata?.max_players);
       const changed = nextCurrent !== beforeCurrent || nextMax !== beforeMax;
       if (changed) updatedPlayerCounts += 1;
+      await recordStatusCheckResult(env, {
+        guildId: row.guild_id,
+        planKey: row.plan_key,
+        ok: result.ok,
+        currentPlayers: nextCurrent,
+        maxPlayers: nextMax,
+        serverOnline: metadataOnlineValue(result.metadata),
+        serverStatus: result.metadata?.server_status ?? null,
+        error: result.ok ? null : result.message,
+      });
+      await upsertServerPublicCache(env, {
+        guildId: row.guild_id,
+        planKey: row.plan_key,
+        publicServerName: serverName,
+        currentPlayers: nextCurrent,
+        maxPlayers: nextMax,
+        serverOnline: metadataOnlineValue(result.metadata),
+        serverStatus: result.metadata?.server_status ?? null,
+        lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
+      });
+      if (changed) {
+        await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], "status-change");
+      }
       results.push({
         linked_server_id: row.id,
         service_id: row.nitrado_service_id,
@@ -486,6 +487,12 @@ export async function refreshLivePlayerCountsForActiveServers(
       });
     } catch (error) {
       failed += 1;
+      await recordStatusCheckResult(env, {
+        guildId: row.guild_id,
+        planKey: row.plan_key,
+        ok: false,
+        error: error instanceof Error ? error.message : "Nitrado metadata refresh failed",
+      }).catch(() => null);
       results.push({
         linked_server_id: row.id,
         service_id: row.nitrado_service_id,
@@ -503,7 +510,7 @@ export async function refreshLivePlayerCountsForActiveServers(
   }
 
   const summary = {
-    processed: rows.results?.length ?? 0,
+    processed: rows.length,
     succeeded,
     failed,
     skipped,
@@ -516,7 +523,7 @@ export async function refreshLivePlayerCountsForActiveServers(
   console.log("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM", summary);
 
   return {
-    processed: rows.results?.length ?? 0,
+    processed: rows.length,
     succeeded,
     failed,
     skipped,
@@ -973,6 +980,12 @@ export function resolveLivePlayerCounts(values: {
 function normalizePlayerCountStatus(value: unknown): PlayerCountStatus {
   if (value === "fresh" || value === "stale" || value === "unavailable" || value === "unknown") return value;
   return "unknown";
+}
+
+function metadataOnlineValue(value: unknown) {
+  return value && typeof value === "object" && "is_online" in value
+    ? (value as { is_online?: boolean | number | null }).is_online ?? null
+    : null;
 }
 
 function firstBoolean(...values: unknown[]) {

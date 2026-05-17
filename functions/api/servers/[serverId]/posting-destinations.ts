@@ -1,0 +1,157 @@
+import { getSessionUser, requireDb } from "../../../_lib/db";
+import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
+import { json, methodNotAllowed, readJson } from "../../../_lib/http";
+import { isMockAuth } from "../../../_lib/mock";
+import { AUTO_POST_TYPES, hasAutoPost } from "../../../_lib/plans";
+import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
+import type { AutoPostType } from "../../../../lib/billing/plans";
+
+type SavePostingDestinationBody = {
+  post_type?: string;
+  discord_channel_id?: string;
+  discord_webhook_url?: string | null;
+  enabled?: boolean;
+};
+
+export const onRequest: PagesFunction = async ({ request, env, params }) => {
+  const user = await resolveUser(env, request);
+  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
+
+  const linkedServerId = sanitizeLinkedServerId(params.serverId);
+  if (!linkedServerId) return json({ error: "Invalid server id" }, { status: 400 });
+  const access = await requireOwnedServer(env, user.id, linkedServerId);
+  if (!access) return json({ error: "Server not found" }, { status: 404 });
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
+
+  if (request.method === "GET") {
+    return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+  }
+  if (request.method !== "POST") return methodNotAllowed();
+
+  const body = await readJson<SavePostingDestinationBody>(request);
+  const postType = normalizePostType(body.post_type);
+  if (!postType) return json({ error: "Invalid post type" }, { status: 400 });
+  if (!hasAutoPost(context.planKey, postType)) {
+    return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
+  }
+  const channelId = sanitizeDiscordId(body.discord_channel_id);
+  if (!channelId) return json({ error: "Discord channel ID is required." }, { status: 400 });
+  const webhookUrl = sanitizeWebhookUrl(body.discord_webhook_url);
+  await ensureAutomationSchema(env);
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_posting_destinations (
+        id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
+        required_feature, min_plan_key, created_by_discord_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(guild_id, post_type) DO UPDATE SET
+        discord_channel_id = excluded.discord_channel_id,
+        discord_webhook_url = excluded.discord_webhook_url,
+        enabled = excluded.enabled,
+        required_feature = excluded.required_feature,
+        min_plan_key = excluded.min_plan_key,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      context.guildId,
+      postType,
+      channelId,
+      webhookUrl,
+      body.enabled === false ? 0 : 1,
+      requiredFeatureForPostType(postType),
+      context.planKey,
+      user.discord_id,
+      now,
+      now,
+    )
+    .run();
+  return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+};
+
+async function getPostingDestinationPayload(env: Env, guildId: string, planKey: string) {
+  await ensureAutomationSchema(env);
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT post_type, discord_channel_id, enabled, required_feature, min_plan_key, updated_at
+       FROM server_posting_destinations
+       WHERE guild_id = ?`,
+    )
+    .bind(guildId)
+    .all<{
+      post_type: AutoPostType;
+      discord_channel_id: string;
+      enabled: number;
+      required_feature: string | null;
+      min_plan_key: string | null;
+      updated_at: string | null;
+    }>();
+  const configured = new Map((rows.results ?? []).map((row) => [row.post_type, row]));
+  return {
+    post_types: AUTO_POST_TYPES.map((postType) => {
+      const row = configured.get(postType);
+      return {
+        post_type: postType,
+        allowed: hasAutoPost(planKey, postType),
+        locked_message: hasAutoPost(planKey, postType) ? null : lockedMessage(postType),
+        discord_channel_id: row?.discord_channel_id ?? null,
+        enabled: row ? Number(row.enabled ?? 0) === 1 : false,
+        required_feature: row?.required_feature ?? requiredFeatureForPostType(postType),
+        min_plan_key: row?.min_plan_key ?? null,
+        updated_at: row?.updated_at ?? null,
+      };
+    }),
+  };
+}
+
+async function requireOwnedServer(env: Env, userId: string, linkedServerId: string) {
+  return requireDb(env)
+    .prepare("SELECT id FROM linked_servers WHERE id = ? AND user_id = ? LIMIT 1")
+    .bind(linkedServerId, userId)
+    .first<{ id: string }>();
+}
+
+async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
+  const user = await getSessionUser(env, request);
+  if (user || !isMockAuth(env.MOCK_AUTH)) return user;
+  return null;
+}
+
+function normalizePostType(value: unknown): AutoPostType | null {
+  return AUTO_POST_TYPES.includes(value as AutoPostType) ? value as AutoPostType : null;
+}
+
+function requiredFeatureForPostType(postType: AutoPostType) {
+  if (postType === "basic_status_embed") return "basic_status";
+  if (postType === "leaderboard_embed" || postType === "daily_summary_embed") return "leaderboards";
+  if (postType === "partner_featured_embed" || postType === "priority_status_embed") return "priority_refresh";
+  return "server_vs_server";
+}
+
+function lockedMessage(postType: AutoPostType) {
+  if (postType === "server_vs_server_embed") return "Upgrade to DZN Network to auto-post server-vs-server competition updates.";
+  if (postType === "partner_featured_embed" || postType === "priority_status_embed") return "Upgrade to DZN Partner to unlock priority Discord posting.";
+  return "Upgrade your DZN plan to unlock this Discord auto-post.";
+}
+
+function sanitizeLinkedServerId(value: unknown) {
+  return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
+}
+
+function sanitizeDiscordId(value: unknown) {
+  return typeof value === "string" && /^\d{8,32}$/.test(value) ? value : null;
+}
+
+function sanitizeWebhookUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && url.hostname === "discord.com" && url.pathname.includes("/webhooks/")
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}

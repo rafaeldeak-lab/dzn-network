@@ -5,6 +5,7 @@ import {
   normalizePlanKey,
   upsertBillingAccount,
 } from "../../_lib/plans";
+import { syncServerSubscriptionsForOwner } from "../../_lib/automation";
 import {
   retrieveStripeSubscription,
   stripeId,
@@ -65,6 +66,16 @@ async function handleCheckoutCompleted(env: Env, object: Record<string, unknown>
     currentPeriodEnd: subscription ? stripeSubscriptionPeriodEnd(subscription) : null,
     cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end),
   });
+  await syncServerSubscriptionsForOwner(env, discordUserId, {
+    stripeCustomerId: customerId,
+    stripeSubscriptionId: subscriptionId,
+    stripePriceId: subscription ? stripeSubscriptionPriceId(subscription) : null,
+    planKey,
+    status: subscription?.status || "active",
+    currentPeriodStart: subscription ? stripeSubscriptionPeriodStart(subscription) : null,
+    currentPeriodEnd: subscription ? stripeSubscriptionPeriodEnd(subscription) : null,
+    cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end),
+  });
 }
 
 async function handleSubscriptionLikeEvent(env: Env, object: Record<string, unknown>, eventType: string) {
@@ -95,6 +106,16 @@ async function handleSubscriptionLikeEvent(env: Env, object: Record<string, unkn
     currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
   });
+  await syncServerSubscriptionsForOwner(env, discordUserId, {
+    stripeCustomerId: customerId,
+    stripeSubscriptionId: subscriptionId,
+    stripePriceId: stripeSubscriptionPriceId(subscription),
+    planKey,
+    status,
+    currentPeriodStart: stripeSubscriptionPeriodStart(subscription),
+    currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+  });
 }
 
 async function handleInvoiceEvent(env: Env, object: Record<string, unknown>, eventType: string) {
@@ -111,6 +132,16 @@ async function handleInvoiceEvent(env: Env, object: Record<string, unknown>, eve
     stripeSubscriptionId: subscriptionId,
     planKey: normalizePlanKey(account?.plan_key),
     planStatus: nextStatus,
+    currentPeriodStart: stringOrNull(account?.current_period_start),
+    currentPeriodEnd: stringOrNull(account?.current_period_end),
+    cancelAtPeriodEnd: Number(account?.cancel_at_period_end ?? 0) === 1,
+  });
+  await syncServerSubscriptionsForOwner(env, discordUserId, {
+    stripeCustomerId: customerId,
+    stripeSubscriptionId: subscriptionId,
+    stripePriceId: null,
+    planKey: normalizePlanKey(account?.plan_key),
+    status: nextStatus,
     currentPeriodStart: stringOrNull(account?.current_period_start),
     currentPeriodEnd: stringOrNull(account?.current_period_end),
     cancelAtPeriodEnd: Number(account?.cancel_at_period_end ?? 0) === 1,

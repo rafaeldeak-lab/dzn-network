@@ -245,6 +245,11 @@ export type BillingStatus = {
     bump_cooldown_hours: number;
     can_use_featured_slots: boolean;
     stat_history_days: number;
+    server_status_interval_minutes?: number;
+    adm_pull_interval_minutes?: number;
+    manual_adm_refresh_cooldown_minutes?: number;
+    allowed_auto_posts?: string[];
+    priority_level?: number;
   };
   linked_server_count: number;
   can_link_more_servers: boolean;
@@ -269,6 +274,22 @@ export type BillingPlanSummary = {
   bump_cooldown_hours: number;
   can_use_featured_slots: boolean;
   stat_history_days: number;
+  server_status_interval_minutes?: number;
+  adm_pull_interval_minutes?: number;
+  manual_adm_refresh_cooldown_minutes?: number;
+  allowed_auto_posts?: string[];
+  priority_level?: number;
+};
+
+export type PostingDestinationSummary = {
+  post_type: string;
+  allowed: boolean;
+  locked_message: string | null;
+  discord_channel_id: string | null;
+  enabled: boolean;
+  required_feature: string | null;
+  min_plan_key: string | null;
+  updated_at: string | null;
 };
 
 export type AdvertisingBumpStatus = {
