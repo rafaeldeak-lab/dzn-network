@@ -40,6 +40,17 @@ assert.equal(pvpKill.distance, 9.836);
 assert.equal(pvpKill.isPvpKill, true);
 assert.equal(pvpKill.isCreditedKill, true);
 
+const deadKillerPvpKill = parseAdmLine(
+  '17:24:11 | Player "xAKA-MINI_KickAs" (DEAD) (id=VICTIM_ID pos=<6363.7, 8031.0, 333.0>) killed by Player "monkeyman178x" (DEAD) (id=KILLER_ID pos=<6370.1, 8033.4, 333.0>) with M4-A1 from 11.6167 meters',
+  { admDate: "2026-05-17" },
+);
+assert.equal(deadKillerPvpKill.eventType, "player_killed");
+assert.equal(deadKillerPvpKill.victimName, "xAKA-MINI_KickAs");
+assert.equal(deadKillerPvpKill.killerName, "monkeyman178x");
+assert.equal(deadKillerPvpKill.weapon, "M4-A1");
+assert.equal(deadKillerPvpKill.distance, 11.6167);
+assert.equal(deadKillerPvpKill.isCreditedKill, true);
+
 const playerHit = parseAdmLine(
   '13:46:10 | Player "VictimName" (DEAD) (id=VICTIM_ID pos=<4511.8, 10366.9, 339.4>)[HP: 0] hit by Player "KillerName" (id=KILLER_ID pos=<4519.4, 10373.2, 339.4>) into Head(0) for 30.5589 damage (Bullet_308Win) with LAR from 9.836 meters',
   context,
@@ -222,6 +233,23 @@ assert.equal(realConsoleKills[0]?.weapon, "M4-A1");
 assert.equal(realConsoleKills[0]?.distance, 6.96356);
 assert.equal(realConsoleKills[0]?.occurredAt, "2026-05-15T19:45:34.000Z");
 
+const nuketown1701FixtureName = "DayZServer_PS4_x64_2026-05-17_17-01-42.ADM";
+const nuketown1802FixtureName = "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM";
+const nuketown1701Fixture = buildNuketownKillFixture(24, 17, "17");
+const nuketown1802Fixture = buildNuketownKillFixture(4, 18, "18");
+assert.equal(nuketown1701Fixture.filter((line) => /\bkilled by\s+Player\s+"/i.test(line)).length, 24);
+assert.equal(nuketown1802Fixture.filter((line) => /\bkilled by\s+Player\s+"/i.test(line)).length, 4);
+assert.equal(
+  parseAdmLines(nuketown1701Fixture, { admDate: "2026-05-17" }).filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length,
+  24,
+  `${nuketown1701FixtureName} should parse all expected kill lines`,
+);
+assert.equal(
+  parseAdmLines(nuketown1802Fixture, { admDate: "2026-05-17" }).filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length,
+  4,
+  `${nuketown1802FixtureName} should parse all expected kill lines`,
+);
+
 const nonKillDamageLines = parseAdmLines([
   '19:45:33 | Player "xAKA-MINI_KickAs" (DEAD) (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6363.7, 8031.0, 333.0>)[HP: 0] hit by Player "Netfl1xAndK1II" (id=A05lJnolLduFHYUSGaa0K81g7ZfYn5Y62WY3lwWfoKk= pos=<6369.5, 8035.0, 333.0>) into Torso(1) for 30 damage (Bullet_556x45) with M4-A1 from 6.96356 meters',
   '19:45:34 | Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6363.7, 8031.0, 333.0>) is unconscious',
@@ -230,3 +258,12 @@ const nonKillDamageLines = parseAdmLines([
 assert.equal(nonKillDamageLines.filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length, 0);
 
 console.log("ADM parser tests passed");
+
+function buildNuketownKillFixture(count: number, hour: number, prefix: string) {
+  return Array.from({ length: count }, (_value, index) => {
+    const minute = String(Math.floor(index / 2)).padStart(2, "0");
+    const second = String((index * 7) % 60).padStart(2, "0");
+    const killerDead = index % 3 === 0 ? " (DEAD)" : "";
+    return `${String(hour).padStart(2, "0")}:${minute}:${second} | Player "NukeVictim${prefix}_${index}" (DEAD) (id=VICTIM_${prefix}_${index} pos=<6363.${index}, 8031.0, 333.0>) killed by Player "NukeKiller${prefix}_${index}"${killerDead} (id=KILLER_${prefix}_${index} pos=<6370.${index}, 8033.4, 333.0>) with M4-A1 from ${Number(3 + index / 10).toFixed(4)} meters`;
+  });
+}

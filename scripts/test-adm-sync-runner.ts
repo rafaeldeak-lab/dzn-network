@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { classifyAdmSyncOutcome, classifyUnavailableAdmFileStatus, isAdmSyncErrorStatus, isAdmSyncTemporarilyUnavailableStatus } from "../functions/_lib/adm-sync";
+import {
+  classifyAdmSyncOutcome,
+  classifyUnavailableAdmFileStatus,
+  compareAdmFileNamesChronological,
+  isAdmSyncErrorStatus,
+  isAdmSyncTemporarilyUnavailableStatus,
+} from "../functions/_lib/adm-sync";
 import { parseAdmLines } from "../functions/_lib/adm-parser";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -50,12 +56,35 @@ assert.equal(classifyUnavailableAdmFileStatus(null, false), "no_adm_file");
 assert.equal(classifyUnavailableAdmFileStatus("DayZServer_PS4_x64_2026-05-17_16-02-20.ADM", false), "adm_file_unreadable");
 assert.equal(classifyUnavailableAdmFileStatus(null, true), "adm_file_unreadable");
 
+const admFilesChronological = [
+  "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
+  "DayZServer_PS4_x64_2026-05-17_16-02-20.ADM",
+  "DayZServer_PS4_x64_2026-05-17_17-01-42.ADM",
+].sort(compareAdmFileNamesChronological);
+assert.deepEqual(admFilesChronological, [
+  "DayZServer_PS4_x64_2026-05-17_16-02-20.ADM",
+  "DayZServer_PS4_x64_2026-05-17_17-01-42.ADM",
+  "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
+]);
+assert.equal(compareAdmFileNamesChronological(
+  "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
+  "DayZServer_PS4_x64_2026-05-17_17-01-42.ADM",
+) > 0, true);
+
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
 assert.equal(admSyncSource.includes("hasExistingPlayerEventBySourceLine"), true);
 assert.equal(admSyncSource.includes("DZN ADM FEED SYNC STATUS IMPROVED"), true);
 assert.equal(admSyncSource.includes("preferredAdmFileName"), true);
+assert.equal(admSyncSource.includes("selectAdmFilesForCursor"), true);
+assert.equal(admSyncSource.includes("Kill lines parsed this check"), true);
 const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
 assert.equal(nitradoSource.includes("DZN ADM FILE READ VARIANT USED"), true);
+assert.equal(nitradoSource.includes("DZN ADM LATEST FILE SELECTION FIXED"), true);
+assert.equal(nitradoSource.includes("fetchReadableNitradoAdmFiles"), true);
+const packageSource = readFileSync("package.json", "utf8");
+assert.equal(packageSource.includes("diagnose:adm-import"), true);
+const diagnoseImportSource = readFileSync("scripts/diagnose-adm-import.ts", "utf8");
+assert.equal(diagnoseImportSource.includes("DZN ADM KILL IMPORT DIAGNOSTICS READY"), true);
 
 const env = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {

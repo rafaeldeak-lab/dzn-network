@@ -98,6 +98,7 @@ type TimestampResult = {
 const NUMBER_PATTERN = "-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:e[+-]?\\d+)?";
 const POSITION_PATTERN = new RegExp(`<\\s*(${NUMBER_PATTERN})\\s*,\\s*(${NUMBER_PATTERN})\\s*,\\s*(${NUMBER_PATTERN})\\s*>`, "i");
 const MAX_REASONABLE_DAYZ_COORDINATE = 200000;
+let deadStateKillParserLogged = false;
 
 export function parseAdmLine(rawLine: string, context: AdmParseContext = {}): ParsedAdmEvent {
   try {
@@ -359,6 +360,11 @@ export function parseKillLine(line: string, rawLine = line, timestamp = parseTim
   const victim = players[0] ?? null;
   const killer = players[1] ?? null;
   const weaponDistance = /\bwith\s+(.+?)\s+from\s+(-?(?:\d+(?:\.\d+)?|\.\d+))\s+meters?\b/i.exec(timestamp.body);
+
+  if ((victim?.isDead || killer?.isDead) && !deadStateKillParserLogged) {
+    deadStateKillParserLogged = true;
+    console.log("DZN ADM KILL PARSER DEAD STATE FIXED");
+  }
 
   return createBaseEvent(rawLine, timestamp, {
     eventType: "player_killed",

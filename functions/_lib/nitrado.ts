@@ -37,6 +37,8 @@ type AdmReadOptions = {
   mode?: AdmReadMode;
   preferredAdmFileName?: string;
   preferredAdmPath?: string | null;
+  previousLatestAdmFileName?: string | null;
+  maxFiles?: number;
 };
 
 type NitradoRawService = {
@@ -260,6 +262,21 @@ export type NitradoLogAccessDiagnostics = {
   attempts: NitradoLogAccessAttempt[];
 };
 
+export type NitradoReadableAdmFile = {
+  name: string;
+  path: string;
+  lines: string[];
+  readableRouteUsed: string | null;
+};
+
+export type NitradoReadableAdmFileBatch = {
+  files: NitradoReadableAdmFile[];
+  filesFound: number;
+  newestAdmFileName: string | null;
+  previousLatestAdmFileName: string | null;
+  lastCheckedAt: string;
+};
+
 export async function validateNitradoToken(token: string) {
   if (!token || token.length < 12) return false;
   try {
@@ -329,6 +346,67 @@ export async function fetchReadableNitradoAdmLines(
   options: AdmReadOptions = {},
 ): Promise<{ lines: string[]; diagnostics: NitradoLogAccessDiagnostics }> {
   return runNitradoLogAccessDiagnosticsInternal(token, serviceId, options);
+}
+
+export async function fetchReadableNitradoAdmFiles(
+  token: string,
+  serviceId: string,
+  options: AdmReadOptions = {},
+): Promise<NitradoReadableAdmFileBatch> {
+  const lastCheckedAt = new Date().toISOString();
+  const serviceProbe = await probeNitradoEndpoint(token, "A gameserver details", `/services/${encodeURIComponent(serviceId)}/gameservers`);
+  const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
+  const preferredEntries = buildPreferredAdmEntries(options.preferredAdmFileName, options.preferredAdmPath);
+  const searchDirs = await buildAdmSearchDirs(token, serviceId);
+  const listAttempts: AdmListAttempt[] = [];
+  const listedEntries: NitradoFileEntry[] = [];
+
+  for (const dir of searchDirs) {
+    listedEntries.push(...await listAdmFileEntries(token, serviceId, dir, listAttempts));
+  }
+
+  const allEntries = dedupeFileEntries([
+    ...gameSpecificLogs.admLogFiles,
+    ...listedEntries,
+    ...preferredEntries,
+  ]).sort(compareAdmFilesOldestFirst);
+  const newest = pickNewestAdmFile([...allEntries]);
+  const previousLatestAdmFileName = options.previousLatestAdmFileName ?? null;
+  const previousScore = previousLatestAdmFileName ? parseAdmTimestamp(previousLatestAdmFileName) : null;
+  const maxFiles = Math.max(1, Math.min(Math.trunc(options.maxFiles ?? 8), 24));
+  const readCandidates = (previousScore
+    ? allEntries.filter((entry) => {
+      const score = timestampScore(entry);
+      return score === null || score >= previousScore;
+    })
+    : allEntries.slice(-1)
+  ).slice(-maxFiles);
+
+  console.log("DZN ADM FILE DISCOVERY", {
+    serviceId,
+    filesFound: allEntries.length,
+    newestAdmFile: newest?.name ?? null,
+    previousLatestAdmFile: previousLatestAdmFileName,
+  });
+  console.log("DZN ADM LATEST FILE SELECTION FIXED", {
+    serviceId,
+    newestAdmFile: newest?.name ?? null,
+    previousLatestAdmFile: previousLatestAdmFileName,
+  });
+
+  const files: NitradoReadableAdmFile[] = [];
+  for (const candidate of readCandidates) {
+    const readable = await readNitradoAdmCandidate(token, serviceId, candidate, gameSpecificLogs, options);
+    if (readable) files.push(readable);
+  }
+
+  return {
+    files,
+    filesFound: allEntries.length,
+    newestAdmFileName: newest?.name ?? null,
+    previousLatestAdmFileName,
+    lastCheckedAt,
+  };
 }
 
 export function mockNitradoLogAccessDiagnostics(serviceId: string): NitradoLogAccessDiagnostics {
@@ -1154,6 +1232,47 @@ async function readNitradoFileSample(
   const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels, options);
   if (download.sample !== null) return download;
   return readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels, options);
+}
+
+async function readNitradoAdmCandidate(
+  token: string,
+  serviceId: string,
+  candidate: NitradoFileEntry,
+  gameSpecificLogs: GameSpecificLogDetails,
+  options: AdmReadOptions,
+): Promise<NitradoReadableAdmFile | null> {
+  const details: GameSpecificLogDetails = {
+    ...gameSpecificLogs,
+    admLogFiles: dedupeFileEntries([candidate, ...gameSpecificLogs.admLogFiles]),
+    selectedAdmFile: candidate,
+  };
+  const variants = buildAdmReadPathVariants(details, candidate.path);
+  const labels = createPathVariantLabelMap(variants);
+
+  for (const variant of variants) {
+    const attempts: AdmReadAttempt[] = [];
+    const sample = await readNitradoFileSample(token, serviceId, variant.path, attempts, labels, options);
+    const lines = splitAdmLines(sample.sample);
+    if (!lines.some((line) => containsDayZAdminLogMarkers(line))) continue;
+
+    console.log("DZN ADM FILE READ VARIANT USED", {
+      serviceId,
+      sourceLabel: `batch ${variant.label}`,
+      method: "file_server/read",
+      file: candidate.name,
+      path: maskNitradoUsernameInPath(variant.path, gameSpecificLogs.username),
+      lineCount: lines.length,
+    });
+
+    return {
+      name: candidate.name,
+      path: variant.path,
+      lines,
+      readableRouteUsed: "/services/{serviceId}/gameservers/file_server/read",
+    };
+  }
+
+  return null;
 }
 
 async function readNitradoFileViaSeek(
@@ -2009,6 +2128,10 @@ function compareAdmFilesNewestFirst(a: NitradoFileEntry, b: NitradoFileEntry) {
   const bTime = timestampScore(b) ?? 0;
   if (aTime !== bTime) return bTime - aTime;
   return b.path.localeCompare(a.path);
+}
+
+function compareAdmFilesOldestFirst(a: NitradoFileEntry, b: NitradoFileEntry) {
+  return compareAdmFilesNewestFirst(b, a);
 }
 
 function timestampScore(entry: NitradoFileEntry) {

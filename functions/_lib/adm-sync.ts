@@ -9,10 +9,12 @@ import { getCurrentLinkedServer, requireDb, saveServerAdmPath } from "./db";
 import { isMockNitrado } from "./mock";
 import {
   detectNitradoAdmLogs,
+  fetchReadableNitradoAdmFiles,
   fetchReadableNitradoAdmLines,
   getAdmLogStoragePath,
   mockAdmLogDetection,
   mockNitradoLogAccessDiagnostics,
+  type NitradoReadableAdmFile,
   type NitradoLogAccessDiagnostics,
   testExactNitradoAdmPath,
 } from "./nitrado";
@@ -179,6 +181,13 @@ export type ReadableAdmLinesResult = {
   message: string;
 };
 
+type ReadableAdmFileForSync = {
+  name: string;
+  path: string | null;
+  lines: string[];
+  readableRouteUsed: string | null;
+};
+
 function verifyAdmServerScope(linkedServer: SyncLinkedServer, syncRunId: string): AdmSyncContext {
   if (!linkedServer.id) throw new Error("ADM sync cannot run without a linked server id");
   if (!linkedServer.nitrado_service_id) throw new Error("No Nitrado service selected");
@@ -256,16 +265,32 @@ export async function runAdmSync(
   const now = new Date().toISOString();
   let admLog = isMock ? mockAdmLogDetection() : null;
   let readable: ReadableAdmLinesResult;
+  let readableFiles: ReadableAdmFileForSync[] = [];
+  let discoveredNewestAdmFile: string | null = null;
+  let discoveredFilesFound = 0;
   try {
     const preferredAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
     const preferredAdmFileName = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
-    readable = await getReadableAdmLinesForLinkedServer(env, linkedServer, {
+    const batch = await getReadableAdmFilesForLinkedServer(env, linkedServer, {
       isMock,
       readMode: "full",
-      preferredAdmFileName,
       preferredAdmPath,
+      previousLatestAdmFileName: preferredAdmFileName,
+      maxFiles: 12,
     });
-    if (!readable.lines.length && !isMock) {
+    readableFiles = batch.files;
+    discoveredNewestAdmFile = batch.newestAdmFileName;
+    discoveredFilesFound = batch.filesFound;
+    const newestReadableFile = readableFiles.at(-1) ?? null;
+    readable = {
+      lines: newestReadableFile?.lines ?? [],
+      newestAdmFileName: discoveredNewestAdmFile ?? newestReadableFile?.name ?? null,
+      latestAdmPath: newestReadableFile?.path ?? preferredAdmPath,
+      readableRouteUsed: newestReadableFile?.readableRouteUsed ?? null,
+      diagnostics: null,
+      message: batch.message,
+    };
+    if (!readableFiles.length && !isMock) {
       const token = await getNitradoTokenForLinkedServer(env, linkedServer);
       admLog = linkedServer.adm_path
         ? await testExactNitradoAdmPath(token, nitradoServiceId, linkedServer.adm_path)
@@ -329,13 +354,28 @@ export async function runAdmSync(
   }
 
   const latestAdmPath = readable.latestAdmPath ?? (admLog ? getAdmLogStoragePath(admLog) : null) ?? existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
-  const latestAdmFile = readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? existingState?.latest_adm_file ?? fileNameFromPath(latestAdmPath);
+  const latestAdmFile = discoveredNewestAdmFile ?? readable.newestAdmFileName ?? admLog?.newestAdmFileName ?? existingState?.latest_adm_file ?? fileNameFromPath(latestAdmPath);
+  console.log("DZN ADM FILE DISCOVERY", {
+    server: initialScope.serverName,
+    serviceId: initialScope.nitradoServiceId,
+    filesFound: discoveredFilesFound,
+    newestAdmFile: latestAdmFile,
+    previousLatestAdmFile: existingState?.latest_adm_file ?? null,
+  });
   if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath) {
     await saveServerAdmPath(env, initialScope.linkedServerId, latestAdmPath.replace(/^\/+/, ""));
   }
   const scope = withAdmFile(initialScope, latestAdmFile);
 
   const lines = readable.lines.length ? readable.lines : getReadableAdmLines(admLog?.debug?.samplePreview ?? null);
+  if (!readableFiles.length && lines.length) {
+    readableFiles = [{
+      name: latestAdmFile ?? "unknown-adm",
+      path: latestAdmPath,
+      lines,
+      readableRouteUsed: readable.readableRouteUsed,
+    }];
+  }
   if (!lines.length) {
     const admAvailable = Boolean(admLog?.admFileExists || readable.newestAdmFileName);
     const status = classifyUnavailableAdmFileStatus(latestAdmFile, admAvailable);
@@ -409,11 +449,6 @@ export async function runAdmSync(
     };
   }
 
-  const isSameAdmFile = Boolean(latestAdmFile && existingState?.last_processed_file === latestAdmFile);
-  const lastProcessedLine = isSameAdmFile ? Number(existingState?.last_processed_line ?? 0) : 0;
-  const parsedLines = parseAdmLines(lines, { admDate: extractAdmDateFromFile(latestAdmFile) ?? undefined });
-  const pendingParsedEvents = parsedLines.slice(lastProcessedLine, lastProcessedLine + maxLinesPerRun);
-  const creditedKillLinesFound = parsedLines.filter(isCreditedKillEvent).length;
   let eventsCreated = 0;
   let killsCreated = 0;
   let joinsCreated = 0;
@@ -425,72 +460,106 @@ export async function runAdmSync(
   let buildEventsStored = 0;
   let unknownLines = 0;
   let duplicateLines = 0;
-  let processedOffset = isSameAdmFile ? Number(existingState?.last_processed_offset ?? 0) : 0;
+  let processedOffset = 0;
   let lastEventAt: string | null = null;
-  const recentDeathLines = new Map<string, number>();
-  const warmupStart = Math.max(0, lastProcessedLine - 5);
-  for (let index = warmupStart; index < lastProcessedLine; index += 1) {
-    const previousEvent = parsedLines[index];
-    if (previousEvent && isDeathCountingEvent(previousEvent)) {
-      markDeathCounted(recentDeathLines, previousEvent, index + 1);
-    }
-  }
+  let totalLinesRead = 0;
+  let totalLinesProcessed = 0;
+  let pendingLineCount = 0;
+  let creditedKillLinesFound = 0;
+  let parsedKillLinesFound = 0;
+  let cursorFile = existingState?.last_processed_file ?? null;
+  let cursorLine = Number(existingState?.last_processed_line ?? 0);
+  let cursorOffset = Number(existingState?.last_processed_offset ?? 0);
+  let readableRouteUsed = readable.readableRouteUsed;
+  let lastProcessedLineForError = cursorLine;
+  const filesToProcess = selectAdmFilesForCursor(readableFiles, existingState?.last_processed_file ?? null);
 
   try {
-    const backfillResult = await backfillMissingCreditedKills(
-      env,
-      scope,
-      parsedLines,
-      lastProcessedLine,
-      recentDeathLines,
-    );
-    eventsCreated += backfillResult.eventsCreated;
-    killEventsStored += backfillResult.killEventsCreated;
-    killsCreated += backfillResult.killsCreated;
-    deathsCreated += backfillResult.deathsCreated;
-    duplicateLines += backfillResult.duplicatesSkipped;
-    if (backfillResult.lastEventAt) lastEventAt = backfillResult.lastEventAt;
+    for (const file of filesToProcess) {
+      const fileScope = withAdmFile(initialScope, file.name);
+      const fileLines = file.lines;
+      const parsedLines = parseAdmLines(fileLines, { admDate: extractAdmDateFromFile(file.name) ?? undefined });
+      const isSameAdmFile = Boolean(file.name && existingState?.last_processed_file === file.name);
+      const fileStartLine = isSameAdmFile ? Number(existingState?.last_processed_line ?? 0) : 0;
+      const remainingBudget = Math.max(0, maxLinesPerRun - totalLinesProcessed);
+      const pendingParsedEvents = remainingBudget > 0
+        ? parsedLines.slice(fileStartLine, fileStartLine + remainingBudget)
+        : [];
+      const recentDeathLines = new Map<string, number>();
+      const warmupStart = Math.max(0, fileStartLine - 5);
+      totalLinesRead += fileLines.length;
+      pendingLineCount += pendingParsedEvents.length;
+      creditedKillLinesFound += parsedLines.filter(isCreditedKillEvent).length;
+      parsedKillLinesFound += pendingParsedEvents.filter(isCreditedKillEvent).length;
+      readableRouteUsed = file.readableRouteUsed ?? readableRouteUsed;
+      processedOffset = isSameAdmFile ? Number(existingState?.last_processed_offset ?? 0) : 0;
 
-    for (let index = 0; index < pendingParsedEvents.length; index += 1) {
-      const parsed = pendingParsedEvents[index];
-      const rawLine = parsed.rawLine;
-      const lineNumber = lastProcessedLine + index + 1;
-      const rawInserted = await insertRawEvent(env, scope, lineNumber, rawLine, parsed);
-      processedOffset += rawLine.length + 1;
-      if (!rawInserted) {
-        duplicateLines += 1;
-        continue;
+      for (let index = warmupStart; index < fileStartLine; index += 1) {
+        const previousEvent = parsedLines[index];
+        if (previousEvent && isDeathCountingEvent(previousEvent)) {
+          markDeathCounted(recentDeathLines, previousEvent, index + 1);
+        }
       }
-      rawEventsStored += 1;
-      if (parsed.eventType === "unknown") unknownLines += 1;
 
-      const eventResult = await persistParsedEvent(env, scope, lineNumber, parsed, {
+      const backfillResult = await backfillMissingCreditedKills(
+        env,
+        fileScope,
+        parsedLines,
+        fileStartLine,
         recentDeathLines,
-      });
-      eventsCreated += eventResult.eventsCreated;
-      playerEventsStored += eventResult.playerEventsCreated;
-      killEventsStored += eventResult.killEventsCreated;
-      buildEventsStored += eventResult.buildEventsCreated;
-      killsCreated += eventResult.killsCreated;
-      joinsCreated += eventResult.joinsCreated;
-      disconnectsCreated += eventResult.disconnectsCreated;
-      deathsCreated += eventResult.deathsCreated;
-      lastEventAt = parsed.occurredAt ?? now;
+      );
+      eventsCreated += backfillResult.eventsCreated;
+      killEventsStored += backfillResult.killEventsCreated;
+      killsCreated += backfillResult.killsCreated;
+      deathsCreated += backfillResult.deathsCreated;
+      duplicateLines += backfillResult.duplicatesSkipped;
+      if (backfillResult.lastEventAt) lastEventAt = backfillResult.lastEventAt;
+
+      for (let index = 0; index < pendingParsedEvents.length; index += 1) {
+        const parsed = pendingParsedEvents[index];
+        const rawLine = parsed.rawLine;
+        const lineNumber = fileStartLine + index + 1;
+        const rawInserted = await insertRawEvent(env, fileScope, lineNumber, rawLine, parsed);
+        processedOffset += rawLine.length + 1;
+        if (!rawInserted) duplicateLines += 1;
+        else rawEventsStored += 1;
+        if (parsed.eventType === "unknown") unknownLines += 1;
+
+        const eventResult = await persistParsedEvent(env, fileScope, lineNumber, parsed, {
+          recentDeathLines,
+        });
+        eventsCreated += eventResult.eventsCreated;
+        playerEventsStored += eventResult.playerEventsCreated;
+        killEventsStored += eventResult.killEventsCreated;
+        buildEventsStored += eventResult.buildEventsCreated;
+        killsCreated += eventResult.killsCreated;
+        joinsCreated += eventResult.joinsCreated;
+        disconnectsCreated += eventResult.disconnectsCreated;
+        deathsCreated += eventResult.deathsCreated;
+        lastEventAt = parsed.occurredAt ?? now;
+      }
+
+      totalLinesProcessed += pendingParsedEvents.length;
+      cursorFile = file.name;
+      cursorLine = fileStartLine + pendingParsedEvents.length;
+      cursorOffset = processedOffset;
+      lastProcessedLineForError = cursorLine;
+      if (totalLinesProcessed >= maxLinesPerRun) break;
     }
   } catch (error) {
     const syncDurationMs = Date.now() - syncStartedAt;
     const message = `ADM write failed. ${safeSyncErrorMessage(error)}`;
-    await upsertSyncState(env, scope.linkedServerId, {
+    await upsertSyncState(env, initialScope.linkedServerId, {
       latestAdmFile,
       latestAdmPath,
-      sourceServiceId: scope.nitradoServiceId,
+      sourceServiceId: initialScope.nitradoServiceId,
       lastProcessedFile: existingState?.last_processed_file ?? null,
-      lastProcessedLine,
+      lastProcessedLine: lastProcessedLineForError,
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
       status: "write_error",
       message,
       lastSyncAt: now,
-      linesRead: lines.length,
+      linesRead: totalLinesRead,
       linesProcessed: 0,
       rawEventsStored: 0,
       playerEventsStored: 0,
@@ -500,16 +569,16 @@ export async function runAdmSync(
       unknownLines: 0,
       duplicateLines: 0,
       syncDurationMs,
-      readableRoute: readable.readableRouteUsed,
+      readableRoute: readableRouteUsed,
     });
     await recordSyncRun(env, {
       id: syncRunId,
-      linkedServerId: scope.linkedServerId,
-      sourceServiceId: scope.nitradoServiceId,
+      linkedServerId: initialScope.linkedServerId,
+      sourceServiceId: initialScope.nitradoServiceId,
       triggerType,
       status: "write_error",
       message,
-      linesRead: lines.length,
+      linesRead: totalLinesRead,
       linesProcessed: 0,
       eventsCreated: 0,
       killsCreated: 0,
@@ -521,23 +590,19 @@ export async function runAdmSync(
       status: "write_error",
       message,
       latestAdmFile,
-      lastProcessedLine,
+      lastProcessedLine: lastProcessedLineForError,
       lastSyncAt: now,
-      readableRouteUsed: readable.readableRouteUsed,
-      linesRead: lines.length,
+      readableRouteUsed,
+      linesRead: totalLinesRead,
       syncDurationMs,
     });
   }
 
-  const nextProcessedLine = lastProcessedLine + pendingParsedEvents.length;
   const syncDurationMs = Date.now() - syncStartedAt;
-  const uniquePlayers = await countUniquePlayers(env, scope.linkedServerId);
-  const creditedKillLinesConsidered =
-    parsedLines.slice(0, lastProcessedLine).filter(isCreditedKillEvent).length +
-    pendingParsedEvents.filter(isCreditedKillEvent).length;
-  const duplicateKillsSkipped = Math.max(0, creditedKillLinesConsidered - killsCreated);
+  const uniquePlayers = await countUniquePlayers(env, initialScope.linkedServerId);
+  const duplicateKillsSkipped = Math.max(0, parsedKillLinesFound - killsCreated);
   const status = classifyAdmSyncOutcome({
-    pendingLineCount: pendingParsedEvents.length,
+    pendingLineCount,
     eventsCreated,
     killsCreated,
     buildEventsStored,
@@ -545,17 +610,18 @@ export async function runAdmSync(
   const message = buildSyncRunMessage({
     triggerType,
     status,
-    linesRead: lines.length,
-    linesProcessed: pendingParsedEvents.length,
+    linesRead: totalLinesRead,
+    linesProcessed: totalLinesProcessed,
     creditedKillLinesFound,
+    parsedKillLinesFound,
     killsCreated,
     buildEventsStored,
     duplicateKillsSkipped,
     uniquePlayers,
     eventsCreated,
   });
-  await upsertServerStats(env, scope.linkedServerId, {
-    sourceServiceId: scope.nitradoServiceId,
+  await upsertServerStats(env, initialScope.linkedServerId, {
+    sourceServiceId: initialScope.nitradoServiceId,
     kills: killsCreated,
     deaths: deathsCreated,
     joins: joinsCreated,
@@ -563,20 +629,20 @@ export async function runAdmSync(
     uniquePlayers,
     lastEventAt,
   });
-  await rebuildServerBuildStats(env, scope.linkedServerId);
-  if (buildEventsStored > 0) console.log("DZN ADM BUILD EVENTS SYNCED", { linkedServerId: scope.linkedServerId, buildEventsStored });
-  await upsertSyncState(env, scope.linkedServerId, {
+  await rebuildServerBuildStats(env, initialScope.linkedServerId);
+  if (buildEventsStored > 0) console.log("DZN ADM BUILD EVENTS SYNCED", { linkedServerId: initialScope.linkedServerId, buildEventsStored });
+  await upsertSyncState(env, initialScope.linkedServerId, {
     latestAdmFile,
     latestAdmPath,
-    sourceServiceId: scope.nitradoServiceId,
-    lastProcessedFile: latestAdmFile,
-    lastProcessedLine: nextProcessedLine,
-    lastProcessedOffset: processedOffset,
+    sourceServiceId: initialScope.nitradoServiceId,
+    lastProcessedFile: cursorFile ?? latestAdmFile,
+    lastProcessedLine: cursorLine,
+    lastProcessedOffset: cursorOffset,
     status,
     message,
     lastSyncAt: now,
-    linesRead: lines.length,
-    linesProcessed: pendingParsedEvents.length,
+    linesRead: totalLinesRead,
+    linesProcessed: totalLinesProcessed,
     rawEventsStored,
     playerEventsStored,
     killEventsStored,
@@ -585,33 +651,33 @@ export async function runAdmSync(
     unknownLines,
     duplicateLines,
     syncDurationMs,
-    readableRoute: readable.readableRouteUsed,
+    readableRoute: readableRouteUsed,
   });
   await recordSyncRun(env, {
     id: syncRunId,
-    linkedServerId: scope.linkedServerId,
-    sourceServiceId: scope.nitradoServiceId,
+    linkedServerId: initialScope.linkedServerId,
+    sourceServiceId: initialScope.nitradoServiceId,
     triggerType,
     status,
     message,
-    linesRead: lines.length,
-    linesProcessed: pendingParsedEvents.length,
+    linesRead: totalLinesRead,
+    linesProcessed: totalLinesProcessed,
     eventsCreated,
     killsCreated,
     startedAt: syncStartedAtIso,
     finishedAt: new Date().toISOString(),
     durationMs: syncDurationMs,
   });
-  await rebuildServerStats(env, scope.linkedServerId);
+  await rebuildServerStats(env, initialScope.linkedServerId);
   console.log("DZN ADM SYNC STATUS CLARIFIED", { status, latestAdmFile });
-  console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, linesRead: lines.length, eventsCreated, killsCreated });
+  console.log("DZN ADM FEED SYNC STATUS IMPROVED", { status, latestAdmFile, linesRead: totalLinesRead, eventsCreated, killsCreated });
   console.log("DZN ADM FULL SYNC COMPLETE");
 
   return {
     status,
     message,
-    linesSeen: lines.length,
-    linesProcessed: pendingParsedEvents.length,
+    linesSeen: totalLinesRead,
+    linesProcessed: totalLinesProcessed,
     eventsCreated,
     killsCreated,
     killsFound: creditedKillLinesFound,
@@ -619,10 +685,10 @@ export async function runAdmSync(
     duplicateKillsSkipped,
     playersUpdated: uniquePlayers,
     latestAdmFile,
-    lastProcessedLine: nextProcessedLine,
+    lastProcessedLine: cursorLine,
     lastSyncAt: now,
-    readableRouteUsed: readable.readableRouteUsed,
-    linesRead: lines.length,
+    readableRouteUsed,
+    linesRead: totalLinesRead,
     syncStatus: status,
     rawEventsStored,
     playerEventsStored,
@@ -659,6 +725,7 @@ function buildSyncRunMessage(values: {
   linesRead: number;
   linesProcessed: number;
   creditedKillLinesFound: number;
+  parsedKillLinesFound: number;
   killsCreated: number;
   buildEventsStored: number;
   duplicateKillsSkipped: number;
@@ -667,16 +734,29 @@ function buildSyncRunMessage(values: {
 }) {
   const prefix = values.triggerType === "manual" ? "Manual sync" : "Scheduled sync";
   if (values.status === "no_new_lines") {
-    return `${prefix} checked latest ADM. No new ADM lines since last sync. Lines scanned: ${values.linesRead}.`;
+    return `${prefix} checked latest ADM. No new ADM lines since last sync. Lines scanned: ${values.linesRead}. Kill lines found this check: ${values.creditedKillLinesFound}.`;
   }
   if (values.status === "no_supported_events") {
-    return `${prefix} checked latest ADM. No supported ADM events found. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}.`;
+    return `${prefix} checked latest ADM. No supported ADM events found. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}. Kill lines found this check: ${values.creditedKillLinesFound}. Kill lines parsed this check: ${values.parsedKillLinesFound}. Kill events inserted this check: ${values.killsCreated}. Kill lines skipped this check: ${values.duplicateKillsSkipped}.`;
   }
-  return `${prefix} completed successfully. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}. Activity events created: ${values.eventsCreated}. Kills found: ${values.creditedKillLinesFound}. New kills created: ${values.killsCreated}. Build events created: ${values.buildEventsStored}. Duplicates skipped: ${values.duplicateKillsSkipped}. Players updated: ${values.uniquePlayers}.`;
+  return `${prefix} completed successfully. Lines scanned: ${values.linesRead}. New lines scanned: ${values.linesProcessed}. Activity events created: ${values.eventsCreated}. Kill lines found this check: ${values.creditedKillLinesFound}. Kill lines parsed this check: ${values.parsedKillLinesFound}. Kill events inserted this check: ${values.killsCreated}. Build events created: ${values.buildEventsStored}. Kill lines skipped this check: ${values.duplicateKillsSkipped}. Players updated: ${values.uniquePlayers}.`;
 }
 
 export function classifyUnavailableAdmFileStatus(latestAdmFile: string | null | undefined, admAvailable: boolean): "adm_file_unreadable" | "no_adm_file" {
   return latestAdmFile || admAvailable ? "adm_file_unreadable" : "no_adm_file";
+}
+
+export function compareAdmFileNamesChronological(a: string | null | undefined, b: string | null | undefined) {
+  const aScore = extractAdmTimestampScore(a);
+  const bScore = extractAdmTimestampScore(b);
+  if (aScore !== null && bScore !== null && aScore !== bScore) return aScore - bScore;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
+
+function selectAdmFilesForCursor(files: ReadableAdmFileForSync[], lastProcessedFile: string | null | undefined) {
+  const ordered = [...files].sort((a, b) => compareAdmFileNamesChronological(a.name, b.name));
+  if (!lastProcessedFile) return ordered.slice(-1);
+  return ordered.filter((file) => compareAdmFileNamesChronological(file.name, lastProcessedFile) >= 0);
 }
 
 function emptyAdmSyncResult(values: {
@@ -2270,6 +2350,69 @@ export async function getReadableAdmLinesForLinkedServer(
   };
 }
 
+async function getReadableAdmFilesForLinkedServer(
+  env: Env,
+  linkedServer: SyncLinkedServer,
+  options: {
+    isMock?: boolean;
+    readMode?: "sample" | "full";
+    previousLatestAdmFileName?: string | null;
+    preferredAdmPath?: string | null;
+    maxFiles?: number;
+  } = {},
+): Promise<{ files: ReadableAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; message: string }> {
+  const isMock = options.isMock ?? isMockNitrado(env.MOCK_NITRADO);
+  if (isMock) {
+    const diagnostics = mockNitradoLogAccessDiagnostics(linkedServer.nitrado_service_id ?? "mock-service");
+    return {
+      files: [{
+        name: diagnostics.newestAdmFileName ?? "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM",
+        path: "dayzps/config/DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM",
+        lines: mockAdmLines(),
+        readableRouteUsed: diagnostics.readable.routeRecommendation,
+      }],
+      filesFound: 1,
+      newestAdmFileName: diagnostics.newestAdmFileName,
+      message: "Mock ADM file loaded through parser sync path",
+    };
+  }
+
+  if (!linkedServer.nitrado_service_id) {
+    return {
+      files: [],
+      filesFound: 0,
+      newestAdmFileName: null,
+      message: "No Nitrado token or service ID is available for ADM log reading.",
+    };
+  }
+
+  const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+  const batch = await fetchReadableNitradoAdmFiles(token, linkedServer.nitrado_service_id, {
+    mode: options.readMode ?? "sample",
+    previousLatestAdmFileName: options.previousLatestAdmFileName,
+    preferredAdmPath: options.preferredAdmPath ?? linkedServer.adm_path,
+    maxFiles: options.maxFiles,
+  });
+
+  return {
+    files: batch.files.map(mapReadableAdmFileForSync),
+    filesFound: batch.filesFound,
+    newestAdmFileName: batch.newestAdmFileName,
+    message: batch.files.length
+      ? `Readable ADM files discovered: ${batch.files.map((file) => file.name).join(", ")}`
+      : "ADM file list was discovered, but no readable ADM file content was returned.",
+  };
+}
+
+function mapReadableAdmFileForSync(file: NitradoReadableAdmFile): ReadableAdmFileForSync {
+  return {
+    name: file.name,
+    path: file.path,
+    lines: file.lines,
+    readableRouteUsed: file.readableRouteUsed,
+  };
+}
+
 function mockAdmLines() {
   return [
     "AdminLog started on 2026-05-14 at 13:45:00",
@@ -2308,6 +2451,13 @@ function didMutate(result: { meta?: { changes?: number } }) {
 function extractAdmDateFromFile(fileName: string | null) {
   const match = fileName ? /(\d{4}-\d{2}-\d{2})/.exec(fileName) : null;
   return match?.[1] ?? null;
+}
+
+function extractAdmTimestampScore(fileName: string | null | undefined) {
+  const match = fileName?.match(/(\d{4})[-_](\d{2})[-_](\d{2})[_-](\d{2})[-_](\d{2})[-_](\d{2})/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
 }
 
 function getPlayerForPlayerEvent(parsed: ParsedAdmEvent) {
