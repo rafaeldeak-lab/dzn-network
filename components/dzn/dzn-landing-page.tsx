@@ -117,6 +117,10 @@ type HomeStats = {
     serverName: string | null;
     publicSlug: string | null;
     occurredAt: string | null;
+    killerName?: string | null;
+    victimName?: string | null;
+    weapon?: string | null;
+    distance?: number | null;
   }>;
   map_nodes: Array<DznOperationalGlobeNode>;
   gameModes: {
@@ -388,6 +392,7 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE PLAYERS ONLINE ONLY");
     console.log("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED");
     console.log("DZN LOGGED OUT CTA CLEANUP COMPLETE");
+    console.log("DZN RECENT ACTIVITY SPACING FIXED");
   }, []);
 
   useEffect(() => {
@@ -854,22 +859,22 @@ function TopServersPanel({ rows, locked = false }: { rows: TopServerPanelRow[]; 
 function RecentActivityPanel({ rows }: { rows: ActivityPanelRow[] }) {
   return (
     <PanelShell title="Recent Activity" href="/servers" icon={Activity}>
-      <div className="grid gap-2">
+      <div className="dzn-recent-activity-list">
         {rows.slice(0, 4).map((row, index) => {
           const Icon = row.icon;
           return (
             <div
               key={`${row.title}-${index}`}
-              className="flex items-center gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.035] px-2.5 py-1.5"
+              className="dzn-recent-activity-row"
             >
-              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border ${row.tone}`}>
+              <span className={`dzn-recent-activity-icon ${row.tone}`}>
                 <Icon className="h-3.5 w-3.5" />
               </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-black uppercase text-white">{row.title}</p>
-                <p className="truncate text-[0.7rem] text-zinc-400">{row.detail}</p>
+              <div className="dzn-recent-activity-body">
+                <p className="dzn-recent-activity-title">{row.title}</p>
+                <p className="dzn-recent-activity-meta">{row.detail}</p>
               </div>
-              <span className="text-[0.68rem] font-semibold text-zinc-500">{row.time}</span>
+              <span className="dzn-recent-activity-time">{row.time}</span>
             </div>
           );
         })}
@@ -1517,22 +1522,25 @@ function scoreBreakdownTitle(breakdown: ScoreBreakdown | null | undefined) {
 }
 
 function buildActivityRows(homeStats: HomeStats): ActivityPanelRow[] {
-  const liveRows = homeStats.recentActivity.slice(0, 5).map<ActivityPanelRow>((activity) => ({
-    title: activity.title || "Server activity synced",
-    detail: activity.serverName || "DZN Network",
-    time: formatAgo(activity.occurredAt),
-    icon: activity.source === "kill" ? Crosshair : activity.source === "build" ? Hammer : activity.source === "sync" ? Radio : activity.source === "server" ? Server : Activity,
-    tone:
-      activity.source === "kill"
-        ? "border-red-300/18 bg-red-400/10 text-red-100"
-        : activity.source === "build"
-          ? "border-orange-300/18 bg-orange-300/10 text-orange-100"
-        : activity.source === "sync"
-          ? "border-cyan-300/18 bg-cyan-300/10 text-cyan-100"
-          : activity.source === "server"
-            ? "border-emerald-300/18 bg-emerald-300/10 text-emerald-100"
-            : "border-violet-300/18 bg-violet-300/10 text-violet-100",
-  }));
+  const liveRows = homeStats.recentActivity.slice(0, 5).map<ActivityPanelRow>((activity) => {
+    const display = formatActivityDisplay(activity);
+    return {
+      title: display.title,
+      detail: display.detail,
+      time: formatAgo(activity.occurredAt),
+      icon: activity.source === "kill" ? Crosshair : activity.source === "build" ? Hammer : activity.source === "sync" ? Radio : activity.source === "server" ? Server : Activity,
+      tone:
+        activity.source === "kill"
+          ? "border-red-300/18 bg-red-400/10 text-red-100"
+          : activity.source === "build"
+            ? "border-orange-300/18 bg-orange-300/10 text-orange-100"
+          : activity.source === "sync"
+            ? "border-cyan-300/18 bg-cyan-300/10 text-cyan-100"
+            : activity.source === "server"
+              ? "border-emerald-300/18 bg-emerald-300/10 text-emerald-100"
+              : "border-violet-300/18 bg-violet-300/10 text-violet-100",
+    };
+  });
 
   if (liveRows.length > 0) return liveRows;
 
@@ -1566,6 +1574,48 @@ function buildActivityRows(homeStats: HomeStats): ActivityPanelRow[] {
       tone: "border-orange-300/18 bg-orange-300/10 text-orange-100",
     },
   ];
+}
+
+function formatActivityDisplay(activity: HomeStats["recentActivity"][number]) {
+  if (activity.source === "kill") return formatKillActivityDisplay(activity);
+  return {
+    title: cleanActivityText(activity.title, "Server activity synced"),
+    detail: cleanActivityText(activity.serverName, "DZN Network"),
+  };
+}
+
+function formatKillActivityDisplay(activity: HomeStats["recentActivity"][number]) {
+  const parsed = parseKillTitle(activity.title);
+  const killer = cleanActivityText(activity.killerName, parsed.killer ?? "Player");
+  const victim = cleanActivityText(activity.victimName, parsed.victim ?? "a player");
+  const weapon = cleanActivityText(activity.weapon, parsed.weapon ?? "");
+  const distance = finiteNumberOrNull(activity.distance);
+  const detailParts = [
+    cleanActivityText(activity.serverName, "DZN Network"),
+    weapon,
+    distance && distance > 0 ? `${formatDecimal(distance)}m` : "",
+  ].filter(Boolean);
+
+  return {
+    title: `${killer} eliminated ${victim}`,
+    detail: detailParts.join(" · "),
+  };
+}
+
+function parseKillTitle(title: string | null | undefined) {
+  const safeTitle = cleanActivityText(title, "");
+  const match = safeTitle.match(/^(.+?)\s+eliminated\s+(.+?)(?:\s+with\s+(.+?))?$/i);
+  if (!match) return {};
+  return {
+    killer: match[1]?.trim(),
+    victim: match[2]?.trim(),
+    weapon: match[3]?.trim(),
+  };
+}
+
+function cleanActivityText(value: string | null | undefined, fallback: string) {
+  const cleaned = value?.replace(/\s+/g, " ").trim();
+  return cleaned || fallback;
 }
 
 function formatServerDisplayName(value: string) {

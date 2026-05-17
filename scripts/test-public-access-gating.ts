@@ -173,7 +173,15 @@ const homeFull = applyHomeStatsAccess({
   network_pulse: { top_server: { server_name: "Pandora" }, current_event: { title: "Build War" } },
   topServers: [{ server_name: "One", score_label: "230" }],
   topPlayers: [{ player_name: "Visible" }],
-  recentActivity: [{ source: "kill", title: "Player A eliminated Player B", serverName: "PANDORA" }],
+  recentActivity: [{
+    source: "kill",
+    title: "REINHARTFESTRAUS eliminated xAKA-MINI_KickAs with M4-A1",
+    serverName: "NukeTown DEATHMATCH",
+    killerName: "REINHARTFESTRAUS",
+    victimName: "xAKA-MINI_KickAs",
+    weapon: "M4-A1",
+    distance: 41.6,
+  }],
   top_build_servers: [{ server_name: "Visible build" }],
   event_leaderboard: { title: "Visible event" },
   map_nodes: [{ name: "Visible map node" }],
@@ -181,7 +189,9 @@ const homeFull = applyHomeStatsAccess({
 }, true);
 assert.equal(homeFull.is_locked, false);
 assert.equal(homeFull.access_level, "full");
-assert.equal(homeFull.recentActivity[0].title, "Player A eliminated Player B");
+assert.equal(homeFull.recentActivity[0].title, "REINHARTFESTRAUS eliminated xAKA-MINI_KickAs with M4-A1");
+assert.equal(homeFull.recentActivity[0].weapon, "M4-A1");
+assert.equal(homeFull.recentActivity[0].distance, 41.6);
 assert.equal(homeFull.map_nodes.length, 1);
 
 const leaderboardPreview = applyLeaderboardsAccess({
@@ -297,10 +307,24 @@ const topServersPanelBlock = homepageSource.slice(
   homepageSource.indexOf("function TopServersPanel"),
   homepageSource.indexOf("function RecentActivityPanel"),
 );
+const recentActivityPanelBlock = homepageSource.slice(
+  homepageSource.indexOf("function RecentActivityPanel"),
+  homepageSource.indexOf("function LiveMapPanel"),
+);
+const activityRowsBlock = homepageSource.slice(
+  homepageSource.indexOf("function buildActivityRows"),
+  homepageSource.indexOf("function formatServerDisplayName"),
+);
 const bottomCtaBlock = homepageSource.slice(
   homepageSource.indexOf("function BottomCta"),
   homepageSource.indexOf("function PanelShell"),
 );
+const globalsSource = readFileSync("app/globals.css", "utf8");
+const recentActivityCssBlock = globalsSource.slice(
+  globalsSource.indexOf(".dzn-recent-activity-list"),
+  globalsSource.indexOf(".dzn-game-modes-section"),
+);
+const homeStatsSource = readFileSync("functions/api/public/home-stats.ts", "utf8");
 assert.equal(homepageSource.includes("Players Online"), true);
 assert.equal(homepageSource.includes("currentPlayersOnline"), true);
 assert.equal(homepageSource.includes("playersOnline"), true);
@@ -333,6 +357,23 @@ assert.equal(lockedPreviewPanelBlock.includes("<Lock className=\"h-4 w-4\" />"),
 assert.equal(lockedPreviewPanelBlock.includes("Login required"), true);
 assert.equal(topServersPanelBlock.includes("/login?returnTo=/leaderboards"), false);
 assert.equal(topServersPanelBlock.includes("dzn-top-servers-view--static"), true);
+assert.equal(homepageSource.includes("DZN RECENT ACTIVITY SPACING FIXED"), true);
+assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-row"), true);
+assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-title"), true);
+assert.equal(recentActivityPanelBlock.includes("dzn-recent-activity-meta"), true);
+assert.equal(recentActivityPanelBlock.includes("truncate"), false);
+assert.equal(activityRowsBlock.includes("formatKillActivityDisplay"), true);
+assert.equal(activityRowsBlock.includes("killerName"), true);
+assert.equal(activityRowsBlock.includes("victimName"), true);
+assert.equal(activityRowsBlock.includes("weapon"), true);
+assert.equal(activityRowsBlock.includes("distance"), true);
+assert.equal(recentActivityCssBlock.includes("grid-template-columns: 2.375rem minmax(0, 1fr) auto;"), true);
+assert.equal(recentActivityCssBlock.includes("min-width: 0;"), true);
+assert.equal(recentActivityCssBlock.includes("-webkit-line-clamp: 2;"), true);
+assert.equal(recentActivityCssBlock.includes("overflow-wrap: anywhere;"), true);
+assert.equal(recentActivityCssBlock.includes("white-space: nowrap;"), true);
+assert.equal(homeStatsSource.includes("killerName: row.source === \"kill\" ? row.killer_name : null"), true);
+assert.equal(homeStatsSource.includes("distance: row.source === \"kill\" ? finiteNumber(row.distance) : null"), true);
 assert.equal(bottomCtaBlock.includes("Login with Discord"), false);
 assert.equal(bottomCtaBlock.includes('href={isPreview ? "#features" : "/login?returnTo=/setup"}'), true);
 assert.equal(homepageSource.includes("dzn-preview-locked-panel__button"), false);

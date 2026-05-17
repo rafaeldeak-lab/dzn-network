@@ -927,6 +927,86 @@ body {
   box-shadow: 0 0 22px rgba(124, 58, 237, 0.22);
 }
 
+.dzn-recent-activity-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.dzn-recent-activity-row {
+  display: grid;
+  grid-template-columns: 2.375rem minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.65rem;
+  min-height: 4rem;
+  height: auto;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.72rem;
+  padding: 0.72rem 0.82rem;
+  background:
+    linear-gradient(135deg, rgba(168, 85, 247, 0.06), rgba(34, 211, 238, 0.025)),
+    rgba(255, 255, 255, 0.035);
+}
+
+.dzn-recent-activity-icon {
+  display: grid;
+  width: 2.375rem;
+  height: 2.375rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 0.72rem;
+}
+
+.dzn-recent-activity-body {
+  min-width: 0;
+}
+
+.dzn-recent-activity-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 950;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+  white-space: normal;
+  word-break: normal;
+}
+
+.dzn-recent-activity-meta {
+  margin-top: 0.24rem;
+  color: rgba(203, 213, 225, 0.66);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: normal;
+}
+
+.dzn-recent-activity-time {
+  color: rgba(203, 213, 225, 0.56);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .dzn-recent-activity-row {
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+  }
+
+  .dzn-recent-activity-time {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: -0.12rem;
+  }
+}
+
 .dzn-game-modes-section {
   border-color: rgba(168, 85, 247, 0.18);
   background:

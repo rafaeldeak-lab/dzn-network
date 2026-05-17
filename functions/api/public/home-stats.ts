@@ -493,6 +493,10 @@ async function getRecentActivity(db: D1Database) {
     serverName: row.server_name,
     publicSlug: row.public_slug,
     occurredAt: row.occurred_at ?? row.created_at,
+    killerName: row.source === "kill" ? row.killer_name : null,
+    victimName: row.source === "kill" ? row.victim_name : null,
+    weapon: row.source === "kill" ? row.weapon : null,
+    distance: row.source === "kill" ? finiteNumber(row.distance) : null,
   }));
 }
 
