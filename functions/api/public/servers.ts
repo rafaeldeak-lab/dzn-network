@@ -73,6 +73,20 @@ type PublicRecentEvent = {
   created_at: string | null;
 };
 
+export type RatingBreakdown = Record<1 | 2 | 3 | 4 | 5, number>;
+
+export type PublicServerRatingSummary = {
+  average_rating: number | null;
+  review_count: number;
+  rating_breakdown: RatingBreakdown;
+};
+
+export type ReviewAggregateRow = {
+  linked_server_id: string;
+  rating: number | null;
+  review_count: number | null;
+};
+
 type SafePublicServer = {
   linked_server_id: string;
   public_slug: string;
@@ -116,6 +130,9 @@ type SafePublicServer = {
   score_label: string;
   score_breakdown: ServerScoreBreakdown | null;
   stats_sync_active: boolean;
+  average_rating: number | null;
+  review_count: number;
+  rating_breakdown: RatingBreakdown;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -165,7 +182,8 @@ export async function getPublicServersPayload(env: Env, slug: string | null) {
   const [rows, rankedServers] = await Promise.all([queryPublicServers(env), getRankedPublicServers(env, 500)]);
   const rankingById = new Map(rankedServers.map((server) => [server.server_id, server]));
   const publicRows = slug ? await findPublicServerRowsBySlug(env, rows, slug) : rows;
-  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row, rankingById.get(row.id) ?? null)))).filter((server): server is SafePublicServer => Boolean(server));
+  const reviewSummaries = await getPublicServerRatingSummaries(env, publicRows.map((row) => row.id));
+  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row, rankingById.get(row.id) ?? null, reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary())))).filter((server): server is SafePublicServer => Boolean(server));
 
   if (slug) {
     if (servers.length === 0 && shouldShowMockServers(env)) {
@@ -410,7 +428,7 @@ async function ensureServerLogConfigTable(env: Env) {
     .run();
 }
 
-async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: PublicLeaderboardServer | null): Promise<SafePublicServer | null> {
+async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: PublicLeaderboardServer | null, reviewSummary: PublicServerRatingSummary): Promise<SafePublicServer | null> {
   if (!row.public_slug) return null;
   const tagsJson = normalizePublicTagsJson(row.tags_json);
   const tags = parsePublicTags(tagsJson);
@@ -479,6 +497,9 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     ...stats,
     score_breakdown: ranking?.score_breakdown ?? null,
     stats_sync_active: ranking?.stats_sync_active ?? statsSync === "Active",
+    average_rating: reviewSummary.average_rating,
+    review_count: reviewSummary.review_count,
+    rating_breakdown: reviewSummary.rating_breakdown,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -488,6 +509,85 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     },
     recent_events: await getPublicRecentEvents(env, row.id),
   } satisfies SafePublicServer;
+}
+
+async function getPublicServerRatingSummaries(env: Env, linkedServerIds: string[]) {
+  const summaries = new Map<string, PublicServerRatingSummary>();
+  for (const linkedServerId of linkedServerIds) {
+    summaries.set(linkedServerId, emptyPublicServerRatingSummary());
+  }
+  if (linkedServerIds.length === 0) return summaries;
+
+  try {
+    const db = requireDb(env);
+    const placeholders = linkedServerIds.map(() => "?").join(", ");
+    const result = await db
+      .prepare(
+        `SELECT linked_server_id, rating, COUNT(*) AS review_count
+         FROM server_reviews
+         WHERE linked_server_id IN (${placeholders})
+           AND status = 'approved'
+         GROUP BY linked_server_id, rating`,
+      )
+      .bind(...linkedServerIds)
+      .all<ReviewAggregateRow>();
+
+    return buildPublicServerRatingSummaries(linkedServerIds, result.results ?? []);
+  } catch (error) {
+    console.warn("DZN public server rating summaries unavailable", error instanceof Error ? error.message : "unknown error");
+    return summaries;
+  }
+}
+
+export function buildPublicServerRatingSummaries(linkedServerIds: string[], rows: ReviewAggregateRow[]) {
+  const summaries = new Map<string, PublicServerRatingSummary>();
+  for (const linkedServerId of linkedServerIds) {
+    summaries.set(linkedServerId, emptyPublicServerRatingSummary());
+  }
+
+  for (const row of rows) {
+    const linkedServerId = row.linked_server_id;
+    if (!summaries.has(linkedServerId)) continue;
+
+    const rating = publicRatingOrNull(row.rating);
+    if (!rating) continue;
+    const count = numberOrZero(row.review_count);
+    if (count <= 0) continue;
+
+    const summary = summaries.get(linkedServerId) ?? emptyPublicServerRatingSummary();
+    summary.rating_breakdown[rating] += count;
+    summary.review_count += count;
+    summaries.set(linkedServerId, summary);
+  }
+
+  for (const [linkedServerId, summary] of summaries) {
+    if (summary.review_count === 0) {
+      summaries.set(linkedServerId, emptyPublicServerRatingSummary());
+      continue;
+    }
+
+    const ratingTotal = ([1, 2, 3, 4, 5] as const).reduce((total, rating) => total + rating * summary.rating_breakdown[rating], 0);
+    summaries.set(linkedServerId, {
+      ...summary,
+      average_rating: Math.round((ratingTotal / summary.review_count) * 10) / 10,
+    });
+  }
+
+  return summaries;
+}
+
+export function emptyPublicServerRatingSummary(): PublicServerRatingSummary {
+  return {
+    average_rating: null,
+    review_count: 0,
+    rating_breakdown: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
+  };
+}
+
+function publicRatingOrNull(value: unknown): 1 | 2 | 3 | 4 | 5 | null {
+  const rating = Number(value);
+  if (!Number.isFinite(rating)) return null;
+  return Math.min(5, Math.max(1, Math.round(rating))) as 1 | 2 | 3 | 4 | 5;
 }
 
 function buildPublicStats(servers: SafePublicServer[]) {
@@ -542,6 +642,7 @@ function mockPublicServers(): SafePublicServer[] {
       score_label: "Pending",
       score_breakdown: null,
       stats_sync_active: false,
+      ...emptyPublicServerRatingSummary(),
       ...mockListingFields("Hybrid PvP/PvE community with factions, events, traders, and weekend raids."),
       recent_events: [],
     },
@@ -580,6 +681,7 @@ function mockPublicServers(): SafePublicServer[] {
       score_label: "Pending",
       score_breakdown: null,
       stats_sync_active: true,
+      ...emptyPublicServerRatingSummary(),
       ...mockListingFields("Raid-focused PvP server with active factions and competitive stat tracking."),
       recent_events: [],
     },
@@ -618,6 +720,7 @@ function mockPublicServers(): SafePublicServer[] {
       score_label: "Pending",
       score_breakdown: null,
       stats_sync_active: false,
+      ...emptyPublicServerRatingSummary(),
       ...mockListingFields("Fast respawn deathmatch arena for clean fights and leaderboard runs."),
       recent_events: [],
     },

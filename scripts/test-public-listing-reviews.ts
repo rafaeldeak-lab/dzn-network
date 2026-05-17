@@ -8,6 +8,7 @@ import {
   validateReviewInput,
 } from "../functions/_lib/review-moderation";
 import { buildPublicReviewSummary, viewerReviewState, type ServerReviewRow } from "../functions/_lib/server-reviews";
+import { buildPublicServerRatingSummaries, emptyPublicServerRatingSummary, type ReviewAggregateRow } from "../functions/api/public/servers";
 
 const listing = validatePublicListingInput({
   public_short_description: "High-action PvP server with weekend raids.",
@@ -61,6 +62,21 @@ assert.equal(pandoraSummary.average_rating, 5);
 assert.equal(pandoraSummary.reviews[0].is_own_review, true);
 assert.equal(JSON.stringify(pandoraSummary).includes("reviewer_discord_id"), false);
 assert.equal(pandoraSummary.reviews.some((review) => review.id === "nuketown-approved"), false);
+
+const listingRatingRows: ReviewAggregateRow[] = [
+  { linked_server_id: "pandora", rating: 5, review_count: 2 },
+  { linked_server_id: "pandora", rating: 4, review_count: 1 },
+  { linked_server_id: "nuketown", rating: 2, review_count: 1 },
+];
+const listingRatingSummaries = buildPublicServerRatingSummaries(["pandora", "nuketown", "warlords"], listingRatingRows);
+assert.equal(listingRatingSummaries.get("pandora")?.review_count, 3);
+assert.equal(listingRatingSummaries.get("pandora")?.average_rating, 4.7);
+assert.equal(listingRatingSummaries.get("pandora")?.rating_breakdown[5], 2);
+assert.equal(listingRatingSummaries.get("nuketown")?.review_count, 1);
+assert.equal(listingRatingSummaries.get("warlords")?.average_rating, null);
+assert.equal(listingRatingSummaries.get("warlords")?.review_count, 0);
+assert.deepEqual(listingRatingSummaries.get("warlords"), emptyPublicServerRatingSummary());
+assert.equal(JSON.stringify(listingRatingSummaries.get("pandora")).includes("reviewer_discord_id"), false);
 
 assert.deepEqual(
   viewerReviewState({

@@ -81,6 +81,9 @@ type PublicServer = {
   score_label: string;
   score_breakdown: ScoreBreakdown | null;
   stats_sync_active: boolean;
+  average_rating: number | null;
+  review_count: number;
+  rating_breakdown: Record<1 | 2 | 3 | 4 | 5, number>;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -207,6 +210,7 @@ export function PublicNetwork() {
           setStats(data.stats ?? null);
           setServer(null);
           console.log("DZN PUBLIC SERVERS FRESH DATA LOADED");
+          console.log("DZN SERVER LIST RATINGS READY");
         }
       } catch (loadError) {
         if (controller.signal.aborted) return;
@@ -420,6 +424,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
               <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified Discord"}</p>
               <h2 className="mt-1 truncate text-2xl font-black text-white">{server.server_name}</h2>
               <p className="mt-1 truncate text-sm font-bold text-zinc-400">{server.nitrado_service_name ?? server.server_name}</p>
+              <ServerRatingChip server={server} />
             </div>
           </div>
           <StatusPill label="Live" tone="emerald" />
@@ -451,6 +456,54 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
         </div>
       </div>
     </motion.article>
+  );
+}
+
+function ServerRatingChip({ server }: { server: PublicServer }) {
+  const reviewCount = Math.max(0, Number(server.review_count) || 0);
+  const averageRating = typeof server.average_rating === "number" && Number.isFinite(server.average_rating) ? server.average_rating : null;
+  const hasReviews = reviewCount > 0 && averageRating !== null;
+
+  return (
+    <div
+      className={`dzn-server-rating-chip mt-3 ${hasReviews ? "" : "dzn-server-rating-chip--empty"}`}
+      aria-label={hasReviews ? `${averageRating.toFixed(1)} out of 5 based on ${reviewCount} ${reviewCount === 1 ? "review" : "reviews"}` : "No reviews yet. Be the first to review."}
+      title={hasReviews ? `${averageRating.toFixed(1)} out of 5 based on ${reviewCount} ${reviewCount === 1 ? "review" : "reviews"}` : "No reviews yet. Be the first to review!"}
+    >
+      <div className="dzn-server-rating-main">
+        <RatingStars rating={hasReviews ? averageRating : 0} />
+        {hasReviews ? <span className="dzn-server-rating-value">{averageRating.toFixed(1)}</span> : null}
+      </div>
+      <div className="dzn-server-rating-copy">
+        {hasReviews ? (
+          <span className="dzn-server-rating-count">Based on {reviewCount} {reviewCount === 1 ? "review" : "reviews"}</span>
+        ) : (
+          <>
+            <span className="dzn-server-rating-empty">No reviews yet</span>
+            <span className="dzn-server-rating-count">Be the first to review!</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RatingStars({ rating }: { rating: number }) {
+  const filledStars = Math.max(0, Math.min(5, Math.round(Number.isFinite(rating) ? rating : 0)));
+
+  return (
+    <span className="dzn-server-rating-stars" aria-hidden="true">
+      {Array.from({ length: 5 }, (_, index) => {
+        const filled = index < filledStars;
+        return (
+          <Star
+            key={index}
+            className={`dzn-server-rating-star ${filled ? "dzn-server-rating-star--filled" : "dzn-server-rating-star--empty"}`}
+            fill={filled ? "currentColor" : "none"}
+          />
+        );
+      })}
+    </span>
   );
 }
 
