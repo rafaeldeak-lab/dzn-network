@@ -14,6 +14,8 @@ type TotalsRow = {
   players_online: number | null;
   currentPlayersOnline: number | null;
   maxPlayersCapacity: number | null;
+  playerCountFreshServers: number | null;
+  playerCountStaleServers: number | null;
   playersSeenFromStats: number | null;
   killsTracked: number | null;
   deathsTracked: number | null;
@@ -134,6 +136,8 @@ async function buildHomeStats(env: Env) {
       players_online: playersOnline,
       currentPlayersOnline: playersOnline,
       maxPlayersCapacity: numberOrZero(totals.maxPlayersCapacity),
+      playerCountFreshServers: numberOrZero(totals.playerCountFreshServers),
+      playerCountStaleServers: numberOrZero(totals.playerCountStaleServers),
       playersSeen,
       killsTracked: numberOrZero(totals.killsTracked),
       deathsTracked: numberOrZero(totals.deathsTracked),
@@ -182,6 +186,8 @@ async function getTotals(db: D1Database) {
         SUM(COALESCE(linked_servers.current_players, 0)) AS players_online,
         SUM(COALESCE(linked_servers.current_players, 0)) AS currentPlayersOnline,
         SUM(COALESCE(linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
+        SUM(CASE WHEN linked_servers.player_count_status = 'fresh' THEN 1 ELSE 0 END) AS playerCountFreshServers,
+        SUM(CASE WHEN linked_servers.player_count_status IS NULL OR linked_servers.player_count_status != 'fresh' THEN 1 ELSE 0 END) AS playerCountStaleServers,
         SUM(
           CASE
             WHEN COALESCE(server_stats.total_joins, 0) > 0
@@ -242,6 +248,8 @@ async function getTotals(db: D1Database) {
     players_online: 0,
     currentPlayersOnline: 0,
     maxPlayersCapacity: 0,
+    playerCountFreshServers: 0,
+    playerCountStaleServers: 0,
     playersSeenFromStats: 0,
     killsTracked: 0,
     deathsTracked: 0,
@@ -887,6 +895,8 @@ function emptyHomeStats() {
       players_online: 0,
       currentPlayersOnline: 0,
       maxPlayersCapacity: 0,
+      playerCountFreshServers: 0,
+      playerCountStaleServers: 0,
       playersSeen: 0,
       killsTracked: 0,
       deathsTracked: 0,
@@ -957,6 +967,8 @@ export function applyHomeStatsAccess<T extends {
           players_online: 0,
           currentPlayersOnline: 0,
           maxPlayersCapacity: 0,
+          playerCountFreshServers: 0,
+          playerCountStaleServers: 0,
           playersSeen: 0,
           killsTracked: 0,
           deathsTracked: 0,

@@ -10,6 +10,7 @@ assert.equal(detectServerModeFromText(["PvP weekdays and PvE safe zones"]), "PVP
 assert.equal(detectServerModeFromText(["quiet community server"]), "SURVIVAL");
 
 assert.deepEqual(parseNitradoPlayerCountPair("2/10"), { current: 2, max: 10 });
+assert.deepEqual(parseNitradoPlayerCountPair("0 / 22"), { current: 0, max: 22 });
 assert.deepEqual(resolveLivePlayerCounts({
   currentPlayers: 2,
   maxPlayers: 10,
@@ -50,13 +51,21 @@ assert.deepEqual(resolveLivePlayerCounts({
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
 assert.equal(admSyncSource.includes("force: triggerType === \"manual\" || triggerType === \"scheduled\""), true);
 assert.equal(admSyncSource.includes("softFail: true"), true);
+assert.equal(admSyncSource.includes("refreshLivePlayerCountsForActiveServers"), true);
+assert.equal(admSyncSource.includes("metadata,"), true);
 const serverMetadataSource = readFileSync("functions/_lib/server-metadata.ts", "utf8");
 assert.equal(serverMetadataSource.includes("DZN LIVE PLAYER COUNT AUTO REFRESH READY"), true);
+assert.equal(serverMetadataSource.includes("DZN LIVE NITRADO PLAYER COUNT SYNC FIXED"), true);
+assert.equal(serverMetadataSource.includes("DZN EXPLICIT ZERO PLAYER COUNT HANDLED"), true);
+assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM"), true);
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT METADATA MISSING"), true);
 assert.equal(serverMetadataSource.includes("player_count_status: PlayerCountStatus"), true);
+assert.equal(serverMetadataSource.includes("currentMissing = rawCurrent === null"), true);
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Player Count Freshness"), true);
-assert.equal(dashboardSource.includes("formatPlayerSlots(server.current_players, server.max_players ?? server.player_slots)"), true);
+assert.equal(dashboardSource.includes("formatDashboardPlayerSlots"), true);
+assert.equal(dashboardSource.includes("Last known:"), true);
+assert.equal(dashboardSource.includes("Live player count stale."), true);
 const homepageSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
 const networkOverviewBlock = homepageSource.slice(
   homepageSource.indexOf("function NetworkOverview"),
@@ -74,8 +83,15 @@ const homeStatsSource = readFileSync("functions/api/public/home-stats.ts", "utf8
 assert.equal(homeStatsSource.includes("SUM(COALESCE(linked_servers.current_players, 0)) AS players_online"), true);
 assert.equal(homeStatsSource.includes("SUM(COALESCE(linked_servers.current_players, 0)) AS currentPlayersOnline"), true);
 assert.equal(homeStatsSource.includes("SUM(COALESCE(server_stats.unique_players, 0)) AS playersSeenFromStats"), true);
+assert.equal(homeStatsSource.includes("playerCountFreshServers"), true);
+assert.equal(homeStatsSource.includes("playerCountStaleServers"), true);
+const publicServersSource = readFileSync("functions/api/public/servers.ts", "utf8");
+assert.equal(publicServersSource.includes("player_count_last_checked_at"), true);
+assert.equal(publicServersSource.includes("player_count_status"), true);
 const auditSource = readFileSync("scripts/adm-audit-health.ts", "utf8");
 assert.equal(auditSource.includes("Player count last checked"), true);
 assert.equal(auditSource.includes("player_count_status"), true);
+assert.equal(auditSource.includes("Nitrado returned current players this check"), true);
+assert.equal(auditSource.includes("Recommended player count action"), true);
 
 console.log("Server metadata mode and live player count tests passed.");

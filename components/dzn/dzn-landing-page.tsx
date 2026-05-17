@@ -81,6 +81,8 @@ type HomeStats = {
     players_online: number;
     currentPlayersOnline: number;
     maxPlayersCapacity: number;
+    playerCountFreshServers: number;
+    playerCountStaleServers: number;
     playersSeen: number;
     killsTracked: number;
     deathsTracked: number;
@@ -215,6 +217,8 @@ const emptyHomeStats: HomeStats = {
     players_online: 0,
     currentPlayersOnline: 0,
     maxPlayersCapacity: 0,
+    playerCountFreshServers: 0,
+    playerCountStaleServers: 0,
     playersSeen: 0,
     killsTracked: 0,
     deathsTracked: 0,
@@ -1560,6 +1564,8 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       players_online: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline),
       currentPlayersOnline: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline),
       maxPlayersCapacity: numberOrZero(payload.totals?.maxPlayersCapacity),
+      playerCountFreshServers: numberOrZero(payload.totals?.playerCountFreshServers),
+      playerCountStaleServers: numberOrZero(payload.totals?.playerCountStaleServers),
       playersSeen: numberOrZero(payload.totals?.playersSeen),
       killsTracked: numberOrZero(payload.totals?.killsTracked),
       deathsTracked: numberOrZero(payload.totals?.deathsTracked),

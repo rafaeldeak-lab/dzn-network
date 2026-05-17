@@ -29,6 +29,9 @@ type PublicServerRow = {
   server_status: string | null;
   is_online: number | null;
   metadata_last_checked_at: string | null;
+  player_count_last_checked_at: string | null;
+  player_count_source: string | null;
+  player_count_status: string | null;
   created_at: string | null;
   updated_at: string | null;
   guild_name: string | null;
@@ -115,6 +118,9 @@ type SafePublicServer = {
   is_online: boolean;
   last_sync_at: string | null;
   metadata_last_checked_at: string | null;
+  player_count_last_checked_at: string | null;
+  player_count_source: string | null;
+  player_count_status: string | null;
   public_short_description: string | null;
   public_description: string | null;
   public_discord_invite: string | null;
@@ -261,6 +267,9 @@ async function queryPublicServers(env: Env) {
       linked_servers.server_status,
       linked_servers.is_online,
       linked_servers.metadata_last_checked_at,
+      linked_servers.player_count_last_checked_at,
+      linked_servers.player_count_source,
+      linked_servers.player_count_status,
       linked_servers.created_at,
       linked_servers.updated_at,
       discord_guilds.name AS guild_name,
@@ -515,6 +524,9 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     is_online: Number(row.is_online) === 1,
     last_sync_at: lastSyncAt,
     metadata_last_checked_at: row.metadata_last_checked_at,
+    player_count_last_checked_at: row.player_count_last_checked_at,
+    player_count_source: row.player_count_source,
+    player_count_status: row.player_count_status,
     public_short_description: row.public_short_description,
     public_description: row.public_description,
     public_discord_invite: row.public_discord_invite,
@@ -740,6 +752,9 @@ function mockPublicServers(): SafePublicServer[] {
       is_online: true,
       last_sync_at: null,
       metadata_last_checked_at: null,
+      player_count_last_checked_at: null,
+      player_count_source: "nitrado",
+      player_count_status: "unknown",
       created_at: new Date().toISOString(),
       total_kills: 0,
       total_deaths: 0,
@@ -781,6 +796,9 @@ function mockPublicServers(): SafePublicServer[] {
       is_online: true,
       last_sync_at: new Date().toISOString(),
       metadata_last_checked_at: new Date().toISOString(),
+      player_count_last_checked_at: new Date().toISOString(),
+      player_count_source: "nitrado",
+      player_count_status: "fresh",
       created_at: new Date().toISOString(),
       total_kills: 12,
       total_deaths: 18,
@@ -822,6 +840,9 @@ function mockPublicServers(): SafePublicServer[] {
       is_online: false,
       last_sync_at: null,
       metadata_last_checked_at: null,
+      player_count_last_checked_at: null,
+      player_count_source: "nitrado",
+      player_count_status: "unknown",
       created_at: new Date().toISOString(),
       total_kills: 0,
       total_deaths: 0,

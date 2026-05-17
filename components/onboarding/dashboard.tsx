@@ -311,6 +311,18 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const metadataChangedLabel = server.metadata_last_changed_at ? formatRelativeTime(server.metadata_last_changed_at) : null;
   const playerCountCheckedLabel = server.player_count_last_checked_at ? formatRelativeTime(server.player_count_last_checked_at) : "not checked yet";
   const playerCountStatusLabel = formatPlayerCountStatus(server.player_count_status);
+  const playerSlotsLabel = formatDashboardPlayerSlots(
+    server.current_players,
+    server.max_players ?? server.player_slots,
+    server.player_count_last_checked_at,
+    server.player_count_status,
+  );
+  const playerCountFreshnessDetail = formatPlayerCountFreshnessDetail(
+    server.current_players,
+    server.max_players ?? server.player_slots,
+    server.player_count_last_checked_at,
+    server.player_count_status,
+  );
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -587,7 +599,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <HeroMetric icon={<Gauge className="h-4 w-4" />} label={networkAddressLabel} value={networkAddress} />
-                <HeroMetric icon={<Users className="h-4 w-4" />} label="Players" value={formatPlayerSlots(server.current_players, server.max_players ?? server.player_slots)} />
+                <HeroMetric icon={<Users className="h-4 w-4" />} label="Players" value={playerSlotsLabel} />
                 <HeroMetric icon={<BarChart3 className="h-4 w-4" />} label="Rank" value={globalRankLabel} title={scoreTitle} />
                 <HeroMetric icon={<CircleCheck className="h-4 w-4" />} label="Status" value={statsSyncActive ? "Synced" : formatSyncStatus(effectiveSyncStatus)} />
               </div>
@@ -634,9 +646,10 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                 <CompactRow label={networkAddressLabel} value={networkAddress} />
                 <CompactRow label="Server Type" value={effectiveServerMode} />
                 <CompactRow label="Game" value={server.game ?? "DayZ"} />
-                <CompactRow label="Player Slots" value={formatPlayerSlots(server.current_players, server.max_players ?? server.player_slots)} />
+                <CompactRow label="Player Slots" value={playerSlotsLabel} />
                 <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
                 <CompactRow label="Player Count Freshness" value={`${playerCountStatusLabel} · ${playerCountCheckedLabel}`} />
+                <CompactRow label="Live Count Detail" value={playerCountFreshnessDetail} />
                 <CompactRow label="Metadata Last Checked" value={server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "Not checked"} />
                 <CompactRow label="Latest ADM File" value={latestAdmFile} />
                 <CompactRow label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
@@ -1959,6 +1972,42 @@ function shouldRefreshServerInfo(value: string | null | undefined) {
   if (!value) return true;
   const checkedAt = Date.parse(value);
   return !Number.isFinite(checkedAt) || Date.now() - checkedAt > 2 * 60 * 1000;
+}
+
+function formatDashboardPlayerSlots(
+  current: number | null | undefined,
+  max: number | null | undefined,
+  checkedAt: string | null | undefined,
+  status: string | null | undefined,
+) {
+  const fraction = formatPlayerSlots(current, max);
+  return isLivePlayerCountFresh(checkedAt, status) ? fraction : `Last known: ${fraction}`;
+}
+
+function formatPlayerCountFreshnessDetail(
+  current: number | null | undefined,
+  max: number | null | undefined,
+  checkedAt: string | null | undefined,
+  status: string | null | undefined,
+) {
+  const fraction = formatPlayerSlots(current, max);
+  const age = checkedAt ? formatRelativeTime(checkedAt) : "not checked yet";
+  if (isLivePlayerCountFresh(checkedAt, status)) return `${fraction} confirmed from Nitrado ${age}`;
+  if (isLivePlayerCountWarning(checkedAt, status)) return `Live player count stale. Last known: ${fraction}. Last checked ${age}.`;
+  return `Player count stale - Nitrado metadata not refreshed for ${age}. Last known: ${fraction}.`;
+}
+
+function isLivePlayerCountFresh(checkedAt: string | null | undefined, status: string | null | undefined) {
+  if (status !== "fresh" || !checkedAt) return false;
+  const checkedTime = Date.parse(checkedAt);
+  return Number.isFinite(checkedTime) && Date.now() - checkedTime <= 15 * 60 * 1000;
+}
+
+function isLivePlayerCountWarning(checkedAt: string | null | undefined, status: string | null | undefined) {
+  if (status === "unavailable") return true;
+  if (!checkedAt) return true;
+  const checkedTime = Date.parse(checkedAt);
+  return !Number.isFinite(checkedTime) || Date.now() - checkedTime > 30 * 60 * 1000;
 }
 
 function formatPlayerSlots(current: number | null | undefined, max: number | null | undefined) {

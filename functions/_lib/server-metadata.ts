@@ -8,6 +8,13 @@ const NITRADO_API = "https://api.nitrado.net";
 const METADATA_STALE_MS = 2 * 60 * 1000;
 export type PlayerCountStatus = "fresh" | "stale" | "unavailable" | "unknown";
 
+export type ScheduledMetadataSyncResult = {
+  processed: number;
+  succeeded: number;
+  failed: number;
+  updated_player_counts: number;
+};
+
 export type LinkedServerMetadata = {
   hostname: string | null;
   description: string | null;
@@ -364,6 +371,71 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
   return refreshNitradoServerMetadata(env, { linkedServerId, userId, force: false, softFail: true }).catch(() => null);
 }
 
+export async function refreshLivePlayerCountsForActiveServers(
+  env: Env,
+  options: { maxServers?: number } = {},
+): Promise<ScheduledMetadataSyncResult> {
+  const db = requireDb(env);
+  await ensureLinkedServerMetadataColumns(env);
+  const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
+  const rows = await db
+    .prepare(
+      `SELECT id, user_id, current_players, max_players
+       FROM linked_servers
+       WHERE lower(COALESCE(status, 'pending')) = 'live'
+         AND nitrado_service_id IS NOT NULL
+         AND nitrado_service_id != ''
+         AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
+         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+       ORDER BY COALESCE(player_count_last_checked_at, metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
+                updated_at DESC
+       LIMIT ?`,
+    )
+    .bind(maxServers)
+    .all<{ id: string; user_id: string; current_players: number | null; max_players: number | null }>();
+
+  let succeeded = 0;
+  let failed = 0;
+  let updatedPlayerCounts = 0;
+  for (const row of rows.results ?? []) {
+    try {
+      const beforeCurrent = cleanNumber(row.current_players);
+      const beforeMax = cleanNumber(row.max_players);
+      const result = await refreshNitradoServerMetadata(env, {
+        linkedServerId: row.id,
+        userId: row.user_id,
+        force: true,
+        softFail: true,
+      });
+      if (result.ok) succeeded += 1;
+      else failed += 1;
+      const nextCurrent = cleanNumber(result.metadata?.current_players);
+      const nextMax = cleanNumber(result.metadata?.max_players);
+      if (nextCurrent !== beforeCurrent || nextMax !== beforeMax) updatedPlayerCounts += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  console.log("DZN LIVE NITRADO PLAYER COUNT SYNC FIXED", {
+    processed: rows.results?.length ?? 0,
+    succeeded,
+    failed,
+    updated_player_counts: updatedPlayerCounts,
+  });
+  console.log("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM", {
+    processed: rows.results?.length ?? 0,
+    updated_player_counts: updatedPlayerCounts,
+  });
+
+  return {
+    processed: rows.results?.length ?? 0,
+    succeeded,
+    failed,
+    updated_player_counts: updatedPlayerCounts,
+  };
+}
+
 export function detectServerModeFromText(values: Array<string | null | undefined>) {
   const text = values.filter(Boolean).join(" ").toLowerCase();
   const hasPve = /\b(pve|no\s*kos|roleplay|\brp\b|survival)\b/.test(text);
@@ -458,6 +530,8 @@ function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMe
   const query = record(gameserver.query);
   const gameSpecific = record(gameserver.game_specific);
   const portList = record(gameserver.portlist);
+  const status = record(gameserver.status);
+  const statusQuery = record(status.query);
 
   const hostname = firstString(config.hostname, gameserver.hostname, gameserver.name, query.name, details.name, details.server_name);
   const description = firstString(config.description, gameserver.description, details.description, gameSpecific.description);
@@ -465,29 +539,78 @@ function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMe
     query.players,
     query.player_count,
     query.players_online,
+    query.current_players,
     gameserver.players,
     gameserver.player_count,
+    gameserver.players_online,
+    gameserver.current_players,
     details.players,
+    details.player_count,
+    status.players,
+    statusQuery.players,
   );
   const maxPlayers = firstNumber(
     gameserver.slots,
     gameserver.max_players,
     gameserver.maxplayers,
     gameserver.player_slots,
+    gameserver.player_slots_max,
     config.slots,
     config.maxplayers,
+    config.max_players,
+    query.slots,
     query.maxplayers,
     query.max_players,
+    query.max_players_count,
+    query.player_slots,
+    details.slots,
+    details.maxplayers,
+    details.max_players,
+    details.player_slots,
+    gameSpecific.max_players,
+    status.slots,
+    status.maxplayers,
+    status.max_players,
+    statusQuery.maxplayers,
+    statusQuery.max_players,
     playerCountPair?.max,
   );
   const currentPlayers = firstNumber(
     query.player_current,
     query.current_players,
     query.players_current,
+    query.player_count,
+    query.players_online,
+    query.online_players,
+    query.numplayers,
+    query.num_players,
     gameserver.player_current,
     gameserver.current_players,
+    gameserver.players_current,
+    gameserver.player_count,
     gameserver.players_online,
     query.players,
+    gameserver.players,
+    details.player_current,
+    details.current_players,
+    details.players_current,
+    details.player_count,
+    details.players_online,
+    details.players,
+    gameSpecific.current_players,
+    gameSpecific.players_online,
+    status.player_current,
+    status.current_players,
+    status.players_current,
+    status.player_count,
+    status.players_online,
+    status.players,
+    statusQuery.player_current,
+    statusQuery.current_players,
+    statusQuery.players_current,
+    statusQuery.player_count,
+    statusQuery.players_online,
+    statusQuery.players,
     playerCountPair?.current,
   );
   const ipAddress = normalizeIpAddress(firstString(gameserver.ip, gameserver.address, query.ip, query.address, details.address));
@@ -574,6 +697,12 @@ async function normalizeMetadataValues(values: {
     });
   }
   const playerCountStatus: PlayerCountStatus = playerCounts.currentMissing || playerCounts.maxMissing ? "stale" : "fresh";
+  if (!playerCounts.currentMissing && playerCounts.current_players === 0) {
+    console.log("DZN EXPLICIT ZERO PLAYER COUNT HANDLED", {
+      linkedServerId: values.linkedServer.id,
+      max_players: playerCounts.max_players,
+    });
+  }
   const hashInput = JSON.stringify({
     hostname: values.hostname ?? null,
     description: values.description ?? null,

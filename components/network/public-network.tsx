@@ -62,6 +62,9 @@ type PublicServer = {
   is_online: boolean;
   last_sync_at: string | null;
   metadata_last_checked_at: string | null;
+  player_count_last_checked_at: string | null;
+  player_count_source: string | null;
+  player_count_status: string | null;
   public_short_description: string | null;
   public_description: string | null;
   public_discord_invite: string | null;

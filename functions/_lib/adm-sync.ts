@@ -20,7 +20,7 @@ import {
   testExactNitradoAdmPath,
 } from "./nitrado";
 import { decryptToken } from "./crypto";
-import { refreshNitradoServerMetadata } from "./server-metadata";
+import { refreshLivePlayerCountsForActiveServers, refreshNitradoServerMetadata } from "./server-metadata";
 import type { Env } from "./types";
 
 export type SyncLinkedServer = {
@@ -1518,6 +1518,12 @@ export type ScheduledAdmSyncResult = {
   cron: string | null;
   maxServers: number;
   maxLinesPerServer: number;
+  metadata: {
+    processed: number;
+    succeeded: number;
+    failed: number;
+    updated_player_counts: number;
+  };
 };
 
 export async function runScheduledAdmSync(
@@ -1533,6 +1539,7 @@ export async function runScheduledAdmSync(
   const maxServers = clampPositiveInteger(options.maxServers ?? 10, 10);
   const maxLinesPerServer = clampPositiveInteger(options.maxLinesPerServer ?? 50000, 50000);
   const minSyncIntervalMs = clampPositiveInteger(options.minSyncIntervalMs ?? 120000, 120000);
+  const metadata = await refreshLivePlayerCountsForActiveServers(env, { maxServers });
   const eligibleServers = await getEligibleScheduledSyncServers(env, maxServers, minSyncIntervalMs);
   let succeeded = 0;
   let failed = 0;
@@ -1578,6 +1585,7 @@ export async function runScheduledAdmSync(
     cron: options.cron ?? null,
     maxServers,
     maxLinesPerServer,
+    metadata,
   };
 }
 

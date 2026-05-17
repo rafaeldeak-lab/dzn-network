@@ -14,7 +14,9 @@ type LinkedServerHealthRow = {
   current_players: number | null;
   max_players: number | null;
   player_count_last_checked_at: string | null;
+  player_count_source: string | null;
   player_count_status: string | null;
+  metadata_last_checked_at: string | null;
   last_sync_status: string | null;
   last_sync_message: string | null;
   latest_adm_file: string | null;
@@ -51,7 +53,8 @@ async function main() {
     `SELECT linked_servers.id, linked_servers.display_name, linked_servers.server_name, linked_servers.hostname,
             linked_servers.nitrado_service_name, linked_servers.nitrado_service_id,
             linked_servers.current_players, linked_servers.max_players,
-            linked_servers.player_count_last_checked_at, linked_servers.player_count_status,
+            linked_servers.player_count_last_checked_at, linked_servers.player_count_source,
+            linked_servers.player_count_status, linked_servers.metadata_last_checked_at,
             adm_sync_state.last_sync_status, adm_sync_state.last_sync_message,
             adm_sync_state.latest_adm_file, adm_sync_state.last_processed_file,
             adm_sync_state.last_processed_line, adm_sync_state.last_sync_at,
@@ -76,7 +79,12 @@ async function main() {
     console.log(`Service ID: ${server.nitrado_service_id ?? "unknown"}`);
     console.log(`Live players: ${formatPlayerFraction(server.current_players, server.max_players)}`);
     console.log(`Player count last checked: ${server.player_count_last_checked_at ?? "never"}`);
+    console.log(`Metadata last checked: ${server.metadata_last_checked_at ?? "never"}`);
+    console.log(`Player count source: ${server.player_count_source ?? "unknown"}`);
     console.log(`Player count status: ${server.player_count_status ?? "unknown"}${isPlayerCountStale(server.player_count_last_checked_at) ? " (stale)" : ""}`);
+    console.log(`Nitrado returned current players this check: ${server.player_count_status === "fresh" ? "yes" : "no"}`);
+    console.log(`Last known count age: ${server.player_count_last_checked_at ? formatAge(server.player_count_last_checked_at) : "unknown"}`);
+    console.log(`Recommended player count action: ${recommendedPlayerCountAction(server)}`);
     console.log(`Status: ${server.last_sync_status ?? "not_started"}`);
     console.log(`Latest ADM discovered: ${server.latest_adm_file ?? "none"}`);
     console.log(`Latest ADM processed: ${server.last_processed_file ?? "none"} line ${server.last_processed_line ?? 0}`);
@@ -169,6 +177,28 @@ function isPlayerCountStale(value: string | null) {
   if (!value) return true;
   const checkedAt = Date.parse(value);
   return !Number.isFinite(checkedAt) || Date.now() - checkedAt > 15 * 60 * 1000;
+}
+
+function formatAge(value: string) {
+  const checkedAt = Date.parse(value);
+  if (!Number.isFinite(checkedAt)) return "unknown";
+  const minutes = Math.max(0, Math.round((Date.now() - checkedAt) / 60000));
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+function recommendedPlayerCountAction(server: LinkedServerHealthRow) {
+  if (server.player_count_status === "fresh" && !isPlayerCountStale(server.player_count_last_checked_at)) {
+    return "No action. Live Nitrado player count is fresh.";
+  }
+  if (server.player_count_status === "unavailable") {
+    return "Check Nitrado availability and owner token/service permissions. DZN will keep retrying.";
+  }
+  if (!server.player_count_last_checked_at) {
+    return "Run scheduled sync or Refresh Server Info to fetch the first live Nitrado player count.";
+  }
+  return "Scheduled metadata refresh should retry automatically; verify Nitrado returned player fields if this remains stale.";
 }
 
 function sql(value: string | number | null | undefined) {

@@ -96,6 +96,8 @@ assert.equal(admSyncSource.includes("DZN ADM MISSION CRITICAL SYNC READY"), true
 assert.equal(admSyncSource.includes("DZN ADM ONLY BLOCKED BY NITRADO STATUS"), true);
 assert.equal(admSyncSource.includes("force: triggerType === \"manual\" || triggerType === \"scheduled\""), true);
 assert.equal(admSyncSource.includes("softFail: true"), true);
+assert.equal(admSyncSource.includes("refreshLivePlayerCountsForActiveServers"), true);
+assert.equal(admSyncSource.includes("metadata,"), true);
 
 const env = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
@@ -145,12 +147,20 @@ async function runEndpointTests() {
       cron: null,
       maxServers: 25,
       maxLinesPerServer: 50000,
+      metadata: {
+        processed: 2,
+        succeeded: 2,
+        failed: 0,
+        updated_player_counts: 1,
+      },
     }),
     runManual: async () => admSyncResult("manual-not-called"),
     resolveUser: async () => null,
   });
   assert.equal(scheduledResponse.status, 200);
-  assert.equal((await scheduledResponse.json() as { processed: number }).processed, 1);
+  const scheduledJson = await scheduledResponse.json() as { processed: number; metadata: { updated_player_counts: number } };
+  assert.equal(scheduledJson.processed, 1);
+  assert.equal(scheduledJson.metadata.updated_player_counts, 1);
 
   const unauthorizedResponse = await handleAdmSyncRun(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
     method: "POST",
@@ -167,6 +177,12 @@ async function runEndpointTests() {
       cron: null,
       maxServers: 25,
       maxLinesPerServer: 50000,
+      metadata: {
+        processed: 0,
+        succeeded: 0,
+        failed: 0,
+        updated_player_counts: 0,
+      },
     }),
     runManual: async () => admSyncResult("manual-not-called"),
     resolveUser: async () => null,
@@ -188,6 +204,12 @@ async function runEndpointTests() {
       cron: null,
       maxServers: 25,
       maxLinesPerServer: 50000,
+      metadata: {
+        processed: 0,
+        succeeded: 0,
+        failed: 0,
+        updated_player_counts: 0,
+      },
     }),
     runManual: async (_env, userId, linkedServerId) => admSyncResult(`${userId}:${linkedServerId}`),
     resolveUser: async () => ({
