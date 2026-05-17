@@ -12,10 +12,11 @@ export function isValidOAuthState(value: string | null) {
   return Boolean(value && OAUTH_STATE_PATTERN.test(value));
 }
 
-export function safeReturnTo(value: string | null, fallback = "/setup") {
+export function safeReturnTo(value: string | null, fallback = "/") {
   if (!value) return fallback;
   const trimmed = value.trim();
   if (!trimmed.startsWith("/") || trimmed.startsWith("//") || trimmed.includes("\\")) return fallback;
+  if (/^\/[a-z][a-z0-9+.-]*:/i.test(trimmed)) return fallback;
 
   try {
     const url = new URL(trimmed, "https://dzn.local");

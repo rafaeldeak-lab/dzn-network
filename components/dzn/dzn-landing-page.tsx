@@ -470,7 +470,7 @@ function Navbar() {
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
+    fetch("/api/auth/me", { cache: "no-store", credentials: "include" })
       .then((response) => setAuthenticated(response.ok))
       .catch(() => setAuthenticated(false));
   }, []);
@@ -530,7 +530,7 @@ function Navbar() {
             </>
           ) : (
             <a
-              href="/login"
+              href="/login?returnTo=/"
               className="rounded-lg border border-white/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.12em] text-zinc-200 transition duration-300 hover:border-violet-300/45 hover:bg-violet-400/10 hover:text-white"
             >
               Login
@@ -612,7 +612,7 @@ function HeroDashboard({
                 <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </a>
               <a
-                href="/signup"
+                href="/login?returnTo=/setup"
                 className="group inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-cyan-300/10 hover:text-white"
               >
                 <Play className="h-4 w-4" />
@@ -1093,7 +1093,7 @@ function BottomCta() {
           </p>
         </div>
         <a
-          href="/signup"
+          href="/login?returnTo=/setup"
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_32px_rgba(124,58,237,0.36)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500 sm:w-auto"
         >
           Add Your Server

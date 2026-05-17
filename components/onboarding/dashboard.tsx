@@ -81,7 +81,7 @@ export function Dashboard() {
             <ShieldCheck className="mx-auto h-12 w-12 text-violet-200" />
             <h1 className="mt-5 text-3xl font-black uppercase text-white">Login required</h1>
             <p className="mt-3 text-zinc-300">Connect Discord to view verified server onboarding progress.</p>
-            <Link href="/login" className="mt-6 inline-flex rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white">
+            <Link href="/login?returnTo=/dashboard" className="mt-6 inline-flex rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white">
               Login with Discord
             </Link>
           </div>

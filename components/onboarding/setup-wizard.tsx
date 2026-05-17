@@ -164,6 +164,12 @@ export function SetupWizard() {
     load();
   }, [loadDiscordGuilds]);
 
+  useEffect(() => {
+    if (!loading && !authenticated) {
+      window.location.href = "/login?returnTo=/setup";
+    }
+  }, [authenticated, loading]);
+
   async function refreshDiscordGuilds() {
     setGuildRefreshing(true);
     setGuildRefreshMessage("");
@@ -343,7 +349,7 @@ export function SetupWizard() {
             <p className="mt-3 text-zinc-300">
               Connect Discord before selecting a guild and verifying your Nitrado DayZ server.
             </p>
-            <Link className="mt-6 inline-flex rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white" href="/login">
+            <Link className="mt-6 inline-flex rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white" href="/login?returnTo=/setup">
               Login with Discord
             </Link>
           </div>
@@ -471,7 +477,7 @@ function SetupFrame({ children, onLogout }: { children: React.ReactNode; onLogou
             <Link href="/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 sm:inline-flex">
               Servers
             </Link>
-            <Link href="/signup" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 md:inline-flex">
+            <Link href="/login?returnTo=/setup" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 md:inline-flex">
               Add Your Server
             </Link>
             <Link href="/dashboard" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200">

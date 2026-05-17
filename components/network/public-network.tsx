@@ -251,7 +251,7 @@ function PublicNav() {
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
+    fetch("/api/auth/me", { cache: "no-store", credentials: "include" })
       .then((response) => setAuthenticated(response.ok))
       .catch(() => setAuthenticated(false));
   }, []);
@@ -280,11 +280,11 @@ function PublicNav() {
             </button>
           </>
         ) : (
-          <Link href="/login" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
+          <Link href="/login?returnTo=/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
             Login
           </Link>
         )}
-        <Link href="/signup" className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_26px_rgba(139,92,246,0.35)] transition hover:bg-violet-400">
+        <Link href="/login?returnTo=/setup" className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_26px_rgba(139,92,246,0.35)] transition hover:bg-violet-400">
           Add Your Server
         </Link>
       </div>
@@ -642,7 +642,7 @@ function EmptyPublicState() {
         <RadioTower className="mx-auto h-12 w-12 text-violet-200" />
         <h2 className="mt-5 text-2xl font-black uppercase text-white">No public servers yet</h2>
         <p className="mt-3 text-zinc-300">No public servers yet. Be the first to join DZN Network.</p>
-        <Link href="/signup" className="mt-6 inline-flex items-center gap-2 rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white">
+        <Link href="/login?returnTo=/setup" className="mt-6 inline-flex items-center gap-2 rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white">
           Add Your Server
           <ArrowRight className="h-4 w-4" />
         </Link>

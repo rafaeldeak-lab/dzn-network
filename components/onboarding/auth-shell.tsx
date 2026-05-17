@@ -19,7 +19,6 @@ import { clearClientAuthState, logoutAndRedirect } from "./api";
 
 type AuthState = {
   authenticated: boolean;
-  linkedServer?: unknown;
 };
 
 const briefingCards: Array<{ title: string; text: string; icon: LucideIcon }> = [
@@ -83,6 +82,10 @@ export function AuthShell({
   const reduceMotion = useReducedMotion();
 
   useEffect(() => {
+    console.log("DZN AUTH RETURN FLOW FIXED");
+  }, []);
+
+  useEffect(() => {
     if (!resolveAuthMode) return;
 
     let active = true;
@@ -126,12 +129,13 @@ export function AuthShell({
     if (!authChecked || !auth?.authenticated) return;
 
     const path = window.location.pathname;
+    const queryReturnTo = safeClientReturnTo(new URLSearchParams(window.location.search).get("returnTo"), path === "/signup" ? "/setup" : "/");
     if (path === "/signup") {
-      window.location.href = "/setup";
+      window.location.href = queryReturnTo;
       return;
     }
 
-    window.location.href = auth.linkedServer ? "/dashboard" : "/setup";
+    window.location.href = queryReturnTo;
   }, [auth, authChecked]);
 
   async function signOut() {
@@ -221,7 +225,7 @@ function AuthNav({ authenticated, onLogout }: { authenticated: boolean; onLogout
             </button>
           </>
         ) : (
-          <Link href="/signup" className="rounded-lg border border-violet-300/35 bg-violet-500/15 px-4 py-2 text-xs font-black uppercase text-violet-50 backdrop-blur-xl transition hover:bg-violet-500/25">
+          <Link href="/login?returnTo=/setup" className="rounded-lg border border-violet-300/35 bg-violet-500/15 px-4 py-2 text-xs font-black uppercase text-violet-50 backdrop-blur-xl transition hover:bg-violet-500/25">
             Add Your Server
           </Link>
         )}
@@ -357,13 +361,23 @@ function DiscordIcon() {
 
 function withReturnTo(startHref: string) {
   if (typeof window === "undefined") return startHref;
-  const defaultReturnTo = window.location.pathname === "/login" ? safeClientReturnTo(new URLSearchParams(window.location.search).get("returnTo")) : "/setup";
+  const path = window.location.pathname;
+  const fallback = path === "/signup" ? "/setup" : path === "/login" ? "/" : `${path}${window.location.search}${window.location.hash}`;
+  const defaultReturnTo = safeClientReturnTo(new URLSearchParams(window.location.search).get("returnTo"), fallback);
   const url = new URL(startHref, window.location.origin);
   url.searchParams.set("returnTo", defaultReturnTo);
   return `${url.pathname}${url.search}`;
 }
 
-function safeClientReturnTo(value: string | null) {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return "/setup";
-  return value;
+function safeClientReturnTo(value: string | null, fallback = "/") {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//") || trimmed.includes("\\") || /^\/[a-z][a-z0-9+.-]*:/i.test(trimmed)) return fallback;
+  try {
+    const url = new URL(trimmed, window.location.origin);
+    if (url.origin !== window.location.origin) return fallback;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return fallback;
+  }
 }
