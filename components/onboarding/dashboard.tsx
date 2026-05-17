@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getBillingStatus, getMe, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AuthResponse, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getBillingPlans, getBillingStatus, getMe, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AuthResponse, BillingPlanSummary, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -224,6 +224,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const [refreshingServerInfo, setRefreshingServerInfo] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
+  const [billingPlans, setBillingPlans] = useState<BillingPlanSummary[]>([]);
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
@@ -255,6 +256,8 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       ]);
       setBillingStatus(billing);
       if (advertising?.advertising) setAdvertisingStatus(advertising.advertising);
+      const plans = await getBillingPlans().catch(() => null);
+      if (plans?.plans?.length) setBillingPlans(plans.plans);
     } catch (error) {
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
     }
@@ -745,7 +748,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
         </div>
 
         <aside className="grid content-start gap-5">
-          <BillingPlanPanel billing={billingStatus} message={billingMessage} onRefresh={refreshBilling} />
+          <BillingPlanPanel billing={billingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBilling} />
           <AdvertisingBoostPanel
             serverId={server.id}
             billing={billingStatus}
@@ -1211,10 +1214,11 @@ const billingPlans = [
   { key: "partner", label: "Partner", price: "£29.99/mo", detail: "25 servers, featured eligibility, 30 bumps/mo" },
 ] as const;
 
-function BillingPlanPanel({ billing, message, onRefresh }: { billing: BillingStatus | null; message: string; onRefresh: () => Promise<void> }) {
+function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; message: string; onRefresh: () => Promise<void> }) {
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const planKey = billing?.plan_key ?? "free";
+  const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
 
   async function upgrade(planKey: "starter" | "pro" | "network" | "partner") {
     setBusyPlan(planKey);
@@ -1262,20 +1266,25 @@ function BillingPlanPanel({ billing, message, onRefresh }: { billing: BillingSta
       </div>
 
       <div className="mt-4 grid gap-2">
-        {billingPlans.map((plan) => (
-          <div key={plan.key} className="rounded-lg border border-white/10 bg-black/24 p-3">
+        {displayPlans.map((plan) => (
+          <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-black uppercase text-white">{plan.label} <span className="text-violet-200">{plan.price}</span></p>
-                <p className="mt-1 text-xs leading-5 text-zinc-400">{plan.detail}</p>
+                <p className="text-sm font-black uppercase text-white">{plan.name} <span className="text-violet-200">{plan.price_label}</span></p>
+                <p className="mt-1 text-xs leading-5 text-zinc-400">
+                  {plan.max_linked_servers} server{plan.max_linked_servers === 1 ? "" : "s"} · {plan.stat_history_days} day stats · {plan.included_bumps_per_month} bumps/mo
+                </p>
+                <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+                  {plan.configured ? "Checkout configured" : "Checkout not configured"}
+                </p>
               </div>
               <button
                 type="button"
-                disabled={busyPlan !== null || plan.key === planKey}
-                onClick={() => upgrade(plan.key)}
+                disabled={busyPlan !== null || plan.plan_key === planKey || !plan.configured}
+                onClick={() => upgrade(plan.plan_key)}
                 className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {plan.key === planKey ? "Current" : busyPlan === plan.key ? "Opening..." : `Upgrade`}
+                {plan.plan_key === planKey ? "Current Plan" : !plan.configured ? "Not configured" : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
               </button>
             </div>
           </div>
@@ -1310,6 +1319,7 @@ function AdvertisingBoostPanel({
   const [error, setError] = useState("");
   const entitlements = billing?.entitlements;
   const canBump = Boolean(entitlements?.can_use_ad_bumps);
+  const proCheckoutConfigured = Boolean(billing?.checkout_configured?.pro);
   const used = advertising?.bump_count_current_period ?? 0;
   const included = advertising?.included_bumps_per_month ?? entitlements?.included_bumps_per_month ?? 0;
   const nextAvailable = nextBumpLabel(advertising);
@@ -1359,13 +1369,14 @@ function AdvertisingBoostPanel({
           <p className="mt-2 text-sm leading-6 text-zinc-300">Bump your server higher in public discovery with Pro or above.</p>
           <button
             type="button"
+            disabled={!proCheckoutConfigured}
             onClick={async () => {
               const session = await createCheckoutSession("pro", "/dashboard");
               window.location.assign(session.url);
             }}
-            className="mt-4 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white"
+            className="mt-4 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-55"
           >
-            Upgrade to Pro
+            {proCheckoutConfigured ? "Upgrade to Pro" : "Checkout not configured"}
           </button>
         </div>
       )}
@@ -1813,6 +1824,74 @@ function planLabel(value: string) {
   if (value === "network") return "Network";
   if (value === "partner") return "Partner";
   return "Free";
+}
+
+function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSummary {
+  const base = {
+    starter: {
+      max_linked_servers: 1,
+      included_bumps_per_month: 0,
+      bump_cooldown_hours: 999,
+      stat_history_days: 30,
+      can_use_ad_bumps: false,
+      can_use_advanced_analytics: false,
+      can_join_events: false,
+      can_use_featured_slots: false,
+      monthly_price_gbp: 4.99,
+    },
+    pro: {
+      max_linked_servers: 3,
+      included_bumps_per_month: 3,
+      bump_cooldown_hours: 24,
+      stat_history_days: 90,
+      can_use_ad_bumps: true,
+      can_use_advanced_analytics: true,
+      can_join_events: true,
+      can_use_featured_slots: false,
+      monthly_price_gbp: 9.99,
+    },
+    network: {
+      max_linked_servers: 10,
+      included_bumps_per_month: 10,
+      bump_cooldown_hours: 12,
+      stat_history_days: 180,
+      can_use_ad_bumps: true,
+      can_use_advanced_analytics: true,
+      can_join_events: true,
+      can_use_featured_slots: true,
+      monthly_price_gbp: 19.99,
+    },
+    partner: {
+      max_linked_servers: 25,
+      included_bumps_per_month: 30,
+      bump_cooldown_hours: 6,
+      stat_history_days: 365,
+      can_use_ad_bumps: true,
+      can_use_advanced_analytics: true,
+      can_join_events: true,
+      can_use_featured_slots: true,
+      monthly_price_gbp: 29.99,
+    },
+  }[plan.key];
+
+  return {
+    plan_key: plan.key,
+    name: `DZN ${plan.label}`,
+    price_label: plan.price,
+    monthly_price_gbp: base.monthly_price_gbp,
+    configured: false,
+    features: [plan.detail],
+    max_linked_servers: base.max_linked_servers,
+    can_use_reviews: true,
+    can_use_public_listing: true,
+    can_use_advanced_analytics: base.can_use_advanced_analytics,
+    can_join_events: base.can_join_events,
+    can_use_ad_bumps: base.can_use_ad_bumps,
+    included_bumps_per_month: base.included_bumps_per_month,
+    bump_cooldown_hours: base.bump_cooldown_hours,
+    can_use_featured_slots: base.can_use_featured_slots,
+    stat_history_days: base.stat_history_days,
+  };
 }
 
 function nextBumpLabel(advertising: AdvertisingBumpStatus | null) {

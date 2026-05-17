@@ -2,6 +2,7 @@ import { requireDb } from "./db";
 import type { Env, SessionUser } from "./types";
 
 export type PlanKey = "free" | "starter" | "pro" | "network" | "partner";
+export type PaidPlanKey = Exclude<PlanKey, "free">;
 
 export type PlanEntitlements = {
   plan_key: PlanKey;
@@ -27,6 +28,16 @@ export type BillingStatus = {
   linked_server_count: number;
   can_link_more_servers: boolean;
   stripe_customer_exists: boolean;
+  checkout_configured: Record<PaidPlanKey, boolean>;
+};
+
+export type BillingPlanSummary = PlanEntitlements & {
+  plan_key: PaidPlanKey;
+  name: string;
+  price_label: string;
+  monthly_price_gbp: number;
+  configured: boolean;
+  features: string[];
 };
 
 export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
@@ -97,12 +108,46 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
   },
 };
 
+const PAID_PLAN_KEYS: PaidPlanKey[] = ["starter", "pro", "network", "partner"];
+
+const PLAN_MARKETING: Record<PaidPlanKey, {
+  name: string;
+  price_label: string;
+  monthly_price_gbp: number;
+  features: string[];
+}> = {
+  starter: {
+    name: "DZN Starter",
+    price_label: "£4.99/mo",
+    monthly_price_gbp: 4.99,
+    features: ["1 linked server", "Full public listing", "Reviews and ratings", "30 day stat history"],
+  },
+  pro: {
+    name: "DZN Pro",
+    price_label: "£9.99/mo",
+    monthly_price_gbp: 9.99,
+    features: ["3 linked servers", "Leaderboard visibility", "Event participation", "3 bumps per month"],
+  },
+  network: {
+    name: "DZN Network",
+    price_label: "£19.99/mo",
+    monthly_price_gbp: 19.99,
+    features: ["10 linked servers", "Multi-server dashboard", "Advanced analytics", "10 bumps per month"],
+  },
+  partner: {
+    name: "DZN Partner",
+    price_label: "£29.99/mo",
+    monthly_price_gbp: 29.99,
+    features: ["25 linked servers", "Featured placement eligibility", "Custom event branding", "30 bumps per month"],
+  },
+};
+
 export function normalizePlanKey(value: unknown): PlanKey {
   const key = typeof value === "string" ? value.toLowerCase() : "";
   return key === "starter" || key === "pro" || key === "network" || key === "partner" ? key : "free";
 }
 
-export function paidPlanKey(value: unknown): Exclude<PlanKey, "free"> | null {
+export function paidPlanKey(value: unknown): PaidPlanKey | null {
   const key = normalizePlanKey(value);
   return key === "free" ? null : key;
 }
@@ -113,19 +158,38 @@ export function getPlanConfig(planKey: unknown): PlanEntitlements {
 
 export function getPlanFromStripePriceId(env: Env, priceId: string | null | undefined): PlanKey {
   const price = typeof priceId === "string" ? priceId : "";
-  if (price && price === env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID) return "starter";
-  if (price && price === env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID) return "pro";
-  if (price && price === env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID) return "network";
-  if (price && price === env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID) return "partner";
+  if (price && price === getStripePriceIdForPlan(env, "starter")) return "starter";
+  if (price && price === getStripePriceIdForPlan(env, "pro")) return "pro";
+  if (price && price === getStripePriceIdForPlan(env, "network")) return "network";
+  if (price && price === getStripePriceIdForPlan(env, "partner")) return "partner";
   return "free";
 }
 
 export function getStripePriceIdForPlan(env: Env, planKey: PlanKey) {
-  if (planKey === "starter") return env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID ?? null;
-  if (planKey === "pro") return env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID ?? null;
-  if (planKey === "network") return env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID ?? null;
-  if (planKey === "partner") return env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID ?? null;
+  if (planKey === "starter") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID);
+  if (planKey === "pro") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID);
+  if (planKey === "network") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID);
+  if (planKey === "partner") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID);
   return null;
+}
+
+export function getCheckoutConfigured(env: Env): Record<PaidPlanKey, boolean> {
+  return {
+    starter: Boolean(getStripePriceIdForPlan(env, "starter")),
+    pro: Boolean(getStripePriceIdForPlan(env, "pro")),
+    network: Boolean(getStripePriceIdForPlan(env, "network")),
+    partner: Boolean(getStripePriceIdForPlan(env, "partner")),
+  };
+}
+
+export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
+  const configured = getCheckoutConfigured(env);
+  return PAID_PLAN_KEYS.map((planKey) => ({
+    ...PLAN_CONFIG[planKey],
+    ...PLAN_MARKETING[planKey],
+    plan_key: planKey,
+    configured: configured[planKey],
+  }));
 }
 
 export function effectiveEntitlementPlan(planKey: PlanKey, status: string | null | undefined): PlanKey {
@@ -297,6 +361,7 @@ export async function getOwnerBillingStatus(env: Env, user: SessionUser): Promis
     linked_server_count: linkedServerCount,
     can_link_more_servers: linkedServerCount < entitlements.max_linked_servers,
     stripe_customer_exists: Boolean(account?.stripe_customer_id),
+    checkout_configured: getCheckoutConfigured(env),
   };
 }
 
@@ -392,4 +457,8 @@ function stringOrNull(value: unknown) {
 
 function boolInt(value: boolean) {
   return value ? 1 : 0;
+}
+
+function cleanEnvString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }

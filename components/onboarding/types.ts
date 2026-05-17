@@ -244,6 +244,26 @@ export type BillingStatus = {
   linked_server_count: number;
   can_link_more_servers: boolean;
   stripe_customer_exists: boolean;
+  checkout_configured: Record<"starter" | "pro" | "network" | "partner", boolean>;
+};
+
+export type BillingPlanSummary = {
+  plan_key: "starter" | "pro" | "network" | "partner";
+  name: string;
+  price_label: string;
+  monthly_price_gbp: number;
+  configured: boolean;
+  features: string[];
+  max_linked_servers: number;
+  can_use_reviews: boolean;
+  can_use_public_listing: boolean;
+  can_use_advanced_analytics: boolean;
+  can_join_events: boolean;
+  can_use_ad_bumps: boolean;
+  included_bumps_per_month: number;
+  bump_cooldown_hours: number;
+  can_use_featured_slots: boolean;
+  stat_history_days: number;
 };
 
 export type AdvertisingBumpStatus = {

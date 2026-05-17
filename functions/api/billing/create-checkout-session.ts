@@ -21,7 +21,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!planKey) return json({ error: "Choose a paid plan." }, { status: 400 });
 
   const priceId = getStripePriceIdForPlan(env, planKey);
-  if (!priceId) return json({ error: "Plan checkout is not configured yet." }, { status: 503 });
+  if (!priceId) return json({ error: "Plan checkout is not configured yet." }, { status: 400 });
 
   await ensureBillingSchema(env);
   const account = await requireDb(env)
@@ -47,6 +47,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   });
 
   if (!session.url) return json({ error: "Stripe checkout did not return a URL." }, { status: 502 });
+  console.log("DZN STRIPE CHECKOUT SESSION CREATED", { planKey });
   return json({ url: session.url });
 };
 

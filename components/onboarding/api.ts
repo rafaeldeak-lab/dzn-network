@@ -4,6 +4,7 @@ import type {
   AdmSyncStatus,
   AuthResponse,
   AdvertisingBumpStatus,
+  BillingPlanSummary,
   BillingStatus,
   DiscordGuild,
   LinkedServer,
@@ -74,6 +75,10 @@ export async function updateServerPublicListing(linkedServerId: string, data: {
 
 export async function getBillingStatus() {
   return request<BillingStatus>("/api/billing/status");
+}
+
+export async function getBillingPlans() {
+  return request<{ plans: BillingPlanSummary[] }>("/api/billing/plans");
 }
 
 export async function createCheckoutSession(planKey: "starter" | "pro" | "network" | "partner", returnTo = "/dashboard") {

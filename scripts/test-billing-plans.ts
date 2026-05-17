@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
-import { getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
+import { getBillingPlanSummaries, getCheckoutConfigured, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
+import { onRequest as billingPlansHandler } from "../functions/api/billing/plans";
+import { onRequest as checkoutHandler } from "../functions/api/billing/create-checkout-session";
+import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
-import type { Env } from "../functions/_lib/types";
+import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const starter = getPlanConfig("starter");
 const pro = getPlanConfig("pro");
@@ -66,6 +69,17 @@ const env = {
 } as Env;
 assert.equal(getPlanFromStripePriceId(env, "price_pro"), "pro");
 assert.equal(getPlanFromStripePriceId(env, "price_missing"), "free");
+assert.deepEqual(getCheckoutConfigured(env), { starter: true, pro: true, network: true, partner: true });
+
+const partialEnv = {
+  NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_1TY4c6JPrnZ0cnkH7207aAi4",
+  NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
+} as Env;
+assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true, network: false, partner: false });
+const planSummaries = getBillingPlanSummaries(partialEnv);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configured, true);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "network")?.configured, false);
+assert.equal(JSON.stringify(planSummaries).includes("sk_test"), false);
 
 const statements: string[] = [];
 const bindings: unknown[][] = [];
@@ -108,7 +122,208 @@ async function run() {
   assert.equal(bindings.some((values) => values.includes("discord-2") && values.includes("free")), true);
   assert.equal(statements.some((statement) => statement.includes("owner_plan_entitlements")), true);
 
+  const plansResponse = await billingPlansHandler(makeContext(billingPlansHandler, new Request("https://local.test/api/billing/plans"), partialEnv));
+  assert.equal(plansResponse.status, 200);
+  const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean }> };
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "starter")?.configured, true);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "partner")?.configured, false);
+
+  const unauthCheckout = await checkoutHandler(makeContext(checkoutHandler, new Request("https://local.test/api/billing/create-checkout-session", { method: "POST" }), {} as Env));
+  assert.equal(unauthCheckout.status, 401);
+
+  const missingPriceCheckout = await checkoutHandler(makeContext(
+    checkoutHandler,
+    new Request("https://local.test/api/billing/create-checkout-session", {
+      method: "POST",
+      body: JSON.stringify({ plan_key: "network" }),
+      headers: { "content-type": "application/json" },
+    }),
+    { ...fakeEnv, MOCK_AUTH: "true" } as Env,
+  ));
+  assert.equal(missingPriceCheckout.status, 400);
+  assert.match(await missingPriceCheckout.text(), /not configured/i);
+
+  let capturedStripeBody = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    capturedStripeBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({ id: "cs_test", url: "https://checkout.stripe.test/session" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const checkoutResponse = await checkoutHandler(makeContext(
+      checkoutHandler,
+      new Request("https://local.test/api/billing/create-checkout-session", {
+        method: "POST",
+        body: JSON.stringify({ plan_key: "pro", returnTo: "/dashboard" }),
+        headers: { "content-type": "application/json" },
+      }),
+      {
+        ...fakeEnv,
+        MOCK_AUTH: "true",
+        STRIPE_SECRET_KEY: "sk_test_placeholder",
+        NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
+        NEXT_PUBLIC_APP_URL: "https://dzn-network.pages.dev",
+      } as Env,
+    ));
+    assert.equal(checkoutResponse.status, 200);
+    assert.match(capturedStripeBody, /line_items%5B0%5D%5Bprice%5D=price_1TY4dDJPrnZ0cnkH4OhfEHmW/);
+    assert.match(capturedStripeBody, /metadata%5Bdiscord_user_id%5D=mock-discord-user/);
+    assert.match(capturedStripeBody, /metadata%5Bplan_key%5D=pro/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const invalidWebhook = await webhookHandler(makeContext(
+    webhookHandler,
+    new Request("https://local.test/api/stripe/webhook", {
+      method: "POST",
+      body: "{}",
+      headers: { "stripe-signature": "t=1,v1=invalid" },
+    }),
+    { STRIPE_WEBHOOK_SECRET: "whsec_test" } as Env,
+  ));
+  assert.equal(invalidWebhook.status, 400);
+
+  const webhookPayload = JSON.stringify({
+    id: "evt_checkout",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: "cs_test",
+        customer: "cus_test",
+        subscription: "sub_test",
+        metadata: { discord_user_id: "discord-webhook", plan_key: "pro" },
+      },
+    },
+  });
+  const webhookBindings: unknown[][] = [];
+  const webhookEnv = createFakeEnv({ bindings: webhookBindings }) as Env;
+  const signedWebhook = await webhookHandler(makeContext(
+    webhookHandler,
+    new Request("https://local.test/api/stripe/webhook", {
+      method: "POST",
+      body: webhookPayload,
+      headers: { "stripe-signature": await stripeSignatureHeader(webhookPayload, "whsec_test") },
+    }),
+    { ...webhookEnv, STRIPE_WEBHOOK_SECRET: "whsec_test" } as Env,
+  ));
+  assert.equal(signedWebhook.status, 200);
+  assert.equal(webhookBindings.some((values) => values.includes("discord-webhook") && values.includes("pro")), true);
+
+  const deletedBindings: unknown[][] = [];
+  const deletedEnv = createFakeEnv({
+    account: {
+      discord_user_id: "discord-deleted",
+      plan_key: "pro",
+      plan_status: "active",
+      current_period_start: "2026-05-01T00:00:00.000Z",
+      current_period_end: "2026-06-01T00:00:00.000Z",
+      cancel_at_period_end: 0,
+    },
+    bindings: deletedBindings,
+  }) as Env;
+  const deletedPayload = JSON.stringify({
+    id: "evt_deleted",
+    type: "customer.subscription.deleted",
+    data: {
+      object: {
+        id: "sub_deleted",
+        object: "subscription",
+        customer: "cus_deleted",
+        status: "canceled",
+        current_period_start: 1772323200,
+        current_period_end: 1775001600,
+        cancel_at_period_end: false,
+        items: { data: [{ price: { id: "price_1TY4dDJPrnZ0cnkH4OhfEHmW" } }] },
+      },
+    },
+  });
+  const deletedResponse = await webhookHandler(makeContext(
+    webhookHandler,
+    new Request("https://local.test/api/stripe/webhook", {
+      method: "POST",
+      body: deletedPayload,
+      headers: { "stripe-signature": await stripeSignatureHeader(deletedPayload, "whsec_test") },
+    }),
+    {
+      ...deletedEnv,
+      STRIPE_WEBHOOK_SECRET: "whsec_test",
+      NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
+    } as Env,
+  ));
+  assert.equal(deletedResponse.status, 200);
+  assert.equal(deletedBindings.some((values) => values.includes("discord-deleted") && values.includes("free")), true);
+
   console.log("Billing plan and advertising tests passed.");
 }
 
 void run();
+
+function createFakeEnv(options: {
+  account?: Record<string, unknown>;
+  statements?: string[];
+  bindings?: unknown[][];
+} = {}) {
+  const localStatements = options.statements ?? [];
+  const localBindings = options.bindings ?? [];
+  return {
+    DB: {
+      prepare(query: string) {
+        localStatements.push(query);
+        return {
+          bind(...values: unknown[]) {
+            localBindings.push(values);
+            return this;
+          },
+          async run() {
+            return { success: true, meta: {} };
+          },
+          async first() {
+            if (/SELECT \* FROM owner_billing_accounts/i.test(query) && options.account) return options.account;
+            return null;
+          },
+          async all() {
+            return { success: true, meta: {}, results: [] };
+          },
+          async raw() {
+            return [];
+          },
+        };
+      },
+      async batch() {
+        return [];
+      },
+      async exec() {
+        return { success: true, meta: {} };
+      },
+    },
+  };
+}
+
+function makeContext(handler: PagesFunction, request: Request, env: Env): Parameters<typeof handler>[0] {
+  return {
+    request,
+    env,
+    params: {},
+    waitUntil() {},
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  };
+}
+
+async function stripeSignatureHeader(payload: string, secret: string) {
+  const timestamp = "1770000000";
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${timestamp}.${payload}`));
+  const hex = [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `t=${timestamp},v1=${hex}`;
+}

@@ -19,6 +19,7 @@
     "test:auth-return-flow": "tsx scripts/test-auth-return-flow.ts",
     "test:public-access-gating": "tsx scripts/test-public-access-gating.ts",
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
+    "check:billing-config": "tsx scripts/check-billing-config.ts",
     "backfill:adm:once": "tsx scripts/one-time-adm-backfill.ts",
     "backfill:build-events": "tsx scripts/backfill-build-events.ts",
     "repair:readded-server": "tsx scripts/repair-readded-server.ts",
