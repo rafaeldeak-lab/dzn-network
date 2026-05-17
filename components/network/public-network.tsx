@@ -743,6 +743,14 @@ function HeroStat({ icon: Icon, label, value, title }: { icon: typeof Activity; 
 
 function CommunityInfoPanel({ server }: { server: PublicServer }) {
   const hasDescription = Boolean(server.public_short_description || server.public_description || server.public_rules || server.public_language || server.public_region_label || server.public_discord_invite || server.public_website_url);
+  const languageRegion = [server.public_language, server.public_region_label].filter(Boolean).join(" / ") || "Not specified";
+  const hasDiscord = Boolean(server.public_discord_invite);
+  const hasRulesUrl = Boolean(server.public_website_url);
+  const rulesNotes = server.public_rules || "No public rules added yet.";
+
+  useEffect(() => {
+    console.log("DZN COMMUNITY INFO LAYOUT POLISHED");
+  }, []);
 
   return (
     <GlassPanel title="Community Info" icon={MessageSquare}>
@@ -751,10 +759,23 @@ function CommunityInfoPanel({ server }: { server: PublicServer }) {
           <>
             {server.public_short_description ? <p className="text-base font-black leading-7 text-white">{server.public_short_description}</p> : null}
             {server.public_description ? <p className="whitespace-pre-line text-sm font-medium leading-7 text-zinc-300">{server.public_description}</p> : <p className="text-sm leading-6 text-zinc-500">This server has not added a full public description yet.</p>}
-            <div className="grid gap-3 md:grid-cols-2">
-              <CommunityDetail label="Language / Region" value={[server.public_language, server.public_region_label].filter(Boolean).join(" / ") || "Not added yet"} />
-              <CommunityDetail label="Rules / Notes" value={server.public_rules || "No rules or notes added yet."} multiline />
+
+            <div className="grid items-start gap-2.5 sm:grid-cols-3">
+              <CommunityInfoMiniCard label="Language / Region" value={languageRegion} tone="violet" />
+              <CommunityInfoMiniCard label="Discord" value={hasDiscord ? "Available" : "Not Added"} tone={hasDiscord ? "emerald" : "muted"} />
+              <CommunityInfoMiniCard label="Website / Rules" value={hasRulesUrl ? "Available" : "Not Added"} tone={hasRulesUrl ? "cyan" : "muted"} />
             </div>
+
+            <div className="h-auto min-h-0 self-start rounded-lg border border-cyan-300/12 bg-black/22 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">Rules / Notes</p>
+                <span className="rounded-full border border-violet-300/16 bg-violet-400/8 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-violet-200">
+                  Public Listing
+                </span>
+              </div>
+              <p className="whitespace-pre-line text-sm font-semibold leading-6 text-zinc-200">{rulesNotes}</p>
+            </div>
+
             <div className="flex flex-col gap-3 sm:flex-row">
               {server.public_discord_invite ? (
                 <a href={server.public_discord_invite} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.32)] transition hover:bg-violet-400">
@@ -782,11 +803,18 @@ function CommunityInfoPanel({ server }: { server: PublicServer }) {
   );
 }
 
-function CommunityDetail({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
+function CommunityInfoMiniCard({ label, value, tone }: { label: string; value: string; tone: "violet" | "cyan" | "emerald" | "muted" }) {
+  const toneClass = {
+    violet: "border-violet-300/18 bg-violet-400/[0.06] text-violet-100",
+    cyan: "border-cyan-300/18 bg-cyan-400/[0.06] text-cyan-100",
+    emerald: "border-emerald-300/18 bg-emerald-400/[0.06] text-emerald-100",
+    muted: "border-white/10 bg-white/[0.035] text-zinc-300",
+  }[tone];
+
   return (
-    <div className="rounded-lg border border-white/10 bg-black/24 p-3">
-      <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
-      <p className={`mt-2 text-sm font-bold leading-6 text-zinc-200 ${multiline ? "whitespace-pre-line" : ""}`}>{value}</p>
+    <div className={`h-auto min-h-0 self-start rounded-lg border px-3 py-2.5 ${toneClass}`}>
+      <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500">{label}</p>
+      <p className="mt-1.5 break-words text-sm font-black leading-5 [overflow-wrap:anywhere]">{value}</p>
     </div>
   );
 }
