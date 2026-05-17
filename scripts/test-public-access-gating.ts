@@ -281,6 +281,26 @@ const landingRenderBlock = homepageSource.slice(
   homepageSource.indexOf("export function DznLandingPage"),
   homepageSource.indexOf("function HomeAliveBackground"),
 );
+const heroBlock = homepageSource.slice(
+  homepageSource.indexOf("function HeroDashboard"),
+  homepageSource.indexOf("function HomepagePreviewUnlock"),
+);
+const previewBannerBlock = homepageSource.slice(
+  homepageSource.indexOf("function HomepagePreviewUnlock"),
+  homepageSource.indexOf("function LockedPreviewPanel"),
+);
+const lockedPreviewPanelBlock = homepageSource.slice(
+  homepageSource.indexOf("function LockedPreviewPanel"),
+  homepageSource.indexOf("function TopServersPanel"),
+);
+const topServersPanelBlock = homepageSource.slice(
+  homepageSource.indexOf("function TopServersPanel"),
+  homepageSource.indexOf("function RecentActivityPanel"),
+);
+const bottomCtaBlock = homepageSource.slice(
+  homepageSource.indexOf("function BottomCta"),
+  homepageSource.indexOf("function PanelShell"),
+);
 assert.equal(homepageSource.includes("Players Online"), true);
 assert.equal(homepageSource.includes("currentPlayersOnline"), true);
 assert.equal(homepageSource.includes("playersOnline"), true);
@@ -301,5 +321,20 @@ assert.equal(navbarBlock.includes("href=\"/setup\""), true);
 assert.equal(landingRenderBlock.includes("isPreviewMode ? ("), true);
 assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={liveStats.data} />"), true);
 assert.equal(homepageSource.includes("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED"), true);
+assert.equal(homepageSource.includes("DZN LOGGED OUT CTA CLEANUP COMPLETE"), true);
+assert.equal((homepageSource.match(/href="\/login\?returnTo=\/"/g) ?? []).length, 2);
+assert.equal(navbarBlock.includes("Login"), true);
+assert.equal(heroBlock.includes("Login with Discord"), true);
+assert.equal(previewBannerBlock.includes("Login with Discord"), false);
+assert.equal(previewBannerBlock.includes("href=\"/login?returnTo=/\""), false);
+assert.equal(lockedPreviewPanelBlock.includes("Login to unlock"), false);
+assert.equal(lockedPreviewPanelBlock.includes("href="), false);
+assert.equal(lockedPreviewPanelBlock.includes("<Lock className=\"h-4 w-4\" />"), true);
+assert.equal(lockedPreviewPanelBlock.includes("Login required"), true);
+assert.equal(topServersPanelBlock.includes("/login?returnTo=/leaderboards"), false);
+assert.equal(topServersPanelBlock.includes("dzn-top-servers-view--static"), true);
+assert.equal(bottomCtaBlock.includes("Login with Discord"), false);
+assert.equal(bottomCtaBlock.includes('href={isPreview ? "#features" : "/login?returnTo=/setup"}'), true);
+assert.equal(homepageSource.includes("dzn-preview-locked-panel__button"), false);
 
 console.log("Public access gating tests passed.");

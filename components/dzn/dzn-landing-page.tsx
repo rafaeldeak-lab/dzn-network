@@ -387,6 +387,7 @@ export function DznLandingPage() {
     console.log("DZN PUBLIC ACCESS GATING READY");
     console.log("DZN HOMEPAGE PLAYERS ONLINE ONLY");
     console.log("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED");
+    console.log("DZN LOGGED OUT CTA CLEANUP COMPLETE");
   }, []);
 
   useEffect(() => {
@@ -717,15 +718,11 @@ function HeroDashboard({
           <>
             <LockedPreviewPanel
               title="Recent Activity"
-              text="Recent activity details, player names, and synced events unlock after Discord login."
-              href="/login?returnTo=/"
-              icon={Activity}
+              text="Recent activity unlocks after Discord login."
             />
             <LockedPreviewPanel
               title="Live Operational Map"
-              text="Login to unlock live server map details, public sync nodes, and operational signals."
-              href="/login?returnTo=/"
-              icon={Globe2}
+              text="Live map data unlocks after Discord login."
             />
           </>
         ) : (
@@ -747,15 +744,11 @@ function HomepagePreviewUnlock() {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-black uppercase tracking-[0.2em] text-violet-100">Preview mode</p>
-          <h2 className="mt-1 text-xl font-black text-white">Login with Discord to unlock full network stats</h2>
+          <h2 className="mt-1 text-xl font-black text-white">Limited public preview</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-            Public visitors can preview top servers and basic activity. Full server profiles, leaderboards, reviews, Discord invites, and detailed player stats unlock after Discord login.
+            Log in with Discord to unlock full network stats, server profiles, leaderboards, reviews, Discord invites, and activity. Use the Login button above to unlock full access.
           </p>
         </div>
-        <a href="/login?returnTo=/" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase tracking-[0.12em] text-white shadow-[0_0_24px_rgba(139,92,246,0.32)] transition hover:bg-violet-400">
-          Login with Discord
-          <ChevronRight className="h-4 w-4" />
-        </a>
       </div>
     </motion.section>
   );
@@ -764,28 +757,20 @@ function HomepagePreviewUnlock() {
 function LockedPreviewPanel({
   title,
   text,
-  href,
-  icon: Icon,
 }: {
   title: string;
   text: string;
-  href: string;
-  icon: LucideIcon;
 }) {
   return (
     <section className="dzn-preview-locked-panel">
       <div className="dzn-preview-locked-panel__icon" aria-hidden="true">
-        <Icon className="h-4 w-4" />
+        <Lock className="h-4 w-4" />
       </div>
       <div className="min-w-0">
-        <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-100">Discord login required</p>
+        <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-100">Login required</p>
         <h2 className="mt-1 text-base font-black uppercase text-white">{title}</h2>
         <p className="mt-2 text-sm leading-6 text-zinc-300">{text}</p>
       </div>
-      <a href={href} className="dzn-preview-locked-panel__button">
-        Login to unlock
-        <ChevronRight className="h-3.5 w-3.5" />
-      </a>
     </section>
   );
 }
@@ -800,9 +785,15 @@ function TopServersPanel({ rows, locked = false }: { rows: TopServerPanelRow[]; 
           </span>
           <h2>Top Servers</h2>
         </div>
-        <a href={locked ? "/login?returnTo=/leaderboards" : "/leaderboards"} className="dzn-top-servers-view">
-          {locked ? "Unlock" : "View All"} <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-        </a>
+        {locked ? (
+          <span className="dzn-top-servers-view dzn-top-servers-view--static">
+            Preview
+          </span>
+        ) : (
+          <a href="/leaderboards" className="dzn-top-servers-view">
+            View All <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        )}
       </div>
 
       <div className="dzn-top-servers-table">
@@ -814,25 +805,40 @@ function TopServersPanel({ rows, locked = false }: { rows: TopServerPanelRow[]; 
           <span>Score</span>
         </div>
         <div className="dzn-top-servers-rows">
-          {rows.slice(0, 3).map((row) => (
-            <a
-              key={`${row.rank}-${row.server}`}
-              href={locked ? "/login?returnTo=/leaderboards" : row.href}
-              title={locked ? "Login to view full rankings" : row.server}
-              className={`dzn-top-server-row ${locked ? "dzn-top-server-row--locked" : ""}`}
-            >
-              <span className="dzn-top-server-rank">{row.rank}</span>
-              <span className="dzn-top-server-name">{row.server}</span>
-              <span title={locked ? "Login required" : row.kd} className="dzn-top-server-stat dzn-top-server-kd">{locked ? "Locked" : row.kd}</span>
-              <span className="dzn-top-server-stat dzn-top-server-kills">{locked ? "Locked" : row.kills}</span>
-              <span
-                title={locked ? "Login required" : row.scoreTitle}
-                className={row.active ? "dzn-top-server-score" : "dzn-top-server-score dzn-top-server-score--pending"}
+          {rows.slice(0, 3).map((row) => {
+            const rowContent = (
+              <>
+                <span className="dzn-top-server-rank">{row.rank}</span>
+                <span className="dzn-top-server-name">{row.server}</span>
+                <span title={locked ? "Login required" : row.kd} className="dzn-top-server-stat dzn-top-server-kd">{locked ? "Locked" : row.kd}</span>
+                <span className="dzn-top-server-stat dzn-top-server-kills">{locked ? "Locked" : row.kills}</span>
+                <span
+                  title={locked ? "Login required" : row.scoreTitle}
+                  className={row.active ? "dzn-top-server-score" : "dzn-top-server-score dzn-top-server-score--pending"}
+                >
+                  {locked ? "Locked" : row.score}
+                </span>
+              </>
+            );
+            return locked ? (
+              <div
+                key={`${row.rank}-${row.server}`}
+                title="Login required"
+                className="dzn-top-server-row dzn-top-server-row--locked"
               >
-                {locked ? "Login" : row.score}
-              </span>
-            </a>
-          ))}
+                {rowContent}
+              </div>
+            ) : (
+              <a
+                key={`${row.rank}-${row.server}`}
+                href={row.href}
+                title={row.server}
+                className="dzn-top-server-row"
+              >
+                {rowContent}
+              </a>
+            );
+          })}
         </div>
       </div>
       {locked ? (
@@ -1241,7 +1247,7 @@ function BottomCta({ isPreview }: { isPreview: boolean }) {
             Be part of something bigger
           </p>
           <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">
-            {isPreview ? "Unlock full DZN Network intelligence." : "Join a growing network of DayZ servers and communities."}
+            {isPreview ? "Discover what DZN unlocks." : "Join a growing network of DayZ servers and communities."}
           </h2>
           <p className="mt-3 text-sm leading-6 text-zinc-300/82">
             {isPreview
@@ -1250,10 +1256,10 @@ function BottomCta({ isPreview }: { isPreview: boolean }) {
           </p>
         </div>
         <a
-          href={isPreview ? "/login?returnTo=/" : "/login?returnTo=/setup"}
+          href={isPreview ? "#features" : "/login?returnTo=/setup"}
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_32px_rgba(124,58,237,0.36)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500 sm:w-auto"
         >
-          {isPreview ? "Login with Discord" : "Add Your Server"}
+          {isPreview ? "Learn More" : "Add Your Server"}
           <ChevronRight className="h-4 w-4" />
         </a>
       </div>

@@ -927,32 +927,6 @@ body {
   box-shadow: 0 0 22px rgba(124, 58, 237, 0.22);
 }
 
-.dzn-preview-locked-panel__button {
-  grid-column: 1 / -1;
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid rgba(168, 85, 247, 0.36);
-  border-radius: 10px;
-  padding: 9px 12px;
-  background: rgba(124, 58, 237, 0.2);
-  color: #ffffff;
-  font-size: 0.72rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-decoration: none;
-  text-transform: uppercase;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
-}
-
-.dzn-preview-locked-panel__button:hover {
-  transform: translateY(-1px);
-  border-color: rgba(103, 232, 249, 0.42);
-  background: rgba(124, 58, 237, 0.28);
-}
-
 .dzn-game-modes-section {
   border-color: rgba(168, 85, 247, 0.18);
   background:
