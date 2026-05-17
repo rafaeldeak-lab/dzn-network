@@ -456,6 +456,14 @@ export function SetupWizard() {
             {message ? (
               <p className="mt-5 rounded-lg border border-red-300/20 bg-red-400/10 px-4 py-3 text-sm font-bold text-red-100">
                 {message}
+                {/current plan allows/i.test(message) ? (
+                  <Link
+                    href="/dashboard"
+                    className="ml-3 inline-flex rounded-md border border-violet-300/30 bg-violet-400/15 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-violet-100 transition hover:border-violet-200/70 hover:bg-violet-400/25"
+                  >
+                    Upgrade Plan
+                  </Link>
+                ) : null}
               </p>
             ) : null}
           </div>
