@@ -323,36 +323,47 @@ const fallbackTopServers = [
 
 const featureCards = [
   {
-    title: "Global Server Leaderboards",
+    key: "leaderboards",
+    title: "GLOBAL SERVER LEADERBOARDS",
     description: "Rank connected DayZ servers by kills, K/D, activity, survival records, and reputation.",
     icon: Trophy,
-    accent: "from-violet-400/25 to-cyan-300/10",
+    accent: "purple",
   },
   {
-    title: "Server Categories",
-    description: "PvP, PvE, Deathmatch, faction worlds, hardcore shards, roleplay, economy, and custom maps.",
+    key: "categories",
+    title: "SERVER CATEGORIES",
+    description: "PvP, PvE, Deathmatch, faction worlds, hardcore shards, roleplay, economy, and more.",
     icon: Server,
-    accent: "from-cyan-300/20 to-blue-400/10",
+    accent: "cyan",
   },
   {
-    title: "Faction Wars",
-    description: "Every player and faction contributes to server ranking, reputation, and event momentum.",
-    icon: Flag,
-    accent: "from-emerald-300/18 to-cyan-300/10",
-  },
-  {
-    title: "Server Analytics",
-    description: "ADM-backed activity, kills, deaths, joins, disconnects, and server health in one control layer.",
-    icon: BarChart3,
-    accent: "from-fuchsia-400/20 to-violet-500/10",
-  },
-  {
-    title: "Server vs Server Events",
-    description: "Monthly server wars and seasonal stat battles are coming soon across kills, K/D, longest kills, factions, activity, and score.",
+    key: "factions",
+    title: "FACTION WARS",
+    description: "Every player and faction contributes to server rankings, reputation, and event momentum.",
     icon: Swords,
-    accent: "from-orange-300/16 to-violet-500/12",
+    accent: "red",
   },
-];
+  {
+    key: "analytics",
+    title: "SERVER ANALYTICS",
+    description: "ADM-backed activity, kills, deaths, joins, disconnects, and server health in one place.",
+    icon: BarChart3,
+    accent: "green",
+  },
+  {
+    key: "events",
+    title: "SERVER VS SERVER EVENTS",
+    description: "Monthly wars, seasonal battles, and community events with rewards and global recognition.",
+    icon: Shield,
+    accent: "violet",
+  },
+] satisfies Array<{
+  key: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  accent: "purple" | "cyan" | "red" | "green" | "violet";
+}>;
 
 function useHomeStats() {
   const [data, setData] = useState<HomeStats>(emptyHomeStats);
@@ -431,6 +442,7 @@ export function DznLandingPage() {
     console.log("DZN BUILD LEADERBOARD IMAGE ASSETS FIXED");
     console.log("DZN BUILD LEADERBOARD COMPACT POLISH READY");
     console.log("DZN BUILD LEADERBOARD TOP TEN POLISHED");
+    console.log("DZN HOMEPAGE FEATURE CARDS POLISHED");
     preloadBuildLeaderboardImages();
   }, []);
 
@@ -768,7 +780,7 @@ function HeroDashboard({
         )}
       </motion.div>
 
-      <FeatureStrip className="order-3 xl:col-start-1 xl:row-start-2" />
+      <FeatureStrip locked={isPreview} className="order-3 xl:col-start-1 xl:row-start-2" />
     </motion.section>
   );
 }
@@ -959,28 +971,29 @@ function DznOperationalGlobePlaceholder() {
   );
 }
 
-function FeatureStrip({ className = "" }: { className?: string }) {
+function FeatureStrip({ className = "", locked }: { className?: string; locked: boolean }) {
   return (
-    <motion.section variants={fadeUp} id="features" className={`grid gap-3 sm:grid-cols-2 lg:grid-cols-5 ${className}`}>
+    <motion.section variants={fadeUp} id="features" className={`dzn-feature-grid ${className}`}>
       {featureCards.map((feature) => {
         const Icon = feature.icon;
         return (
           <motion.article
-            key={feature.title}
-            id={feature.title === "Server vs Server Events" ? "server-events" : undefined}
+            key={feature.key}
+            id={feature.key === "events" ? "server-events" : undefined}
             whileHover={{ y: -4 }}
-            className="dzn-home-card group relative min-h-[176px] scroll-mt-28 overflow-hidden rounded-xl border border-white/10 bg-[#070b16]/74 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl transition duration-300 hover:border-violet-300/32"
+            className={`dzn-feature-card dzn-feature-card--${feature.accent} scroll-mt-28`}
           >
-            <div className={`absolute inset-0 bg-gradient-to-br ${feature.accent} opacity-0 transition duration-300 group-hover:opacity-100`} />
-            <div className="relative z-10">
-              <span className="grid h-10 w-10 place-items-center rounded-lg border border-violet-300/20 bg-violet-400/10 text-violet-100 shadow-[0_0_22px_rgba(139,92,246,0.14)]">
-                <Icon className="h-5 w-5" />
-              </span>
-              <h2 className="mt-4 text-sm font-black uppercase leading-snug text-white">
-                {feature.title}
-              </h2>
-              <p className="mt-2 text-xs leading-5 text-zinc-400">{feature.description}</p>
+            <div className="dzn-feature-card__icon">
+              <Icon aria-hidden="true" />
             </div>
+            <h2 className="dzn-feature-card__title">{feature.title}</h2>
+            <p className="dzn-feature-card__description">{feature.description}</p>
+            {locked ? (
+              <div className="dzn-feature-card__locked">
+                <Lock aria-hidden="true" />
+                Login Required
+              </div>
+            ) : null}
           </motion.article>
         );
       })}

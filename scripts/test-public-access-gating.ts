@@ -443,6 +443,14 @@ const buildLeaderboardBlock = homepageSource.slice(
   homepageSource.indexOf("function BuildTrackingLeaderboard"),
   homepageSource.indexOf("function BottomCta"),
 );
+const featureCardsBlock = homepageSource.slice(
+  homepageSource.indexOf("const featureCards"),
+  homepageSource.indexOf("function useHomeStats"),
+);
+const featureStripBlock = homepageSource.slice(
+  homepageSource.indexOf("function FeatureStrip"),
+  homepageSource.indexOf("function GameModeGrid"),
+);
 const globalsSource = readFileSync("app/globals.css", "utf8");
 const recentActivityCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-recent-activity-list"),
@@ -452,6 +460,10 @@ const homeStatsSource = readFileSync("functions/api/public/home-stats.ts", "utf8
 const buildLeaderboardCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-build-leaderboard"),
   globalsSource.indexOf(".dzn-game-modes-section"),
+);
+const featureCardsCssBlock = globalsSource.slice(
+  globalsSource.indexOf(".dzn-feature-grid"),
+  globalsSource.indexOf(".dzn-top-servers-panel"),
 );
 const buildImageAssets = [
   "public/dzn/build/full-walls.webp",
@@ -507,6 +519,40 @@ assert.equal(homepageSource.includes("DZN BUILD TRACKING LEADERBOARD UPGRADED"),
 assert.equal(homepageSource.includes("DZN BUILD LEADERBOARD IMAGE ASSETS FIXED"), true);
 assert.equal(homepageSource.includes("DZN BUILD LEADERBOARD COMPACT POLISH READY"), true);
 assert.equal(homepageSource.includes("DZN BUILD LEADERBOARD TOP TEN POLISHED"), true);
+assert.equal(homepageSource.includes("DZN HOMEPAGE FEATURE CARDS POLISHED"), true);
+assert.equal(featureCardsBlock.includes("GLOBAL SERVER LEADERBOARDS"), true);
+assert.equal(featureCardsBlock.includes("SERVER CATEGORIES"), true);
+assert.equal(featureCardsBlock.includes("FACTION WARS"), true);
+assert.equal(featureCardsBlock.includes("SERVER ANALYTICS"), true);
+assert.equal(featureCardsBlock.includes("SERVER VS SERVER EVENTS"), true);
+assert.equal((featureCardsBlock.match(/key: "/g) ?? []).length, 5);
+assert.equal(featureCardsBlock.includes("accent: \"purple\""), true);
+assert.equal(featureCardsBlock.includes("accent: \"cyan\""), true);
+assert.equal(featureCardsBlock.includes("accent: \"red\""), true);
+assert.equal(featureCardsBlock.includes("accent: \"green\""), true);
+assert.equal(featureCardsBlock.includes("accent: \"violet\""), true);
+assert.equal(featureCardsBlock.includes("Trophy"), true);
+assert.equal(featureCardsBlock.includes("Server"), true);
+assert.equal(featureCardsBlock.includes("Swords"), true);
+assert.equal(featureCardsBlock.includes("BarChart3"), true);
+assert.equal(featureCardsBlock.includes("Shield"), true);
+assert.equal(featureStripBlock.includes("dzn-feature-grid"), true);
+assert.equal(featureStripBlock.includes("dzn-feature-card dzn-feature-card--${feature.accent}"), true);
+assert.equal(featureStripBlock.includes("dzn-feature-card__icon"), true);
+assert.equal(featureStripBlock.includes("dzn-feature-card__locked"), true);
+assert.equal(featureStripBlock.includes("{locked ? ("), true);
+assert.equal(featureStripBlock.includes("Login Required"), true);
+assert.equal(featureStripBlock.includes("Login with Discord"), false);
+assert.equal(featureStripBlock.includes("href=\"/login?returnTo=/\""), false);
+assert.equal(featureCardsCssBlock.includes("grid-template-columns: repeat(5, minmax(0, 1fr));"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--purple"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--cyan"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--red"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--green"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--violet"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-feature-card__locked"), true);
+assert.equal(featureCardsCssBlock.includes("@media (max-width: 1180px)"), true);
+assert.equal(featureCardsCssBlock.includes("@media (max-width: 760px)"), true);
 assert.equal(homepageSource.includes("DZN BUILD IMAGE ASSET MISSING:"), true);
 assert.equal(homepageSource.includes("preloadBuildLeaderboardImages"), true);
 assert.equal(homepageSource.includes("BUILD_LEADERBOARD_IMAGE_PATHS"), true);
