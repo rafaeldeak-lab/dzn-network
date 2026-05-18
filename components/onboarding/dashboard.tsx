@@ -1503,8 +1503,8 @@ function DiscordAutoPostsPanel({
       const permissionWarning = result.permission_check?.warning;
       if (sendTestPost) {
         setMessage(result.test_post?.ok
-          ? `${formatPostType(item.post_type)} test posted by ${result.test_post.mode === "bot" ? "DZN bot" : "webhook"}.`
-          : result.test_post?.error ?? permissionWarning ?? "Discord test post failed.");
+          ? `${formatPostType(item.post_type)} test posted by ${result.test_post.mode === "bot" ? "bot mode" : "webhook fallback"}. Future updates will edit the saved message when possible.`
+          : formatPostingError(result.test_post?.error ?? permissionWarning ?? "Discord test post failed.", result.test_post?.missing_permissions));
       } else {
         setMessage(permissionWarning ?? `${formatPostType(item.post_type)} destination saved.`);
       }
@@ -1529,11 +1529,15 @@ function DiscordAutoPostsPanel({
         {allowed.map((item) => {
           const draft = drafts[item.post_type] ?? destinationDrafts[item.post_type] ?? { channel: item.discord_channel_id ?? "", webhook: "", enabled: item.enabled };
           const postingMode = postingStatusLabel(item);
+          const setupStatus = postingSetupLabel(item);
           return (
             <div key={item.post_type} className="rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-black uppercase text-white">{formatPostType(item.post_type)}</p>
                 <div className="flex items-center gap-2">
+                  <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingSetupClass(item.setup_status)}`}>
+                    {setupStatus}
+                  </span>
                   <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingModeClass(postingMode.mode)}`}>
                     {postingMode.label}
                   </span>
@@ -1565,7 +1569,7 @@ function DiscordAutoPostsPanel({
                   ...current,
                   [item.post_type]: { ...draft, webhook: event.target.value },
                 }))}
-                placeholder={item.discord_channel_id ? "Webhook URL hidden after save" : "Discord webhook URL"}
+                placeholder={item.has_webhook_url ? "Webhook fallback saved - enter a new URL to replace it" : "Optional Discord webhook fallback URL"}
                 className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
               />
               <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-3">
@@ -1575,6 +1579,13 @@ function DiscordAutoPostsPanel({
                   This post edits automatically when saved DZN data changes. Bot mode uses the channel ID first; webhook fallback is only used if bot posting cannot complete.
                 </p>
               </div>
+              {item.setup_message ? <p className="mt-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-200">{item.setup_message}</p> : null}
+              {item.missing_permissions?.length ? (
+                <div className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">
+                  <p className="uppercase">Missing Discord permissions</p>
+                  <p className="mt-1 text-[11px] leading-5 text-amber-50/85">{item.missing_permissions.join(" | ")}</p>
+                </div>
+              ) : null}
               {item.setup_warning ? <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{item.setup_warning}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -1591,7 +1602,7 @@ function DiscordAutoPostsPanel({
                   onClick={() => save(item, true)}
                   className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50 disabled:cursor-not-allowed disabled:opacity-55"
                 >
-                  {testingType === item.post_type ? "Testing..." : "Send Test Post"}
+                  {testingType === item.post_type ? "Testing..." : testPostButtonLabel(item.post_type)}
                 </button>
               </div>
             </div>
@@ -1661,22 +1672,42 @@ function HealthCountLine({ label, counts }: { label: string; counts: Record<stri
 }
 
 function postingModeLabel(mode: PostingDestinationSummary["delivery_mode"]) {
-  if (mode === "bot") return "Bot mode";
-  if (mode === "webhook") return "Webhook";
-  return "Setup needed";
+  if (mode === "bot") return "BOT MODE";
+  if (mode === "webhook") return "WEBHOOK FALLBACK";
+  return "SETUP NEEDED";
 }
 
 function postingStatusLabel(item: PostingDestinationSummary) {
-  if (item.setup_warning?.startsWith("DZN cannot auto-post here yet")) {
-    return { label: "Missing permissions", mode: "not_configured" as const };
+  if (item.setup_status === "missing_permissions") {
+    return { label: "MISSING PERMISSIONS", mode: "not_configured" as const };
   }
   return { label: postingModeLabel(item.delivery_mode), mode: item.delivery_mode };
+}
+
+function postingSetupLabel(item: PostingDestinationSummary) {
+  return item.setup_label ?? (item.setup_status === "active" ? "ACTIVE" : item.setup_status === "missing_permissions" ? "MISSING PERMISSIONS" : "SETUP NEEDED");
+}
+
+function postingSetupClass(status: PostingDestinationSummary["setup_status"]) {
+  if (status === "active") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
+  if (status === "missing_permissions") return "border-red-300/30 bg-red-400/10 text-red-100";
+  return "border-amber-300/30 bg-amber-400/10 text-amber-100";
 }
 
 function postingModeClass(mode: PostingDestinationSummary["delivery_mode"]) {
   if (mode === "bot") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
   if (mode === "webhook") return "border-cyan-300/30 bg-cyan-400/10 text-cyan-100";
   return "border-amber-300/30 bg-amber-400/10 text-amber-100";
+}
+
+function testPostButtonLabel(postType: string) {
+  if (postType === "basic_status_embed") return "TEST BASIC STATUS POST";
+  return `TEST ${formatPostType(postType)} POST`;
+}
+
+function formatPostingError(message: string, missingPermissions?: string[]) {
+  if (!missingPermissions?.length) return message;
+  return `${message} Missing: ${missingPermissions.join(", ")}.`;
 }
 
 function formatCronSource(value: string | null | undefined) {

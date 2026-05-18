@@ -38,7 +38,7 @@ type PublicCache = {
 
 type DiscordPayload = ReturnType<typeof renderDiscordPostPayload>;
 
-type DeliveryMode = "bot" | "webhook" | "not_configured";
+export type DeliveryMode = "bot" | "webhook" | "not_configured";
 export type PostingPermissionMode = DeliveryMode | "missing_permissions";
 export type PostingPermissionCheck = {
   ok: boolean;
@@ -47,17 +47,30 @@ export type PostingPermissionCheck = {
   warning: string | null;
   checked_at: string | null;
 };
+export type DiscordDeliveryResult = { mode: DeliveryMode; messageId: string | null };
 
 const DISCORD_CHANNEL_PERMISSION_WARNING =
   "DZN cannot auto-post here yet. Please give the bot permission to View Channel, Send Messages, Embed Links, and Read Message History.";
 const DISCORD_PERMISSION_ONE = BigInt(1);
+const DISCORD_ADMINISTRATOR_PERMISSION = DISCORD_PERMISSION_ONE << BigInt(3);
 const REQUIRED_BOT_CHANNEL_PERMISSIONS = [
   ["View Channel", DISCORD_PERMISSION_ONE << BigInt(10)],
   ["Send Messages", DISCORD_PERMISSION_ONE << BigInt(11)],
-  ["Manage Messages", DISCORD_PERMISSION_ONE << BigInt(13)],
   ["Embed Links", DISCORD_PERMISSION_ONE << BigInt(14)],
   ["Read Message History", DISCORD_PERMISSION_ONE << BigInt(16)],
 ] as const;
+const OPTIONAL_BOT_CHANNEL_PERMISSIONS = [
+  ["Manage Messages", DISCORD_PERMISSION_ONE << BigInt(13)],
+] as const;
+export const REQUIRED_BOT_PERMISSION_LABELS = REQUIRED_BOT_CHANNEL_PERMISSIONS.map(([label]) => label);
+export const OPTIONAL_BOT_PERMISSION_LABELS = OPTIONAL_BOT_CHANNEL_PERMISSIONS.map(([label]) => label);
+
+class DiscordDeliveryError extends Error {
+  constructor(message: string, public readonly status: number, public readonly operation: "post" | "edit", public readonly mode: "bot" | "webhook") {
+    super(message);
+    this.name = "DiscordDeliveryError";
+  }
+}
 
 export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJobs?: number } = {}) {
   await ensureAutomationSchema(env);
@@ -164,7 +177,7 @@ export async function sendDiscordTestPost(env: Env, destination: {
   post_type: AutoPostType;
   discord_channel_id: string;
   discord_webhook_url?: string | null;
-}) {
+}, existingMessageId: string | null = null) {
   const payload = {
     username: "DZN Network",
     embeds: [
@@ -183,9 +196,77 @@ export async function sendDiscordTestPost(env: Env, destination: {
     discord_channel_id: destination.discord_channel_id,
     discord_webhook_url: destination.discord_webhook_url ?? null,
     enabled: 1,
-  }, payload, null);
+  }, payload, existingMessageId);
   if (result.mode === "not_configured") throw new Error("Configure the DZN bot token/channel permission or add a webhook URL.");
   return result;
+}
+
+export async function recordDiscordPostingDeliveryState(env: Env, destination: {
+  guild_id: string;
+  post_type: AutoPostType;
+  discord_channel_id: string;
+}, delivery: DiscordDeliveryResult, payloadHash: string | null = null) {
+  if (delivery.mode === "not_configured") return;
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_posting_state (
+        id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
+        last_edited_at, last_payload_hash, last_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
+        discord_message_id = COALESCE(excluded.discord_message_id, server_posting_state.discord_message_id),
+        last_posted_at = COALESCE(server_posting_state.last_posted_at, excluded.last_posted_at),
+        last_edited_at = excluded.last_edited_at,
+        last_payload_hash = excluded.last_payload_hash,
+        last_error = NULL,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      destination.guild_id,
+      destination.post_type,
+      destination.discord_channel_id,
+      delivery.messageId,
+      now,
+      now,
+      payloadHash,
+      now,
+      now,
+    )
+    .run();
+}
+
+export function classifyDiscordPostingError(error: unknown): PostingPermissionCheck {
+  const checkedAt = new Date().toISOString();
+  if (error instanceof DiscordDeliveryError && error.mode === "bot") {
+    if (error.status === 401) {
+      return {
+        ok: false,
+        mode: "not_configured",
+        missing_permissions: [],
+        warning: "DZN bot posting is not configured correctly. Check the bot token or provide a webhook fallback.",
+        checked_at: checkedAt,
+      };
+    }
+    if (error.status === 403 || error.status === 404) {
+      return {
+        ok: false,
+        mode: "missing_permissions",
+        missing_permissions: [...REQUIRED_BOT_PERMISSION_LABELS],
+        warning: permissionWarning(REQUIRED_BOT_PERMISSION_LABELS),
+        checked_at: checkedAt,
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    mode: "not_configured",
+    missing_permissions: [],
+    warning: error instanceof Error ? error.message : "Discord test post failed.",
+    checked_at: checkedAt,
+  };
 }
 
 export function getPostingDeliveryMode(env: Env, destination: {
@@ -205,31 +286,56 @@ export async function checkDiscordPostingPermissions(env: Env, destination: {
   const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (botToken && destination.discord_channel_id) {
     try {
-      const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(destination.discord_channel_id)}`, {
-        headers: { authorization: `Bot ${botToken}` },
-      });
+      const response = await fetchDiscordApi(botToken, `/channels/${encodeURIComponent(destination.discord_channel_id)}`);
       if (!response.ok) {
+        if (response.status === 401) {
+          return {
+            ok: Boolean(destination.discord_webhook_url),
+            mode: destination.discord_webhook_url ? "webhook" : "not_configured",
+            missing_permissions: [],
+            warning: destination.discord_webhook_url ? null : "DZN bot posting is not configured correctly. Check the bot token or provide a webhook fallback.",
+            checked_at: checkedAt,
+          };
+        }
+        if (destination.discord_webhook_url) {
+          return {
+            ok: true,
+            mode: "webhook",
+            missing_permissions: [],
+            warning: null,
+            checked_at: checkedAt,
+          };
+        }
         return {
           ok: false,
           mode: "missing_permissions",
           missing_permissions: ["View Channel"],
-          warning: DISCORD_CHANNEL_PERMISSION_WARNING,
+          warning: permissionWarning(["View Channel"]),
           checked_at: checkedAt,
         };
       }
 
-      const channel = await response.json().catch(() => null) as { permissions?: string | number | null } | null;
-      const permissions = parsePermissionBits(channel?.permissions);
+      const channel = await response.json().catch(() => null) as DiscordChannel | null;
+      const permissions = await getBotChannelPermissionBits(botToken, channel);
       if (permissions !== null) {
         const missing = REQUIRED_BOT_CHANNEL_PERMISSIONS
           .filter(([, bit]) => (permissions & bit) !== bit)
           .map(([label]) => label);
         if (missing.length > 0) {
+          if (destination.discord_webhook_url) {
+            return {
+              ok: true,
+              mode: "webhook",
+              missing_permissions: [],
+              warning: null,
+              checked_at: checkedAt,
+            };
+          }
           return {
             ok: false,
             mode: "missing_permissions",
             missing_permissions: missing,
-            warning: DISCORD_CHANNEL_PERMISSION_WARNING,
+            warning: permissionWarning(missing),
             checked_at: checkedAt,
           };
         }
@@ -244,12 +350,10 @@ export async function checkDiscordPostingPermissions(env: Env, destination: {
       };
     } catch {
       return {
-        ok: false,
+        ok: Boolean(destination.discord_webhook_url),
         mode: destination.discord_webhook_url ? "webhook" : "missing_permissions",
-        missing_permissions: ["View Channel"],
-        warning: destination.discord_webhook_url
-          ? "DZN bot permission check failed. Webhook fallback is configured."
-          : DISCORD_CHANNEL_PERMISSION_WARNING,
+        missing_permissions: destination.discord_webhook_url ? [] : ["View Channel"],
+        warning: destination.discord_webhook_url ? null : permissionWarning(["View Channel"]),
         checked_at: checkedAt,
       };
     }
@@ -279,7 +383,7 @@ async function deliverDiscordPayload(
   destination: PostingDestination,
   payload: DiscordPayload,
   existingMessageId: string | null,
-): Promise<{ mode: DeliveryMode; messageId: string | null }> {
+): Promise<DiscordDeliveryResult> {
   const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (botToken && destination.discord_channel_id) {
     try {
@@ -321,7 +425,9 @@ async function sendOrEditWithBot(
       body: JSON.stringify(stripWebhookOnlyFields(payload)),
     });
     if (editResponse.ok) return messageId;
-    if (![403, 404].includes(editResponse.status)) throw new Error(`Discord bot edit failed with ${editResponse.status}`);
+    if (![403, 404].includes(editResponse.status)) {
+      throw new DiscordDeliveryError(`Discord bot edit failed with ${editResponse.status}`, editResponse.status, "edit", "bot");
+    }
     messageId = null;
   }
 
@@ -330,7 +436,9 @@ async function sendOrEditWithBot(
     headers,
     body: JSON.stringify(stripWebhookOnlyFields(payload)),
   });
-  if (!sendResponse.ok) throw new Error(`Discord bot post failed with ${sendResponse.status}`);
+  if (!sendResponse.ok) {
+    throw new DiscordDeliveryError(`Discord bot post failed with ${sendResponse.status}`, sendResponse.status, "post", "bot");
+  }
   const message = await sendResponse.json().catch(() => null) as { id?: string } | null;
   return typeof message?.id === "string" ? message.id : null;
 }
@@ -344,7 +452,9 @@ async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload
       body: JSON.stringify(payload),
     });
     if (editResponse.ok) return messageId;
-    if (editResponse.status !== 404) throw new Error(`Discord webhook edit failed with ${editResponse.status}`);
+    if (editResponse.status !== 404) {
+      throw new DiscordDeliveryError(`Discord webhook edit failed with ${editResponse.status}`, editResponse.status, "edit", "webhook");
+    }
     messageId = null;
   }
   const sendResponse = await fetch(`${webhookUrl}?wait=true`, {
@@ -352,7 +462,9 @@ async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!sendResponse.ok) throw new Error(`Discord webhook post failed with ${sendResponse.status}`);
+  if (!sendResponse.ok) {
+    throw new DiscordDeliveryError(`Discord webhook post failed with ${sendResponse.status}`, sendResponse.status, "post", "webhook");
+  }
   const message = await sendResponse.json().catch(() => null) as { id?: string } | null;
   return typeof message?.id === "string" ? message.id : null;
 }
@@ -377,6 +489,90 @@ async function recordPostingStateError(env: Env, destination: PostingDestination
     )
     .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, message, now, now)
     .run();
+}
+
+type DiscordChannel = {
+  guild_id?: string | null;
+  permissions?: string | number | null;
+  permission_overwrites?: Array<{
+    id: string;
+    type: number | string;
+    allow?: string | number | null;
+    deny?: string | number | null;
+  }>;
+};
+
+async function fetchDiscordApi(botToken: string, path: string) {
+  return fetch(`https://discord.com/api/v10${path}`, {
+    headers: { authorization: `Bot ${botToken}` },
+  });
+}
+
+async function getBotChannelPermissionBits(botToken: string, channel: DiscordChannel | null): Promise<bigint | null> {
+  const direct = parsePermissionBits(channel?.permissions);
+  if (direct !== null) return direct;
+  const guildId = typeof channel?.guild_id === "string" ? channel.guild_id : null;
+  if (!guildId) return null;
+
+  try {
+    const meResponse = await fetchDiscordApi(botToken, "/users/@me");
+    if (!meResponse.ok) return null;
+    const me = await meResponse.json().catch(() => null) as { id?: string } | null;
+    const botUserId = typeof me?.id === "string" ? me.id : null;
+    if (!botUserId) return null;
+
+    const [memberResponse, rolesResponse] = await Promise.all([
+      fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(botUserId)}`),
+      fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/roles`),
+    ]);
+    if (!memberResponse.ok || !rolesResponse.ok) return null;
+    const member = await memberResponse.json().catch(() => null) as { roles?: string[] } | null;
+    const roles = await rolesResponse.json().catch(() => null) as Array<{ id?: string; permissions?: string | number | null }> | null;
+    if (!Array.isArray(roles)) return null;
+
+    const roleIds = new Set(Array.isArray(member?.roles) ? member.roles : []);
+    let permissions = BigInt(0);
+    for (const role of roles) {
+      if (role.id === guildId || (role.id && roleIds.has(role.id))) {
+        permissions |= parsePermissionBits(role.permissions) ?? BigInt(0);
+      }
+    }
+    if ((permissions & DISCORD_ADMINISTRATOR_PERMISSION) === DISCORD_ADMINISTRATOR_PERMISSION) return permissions;
+
+    const overwrites = Array.isArray(channel?.permission_overwrites) ? channel.permission_overwrites : [];
+    const everyoneOverwrite = overwrites.find((overwrite) => overwrite.id === guildId && String(overwrite.type) === "0");
+    permissions = applyPermissionOverwrite(permissions, everyoneOverwrite);
+
+    let roleAllow = BigInt(0);
+    let roleDeny = BigInt(0);
+    for (const overwrite of overwrites) {
+      if (String(overwrite.type) !== "0" || !roleIds.has(overwrite.id)) continue;
+      roleAllow |= parsePermissionBits(overwrite.allow) ?? BigInt(0);
+      roleDeny |= parsePermissionBits(overwrite.deny) ?? BigInt(0);
+    }
+    permissions = (permissions & ~roleDeny) | roleAllow;
+
+    const memberOverwrite = overwrites.find((overwrite) => overwrite.id === botUserId && String(overwrite.type) === "1");
+    return applyPermissionOverwrite(permissions, memberOverwrite);
+  } catch {
+    return null;
+  }
+}
+
+function applyPermissionOverwrite(
+  permissions: bigint,
+  overwrite?: { allow?: string | number | null; deny?: string | number | null } | null,
+) {
+  if (!overwrite) return permissions;
+  const allow = parsePermissionBits(overwrite.allow) ?? BigInt(0);
+  const deny = parsePermissionBits(overwrite.deny) ?? BigInt(0);
+  return (permissions & ~deny) | allow;
+}
+
+function permissionWarning(missing: readonly string[]) {
+  return missing.length
+    ? `${DISCORD_CHANNEL_PERMISSION_WARNING} Missing: ${missing.join(", ")}.`
+    : DISCORD_CHANNEL_PERMISSION_WARNING;
 }
 
 function normalizeBotToken(value: string | undefined | null) {

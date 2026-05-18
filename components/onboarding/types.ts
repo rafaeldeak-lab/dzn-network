@@ -290,8 +290,13 @@ export type PostingDestinationSummary = {
   required_feature: string | null;
   min_plan_key: string | null;
   updated_at: string | null;
+  has_webhook_url?: boolean;
   delivery_mode?: "bot" | "webhook" | "not_configured";
+  setup_status?: "active" | "missing_permissions" | "setup_needed";
+  setup_label?: string;
+  setup_message?: string | null;
   setup_warning?: string | null;
+  missing_permissions?: string[];
   last_error?: string | null;
   last_posted_at?: string | null;
   last_edited_at?: string | null;
@@ -303,6 +308,13 @@ export type PostingPermissionCheck = {
   missing_permissions: string[];
   warning: string | null;
   checked_at: string | null;
+};
+
+export type PostingTestPostResult = {
+  ok: boolean;
+  mode?: string;
+  error?: string;
+  missing_permissions?: string[];
 };
 
 export type AutomationHealth = {

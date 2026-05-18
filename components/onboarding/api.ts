@@ -14,6 +14,7 @@ import type {
   OnboardingChecks,
   PostingPermissionCheck,
   PostingDestinationSummary,
+  PostingTestPostResult,
 } from "./types";
 
 export async function getMe() {
@@ -183,7 +184,7 @@ export async function savePostingDestination(linkedServerId: string, data: {
   enabled: boolean;
   send_test_post?: boolean;
 }) {
-  return request<{ post_types: PostingDestinationSummary[]; permission_check?: PostingPermissionCheck; test_post?: { ok: boolean; mode?: string; error?: string } | null }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
+  return request<{ post_types: PostingDestinationSummary[]; permission_check?: PostingPermissionCheck; test_post?: PostingTestPostResult | null }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
     method: "POST",
     body: JSON.stringify(data),
   });

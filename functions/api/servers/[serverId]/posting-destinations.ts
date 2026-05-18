@@ -1,5 +1,11 @@
 import { getSessionUser, requireDb } from "../../../_lib/db";
-import { checkDiscordPostingPermissions, getPostingDeliveryMode, sendDiscordTestPost } from "../../../_lib/discord-posting";
+import {
+  classifyDiscordPostingError,
+  checkDiscordPostingPermissions,
+  getPostingDeliveryMode,
+  recordDiscordPostingDeliveryState,
+  sendDiscordTestPost,
+} from "../../../_lib/discord-posting";
 import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
@@ -39,7 +45,13 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   }
   const channelId = sanitizeDiscordId(body.discord_channel_id);
   if (!channelId) return json({ error: "Discord channel ID is required." }, { status: 400 });
-  const webhookUrl = sanitizeWebhookUrl(body.discord_webhook_url);
+  const existingDestination = await requireDb(env)
+    .prepare("SELECT discord_webhook_url FROM server_posting_destinations WHERE guild_id = ? AND post_type = ? LIMIT 1")
+    .bind(context.guildId, postType)
+    .first<{ discord_webhook_url: string | null }>();
+  const rawWebhookUrl = typeof body.discord_webhook_url === "string" ? body.discord_webhook_url.trim() : "";
+  const webhookUrl = rawWebhookUrl ? sanitizeWebhookUrl(rawWebhookUrl) : existingDestination?.discord_webhook_url ?? null;
+  if (rawWebhookUrl && !webhookUrl) return json({ error: "Invalid Discord webhook URL." }, { status: 400 });
   const permissionCheck = await checkDiscordPostingPermissions(env, {
     discord_channel_id: channelId,
     discord_webhook_url: webhookUrl,
@@ -82,18 +94,48 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     warning: permissionCheck.warning,
   });
 
-  let testResult: { ok: boolean; mode?: string; error?: string } | null = null;
+  let testResult: { ok: boolean; mode?: string; error?: string; missing_permissions?: string[] } | null = null;
   if (body.send_test_post === true) {
-    try {
-      const delivery = await sendDiscordTestPost(env, {
-        guild_id: context.guildId,
-        post_type: postType,
-        discord_channel_id: channelId,
-        discord_webhook_url: webhookUrl,
-      });
-      testResult = { ok: true, mode: delivery.mode };
-    } catch (error) {
-      testResult = { ok: false, error: error instanceof Error ? error.message : "Discord test post failed." };
+    const state = await requireDb(env)
+      .prepare("SELECT discord_message_id FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
+      .bind(context.guildId, postType, channelId)
+      .first<{ discord_message_id: string | null }>();
+    if (permissionCheck.mode === "missing_permissions" && !webhookUrl) {
+      testResult = {
+        ok: false,
+        mode: "missing_permissions",
+        error: permissionCheck.warning ?? "DZN cannot auto-post in this channel yet.",
+        missing_permissions: permissionCheck.missing_permissions,
+      };
+    } else {
+      try {
+        const delivery = await sendDiscordTestPost(env, {
+          guild_id: context.guildId,
+          post_type: postType,
+          discord_channel_id: channelId,
+          discord_webhook_url: webhookUrl,
+        }, state?.discord_message_id ?? null);
+        await recordDiscordPostingDeliveryState(env, {
+          guild_id: context.guildId,
+          post_type: postType,
+          discord_channel_id: channelId,
+        }, delivery);
+        testResult = { ok: true, mode: delivery.mode };
+      } catch (error) {
+        const classified = classifyDiscordPostingError(error);
+        await upsertPostingPermissionWarning(env, {
+          guildId: context.guildId,
+          postType,
+          channelId,
+          warning: classified.warning,
+        });
+        testResult = {
+          ok: false,
+          mode: classified.mode,
+          error: classified.warning ?? "Discord test post failed.",
+          missing_permissions: classified.missing_permissions,
+        };
+      }
     }
   }
   return json({
@@ -136,31 +178,52 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
       last_edited_at: string | null;
     }>();
   const configured = new Map((rows.results ?? []).map((row) => [row.post_type, row]));
-  const states = new Map((stateRows.results ?? []).map((row) => [row.post_type, row]));
+  const states = new Map((stateRows.results ?? []).map((row) => [`${row.post_type}:${row.discord_channel_id}`, row]));
   return {
-    post_types: AUTO_POST_TYPES.map((postType) => {
+    post_types: await Promise.all(AUTO_POST_TYPES.map(async (postType) => {
       const row = configured.get(postType);
-      const state = states.get(postType);
-      const deliveryMode = getPostingDeliveryMode(env, {
+      const state = row?.discord_channel_id ? states.get(`${postType}:${row.discord_channel_id}`) : undefined;
+      let deliveryMode = getPostingDeliveryMode(env, {
         discord_channel_id: row?.discord_channel_id ?? null,
         discord_webhook_url: row?.discord_webhook_url ?? null,
       });
+      let permissionMissing: string[] = [];
+      let setupWarning = state?.last_error ?? null;
+      if (row?.discord_channel_id) {
+        const permissionCheck = await checkDiscordPostingPermissions(env, {
+          discord_channel_id: row.discord_channel_id,
+          discord_webhook_url: row.discord_webhook_url ?? null,
+        });
+        if (permissionCheck.mode === "bot" || permissionCheck.mode === "webhook" || permissionCheck.mode === "not_configured") {
+          deliveryMode = permissionCheck.mode;
+        } else {
+          deliveryMode = "not_configured";
+        }
+        permissionMissing = permissionCheck.missing_permissions;
+        setupWarning = permissionCheck.ok ? null : state?.last_error ?? permissionCheck.warning;
+      }
+      const setup = resolvePostingSetup(deliveryMode, row?.discord_channel_id ?? null, Boolean(row?.discord_webhook_url), setupWarning, permissionMissing);
       return {
         post_type: postType,
         allowed: hasAutoPost(planKey, postType),
         locked_message: hasAutoPost(planKey, postType) ? null : lockedMessage(postType),
         discord_channel_id: row?.discord_channel_id ?? null,
+        has_webhook_url: Boolean(row?.discord_webhook_url),
         enabled: row ? Number(row.enabled ?? 0) === 1 : false,
         required_feature: row?.required_feature ?? requiredFeatureForPostType(postType),
         min_plan_key: row?.min_plan_key ?? null,
         updated_at: row?.updated_at ?? null,
         delivery_mode: deliveryMode,
-        setup_warning: setupWarning(deliveryMode, state?.last_error ?? null),
+        setup_status: setup.status,
+        setup_label: setup.label,
+        setup_message: setup.message,
+        setup_warning: setup.warning,
+        missing_permissions: setup.missingPermissions,
         last_error: state?.last_error ?? null,
         last_posted_at: state?.last_posted_at ?? null,
         last_edited_at: state?.last_edited_at ?? null,
       };
-    }),
+    })),
   };
 }
 
@@ -194,10 +257,64 @@ function lockedMessage(postType: AutoPostType) {
   return "Upgrade your DZN plan to unlock this Discord auto-post.";
 }
 
-function setupWarning(deliveryMode: string, lastError: string | null) {
-  if (lastError) return lastError;
-  if (deliveryMode === "not_configured") return "Add a channel ID for bot posting or provide a webhook fallback.";
-  return null;
+function resolvePostingSetup(deliveryMode: string, channelId: string | null, hasWebhook: boolean, lastError: string | null, checkedMissingPermissions: string[] = []) {
+  const missingPermissions = checkedMissingPermissions.length > 0 ? checkedMissingPermissions : parseMissingPermissions(lastError);
+  if (missingPermissions.length > 0 || lastError?.startsWith("DZN cannot auto-post here yet")) {
+    return {
+      status: "missing_permissions",
+      label: "MISSING PERMISSIONS",
+      message: "DZN cannot auto-post in this channel yet. Please give the bot View Channel, Send Messages, Embed Links, and Read Message History permissions.",
+      warning: lastError,
+      missingPermissions: missingPermissions.length > 0 ? missingPermissions : ["View Channel", "Send Messages", "Embed Links", "Read Message History"],
+    };
+  }
+  if (lastError) {
+    return {
+      status: "setup_needed",
+      label: "SETUP NEEDED",
+      message: "DZN could not verify this auto-post destination yet. Send a test post or update the channel/webhook settings.",
+      warning: lastError,
+      missingPermissions: [],
+    };
+  }
+  if (deliveryMode === "bot") {
+    return {
+      status: "active",
+      label: "ACTIVE",
+      message: "DZN will auto-post and edit this embed using the bot in the selected channel.",
+      warning: null,
+      missingPermissions: [],
+    };
+  }
+  if (deliveryMode === "webhook") {
+    return {
+      status: "active",
+      label: "ACTIVE",
+      message: "DZN will auto-post using the saved webhook fallback.",
+      warning: null,
+      missingPermissions: [],
+    };
+  }
+  const warning = channelId && !hasWebhook
+    ? "DZN bot mode is not available yet. Check DISCORD_BOT_TOKEN in Cloudflare Pages or add a webhook fallback."
+    : "Add a channel ID for bot posting or provide a webhook fallback.";
+  return {
+    status: "setup_needed",
+    label: "SETUP NEEDED",
+    message: "Add a Discord channel ID for bot mode or a webhook fallback, then send a test post.",
+    warning: lastError ?? warning,
+    missingPermissions: [],
+  };
+}
+
+function parseMissingPermissions(value: string | null) {
+  if (!value) return [];
+  const match = value.match(/Missing:\s*([^.]*)\./i);
+  if (!match?.[1]) return [];
+  return match[1]
+    .split(",")
+    .map((permission) => permission.trim())
+    .filter(Boolean);
 }
 
 async function upsertPostingPermissionWarning(env: Env, input: {

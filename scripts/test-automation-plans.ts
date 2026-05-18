@@ -75,6 +75,15 @@ assert.equal(postingSource.includes("Manage Messages"), true);
 assert.equal(postingSource.includes("DZN cannot auto-post here yet"), true);
 assert.equal(postingSource.includes("DISCORD_BOT_TOKEN"), true);
 assert.equal(postingSource.includes("DZN DISCORD AUTO POST DISPATCH READY"), true);
+assert.equal(postingSource.includes("recordDiscordPostingDeliveryState"), true);
+assert.equal(postingSource.includes("classifyDiscordPostingError"), true);
+
+const postingEndpointSource = readFileSync("functions/api/servers/[serverId]/posting-destinations.ts", "utf8");
+assert.equal(postingEndpointSource.includes("existingDestination?.discord_webhook_url"), true);
+assert.equal(postingEndpointSource.includes("has_webhook_url"), true);
+assert.equal(postingEndpointSource.includes("setup_status"), true);
+assert.equal(postingEndpointSource.includes("MISSING PERMISSIONS"), true);
+assert.equal(postingEndpointSource.includes("SETUP NEEDED"), true);
 
 const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", "utf8");
 assert.equal(migrationSource.includes("CREATE TABLE IF NOT EXISTS server_subscriptions"), true);
@@ -114,14 +123,18 @@ assert.equal(cronAuthSource.includes("env.SYNC_CRON_SECRET"), false);
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Discord Auto Posts"), true);
 assert.equal(dashboardSource.includes("Automation Health"), true);
-assert.equal(dashboardSource.includes("Send Test Post"), true);
+assert.equal(dashboardSource.includes("TEST BASIC STATUS POST"), true);
 assert.equal(dashboardSource.includes("Preview Embed"), true);
-assert.equal(dashboardSource.includes("Bot mode"), true);
+assert.equal(dashboardSource.includes("BOT MODE"), true);
+assert.equal(dashboardSource.includes("WEBHOOK FALLBACK"), true);
+assert.equal(dashboardSource.includes("ACTIVE"), true);
 assert.equal(dashboardSource.includes("Server Status Sync:"), true);
 assert.equal(dashboardSource.includes("ADM Log Sync:"), true);
 assert.equal(dashboardSource.includes("Last Cron Source"), true);
-assert.equal(dashboardSource.includes("Missing permissions"), true);
+assert.equal(dashboardSource.includes("MISSING PERMISSIONS"), true);
 assert.equal(dashboardSource.includes("ADM logs can appear 5-45 minutes after a restart"), true);
+assert.equal(postingEndpointSource.includes("DZN will auto-post and edit this embed using the bot in the selected channel."), true);
+assert.equal(postingEndpointSource.includes("DZN will auto-post using the saved webhook fallback."), true);
 
 const healthEndpointSource = readFileSync("functions/api/automation/health.ts", "utf8");
 assert.equal(healthEndpointSource.includes("requireDznAdmin"), true);
