@@ -7,7 +7,7 @@ crons = ["* * * * *"]
 
 [vars]
 MOCK_NITRADO = "false"
-NEXT_PUBLIC_APP_URL = "https://dzn-network.pages.dev"
+DZN_APP_URL = "https://dzn-network.pages.dev"
 
 [[d1_databases]]
 binding = "DB"

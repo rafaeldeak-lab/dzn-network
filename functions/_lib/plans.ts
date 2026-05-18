@@ -193,10 +193,10 @@ export function getPlanFromStripePriceId(env: Env, priceId: string | null | unde
 }
 
 export function getStripePriceIdForPlan(env: Env, planKey: PlanKey) {
-  if (planKey === "starter") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID);
-  if (planKey === "pro") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID);
-  if (planKey === "network") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID);
-  if (planKey === "partner") return cleanEnvString(env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID);
+  if (planKey === "starter") return cleanEnvString(env.STRIPE_PRICE_STARTER) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID);
+  if (planKey === "pro") return cleanEnvString(env.STRIPE_PRICE_PRO) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID);
+  if (planKey === "network") return cleanEnvString(env.STRIPE_PRICE_NETWORK) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID);
+  if (planKey === "partner") return cleanEnvString(env.STRIPE_PRICE_PARTNER) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID);
   return null;
 }
 

@@ -1,11 +1,18 @@
 const checks = [
   ["STRIPE_SECRET_KEY", process.env.STRIPE_SECRET_KEY, true],
   ["STRIPE_WEBHOOK_SECRET", process.env.STRIPE_WEBHOOK_SECRET, true],
+  ["NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, false],
+  ["STRIPE_PRICE_STARTER", process.env.STRIPE_PRICE_STARTER, false],
+  ["STRIPE_PRICE_PRO", process.env.STRIPE_PRICE_PRO, false],
+  ["STRIPE_PRICE_NETWORK", process.env.STRIPE_PRICE_NETWORK, false],
+  ["STRIPE_PRICE_PARTNER", process.env.STRIPE_PRICE_PARTNER, false],
   ["NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID", process.env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID, false],
   ["NEXT_PUBLIC_STRIPE_PRO_PRICE_ID", process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID, false],
   ["NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID", process.env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID, false],
   ["NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID", process.env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID, false],
   ["NEXT_PUBLIC_APP_URL", process.env.NEXT_PUBLIC_APP_URL, false],
+  ["DZN_APP_URL", process.env.DZN_APP_URL, false],
+  ["DZN_CRON_SECRET", process.env.DZN_CRON_SECRET, true],
 ] as const;
 
 for (const [name, value, secret] of checks) {

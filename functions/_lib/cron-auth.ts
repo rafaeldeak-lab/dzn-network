@@ -2,6 +2,18 @@ import type { Env } from "./types";
 
 export const DZN_CRON_SECRET_HEADER = "x-dzn-cron-secret";
 
+export function requireCronSecret(request: Request, env: Env): Response | null {
+  if (isCronSecretAuthorized(request, env)) return null;
+  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    status: 401,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
 export function isCronSecretAuthorized(request: Request, env: Env) {
   const expected = getCronSecret(env);
   if (!expected) return false;

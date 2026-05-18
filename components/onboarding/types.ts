@@ -312,9 +312,13 @@ export type AutomationHealth = {
   last_adm_sync_run: string | null;
   last_discord_dispatcher_run: string | null;
   last_cron_trigger_source: "cloudflare" | "github-backup" | "manual" | string | null;
-  last_cron_trigger_endpoint: string | null;
+  last_cron_trigger_job_type: string | null;
   last_cron_trigger_status: string | null;
+  last_cron_trigger_started_at: string | null;
+  last_cron_trigger_finished_at: string | null;
   last_cron_trigger_at: string | null;
+  latest_cloudflare_cron_run_at: string | null;
+  latest_github_backup_cron_run_at: string | null;
   due_metadata_jobs: number;
   due_adm_jobs: number;
   queued_discord_post_jobs: number;
@@ -323,6 +327,11 @@ export type AutomationHealth = {
   stuck_currently_syncing_adm_locks: number;
   server_count_by_plan: Record<string, number>;
   subscription_count_by_status: Record<string, number>;
+  automation_cron_runs_table_exists: boolean;
+  automation_cron_runs_runtime_created: boolean;
+  automation_cron_runs_migration_applied: boolean | null;
+  migrationWarning: boolean;
+  migrationWarningMessage: string | null;
 };
 
 export type AdvertisingBumpStatus = {

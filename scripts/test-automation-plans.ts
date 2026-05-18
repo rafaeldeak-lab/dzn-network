@@ -82,6 +82,9 @@ assert.equal(migrationSource.includes("CREATE TABLE IF NOT EXISTS server_posting
 assert.equal(migrationSource.includes("CREATE TABLE IF NOT EXISTS automation_jobs"), true);
 const cronMigrationSource = readFileSync("migrations/0016_automation_cron_runs.sql", "utf8");
 assert.equal(cronMigrationSource.includes("CREATE TABLE IF NOT EXISTS automation_cron_runs"), true);
+assert.equal(cronMigrationSource.includes("job_type TEXT NOT NULL"), true);
+assert.equal(cronMigrationSource.includes("started_at TEXT"), true);
+assert.equal(cronMigrationSource.includes("finished_at TEXT"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 assert.equal(workflowSource.includes("Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only."), true);
@@ -94,8 +97,10 @@ assert.equal(workflowSource.indexOf("/api/sync/adm/run") < workflowSource.indexO
 
 const workerConfigSource = readFileSync("wrangler.adm-sync.toml", "utf8");
 assert.equal(workerConfigSource.includes("crons = [\"* * * * *\"]"), true);
+assert.equal(workerConfigSource.includes("DZN_APP_URL = \"https://dzn-network.pages.dev\""), true);
 const workerSource = readFileSync("workers/adm-sync-worker.ts", "utf8");
 assert.equal(workerSource.includes("DZN_CRON_SECRET"), true);
+assert.equal(workerSource.includes("env.DZN_APP_URL"), true);
 assert.equal(workerSource.includes("x-dzn-cron-secret"), true);
 assert.equal(workerSource.includes("env.SYNC_CRON_SECRET"), false);
 assert.equal(workerSource.includes("source: \"cloudflare\""), true);

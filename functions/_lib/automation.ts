@@ -13,8 +13,13 @@ import type { AutoPostType } from "../../lib/billing/plans";
 
 export const ACTIVE_BILLING_STATUSES = ["active", "trialing"] as const;
 export const AUTOMATION_CRON_SOURCES = ["cloudflare", "github-backup", "manual"] as const;
+export const AUTOMATION_CRON_MIGRATION_NAME = "0016_automation_cron_runs.sql";
+export const AUTOMATION_MIGRATION_WARNING =
+  "Automation is running, but D1 migration history needs attention. Rerun npm run db:migrate:remote once Cloudflare account permissions are fixed.";
 
 export type AutomationCronSource = typeof AUTOMATION_CRON_SOURCES[number];
+export type AutomationCronJobType = "metadata" | "adm" | "discord-posts";
+export type AutomationCronStatus = "success" | "failed" | "partial";
 
 export type AutomationSyncServer = {
   id: string;
@@ -41,6 +46,7 @@ export async function ensureAutomationSchema(env: Env) {
   for (const statement of AUTOMATION_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();
   }
+  await ensureAutomationCronRunsColumns(db);
 }
 
 export async function ensureAutomationRowsForLinkedServers(env: Env) {
@@ -129,18 +135,33 @@ export function normalizeAutomationCronSource(source: unknown, cron?: unknown): 
 
 export async function recordAutomationCronRun(env: Env, input: {
   source: AutomationCronSource;
-  endpoint: "metadata" | "adm" | "discord-posts";
-  status: "completed" | "failed" | "manual";
+  jobType: AutomationCronJobType;
+  status: AutomationCronStatus;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  errorMessage?: string | null;
 }) {
   await ensureAutomationSchema(env);
   const now = new Date().toISOString();
+  const startedAt = input.startedAt ?? now;
+  const finishedAt = input.finishedAt ?? now;
   await requireDb(env)
     .prepare(
       `INSERT INTO automation_cron_runs (
-        id, source, endpoint, status, created_at
-      ) VALUES (?, ?, ?, ?, ?)`,
+        id, source, endpoint, job_type, started_at, finished_at, status, error_message, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(crypto.randomUUID(), input.source, input.endpoint, input.status, now)
+    .bind(
+      crypto.randomUUID(),
+      input.source,
+      input.jobType,
+      input.jobType,
+      startedAt,
+      finishedAt,
+      input.status,
+      input.errorMessage ?? null,
+      now,
+    )
     .run();
 }
 
@@ -607,6 +628,9 @@ export async function getAutomationHealth(env: Env) {
   const [
     lastRuns,
     latestCronRun,
+    latestCloudflareCronRun,
+    latestGithubCronRun,
+    migrationState,
     dueMetadata,
     dueAdm,
     queuedDiscord,
@@ -630,8 +654,15 @@ export async function getAutomationHealth(env: Env) {
         last_discord_dispatcher_run: string | null;
       }>(),
     db
-      .prepare("SELECT source, endpoint, status, created_at FROM automation_cron_runs ORDER BY created_at DESC LIMIT 1")
-      .first<{ source: string | null; endpoint: string | null; status: string | null; created_at: string | null }>(),
+      .prepare("SELECT source, job_type, status, started_at, finished_at, created_at FROM automation_cron_runs ORDER BY created_at DESC LIMIT 1")
+      .first<{ source: string | null; job_type: string | null; status: string | null; started_at: string | null; finished_at: string | null; created_at: string | null }>(),
+    db
+      .prepare("SELECT MAX(created_at) AS created_at FROM automation_cron_runs WHERE source = 'cloudflare'")
+      .first<{ created_at: string | null }>(),
+    db
+      .prepare("SELECT MAX(created_at) AS created_at FROM automation_cron_runs WHERE source = 'github-backup'")
+      .first<{ created_at: string | null }>(),
+    getAutomationCronMigrationState(db),
     countFirst(db,
       `SELECT COUNT(*) AS count
        FROM server_subscriptions
@@ -674,18 +705,27 @@ export async function getAutomationHealth(env: Env) {
     last_metadata_sync_run: lastRuns?.last_metadata_sync_run ?? null,
     last_adm_sync_run: lastRuns?.last_adm_sync_run ?? null,
     last_discord_dispatcher_run: lastRuns?.last_discord_dispatcher_run ?? null,
-    last_cron_trigger_source: latestCronRun?.source ?? null,
-    last_cron_trigger_endpoint: latestCronRun?.endpoint ?? null,
+    last_cron_trigger_source: latestCronRun?.source ?? "unknown",
+    last_cron_trigger_job_type: latestCronRun?.job_type ?? null,
     last_cron_trigger_status: latestCronRun?.status ?? null,
+    last_cron_trigger_started_at: latestCronRun?.started_at ?? null,
+    last_cron_trigger_finished_at: latestCronRun?.finished_at ?? null,
     last_cron_trigger_at: latestCronRun?.created_at ?? null,
+    latest_cloudflare_cron_run_at: latestCloudflareCronRun?.created_at ?? null,
+    latest_github_backup_cron_run_at: latestGithubCronRun?.created_at ?? null,
     due_metadata_jobs: dueMetadata,
     due_adm_jobs: dueAdm,
     queued_discord_post_jobs: queuedDiscord,
     failed_jobs: failedJobs,
     stuck_currently_checking_status_locks: stuckStatusLocks,
     stuck_currently_syncing_adm_locks: stuckAdmLocks,
-    server_count_by_plan: rowsToCountMap(planCounts.results ?? [], "plan_key"),
-    subscription_count_by_status: rowsToCountMap(statusCounts.results ?? [], "status"),
+    server_count_by_plan: rowsToCountMap(planCounts.results ?? [], "plan_key", ["starter", "pro", "network", "partner"]),
+    subscription_count_by_status: rowsToCountMap(statusCounts.results ?? [], "status", ["active", "trialing", "past_due", "canceled", "unpaid", "incomplete"]),
+    automation_cron_runs_table_exists: migrationState.tableExists,
+    automation_cron_runs_runtime_created: migrationState.runtimeCreated,
+    automation_cron_runs_migration_applied: migrationState.migrationApplied,
+    migrationWarning: migrationState.warning,
+    migrationWarningMessage: migrationState.warning ? AUTOMATION_MIGRATION_WARNING : null,
   };
 }
 
@@ -716,8 +756,74 @@ async function countFirst(db: D1Database, query: string, ...bindings: unknown[])
   return Number(row?.count ?? 0);
 }
 
-function rowsToCountMap<T extends Record<string, unknown> & { count?: unknown }>(rows: T[], key: keyof T) {
-  return Object.fromEntries(rows.map((row) => [String(row[key] ?? "unknown"), Number(row.count ?? 0)]));
+function rowsToCountMap<T extends Record<string, unknown> & { count?: unknown }>(rows: T[], key: keyof T, defaults: string[] = []) {
+  return {
+    ...Object.fromEntries(defaults.map((value) => [value, 0])),
+    ...Object.fromEntries(rows.map((row) => [String(row[key] ?? "unknown"), Number(row.count ?? 0)])),
+  };
+}
+
+async function ensureAutomationCronRunsColumns(db: D1Database) {
+  const columns = await getTableColumns(db, "automation_cron_runs");
+  const requiredColumns: Record<string, string> = {
+    endpoint: "ALTER TABLE automation_cron_runs ADD COLUMN endpoint TEXT",
+    job_type: "ALTER TABLE automation_cron_runs ADD COLUMN job_type TEXT",
+    started_at: "ALTER TABLE automation_cron_runs ADD COLUMN started_at TEXT",
+    finished_at: "ALTER TABLE automation_cron_runs ADD COLUMN finished_at TEXT",
+    error_message: "ALTER TABLE automation_cron_runs ADD COLUMN error_message TEXT",
+  };
+
+  for (const [column, statement] of Object.entries(requiredColumns)) {
+    if (!columns.has(column)) {
+      await db.prepare(statement).run();
+    }
+  }
+
+  if (!columns.has("job_type") && columns.has("endpoint")) {
+    await db.prepare("UPDATE automation_cron_runs SET job_type = COALESCE(job_type, endpoint)").run();
+  }
+  await db.prepare("UPDATE automation_cron_runs SET job_type = COALESCE(job_type, 'metadata') WHERE job_type IS NULL").run();
+  await db.prepare("UPDATE automation_cron_runs SET started_at = COALESCE(started_at, created_at) WHERE started_at IS NULL").run();
+  await db.prepare("UPDATE automation_cron_runs SET finished_at = COALESCE(finished_at, created_at) WHERE finished_at IS NULL").run();
+  await db.prepare("UPDATE automation_cron_runs SET status = 'success' WHERE status IN ('completed', 'manual')").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_job_type ON automation_cron_runs(job_type)").run();
+}
+
+async function getAutomationCronMigrationState(db: D1Database) {
+  const cronTableExists = await tableExists(db, "automation_cron_runs");
+  const migrationApplied = await isD1MigrationApplied(db, AUTOMATION_CRON_MIGRATION_NAME);
+  const runtimeCreated = cronTableExists && migrationApplied !== true;
+  return {
+    tableExists: cronTableExists,
+    migrationApplied,
+    runtimeCreated,
+    warning: !cronTableExists || migrationApplied !== true || runtimeCreated,
+  };
+}
+
+async function tableExists(db: D1Database, tableName: string) {
+  const row = await db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+    .bind(tableName)
+    .first<{ name: string }>()
+    .catch(() => null);
+  return Boolean(row?.name);
+}
+
+async function isD1MigrationApplied(db: D1Database, migrationName: string): Promise<boolean | null> {
+  const migrationTableExists = await tableExists(db, "d1_migrations");
+  if (!migrationTableExists) return false;
+  const row = await db
+    .prepare("SELECT name FROM d1_migrations WHERE name = ? OR name LIKE ? LIMIT 1")
+    .bind(migrationName, `%${migrationName.replace(/\.sql$/, "")}%`)
+    .first<{ name: string }>()
+    .catch(() => null);
+  return Boolean(row?.name);
+}
+
+async function getTableColumns(db: D1Database, tableName: string) {
+  const result = await db.prepare(`PRAGMA table_info(${tableName})`).all<{ name: string }>();
+  return new Set((result.results ?? []).map((row) => row.name));
 }
 
 const AUTOMATION_SCHEMA_STATEMENTS = [
@@ -844,8 +950,12 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS automation_cron_runs (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
-    endpoint TEXT NOT NULL,
+    endpoint TEXT,
+    job_type TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
     status TEXT NOT NULL,
+    error_message TEXT,
     created_at TEXT NOT NULL
   )`,
   "CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_created_at ON automation_cron_runs(created_at)",

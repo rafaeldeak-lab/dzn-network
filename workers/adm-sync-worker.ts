@@ -115,7 +115,7 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
 }
 
 function appBaseUrl(env: Env) {
-  const configured = env.NEXT_PUBLIC_APP_URL?.trim();
+  const configured = env.DZN_APP_URL?.trim() || env.NEXT_PUBLIC_APP_URL?.trim();
   if (!configured) return DEFAULT_APP_URL;
   try {
     const url = new URL(configured);

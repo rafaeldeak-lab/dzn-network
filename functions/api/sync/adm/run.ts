@@ -1,6 +1,6 @@
 import { runAdmSync, runScheduledAdmSync } from "../../../_lib/adm-sync";
 import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
-import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
+import { DZN_CRON_SECRET_HEADER, isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
 import { ensureMockUser, getSessionUser } from "../../../_lib/db";
 import { json, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
@@ -51,7 +51,10 @@ export async function handleAdmSyncRun(
 ) {
   const body = await readJson<AdmSyncRunBody>(request);
   if (isCronAuthorized(request, env)) {
+    const unauthorized = requireCronSecret(request, env);
+    if (unauthorized) return unauthorized;
     const source = normalizeAutomationCronSource(body.source, body.cron);
+    const startedAt = new Date().toISOString();
     let result: Awaited<ReturnType<typeof runScheduledAdmSync>>;
     try {
       result = await handlers.runScheduled(env, {
@@ -60,9 +63,9 @@ export async function handleAdmSyncRun(
         maxLinesPerServer: sanitizePositiveInteger(body.max_lines_per_server, 50000),
         minSyncIntervalMs: 0,
       });
-      await safeRecordCronRun(env, source, "completed");
+      await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt);
     } catch (error) {
-      await safeRecordCronRun(env, source, "failed");
+      await safeRecordCronRun(env, source, "failed", startedAt, error);
       throw error;
     }
     console.log("DZN ADM SYNC POST ENDPOINT FIXED");
@@ -76,6 +79,11 @@ export async function handleAdmSyncRun(
     return json({ ...result, source });
   }
 
+  if (request.headers.has(DZN_CRON_SECRET_HEADER)) {
+    const unauthorized = requireCronSecret(request, env);
+    if (unauthorized) return unauthorized;
+  }
+
   const user = await handlers.resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
@@ -84,7 +92,7 @@ export async function handleAdmSyncRun(
       triggerType: "manual",
       maxLinesPerRun: sanitizePositiveInteger(body.max_lines_per_server, 50000),
     });
-    await safeRecordCronRun(env, "manual", "manual");
+    await safeRecordCronRun(env, "manual", "success", new Date().toISOString());
     return json(result);
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "ADM sync failed" }, { status: 400 });
@@ -117,9 +125,22 @@ function sanitizePositiveInteger(value: unknown, fallback: number) {
   return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), 100000) : fallback;
 }
 
-async function safeRecordCronRun(env: Env, source: ReturnType<typeof normalizeAutomationCronSource>, status: "completed" | "failed" | "manual") {
+async function safeRecordCronRun(
+  env: Env,
+  source: ReturnType<typeof normalizeAutomationCronSource>,
+  status: "success" | "failed" | "partial",
+  startedAt: string,
+  error?: unknown,
+) {
   try {
-    await recordAutomationCronRun(env, { source, endpoint: "adm", status });
+    await recordAutomationCronRun(env, {
+      source,
+      jobType: "adm",
+      status,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      errorMessage: error instanceof Error ? error.message : null,
+    });
   } catch (error) {
     console.warn("DZN AUTOMATION CRON RUN RECORD SKIPPED", {
       endpoint: "adm",

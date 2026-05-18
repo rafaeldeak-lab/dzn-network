@@ -30,6 +30,7 @@ interface CloudflareEnv {
   SESSION_SECRET?: string;
   TOKEN_ENCRYPTION_KEY?: string;
   DZN_CRON_SECRET?: string;
+  DZN_APP_URL?: string;
   SYNC_WORKER_HEALTH_TOKEN?: string;
   DZN_ADMIN_DISCORD_IDS?: string;
   DZN_OWNER_DISCORD_IDS?: string;
@@ -38,6 +39,11 @@ interface CloudflareEnv {
   MOCK_NITRADO?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string;
+  STRIPE_PRICE_STARTER?: string;
+  STRIPE_PRICE_PRO?: string;
+  STRIPE_PRICE_NETWORK?: string;
+  STRIPE_PRICE_PARTNER?: string;
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID?: string;
   NEXT_PUBLIC_STRIPE_PRO_PRICE_ID?: string;
   NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID?: string;

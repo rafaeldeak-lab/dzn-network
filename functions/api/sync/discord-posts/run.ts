@@ -1,6 +1,6 @@
 import { dispatchQueuedDiscordPostUpdates } from "../../../_lib/discord-posting";
 import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
-import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
+import { isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
 import { json, readJson } from "../../../_lib/http";
 import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
@@ -35,16 +35,18 @@ export async function handleDiscordPostRun(
   handlers: DiscordPostRunHandlers = DEFAULT_HANDLERS,
 ) {
   const body = await readJson<DiscordPostRunBody>(request);
-  if (!isDiscordPostCronAuthorized(request, env)) return json({ error: "Unauthorized" }, { status: 401 });
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
   const source = normalizeAutomationCronSource(body.source, body.cron);
+  const startedAt = new Date().toISOString();
   let result: Awaited<ReturnType<typeof dispatchQueuedDiscordPostUpdates>>;
   try {
     result = await handlers.dispatch(env, {
       maxJobs: sanitizePositiveInteger(body.max_jobs, 25),
     });
-    await safeRecordCronRun(env, source, "completed");
+    await safeRecordCronRun(env, source, result.failed > 0 && (result.posted > 0 || result.skipped > 0) ? "partial" : result.failed > 0 ? "failed" : "success", startedAt);
   } catch (error) {
-    await safeRecordCronRun(env, source, "failed");
+    await safeRecordCronRun(env, source, "failed", startedAt, error);
     throw error;
   }
   return json({
@@ -63,9 +65,22 @@ function sanitizePositiveInteger(value: unknown, fallback: number) {
   return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), 100000) : fallback;
 }
 
-async function safeRecordCronRun(env: Env, source: ReturnType<typeof normalizeAutomationCronSource>, status: "completed" | "failed") {
+async function safeRecordCronRun(
+  env: Env,
+  source: ReturnType<typeof normalizeAutomationCronSource>,
+  status: "success" | "failed" | "partial",
+  startedAt: string,
+  error?: unknown,
+) {
   try {
-    await recordAutomationCronRun(env, { source, endpoint: "discord-posts", status });
+    await recordAutomationCronRun(env, {
+      source,
+      jobType: "discord-posts",
+      status,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      errorMessage: error instanceof Error ? error.message : null,
+    });
   } catch (error) {
     console.warn("DZN AUTOMATION CRON RUN RECORD SKIPPED", {
       endpoint: "discord-posts",

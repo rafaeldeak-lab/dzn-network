@@ -1,6 +1,6 @@
 import { refreshLivePlayerCountsForActiveServers } from "../../../_lib/server-metadata";
 import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
-import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
+import { isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
 import { json, readJson } from "../../../_lib/http";
 import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
@@ -42,20 +42,20 @@ export async function handleMetadataSyncRun(
   handlers: MetadataSyncRunHandlers = DEFAULT_HANDLERS,
 ) {
   const body = await readJson<MetadataSyncRunBody>(request);
-  if (!isMetadataCronAuthorized(request, env)) {
-    return json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
 
   const source = normalizeAutomationCronSource(body.source, body.cron);
+  const startedAt = new Date().toISOString();
   let result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>;
   try {
     result = await handlers.refreshMetadata(env, {
       maxServers: sanitizePositiveInteger(body.max_servers, 25),
       includeResults: true,
     });
-    await safeRecordCronRun(env, source, "completed");
+    await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt);
   } catch (error) {
-    await safeRecordCronRun(env, source, "failed");
+    await safeRecordCronRun(env, source, "failed", startedAt, error);
     throw error;
   }
 
@@ -90,9 +90,22 @@ function sanitizePositiveInteger(value: unknown, fallback: number) {
   return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), 100000) : fallback;
 }
 
-async function safeRecordCronRun(env: Env, source: ReturnType<typeof normalizeAutomationCronSource>, status: "completed" | "failed") {
+async function safeRecordCronRun(
+  env: Env,
+  source: ReturnType<typeof normalizeAutomationCronSource>,
+  status: "success" | "failed" | "partial",
+  startedAt: string,
+  error?: unknown,
+) {
   try {
-    await recordAutomationCronRun(env, { source, endpoint: "metadata", status });
+    await recordAutomationCronRun(env, {
+      source,
+      jobType: "metadata",
+      status,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      errorMessage: error instanceof Error ? error.message : null,
+    });
   } catch (error) {
     console.warn("DZN AUTOMATION CRON RUN RECORD SKIPPED", {
       endpoint: "metadata",

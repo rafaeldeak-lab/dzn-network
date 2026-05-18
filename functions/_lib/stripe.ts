@@ -47,7 +47,7 @@ export type StripeEvent = {
 };
 
 export function getAppUrl(env: Env, request: Request) {
-  const configured = env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+  const configured = (env.DZN_APP_URL ?? env.NEXT_PUBLIC_APP_URL)?.trim().replace(/\/+$/, "");
   if (configured) return configured;
   const url = new URL(request.url);
   return `${url.protocol}//${url.host}`;

@@ -643,7 +643,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                 <p className="text-xs font-black uppercase opacity-75">{dashboardSyncBanner.title}</p>
                 <p className="mt-1 text-sm font-black leading-6 text-white">{dashboardSyncBanner.message}</p>
                 <p className="mt-1 text-sm leading-6 text-zinc-300">
-                  {dashboardSyncBanner.detail ?? "Player activity, kills, deaths and more are being synced in real time."}
+                  {dashboardSyncBanner.detail ?? "Player activity, kills, deaths and more update after each successful ADM log check."}
                 </p>
               </div>
             </div>
@@ -1610,18 +1610,30 @@ function DiscordAutoPostsPanel({
 }
 
 function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
+  const summary = getAutomationHealthSummary(health);
   return (
     <DashboardPanel className="p-4">
       <PanelHeader icon={<Activity className="h-5 w-5" />} title="Automation Health" />
       <p className="mt-3 text-xs leading-5 text-zinc-400">
         Backend cron state from the database. Cloudflare Worker Cron is the primary trigger; GitHub Actions is backup only.
       </p>
+      <p className={`mt-3 rounded-lg border px-3 py-2 text-xs font-bold leading-5 ${summary.className}`}>
+        {summary.message}
+      </p>
+      {health.migrationWarning ? (
+        <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold leading-5 text-amber-100">
+          {health.migrationWarningMessage ?? "Automation is running, but D1 migration history needs attention."}
+        </p>
+      ) : null}
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MiniInfo label="Last Metadata Run" value={health.last_metadata_sync_run ? formatDashboardDate(health.last_metadata_sync_run) : "Waiting"} />
         <MiniInfo label="Last ADM Run" value={health.last_adm_sync_run ? formatDashboardDate(health.last_adm_sync_run) : "Waiting"} />
         <MiniInfo label="Last Discord Dispatch" value={health.last_discord_dispatcher_run ? formatDashboardDate(health.last_discord_dispatcher_run) : "Waiting"} />
         <MiniInfo label="Last Cron Source" value={formatCronSource(health.last_cron_trigger_source)} />
         <MiniInfo label="Last Cron Trigger" value={health.last_cron_trigger_at ? formatDashboardDate(health.last_cron_trigger_at) : "Waiting"} />
+        <MiniInfo label="Cloudflare Cron" value={health.latest_cloudflare_cron_run_at ? formatDashboardDate(health.latest_cloudflare_cron_run_at) : "Waiting"} />
+        <MiniInfo label="GitHub Backup" value={health.latest_github_backup_cron_run_at ? formatDashboardDate(health.latest_github_backup_cron_run_at) : "Waiting"} />
+        <MiniInfo label="Cron Table" value={health.automation_cron_runs_table_exists ? health.automation_cron_runs_migration_applied ? "Migration applied" : "Runtime-created" : "Missing"} />
         <MiniInfo label="Due Metadata Jobs" value={String(health.due_metadata_jobs)} />
         <MiniInfo label="Due ADM Jobs" value={String(health.due_adm_jobs)} />
         <MiniInfo label="Queued Discord Jobs" value={String(health.queued_discord_post_jobs)} />
@@ -1671,7 +1683,40 @@ function formatCronSource(value: string | null | undefined) {
   if (value === "cloudflare") return "Cloudflare";
   if (value === "github-backup") return "GitHub backup";
   if (value === "manual") return "Manual";
+  if (value === "unknown") return "Unknown";
   return "Waiting";
+}
+
+function getAutomationHealthSummary(health: AutomationHealth) {
+  const latestCronAgeMs = health.last_cron_trigger_at ? Date.now() - Date.parse(health.last_cron_trigger_at) : Number.POSITIVE_INFINITY;
+  const cloudflareAgeMs = health.latest_cloudflare_cron_run_at ? Date.now() - Date.parse(health.latest_cloudflare_cron_run_at) : Number.POSITIVE_INFINITY;
+  const githubAgeMs = health.latest_github_backup_cron_run_at ? Date.now() - Date.parse(health.latest_github_backup_cron_run_at) : Number.POSITIVE_INFINITY;
+
+  if (!Number.isFinite(latestCronAgeMs) || latestCronAgeMs > 10 * 60 * 1000) {
+    return {
+      message: "No recent automation cron check-in detected.",
+      className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
+    };
+  }
+
+  if (Number.isFinite(cloudflareAgeMs) && cloudflareAgeMs <= 3 * 60 * 1000) {
+    return {
+      message: "Cloudflare Worker Cron is active. Automation is running.",
+      className: "border-emerald-300/20 bg-emerald-400/10 text-emerald-50",
+    };
+  }
+
+  if (Number.isFinite(githubAgeMs) && githubAgeMs <= 10 * 60 * 1000) {
+    return {
+      message: "GitHub backup cron is running, but Cloudflare 1-minute cron has not checked in recently.",
+      className: "border-amber-300/20 bg-amber-400/10 text-amber-50",
+    };
+  }
+
+  return {
+    message: "Automation is running, but Cloudflare Worker Cron has not checked in recently.",
+    className: "border-amber-300/20 bg-amber-400/10 text-amber-50",
+  };
 }
 
 function DashboardPublicReviewsSummary({ slug }: { slug: string }) {
@@ -2637,7 +2682,7 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     status: "active" as const,
     title: "ADM Sync Active",
     message: "ADM Sync Active - DZN is reading your server logs and updating player activity.",
-    detail: "Player activity, kills, deaths and more are being synced in real time.",
+    detail: "Player activity, kills, deaths and more update after each successful ADM log check.",
     nextAction: "Continue syncing after fresh ADM activity",
     latestSuccessTime,
   };
