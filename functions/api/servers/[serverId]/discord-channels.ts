@@ -1,60 +1,174 @@
-import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
+import { getAutomationContextForLinkedServer } from "../../../_lib/automation";
 import { getSessionUser, requireDb } from "../../../_lib/db";
-import { fetchDiscordPostingChannels } from "../../../_lib/discord-posting";
+import {
+  DiscordChannelFetchError,
+  fetchDiscordPostingChannels,
+  type DiscordPostingChannel,
+} from "../../../_lib/discord-posting";
 import { json, methodNotAllowed } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
+
+type ChannelFetchDiagnostics = {
+  selected_server_id: string | null;
+  selected_guild_id: string | null;
+  guild_name: string | null;
+  bot_token_configured: boolean;
+  bot_connected: boolean | null;
+  channels_fetched_count: number;
+  postable_channels_count: number;
+  last_fetch_error_code: string | null;
+  last_fetch_error_message: string | null;
+  last_fetch_time: string;
+};
+
+type LinkedServerAccess = {
+  id: string;
+  guild_id: string | null;
+  discord_guild_id: string | null;
+  server_name: string | null;
+  display_name: string | null;
+  guild_name: string | null;
+};
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (request.method !== "GET") return methodNotAllowed();
 
   const user = await resolveUser(env, request);
-  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) return json({ error: "Unauthorized", error_code: "not_authorized" }, { status: 401 });
 
   const linkedServerId = sanitizeLinkedServerId(params.serverId);
   if (!linkedServerId) return json({ error: "Invalid server id" }, { status: 400 });
-  const access = await requireOwnedServer(env, user.id, linkedServerId);
-  if (!access) return json({ error: "Server not found" }, { status: 404 });
 
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
-  if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
-
-  await ensureAutomationSchema(env);
-
-  if (isMockAuth(env.MOCK_AUTH)) {
+  const server = await requireManageableServer(env, user.id, linkedServerId);
+  if (!server) {
     return json({
-      channels: [
-        mockChannel("123456789012345678", "auto-leaderboards", "Automation"),
-        mockChannel("123456789012345679", "killfeed", "Feeds"),
-        mockChannel("123456789012345680", "admin-alerts", "Admin", ["Embed Links"]),
-      ],
-      manual_fallback: false,
-      fetched_at: new Date().toISOString(),
+      error: "Server not found or you do not have permission to manage it.",
+      ...emptyResponse({
+        selectedServerId: linkedServerId,
+        selectedGuildId: null,
+        guildName: null,
+        botTokenConfigured: hasDiscordBotToken(env),
+        botConnected: null,
+        fetchedAt: new Date().toISOString(),
+        errorCode: "not_authorized",
+        errorMessage: "Logged-in user cannot manage this DZN server.",
+        botInviteUrl: null,
+      }),
+    }, { status: 403 });
+  }
+
+  const fetchedAt = new Date().toISOString();
+  const selectedGuildId = normalizeDiscordId(server.guild_id);
+  const guildName = server.guild_name ?? server.display_name ?? server.server_name ?? null;
+  const botTokenConfigured = hasDiscordBotToken(env);
+  if (!selectedGuildId) {
+    return json({
+      error: "No Discord server is linked to this DZN server.",
+      ...emptyResponse({
+        selectedServerId: server.id,
+        selectedGuildId: null,
+        guildName,
+        botTokenConfigured,
+        botConnected: null,
+        fetchedAt,
+        errorCode: "missing_guild_id",
+        errorMessage: "The selected dashboard server does not have a stored Discord guild ID.",
+        botInviteUrl: null,
+      }),
     });
   }
 
-  try {
-    const channels = await fetchDiscordPostingChannels(env, context.guildId);
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  if (!context) {
     return json({
-      channels,
-      manual_fallback: false,
-      fetched_at: new Date().toISOString(),
+      error: "Automation is not ready for this server yet.",
+      ...emptyResponse({
+        selectedServerId: server.id,
+        selectedGuildId,
+        guildName,
+        botTokenConfigured,
+        botConnected: null,
+        fetchedAt,
+        errorCode: "missing_guild_id",
+        errorMessage: "Automation context could not be created for the selected guild.",
+        botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
+      }),
     });
-  } catch {
+  }
+
+  if (isMockAuth(env.MOCK_AUTH)) {
+    const channels = [
+      mockChannel("123456789012345678", "auto-leaderboards", "Automation"),
+      mockChannel("123456789012345679", "killfeed", "Feeds"),
+      mockChannel("123456789012345680", "admin-alerts", "Admin", ["Embed Links"]),
+    ];
+    return json(channelResponse({
+      channels,
+      selectedServerId: server.id,
+      selectedGuildId,
+      guildName: guildName ?? "Mock Discord Server",
+      botTokenConfigured: true,
+      botConnected: true,
+      fetchedAt,
+      manualFallback: false,
+      warning: null,
+      errorCode: null,
+      errorMessage: null,
+      botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
+    }));
+  }
+
+  try {
+    const channels = await fetchDiscordPostingChannels(env, selectedGuildId);
+    return json(channelResponse({
+      channels,
+      selectedServerId: server.id,
+      selectedGuildId,
+      guildName,
+      botTokenConfigured,
+      botConnected: true,
+      fetchedAt,
+      manualFallback: false,
+      warning: null,
+      errorCode: null,
+      errorMessage: null,
+      botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
+    }));
+  } catch (error) {
+    const classified = classifyChannelFetchError(error);
     return json({
-      channels: [],
-      manual_fallback: true,
-      warning: "DZN could not fetch Discord channels. Use Advanced manual setup with a channel ID and optional webhook fallback.",
-      fetched_at: new Date().toISOString(),
+      error: classified.message,
+      ...emptyResponse({
+        selectedServerId: server.id,
+        selectedGuildId,
+        guildName,
+        botTokenConfigured,
+        botConnected: classified.botConnected,
+        fetchedAt,
+        errorCode: classified.code,
+        errorMessage: classified.message,
+        botInviteUrl: classified.code === "bot_not_in_guild" ? buildBotInviteUrl(env, selectedGuildId) : null,
+      }),
+      warning: classified.message,
+      bot_invite_url: classified.code === "bot_not_in_guild" ? buildBotInviteUrl(env, selectedGuildId) : null,
     });
   }
 };
 
-async function requireOwnedServer(env: Env, userId: string, linkedServerId: string) {
+async function requireManageableServer(env: Env, userId: string, linkedServerId: string): Promise<LinkedServerAccess | null> {
   return requireDb(env)
-    .prepare("SELECT id FROM linked_servers WHERE id = ? AND user_id = ? LIMIT 1")
+    .prepare(
+      `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.discord_guild_id,
+              linked_servers.server_name, linked_servers.display_name,
+              discord_guilds.name AS guild_name
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       WHERE linked_servers.id = ? AND linked_servers.user_id = ?
+       LIMIT 1`,
+    )
     .bind(linkedServerId, userId)
-    .first<{ id: string }>();
+    .first<LinkedServerAccess>();
 }
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
@@ -68,16 +182,180 @@ async function resolveUser(env: Env, request: Request): Promise<SessionUser | nu
   };
 }
 
+function channelResponse(input: {
+  channels: DiscordPostingChannel[];
+  selectedServerId: string;
+  selectedGuildId: string | null;
+  guildName: string | null;
+  botTokenConfigured: boolean;
+  botConnected: boolean | null;
+  fetchedAt: string;
+  manualFallback: boolean;
+  warning: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  botInviteUrl: string | null;
+}) {
+  return {
+    channels: input.channels,
+    manual_fallback: input.manualFallback,
+    warning: input.warning ?? undefined,
+    fetched_at: input.fetchedAt,
+    selected_server_id: input.selectedServerId,
+    selected_guild_id: input.selectedGuildId,
+    guild_name: input.guildName,
+    bot_token_configured: input.botTokenConfigured,
+    bot_connected: input.botConnected,
+    error_code: input.errorCode,
+    bot_invite_url: input.botInviteUrl,
+    diagnostics: buildDiagnostics({
+      selectedServerId: input.selectedServerId,
+      selectedGuildId: input.selectedGuildId,
+      guildName: input.guildName,
+      botTokenConfigured: input.botTokenConfigured,
+      botConnected: input.botConnected,
+      fetchedAt: input.fetchedAt,
+      channels: input.channels,
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+    }),
+  };
+}
+
+function emptyResponse(input: {
+  selectedServerId: string | null;
+  selectedGuildId: string | null;
+  guildName: string | null;
+  botTokenConfigured: boolean;
+  botConnected: boolean | null;
+  fetchedAt: string;
+  errorCode: string;
+  errorMessage: string;
+  botInviteUrl: string | null;
+}) {
+  return {
+    channels: [] as DiscordPostingChannel[],
+    manual_fallback: true,
+    fetched_at: input.fetchedAt,
+    selected_server_id: input.selectedServerId,
+    selected_guild_id: input.selectedGuildId,
+    guild_name: input.guildName,
+    bot_token_configured: input.botTokenConfigured,
+    bot_connected: input.botConnected,
+    error_code: input.errorCode,
+    bot_invite_url: input.botInviteUrl,
+    diagnostics: buildDiagnostics({
+      selectedServerId: input.selectedServerId,
+      selectedGuildId: input.selectedGuildId,
+      guildName: input.guildName,
+      botTokenConfigured: input.botTokenConfigured,
+      botConnected: input.botConnected,
+      fetchedAt: input.fetchedAt,
+      channels: [],
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+    }),
+  };
+}
+
+function buildDiagnostics(input: {
+  selectedServerId: string | null;
+  selectedGuildId: string | null;
+  guildName: string | null;
+  botTokenConfigured: boolean;
+  botConnected: boolean | null;
+  fetchedAt: string;
+  channels: DiscordPostingChannel[];
+  errorCode: string | null;
+  errorMessage: string | null;
+}): ChannelFetchDiagnostics {
+  return {
+    selected_server_id: input.selectedServerId,
+    selected_guild_id: input.selectedGuildId,
+    guild_name: input.guildName,
+    bot_token_configured: input.botTokenConfigured,
+    bot_connected: input.botConnected,
+    channels_fetched_count: input.channels.length,
+    postable_channels_count: input.channels.filter((channel) => channel.can_post).length,
+    last_fetch_error_code: input.errorCode,
+    last_fetch_error_message: input.errorMessage,
+    last_fetch_time: input.fetchedAt,
+  };
+}
+
+function classifyChannelFetchError(error: unknown) {
+  if (error instanceof DiscordChannelFetchError) {
+    if (error.code === "missing_bot_token") {
+      return {
+        code: "missing_bot_token",
+        message: "DISCORD_BOT_TOKEN is missing in Cloudflare Pages, so DZN cannot fetch Discord channels automatically.",
+        status: 503,
+        botConnected: null,
+      };
+    }
+    if (error.code === "bot_not_in_guild") {
+      return {
+        code: "bot_not_in_guild",
+        message: "DZN bot is not connected to this Discord server yet. Invite the bot to enable auto posts.",
+        status: 424,
+        botConnected: false,
+      };
+    }
+    if (error.code === "discord_api_403") {
+      return {
+        code: "discord_api_403",
+        message: "Discord returned 403 while DZN tried to fetch this server's channels. Check bot permissions and guild access.",
+        status: 424,
+        botConnected: null,
+      };
+    }
+    return {
+      code: error.code,
+      message: error.message,
+      status: 424,
+      botConnected: null,
+    };
+  }
+  return {
+    code: "discord_api_error",
+    message: error instanceof Error ? error.message : "Discord channel fetch failed.",
+    status: 424,
+    botConnected: null,
+  };
+}
+
+function buildBotInviteUrl(env: Env, guildId: string | null) {
+  const clientId = typeof env.DISCORD_CLIENT_ID === "string" ? env.DISCORD_CLIENT_ID.trim() : "";
+  if (!clientId || !guildId) return null;
+  const url = new URL("https://discord.com/oauth2/authorize");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("scope", "bot applications.commands");
+  url.searchParams.set("permissions", "274878294016");
+  url.searchParams.set("guild_id", guildId);
+  url.searchParams.set("disable_guild_select", "true");
+  return url.toString();
+}
+
+function hasDiscordBotToken(env: Env) {
+  return typeof env.DISCORD_BOT_TOKEN === "string" && env.DISCORD_BOT_TOKEN.trim().length > 0;
+}
+
+function normalizeDiscordId(value: unknown) {
+  return typeof value === "string" && /^\d{12,24}$/.test(value.trim()) ? value.trim() : null;
+}
+
 function sanitizeLinkedServerId(value: unknown) {
   return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
 }
 
-function mockChannel(channelId: string, channelName: string, categoryName: string, missingPermissions: string[] = []) {
+function mockChannel(channelId: string, channelName: string, categoryName: string, missingPermissions: string[] = []): DiscordPostingChannel {
   return {
     channel_id: channelId,
     channel_name: channelName,
     channel_type: "text",
     category_name: categoryName,
+    position: 0,
+    category_position: 0,
     can_view: !missingPermissions.includes("View Channel"),
     can_send: !missingPermissions.includes("Send Messages"),
     can_embed: !missingPermissions.includes("Embed Links"),

@@ -307,6 +307,8 @@ export type DiscordPostingChannel = {
   channel_name: string;
   channel_type: "text" | "announcement" | string;
   category_name: string | null;
+  position?: number;
+  category_position?: number | null;
   can_view: boolean;
   can_send: boolean;
   can_embed: boolean;
@@ -357,6 +359,25 @@ export type DiscordChannelsResponse = {
   manual_fallback: boolean;
   warning?: string;
   fetched_at: string;
+  selected_server_id?: string | null;
+  selected_guild_id?: string | null;
+  guild_name?: string | null;
+  bot_token_configured?: boolean;
+  bot_connected?: boolean | null;
+  bot_invite_url?: string | null;
+  error_code?: string | null;
+  diagnostics?: {
+    selected_server_id: string | null;
+    selected_guild_id: string | null;
+    guild_name: string | null;
+    bot_token_configured: boolean;
+    bot_connected: boolean | null;
+    channels_fetched_count: number;
+    postable_channels_count: number;
+    last_fetch_error_code: string | null;
+    last_fetch_error_message: string | null;
+    last_fetch_time: string;
+  };
 };
 
 export type PostingPermissionCheck = {

@@ -53,6 +53,8 @@ export type DiscordPostingChannel = {
   channel_name: string;
   channel_type: "text" | "announcement";
   category_name: string | null;
+  position: number;
+  category_position: number | null;
   can_view: boolean;
   can_send: boolean;
   can_embed: boolean;
@@ -61,6 +63,23 @@ export type DiscordPostingChannel = {
   can_post: boolean;
   missing_permissions: string[];
 };
+export type DiscordChannelFetchErrorCode =
+  | "missing_bot_token"
+  | "discord_api_403"
+  | "bot_not_in_guild"
+  | "discord_api_error"
+  | "discord_api_invalid_response";
+
+export class DiscordChannelFetchError extends Error {
+  constructor(
+    public readonly code: DiscordChannelFetchErrorCode,
+    message: string,
+    public readonly status: number | null = null,
+  ) {
+    super(message);
+    this.name = "DiscordChannelFetchError";
+  }
+}
 
 const DISCORD_CHANNEL_PERMISSION_WARNING =
   "DZN cannot auto-post here yet. Please give the bot permission to View Channel, Send Messages, Embed Links, and Read Message History.";
@@ -293,16 +312,22 @@ export function getPostingDeliveryMode(env: Env, destination: {
 
 export async function fetchDiscordPostingChannels(env: Env, guildId: string): Promise<DiscordPostingChannel[]> {
   const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
-  if (!botToken) throw new Error("DZN bot token is not configured.");
+  if (!botToken) throw new DiscordChannelFetchError("missing_bot_token", "DISCORD_BOT_TOKEN is not configured in Cloudflare Pages.");
   const response = await fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/channels`);
-  if (!response.ok) throw new Error("DZN could not fetch Discord channels for this server.");
+  if (!response.ok) {
+    if (response.status === 403) throw new DiscordChannelFetchError("discord_api_403", "Discord returned 403 while fetching guild channels.", response.status);
+    if (response.status === 404) throw new DiscordChannelFetchError("bot_not_in_guild", "DZN bot is not connected to this Discord server.", response.status);
+    throw new DiscordChannelFetchError("discord_api_error", `Discord channel fetch failed with ${response.status}.`, response.status);
+  }
   const channels = await response.json().catch(() => null) as DiscordChannel[] | null;
-  if (!Array.isArray(channels)) return [];
+  if (!Array.isArray(channels)) {
+    throw new DiscordChannelFetchError("discord_api_invalid_response", "Discord returned an unexpected channel response.");
+  }
   const permissionContext = await getBotGuildPermissionContext(botToken, guildId);
-  const categories = new Map(
+  const categories = new Map<string, { name: string | null; position: number | null }>(
     channels
       .filter((channel) => Number(channel.type) === 4 && typeof channel.name === "string")
-      .map((channel) => [channel.id, channel.name ?? null]),
+      .map((channel) => [String(channel.id), { name: channel.name ?? null, position: numberOrNull(channel.position) }]),
   );
 
   return channels
@@ -313,11 +338,14 @@ export async function fetchDiscordPostingChannels(env: Env, guildId: string): Pr
         .filter(([, bit]) => (permissions & bit) !== bit)
         .map(([label]) => label);
       const canManageMessages = permissions === null ? false : OPTIONAL_BOT_CHANNEL_PERMISSIONS.every(([, bit]) => (permissions & bit) === bit);
+      const category = typeof channel.parent_id === "string" ? categories.get(channel.parent_id) ?? null : null;
       return {
         channel_id: String(channel.id),
         channel_name: String(channel.name ?? "unknown-channel"),
         channel_type: Number(channel.type) === 5 ? "announcement" as const : "text" as const,
-        category_name: typeof channel.parent_id === "string" ? categories.get(channel.parent_id) ?? null : null,
+        category_name: category?.name ?? null,
+        position: numberOrNull(channel.position) ?? 0,
+        category_position: category?.position ?? null,
         can_view: permissions === null ? true : !missing.includes("View Channel"),
         can_send: permissions === null ? true : !missing.includes("Send Messages"),
         can_embed: permissions === null ? true : !missing.includes("Embed Links"),
@@ -327,7 +355,11 @@ export async function fetchDiscordPostingChannels(env: Env, guildId: string): Pr
         missing_permissions: missing,
       };
     })
-    .sort((a, b) => `${a.category_name ?? ""} ${a.channel_name}`.localeCompare(`${b.category_name ?? ""} ${b.channel_name}`));
+    .sort((a, b) =>
+      (a.category_position ?? Number.MAX_SAFE_INTEGER) - (b.category_position ?? Number.MAX_SAFE_INTEGER)
+      || a.position - b.position
+      || a.channel_name.localeCompare(b.channel_name)
+    );
 }
 
 export async function verifyDiscordPostingChannel(env: Env, guildId: string, channelId: string): Promise<DiscordPostingChannel | null> {
@@ -348,6 +380,8 @@ export async function verifyDiscordPostingChannel(env: Env, guildId: string, cha
     channel_name: String(channel.name ?? "unknown-channel"),
     channel_type: Number(channel.type) === 5 ? "announcement" : "text",
     category_name: null,
+    position: numberOrNull(channel.position) ?? 0,
+    category_position: null,
     can_view: permissions === null ? true : !missing.includes("View Channel"),
     can_send: permissions === null ? true : !missing.includes("Send Messages"),
     can_embed: permissions === null ? true : !missing.includes("Embed Links"),
@@ -577,6 +611,7 @@ type DiscordChannel = {
   type?: number | string | null;
   guild_id?: string | null;
   parent_id?: string | null;
+  position?: number | string | null;
   permissions?: string | number | null;
   permission_overwrites?: Array<{
     id: string;
@@ -662,6 +697,11 @@ function getChannelPermissionBitsFromContext(context: BotPermissionContext, chan
 function isPostableChannelType(value: unknown) {
   const type = Number(value);
   return type === 0 || type === 5;
+}
+
+function numberOrNull(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function applyPermissionOverwrite(

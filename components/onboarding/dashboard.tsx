@@ -32,7 +32,7 @@ import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AuthResponse, BillingPlanSummary, BillingStatus, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -229,6 +229,8 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const [postingSetups, setPostingSetups] = useState<PostingChannelSetup[]>([]);
   const [postingOptions, setPostingOptions] = useState<PostingOptionSummary[]>([]);
   const [discordPostingChannels, setDiscordPostingChannels] = useState<DiscordPostingChannel[]>([]);
+  const [discordChannelsResponse, setDiscordChannelsResponse] = useState<DiscordChannelsResponse | null>(null);
+  const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
   const [discordChannelsWarning, setDiscordChannelsWarning] = useState("");
   const [automationHealth, setAutomationHealth] = useState<AutomationHealth | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
@@ -271,14 +273,21 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       const posting = await getPostingDestinations(server.id).catch(() => null);
       if (posting?.setups) setPostingSetups(posting.setups);
       if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
+      setDiscordChannelsLoading(true);
       const channels = await getDiscordPostingChannels(server.id).catch(() => null);
       if (channels?.channels) {
         setDiscordPostingChannels(channels.channels);
+        setDiscordChannelsResponse(channels);
         setDiscordChannelsWarning(channels.warning ?? "");
+      } else {
+        setDiscordChannelsResponse(null);
+        setDiscordChannelsWarning("DZN could not load Discord channel diagnostics for this server.");
       }
+      setDiscordChannelsLoading(false);
       const health = await getAutomationHealth().catch(() => null);
       setAutomationHealth(health);
     } catch (error) {
+      setDiscordChannelsLoading(false);
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
     }
   }, [server.id]);
@@ -788,7 +797,11 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
             setups={postingSetups}
             options={postingOptions}
             channels={discordPostingChannels}
+            channelsResponse={discordChannelsResponse}
+            channelsLoading={discordChannelsLoading}
             channelsWarning={discordChannelsWarning}
+            connectedServerName={server.guild_name ?? serverDisplayName}
+            planName={planLabel(billingStatus?.plan_key ?? "free")}
             onSaved={(result) => {
               setPostingSetups(result.setups ?? []);
               if (result.post_type_options) setPostingOptions(result.post_type_options);
@@ -1484,14 +1497,22 @@ function DiscordAutoPostsPanel({
   setups,
   options,
   channels,
+  channelsResponse,
+  channelsLoading,
   channelsWarning,
+  connectedServerName,
+  planName,
   onSaved,
 }: {
   serverId: string;
   setups: PostingChannelSetup[];
   options: PostingOptionSummary[];
   channels: DiscordPostingChannel[];
+  channelsResponse: DiscordChannelsResponse | null;
+  channelsLoading: boolean;
   channelsWarning: string;
+  connectedServerName: string;
+  planName: string;
   onSaved: (result: PostingDestinationsResponse) => void;
 }) {
   const [selectedChannelId, setSelectedChannelId] = useState("");
@@ -1499,6 +1520,7 @@ function DiscordAutoPostsPanel({
   const [selectedPostTypes, setSelectedPostTypes] = useState<string[]>([]);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busyChannel, setBusyChannel] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -1506,11 +1528,30 @@ function DiscordAutoPostsPanel({
 
   const effectiveOptions = options.length ? options : fallbackPostingOptions();
   const groupedOptions = useMemo(() => groupPostingOptions(effectiveOptions), [effectiveOptions]);
-  const selectedChannel = channels.find((channel) => channel.channel_id === selectedChannelId) ?? null;
-  const channelForSave = selectedChannelId === "__manual" ? manualChannelId.trim() : selectedChannelId;
+  const channelById = useMemo(() => new Map(channels.map((channel) => [channel.channel_id, channel])), [channels]);
+  const selectedChannel = channelById.get(selectedChannelId) ?? null;
+  const channelFetchFailed = Boolean(channelsResponse?.manual_fallback || channelsResponse?.error_code || channelsWarning);
+  const showManualFallback = advancedOpen || channelFetchFailed;
+  const manualChannelValue = manualChannelId.trim();
+  const channelForSave = selectedChannelId || manualChannelValue;
   const selectedLockedCount = selectedPostTypes.filter((postType) => !effectiveOptions.find((option) => option.key === postType)?.allowed_by_plan).length;
-  const missingPermissions = selectedChannel?.missing_permissions ?? [];
-  const canSave = Boolean(channelForSave && selectedPostTypes.length && selectedLockedCount === 0 && (missingPermissions.length === 0 || webhookUrl.trim()));
+  const webhookFallbackConfigured = Boolean(webhookUrl.trim());
+  const channelCanPost = selectedChannel ? selectedChannel.can_post || webhookFallbackConfigured : webhookFallbackConfigured;
+  const canSave = Boolean(channelForSave && selectedPostTypes.length && selectedLockedCount === 0 && channelCanPost);
+  const diagnostics = channelsResponse?.diagnostics;
+  const botStatus = channelsResponse?.bot_connected === true
+    ? "Connected"
+    : channelsResponse?.error_code === "missing_bot_token"
+      ? "Bot token missing"
+      : channelsResponse?.bot_connected === false
+        ? "Not connected"
+        : "Unknown";
+
+  function togglePostType(postType: string) {
+    setSelectedPostTypes((current) => current.includes(postType)
+      ? current.filter((value) => value !== postType)
+      : [...current, postType]);
+  }
 
   async function saveSetup() {
     if (!canSave) return;
@@ -1531,6 +1572,7 @@ function DiscordAutoPostsPanel({
       setSelectedPostTypes([]);
       setWebhookUrl("");
       setAdvancedOpen(false);
+      setDiagnosticsOpen(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not save Discord auto-post setup.");
     } finally {
@@ -1568,21 +1610,22 @@ function DiscordAutoPostsPanel({
   }
 
   function editSetup(setup: PostingChannelSetup) {
-    setSelectedChannelId(channels.some((channel) => channel.channel_id === setup.channel_id) ? setup.channel_id : "__manual");
-    setManualChannelId(setup.channel_id);
+    const channelKnown = channelById.has(setup.channel_id);
+    setSelectedChannelId(channelKnown ? setup.channel_id : "");
+    setManualChannelId(channelKnown ? "" : setup.channel_id);
     setSelectedPostTypes(setup.post_types.map((postType) => postType.key));
     setWebhookUrl("");
-    setAdvancedOpen(setup.has_webhook_url);
-    setMessage(`Editing ${setup.channel_label}.`);
+    setAdvancedOpen(!channelKnown || setup.has_webhook_url);
+    setMessage(`Editing ${resolveSetupChannelLabel(setup, channelById)}.`);
   }
 
   return (
-    <DashboardPanel className="p-4">
+    <DashboardPanel className="p-4 lg:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <PanelHeader icon={<Bell className="h-5 w-5" />} title="Discord Auto Posts" />
           <p className="mt-3 text-xs leading-5 text-zinc-400">
-            Choose a Discord channel, then select what DZN should automatically post there.
+            DZN already knows your connected Discord server. Choose where each automatic post should go.
           </p>
         </div>
         <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-[10px] font-black uppercase text-zinc-300">
@@ -1590,97 +1633,144 @@ function DiscordAutoPostsPanel({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3 lg:grid-cols-[1fr_1.2fr_auto]">
-        <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
-          1. Select Discord Channel
-          <select
-            value={selectedChannelId}
-            onChange={(event) => setSelectedChannelId(event.target.value)}
-            className="min-h-11 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
-          >
-            <option value="">Choose channel</option>
-            {channels.map((channel) => (
-              <option key={channel.channel_id} value={channel.channel_id} className="bg-[#080b16] text-white">
-                {channel.category_name ? `${channel.category_name} / #${channel.channel_name}` : `# ${channel.channel_name}`}
-              </option>
-            ))}
-            <option value="__manual" className="bg-[#080b16] text-white">Advanced manual channel ID</option>
-          </select>
-          {selectedChannel ? (
-            <span className={`text-[11px] font-bold normal-case ${selectedChannel.can_post ? "text-emerald-200" : "text-amber-200"}`}>
-              {selectedChannel.can_post ? "Bot can post in this channel" : `Missing: ${selectedChannel.missing_permissions.join(", ")}`}
-            </span>
-          ) : channelsWarning ? (
-            <span className="text-[11px] font-bold normal-case text-amber-200">{channelsWarning}</span>
-          ) : null}
-        </label>
-
-        <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
-          2. What should DZN post here?
-          <select
-            multiple
-            value={selectedPostTypes}
-            onChange={(event) => setSelectedPostTypes(Array.from(event.target.selectedOptions).map((option) => option.value))}
-            className="min-h-[112px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
-          >
-            {groupedOptions.map(([group, groupOptions]) => (
-              <optgroup key={group} label={group}>
-                {groupOptions.map((option) => (
-                  <option key={option.key} value={option.key} disabled={!option.allowed_by_plan} className="bg-[#080b16] text-white disabled:text-zinc-500">
-                    {option.label}{option.allowed_by_plan ? "" : ` - ${option.upgrade_label}`}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          <span className="text-[11px] font-bold normal-case text-zinc-500">{selectedPostTypes.length} posts selected</span>
-        </label>
-
-        <div className="grid content-end gap-2">
-          <button
-            type="button"
-            disabled={!canSave || saving}
-            onClick={saveSetup}
-            className="min-h-11 rounded-lg bg-violet-500 px-4 py-3 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-55"
-          >
-            {saving ? "Saving..." : "Save Auto Post Setup"}
-          </button>
-          {!canSave && channelForSave ? <p className="max-w-[240px] text-[11px] font-bold leading-5 text-amber-200">Choose allowed post types and a channel where bot mode works, or add a webhook fallback.</p> : null}
-        </div>
+      <div className="mt-4 grid gap-3 rounded-xl border border-cyan-300/15 bg-cyan-400/5 p-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MiniInfo label="Discord Server" value={channelsResponse?.guild_name ?? connectedServerName ?? "Unknown"} />
+        <MiniInfo label="Bot" value={botStatus} />
+        <MiniInfo label="Channels Found" value={channelsLoading ? "Loading" : String(channels.length)} />
+        <MiniInfo label="Plan" value={planName} />
       </div>
 
-      <button
-        type="button"
-        onClick={() => setAdvancedOpen((value) => !value)}
-        className="mt-3 text-[10px] font-black uppercase text-cyan-200"
-      >
-        {advancedOpen ? "Hide" : "Show"} advanced fallback
-      </button>
-      {advancedOpen || selectedChannelId === "__manual" ? (
-        <div className="mt-3 grid gap-3 rounded-lg border border-white/10 bg-black/24 p-3 md:grid-cols-2">
-          {selectedChannelId === "__manual" ? (
+      {channelsLoading ? (
+        <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-bold text-cyan-50">
+          Loading Discord channels...
+        </p>
+      ) : null}
+      {channelsWarning ? (
+        <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-3">
+          <p className="text-xs font-black uppercase text-amber-100">{channelsResponse?.error_code ?? "Channel fetch warning"}</p>
+          <p className="mt-1 text-xs font-bold leading-5 text-amber-50">{channelsWarning}</p>
+          {channelsResponse?.error_code === "bot_not_in_guild" && channelsResponse.bot_invite_url ? (
+            <a href={channelsResponse.bot_invite_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-200/30 bg-amber-300/15 px-3 py-2 text-[10px] font-black uppercase text-amber-50">
+              Invite DZN Bot <ExternalLink className="h-3 w-3" />
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-4 rounded-xl border border-white/10 bg-black/24 p-4">
+        <div className="grid gap-5 lg:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.45fr)_auto]">
+          <div className="grid content-start gap-3">
+            <p className="text-[10px] font-black uppercase text-zinc-400">Step 1: Choose Channel</p>
+            <select
+              value={selectedChannelId}
+              onChange={(event) => {
+                setSelectedChannelId(event.target.value);
+                setManualChannelId("");
+              }}
+              disabled={channelsLoading || channels.length === 0}
+              className="min-h-11 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40 disabled:opacity-55"
+            >
+              <option value="">{channels.length ? "Choose channel" : "No channels loaded"}</option>
+              {channels.map((channel) => (
+                <option key={channel.channel_id} value={channel.channel_id} className="bg-[#080b16] text-white">
+                  {formatChannelLabel(channel)}
+                </option>
+              ))}
+            </select>
+            {selectedChannel ? (
+              <span className={`text-[11px] font-bold ${selectedChannel.can_post ? "text-emerald-200" : "text-amber-200"}`}>
+                {selectedChannel.can_post ? "Bot can post in this channel." : `Missing: ${selectedChannel.missing_permissions.join(", ")}`}
+              </span>
+            ) : (
+              <span className="text-[11px] font-bold text-zinc-500">DZN uses the guild selected during onboarding.</span>
+            )}
+          </div>
+
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[10px] font-black uppercase text-zinc-400">Step 2: Choose Auto Posts</p>
+              <p className="text-[11px] font-bold text-zinc-500">{selectedPostTypes.length} selected</p>
+            </div>
+            <div className="grid gap-3">
+              {groupedOptions.map(([group, groupOptions]) => (
+                <div key={group} className="rounded-lg border border-white/10 bg-white/[0.025] p-3">
+                  <p className="text-[10px] font-black uppercase text-zinc-500">{group}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {groupOptions.map((option) => {
+                      const selected = selectedPostTypes.includes(option.key);
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          disabled={!option.allowed_by_plan}
+                          onClick={() => togglePostType(option.key)}
+                          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[10px] font-black uppercase transition ${selected ? "border-violet-200/50 bg-violet-400/20 text-violet-50" : option.allowed_by_plan ? "border-white/10 bg-black/30 text-zinc-200 hover:border-cyan-200/40 hover:text-cyan-50" : "cursor-not-allowed border-amber-300/15 bg-amber-400/5 text-amber-100/70"}`}
+                        >
+                          {selected ? <CircleCheck className="h-3 w-3" /> : null}
+                          {option.label}
+                          {!option.allowed_by_plan ? <span className="text-[9px] text-amber-200">{option.upgrade_label}</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid content-start gap-2 lg:min-w-[190px]">
+            <p className="text-[10px] font-black uppercase text-zinc-400">Step 3: Save</p>
+            <button
+              type="button"
+              disabled={!canSave || saving}
+              onClick={saveSetup}
+              className="min-h-11 rounded-lg bg-violet-500 px-4 py-3 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {saving ? "Saving..." : "Save Auto Post Setup"}
+            </button>
+            {!canSave ? (
+              <p className="text-[11px] font-bold leading-5 text-amber-200">
+                Choose a channel and allowed posts. If bot mode cannot work, add a webhook fallback.
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((value) => !value)}
+          className="mt-4 text-[10px] font-black uppercase text-cyan-200"
+        >
+          {advancedOpen ? "Hide" : "Show"} advanced manual setup
+        </button>
+        {showManualFallback ? (
+          <div className="mt-3 grid gap-3 rounded-lg border border-white/10 bg-black/24 p-3 md:grid-cols-2">
             <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
               Manual Channel ID
               <input
                 value={manualChannelId}
-                onChange={(event) => setManualChannelId(event.target.value)}
-                placeholder="Discord channel ID"
+                onChange={(event) => {
+                  setManualChannelId(event.target.value);
+                  setSelectedChannelId("");
+                }}
+                placeholder="Only use this if DZN cannot fetch channels"
                 className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
               />
+              <span className="text-[11px] font-bold normal-case text-zinc-500">Only use this if DZN cannot fetch your Discord channels automatically.</span>
             </label>
-          ) : null}
-          <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
-            Optional Webhook URL
-            <input
-              value={webhookUrl}
-              onChange={(event) => setWebhookUrl(event.target.value)}
-              placeholder="Only needed if the bot cannot post directly"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
-            />
-            <span className="text-[11px] font-bold normal-case text-zinc-500">Saved webhooks are hidden. Enter a new URL only to replace the fallback.</span>
-          </label>
-        </div>
-      ) : null}
+            <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
+              Optional Webhook URL
+              <input
+                value={webhookUrl}
+                onChange={(event) => setWebhookUrl(event.target.value)}
+                placeholder="Only needed if the bot cannot post directly"
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
+              />
+              <span className="text-[11px] font-bold normal-case text-zinc-500">Saved webhooks are hidden. Enter a new URL only to replace the fallback.</span>
+            </label>
+          </div>
+        ) : null}
+      </div>
 
       <div className="mt-5 flex items-center justify-between gap-3">
         <p className="text-sm font-black uppercase text-white">Saved Auto Post Setups</p>
@@ -1689,6 +1779,8 @@ function DiscordAutoPostsPanel({
       <div className="mt-3 grid gap-3">
         {setups.length ? setups.map((setup) => {
           const testType = testTypeByChannel[setup.channel_id] ?? setup.post_types.find((postType) => postType.enabled)?.key ?? setup.post_types[0]?.key ?? "";
+          const channel = channelById.get(setup.channel_id) ?? null;
+          const channelLabel = resolveSetupChannelLabel(setup, channelById);
           return (
             <div key={setup.channel_id} className="rounded-lg border border-white/10 bg-black/28 p-3">
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.7fr)_auto] lg:items-start">
@@ -1698,7 +1790,8 @@ function DiscordAutoPostsPanel({
                       <Bell className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-black text-white">{setup.channel_label}</p>
+                      <p className="truncate text-sm font-black text-white">{channelLabel}</p>
+                      {channel?.category_name ? <p className="text-[11px] font-bold text-zinc-500">{channel.category_name}</p> : null}
                       <p className="text-[11px] font-bold text-zinc-500">ID: {setup.channel_id}</p>
                     </div>
                   </div>
@@ -1752,6 +1845,30 @@ function DiscordAutoPostsPanel({
           <p>DZN edits the existing message when data changes. No spam.</p>
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => setDiagnosticsOpen((value) => !value)}
+        className="mt-3 text-[10px] font-black uppercase text-zinc-400 hover:text-cyan-100"
+      >
+        {diagnosticsOpen ? "Hide" : "Show"} Channel Fetch Diagnostics
+      </button>
+      {diagnosticsOpen ? (
+        <div className="mt-3 grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs font-bold text-zinc-300 sm:grid-cols-2 lg:grid-cols-4">
+          <MiniInfo label="Selected Server ID" value={diagnostics?.selected_server_id ?? serverId} />
+          <MiniInfo label="Selected Guild ID" value={diagnostics?.selected_guild_id ?? "Missing"} />
+          <MiniInfo label="Guild Name" value={diagnostics?.guild_name ?? channelsResponse?.guild_name ?? "Unknown"} />
+          <MiniInfo label="Bot Token Configured" value={diagnostics?.bot_token_configured ? "Yes" : "No"} />
+          <MiniInfo label="Bot Connected" value={diagnostics?.bot_connected === true ? "Yes" : diagnostics?.bot_connected === false ? "No" : "Unknown"} />
+          <MiniInfo label="Channels Fetched" value={String(diagnostics?.channels_fetched_count ?? channels.length)} />
+          <MiniInfo label="Postable Channels" value={String(diagnostics?.postable_channels_count ?? channels.filter((channel) => channel.can_post).length)} />
+          <MiniInfo label="Last Fetch Error" value={diagnostics?.last_fetch_error_code ?? "None"} />
+          <MiniInfo label="Last Fetch Time" value={diagnostics?.last_fetch_time ? formatDashboardDate(diagnostics.last_fetch_time) : "Waiting"} />
+          <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2 sm:col-span-2 lg:col-span-4">
+            <p className="text-[10px] font-black uppercase text-zinc-500">Last Fetch Message</p>
+            <p className="mt-1 text-xs font-bold text-zinc-200">{diagnostics?.last_fetch_error_message ?? "Channel fetch is healthy."}</p>
+          </div>
+        </div>
+      ) : null}
       {message ? <p className="mt-3 text-xs font-bold text-cyan-100">{message}</p> : null}
     </DashboardPanel>
   );
@@ -1812,6 +1929,19 @@ function postingModeLabel(mode: string | null | undefined) {
   if (mode === "bot") return "BOT MODE";
   if (mode === "webhook") return "WEBHOOK FALLBACK";
   return "SETUP NEEDED";
+}
+
+function formatChannelLabel(channel: Pick<DiscordPostingChannel, "channel_name" | "category_name">) {
+  return channel.category_name ? `${channel.category_name} / #${channel.channel_name}` : `#${channel.channel_name}`;
+}
+
+function resolveSetupChannelLabel(setup: PostingChannelSetup, channelById: Map<string, DiscordPostingChannel>) {
+  const channel = channelById.get(setup.channel_id);
+  if (channel) return formatChannelLabel(channel);
+  if (setup.channel_name && setup.channel_name !== "Unknown channel" && setup.channel_name !== setup.channel_id) {
+    return setup.channel_label || `#${setup.channel_name}`;
+  }
+  return "Unknown channel";
 }
 
 function postingModeClass(mode: string | null | undefined) {
