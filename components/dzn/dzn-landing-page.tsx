@@ -443,6 +443,7 @@ export function DznLandingPage() {
     console.log("DZN BUILD LEADERBOARD COMPACT POLISH READY");
     console.log("DZN BUILD LEADERBOARD TOP TEN POLISHED");
     console.log("DZN HOMEPAGE FEATURE CARDS POLISHED");
+    console.log("DZN LIVE GLOBE TRACKER COPY UPDATED");
     preloadBuildLeaderboardImages();
   }, []);
 
@@ -768,8 +769,8 @@ function HeroDashboard({
               text="Recent activity unlocks after Discord login."
             />
             <LockedPreviewPanel
-              title="Live Operational Map"
-              text="Live map data unlocks after Discord login."
+              title="Live Globe Tracker"
+              text="Global server nodes, sync status, and live map intelligence unlock after Discord login."
             />
           </>
         ) : (
