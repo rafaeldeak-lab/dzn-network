@@ -297,12 +297,24 @@ export type PostingDestinationSummary = {
   last_edited_at?: string | null;
 };
 
+export type PostingPermissionCheck = {
+  ok: boolean;
+  mode: "bot" | "webhook" | "not_configured" | "missing_permissions";
+  missing_permissions: string[];
+  warning: string | null;
+  checked_at: string | null;
+};
+
 export type AutomationHealth = {
   ok: boolean;
   checked_at: string;
   last_metadata_sync_run: string | null;
   last_adm_sync_run: string | null;
   last_discord_dispatcher_run: string | null;
+  last_cron_trigger_source: "cloudflare" | "github-backup" | "manual" | string | null;
+  last_cron_trigger_endpoint: string | null;
+  last_cron_trigger_status: string | null;
+  last_cron_trigger_at: string | null;
   due_metadata_jobs: number;
   due_adm_jobs: number;
   queued_discord_post_jobs: number;

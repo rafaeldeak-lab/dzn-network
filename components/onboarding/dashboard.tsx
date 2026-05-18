@@ -1335,9 +1335,10 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
                 <p className="mt-1 text-xs leading-5 text-zinc-400">
                   {plan.max_linked_servers} server{plan.max_linked_servers === 1 ? "" : "s"} · {plan.stat_history_days} day stats · {plan.included_bumps_per_month} bumps/mo
                 </p>
-                <p className="mt-1 text-[11px] leading-5 text-zinc-500">
-                  Server status checked every {plan.server_status_interval_minutes ?? "?"} minutes. ADM stats checked every {plan.adm_pull_interval_minutes ?? "?"} minutes.
-                </p>
+                <div className="mt-2 grid gap-1 text-[11px] leading-5 text-zinc-500">
+                  <p><span className="font-black uppercase text-zinc-400">Server Status Sync:</span> player count, online/offline, slots, and basic status checked every {plan.server_status_interval_minutes ?? "?"} minute{plan.server_status_interval_minutes === 1 ? "" : "s"}.</p>
+                  <p><span className="font-black uppercase text-zinc-400">ADM Log Sync:</span> kills, deaths, K/D, leaderboards, and events checked every {plan.adm_pull_interval_minutes ?? "?"} minutes.</p>
+                </div>
                 <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                   {plan.configured ? "Checkout configured" : "Checkout not configured"}
                 </p>
@@ -1365,7 +1366,7 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
       </button>
       {message ? <p className="mt-3 text-sm font-bold text-orange-100">{message}</p> : null}
       <p className="mt-3 text-[11px] leading-5 text-zinc-500">
-        Nitrado controls when fresh logs are available. DZN checks automatically based on your plan, but ADM logs can appear 5-45 minutes after a restart.
+        Nitrado controls when fresh ADM logs are available. DZN checks automatically based on your plan, but ADM logs can appear 5-45 minutes after a restart.
       </p>
     </DashboardPanel>
   );
@@ -1499,12 +1500,13 @@ function DiscordAutoPostsPanel({
         send_test_post: sendTestPost,
       });
       onSaved(result.post_types);
+      const permissionWarning = result.permission_check?.warning;
       if (sendTestPost) {
         setMessage(result.test_post?.ok
           ? `${formatPostType(item.post_type)} test posted by ${result.test_post.mode === "bot" ? "DZN bot" : "webhook"}.`
-          : result.test_post?.error ?? "Discord test post failed.");
+          : result.test_post?.error ?? permissionWarning ?? "Discord test post failed.");
       } else {
-        setMessage(`${formatPostType(item.post_type)} destination saved.`);
+        setMessage(permissionWarning ?? `${formatPostType(item.post_type)} destination saved.`);
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not save Discord posting destination.");
@@ -1526,13 +1528,14 @@ function DiscordAutoPostsPanel({
       <div className="mt-4 grid gap-3">
         {allowed.map((item) => {
           const draft = drafts[item.post_type] ?? destinationDrafts[item.post_type] ?? { channel: item.discord_channel_id ?? "", webhook: "", enabled: item.enabled };
+          const postingMode = postingStatusLabel(item);
           return (
             <div key={item.post_type} className="rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-black uppercase text-white">{formatPostType(item.post_type)}</p>
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingModeClass(item.delivery_mode)}`}>
-                    {postingModeLabel(item.delivery_mode)}
+                  <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingModeClass(postingMode.mode)}`}>
+                    {postingMode.label}
                   </span>
                   <label className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
                     <input
@@ -1565,6 +1568,13 @@ function DiscordAutoPostsPanel({
                 placeholder={item.discord_channel_id ? "Webhook URL hidden after save" : "Discord webhook URL"}
                 className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
               />
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Preview Embed</p>
+                <p className="mt-1 text-xs font-black uppercase text-white">DZN {formatPostType(item.post_type)}</p>
+                <p className="mt-1 text-[11px] leading-5 text-zinc-400">
+                  This post edits automatically when saved DZN data changes. Bot mode uses the channel ID first; webhook fallback is only used if bot posting cannot complete.
+                </p>
+              </div>
               {item.setup_warning ? <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{item.setup_warning}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -1610,6 +1620,8 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
         <MiniInfo label="Last Metadata Run" value={health.last_metadata_sync_run ? formatDashboardDate(health.last_metadata_sync_run) : "Waiting"} />
         <MiniInfo label="Last ADM Run" value={health.last_adm_sync_run ? formatDashboardDate(health.last_adm_sync_run) : "Waiting"} />
         <MiniInfo label="Last Discord Dispatch" value={health.last_discord_dispatcher_run ? formatDashboardDate(health.last_discord_dispatcher_run) : "Waiting"} />
+        <MiniInfo label="Last Cron Source" value={formatCronSource(health.last_cron_trigger_source)} />
+        <MiniInfo label="Last Cron Trigger" value={health.last_cron_trigger_at ? formatDashboardDate(health.last_cron_trigger_at) : "Waiting"} />
         <MiniInfo label="Due Metadata Jobs" value={String(health.due_metadata_jobs)} />
         <MiniInfo label="Due ADM Jobs" value={String(health.due_adm_jobs)} />
         <MiniInfo label="Queued Discord Jobs" value={String(health.queued_discord_post_jobs)} />
@@ -1642,10 +1654,24 @@ function postingModeLabel(mode: PostingDestinationSummary["delivery_mode"]) {
   return "Setup needed";
 }
 
+function postingStatusLabel(item: PostingDestinationSummary) {
+  if (item.setup_warning?.startsWith("DZN cannot auto-post here yet")) {
+    return { label: "Missing permissions", mode: "not_configured" as const };
+  }
+  return { label: postingModeLabel(item.delivery_mode), mode: item.delivery_mode };
+}
+
 function postingModeClass(mode: PostingDestinationSummary["delivery_mode"]) {
   if (mode === "bot") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
   if (mode === "webhook") return "border-cyan-300/30 bg-cyan-400/10 text-cyan-100";
   return "border-amber-300/30 bg-amber-400/10 text-amber-100";
+}
+
+function formatCronSource(value: string | null | undefined) {
+  if (value === "cloudflare") return "Cloudflare";
+  if (value === "github-backup") return "GitHub backup";
+  if (value === "manual") return "Manual";
+  return "Waiting";
 }
 
 function DashboardPublicReviewsSummary({ slug }: { slug: string }) {

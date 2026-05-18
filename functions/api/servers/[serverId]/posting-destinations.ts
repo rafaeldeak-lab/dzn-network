@@ -1,5 +1,5 @@
 import { getSessionUser, requireDb } from "../../../_lib/db";
-import { getPostingDeliveryMode, sendDiscordTestPost } from "../../../_lib/discord-posting";
+import { checkDiscordPostingPermissions, getPostingDeliveryMode, sendDiscordTestPost } from "../../../_lib/discord-posting";
 import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
@@ -40,6 +40,10 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const channelId = sanitizeDiscordId(body.discord_channel_id);
   if (!channelId) return json({ error: "Discord channel ID is required." }, { status: 400 });
   const webhookUrl = sanitizeWebhookUrl(body.discord_webhook_url);
+  const permissionCheck = await checkDiscordPostingPermissions(env, {
+    discord_channel_id: channelId,
+    discord_webhook_url: webhookUrl,
+  });
   await ensureAutomationSchema(env);
   const now = new Date().toISOString();
   await requireDb(env)
@@ -70,6 +74,14 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       now,
     )
     .run();
+
+  await upsertPostingPermissionWarning(env, {
+    guildId: context.guildId,
+    postType,
+    channelId,
+    warning: permissionCheck.warning,
+  });
+
   let testResult: { ok: boolean; mode?: string; error?: string } | null = null;
   if (body.send_test_post === true) {
     try {
@@ -86,6 +98,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   }
   return json({
     ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+    permission_check: permissionCheck,
     test_post: testResult,
   });
 };
@@ -185,6 +198,27 @@ function setupWarning(deliveryMode: string, lastError: string | null) {
   if (lastError) return lastError;
   if (deliveryMode === "not_configured") return "Add a channel ID for bot posting or provide a webhook fallback.";
   return null;
+}
+
+async function upsertPostingPermissionWarning(env: Env, input: {
+  guildId: string;
+  postType: AutoPostType;
+  channelId: string;
+  warning: string | null;
+}) {
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_posting_state (
+        id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
+        last_edited_at, last_payload_hash, last_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
+      ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
+        last_error = excluded.last_error,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(crypto.randomUUID(), input.guildId, input.postType, input.channelId, input.warning, now, now)
+    .run();
 }
 
 function sanitizeLinkedServerId(value: unknown) {

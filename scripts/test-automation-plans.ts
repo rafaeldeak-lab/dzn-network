@@ -56,6 +56,9 @@ const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
 assert.equal(automationSource.includes("server_subscriptions"), true);
 assert.equal(automationSource.includes("server_sync_state"), true);
 assert.equal(automationSource.includes("server_public_cache"), true);
+assert.equal(automationSource.includes("automation_cron_runs"), true);
+assert.equal(automationSource.includes("recordAutomationCronRun"), true);
+assert.equal(automationSource.includes("last_cron_trigger_source"), true);
 assert.equal(automationSource.includes("queueDiscordPostUpdatesForGuild"), true);
 assert.equal(automationSource.includes("getDueStatusAutomationServers"), true);
 assert.equal(automationSource.includes("getDueAdmAutomationServers"), true);
@@ -67,6 +70,9 @@ const postingSource = readFileSync("functions/_lib/discord-posting.ts", "utf8");
 assert.equal(postingSource.includes("last_payload_hash"), true);
 assert.equal(postingSource.includes("discord_webhook_url"), true);
 assert.equal(postingSource.includes("sendOrEditWithBot"), true);
+assert.equal(postingSource.includes("checkDiscordPostingPermissions"), true);
+assert.equal(postingSource.includes("Manage Messages"), true);
+assert.equal(postingSource.includes("DZN cannot auto-post here yet"), true);
 assert.equal(postingSource.includes("DISCORD_BOT_TOKEN"), true);
 assert.equal(postingSource.includes("DZN DISCORD AUTO POST DISPATCH READY"), true);
 
@@ -74,11 +80,15 @@ const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", 
 assert.equal(migrationSource.includes("CREATE TABLE IF NOT EXISTS server_subscriptions"), true);
 assert.equal(migrationSource.includes("CREATE TABLE IF NOT EXISTS server_posting_destinations"), true);
 assert.equal(migrationSource.includes("CREATE TABLE IF NOT EXISTS automation_jobs"), true);
+const cronMigrationSource = readFileSync("migrations/0016_automation_cron_runs.sql", "utf8");
+assert.equal(cronMigrationSource.includes("CREATE TABLE IF NOT EXISTS automation_cron_runs"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 assert.equal(workflowSource.includes("Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only."), true);
 assert.equal(workflowSource.includes("- cron: \"*/5 * * * *\""), true);
 assert.equal(workflowSource.includes("x-dzn-cron-secret"), true);
+assert.equal(workflowSource.includes("LEGACY_SYNC_CRON_SECRET"), false);
+assert.equal(workflowSource.includes("\"source\":\"github-backup\""), true);
 assert.equal(workflowSource.indexOf("/api/sync/metadata/run") < workflowSource.indexOf("/api/sync/adm/run"), true);
 assert.equal(workflowSource.indexOf("/api/sync/adm/run") < workflowSource.indexOf("/api/sync/discord-posts/run"), true);
 
@@ -87,15 +97,25 @@ assert.equal(workerConfigSource.includes("crons = [\"* * * * *\"]"), true);
 const workerSource = readFileSync("workers/adm-sync-worker.ts", "utf8");
 assert.equal(workerSource.includes("DZN_CRON_SECRET"), true);
 assert.equal(workerSource.includes("x-dzn-cron-secret"), true);
+assert.equal(workerSource.includes("env.SYNC_CRON_SECRET"), false);
+assert.equal(workerSource.includes("source: \"cloudflare\""), true);
 assert.equal(workerSource.indexOf("/api/sync/metadata/run") < workerSource.indexOf("/api/sync/adm/run"), true);
 assert.equal(workerSource.indexOf("/api/sync/adm/run") < workerSource.indexOf("/api/sync/discord-posts/run"), true);
+
+const cronAuthSource = readFileSync("functions/_lib/cron-auth.ts", "utf8");
+assert.equal(cronAuthSource.includes("env.DZN_CRON_SECRET || null"), true);
+assert.equal(cronAuthSource.includes("env.SYNC_CRON_SECRET"), false);
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Discord Auto Posts"), true);
 assert.equal(dashboardSource.includes("Automation Health"), true);
 assert.equal(dashboardSource.includes("Send Test Post"), true);
+assert.equal(dashboardSource.includes("Preview Embed"), true);
 assert.equal(dashboardSource.includes("Bot mode"), true);
-assert.equal(dashboardSource.includes("Server status checked every"), true);
+assert.equal(dashboardSource.includes("Server Status Sync:"), true);
+assert.equal(dashboardSource.includes("ADM Log Sync:"), true);
+assert.equal(dashboardSource.includes("Last Cron Source"), true);
+assert.equal(dashboardSource.includes("Missing permissions"), true);
 assert.equal(dashboardSource.includes("ADM logs can appear 5-45 minutes after a restart"), true);
 
 const healthEndpointSource = readFileSync("functions/api/automation/health.ts", "utf8");

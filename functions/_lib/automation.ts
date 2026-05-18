@@ -12,6 +12,9 @@ import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 
 export const ACTIVE_BILLING_STATUSES = ["active", "trialing"] as const;
+export const AUTOMATION_CRON_SOURCES = ["cloudflare", "github-backup", "manual"] as const;
+
+export type AutomationCronSource = typeof AUTOMATION_CRON_SOURCES[number];
 
 export type AutomationSyncServer = {
   id: string;
@@ -113,6 +116,32 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
       lastStatusUpdateAt: row.player_count_last_checked_at ?? row.metadata_last_checked_at,
     });
   }
+}
+
+export function normalizeAutomationCronSource(source: unknown, cron?: unknown): AutomationCronSource {
+  const explicit = typeof source === "string" ? source.trim().toLowerCase() : "";
+  if (explicit === "cloudflare" || explicit === "github-backup" || explicit === "manual") return explicit;
+  const cronValue = typeof cron === "string" ? cron.trim().toLowerCase() : "";
+  if (cronValue.includes("github")) return "github-backup";
+  if (cronValue.includes("cloudflare") || cronValue === "* * * * *") return "cloudflare";
+  return "manual";
+}
+
+export async function recordAutomationCronRun(env: Env, input: {
+  source: AutomationCronSource;
+  endpoint: "metadata" | "adm" | "discord-posts";
+  status: "completed" | "failed" | "manual";
+}) {
+  await ensureAutomationSchema(env);
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO automation_cron_runs (
+        id, source, endpoint, status, created_at
+      ) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), input.source, input.endpoint, input.status, now)
+    .run();
 }
 
 export async function upsertServerSubscription(env: Env, input: {
@@ -577,6 +606,7 @@ export async function getAutomationHealth(env: Env) {
 
   const [
     lastRuns,
+    latestCronRun,
     dueMetadata,
     dueAdm,
     queuedDiscord,
@@ -599,6 +629,9 @@ export async function getAutomationHealth(env: Env) {
         last_adm_sync_run: string | null;
         last_discord_dispatcher_run: string | null;
       }>(),
+    db
+      .prepare("SELECT source, endpoint, status, created_at FROM automation_cron_runs ORDER BY created_at DESC LIMIT 1")
+      .first<{ source: string | null; endpoint: string | null; status: string | null; created_at: string | null }>(),
     countFirst(db,
       `SELECT COUNT(*) AS count
        FROM server_subscriptions
@@ -641,6 +674,10 @@ export async function getAutomationHealth(env: Env) {
     last_metadata_sync_run: lastRuns?.last_metadata_sync_run ?? null,
     last_adm_sync_run: lastRuns?.last_adm_sync_run ?? null,
     last_discord_dispatcher_run: lastRuns?.last_discord_dispatcher_run ?? null,
+    last_cron_trigger_source: latestCronRun?.source ?? null,
+    last_cron_trigger_endpoint: latestCronRun?.endpoint ?? null,
+    last_cron_trigger_status: latestCronRun?.status ?? null,
+    last_cron_trigger_at: latestCronRun?.created_at ?? null,
     due_metadata_jobs: dueMetadata,
     due_adm_jobs: dueAdm,
     queued_discord_post_jobs: queuedDiscord,
@@ -804,4 +841,13 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
   )`,
   "CREATE INDEX IF NOT EXISTS idx_automation_jobs_due ON automation_jobs(status, run_after)",
   "CREATE INDEX IF NOT EXISTS idx_automation_jobs_guild_type ON automation_jobs(guild_id, job_type)",
+  `CREATE TABLE IF NOT EXISTS automation_cron_runs (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_created_at ON automation_cron_runs(created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_source ON automation_cron_runs(source)",
 ];

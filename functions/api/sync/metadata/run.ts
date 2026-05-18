@@ -1,10 +1,12 @@
 import { refreshLivePlayerCountsForActiveServers } from "../../../_lib/server-metadata";
+import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
 import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
 import { json, readJson } from "../../../_lib/http";
 import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
 type MetadataSyncRunBody = {
   cron?: string;
+  source?: string;
   max_servers?: number;
 };
 
@@ -44,10 +46,18 @@ export async function handleMetadataSyncRun(
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const result = await handlers.refreshMetadata(env, {
-    maxServers: sanitizePositiveInteger(body.max_servers, 25),
-    includeResults: true,
-  });
+  const source = normalizeAutomationCronSource(body.source, body.cron);
+  let result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>;
+  try {
+    result = await handlers.refreshMetadata(env, {
+      maxServers: sanitizePositiveInteger(body.max_servers, 25),
+      includeResults: true,
+    });
+    await safeRecordCronRun(env, source, "completed");
+  } catch (error) {
+    await safeRecordCronRun(env, source, "failed");
+    throw error;
+  }
 
   console.log("DZN LIVE PLAYER COUNT AUTO SYNC READY", {
     processed: result.processed,
@@ -66,6 +76,7 @@ export async function handleMetadataSyncRun(
   return json({
     ok: true,
     ...result,
+    source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
   });
 }
@@ -77,4 +88,15 @@ export function isMetadataCronAuthorized(request: Request, env: Env) {
 function sanitizePositiveInteger(value: unknown, fallback: number) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), 100000) : fallback;
+}
+
+async function safeRecordCronRun(env: Env, source: ReturnType<typeof normalizeAutomationCronSource>, status: "completed" | "failed") {
+  try {
+    await recordAutomationCronRun(env, { source, endpoint: "metadata", status });
+  } catch (error) {
+    console.warn("DZN AUTOMATION CRON RUN RECORD SKIPPED", {
+      endpoint: "metadata",
+      message: error instanceof Error ? error.message : "record failed",
+    });
+  }
 }

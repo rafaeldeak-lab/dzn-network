@@ -23,17 +23,17 @@ const CRON_ENDPOINTS: CronEndpoint[] = [
   {
     label: "metadata",
     path: "/api/sync/metadata/run",
-    body: { cron: "cloudflare-worker", max_servers: 50 },
+    body: { source: "cloudflare", cron: "cloudflare-worker", max_servers: 50 },
   },
   {
     label: "adm",
     path: "/api/sync/adm/run",
-    body: { cron: "cloudflare-worker", max_servers: 50, max_lines_per_server: 50000 },
+    body: { source: "cloudflare", cron: "cloudflare-worker", max_servers: 50, max_lines_per_server: 50000 },
   },
   {
     label: "discord-posts",
     path: "/api/sync/discord-posts/run",
-    body: { cron: "cloudflare-worker", max_jobs: 50 },
+    body: { source: "cloudflare", cron: "cloudflare-worker", max_jobs: 50 },
   },
 ];
 
@@ -87,6 +87,7 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
       },
       body: JSON.stringify({
         ...endpoint.body,
+        source: "cloudflare",
         cron: options.cron ?? "cloudflare-worker",
         scheduled_time: options.scheduledTime,
       }),
@@ -125,7 +126,7 @@ function appBaseUrl(env: Env) {
 }
 
 function getCronSecret(env: Env) {
-  return env.DZN_CRON_SECRET || env.SYNC_CRON_SECRET || null;
+  return env.DZN_CRON_SECRET || null;
 }
 
 function isHealthAuthorized(request: Request, env: Env) {

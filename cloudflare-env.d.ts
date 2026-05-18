@@ -30,7 +30,6 @@ interface CloudflareEnv {
   SESSION_SECRET?: string;
   TOKEN_ENCRYPTION_KEY?: string;
   DZN_CRON_SECRET?: string;
-  SYNC_CRON_SECRET?: string;
   SYNC_WORKER_HEALTH_TOKEN?: string;
   DZN_ADMIN_DISCORD_IDS?: string;
   DZN_OWNER_DISCORD_IDS?: string;

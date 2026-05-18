@@ -13,28 +13,26 @@ jobs:
       - name: Trigger scheduled metadata and ADM sync
         env:
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
-          LEGACY_SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: |
-          CRON_SECRET="${DZN_CRON_SECRET:-$LEGACY_SYNC_CRON_SECRET}"
-          if [ -z "$CRON_SECRET" ]; then
+          if [ -z "$DZN_CRON_SECRET" ]; then
             echo "DZN_CRON_SECRET is not configured."
             exit 1
           fi
 
           curl --fail-with-body --silent --show-error \
             -X POST "https://dzn-network.pages.dev/api/sync/metadata/run" \
-            -H "x-dzn-cron-secret: ${CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --data '{"cron":"github-actions","max_servers":25}'
+            --data '{"source":"github-backup","cron":"github-actions","max_servers":25}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "https://dzn-network.pages.dev/api/sync/adm/run" \
-            -H "x-dzn-cron-secret: ${CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --data '{"cron":"github-actions","max_servers":25,"max_lines_per_server":50000}'
+            --data '{"source":"github-backup","cron":"github-actions","max_servers":25,"max_lines_per_server":50000}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "https://dzn-network.pages.dev/api/sync/discord-posts/run" \
-            -H "x-dzn-cron-secret: ${CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --data '{"cron":"github-actions","max_jobs":25}'
+            --data '{"source":"github-backup","cron":"github-actions","max_jobs":25}'

@@ -1,4 +1,5 @@
 import { runAdmSync, runScheduledAdmSync } from "../../../_lib/adm-sync";
+import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
 import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
 import { ensureMockUser, getSessionUser } from "../../../_lib/db";
 import { json, readJson } from "../../../_lib/http";
@@ -7,6 +8,7 @@ import type { Env, PagesContext, PagesFunction, SessionUser } from "../../../_li
 
 type AdmSyncRunBody = {
   cron?: string;
+  source?: string;
   linked_server_id?: string;
   max_servers?: number;
   max_lines_per_server?: number;
@@ -49,12 +51,20 @@ export async function handleAdmSyncRun(
 ) {
   const body = await readJson<AdmSyncRunBody>(request);
   if (isCronAuthorized(request, env)) {
-    const result = await handlers.runScheduled(env, {
-      cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
-      maxServers: sanitizePositiveInteger(body.max_servers, 25),
-      maxLinesPerServer: sanitizePositiveInteger(body.max_lines_per_server, 50000),
-      minSyncIntervalMs: 0,
-    });
+    const source = normalizeAutomationCronSource(body.source, body.cron);
+    let result: Awaited<ReturnType<typeof runScheduledAdmSync>>;
+    try {
+      result = await handlers.runScheduled(env, {
+        cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
+        maxServers: sanitizePositiveInteger(body.max_servers, 25),
+        maxLinesPerServer: sanitizePositiveInteger(body.max_lines_per_server, 50000),
+        minSyncIntervalMs: 0,
+      });
+      await safeRecordCronRun(env, source, "completed");
+    } catch (error) {
+      await safeRecordCronRun(env, source, "failed");
+      throw error;
+    }
     console.log("DZN ADM SYNC POST ENDPOINT FIXED");
     console.log("DZN RELIABLE ADM AUTO SYNC READY", {
       processed: result.processed,
@@ -63,7 +73,7 @@ export async function handleAdmSyncRun(
       unavailable: result.unavailable,
       metadata: result.metadata,
     });
-    return json(result);
+    return json({ ...result, source });
   }
 
   const user = await handlers.resolveUser(env, request);
@@ -74,6 +84,7 @@ export async function handleAdmSyncRun(
       triggerType: "manual",
       maxLinesPerRun: sanitizePositiveInteger(body.max_lines_per_server, 50000),
     });
+    await safeRecordCronRun(env, "manual", "manual");
     return json(result);
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "ADM sync failed" }, { status: 400 });
@@ -104,4 +115,15 @@ function sanitizeLinkedServerId(value: unknown) {
 function sanitizePositiveInteger(value: unknown, fallback: number) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), 100000) : fallback;
+}
+
+async function safeRecordCronRun(env: Env, source: ReturnType<typeof normalizeAutomationCronSource>, status: "completed" | "failed" | "manual") {
+  try {
+    await recordAutomationCronRun(env, { source, endpoint: "adm", status });
+  } catch (error) {
+    console.warn("DZN AUTOMATION CRON RUN RECORD SKIPPED", {
+      endpoint: "adm",
+      message: error instanceof Error ? error.message : "record failed",
+    });
+  }
 }
