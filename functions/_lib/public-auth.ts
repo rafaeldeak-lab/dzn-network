@@ -15,6 +15,12 @@ export async function isPublicViewerLoggedIn(request: Request, env: Env) {
 
 export function publicAccessCacheHeaders(viewerLoggedIn: boolean) {
   return viewerLoggedIn
-    ? { "cache-control": "private, no-store, no-cache, must-revalidate" }
-    : { "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60" };
+    ? {
+        "cache-control": "private, no-store, no-cache, must-revalidate",
+        vary: "Cookie",
+      }
+    : {
+        "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+        vary: "Cookie",
+      };
 }

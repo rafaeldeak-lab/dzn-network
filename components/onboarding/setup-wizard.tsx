@@ -25,12 +25,14 @@ import {
   Users,
   X,
   AlertTriangle,
+  Bot,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 
 import {
   clearClientAuthState,
+  getDiscordBotStatus,
   getGuilds,
   getMe,
   getNitradoServices,
@@ -41,11 +43,12 @@ import {
   testOnboarding,
   validateNitradoToken,
 } from "./api";
-import type { AdmApiDebug, DiscordGuild, LinkedServer, NitradoService, OnboardingChecks } from "./types";
+import type { AdmApiDebug, DiscordBotStatusResponse, DiscordGuild, LinkedServer, NitradoService, OnboardingChecks } from "./types";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 
 const steps = [
-  "Select Discord Server",
+  "Connect Discord Server",
+  "Add DZN Bot",
   "Server Type & Categories",
   "Nitrado Token + Service ID",
   "Select Nitrado Service",
@@ -107,6 +110,9 @@ export function SetupWizard() {
   const [publishError, setPublishError] = useState("");
   const [guildRefreshing, setGuildRefreshing] = useState(false);
   const [guildRefreshMessage, setGuildRefreshMessage] = useState("");
+  const [botStatus, setBotStatus] = useState<DiscordBotStatusResponse | null>(null);
+  const [botChecking, setBotChecking] = useState(false);
+  const [botStatusMessage, setBotStatusMessage] = useState("");
 
   const loadDiscordGuilds = useCallback(async (fresh: boolean) => {
     try {
@@ -153,7 +159,7 @@ export function SetupWizard() {
           setSelectedService(existingService.id);
           setTokenValid(true);
           setDirectServiceValidated(true);
-          setStep(4);
+          setStep(5);
         }
       } catch {
         setAuthenticated(false);
@@ -197,9 +203,41 @@ export function SetupWizard() {
     [services, selectedService, validatedService],
   );
   const stepLabels = useMemo(
-    () => steps.map((label, index) => (index === 3 && directServiceValidated ? "Confirm Nitrado Server" : label)),
+    () => steps.map((label, index) => (index === 4 && directServiceValidated ? "Confirm Nitrado Server" : label)),
     [directServiceValidated],
   );
+
+  const checkDiscordBot = useCallback(async () => {
+    if (!selectedGuild) {
+      setBotStatus(null);
+      setBotStatusMessage("No Discord server is selected. Please choose a server first.");
+      return null;
+    }
+    setBotChecking(true);
+    setBotStatusMessage("");
+    try {
+      const result = await getDiscordBotStatus(selectedGuild);
+      setBotStatus(result);
+      setBotStatusMessage(result.ok
+        ? "DZN Bot is installed and channels were discovered."
+        : result.error_message ?? "DZN Bot connection could not be verified yet.");
+      return result;
+    } catch (error) {
+      setBotStatus(null);
+      setBotStatusMessage(error instanceof Error ? error.message : "DZN Bot connection check failed.");
+      return null;
+    } finally {
+      setBotChecking(false);
+    }
+  }, [selectedGuild]);
+
+  useEffect(() => {
+    if (!authenticated || !selectedGuild) return;
+    const timer = window.setTimeout(() => {
+      void checkDiscordBot();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [authenticated, selectedGuild, checkDiscordBot]);
 
   async function validateTokenWithServiceId() {
     setBusy(true);
@@ -222,7 +260,7 @@ export function SetupWizard() {
         setSelectedService(result.service.id);
       }
       setDirectServiceValidated(true);
-      setStep(3);
+      setStep(4);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nitrado token validation failed");
     } finally {
@@ -247,7 +285,7 @@ export function SetupWizard() {
       const serviceResult = await getNitradoServices();
       setServices(serviceResult.services);
       if (serviceResult.services[0]) setSelectedService(serviceResult.services[0].id);
-      setStep(3);
+      setStep(4);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nitrado service discovery failed");
     } finally {
@@ -266,7 +304,7 @@ export function SetupWizard() {
         ...publicListing,
         nitradoServiceId: selectedService,
       });
-      setStep(4);
+      setStep(5);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save onboarding");
     } finally {
@@ -308,10 +346,10 @@ export function SetupWizard() {
       await goLive();
       const refreshed = await getMe().catch(() => null);
       setPublishedServer(refreshed?.linkedServer ?? null);
-      setStep(5);
+      setStep(6);
     } catch (error) {
       setPublishError(error instanceof Error ? error.message : "Go-live failed");
-      setStep(5);
+      setStep(6);
     } finally {
       setBusy(false);
     }
@@ -403,7 +441,11 @@ export function SetupWizard() {
                   <GuildStep
                     guilds={guilds}
                     selectedGuild={selectedGuild}
-                    setSelectedGuild={setSelectedGuild}
+                    setSelectedGuild={(value) => {
+                      setSelectedGuild(value);
+                      setBotStatus(null);
+                      setBotStatusMessage("");
+                    }}
                     onNext={() => setStep(1)}
                     onRefresh={refreshDiscordGuilds}
                     refreshing={guildRefreshing}
@@ -411,9 +453,12 @@ export function SetupWizard() {
                   />
                 ) : null}
                 {step === 1 ? (
-                <TypeStep serverType={serverType} setServerType={setServerType} selectedTags={selectedTags} toggleTag={toggleTag} publicListing={publicListing} setPublicListing={setPublicListing} onNext={() => setStep(2)} />
+                  <BotInstallStep guild={selectedGuildData} status={botStatus} checking={botChecking} message={botStatusMessage} onCheck={checkDiscordBot} onNext={() => setStep(2)} />
                 ) : null}
                 {step === 2 ? (
+                  <TypeStep serverType={serverType} setServerType={setServerType} selectedTags={selectedTags} toggleTag={toggleTag} publicListing={publicListing} setPublicListing={setPublicListing} onNext={() => setStep(3)} />
+                ) : null}
+                {step === 3 ? (
                   <TokenStep
                     tokenInput={tokenInput}
                     setTokenInput={setTokenInput}
@@ -428,17 +473,17 @@ export function SetupWizard() {
                     onFindServices={findServicesInstead}
                   />
                 ) : null}
-                {step === 3 ? (
+                {step === 4 ? (
                   directServiceValidated && validatedService ? (
-                    <ConfirmedServiceStep service={validatedService} onNext={() => setStep(4)} />
+                    <ConfirmedServiceStep service={validatedService} onNext={() => setStep(5)} />
                   ) : (
                     <ServiceStep services={services} selectedService={selectedService} setSelectedService={setSelectedService} onNext={saveAndReview} busy={busy} />
                   )
                 ) : null}
-                {step === 4 ? (
+                {step === 5 ? (
                   <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
                 ) : null}
-                {step === 5 ? (
+                {step === 6 ? (
                   <LiveStep
                     server={publishedServer}
                     service={selectedServiceData}
@@ -446,9 +491,9 @@ export function SetupWizard() {
                     finalError={publishError}
                     onRetryTest={async () => {
                       await runTest();
-                      setStep(4);
+                      setStep(5);
                     }}
-                    onBack={() => setStep(4)}
+                    onBack={() => setStep(5)}
                   />
                 ) : null}
               </motion.div>
@@ -590,6 +635,104 @@ function GuildStep({
         )}
       </div>
       <WizardButton disabled={!selectedGuild} onClick={onNext}>Continue</WizardButton>
+    </Step>
+  );
+}
+
+function BotInstallStep({
+  guild,
+  status,
+  checking,
+  message,
+  onCheck,
+  onNext,
+}: {
+  guild?: DiscordGuild;
+  status: DiscordBotStatusResponse | null;
+  checking: boolean;
+  message: string;
+  onCheck: () => Promise<DiscordBotStatusResponse | null>;
+  onNext: () => void;
+}) {
+  const botInstalled = Boolean(status?.bot_connected && status.channels_available);
+  const postableCount = status?.postable_channels_count ?? 0;
+  const inviteUrl = status?.invite_url ?? "https://discord.com/oauth2/authorize?permissions=8&scope=bot%20applications.commands";
+
+  return (
+    <Step
+      title="Add DZN Bot"
+      icon={Bot}
+      description="Install the DZN bot in the Discord server selected during setup."
+    >
+      <div className="rounded-xl border border-cyan-300/15 bg-cyan-400/8 p-4">
+        <p className="text-sm font-black uppercase text-cyan-100">Discord automation requires the bot</p>
+        <p className="mt-2 text-sm leading-6 text-zinc-300">
+          Connecting a Discord server lets DZN know which server you own. Installing the DZN bot lets DZN read channels, post embeds, edit updates, and run automation.
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className={`rounded-lg border p-4 ${botInstalled ? "border-emerald-300/25 bg-emerald-400/10" : "border-amber-300/25 bg-amber-400/10"}`}>
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-black/24">
+              {botInstalled ? <CheckCircle2 className="h-5 w-5 text-emerald-100" /> : <AlertTriangle className="h-5 w-5 text-amber-100" />}
+            </span>
+            <div>
+              <p className="text-sm font-black uppercase text-white">{botInstalled ? "DZN Bot installed" : "DZN Bot not verified yet"}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-200">
+                {botInstalled
+                  ? `DZN found ${status?.channels_fetched_count ?? 0} channels in ${guild?.name ?? "this Discord server"} and ${postableCount} can be used for posting.`
+                  : "DZN Bot is not installed in this Discord server yet. Add the bot to enable auto-posts, channel discovery, slash commands, and Discord automation."}
+              </p>
+              {message ? <p className="mt-3 text-sm font-bold leading-6 text-zinc-200">{message}</p> : null}
+              {status?.error_code ? (
+                <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-black uppercase text-amber-100">
+                  {status.error_code}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+          <p className="text-xs font-black uppercase text-zinc-400">Selected Discord Server</p>
+          <p className="mt-2 text-lg font-black text-white">{guild?.name ?? "No server selected"}</p>
+          <div className="mt-4 grid gap-2 text-xs font-bold text-zinc-300">
+            <p>Bot token configured: {status?.bot_token_configured ? "Yes" : status ? "No" : "Checking"}</p>
+            <p>Bot connected: {status?.bot_connected ? "Yes" : "No"}</p>
+            <p>Channels discovered: {status?.channels_fetched_count ?? 0}</p>
+            <p>Postable channels: {postableCount}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <a
+          href={inviteUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400"
+        >
+          Add / Reconnect DZN Bot <ExternalLink className="h-4 w-4" />
+        </a>
+        <button
+          type="button"
+          disabled={checking}
+          onClick={() => void onCheck()}
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-400/12 px-5 py-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/55 hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${checking ? "animate-spin" : ""}`} />
+          {checking ? "Checking..." : "Verify Bot Connection"}
+        </button>
+      </div>
+
+      {!botInstalled ? (
+        <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm font-bold leading-6 text-amber-50">
+          Add the bot, return to this page, then click Verify Bot Connection. For testing, the invite requests Administrator permission.
+        </p>
+      ) : null}
+
+      <WizardButton disabled={!botInstalled} onClick={onNext}>Continue</WizardButton>
     </Step>
   );
 }
@@ -1141,7 +1284,7 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
       </div>
       {!canGoLive ? (
         <p className="mt-4 rounded-lg border border-white/10 bg-black/24 px-4 py-3 text-sm font-bold leading-6 text-zinc-300">
-          Run the test and pass the required Discord, Nitrado, DayZ service, and metadata checks before publishing. ADM read pending is a warning, not a hard block.
+          Run the test and pass the required Discord server, DZN bot, Nitrado, DayZ service, and metadata checks before publishing. ADM read pending is a warning, not a hard block.
         </p>
       ) : null}
       <AdvancedDiagnostics
@@ -1175,11 +1318,33 @@ function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild;
   const admDiscovered = Boolean(checks?.admLogsFound || checks?.admLog?.admFileExists);
   const admReadable = Boolean(checks?.admLogsFound && checks?.admLog?.sampleReadSucceeded);
   const metadataSynced = Boolean(checks?.metadataSynced || service?.name);
+  const discordBotConnected = Boolean(checks?.discordBotConnected);
+  const discordChannelsAvailable = Boolean(checks?.discordChannelsAvailable);
   const checkRows: FriendlyCheck[] = [
     {
       label: "Discord server selected",
       status: guild ? "passed" : "failed",
       message: guild ? "Discord server connected." : "Select a Discord server you own or administer.",
+      required: true,
+    },
+    {
+      label: "DZN bot installed",
+      status: !checks ? "pending" : discordBotConnected ? "passed" : "failed",
+      message: !checks
+        ? "Run the test to confirm the DZN bot is installed in the selected Discord server."
+        : discordBotConnected
+          ? "DZN bot is installed in the selected Discord server."
+          : "DZN Bot is not installed in this Discord server yet. Add the bot to enable auto-posts, channel discovery, slash commands, and Discord automation.",
+      required: true,
+    },
+    {
+      label: "Channels discovered",
+      status: !checks ? "pending" : discordChannelsAvailable ? "passed" : "failed",
+      message: !checks
+        ? "Run the test to confirm DZN can fetch Discord channels with the bot."
+        : discordChannelsAvailable
+          ? `${checks.discordPostableChannelCount ?? 0} channels can currently be used for DZN posting.`
+          : "DZN could not fetch channels from the selected Discord server. Reconnect the bot and run the test again.",
       required: true,
     },
     {

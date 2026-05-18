@@ -7,6 +7,7 @@ import type {
   AutomationHealth,
   BillingPlanSummary,
   BillingStatus,
+  DiscordBotStatusResponse,
   DiscordGuild,
   DiscordChannelsResponse,
   LinkedServer,
@@ -25,6 +26,12 @@ export async function getMe() {
 export async function getGuilds(options: { fresh?: boolean } = {}) {
   const query = options.fresh ? "?fresh=1" : "";
   return request<{ guilds: DiscordGuild[]; fetched_at?: string; fresh?: boolean }>(`/api/discord/guilds${query}`);
+}
+
+export async function getDiscordBotStatus(guildId: string) {
+  return request<DiscordBotStatusResponse>(`/api/discord/bot-status?guild_id=${encodeURIComponent(guildId)}`, {
+    cache: "no-store",
+  });
 }
 
 export async function validateNitradoToken(data: {

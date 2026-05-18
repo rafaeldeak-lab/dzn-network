@@ -71,6 +71,19 @@ type BuildLeaderboardRow = PublicBuildLeaderboardRow & {
   storage_expansion_built: number;
 };
 
+type HomeStatsSectionReason = "login_required" | "plan_required" | null;
+
+type HomeStatsSectionAccess = {
+  locked: boolean;
+  reason: HomeStatsSectionReason;
+};
+
+type HomeStatsSections = {
+  topServers: HomeStatsSectionAccess;
+  recentActivity: HomeStatsSectionAccess;
+  liveGlobeTracker: HomeStatsSectionAccess;
+};
+
 export type MapNodeRow = {
   id: string;
   status?: string | null;
@@ -947,6 +960,9 @@ export function applyHomeStatsAccess<T extends {
   access_level: "full" | "preview";
   is_locked: boolean;
   locked_reason: string | null;
+  loggedIn: boolean;
+  previewMode: boolean;
+  sections: HomeStatsSections;
 } {
   if (viewerLoggedIn) {
     return {
@@ -954,6 +970,9 @@ export function applyHomeStatsAccess<T extends {
       access_level: "full",
       is_locked: false,
       locked_reason: null,
+      loggedIn: true,
+      previewMode: false,
+      sections: fullHomeStatsSections(),
     };
   }
 
@@ -962,6 +981,9 @@ export function applyHomeStatsAccess<T extends {
     access_level: "preview",
     is_locked: true,
     locked_reason: "Log in with Discord to unlock full network stats.",
+    loggedIn: false,
+    previewMode: true,
+    sections: previewHomeStatsSections(),
     totals: data.totals
       ? {
           ...data.totals,
@@ -1015,4 +1037,28 @@ export function applyHomeStatsAccess<T extends {
     map_nodes: [],
     syncHealth: data.syncHealth ? { ...data.syncHealth, active: 0, pending: 0 } : data.syncHealth,
   };
+}
+
+function previewHomeStatsSections(): HomeStatsSections {
+  return {
+    topServers: lockedLoginSection(),
+    recentActivity: lockedLoginSection(),
+    liveGlobeTracker: lockedLoginSection(),
+  };
+}
+
+function fullHomeStatsSections(): HomeStatsSections {
+  return {
+    topServers: unlockedSection(),
+    recentActivity: unlockedSection(),
+    liveGlobeTracker: unlockedSection(),
+  };
+}
+
+function lockedLoginSection(): HomeStatsSectionAccess {
+  return { locked: true, reason: "login_required" };
+}
+
+function unlockedSection(): HomeStatsSectionAccess {
+  return { locked: false, reason: null };
 }

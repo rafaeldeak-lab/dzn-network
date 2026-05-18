@@ -301,7 +301,9 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const normalizedStatus = server.status.toLowerCase();
   const admState = getAdmState(server);
   const isDayzService = [server.game, serverDisplayName, server.nitrado_service_name].some((value) => /dayz/i.test(value ?? ""));
-  const coreSetupComplete = Boolean(server.guild_id && server.nitrado_service_id && isDayzService && admState.isDiscovered);
+  const discordBotInstalled = discordChannelsResponse?.bot_connected === true;
+  const discordChannelsDiscovered = discordPostingChannels.length > 0;
+  const coreSetupComplete = Boolean(server.guild_id && discordBotInstalled && discordChannelsDiscovered && server.nitrado_service_id && isDayzService && admState.isDiscovered);
   const progress = coreSetupComplete ? 100 : normalizedStatus === "error" ? 72 : normalizedStatus === "live" ? 92 : 84;
   const networkAddress = server.ip_address ?? server.region ?? "Unknown";
   const networkAddressLabel = looksLikeIpAddress(networkAddress) ? "IP Address" : "Region";
@@ -888,10 +890,12 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
                 <div className="h-full bg-gradient-to-r from-violet-300 via-cyan-300 to-emerald-300" style={{ width: `${progress}%` }} />
               </div>
               <div className="mt-3 grid gap-2">
+                <SetupCheck label="Discord Connected" done />
+                <SetupCheck label="DZN Bot Installed" done={discordBotInstalled} />
+                <SetupCheck label="Channels Discovered" done={discordChannelsDiscovered} />
                 <SetupCheck label="ADM Discovered" done={admState.isDiscovered} />
                 <SetupCheck label="Log Sync Active" done={statsSyncActive} />
                 <SetupCheck label="Events Processing" done={(syncStatus?.last_events_created ?? 0) > 0 || (syncStatus?.total_joins ?? 0) > 0} />
-                <SetupCheck label="Discord Connected" done />
                 <SetupCheck label="Stats Sync Active" done={statsSyncActive} />
               </div>
             </div>
@@ -1679,7 +1683,9 @@ function DiscordAutoPostsPanel({
             </select>
             {selectedChannel ? (
               <span className={`text-[11px] font-bold ${selectedChannel.can_post ? "text-emerald-200" : "text-amber-200"}`}>
-                {selectedChannel.can_post ? "Bot can post in this channel." : `Missing: ${selectedChannel.missing_permissions.join(", ")}`}
+                {selectedChannel.can_post
+                  ? "Bot can post in this channel."
+                  : `DZN can see this channel, but cannot post here yet. Missing: ${selectedChannel.missing_permissions.join(", ")}. Private channels often override bot permissions. Add the DZN Bot role to the channel permissions or choose a public channel.`}
               </span>
             ) : (
               <span className="text-[11px] font-bold text-zinc-500">DZN uses the guild selected during onboarding.</span>
@@ -1809,7 +1815,11 @@ function DiscordAutoPostsPanel({
                     <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${setupStatusClass(setup.status)}`}>{setupStatusLabel(setup.status)}</span>
                   </div>
                   <p className="text-[11px] font-bold text-zinc-400">{setup.last_edited_at ? `Last updated ${formatRelativeTime(setup.last_edited_at)}` : "Waiting for first post"}</p>
-                  {setup.missing_permissions.length ? <p className="text-[11px] font-bold text-amber-200">Missing: {setup.missing_permissions.join(", ")}</p> : null}
+                  {setup.missing_permissions.length ? (
+                    <p className="text-[11px] font-bold leading-5 text-amber-200">
+                      The bot is installed, but this channel blocks posting. Give DZN Bot permission to Send Messages and Embed Links in this channel, or choose another channel. Missing: {setup.missing_permissions.join(", ")}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
                   <select

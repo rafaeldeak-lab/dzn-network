@@ -1,4 +1,5 @@
 import { getCurrentLinkedServer, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
+import { fetchDiscordPostingChannels } from "../../_lib/discord-posting";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
@@ -38,6 +39,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (admLog.admFileExists && admStoragePath) {
     await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
   }
+  const discordChannels = isMockAuth(env.MOCK_AUTH)
+    ? [{ can_post: true }, { can_post: true }]
+    : typeof linkedServer.guild_id === "string" && linkedServer.guild_id
+      ? await fetchDiscordPostingChannels(env, linkedServer.guild_id).catch(() => [])
+      : [];
 
   const checks = {
     token_valid: 1,
@@ -97,6 +103,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       admLogsFound: Boolean(checks.adm_logs_found),
       dayzServiceDetected: true,
       metadataSynced: Boolean(metadataResult?.ok),
+      discordBotConnected: discordChannels.length > 0,
+      discordChannelsAvailable: discordChannels.length > 0,
+      discordPostableChannelCount: discordChannels.filter((channel) => channel.can_post).length,
       admLog,
     },
   });

@@ -161,7 +161,25 @@ export type OnboardingChecks = {
   admLogsFound: boolean;
   dayzServiceDetected: boolean;
   metadataSynced?: boolean;
+  discordBotConnected?: boolean;
+  discordChannelsAvailable?: boolean;
+  discordPostableChannelCount?: number;
   admLog?: AdmLogDetection;
+};
+
+export type DiscordBotStatusResponse = {
+  ok: boolean;
+  guild_id: string | null;
+  guild_name: string | null;
+  bot_token_configured: boolean;
+  bot_connected: boolean;
+  channels_available: boolean;
+  channels_fetched_count: number;
+  postable_channels_count: number;
+  error_code: "missing_bot_token" | "missing_guild_id" | "bot_not_in_guild" | "discord_api_403" | "discord_api_error" | "not_authorized" | null;
+  error_message: string | null;
+  invite_url: string | null;
+  checked_at: string;
 };
 
 export type LinkedServer = {

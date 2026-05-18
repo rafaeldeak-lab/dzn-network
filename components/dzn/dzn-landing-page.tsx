@@ -35,6 +35,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
+import type { AuthResponse } from "@/components/onboarding/types";
 import { DznLogo } from "./dzn-logo";
 import type { DznOperationalGlobeNode } from "./dzn-operational-globe";
 
@@ -138,6 +139,22 @@ type HomeStats = {
   access_level: "full" | "preview";
   is_locked: boolean;
   locked_reason: string | null;
+  loggedIn: boolean;
+  previewMode: boolean;
+  sections: HomeStatsSections;
+};
+
+type HomeStatsSectionReason = "login_required" | "plan_required" | null;
+
+type HomeStatsSectionAccess = {
+  locked: boolean;
+  reason: HomeStatsSectionReason;
+};
+
+type HomeStatsSections = {
+  topServers: HomeStatsSectionAccess;
+  recentActivity: HomeStatsSectionAccess;
+  liveGlobeTracker: HomeStatsSectionAccess;
 };
 
 type PublicNetworkEvent = {
@@ -179,6 +196,16 @@ type PublicEventLeaderboard = {
 type HomeStatsResponse = Partial<HomeStats> & {
   ok?: boolean;
   error?: string;
+};
+
+type HomepageAuthStatus = "loading" | "logged_out" | "logged_in";
+
+type HomepageAuthState = {
+  status: HomepageAuthStatus;
+  sessionStatus: number | null;
+  user: AuthResponse["user"] | null;
+  manageableServersCount: number;
+  selectedServerId: string | null;
 };
 
 type TopServerPanelRow = {
@@ -254,6 +281,9 @@ const emptyHomeStats: HomeStats = {
   access_level: "preview",
   is_locked: true,
   locked_reason: "Log in with Discord to unlock full network stats.",
+  loggedIn: false,
+  previewMode: true,
+  sections: previewHomeStatsSections(),
 };
 
 const HOME_STATS_REFRESH_MS = 30000;
@@ -383,19 +413,20 @@ function useHomeStats() {
       abortRef.current = controller;
       try {
         const response = await fetch("/api/public/home-stats", {
+          cache: "no-store",
           credentials: "include",
           headers: { accept: "application/json" },
           signal: controller.signal,
         });
         const payload = (await response.json().catch(() => ({}))) as HomeStatsResponse;
-        if (!response.ok) throw new Error(payload.error || "Live stats unavailable");
+        if (!response.ok) throw new Error(payload.error || "Network stats syncing");
         if (!active) return;
         setData(normalizeHomeStats(payload));
         setLastUpdated(new Date());
         setError("");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        if (active) setError("Live stats temporarily unavailable.");
+        if (active) setError("Network stats syncing. Latest server data is being refreshed.");
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
         inFlight.current = false;
@@ -414,11 +445,91 @@ function useHomeStats() {
   return { data, lastUpdated, error };
 }
 
+function useHomepageAuth(): HomepageAuthState {
+  const [authState, setAuthState] = useState<HomepageAuthState>({
+    status: "loading",
+    sessionStatus: null,
+    user: null,
+    manageableServersCount: 0,
+    selectedServerId: null,
+  });
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAuth() {
+      try {
+        const response = await fetch("/api/auth/me", {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+        });
+        const payload = (await response.json().catch(() => ({}))) as AuthResponse;
+        if (!active) return;
+        if (!response.ok || !payload.authenticated || !payload.user) {
+          setAuthState({
+            status: "logged_out",
+            sessionStatus: response.status,
+            user: null,
+            manageableServersCount: 0,
+            selectedServerId: null,
+          });
+          return;
+        }
+
+        const linkedServers = Array.isArray(payload.linkedServers) ? payload.linkedServers : [];
+        const selectedServerId =
+          typeof payload.linkedServer?.id === "string"
+            ? payload.linkedServer.id
+            : typeof linkedServers[0]?.id === "string"
+              ? linkedServers[0].id
+              : null;
+
+        setAuthState({
+          status: "logged_in",
+          sessionStatus: response.status,
+          user: payload.user,
+          manageableServersCount: linkedServers.length || (payload.linkedServer ? 1 : 0),
+          selectedServerId,
+        });
+      } catch {
+        if (!active) return;
+        setAuthState({
+          status: "logged_out",
+          sessionStatus: null,
+          user: null,
+          manageableServersCount: 0,
+          selectedServerId: null,
+        });
+      }
+    }
+
+    loadAuth();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return authState;
+}
+
 export function DznLandingPage() {
   const reduceMotion = useReducedMotion();
   const [isLoading, setIsLoading] = useState(true);
+  const authState = useHomepageAuth();
   const liveStats = useHomeStats();
-  const isPreviewMode = liveStats.data.is_locked || liveStats.data.access_level === "preview";
+  const isAuthLoading = authState.status === "loading";
+  const isLoggedIn = authState.status === "logged_in" || liveStats.data.loggedIn;
+  const isPreviewMode = !isLoggedIn && !isAuthLoading && (liveStats.data.previewMode || liveStats.data.is_locked || liveStats.data.access_level === "preview");
+  const displayHomeStats = useMemo(
+    () => (isLoggedIn ? unlockHomeStatsForLoggedIn(liveStats.data) : liveStats.data),
+    [isLoggedIn, liveStats.data],
+  );
+  const loggedInContext = isLoggedIn
+    ? authState.manageableServersCount > 0
+      ? "connected_server"
+      : "no_server"
+    : "logged_out";
 
   useEffect(() => {
     console.log("DZN SERVER COMPETITION HOMEPAGE WITH ANIMATED LOGO LOADED");
@@ -444,6 +555,7 @@ export function DznLandingPage() {
     console.log("DZN BUILD LEADERBOARD TOP TEN POLISHED");
     console.log("DZN HOMEPAGE FEATURE CARDS POLISHED");
     console.log("DZN LIVE GLOBE TRACKER COPY UPDATED");
+    console.log("DZN HOMEPAGE AUTH STATE ALIGNED");
     preloadBuildLeaderboardImages();
   }, []);
 
@@ -460,7 +572,7 @@ export function DznLandingPage() {
       >
         <HomeAliveBackground reducedMotion={Boolean(reduceMotion)} />
         <LoadingOverlay isVisible={isLoading} />
-        <Navbar />
+        <Navbar authState={authState} />
 
         <motion.main
           initial="hidden"
@@ -469,22 +581,26 @@ export function DznLandingPage() {
           className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-col gap-[18px] px-4 pb-7 pt-3 sm:px-6 lg:px-8"
         >
           <HeroDashboard
-            homeStats={liveStats.data}
+            homeStats={displayHomeStats}
             lastUpdated={liveStats.lastUpdated}
             error={liveStats.error}
             isPreview={isPreviewMode}
+            authStatus={authState.status}
+            loggedInContext={loggedInContext}
           />
+          {isAuthLoading ? <AuthCheckingPanel /> : null}
           {isPreviewMode ? (
             <HomepagePreviewUnlock />
           ) : (
             <>
-              <GameModeGrid counts={liveStats.data.gameModes} />
-              <NetworkOverview homeStats={liveStats.data} />
-              <NetworkPulse homeStats={liveStats.data} />
-              <EventLeaderboardPanel homeStats={liveStats.data} />
+              <GameModeGrid counts={displayHomeStats.gameModes} />
+              <NetworkOverview homeStats={displayHomeStats} />
+              <NetworkPulse homeStats={displayHomeStats} />
+              <EventLeaderboardPanel homeStats={displayHomeStats} />
             </>
           )}
           <BottomCta isPreview={isPreviewMode} />
+          <HomepageAuthDebug authState={authState} homeStats={liveStats.data} />
         </motion.main>
 
         <Footer />
@@ -556,18 +672,12 @@ function LoadingOverlay({ isVisible }: { isVisible: boolean }) {
   );
 }
 
-function Navbar() {
-  const [authenticated, setAuthenticated] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/auth/me", { cache: "no-store", credentials: "include" })
-      .then((response) => setAuthenticated(response.ok))
-      .catch(() => setAuthenticated(false));
-  }, []);
+function Navbar({ authState }: { authState: HomepageAuthState }) {
+  const authenticated = authState.status === "logged_in";
+  const isCheckingAccount = authState.status === "loading";
 
   async function signOut() {
     clearClientAuthState();
-    setAuthenticated(false);
     await logoutAndRedirect();
   }
 
@@ -600,7 +710,11 @@ function Navbar() {
             <DiscordIcon className="dzn-nav-discord-icon" />
             <span>Discord</span>
           </a>
-          {authenticated ? (
+          {isCheckingAccount ? (
+            <span className="dzn-nav-action dzn-nav-action--login" aria-live="polite">
+              Checking account...
+            </span>
+          ) : authenticated ? (
             <>
               <a
                 href="/dashboard"
@@ -657,14 +771,19 @@ function HeroDashboard({
   lastUpdated,
   error,
   isPreview,
+  authStatus,
+  loggedInContext,
 }: {
   homeStats: HomeStats;
   lastUpdated: Date | null;
   error: string;
   isPreview: boolean;
+  authStatus: HomepageAuthStatus;
+  loggedInContext: "logged_out" | "no_server" | "connected_server";
 }) {
   const serverRows = useMemo(() => buildTopServerRows(homeStats), [homeStats]);
   const activityRows = useMemo(() => buildActivityRows(homeStats), [homeStats]);
+  const isCheckingAccount = authStatus === "loading";
 
   return (
     <motion.section
@@ -715,7 +834,12 @@ function HeroDashboard({
 
           <motion.div variants={fadeUp} className="flex flex-col gap-4">
             <div className="flex flex-col gap-3 sm:flex-row">
-              {isPreview ? (
+              {isCheckingAccount ? (
+                <span className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200/30 bg-cyan-300/10 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-100">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Checking account...
+                </span>
+              ) : isPreview ? (
                 <>
                   <a
                     href="/login?returnTo=/"
@@ -736,20 +860,39 @@ function HeroDashboard({
                   </a>
                 </>
               ) : (
-                <a
-                  href="/leaderboards"
-                  className="group inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600/86 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_34px_rgba(124,58,237,0.42)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500"
-                >
-                  <Trophy className="h-4 w-4" />
-                  View Leaderboards
-                  <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
-                </a>
+                <>
+                  <a
+                    href="/leaderboards"
+                    className="group inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200/45 bg-violet-600/86 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-white shadow-[0_0_34px_rgba(124,58,237,0.42)] transition duration-300 hover:-translate-y-0.5 hover:bg-violet-500"
+                  >
+                    <Trophy className="h-4 w-4" />
+                    View Leaderboards
+                    <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  </a>
+                  {loggedInContext === "no_server" ? (
+                    <a
+                      href="/setup"
+                      className="group inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200/35 bg-cyan-300/10 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-100/60 hover:bg-cyan-300/16"
+                    >
+                      <Server className="h-4 w-4" />
+                      Add Your Server
+                    </a>
+                  ) : (
+                    <a
+                      href="/dashboard"
+                      className="group inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-cyan-300/10 hover:text-white"
+                    >
+                      <Shield className="h-4 w-4" />
+                      Manage Server
+                    </a>
+                  )}
+                </>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[0.68rem] font-bold uppercase tracking-[0.16em] text-zinc-400">
               <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-emerald-200">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.95)]" />
-                Live data
+                Auto-refreshed data
               </span>
               <span>
                 Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "syncing"}
@@ -799,6 +942,57 @@ function HomepagePreviewUnlock() {
         </div>
       </div>
     </motion.section>
+  );
+}
+
+function AuthCheckingPanel() {
+  return (
+    <motion.section
+      variants={fadeUp}
+      className="rounded-xl border border-cyan-300/18 bg-cyan-300/[0.055] p-4 text-sm font-bold text-cyan-100 shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl"
+      role="status"
+      aria-live="polite"
+    >
+      Checking account...
+    </motion.section>
+  );
+}
+
+function HomepageAuthDebug({
+  authState,
+  homeStats,
+}: {
+  authState: HomepageAuthState;
+  homeStats: HomeStats;
+}) {
+  if (authState.status !== "logged_in" || authState.manageableServersCount <= 0) return null;
+
+  return (
+    <details className="rounded-xl border border-white/10 bg-[#050914]/66 p-4 text-xs text-zinc-300 backdrop-blur-xl">
+      <summary className="cursor-pointer text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">
+        Homepage Auth Debug
+      </summary>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <MiniInfo label="Auth status" value={authState.status} />
+        <MiniInfo label="Discord ID present" value={authState.user?.discord_id ? "yes" : "no"} />
+        <MiniInfo label="Session endpoint" value={authState.sessionStatus ? String(authState.sessionStatus) : "unknown"} />
+        <MiniInfo label="Selected server" value={authState.selectedServerId ?? "none"} />
+        <MiniInfo label="Manageable servers" value={String(authState.manageableServersCount)} />
+        <MiniInfo label="Home stats logged in" value={homeStats.loggedIn ? "yes" : "no"} />
+        <MiniInfo label="Top servers lock" value={sectionDebugValue(homeStats.sections.topServers)} />
+        <MiniInfo label="Activity lock" value={sectionDebugValue(homeStats.sections.recentActivity)} />
+        <MiniInfo label="Globe lock" value={sectionDebugValue(homeStats.sections.liveGlobeTracker)} />
+      </div>
+    </details>
+  );
+}
+
+function MiniInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/[0.07] bg-black/20 px-3 py-2">
+      <p className="text-[0.62rem] font-black uppercase tracking-[0.14em] text-zinc-500">{label}</p>
+      <p className="mt-1 break-words font-mono text-[0.72rem] text-zinc-200">{value}</p>
+    </div>
   );
 }
 
@@ -1688,7 +1882,76 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
     access_level: payload.access_level === "preview" ? "preview" : "full",
     is_locked: Boolean(payload.is_locked),
     locked_reason: typeof payload.locked_reason === "string" ? payload.locked_reason : null,
+    loggedIn: Boolean(payload.loggedIn) || payload.access_level === "full",
+    previewMode: typeof payload.previewMode === "boolean" ? payload.previewMode : payload.access_level === "preview" || Boolean(payload.is_locked),
+    sections: normalizeHomeStatsSections(payload.sections),
   };
+}
+
+function normalizeHomeStatsSections(value: unknown): HomeStatsSections {
+  if (!value || typeof value !== "object") {
+    return previewHomeStatsSections();
+  }
+  const sections = value as Partial<Record<keyof HomeStatsSections, Partial<HomeStatsSectionAccess>>>;
+  return {
+    topServers: normalizeHomeStatsSection(sections.topServers),
+    recentActivity: normalizeHomeStatsSection(sections.recentActivity),
+    liveGlobeTracker: normalizeHomeStatsSection(sections.liveGlobeTracker),
+  };
+}
+
+function normalizeHomeStatsSection(value: unknown): HomeStatsSectionAccess {
+  if (!value || typeof value !== "object") return lockedLoginSection();
+  const section = value as Partial<HomeStatsSectionAccess>;
+  const reason = section.reason === "login_required" || section.reason === "plan_required" ? section.reason : null;
+  return {
+    locked: Boolean(section.locked),
+    reason,
+  };
+}
+
+function previewHomeStatsSections(): HomeStatsSections {
+  return {
+    topServers: lockedLoginSection(),
+    recentActivity: lockedLoginSection(),
+    liveGlobeTracker: lockedLoginSection(),
+  };
+}
+
+function fullHomeStatsSections(): HomeStatsSections {
+  return {
+    topServers: unlockedSection(),
+    recentActivity: unlockedSection(),
+    liveGlobeTracker: unlockedSection(),
+  };
+}
+
+function lockedLoginSection(): HomeStatsSectionAccess {
+  return { locked: true, reason: "login_required" };
+}
+
+function unlockedSection(): HomeStatsSectionAccess {
+  return { locked: false, reason: null };
+}
+
+function unlockHomeStatsForLoggedIn(homeStats: HomeStats): HomeStats {
+  return {
+    ...homeStats,
+    access_level: "full",
+    is_locked: false,
+    locked_reason: null,
+    loggedIn: true,
+    previewMode: false,
+    sections: fullHomeStatsSections(),
+    topServers: homeStats.topServers.map((server) => ({
+      ...server,
+      score_label: server.score_label === "Login required" ? "Pending" : server.score_label,
+    })),
+  };
+}
+
+function sectionDebugValue(section: HomeStatsSectionAccess) {
+  return section.locked ? `locked:${section.reason ?? "unknown"}` : "unlocked";
 }
 
 function normalizeTopServer(value: unknown): HomeTopServer | null {
