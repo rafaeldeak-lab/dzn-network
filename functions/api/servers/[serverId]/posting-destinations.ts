@@ -2,18 +2,24 @@ import { getSessionUser, requireDb } from "../../../_lib/db";
 import {
   classifyDiscordPostingError,
   checkDiscordPostingPermissions,
+  fetchDiscordPostingChannels,
   getPostingDeliveryMode,
   recordDiscordPostingDeliveryState,
   sendDiscordTestPost,
+  verifyDiscordPostingChannel,
 } from "../../../_lib/discord-posting";
-import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
+import { ensureAutomationSchema, getAutomationContextForLinkedServer, isActiveSubscriptionStatus } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
-import { AUTO_POST_TYPES, hasAutoPost } from "../../../_lib/plans";
+import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, hasAutoPost } from "../../../_lib/plans";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 import type { AutoPostType } from "../../../../lib/billing/plans";
 
 type SavePostingDestinationBody = {
+  action?: "save" | "test" | "disable" | "delete";
+  channel_id?: string;
+  post_types?: string[];
+  test_post_type?: string;
   post_type?: string;
   discord_channel_id?: string;
   discord_webhook_url?: string | null;
@@ -38,6 +44,13 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (request.method !== "POST") return methodNotAllowed();
 
   const body = await readJson<SavePostingDestinationBody>(request);
+  if (!isActiveSubscriptionStatus(context.subscriptionStatus)) {
+    return json({ error: "An active DZN subscription is required to configure Discord auto-posts." }, { status: 403 });
+  }
+  if (body.channel_id || Array.isArray(body.post_types) || body.action) {
+    return handleGroupedPostingAction(env, context, user, body);
+  }
+
   const postType = normalizePostType(body.post_type);
   if (!postType) return json({ error: "Invalid post type" }, { status: 400 });
   if (!hasAutoPost(context.planKey, postType)) {
@@ -145,6 +158,180 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   });
 };
 
+async function handleGroupedPostingAction(
+  env: Env,
+  context: { guildId: string; planKey: string; subscriptionStatus: string },
+  user: SessionUser,
+  body: SavePostingDestinationBody,
+) {
+  await ensureAutomationSchema(env);
+  const action = body.action ?? "save";
+  const channelId = sanitizeDiscordId(body.channel_id ?? body.discord_channel_id);
+  if (!channelId) return json({ error: "Discord channel is required." }, { status: 400 });
+
+  if (action === "delete") {
+    await requireDb(env)
+      .prepare("DELETE FROM server_posting_destinations WHERE guild_id = ? AND discord_channel_id = ?")
+      .bind(context.guildId, channelId)
+      .run();
+    return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+  }
+
+  if (action === "disable") {
+    await requireDb(env)
+      .prepare("UPDATE server_posting_destinations SET enabled = 0, updated_at = ? WHERE guild_id = ? AND discord_channel_id = ?")
+      .bind(new Date().toISOString(), context.guildId, channelId)
+      .run();
+    return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+  }
+
+  const existingForChannel = await requireDb(env)
+    .prepare("SELECT discord_webhook_url FROM server_posting_destinations WHERE guild_id = ? AND discord_channel_id = ? AND discord_webhook_url IS NOT NULL LIMIT 1")
+    .bind(context.guildId, channelId)
+    .first<{ discord_webhook_url: string | null }>();
+  const rawWebhookUrl = typeof body.discord_webhook_url === "string" ? body.discord_webhook_url.trim() : "";
+  const webhookUrl = rawWebhookUrl ? sanitizeWebhookUrl(rawWebhookUrl) : existingForChannel?.discord_webhook_url ?? null;
+  if (rawWebhookUrl && !webhookUrl) return json({ error: "Invalid Discord webhook URL." }, { status: 400 });
+
+  const permissionCheck = await checkDiscordPostingPermissions(env, {
+    discord_channel_id: channelId,
+    discord_webhook_url: webhookUrl,
+  });
+  const verifiedChannel = await verifyDiscordPostingChannel(env, context.guildId, channelId).catch(() => null);
+  if (!verifiedChannel && !webhookUrl) {
+    return json({
+      error: "Choose another channel or add a webhook fallback.",
+      permission_check: permissionCheck,
+      ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+    }, { status: 400 });
+  }
+  if (permissionCheck.mode === "missing_permissions" && !webhookUrl) {
+    return json({
+      error: permissionCheck.warning ?? "DZN cannot auto-post in this channel yet.",
+      permission_check: permissionCheck,
+      ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+    }, { status: 400 });
+  }
+
+  if (action === "test") {
+    const postType = normalizePostType(body.test_post_type ?? body.post_type ?? body.post_types?.[0]);
+    if (!postType) return json({ error: "Select a post type to test." }, { status: 400 });
+    if (!hasAutoPost(context.planKey, postType)) return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
+    const testResult = await runPostingTest(env, context.guildId, channelId, postType, webhookUrl, permissionCheck);
+    return json({
+      ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+      permission_check: permissionCheck,
+      test_post: testResult,
+    });
+  }
+
+  const postTypes = normalizePostTypes(body.post_types);
+  if (!postTypes.length) return json({ error: "Select at least one auto-post type." }, { status: 400 });
+  const locked = postTypes.filter((postType) => !hasAutoPost(context.planKey, postType));
+  if (locked.length > 0) return json({ error: "One or more selected auto-post types are locked by your DZN plan." }, { status: 403 });
+
+  const now = new Date().toISOString();
+  const db = requireDb(env);
+  for (const postType of postTypes) {
+    await db
+      .prepare(
+        `INSERT INTO server_posting_destinations (
+          id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
+          required_feature, min_plan_key, created_by_discord_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(guild_id, post_type) DO UPDATE SET
+          discord_channel_id = excluded.discord_channel_id,
+          discord_webhook_url = excluded.discord_webhook_url,
+          enabled = excluded.enabled,
+          required_feature = excluded.required_feature,
+          min_plan_key = excluded.min_plan_key,
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        context.guildId,
+        postType,
+        channelId,
+        webhookUrl,
+        body.enabled === false ? 0 : 1,
+        requiredFeatureForPostType(postType),
+        context.planKey,
+        user.discord_id,
+        now,
+        now,
+      )
+      .run();
+    await upsertPostingPermissionWarning(env, {
+      guildId: context.guildId,
+      postType,
+      channelId,
+      warning: permissionCheck.warning,
+    });
+  }
+
+  const placeholders = postTypes.map(() => "?").join(", ");
+  await db
+    .prepare(`UPDATE server_posting_destinations SET enabled = 0, updated_at = ? WHERE guild_id = ? AND discord_channel_id = ? AND post_type NOT IN (${placeholders})`)
+    .bind(now, context.guildId, channelId, ...postTypes)
+    .run();
+
+  return json({
+    ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+    permission_check: permissionCheck,
+  });
+}
+
+async function runPostingTest(
+  env: Env,
+  guildId: string,
+  channelId: string,
+  postType: AutoPostType,
+  webhookUrl: string | null,
+  permissionCheck: Awaited<ReturnType<typeof checkDiscordPostingPermissions>>,
+) {
+  const state = await requireDb(env)
+    .prepare("SELECT discord_message_id FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
+    .bind(guildId, postType, channelId)
+    .first<{ discord_message_id: string | null }>();
+  if (permissionCheck.mode === "missing_permissions" && !webhookUrl) {
+    return {
+      ok: false,
+      mode: "missing_permissions",
+      error: permissionCheck.warning ?? "DZN cannot auto-post in this channel yet.",
+      missing_permissions: permissionCheck.missing_permissions,
+    };
+  }
+
+  try {
+    const delivery = await sendDiscordTestPost(env, {
+      guild_id: guildId,
+      post_type: postType,
+      discord_channel_id: channelId,
+      discord_webhook_url: webhookUrl,
+    }, state?.discord_message_id ?? null);
+    await recordDiscordPostingDeliveryState(env, {
+      guild_id: guildId,
+      post_type: postType,
+      discord_channel_id: channelId,
+    }, delivery);
+    return { ok: true, mode: delivery.mode };
+  } catch (error) {
+    const classified = classifyDiscordPostingError(error);
+    await upsertPostingPermissionWarning(env, {
+      guildId,
+      postType,
+      channelId,
+      warning: classified.warning,
+    });
+    return {
+      ok: false,
+      mode: classified.mode,
+      error: classified.warning ?? "Discord test post failed.",
+      missing_permissions: classified.missing_permissions,
+    };
+  }
+}
+
 async function getPostingDestinationPayload(env: Env, guildId: string, planKey: string) {
   await ensureAutomationSchema(env);
   const rows = await requireDb(env)
@@ -179,8 +366,9 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
     }>();
   const configured = new Map((rows.results ?? []).map((row) => [row.post_type, row]));
   const states = new Map((stateRows.results ?? []).map((row) => [`${row.post_type}:${row.discord_channel_id}`, row]));
-  return {
-    post_types: await Promise.all(AUTO_POST_TYPES.map(async (postType) => {
+  const channelRows = await fetchDiscordPostingChannels(env, guildId).catch(() => []);
+  const channelNames = new Map(channelRows.map((channel) => [channel.channel_id, channel]));
+  const postTypeSummaries = await Promise.all(AUTO_POST_TYPES.map(async (postType) => {
       const row = configured.get(postType);
       const state = row?.discord_channel_id ? states.get(`${postType}:${row.discord_channel_id}`) : undefined;
       let deliveryMode = getPostingDeliveryMode(env, {
@@ -223,7 +411,63 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
         last_posted_at: state?.last_posted_at ?? null,
         last_edited_at: state?.last_edited_at ?? null,
       };
+    }));
+  const summariesByType = new Map(postTypeSummaries.map((summary) => [summary.post_type, summary]));
+  const groupedRows = new Map<string, typeof postTypeSummaries>();
+  for (const row of rows.results ?? []) {
+    const summary = summariesByType.get(row.post_type);
+    if (!summary) continue;
+    const list = groupedRows.get(row.discord_channel_id) ?? [];
+    list.push(summary);
+    groupedRows.set(row.discord_channel_id, list);
+  }
+
+  return {
+    post_type_options: AUTO_POST_OPTIONS.map((option) => ({
+      ...option,
+      allowed_by_plan: hasAutoPost(planKey, option.key),
     })),
+    post_types: postTypeSummaries,
+    setups: [...groupedRows.entries()].map(([channelId, postTypes]) => {
+      const channel = channelNames.get(channelId);
+      const missingPermissions = [...new Set(postTypes.flatMap((postType) => postType.missing_permissions ?? []))];
+      const anyEnabled = postTypes.some((postType) => postType.enabled);
+      const anyLocked = postTypes.some((postType) => !postType.allowed);
+      const mode = postTypes.some((postType) => postType.delivery_mode === "bot")
+        ? "bot"
+        : postTypes.some((postType) => postType.delivery_mode === "webhook")
+          ? "webhook"
+          : "not_configured";
+      const setupStatus = missingPermissions.length > 0
+        ? "missing_permissions"
+        : !anyEnabled
+          ? "disabled"
+          : anyLocked
+            ? "locked_by_plan"
+            : postTypes.some((postType) => postType.setup_status === "active")
+              ? "active"
+              : "setup_needed";
+      return {
+        channel_id: channelId,
+        channel_name: channel?.channel_name ?? "Unknown channel",
+        channel_label: channel?.category_name ? `${channel.category_name} / #${channel.channel_name}` : `# ${channel?.channel_name ?? channelId}`,
+        posting_mode: mode,
+        status: setupStatus,
+        missing_permissions: missingPermissions,
+        has_webhook_url: postTypes.some((postType) => postType.has_webhook_url),
+        last_posted_at: latestString(postTypes.map((postType) => postType.last_posted_at)),
+        last_edited_at: latestString(postTypes.map((postType) => postType.last_edited_at)),
+        post_types: postTypes.map((postType) => ({
+          key: postType.post_type,
+          label: labelForPostType(postType.post_type),
+          enabled: postType.enabled,
+          allowed_by_plan: postType.allowed,
+          setup_status: postType.setup_status,
+          last_posted_at: postType.last_posted_at,
+          last_edited_at: postType.last_edited_at,
+        })),
+      };
+    }),
   };
 }
 
@@ -242,6 +486,23 @@ async function resolveUser(env: Env, request: Request): Promise<SessionUser | nu
 
 function normalizePostType(value: unknown): AutoPostType | null {
   return AUTO_POST_TYPES.includes(value as AutoPostType) ? value as AutoPostType : null;
+}
+
+function normalizePostTypes(value: unknown): AutoPostType[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(normalizePostType).filter((postType): postType is AutoPostType => Boolean(postType)))];
+}
+
+function labelForPostType(postType: AutoPostType) {
+  return AUTO_POST_OPTIONS.find((option) => option.key === postType)?.label
+    ?? postType.replace(/_embed$/, "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function latestString(values: Array<string | null | undefined>) {
+  const timestamps = values
+    .filter((value): value is string => Boolean(value))
+    .sort((a, b) => Date.parse(b) - Date.parse(a));
+  return timestamps[0] ?? null;
 }
 
 function requiredFeatureForPostType(postType: AutoPostType) {

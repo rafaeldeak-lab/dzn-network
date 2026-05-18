@@ -27,6 +27,13 @@ export type AutoPostType =
   | "event_leaderboard_embed"
   | "network_ranking_embed"
   | "server_vs_server_embed"
+  | "killfeed_embed"
+  | "pve_feed_embed"
+  | "hit_feed_embed"
+  | "connection_feed_embed"
+  | "build_feed_embed"
+  | "admin_alerts_embed"
+  | "admin_logs_embed"
   | "partner_featured_embed"
   | "priority_status_embed";
 
@@ -41,6 +48,15 @@ export type BillingPlanConfig = {
   allowed_features: PlanFeature[];
   allowed_auto_posts: AutoPostType[];
   priority_level: number;
+};
+
+export type AutoPostOptionGroup = "Basic" | "Stats" | "Events" | "Feeds" | "Admin" | "Partner";
+export type AutoPostOption = {
+  key: AutoPostType;
+  label: string;
+  group: AutoPostOptionGroup;
+  min_plan_key: PaidPlanKey;
+  upgrade_label: string;
 };
 
 export const MIN_SERVER_STATUS_INTERVAL_MINUTES = 1;
@@ -145,6 +161,13 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
       "event_leaderboard_embed",
       "network_ranking_embed",
       "server_vs_server_embed",
+      "killfeed_embed",
+      "pve_feed_embed",
+      "hit_feed_embed",
+      "connection_feed_embed",
+      "build_feed_embed",
+      "admin_alerts_embed",
+      "admin_logs_embed",
       "partner_featured_embed",
       "priority_status_embed",
     ],
@@ -160,8 +183,33 @@ export const AUTO_POST_TYPES: AutoPostType[] = [
   "event_leaderboard_embed",
   "network_ranking_embed",
   "server_vs_server_embed",
+  "killfeed_embed",
+  "pve_feed_embed",
+  "hit_feed_embed",
+  "connection_feed_embed",
+  "build_feed_embed",
+  "admin_alerts_embed",
+  "admin_logs_embed",
   "partner_featured_embed",
   "priority_status_embed",
+];
+
+export const AUTO_POST_OPTIONS: AutoPostOption[] = [
+  { key: "basic_status_embed", label: "Basic Server Status", group: "Basic", min_plan_key: "starter", upgrade_label: "Upgrade to DZN Starter" },
+  { key: "leaderboard_embed", label: "Leaderboards", group: "Stats", min_plan_key: "pro", upgrade_label: "Upgrade to DZN Pro" },
+  { key: "daily_summary_embed", label: "Daily Summary", group: "Stats", min_plan_key: "pro", upgrade_label: "Upgrade to DZN Pro" },
+  { key: "event_leaderboard_embed", label: "Event Leaderboard", group: "Events", min_plan_key: "network", upgrade_label: "Upgrade to DZN Network" },
+  { key: "server_vs_server_embed", label: "Server-vs-Server Progress", group: "Events", min_plan_key: "network", upgrade_label: "Upgrade to DZN Network" },
+  { key: "network_ranking_embed", label: "Network Ranking", group: "Events", min_plan_key: "network", upgrade_label: "Upgrade to DZN Network" },
+  { key: "killfeed_embed", label: "Killfeed", group: "Feeds", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "pve_feed_embed", label: "PvE Feed", group: "Feeds", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "hit_feed_embed", label: "Hit Feed", group: "Feeds", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "connection_feed_embed", label: "Connection Feed", group: "Feeds", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "build_feed_embed", label: "Build Feed", group: "Feeds", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "admin_alerts_embed", label: "Admin Alerts", group: "Admin", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "admin_logs_embed", label: "Admin Logs", group: "Admin", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "partner_featured_embed", label: "Partner Featured Post", group: "Partner", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
+  { key: "priority_status_embed", label: "Priority Status Post", group: "Partner", min_plan_key: "partner", upgrade_label: "Upgrade to DZN Partner" },
 ];
 
 export function normalizePlanKey(value: unknown): PlanKey {

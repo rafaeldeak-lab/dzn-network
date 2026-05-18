@@ -1592,6 +1592,13 @@ export async function runScheduledAdmSync(
             "event_leaderboard_embed",
             "network_ranking_embed",
             "server_vs_server_embed",
+            "killfeed_embed",
+            "pve_feed_embed",
+            "hit_feed_embed",
+            "connection_feed_embed",
+            "build_feed_embed",
+            "admin_alerts_embed",
+            "admin_logs_embed",
           ], "adm-data-change");
         }
       }

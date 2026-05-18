@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AuthResponse, BillingPlanSummary, BillingStatus, LinkedServer, NitradoLogAccessDiagnostics, PostingDestinationSummary } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AuthResponse, BillingPlanSummary, BillingStatus, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -226,7 +226,10 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [billingPlans, setBillingPlans] = useState<BillingPlanSummary[]>([]);
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
-  const [postingDestinations, setPostingDestinations] = useState<PostingDestinationSummary[]>([]);
+  const [postingSetups, setPostingSetups] = useState<PostingChannelSetup[]>([]);
+  const [postingOptions, setPostingOptions] = useState<PostingOptionSummary[]>([]);
+  const [discordPostingChannels, setDiscordPostingChannels] = useState<DiscordPostingChannel[]>([]);
+  const [discordChannelsWarning, setDiscordChannelsWarning] = useState("");
   const [automationHealth, setAutomationHealth] = useState<AutomationHealth | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
@@ -266,7 +269,13 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       const plans = await getBillingPlans().catch(() => null);
       if (plans?.plans?.length) setBillingPlans(plans.plans);
       const posting = await getPostingDestinations(server.id).catch(() => null);
-      if (posting?.post_types) setPostingDestinations(posting.post_types);
+      if (posting?.setups) setPostingSetups(posting.setups);
+      if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
+      const channels = await getDiscordPostingChannels(server.id).catch(() => null);
+      if (channels?.channels) {
+        setDiscordPostingChannels(channels.channels);
+        setDiscordChannelsWarning(channels.warning ?? "");
+      }
       const health = await getAutomationHealth().catch(() => null);
       setAutomationHealth(health);
     } catch (error) {
@@ -774,6 +783,18 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
             }}
           />
 
+          <DiscordAutoPostsPanel
+            serverId={server.id}
+            setups={postingSetups}
+            options={postingOptions}
+            channels={discordPostingChannels}
+            channelsWarning={discordChannelsWarning}
+            onSaved={(result) => {
+              setPostingSetups(result.setups ?? []);
+              if (result.post_type_options) setPostingOptions(result.post_type_options);
+            }}
+          />
+
           <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
             <DashboardPanel className="p-4">
               <div className="flex items-center justify-between gap-3">
@@ -813,11 +834,6 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               setActionMessage("Server bumped. It will appear higher in public discovery.");
               void refreshBilling();
             }}
-          />
-          <DiscordAutoPostsPanel
-            serverId={server.id}
-            destinations={postingDestinations}
-            onSaved={(next) => setPostingDestinations(next)}
           />
           {automationHealth ? <AutomationHealthPanel health={automationHealth} /> : null}
           <DashboardPanel className="p-4">
@@ -1465,155 +1481,276 @@ function AdvertisingBoostPanel({
 
 function DiscordAutoPostsPanel({
   serverId,
-  destinations,
+  setups,
+  options,
+  channels,
+  channelsWarning,
   onSaved,
 }: {
   serverId: string;
-  destinations: PostingDestinationSummary[];
-  onSaved: (items: PostingDestinationSummary[]) => void;
+  setups: PostingChannelSetup[];
+  options: PostingOptionSummary[];
+  channels: DiscordPostingChannel[];
+  channelsWarning: string;
+  onSaved: (result: PostingDestinationsResponse) => void;
 }) {
-  const [drafts, setDrafts] = useState<Record<string, { channel: string; webhook: string; enabled: boolean }>>({});
-  const [savingType, setSavingType] = useState<string | null>(null);
-  const [testingType, setTestingType] = useState<string | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useState("");
+  const [manualChannelId, setManualChannelId] = useState("");
+  const [selectedPostTypes, setSelectedPostTypes] = useState<string[]>([]);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [busyChannel, setBusyChannel] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [testTypeByChannel, setTestTypeByChannel] = useState<Record<string, string>>({});
 
-  const destinationDrafts = useMemo(() => Object.fromEntries(destinations.map((item) => [
-      item.post_type,
-      {
-        channel: item.discord_channel_id ?? "",
-        webhook: "",
-        enabled: item.enabled,
-      },
-    ])), [destinations]);
+  const effectiveOptions = options.length ? options : fallbackPostingOptions();
+  const groupedOptions = useMemo(() => groupPostingOptions(effectiveOptions), [effectiveOptions]);
+  const selectedChannel = channels.find((channel) => channel.channel_id === selectedChannelId) ?? null;
+  const channelForSave = selectedChannelId === "__manual" ? manualChannelId.trim() : selectedChannelId;
+  const selectedLockedCount = selectedPostTypes.filter((postType) => !effectiveOptions.find((option) => option.key === postType)?.allowed_by_plan).length;
+  const missingPermissions = selectedChannel?.missing_permissions ?? [];
+  const canSave = Boolean(channelForSave && selectedPostTypes.length && selectedLockedCount === 0 && (missingPermissions.length === 0 || webhookUrl.trim()));
 
-  async function save(item: PostingDestinationSummary, sendTestPost = false) {
-    const draft = drafts[item.post_type] ?? destinationDrafts[item.post_type] ?? { channel: "", webhook: "", enabled: false };
-    if (sendTestPost) setTestingType(item.post_type);
-    else setSavingType(item.post_type);
+  async function saveSetup() {
+    if (!canSave) return;
+    setSaving(true);
     setMessage("");
     try {
       const result = await savePostingDestination(serverId, {
-        post_type: item.post_type,
-        discord_channel_id: draft.channel,
-        discord_webhook_url: draft.webhook || null,
-        enabled: draft.enabled,
-        send_test_post: sendTestPost,
+        action: "save",
+        channel_id: channelForSave,
+        post_types: selectedPostTypes,
+        discord_webhook_url: webhookUrl || null,
+        enabled: true,
       });
-      onSaved(result.post_types);
-      const permissionWarning = result.permission_check?.warning;
-      if (sendTestPost) {
-        setMessage(result.test_post?.ok
-          ? `${formatPostType(item.post_type)} test posted by ${result.test_post.mode === "bot" ? "bot mode" : "webhook fallback"}. Future updates will edit the saved message when possible.`
-          : formatPostingError(result.test_post?.error ?? permissionWarning ?? "Discord test post failed.", result.test_post?.missing_permissions));
-      } else {
-        setMessage(permissionWarning ?? `${formatPostType(item.post_type)} destination saved.`);
-      }
+      onSaved(result);
+      setMessage("Discord auto-post setup saved.");
+      setSelectedChannelId("");
+      setManualChannelId("");
+      setSelectedPostTypes([]);
+      setWebhookUrl("");
+      setAdvancedOpen(false);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save Discord posting destination.");
+      setMessage(error instanceof Error ? error.message : "Could not save Discord auto-post setup.");
     } finally {
-      setSavingType(null);
-      setTestingType(null);
+      setSaving(false);
     }
   }
 
-  const allowed = destinations.filter((item) => item.allowed);
-  const locked = destinations.filter((item) => !item.allowed);
+  async function runSetupAction(setup: PostingChannelSetup, action: "test" | "disable" | "delete") {
+    setBusyChannel(`${setup.channel_id}:${action}`);
+    setMessage("");
+    try {
+      const selectedTestType = testTypeByChannel[setup.channel_id] ?? setup.post_types.find((postType) => postType.enabled)?.key ?? setup.post_types[0]?.key;
+      const result = await savePostingDestination(serverId, {
+        action,
+        channel_id: setup.channel_id,
+        post_types: setup.post_types.map((postType) => postType.key),
+        test_post_type: selectedTestType,
+        enabled: action !== "disable",
+      });
+      onSaved(result);
+      if (action === "test") {
+        setMessage(result.test_post?.ok
+          ? `${formatPostType(selectedTestType)} test posted. Future updates will edit the saved message when possible.`
+          : formatPostingError(result.test_post?.error ?? "Discord test post failed.", result.test_post?.missing_permissions));
+      } else if (action === "delete") {
+        setMessage("Discord auto-post setup deleted.");
+      } else {
+        setMessage("Discord auto-post setup disabled.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : `Could not ${action} Discord auto-post setup.`);
+    } finally {
+      setBusyChannel(null);
+    }
+  }
+
+  function editSetup(setup: PostingChannelSetup) {
+    setSelectedChannelId(channels.some((channel) => channel.channel_id === setup.channel_id) ? setup.channel_id : "__manual");
+    setManualChannelId(setup.channel_id);
+    setSelectedPostTypes(setup.post_types.map((postType) => postType.key));
+    setWebhookUrl("");
+    setAdvancedOpen(setup.has_webhook_url);
+    setMessage(`Editing ${setup.channel_label}.`);
+  }
 
   return (
     <DashboardPanel className="p-4">
-      <PanelHeader icon={<Bell className="h-5 w-5" />} title="Discord Auto Posts" />
-      <p className="mt-3 text-xs leading-5 text-zinc-400">
-        DZN uses the bot and saved channel ID first, then falls back to a webhook URL if one is supplied. No destination means that post type is skipped safely.
-      </p>
-      <div className="mt-4 grid gap-3">
-        {allowed.map((item) => {
-          const draft = drafts[item.post_type] ?? destinationDrafts[item.post_type] ?? { channel: item.discord_channel_id ?? "", webhook: "", enabled: item.enabled };
-          const postingMode = postingStatusLabel(item);
-          const setupStatus = postingSetupLabel(item);
-          return (
-            <div key={item.post_type} className="rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-black uppercase text-white">{formatPostType(item.post_type)}</p>
-                <div className="flex items-center gap-2">
-                  <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingSetupClass(item.setup_status)}`}>
-                    {setupStatus}
-                  </span>
-                  <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingModeClass(postingMode.mode)}`}>
-                    {postingMode.label}
-                  </span>
-                  <label className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
-                    <input
-                      type="checkbox"
-                      checked={draft.enabled}
-                      onChange={(event) => setDrafts((current) => ({
-                        ...current,
-                        [item.post_type]: { ...draft, enabled: event.target.checked },
-                      }))}
-                    />
-                    Enabled
-                  </label>
-                </div>
-              </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <PanelHeader icon={<Bell className="h-5 w-5" />} title="Discord Auto Posts" />
+          <p className="mt-3 text-xs leading-5 text-zinc-400">
+            Choose a Discord channel, then select what DZN should automatically post there.
+          </p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-[10px] font-black uppercase text-zinc-300">
+          {setups.filter((setup) => setup.status === "active").length} active setups
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3 lg:grid-cols-[1fr_1.2fr_auto]">
+        <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
+          1. Select Discord Channel
+          <select
+            value={selectedChannelId}
+            onChange={(event) => setSelectedChannelId(event.target.value)}
+            className="min-h-11 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
+          >
+            <option value="">Choose channel</option>
+            {channels.map((channel) => (
+              <option key={channel.channel_id} value={channel.channel_id} className="bg-[#080b16] text-white">
+                {channel.category_name ? `${channel.category_name} / #${channel.channel_name}` : `# ${channel.channel_name}`}
+              </option>
+            ))}
+            <option value="__manual" className="bg-[#080b16] text-white">Advanced manual channel ID</option>
+          </select>
+          {selectedChannel ? (
+            <span className={`text-[11px] font-bold normal-case ${selectedChannel.can_post ? "text-emerald-200" : "text-amber-200"}`}>
+              {selectedChannel.can_post ? "Bot can post in this channel" : `Missing: ${selectedChannel.missing_permissions.join(", ")}`}
+            </span>
+          ) : channelsWarning ? (
+            <span className="text-[11px] font-bold normal-case text-amber-200">{channelsWarning}</span>
+          ) : null}
+        </label>
+
+        <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
+          2. What should DZN post here?
+          <select
+            multiple
+            value={selectedPostTypes}
+            onChange={(event) => setSelectedPostTypes(Array.from(event.target.selectedOptions).map((option) => option.value))}
+            className="min-h-[112px] rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
+          >
+            {groupedOptions.map(([group, groupOptions]) => (
+              <optgroup key={group} label={group}>
+                {groupOptions.map((option) => (
+                  <option key={option.key} value={option.key} disabled={!option.allowed_by_plan} className="bg-[#080b16] text-white disabled:text-zinc-500">
+                    {option.label}{option.allowed_by_plan ? "" : ` - ${option.upgrade_label}`}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <span className="text-[11px] font-bold normal-case text-zinc-500">{selectedPostTypes.length} posts selected</span>
+        </label>
+
+        <div className="grid content-end gap-2">
+          <button
+            type="button"
+            disabled={!canSave || saving}
+            onClick={saveSetup}
+            className="min-h-11 rounded-lg bg-violet-500 px-4 py-3 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            {saving ? "Saving..." : "Save Auto Post Setup"}
+          </button>
+          {!canSave && channelForSave ? <p className="max-w-[240px] text-[11px] font-bold leading-5 text-amber-200">Choose allowed post types and a channel where bot mode works, or add a webhook fallback.</p> : null}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setAdvancedOpen((value) => !value)}
+        className="mt-3 text-[10px] font-black uppercase text-cyan-200"
+      >
+        {advancedOpen ? "Hide" : "Show"} advanced fallback
+      </button>
+      {advancedOpen || selectedChannelId === "__manual" ? (
+        <div className="mt-3 grid gap-3 rounded-lg border border-white/10 bg-black/24 p-3 md:grid-cols-2">
+          {selectedChannelId === "__manual" ? (
+            <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
+              Manual Channel ID
               <input
-                value={draft.channel}
-                onChange={(event) => setDrafts((current) => ({
-                  ...current,
-                  [item.post_type]: { ...draft, channel: event.target.value },
-                }))}
+                value={manualChannelId}
+                onChange={(event) => setManualChannelId(event.target.value)}
                 placeholder="Discord channel ID"
-                className="mt-3 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
               />
-              <input
-                value={draft.webhook}
-                onChange={(event) => setDrafts((current) => ({
-                  ...current,
-                  [item.post_type]: { ...draft, webhook: event.target.value },
-                }))}
-                placeholder={item.has_webhook_url ? "Webhook fallback saved - enter a new URL to replace it" : "Optional Discord webhook fallback URL"}
-                className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
-              />
-              <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-3">
-                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Preview Embed</p>
-                <p className="mt-1 text-xs font-black uppercase text-white">DZN {formatPostType(item.post_type)}</p>
-                <p className="mt-1 text-[11px] leading-5 text-zinc-400">
-                  This post edits automatically when saved DZN data changes. Bot mode uses the channel ID first; webhook fallback is only used if bot posting cannot complete.
-                </p>
-              </div>
-              {item.setup_message ? <p className="mt-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-200">{item.setup_message}</p> : null}
-              {item.missing_permissions?.length ? (
-                <div className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">
-                  <p className="uppercase">Missing Discord permissions</p>
-                  <p className="mt-1 text-[11px] leading-5 text-amber-50/85">{item.missing_permissions.join(" | ")}</p>
+            </label>
+          ) : null}
+          <label className="grid gap-2 text-[10px] font-black uppercase text-zinc-400">
+            Optional Webhook URL
+            <input
+              value={webhookUrl}
+              onChange={(event) => setWebhookUrl(event.target.value)}
+              placeholder="Only needed if the bot cannot post directly"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"
+            />
+            <span className="text-[11px] font-bold normal-case text-zinc-500">Saved webhooks are hidden. Enter a new URL only to replace the fallback.</span>
+          </label>
+        </div>
+      ) : null}
+
+      <div className="mt-5 flex items-center justify-between gap-3">
+        <p className="text-sm font-black uppercase text-white">Saved Auto Post Setups</p>
+        <p className="text-[10px] font-black uppercase text-zinc-500">{setups.length} channels configured</p>
+      </div>
+      <div className="mt-3 grid gap-3">
+        {setups.length ? setups.map((setup) => {
+          const testType = testTypeByChannel[setup.channel_id] ?? setup.post_types.find((postType) => postType.enabled)?.key ?? setup.post_types[0]?.key ?? "";
+          return (
+            <div key={setup.channel_id} className="rounded-lg border border-white/10 bg-black/28 p-3">
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.7fr)_auto] lg:items-start">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/80 text-white">
+                      <Bell className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black text-white">{setup.channel_label}</p>
+                      <p className="text-[11px] font-bold text-zinc-500">ID: {setup.channel_id}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {setup.post_types.map((postType) => (
+                      <span key={postType.key} className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase ${postType.allowed_by_plan ? "border-violet-300/20 bg-violet-400/10 text-violet-100" : "border-amber-300/25 bg-amber-400/10 text-amber-100"}`}>
+                        {postType.label}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              ) : null}
-              {item.setup_warning ? <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{item.setup_warning}</p> : null}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={savingType === item.post_type || !draft.channel}
-                  onClick={() => save(item)}
-                  className="rounded-lg bg-cyan-500/80 px-3 py-2 text-[10px] font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-55"
-                >
-                  {savingType === item.post_type ? "Saving..." : "Save Destination"}
-                </button>
-                <button
-                  type="button"
-                  disabled={testingType === item.post_type || !draft.channel}
-                  onClick={() => save(item, true)}
-                  className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50 disabled:cursor-not-allowed disabled:opacity-55"
-                >
-                  {testingType === item.post_type ? "Testing..." : testPostButtonLabel(item.post_type)}
-                </button>
+                <div className="grid gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${postingModeClass(setup.posting_mode)}`}>{postingModeLabel(setup.posting_mode)}</span>
+                    <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${setupStatusClass(setup.status)}`}>{setupStatusLabel(setup.status)}</span>
+                  </div>
+                  <p className="text-[11px] font-bold text-zinc-400">{setup.last_edited_at ? `Last updated ${formatRelativeTime(setup.last_edited_at)}` : "Waiting for first post"}</p>
+                  {setup.missing_permissions.length ? <p className="text-[11px] font-bold text-amber-200">Missing: {setup.missing_permissions.join(", ")}</p> : null}
+                </div>
+                <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+                  <select
+                    value={testType}
+                    onChange={(event) => setTestTypeByChannel((current) => ({ ...current, [setup.channel_id]: event.target.value }))}
+                    className="rounded-lg border border-white/10 bg-black/40 px-2 py-2 text-[10px] font-bold text-white outline-none"
+                  >
+                    {setup.post_types.map((postType) => (
+                      <option key={postType.key} value={postType.key} className="bg-[#080b16] text-white">{postType.label}</option>
+                    ))}
+                  </select>
+                  <button type="button" disabled={busyChannel === `${setup.channel_id}:test`} onClick={() => runSetupAction(setup, "test")} className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 disabled:opacity-55">
+                    {busyChannel === `${setup.channel_id}:test` ? "Testing..." : "Test"}
+                  </button>
+                  <button type="button" onClick={() => editSetup(setup)} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100">Edit</button>
+                  <button type="button" disabled={busyChannel === `${setup.channel_id}:disable`} onClick={() => runSetupAction(setup, "disable")} className="rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-[10px] font-black uppercase text-amber-50 disabled:opacity-55">Disable</button>
+                  <button type="button" disabled={busyChannel === `${setup.channel_id}:delete`} onClick={() => runSetupAction(setup, "delete")} className="rounded-lg border border-red-300/25 bg-red-400/10 px-3 py-2 text-[10px] font-black uppercase text-red-50 disabled:opacity-55">Delete</button>
+                </div>
               </div>
             </div>
           );
-        })}
-        {locked.slice(0, 3).map((item) => (
-          <div key={item.post_type} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-            <p className="text-xs font-black uppercase text-zinc-200">{formatPostType(item.post_type)}</p>
-            <p className="mt-2 text-xs leading-5 text-zinc-500">{item.locked_message ?? "Upgrade to unlock this auto-post."}</p>
+        }) : (
+          <div className="rounded-lg border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm font-bold text-zinc-400">
+            No Discord auto-post setups yet. Choose a channel and select the embeds DZN should keep updated.
           </div>
-        ))}
+        )}
+      </div>
+      <div className="mt-4 rounded-lg border border-violet-300/20 bg-violet-400/10 p-3">
+        <p className="text-[10px] font-black uppercase text-violet-100">How Auto Posts Work</p>
+        <div className="mt-2 grid gap-2 text-xs font-bold leading-5 text-zinc-300 md:grid-cols-3">
+          <p>DZN posts the embed in the selected channel.</p>
+          <p>DZN saves the Discord message ID for future updates.</p>
+          <p>DZN edits the existing message when data changes. No spam.</p>
+        </div>
       </div>
       {message ? <p className="mt-3 text-xs font-bold text-cyan-100">{message}</p> : null}
     </DashboardPanel>
@@ -1671,38 +1808,68 @@ function HealthCountLine({ label, counts }: { label: string; counts: Record<stri
   );
 }
 
-function postingModeLabel(mode: PostingDestinationSummary["delivery_mode"]) {
+function postingModeLabel(mode: string | null | undefined) {
   if (mode === "bot") return "BOT MODE";
   if (mode === "webhook") return "WEBHOOK FALLBACK";
   return "SETUP NEEDED";
 }
 
-function postingStatusLabel(item: PostingDestinationSummary) {
-  if (item.setup_status === "missing_permissions") {
-    return { label: "MISSING PERMISSIONS", mode: "not_configured" as const };
-  }
-  return { label: postingModeLabel(item.delivery_mode), mode: item.delivery_mode };
-}
-
-function postingSetupLabel(item: PostingDestinationSummary) {
-  return item.setup_label ?? (item.setup_status === "active" ? "ACTIVE" : item.setup_status === "missing_permissions" ? "MISSING PERMISSIONS" : "SETUP NEEDED");
-}
-
-function postingSetupClass(status: PostingDestinationSummary["setup_status"]) {
-  if (status === "active") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
-  if (status === "missing_permissions") return "border-red-300/30 bg-red-400/10 text-red-100";
-  return "border-amber-300/30 bg-amber-400/10 text-amber-100";
-}
-
-function postingModeClass(mode: PostingDestinationSummary["delivery_mode"]) {
+function postingModeClass(mode: string | null | undefined) {
   if (mode === "bot") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
   if (mode === "webhook") return "border-cyan-300/30 bg-cyan-400/10 text-cyan-100";
   return "border-amber-300/30 bg-amber-400/10 text-amber-100";
 }
 
-function testPostButtonLabel(postType: string) {
-  if (postType === "basic_status_embed") return "TEST BASIC STATUS POST";
-  return `TEST ${formatPostType(postType)} POST`;
+function setupStatusLabel(status: string | null | undefined) {
+  if (status === "active") return "Active";
+  if (status === "disabled") return "Disabled";
+  if (status === "locked_by_plan") return "Locked by plan";
+  if (status === "missing_permissions") return "Missing permissions";
+  return "Setup needed";
+}
+
+function setupStatusClass(status: string | null | undefined) {
+  if (status === "active") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
+  if (status === "disabled") return "border-zinc-300/20 bg-zinc-400/10 text-zinc-200";
+  if (status === "locked_by_plan" || status === "missing_permissions") return "border-amber-300/30 bg-amber-400/10 text-amber-100";
+  return "border-red-300/30 bg-red-400/10 text-red-100";
+}
+
+function groupPostingOptions(options: PostingOptionSummary[]) {
+  const groups = new Map<string, PostingOptionSummary[]>();
+  for (const option of options) {
+    const group = groups.get(option.group) ?? [];
+    group.push(option);
+    groups.set(option.group, group);
+  }
+  return [...groups.entries()];
+}
+
+function fallbackPostingOptions(): PostingOptionSummary[] {
+  return [
+    ["basic_status_embed", "Basic Server Status", "Basic", "starter", "Upgrade to DZN Starter"],
+    ["leaderboard_embed", "Leaderboards", "Stats", "pro", "Upgrade to DZN Pro"],
+    ["daily_summary_embed", "Daily Summary", "Stats", "pro", "Upgrade to DZN Pro"],
+    ["event_leaderboard_embed", "Event Leaderboard", "Events", "network", "Upgrade to DZN Network"],
+    ["server_vs_server_embed", "Server-vs-Server Progress", "Events", "network", "Upgrade to DZN Network"],
+    ["network_ranking_embed", "Network Ranking", "Events", "network", "Upgrade to DZN Network"],
+    ["killfeed_embed", "Killfeed", "Feeds", "partner", "Upgrade to DZN Partner"],
+    ["pve_feed_embed", "PvE Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
+    ["hit_feed_embed", "Hit Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
+    ["connection_feed_embed", "Connection Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
+    ["build_feed_embed", "Build Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
+    ["admin_alerts_embed", "Admin Alerts", "Admin", "partner", "Upgrade to DZN Partner"],
+    ["admin_logs_embed", "Admin Logs", "Admin", "partner", "Upgrade to DZN Partner"],
+    ["partner_featured_embed", "Partner Featured Post", "Partner", "partner", "Upgrade to DZN Partner"],
+    ["priority_status_embed", "Priority Status Post", "Partner", "partner", "Upgrade to DZN Partner"],
+  ].map(([key, label, group, minPlan, upgrade]) => ({
+    key,
+    label,
+    group,
+    min_plan_key: minPlan,
+    upgrade_label: upgrade,
+    allowed_by_plan: false,
+  }));
 }
 
 function formatPostingError(message: string, missingPermissions?: string[]) {
@@ -2271,7 +2438,7 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       adm_pull_interval_minutes: 10,
       manual_adm_refresh_cooldown_minutes: 10,
       priority_level: 4,
-      allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed", "partner_featured_embed", "priority_status_embed"],
+      allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed", "killfeed_embed", "pve_feed_embed", "hit_feed_embed", "connection_feed_embed", "build_feed_embed", "admin_alerts_embed", "admin_logs_embed", "partner_featured_embed", "priority_status_embed"],
     },
   }[plan.key];
 

@@ -48,6 +48,19 @@ export type PostingPermissionCheck = {
   checked_at: string | null;
 };
 export type DiscordDeliveryResult = { mode: DeliveryMode; messageId: string | null };
+export type DiscordPostingChannel = {
+  channel_id: string;
+  channel_name: string;
+  channel_type: "text" | "announcement";
+  category_name: string | null;
+  can_view: boolean;
+  can_send: boolean;
+  can_embed: boolean;
+  can_read_history: boolean;
+  can_manage_messages: boolean;
+  can_post: boolean;
+  missing_permissions: string[];
+};
 
 const DISCORD_CHANNEL_PERMISSION_WARNING =
   "DZN cannot auto-post here yet. Please give the bot permission to View Channel, Send Messages, Embed Links, and Read Message History.";
@@ -278,6 +291,73 @@ export function getPostingDeliveryMode(env: Env, destination: {
   return "not_configured";
 }
 
+export async function fetchDiscordPostingChannels(env: Env, guildId: string): Promise<DiscordPostingChannel[]> {
+  const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
+  if (!botToken) throw new Error("DZN bot token is not configured.");
+  const response = await fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/channels`);
+  if (!response.ok) throw new Error("DZN could not fetch Discord channels for this server.");
+  const channels = await response.json().catch(() => null) as DiscordChannel[] | null;
+  if (!Array.isArray(channels)) return [];
+  const permissionContext = await getBotGuildPermissionContext(botToken, guildId);
+  const categories = new Map(
+    channels
+      .filter((channel) => Number(channel.type) === 4 && typeof channel.name === "string")
+      .map((channel) => [channel.id, channel.name ?? null]),
+  );
+
+  return channels
+    .filter((channel) => isPostableChannelType(channel.type) && typeof channel.id === "string")
+    .map((channel) => {
+      const permissions = permissionContext ? getChannelPermissionBitsFromContext(permissionContext, channel) : parsePermissionBits(channel.permissions);
+      const missing = permissions === null ? [] : REQUIRED_BOT_CHANNEL_PERMISSIONS
+        .filter(([, bit]) => (permissions & bit) !== bit)
+        .map(([label]) => label);
+      const canManageMessages = permissions === null ? false : OPTIONAL_BOT_CHANNEL_PERMISSIONS.every(([, bit]) => (permissions & bit) === bit);
+      return {
+        channel_id: String(channel.id),
+        channel_name: String(channel.name ?? "unknown-channel"),
+        channel_type: Number(channel.type) === 5 ? "announcement" as const : "text" as const,
+        category_name: typeof channel.parent_id === "string" ? categories.get(channel.parent_id) ?? null : null,
+        can_view: permissions === null ? true : !missing.includes("View Channel"),
+        can_send: permissions === null ? true : !missing.includes("Send Messages"),
+        can_embed: permissions === null ? true : !missing.includes("Embed Links"),
+        can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
+        can_manage_messages: canManageMessages,
+        can_post: permissions === null ? true : missing.length === 0,
+        missing_permissions: missing,
+      };
+    })
+    .sort((a, b) => `${a.category_name ?? ""} ${a.channel_name}`.localeCompare(`${b.category_name ?? ""} ${b.channel_name}`));
+}
+
+export async function verifyDiscordPostingChannel(env: Env, guildId: string, channelId: string): Promise<DiscordPostingChannel | null> {
+  const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
+  if (!botToken) return null;
+  const response = await fetchDiscordApi(botToken, `/channels/${encodeURIComponent(channelId)}`);
+  if (!response.ok) return null;
+  const channel = await response.json().catch(() => null) as DiscordChannel | null;
+  if (!channel || channel.guild_id !== guildId || !isPostableChannelType(channel.type)) return null;
+  const permissionContext = await getBotGuildPermissionContext(botToken, guildId);
+  const permissions = permissionContext ? getChannelPermissionBitsFromContext(permissionContext, channel) : await getBotChannelPermissionBits(botToken, channel);
+  const missing = permissions === null ? [] : REQUIRED_BOT_CHANNEL_PERMISSIONS
+    .filter(([, bit]) => (permissions & bit) !== bit)
+    .map(([label]) => label);
+  const canManageMessages = permissions === null ? false : OPTIONAL_BOT_CHANNEL_PERMISSIONS.every(([, bit]) => (permissions & bit) === bit);
+  return {
+    channel_id: channelId,
+    channel_name: String(channel.name ?? "unknown-channel"),
+    channel_type: Number(channel.type) === 5 ? "announcement" : "text",
+    category_name: null,
+    can_view: permissions === null ? true : !missing.includes("View Channel"),
+    can_send: permissions === null ? true : !missing.includes("Send Messages"),
+    can_embed: permissions === null ? true : !missing.includes("Embed Links"),
+    can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
+    can_manage_messages: canManageMessages,
+    can_post: permissions === null ? true : missing.length === 0,
+    missing_permissions: missing,
+  };
+}
+
 export async function checkDiscordPostingPermissions(env: Env, destination: {
   discord_channel_id?: string | null;
   discord_webhook_url?: string | null;
@@ -492,7 +572,11 @@ async function recordPostingStateError(env: Env, destination: PostingDestination
 }
 
 type DiscordChannel = {
+  id?: string | null;
+  name?: string | null;
+  type?: number | string | null;
   guild_id?: string | null;
+  parent_id?: string | null;
   permissions?: string | number | null;
   permission_overwrites?: Array<{
     id: string;
@@ -500,6 +584,13 @@ type DiscordChannel = {
     allow?: string | number | null;
     deny?: string | number | null;
   }>;
+};
+
+type BotPermissionContext = {
+  botUserId: string;
+  guildId: string;
+  roleIds: Set<string>;
+  basePermissions: bigint;
 };
 
 async function fetchDiscordApi(botToken: string, path: string) {
@@ -515,48 +606,62 @@ async function getBotChannelPermissionBits(botToken: string, channel: DiscordCha
   if (!guildId) return null;
 
   try {
-    const meResponse = await fetchDiscordApi(botToken, "/users/@me");
-    if (!meResponse.ok) return null;
-    const me = await meResponse.json().catch(() => null) as { id?: string } | null;
-    const botUserId = typeof me?.id === "string" ? me.id : null;
-    if (!botUserId) return null;
-
-    const [memberResponse, rolesResponse] = await Promise.all([
-      fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(botUserId)}`),
-      fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/roles`),
-    ]);
-    if (!memberResponse.ok || !rolesResponse.ok) return null;
-    const member = await memberResponse.json().catch(() => null) as { roles?: string[] } | null;
-    const roles = await rolesResponse.json().catch(() => null) as Array<{ id?: string; permissions?: string | number | null }> | null;
-    if (!Array.isArray(roles)) return null;
-
-    const roleIds = new Set(Array.isArray(member?.roles) ? member.roles : []);
-    let permissions = BigInt(0);
-    for (const role of roles) {
-      if (role.id === guildId || (role.id && roleIds.has(role.id))) {
-        permissions |= parsePermissionBits(role.permissions) ?? BigInt(0);
-      }
-    }
-    if ((permissions & DISCORD_ADMINISTRATOR_PERMISSION) === DISCORD_ADMINISTRATOR_PERMISSION) return permissions;
-
-    const overwrites = Array.isArray(channel?.permission_overwrites) ? channel.permission_overwrites : [];
-    const everyoneOverwrite = overwrites.find((overwrite) => overwrite.id === guildId && String(overwrite.type) === "0");
-    permissions = applyPermissionOverwrite(permissions, everyoneOverwrite);
-
-    let roleAllow = BigInt(0);
-    let roleDeny = BigInt(0);
-    for (const overwrite of overwrites) {
-      if (String(overwrite.type) !== "0" || !roleIds.has(overwrite.id)) continue;
-      roleAllow |= parsePermissionBits(overwrite.allow) ?? BigInt(0);
-      roleDeny |= parsePermissionBits(overwrite.deny) ?? BigInt(0);
-    }
-    permissions = (permissions & ~roleDeny) | roleAllow;
-
-    const memberOverwrite = overwrites.find((overwrite) => overwrite.id === botUserId && String(overwrite.type) === "1");
-    return applyPermissionOverwrite(permissions, memberOverwrite);
+    const context = await getBotGuildPermissionContext(botToken, guildId);
+    return context ? getChannelPermissionBitsFromContext(context, channel) : null;
   } catch {
     return null;
   }
+}
+
+async function getBotGuildPermissionContext(botToken: string, guildId: string): Promise<BotPermissionContext | null> {
+  const meResponse = await fetchDiscordApi(botToken, "/users/@me");
+  if (!meResponse.ok) return null;
+  const me = await meResponse.json().catch(() => null) as { id?: string } | null;
+  const botUserId = typeof me?.id === "string" ? me.id : null;
+  if (!botUserId) return null;
+
+  const [memberResponse, rolesResponse] = await Promise.all([
+    fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(botUserId)}`),
+    fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/roles`),
+  ]);
+  if (!memberResponse.ok || !rolesResponse.ok) return null;
+  const member = await memberResponse.json().catch(() => null) as { roles?: string[] } | null;
+  const roles = await rolesResponse.json().catch(() => null) as Array<{ id?: string; permissions?: string | number | null }> | null;
+  if (!Array.isArray(roles)) return null;
+
+  const roleIds = new Set(Array.isArray(member?.roles) ? member.roles : []);
+  let basePermissions = BigInt(0);
+  for (const role of roles) {
+    if (role.id === guildId || (role.id && roleIds.has(role.id))) {
+      basePermissions |= parsePermissionBits(role.permissions) ?? BigInt(0);
+    }
+  }
+  return { botUserId, guildId, roleIds, basePermissions };
+}
+
+function getChannelPermissionBitsFromContext(context: BotPermissionContext, channel: DiscordChannel | null) {
+  if (!channel) return null;
+  if ((context.basePermissions & DISCORD_ADMINISTRATOR_PERMISSION) === DISCORD_ADMINISTRATOR_PERMISSION) return context.basePermissions;
+  const overwrites = Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : [];
+  const everyoneOverwrite = overwrites.find((overwrite) => overwrite.id === context.guildId && String(overwrite.type) === "0");
+  let permissions = applyPermissionOverwrite(context.basePermissions, everyoneOverwrite);
+
+  let roleAllow = BigInt(0);
+  let roleDeny = BigInt(0);
+  for (const overwrite of overwrites) {
+    if (String(overwrite.type) !== "0" || !context.roleIds.has(overwrite.id)) continue;
+    roleAllow |= parsePermissionBits(overwrite.allow) ?? BigInt(0);
+    roleDeny |= parsePermissionBits(overwrite.deny) ?? BigInt(0);
+  }
+  permissions = (permissions & ~roleDeny) | roleAllow;
+
+  const memberOverwrite = overwrites.find((overwrite) => overwrite.id === context.botUserId && String(overwrite.type) === "1");
+  return applyPermissionOverwrite(permissions, memberOverwrite);
+}
+
+function isPostableChannelType(value: unknown) {
+  const type = Number(value);
+  return type === 0 || type === 5;
 }
 
 function applyPermissionOverwrite(

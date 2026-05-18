@@ -8,12 +8,13 @@ import type {
   BillingPlanSummary,
   BillingStatus,
   DiscordGuild,
+  DiscordChannelsResponse,
   LinkedServer,
   NitradoLogAccessDiagnostics,
   NitradoService,
   OnboardingChecks,
   PostingPermissionCheck,
-  PostingDestinationSummary,
+  PostingDestinationsResponse,
   PostingTestPostResult,
 } from "./types";
 
@@ -172,21 +173,31 @@ export async function refreshServerMetadata(linkedServerId: string) {
 }
 
 export async function getPostingDestinations(linkedServerId: string) {
-  return request<{ post_types: PostingDestinationSummary[] }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
+  return request<PostingDestinationsResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
     cache: "no-store",
   });
 }
 
 export async function savePostingDestination(linkedServerId: string, data: {
-  post_type: string;
-  discord_channel_id: string;
+  action?: "save" | "test" | "disable" | "delete";
+  channel_id?: string;
+  post_types?: string[];
+  test_post_type?: string;
+  post_type?: string;
+  discord_channel_id?: string;
   discord_webhook_url?: string | null;
   enabled: boolean;
   send_test_post?: boolean;
 }) {
-  return request<{ post_types: PostingDestinationSummary[]; permission_check?: PostingPermissionCheck; test_post?: PostingTestPostResult | null }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
+  return request<PostingDestinationsResponse & { permission_check?: PostingPermissionCheck; test_post?: PostingTestPostResult | null }>(`/api/servers/${encodeURIComponent(linkedServerId)}/posting-destinations`, {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+export async function getDiscordPostingChannels(linkedServerId: string) {
+  return request<DiscordChannelsResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/discord-channels`, {
+    cache: "no-store",
   });
 }
 

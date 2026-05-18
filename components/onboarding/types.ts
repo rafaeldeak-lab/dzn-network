@@ -302,6 +302,63 @@ export type PostingDestinationSummary = {
   last_edited_at?: string | null;
 };
 
+export type DiscordPostingChannel = {
+  channel_id: string;
+  channel_name: string;
+  channel_type: "text" | "announcement" | string;
+  category_name: string | null;
+  can_view: boolean;
+  can_send: boolean;
+  can_embed: boolean;
+  can_read_history: boolean;
+  can_manage_messages: boolean;
+  can_post: boolean;
+  missing_permissions: string[];
+};
+
+export type PostingOptionSummary = {
+  key: string;
+  label: string;
+  group: string;
+  min_plan_key: string;
+  upgrade_label: string;
+  allowed_by_plan: boolean;
+};
+
+export type PostingChannelSetup = {
+  channel_id: string;
+  channel_name: string;
+  channel_label: string;
+  posting_mode: "bot" | "webhook" | "not_configured" | string;
+  status: "active" | "disabled" | "locked_by_plan" | "missing_permissions" | "setup_needed" | string;
+  missing_permissions: string[];
+  has_webhook_url: boolean;
+  last_posted_at: string | null;
+  last_edited_at: string | null;
+  post_types: Array<{
+    key: string;
+    label: string;
+    enabled: boolean;
+    allowed_by_plan: boolean;
+    setup_status?: string;
+    last_posted_at?: string | null;
+    last_edited_at?: string | null;
+  }>;
+};
+
+export type PostingDestinationsResponse = {
+  post_type_options?: PostingOptionSummary[];
+  post_types: PostingDestinationSummary[];
+  setups?: PostingChannelSetup[];
+};
+
+export type DiscordChannelsResponse = {
+  channels: DiscordPostingChannel[];
+  manual_fallback: boolean;
+  warning?: string;
+  fetched_at: string;
+};
+
 export type PostingPermissionCheck = {
   ok: boolean;
   mode: "bot" | "webhook" | "not_configured" | "missing_permissions";

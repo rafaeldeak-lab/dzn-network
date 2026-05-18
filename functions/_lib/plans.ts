@@ -2,6 +2,7 @@ import { requireDb } from "./db";
 import type { Env, SessionUser } from "./types";
 import {
   AUTO_POST_TYPES,
+  AUTO_POST_OPTIONS,
   BILLING_PLAN_CONFIG,
   PAID_PLAN_KEYS,
   getAdmPullInterval as centralAdmPullInterval,
@@ -244,6 +245,7 @@ export function getPlanPriority(planKey: unknown) {
 }
 
 export { AUTO_POST_TYPES };
+export { AUTO_POST_OPTIONS };
 
 export function effectiveEntitlementPlan(planKey: PlanKey, status: string | null | undefined): PlanKey {
   if (planKey === "free") return "free";
