@@ -31,7 +31,7 @@ jobs:
             -X POST "${APP_URL}/api/sync/adm/run" \
             -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --data '{"source":"github-backup","cron":"github-actions","max_servers":25,"max_lines_per_server":50000}'
+            --data '{"source":"github-backup","cron":"github-actions","max_servers":1,"max_lines_per_server":50000}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/discord-posts/run" \

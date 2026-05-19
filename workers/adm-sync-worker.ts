@@ -28,7 +28,7 @@ const CRON_ENDPOINTS: CronEndpoint[] = [
   {
     label: "adm",
     path: "/api/sync/adm/run",
-    body: { source: "cloudflare", cron: "cloudflare-worker", max_servers: 50, max_lines_per_server: 50000 },
+    body: { source: "cloudflare", cron: "cloudflare-worker", max_servers: 1, max_lines_per_server: 50000 },
   },
   {
     label: "discord-posts",

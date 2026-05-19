@@ -55,6 +55,7 @@ export async function handleAdmSyncRun(
     if (unauthorized) return unauthorized;
     const source = normalizeAutomationCronSource(body.source, body.cron);
     const startedAt = new Date().toISOString();
+    await safeRecordCronRun(env, source, "started", startedAt);
     let result: Awaited<ReturnType<typeof runScheduledAdmSync>>;
     try {
       result = await handlers.runScheduled(env, {
@@ -147,7 +148,7 @@ function sanitizePositiveInteger(value: unknown, fallback: number) {
 async function safeRecordCronRun(
   env: Env,
   source: ReturnType<typeof normalizeAutomationCronSource>,
-  status: "success" | "failed" | "partial",
+  status: "started" | "success" | "failed" | "partial",
   startedAt: string,
   error?: unknown,
   metrics: { processedCount?: number; skippedCount?: number; failedCount?: number } = {},
