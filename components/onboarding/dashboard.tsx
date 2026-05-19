@@ -32,7 +32,7 @@ import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -206,7 +206,9 @@ function ServerDashboard({
   const [discordChannelFetchFailure, setDiscordChannelFetchFailure] = useState<DiscordChannelFetchFailure | null>(null);
   const [automationHealth, setAutomationHealth] = useState<AutomationHealth | null>(null);
   const [nitradoLogSettings, setNitradoLogSettings] = useState<NitradoLogSettingsConfirmation | null>(null);
+  const [nitradoLogSettingsCheck, setNitradoLogSettingsCheck] = useState<NitradoLogSettingsCheckResponse | null>(null);
   const [savingNitradoLogSettings, setSavingNitradoLogSettings] = useState(false);
+  const [checkingNitradoLogSettings, setCheckingNitradoLogSettings] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
@@ -287,7 +289,10 @@ function ServerDashboard({
       if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
       await refreshDiscordChannels();
       const logSettings = await getNitradoLogSettings(server.id).catch(() => null);
-      if (logSettings?.settings) setNitradoLogSettings(logSettings.settings);
+      if (logSettings?.saved_settings) {
+        setNitradoLogSettings(logSettings.saved_settings);
+        setNitradoLogSettingsCheck(logSettings);
+      }
       const health = await getAutomationHealth().catch(() => null);
       setAutomationHealth(health);
     } catch (error) {
@@ -385,7 +390,10 @@ function ServerDashboard({
       .then(([statusResult, eventsResult, logSettings]) => {
         setSyncStatus(statusResult.status);
         setRecentEvents(eventsResult.events);
-        if (logSettings?.settings) setNitradoLogSettings(logSettings.settings);
+        if (logSettings?.saved_settings) {
+          setNitradoLogSettings(logSettings.saved_settings);
+          setNitradoLogSettingsCheck(logSettings);
+        }
         setLastRefreshedAt(new Date().toISOString());
         setLiveRefreshWarning("");
         return true;
@@ -468,6 +476,7 @@ function ServerDashboard({
     try {
       const result = await saveNitradoLogSettings(server.id, next);
       setNitradoLogSettings(result.settings);
+      setNitradoLogSettingsCheck(null);
       await refreshSyncData({ warnOnError: false, queueIfBusy: true });
       setActionMessage(result.settings.nitrado_reduce_log_output_confirmed && result.settings.nitrado_log_playerlist_confirmed
         ? "Nitrado log settings confirmed for ADM tracking."
@@ -476,6 +485,28 @@ function ServerDashboard({
       setActionMessage(error instanceof Error ? error.message : "Unable to save Nitrado log settings.");
     } finally {
       setSavingNitradoLogSettings(false);
+    }
+  }
+
+  async function checkNitradoLogSettingsNow() {
+    setCheckingNitradoLogSettings(true);
+    setActionMessage("");
+    try {
+      const result = await getNitradoLogSettings(server.id);
+      setNitradoLogSettingsCheck(result);
+      setNitradoLogSettings(result.saved_settings);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
+      if (result.verified && result.valid) {
+        setActionMessage("Nitrado log settings verified automatically by DZN.");
+      } else if (result.verified && result.warnings?.length) {
+        setActionMessage(result.warnings.join(" "));
+      } else {
+        setActionMessage(result.reason ?? "DZN could not verify these Nitrado settings automatically.");
+      }
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to check Nitrado log settings.");
+    } finally {
+      setCheckingNitradoLogSettings(false);
     }
   }
 
@@ -639,6 +670,8 @@ function ServerDashboard({
   ];
   const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
   const currentPlanName = planLabel(billingStatus?.plan_key ?? "free");
+  const nitradoLogSettingsComplete = isNitradoLogSettingsComplete(nitradoLogSettings);
+  const logSettingsSourceLabel = getNitradoLogSettingsSourceLabel(nitradoLogSettings);
   const setupChecks = [
     ["ADM Discovered", admState.isDiscovered],
     ["Log Sync Active", statsSyncActive],
@@ -646,7 +679,7 @@ function ServerDashboard({
     ["Discord Connected", Boolean(server.guild_id)],
     ["DZN Bot Installed", discordBotInstalled],
     ["Channels Discovered", discordChannelsDiscovered],
-    ["Nitrado Log Settings", Boolean(nitradoLogSettings?.nitrado_reduce_log_output_confirmed && nitradoLogSettings.nitrado_log_playerlist_confirmed)],
+    [`Nitrado Log Settings${logSettingsSourceLabel ? ` (${logSettingsSourceLabel})` : ""}`, nitradoLogSettingsComplete],
     ["Stats Sync Active", statsSyncActive],
   ] as const;
 
@@ -926,8 +959,11 @@ function ServerDashboard({
 
             <NitradoLogSettingsChecklist
               settings={nitradoLogSettings}
+              check={nitradoLogSettingsCheck}
               saving={savingNitradoLogSettings}
+              checking={checkingNitradoLogSettings}
               onSave={saveNitradoChecklist}
+              onCheck={checkNitradoLogSettingsNow}
             />
 
             <DashboardPanel className="p-4">
@@ -1193,60 +1229,127 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
 
 function NitradoLogSettingsChecklist({
   settings,
+  check,
   saving,
+  checking,
   onSave,
+  onCheck,
 }: {
   settings: NitradoLogSettingsConfirmation | null;
+  check: NitradoLogSettingsCheckResponse | null;
   saving: boolean;
+  checking: boolean;
   onSave: (settings: NitradoLogSettingsConfirmation) => void;
+  onCheck: () => void;
 }) {
   const reduceConfirmed = settings?.nitrado_reduce_log_output_confirmed ?? false;
   const playerlistConfirmed = settings?.nitrado_log_playerlist_confirmed ?? false;
   const fullyConfirmed = reduceConfirmed && playerlistConfirmed;
+  const verificationUnavailable = check?.verified === false;
+  const hasWrongSettings = Boolean(check?.warnings?.length);
+  const verifiedByDzn = fullyConfirmed && settings?.nitrado_log_settings_verification_source === "nitrado_api" && !hasWrongSettings;
   const nextSettings = (patch: Partial<NitradoLogSettingsConfirmation>): NitradoLogSettingsConfirmation => ({
     nitrado_reduce_log_output_confirmed: reduceConfirmed,
     nitrado_log_playerlist_confirmed: playerlistConfirmed,
     nitrado_log_settings_confirmed_at: settings?.nitrado_log_settings_confirmed_at ?? null,
+    nitrado_log_settings_verification_source: "manual",
+    nitrado_admin_log_enabled: settings?.nitrado_admin_log_enabled ?? null,
+    nitrado_server_log_enabled: settings?.nitrado_server_log_enabled ?? null,
+    nitrado_log_settings_last_checked_at: settings?.nitrado_log_settings_last_checked_at ?? null,
+    nitrado_log_settings_last_error: settings?.nitrado_log_settings_last_error ?? null,
     ...patch,
   });
 
   return (
     <DashboardPanel className={`p-4 ${fullyConfirmed ? "border-emerald-300/20" : "border-amber-300/20"}`}>
-      <PanelHeader icon={<ListChecks className="h-5 w-5" />} title="Nitrado Log Settings" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <PanelHeader icon={<ListChecks className="h-5 w-5" />} title="Nitrado Log Settings" />
+        <button
+          type="button"
+          disabled={checking}
+          onClick={onCheck}
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${checking ? "animate-spin" : ""}`} />
+          {checking ? "Checking..." : "Check Nitrado Log Settings"}
+        </button>
+      </div>
       <p className="mt-3 text-sm leading-6 text-zinc-300">
-        For best ADM tracking, disable Reduce Log Output and enable Log Playerlist in your Nitrado general settings.
+        DZN will try to verify the required Nitrado log settings from the connected service. Manual confirmation is only needed when Nitrado does not expose the settings through the API.
       </p>
-      {!fullyConfirmed ? (
+
+      {hasWrongSettings ? (
+        <div className="mt-3 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-sm font-bold leading-6 text-amber-50">
+          {check?.warnings?.map((warning) => <p key={warning}>{warning}</p>)}
+        </div>
+      ) : verifiedByDzn ? (
+        <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm font-bold leading-6 text-emerald-50">
+          Nitrado log settings verified automatically{settings?.nitrado_log_settings_confirmed_at ? ` ${formatRelativeTime(settings.nitrado_log_settings_confirmed_at)}` : ""}.
+        </p>
+      ) : !fullyConfirmed ? (
         <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-sm font-bold leading-6 text-amber-50">
-          ADM tracking may miss useful lines until these Nitrado settings are confirmed.
+          {verificationUnavailable
+            ? check?.reason ?? "DZN could not verify these Nitrado settings automatically."
+            : "ADM tracking may miss useful lines until these Nitrado settings are confirmed."}
         </p>
       ) : (
         <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm font-bold leading-6 text-emerald-50">
           Required Nitrado log settings were confirmed{settings?.nitrado_log_settings_confirmed_at ? ` ${formatRelativeTime(settings.nitrado_log_settings_confirmed_at)}` : ""}.
         </p>
       )}
-      <div className="mt-4 grid gap-2">
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => onSave(nextSettings({ nitrado_reduce_log_output_confirmed: !reduceConfirmed }))}
-          className={`flex items-center justify-between rounded-lg border px-3 py-3 text-left text-sm font-black transition ${reduceConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-50" : "border-white/10 bg-black/24 text-zinc-200"}`}
-        >
-          <span>I have disabled Reduce Log Output</span>
-          {reduceConfirmed ? <CircleCheck className="h-4 w-4" /> : <span className="text-[10px] uppercase text-zinc-500">Required</span>}
-        </button>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => onSave(nextSettings({ nitrado_log_playerlist_confirmed: !playerlistConfirmed }))}
-          className={`flex items-center justify-between rounded-lg border px-3 py-3 text-left text-sm font-black transition ${playerlistConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-50" : "border-white/10 bg-black/24 text-zinc-200"}`}
-        >
-          <span>I have enabled Log Playerlist</span>
-          {playerlistConfirmed ? <CircleCheck className="h-4 w-4" /> : <span className="text-[10px] uppercase text-zinc-500">Required</span>}
-        </button>
+
+      <div className="mt-4 grid gap-2 rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
+        <NitradoSettingStatus label="Admin Log" value={check?.settings.admin_log_enabled ?? settings?.nitrado_admin_log_enabled ?? null} expectedLabel="Enabled" />
+        <NitradoSettingStatus label="Server Log" value={check?.settings.server_log_enabled ?? settings?.nitrado_server_log_enabled ?? null} expectedLabel="Enabled" />
+        <NitradoSettingStatus label="Reduce Log Output" value={check?.settings.reduce_log_output_disabled ?? reduceConfirmed} expectedLabel="Disabled" />
+        <NitradoSettingStatus label="Log Playerlist" value={check?.settings.log_playerlist_enabled ?? playerlistConfirmed} expectedLabel="Enabled" />
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase text-zinc-500">
+          <span>Source: {getNitradoLogSettingsSourceLabel(settings) || (check?.source === "manual_required" ? "Manual required" : "Not checked")}</span>
+          {settings?.nitrado_log_settings_last_checked_at ? <span>Last checked: {formatRelativeTime(settings.nitrado_log_settings_last_checked_at)}</span> : null}
+        </div>
+        {settings?.nitrado_log_settings_last_error && !verifiedByDzn ? (
+          <p className="text-xs font-bold text-amber-100">{settings.nitrado_log_settings_last_error}</p>
+        ) : null}
       </div>
+
+      {!verifiedByDzn && !hasWrongSettings ? (
+        <>
+          <p className="mt-4 text-xs font-bold uppercase text-zinc-500">Manual fallback</p>
+          <div className="mt-2 grid gap-2">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => onSave(nextSettings({ nitrado_reduce_log_output_confirmed: !reduceConfirmed }))}
+              className={`flex items-center justify-between rounded-lg border px-3 py-3 text-left text-sm font-black transition ${reduceConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-50" : "border-white/10 bg-black/24 text-zinc-200"}`}
+            >
+              <span>I have disabled Reduce Log Output</span>
+              {reduceConfirmed ? <CircleCheck className="h-4 w-4" /> : <span className="text-[10px] uppercase text-zinc-500">Required</span>}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => onSave(nextSettings({ nitrado_log_playerlist_confirmed: !playerlistConfirmed }))}
+              className={`flex items-center justify-between rounded-lg border px-3 py-3 text-left text-sm font-black transition ${playerlistConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-50" : "border-white/10 bg-black/24 text-zinc-200"}`}
+            >
+              <span>I have enabled Log Playerlist</span>
+              {playerlistConfirmed ? <CircleCheck className="h-4 w-4" /> : <span className="text-[10px] uppercase text-zinc-500">Required</span>}
+            </button>
+          </div>
+        </>
+      ) : null}
       {saving ? <p className="mt-3 text-xs font-bold uppercase text-cyan-100">Saving checklist...</p> : null}
     </DashboardPanel>
+  );
+}
+
+function NitradoSettingStatus({ label, value, expectedLabel }: { label: string; value: boolean | null; expectedLabel: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="font-bold text-zinc-300">{label}</span>
+      <span className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase ${value === true ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : value === false ? "border-amber-300/25 bg-amber-400/10 text-amber-100" : "border-white/10 bg-white/[0.03] text-zinc-500"}`}>
+        {value === true ? expectedLabel : value === false ? "Needs change" : "Not verified"}
+      </span>
+    </div>
   );
 }
 
@@ -3200,6 +3303,22 @@ function planLabel(value: string) {
   if (value === "network") return "Network";
   if (value === "partner") return "Partner";
   return "Free";
+}
+
+function getNitradoLogSettingsSourceLabel(settings: NitradoLogSettingsConfirmation | null) {
+  if (!settings?.nitrado_log_settings_verification_source) return "";
+  if (settings.nitrado_log_settings_verification_source === "nitrado_api") return "Verified by DZN";
+  if (settings.nitrado_log_settings_verification_source === "manual") return "Manually confirmed";
+  if (settings.nitrado_log_settings_verification_source === "manual_required") return "Manual required";
+  return settings.nitrado_log_settings_verification_source;
+}
+
+function isNitradoLogSettingsComplete(settings: NitradoLogSettingsConfirmation | null) {
+  if (!settings?.nitrado_reduce_log_output_confirmed || !settings.nitrado_log_playerlist_confirmed) return false;
+  if (settings.nitrado_log_settings_verification_source === "nitrado_api") {
+    return settings.nitrado_admin_log_enabled !== false && settings.nitrado_server_log_enabled !== false;
+  }
+  return true;
 }
 
 function billingRenewalLabel(billing: BillingStatus | null) {

@@ -215,6 +215,11 @@ export type AdmSyncStatus = {
   nitrado_reduce_log_output_confirmed: boolean;
   nitrado_log_playerlist_confirmed: boolean;
   nitrado_log_settings_confirmed_at: string | null;
+  nitrado_log_settings_verification_source: string | null;
+  nitrado_admin_log_enabled: boolean | null;
+  nitrado_server_log_enabled: boolean | null;
+  nitrado_log_settings_last_checked_at: string | null;
+  nitrado_log_settings_last_error: string | null;
   last_sync_trigger: string | null;
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;
@@ -1304,6 +1309,11 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
         server_sync_state.nitrado_reduce_log_output_confirmed,
         server_sync_state.nitrado_log_playerlist_confirmed,
         server_sync_state.nitrado_log_settings_confirmed_at,
+        server_sync_state.nitrado_log_settings_verification_source,
+        server_sync_state.nitrado_admin_log_enabled,
+        server_sync_state.nitrado_server_log_enabled,
+        server_sync_state.nitrado_log_settings_last_checked_at,
+        server_sync_state.nitrado_log_settings_last_error,
         server_stats.total_kills,
         server_stats.total_deaths,
         server_stats.total_joins,
@@ -1381,6 +1391,11 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     nitrado_reduce_log_output_confirmed: Number(row?.nitrado_reduce_log_output_confirmed ?? 0) === 1,
     nitrado_log_playerlist_confirmed: Number(row?.nitrado_log_playerlist_confirmed ?? 0) === 1,
     nitrado_log_settings_confirmed_at: typeof row?.nitrado_log_settings_confirmed_at === "string" ? row.nitrado_log_settings_confirmed_at : null,
+    nitrado_log_settings_verification_source: typeof row?.nitrado_log_settings_verification_source === "string" ? row.nitrado_log_settings_verification_source : null,
+    nitrado_admin_log_enabled: nullableBoolean(row?.nitrado_admin_log_enabled),
+    nitrado_server_log_enabled: nullableBoolean(row?.nitrado_server_log_enabled),
+    nitrado_log_settings_last_checked_at: typeof row?.nitrado_log_settings_last_checked_at === "string" ? row.nitrado_log_settings_last_checked_at : null,
+    nitrado_log_settings_last_error: typeof row?.nitrado_log_settings_last_error === "string" ? row.nitrado_log_settings_last_error : null,
     last_sync_trigger: recentRuns[0]?.trigger_type ?? null,
     last_scheduled_sync_at: lastScheduledRun?.finished_at ?? lastScheduledRun?.started_at ?? null,
     last_manual_sync_at: lastManualRun?.finished_at ?? lastManualRun?.started_at ?? null,
@@ -3370,6 +3385,11 @@ function numberOrZero(value: unknown) {
 function nullablePositiveInteger(value: unknown) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : null;
+}
+
+function nullableBoolean(value: unknown) {
+  if (value === null || value === undefined) return null;
+  return Number(value) === 1;
 }
 
 function minutesSinceIso(value: string, nowMs = Date.now()) {

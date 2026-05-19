@@ -127,6 +127,8 @@ assert.equal(dashboardSource.includes("No recent automation cron check-in detect
 assert.equal(dashboardSource.includes("Server Status Sync:"), true);
 assert.equal(dashboardSource.includes("ADM Discovery:"), true);
 assert.equal(dashboardSource.includes("ADM Processing:"), true);
+assert.equal(dashboardSource.includes("Check Nitrado Log Settings"), true);
+assert.equal(dashboardSource.includes("Manual fallback"), true);
 assert.equal(dashboardSource.includes("real-time logs"), false);
 assert.equal(dashboardSource.includes("instant stats"), false);
 

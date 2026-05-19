@@ -1,0 +1,5 @@
+ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_verification_source TEXT;
+ALTER TABLE server_sync_state ADD COLUMN nitrado_admin_log_enabled INTEGER;
+ALTER TABLE server_sync_state ADD COLUMN nitrado_server_log_enabled INTEGER;
+ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_last_checked_at TEXT;
+ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_last_error TEXT;

@@ -247,6 +247,8 @@ assert.equal(syncMapDoc.includes("ADM / Backend Log Sync"), true);
 assert.equal(syncMapDoc.includes("ADM Discovery vs ADM Processing"), true);
 assert.equal(syncMapDoc.includes("Observed ADM cadence"), true);
 assert.equal(syncMapDoc.includes("Reduce Log Output"), true);
+assert.equal(syncMapDoc.includes("Admin Log: Enabled"), true);
+assert.equal(syncMapDoc.includes("DZN attempts to verify these automatically"), true);
 assert.equal(syncMapDoc.includes("Discord Auto-Post Dispatcher"), true);
 assert.equal(syncMapDoc.includes("Cloudflare Worker Cron"), true);
 assert.equal(syncMapDoc.includes("GitHub Actions Backup"), true);
@@ -273,6 +275,9 @@ assert.equal(dashboardSource.includes("Active"), true);
 assert.equal(dashboardSource.includes("Server Status Sync:"), true);
 assert.equal(dashboardSource.includes("ADM Discovery:"), true);
 assert.equal(dashboardSource.includes("Nitrado Log Settings"), true);
+assert.equal(dashboardSource.includes("Check Nitrado Log Settings"), true);
+assert.equal(dashboardSource.includes("Nitrado log settings verified automatically"), true);
+assert.equal(dashboardSource.includes("Manual fallback"), true);
 assert.equal(dashboardSource.includes("Checks for new ADM files every"), true);
 assert.equal(dashboardSource.includes("Processes readable ADM data every"), true);
 assert.equal(dashboardSource.includes("Observed ADM Cadence"), true);
@@ -282,6 +287,16 @@ assert.equal(dashboardSource.includes("Missing permissions"), true);
 assert.equal(dashboardSource.includes("ADM logs can appear 5-45 minutes after a restart"), true);
 assert.equal(postingEndpointSource.includes("DZN will auto-post and edit this embed using the bot in the selected channel."), true);
 assert.equal(postingEndpointSource.includes("DZN will auto-post using the saved webhook fallback."), true);
+
+const nitradoLogSettingsEndpointSource = readFileSync("functions/api/servers/[serverId]/nitrado-log-settings.ts", "utf8");
+assert.equal(nitradoLogSettingsEndpointSource.includes("fetchNitradoLogSettingsVerification"), true);
+assert.equal(nitradoLogSettingsEndpointSource.includes("recordNitradoLogSettingsVerification"), true);
+assert.equal(nitradoLogSettingsEndpointSource.includes("manual_required"), true);
+
+const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
+assert.equal(nitradoSource.includes("fetchNitradoLogSettingsVerification"), true);
+assert.equal(nitradoSource.includes("reduce_log_output_disabled"), true);
+assert.equal(nitradoSource.includes("log_playerlist_enabled"), true);
 
 const healthEndpointSource = readFileSync("functions/api/automation/health.ts", "utf8");
 assert.equal(healthEndpointSource.includes("requireDznAdmin"), true);

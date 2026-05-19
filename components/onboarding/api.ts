@@ -11,6 +11,7 @@ import type {
   DiscordGuild,
   DiscordChannelsResponse,
   LinkedServer,
+  NitradoLogSettingsCheckResponse,
   NitradoLogSettingsConfirmation,
   NitradoLogAccessDiagnostics,
   NitradoService,
@@ -150,7 +151,7 @@ export async function runLogAccessDiagnostics() {
 }
 
 export async function getNitradoLogSettings(linkedServerId: string) {
-  return request<{ ok: boolean; settings: NitradoLogSettingsConfirmation }>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings`, {
+  return request<NitradoLogSettingsCheckResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings`, {
     cache: "no-store",
   });
 }

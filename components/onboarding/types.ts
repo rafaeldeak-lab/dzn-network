@@ -513,6 +513,28 @@ export type NitradoLogSettingsConfirmation = {
   nitrado_reduce_log_output_confirmed: boolean;
   nitrado_log_playerlist_confirmed: boolean;
   nitrado_log_settings_confirmed_at: string | null;
+  nitrado_log_settings_verification_source?: string | null;
+  nitrado_admin_log_enabled?: boolean | null;
+  nitrado_server_log_enabled?: boolean | null;
+  nitrado_log_settings_last_checked_at?: string | null;
+  nitrado_log_settings_last_error?: string | null;
+};
+
+export type NitradoLogSettingsCheckResponse = {
+  ok: boolean;
+  verified: boolean;
+  valid: boolean | null;
+  source: "nitrado_api" | "manual_required" | string;
+  checked_at: string;
+  reason?: string | null;
+  warnings?: string[];
+  settings: {
+    admin_log_enabled: boolean | null;
+    server_log_enabled: boolean | null;
+    reduce_log_output_disabled: boolean | null;
+    log_playerlist_enabled: boolean | null;
+  };
+  saved_settings: NitradoLogSettingsConfirmation;
 };
 
 export type ScoreBreakdown = {
@@ -571,6 +593,11 @@ export type AdmSyncStatus = {
   nitrado_reduce_log_output_confirmed: boolean;
   nitrado_log_playerlist_confirmed: boolean;
   nitrado_log_settings_confirmed_at: string | null;
+  nitrado_log_settings_verification_source: string | null;
+  nitrado_admin_log_enabled: boolean | null;
+  nitrado_server_log_enabled: boolean | null;
+  nitrado_log_settings_last_checked_at: string | null;
+  nitrado_log_settings_last_error: string | null;
   last_sync_trigger: string | null;
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;

@@ -1281,7 +1281,7 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
       <div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-400/10 p-4">
         <p className="text-sm font-black uppercase text-amber-100">Required Nitrado Log Settings</p>
         <p className="mt-2 text-sm leading-6 text-zinc-200">
-          For best ADM tracking, disable Reduce Log Output and enable Log Playerlist in your Nitrado general settings. This is a warning checklist, not a setup blocker.
+          For best ADM tracking, enable Admin Log and Server Log, disable Reduce Log Output, and enable Log Playerlist in your Nitrado general settings. After this server is saved, DZN will try to verify these settings automatically from the connected Nitrado service.
         </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-100">
@@ -1290,9 +1290,15 @@ function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, on
           <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-100">
             Log Playerlist: <span className="text-amber-100">Enabled</span>
           </div>
+          <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-100">
+            Admin Log: <span className="text-amber-100">Enabled</span>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-100">
+            Server Log: <span className="text-amber-100">Enabled</span>
+          </div>
         </div>
         <p className="mt-3 text-xs font-bold leading-5 text-zinc-400">
-          You can confirm these settings later in Dashboard &gt; Sync Health after the server is saved.
+          If Nitrado does not expose these settings to DZN, you can manually confirm them later in Dashboard &gt; Sync Health.
         </p>
       </div>
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">

@@ -104,6 +104,9 @@ const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
 assert.equal(nitradoSource.includes("DZN ADM FILE READ VARIANT USED"), true);
 assert.equal(nitradoSource.includes("DZN ADM LATEST FILE SELECTION FIXED"), true);
 assert.equal(nitradoSource.includes("fetchReadableNitradoAdmFiles"), true);
+assert.equal(nitradoSource.includes("fetchNitradoLogSettingsVerification"), true);
+assert.equal(nitradoSource.includes("admin_log_enabled"), true);
+assert.equal(nitradoSource.includes("server_log_enabled"), true);
 const packageSource = readFileSync("package.json", "utf8");
 assert.equal(packageSource.includes("diagnose:adm-import"), true);
 assert.equal(packageSource.includes("adm:audit-health"), true);
@@ -150,6 +153,8 @@ assert.equal(dashboardUi.includes("No ADM File"), false);
 assert.equal(dashboardUi.includes("Latest ADM Not Readable Yet"), true);
 assert.equal(dashboardUi.includes("Latest ADM file found but not readable yet. DZN will retry on the next scheduled check."), true);
 assert.equal(dashboardUi.includes("Server restart detected. Waiting for Nitrado to publish the next ADM log."), true);
+assert.equal(dashboardUi.includes("Check Nitrado Log Settings"), true);
+assert.equal(dashboardUi.includes("Nitrado log settings verified automatically"), true);
 assert.equal(dashboardUi.includes("Feed last updated"), true);
 assert.equal(dashboardUi.includes("getDashboardSyncStatusBanner"), true);
 

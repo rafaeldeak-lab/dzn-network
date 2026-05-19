@@ -1,10 +1,12 @@
 import { getSessionUser, requireDb } from "../../../_lib/db";
+import { decryptToken } from "../../../_lib/crypto";
 import {
-  getNitradoLogSettingsConfirmation,
+  recordNitradoLogSettingsVerification,
   updateNitradoLogSettingsConfirmation,
 } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
+import { fetchNitradoLogSettingsVerification, NitradoServiceLookupError } from "../../../_lib/nitrado";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type SaveNitradoLogSettingsBody = {
@@ -24,10 +26,61 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (!server.guild_id) return json({ error: "Selected server has no Discord guild id." }, { status: 409 });
 
   if (request.method === "GET") {
-    return json({
-      ok: true,
-      settings: await getNitradoLogSettingsConfirmation(env, server.guild_id),
-    });
+    const checkedAt = new Date().toISOString();
+    try {
+      const token = await getNitradoTokenForLinkedServer(env, server);
+      const verification = await fetchNitradoLogSettingsVerification(token, server.nitrado_service_id ?? "");
+      const warnings = buildNitradoLogSettingsWarnings(verification.settings);
+      const savedSettings = await recordNitradoLogSettingsVerification(env, {
+        guildId: server.guild_id,
+        reduceLogOutputDisabled: verification.settings.reduce_log_output_disabled,
+        logPlayerlistEnabled: verification.settings.log_playerlist_enabled,
+        adminLogEnabled: verification.settings.admin_log_enabled,
+        serverLogEnabled: verification.settings.server_log_enabled,
+        source: verification.source,
+        checkedAt: verification.checkedAt,
+        error: verification.reason,
+      });
+      return json({
+        ok: true,
+        verified: verification.verified,
+        valid: verification.verified ? warnings.length === 0 : null,
+        settings: verification.settings,
+        source: verification.source,
+        checked_at: verification.checkedAt,
+        reason: verification.reason,
+        warnings,
+        saved_settings: savedSettings,
+      });
+    } catch (error) {
+      const reason = logSettingsVerificationFallbackReason(error);
+      const savedSettings = await recordNitradoLogSettingsVerification(env, {
+        guildId: server.guild_id,
+        reduceLogOutputDisabled: null,
+        logPlayerlistEnabled: null,
+        adminLogEnabled: null,
+        serverLogEnabled: null,
+        source: "manual_required",
+        checkedAt,
+        error: reason,
+      });
+      return json({
+        ok: true,
+        verified: false,
+        valid: null,
+        settings: {
+          admin_log_enabled: null,
+          server_log_enabled: null,
+          reduce_log_output_disabled: null,
+          log_playerlist_enabled: null,
+        },
+        source: "manual_required",
+        checked_at: checkedAt,
+        reason,
+        warnings: [],
+        saved_settings: savedSettings,
+      });
+    }
   }
   if (request.method !== "POST") return methodNotAllowed();
 
@@ -36,6 +89,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     guildId: server.guild_id,
     reduceLogOutputConfirmed: body.nitrado_reduce_log_output_confirmed === true,
     logPlayerlistConfirmed: body.nitrado_log_playerlist_confirmed === true,
+    source: "manual",
   });
   return json({ ok: true, settings });
 };
@@ -57,7 +111,7 @@ async function resolveUser(env: Env, request: Request): Promise<SessionUser | nu
 async function requireOwnedServer(env: Env, userId: string, linkedServerId: string) {
   return requireDb(env)
     .prepare(
-      `SELECT id, guild_id
+      `SELECT id, user_id, guild_id, nitrado_service_id
        FROM linked_servers
        WHERE id = ?
          AND user_id = ?
@@ -66,9 +120,51 @@ async function requireOwnedServer(env: Env, userId: string, linkedServerId: stri
        LIMIT 1`,
     )
     .bind(linkedServerId, userId)
-    .first<{ id: string; guild_id: string | null }>();
+    .first<{ id: string; user_id: string; guild_id: string | null; nitrado_service_id: string | null }>();
 }
 
 function sanitizeLinkedServerId(value: unknown) {
   return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
+}
+
+async function getNitradoTokenForLinkedServer(
+  env: Env,
+  server: { id: string; user_id: string },
+) {
+  if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT encrypted_token, token_iv, token_auth_tag
+       FROM nitrado_connections
+       WHERE user_id = ? AND linked_server_id = ?
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(server.user_id, server.id)
+    .first<{ encrypted_token: string; token_iv: string; token_auth_tag: string }>();
+  if (!row) throw new Error("No Nitrado token found for this linked server");
+  return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+}
+
+function buildNitradoLogSettingsWarnings(settings: {
+  reduce_log_output_disabled: boolean | null;
+  log_playerlist_enabled: boolean | null;
+  admin_log_enabled: boolean | null;
+  server_log_enabled: boolean | null;
+}) {
+  const warnings: string[] = [];
+  if (settings.admin_log_enabled === false) warnings.push("Admin Log must be enabled.");
+  if (settings.server_log_enabled === false) warnings.push("Server Log must be enabled.");
+  if (settings.reduce_log_output_disabled === false) warnings.push("Reduce Log Output must be disabled.");
+  if (settings.log_playerlist_enabled === false) warnings.push("Log Playerlist must be enabled.");
+  return warnings;
+}
+
+function logSettingsVerificationFallbackReason(error: unknown) {
+  if (error instanceof NitradoServiceLookupError) {
+    if (error.code === "invalid_token" || error.code === "access_denied") return "DZN could not verify these settings because the Nitrado token cannot access this service.";
+    if (error.code === "service_not_found") return "DZN could not verify these settings because the Nitrado service was not found.";
+    return "DZN could not verify these settings automatically from Nitrado.";
+  }
+  return error instanceof Error ? error.message : "DZN could not verify these settings automatically from Nitrado.";
 }

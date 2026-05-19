@@ -113,6 +113,10 @@ function auditRestartStateMachine() {
   checkFile("migrations/0019_adm_discovery_and_nitrado_settings.sql", "ADM discovery/settings migration");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "Migration stores ADM discovery due state");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "nitrado_reduce_log_output_confirmed", "Migration stores Nitrado Reduce Log Output confirmation");
+  checkFile("migrations/0021_nitrado_log_settings_verification.sql", "Nitrado settings verification migration");
+  checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_log_settings_verification_source", "Migration stores Nitrado settings verification source");
+  checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_admin_log_enabled", "Migration stores Admin Log verification");
+  checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_server_log_enabled", "Migration stores Server Log verification");
   checkFile("migrations/0020_adm_observed_cadence.sql", "ADM observed cadence migration");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "first_adm_after_restart_delay_minutes", "Migration stores first ADM after restart delay");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_playerlist_interval_minutes", "Migration stores observed PlayerList interval");
@@ -153,6 +157,9 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "ADM Discovery", "Dashboard shows ADM discovery section");
   checkIncludes("components/onboarding/dashboard.tsx", "ADM Processing", "Dashboard shows ADM processing section");
   checkIncludes("components/onboarding/dashboard.tsx", "Nitrado Log Settings", "Dashboard shows Nitrado settings checklist");
+  checkIncludes("components/onboarding/dashboard.tsx", "Check Nitrado Log Settings", "Dashboard can verify Nitrado settings automatically");
+  checkIncludes("functions/api/servers/[serverId]/nitrado-log-settings.ts", "fetchNitradoLogSettingsVerification", "Nitrado settings endpoint uses connected service verification");
+  checkIncludes("functions/api/servers/[serverId]/nitrado-log-settings.ts", "manual_required", "Nitrado settings endpoint falls back to manual confirmation");
   checkIncludes("components/onboarding/dashboard.tsx", "Server restart detected. Waiting for Nitrado to publish the next ADM log.", "Dashboard waiting-after-restart wording");
   checkIncludes("components/onboarding/dashboard.tsx", "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.", "Dashboard latest-unreadable wording");
   checkIncludes("components/onboarding/dashboard.tsx", "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.", "Dashboard delayed-after-restart wording");

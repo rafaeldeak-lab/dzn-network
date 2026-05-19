@@ -57,6 +57,19 @@ type NitradoRawService = {
   websocket_token?: string;
 };
 
+export type NitradoLogSettingsVerification = {
+  verified: boolean;
+  source: "nitrado_api" | "manual_required";
+  checkedAt: string;
+  reason: string | null;
+  settings: {
+    admin_log_enabled: boolean | null;
+    server_log_enabled: boolean | null;
+    reduce_log_output_disabled: boolean | null;
+    log_playerlist_enabled: boolean | null;
+  };
+};
+
 export class NitradoServiceLookupError extends Error {
   constructor(public code: "invalid_token" | "service_not_found" | "access_denied" | "not_dayz" | "api_unavailable") {
     super(code);
@@ -343,6 +356,40 @@ export async function fetchNitradoServiceById(token: string, serviceId: string):
   const service = normalizeGameserverDetails(payload, serviceId);
   if (!isDayZService(service)) throw new NitradoServiceLookupError("not_dayz");
   return service;
+}
+
+export async function fetchNitradoLogSettingsVerification(
+  token: string,
+  serviceId: string,
+): Promise<NitradoLogSettingsVerification> {
+  const checkedAt = new Date().toISOString();
+  if (!/^\d+$/.test(serviceId)) throw new NitradoServiceLookupError("service_not_found");
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers`,
+      { headers: nitradoHeaders(token) },
+    );
+  } catch {
+    throw new NitradoServiceLookupError("api_unavailable");
+  }
+
+  if (response.status === 401) throw new NitradoServiceLookupError("invalid_token");
+  if (response.status === 403) throw new NitradoServiceLookupError("access_denied");
+  if (response.status === 404) throw new NitradoServiceLookupError("service_not_found");
+  if (!response.ok) throw new NitradoServiceLookupError("api_unavailable");
+
+  const payload = await response.json().catch(() => null);
+  const settings = extractNitradoLogSettings(payload);
+  const requiredKnown = settings.reduce_log_output_disabled !== null && settings.log_playerlist_enabled !== null;
+  return {
+    verified: requiredKnown,
+    source: requiredKnown ? "nitrado_api" : "manual_required",
+    checkedAt,
+    reason: requiredKnown ? null : "DZN could not verify these settings automatically from Nitrado.",
+    settings,
+  };
 }
 
 export async function runNitradoLogAccessDiagnostics(token: string, serviceId: string): Promise<NitradoLogAccessDiagnostics> {
@@ -2746,6 +2793,74 @@ function firstNumber(...values: unknown[]) {
     if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
   }
   return undefined;
+}
+
+function extractNitradoLogSettings(payload: unknown): NitradoLogSettingsVerification["settings"] {
+  const candidates = flattenSettingCandidates(payload);
+  return {
+    admin_log_enabled: findSetting(candidates, [
+      { includes: ["admin", "log"], invert: false },
+      { includes: ["adm", "log"], invert: false },
+    ]),
+    server_log_enabled: findSetting(candidates, [
+      { includes: ["server", "log"], invert: false },
+      { includes: ["game", "log"], invert: false },
+    ]),
+    reduce_log_output_disabled: findSetting(candidates, [
+      { includes: ["reduce", "log", "output"], invert: true },
+      { includes: ["reduced", "log", "output"], invert: true },
+    ]),
+    log_playerlist_enabled: findSetting(candidates, [
+      { includes: ["log", "playerlist"], invert: false },
+      { includes: ["playerlist", "log"], invert: false },
+      { includes: ["player", "list", "log"], invert: false },
+    ]),
+  };
+}
+
+function flattenSettingCandidates(value: unknown, keyPath: string[] = [], results: Array<{ key: string; value: unknown }> = []) {
+  if (!value || typeof value !== "object") return results;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (isSensitiveKey(key)) continue;
+    const nextPath = [...keyPath, key];
+    if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
+      results.push({ key: normalizeSettingKey(nextPath.join("_")), value: child });
+    } else if (child && typeof child === "object") {
+      flattenSettingCandidates(child, nextPath, results);
+    }
+  }
+  return results;
+}
+
+function findSetting(
+  candidates: Array<{ key: string; value: unknown }>,
+  rules: Array<{ includes: string[]; invert: boolean }>,
+) {
+  for (const rule of rules) {
+    const candidate = candidates.find((item) => rule.includes.every((part) => item.key.includes(normalizeSettingKey(part))));
+    if (!candidate) continue;
+    const parsed = parseBooleanSetting(candidate.value);
+    if (parsed !== null) return rule.invert ? !parsed : parsed;
+  }
+  return null;
+}
+
+function parseBooleanSetting(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (["1", "true", "yes", "on", "enabled", "enable", "active"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", "disabled", "disable", "inactive"].includes(normalized)) return false;
+  return null;
+}
+
+function normalizeSettingKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function normalizeIpAddress(value: string) {

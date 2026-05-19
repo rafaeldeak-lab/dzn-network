@@ -895,9 +895,13 @@ export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string,
 
 export async function getNitradoLogSettingsConfirmation(env: Env, guildId: string) {
   await ensureAutomationSchema(env);
+  await ensureServerSyncStateRow(env, guildId);
   const row = await requireDb(env)
     .prepare(
-      `SELECT nitrado_reduce_log_output_confirmed, nitrado_log_playerlist_confirmed, nitrado_log_settings_confirmed_at
+      `SELECT nitrado_reduce_log_output_confirmed, nitrado_log_playerlist_confirmed,
+              nitrado_log_settings_confirmed_at, nitrado_log_settings_verification_source,
+              nitrado_admin_log_enabled, nitrado_server_log_enabled,
+              nitrado_log_settings_last_checked_at, nitrado_log_settings_last_error
        FROM server_sync_state
        WHERE guild_id = ?
        LIMIT 1`,
@@ -907,11 +911,21 @@ export async function getNitradoLogSettingsConfirmation(env: Env, guildId: strin
       nitrado_reduce_log_output_confirmed: number | null;
       nitrado_log_playerlist_confirmed: number | null;
       nitrado_log_settings_confirmed_at: string | null;
+      nitrado_log_settings_verification_source: string | null;
+      nitrado_admin_log_enabled: number | null;
+      nitrado_server_log_enabled: number | null;
+      nitrado_log_settings_last_checked_at: string | null;
+      nitrado_log_settings_last_error: string | null;
     }>();
   return {
     nitrado_reduce_log_output_confirmed: Number(row?.nitrado_reduce_log_output_confirmed ?? 0) === 1,
     nitrado_log_playerlist_confirmed: Number(row?.nitrado_log_playerlist_confirmed ?? 0) === 1,
     nitrado_log_settings_confirmed_at: row?.nitrado_log_settings_confirmed_at ?? null,
+    nitrado_log_settings_verification_source: row?.nitrado_log_settings_verification_source ?? null,
+    nitrado_admin_log_enabled: nullableBoolean(row?.nitrado_admin_log_enabled),
+    nitrado_server_log_enabled: nullableBoolean(row?.nitrado_server_log_enabled),
+    nitrado_log_settings_last_checked_at: row?.nitrado_log_settings_last_checked_at ?? null,
+    nitrado_log_settings_last_error: row?.nitrado_log_settings_last_error ?? null,
   };
 }
 
@@ -919,9 +933,15 @@ export async function updateNitradoLogSettingsConfirmation(env: Env, input: {
   guildId: string;
   reduceLogOutputConfirmed: boolean;
   logPlayerlistConfirmed: boolean;
+  source?: string | null;
+  adminLogEnabled?: boolean | null;
+  serverLogEnabled?: boolean | null;
+  checkedAt?: string | null;
+  lastError?: string | null;
 }) {
   await ensureAutomationSchema(env);
-  const now = new Date().toISOString();
+  await ensureServerSyncStateRow(env, input.guildId);
+  const now = input.checkedAt ?? new Date().toISOString();
   const confirmedAt = input.reduceLogOutputConfirmed && input.logPlayerlistConfirmed ? now : null;
   await requireDb(env)
     .prepare(
@@ -929,6 +949,11 @@ export async function updateNitradoLogSettingsConfirmation(env: Env, input: {
         nitrado_reduce_log_output_confirmed = ?,
         nitrado_log_playerlist_confirmed = ?,
         nitrado_log_settings_confirmed_at = ?,
+        nitrado_log_settings_verification_source = ?,
+        nitrado_admin_log_enabled = ?,
+        nitrado_server_log_enabled = ?,
+        nitrado_log_settings_last_checked_at = ?,
+        nitrado_log_settings_last_error = ?,
         updated_at = ?
        WHERE guild_id = ?`,
     )
@@ -936,11 +961,78 @@ export async function updateNitradoLogSettingsConfirmation(env: Env, input: {
       input.reduceLogOutputConfirmed ? 1 : 0,
       input.logPlayerlistConfirmed ? 1 : 0,
       confirmedAt,
+      input.source ?? "manual",
+      nullableBooleanInt(input.adminLogEnabled),
+      nullableBooleanInt(input.serverLogEnabled),
+      input.checkedAt ?? null,
+      input.lastError ?? null,
       now,
       input.guildId,
     )
     .run();
   return getNitradoLogSettingsConfirmation(env, input.guildId);
+}
+
+export async function recordNitradoLogSettingsVerification(env: Env, input: {
+  guildId: string;
+  reduceLogOutputDisabled: boolean | null;
+  logPlayerlistEnabled: boolean | null;
+  adminLogEnabled: boolean | null;
+  serverLogEnabled: boolean | null;
+  source: string;
+  checkedAt?: string | null;
+  error?: string | null;
+}) {
+  await ensureAutomationSchema(env);
+  await ensureServerSyncStateRow(env, input.guildId);
+  const now = input.checkedAt ?? new Date().toISOString();
+  const canAutoConfirm = input.reduceLogOutputDisabled === true && input.logPlayerlistEnabled === true;
+  const shouldUpdateConfirmation = input.reduceLogOutputDisabled !== null || input.logPlayerlistEnabled !== null;
+  const current = await getNitradoLogSettingsConfirmation(env, input.guildId);
+  const sourceForRecord = shouldUpdateConfirmation ? input.source : current.nitrado_log_settings_verification_source ?? input.source;
+  await requireDb(env)
+    .prepare(
+      `UPDATE server_sync_state SET
+        nitrado_reduce_log_output_confirmed = CASE WHEN ? THEN ? ELSE nitrado_reduce_log_output_confirmed END,
+        nitrado_log_playerlist_confirmed = CASE WHEN ? THEN ? ELSE nitrado_log_playerlist_confirmed END,
+        nitrado_log_settings_confirmed_at = CASE WHEN ? THEN ? ELSE nitrado_log_settings_confirmed_at END,
+        nitrado_log_settings_verification_source = ?,
+        nitrado_admin_log_enabled = ?,
+        nitrado_server_log_enabled = ?,
+        nitrado_log_settings_last_checked_at = ?,
+        nitrado_log_settings_last_error = ?,
+        updated_at = ?
+       WHERE guild_id = ?`,
+    )
+    .bind(
+      shouldUpdateConfirmation ? 1 : 0,
+      canAutoConfirm ? 1 : 0,
+      shouldUpdateConfirmation ? 1 : 0,
+      canAutoConfirm ? 1 : 0,
+      canAutoConfirm ? 1 : 0,
+      now,
+      sourceForRecord,
+      nullableBooleanInt(input.adminLogEnabled),
+      nullableBooleanInt(input.serverLogEnabled),
+      now,
+      input.error ?? null,
+      now,
+      input.guildId,
+    )
+    .run();
+  return getNitradoLogSettingsConfirmation(env, input.guildId);
+}
+
+async function ensureServerSyncStateRow(env: Env, guildId: string) {
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT OR IGNORE INTO server_sync_state (
+        id, guild_id, status_data_freshness, adm_status, created_at, updated_at
+      ) VALUES (?, ?, 'unknown', 'waiting_for_schedule', ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), guildId, now, now)
+    .run();
 }
 
 export async function recoverStuckAutomationLocks(env: Env) {
@@ -1208,6 +1300,16 @@ function rowsToCountMap<T extends Record<string, unknown> & { count?: unknown }>
   };
 }
 
+function nullableBoolean(value: number | null | undefined) {
+  if (value === null || value === undefined) return null;
+  return Number(value) === 1;
+}
+
+function nullableBooleanInt(value: boolean | null | undefined) {
+  if (value === null || value === undefined) return null;
+  return value ? 1 : 0;
+}
+
 async function ensureAutomationCronRunsColumns(db: D1Database) {
   const columns = await getTableColumns(db, "automation_cron_runs");
   const requiredColumns: Record<string, string> = {
@@ -1262,6 +1364,11 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
     nitrado_reduce_log_output_confirmed: "ALTER TABLE server_sync_state ADD COLUMN nitrado_reduce_log_output_confirmed INTEGER NOT NULL DEFAULT 0",
     nitrado_log_playerlist_confirmed: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_playerlist_confirmed INTEGER NOT NULL DEFAULT 0",
     nitrado_log_settings_confirmed_at: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_confirmed_at TEXT",
+    nitrado_log_settings_verification_source: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_verification_source TEXT",
+    nitrado_admin_log_enabled: "ALTER TABLE server_sync_state ADD COLUMN nitrado_admin_log_enabled INTEGER",
+    nitrado_server_log_enabled: "ALTER TABLE server_sync_state ADD COLUMN nitrado_server_log_enabled INTEGER",
+    nitrado_log_settings_last_checked_at: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_last_checked_at TEXT",
+    nitrado_log_settings_last_error: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_last_error TEXT",
   };
 
   for (const [column, statement] of Object.entries(requiredColumns)) {
@@ -1396,6 +1503,11 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     nitrado_reduce_log_output_confirmed INTEGER NOT NULL DEFAULT 0,
     nitrado_log_playerlist_confirmed INTEGER NOT NULL DEFAULT 0,
     nitrado_log_settings_confirmed_at TEXT,
+    nitrado_log_settings_verification_source TEXT,
+    nitrado_admin_log_enabled INTEGER,
+    nitrado_server_log_enabled INTEGER,
+    nitrado_log_settings_last_checked_at TEXT,
+    nitrado_log_settings_last_error TEXT,
     currently_syncing_adm INTEGER NOT NULL DEFAULT 0,
     manual_refresh_locked_until TEXT,
     created_at TEXT NOT NULL,
