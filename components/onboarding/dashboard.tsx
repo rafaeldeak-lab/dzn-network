@@ -260,6 +260,24 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
     }
   }, [server.tags_json]);
 
+  const refreshDiscordChannels = useCallback(async () => {
+    setDiscordChannelsLoading(true);
+    try {
+      const channels = await getDiscordPostingChannels(server.id);
+      setDiscordPostingChannels(channels.channels);
+      setDiscordChannelsResponse(channels);
+      setDiscordChannelsWarning(channels.warning ?? "");
+      return channels;
+    } catch (error) {
+      setDiscordPostingChannels([]);
+      setDiscordChannelsResponse(null);
+      setDiscordChannelsWarning(error instanceof Error ? error.message : "DZN could not load Discord channel diagnostics for this server.");
+      return null;
+    } finally {
+      setDiscordChannelsLoading(false);
+    }
+  }, [server.id]);
+
   const refreshBilling = useCallback(async () => {
     try {
       const [billing, advertising] = await Promise.all([
@@ -273,24 +291,14 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
       const posting = await getPostingDestinations(server.id).catch(() => null);
       if (posting?.setups) setPostingSetups(posting.setups);
       if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
-      setDiscordChannelsLoading(true);
-      const channels = await getDiscordPostingChannels(server.id).catch(() => null);
-      if (channels?.channels) {
-        setDiscordPostingChannels(channels.channels);
-        setDiscordChannelsResponse(channels);
-        setDiscordChannelsWarning(channels.warning ?? "");
-      } else {
-        setDiscordChannelsResponse(null);
-        setDiscordChannelsWarning("DZN could not load Discord channel diagnostics for this server.");
-      }
-      setDiscordChannelsLoading(false);
+      await refreshDiscordChannels();
       const health = await getAutomationHealth().catch(() => null);
       setAutomationHealth(health);
     } catch (error) {
       setDiscordChannelsLoading(false);
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
     }
-  }, [server.id]);
+  }, [refreshDiscordChannels, server.id]);
 
   useEffect(() => {
     void Promise.resolve().then(refreshBilling);
@@ -804,6 +812,7 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
             channelsWarning={discordChannelsWarning}
             connectedServerName={server.guild_name ?? serverDisplayName}
             planName={planLabel(billingStatus?.plan_key ?? "free")}
+            onChannelsRefresh={refreshDiscordChannels}
             onSaved={(result) => {
               setPostingSetups(result.setups ?? []);
               if (result.post_type_options) setPostingOptions(result.post_type_options);
@@ -1506,6 +1515,7 @@ function DiscordAutoPostsPanel({
   channelsWarning,
   connectedServerName,
   planName,
+  onChannelsRefresh,
   onSaved,
 }: {
   serverId: string;
@@ -1517,6 +1527,7 @@ function DiscordAutoPostsPanel({
   channelsWarning: string;
   connectedServerName: string;
   planName: string;
+  onChannelsRefresh: () => Promise<DiscordChannelsResponse | null>;
   onSaved: (result: PostingDestinationsResponse) => void;
 }) {
   const [selectedChannelId, setSelectedChannelId] = useState("");
@@ -1526,6 +1537,7 @@ function DiscordAutoPostsPanel({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [recheckingChannel, setRecheckingChannel] = useState(false);
   const [busyChannel, setBusyChannel] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [testTypeByChannel, setTestTypeByChannel] = useState<Record<string, string>>({});
@@ -1534,13 +1546,29 @@ function DiscordAutoPostsPanel({
   const groupedOptions = useMemo(() => groupPostingOptions(effectiveOptions), [effectiveOptions]);
   const channelById = useMemo(() => new Map(channels.map((channel) => [channel.channel_id, channel])), [channels]);
   const selectedChannel = channelById.get(selectedChannelId) ?? null;
+  const selectedChannelPermission = useMemo(() => {
+    if (!selectedChannel) {
+      return {
+        channelId: selectedChannelId || null,
+        channelName: null,
+        canPost: false,
+        missingPermissions: [] as string[],
+      };
+    }
+    return {
+      channelId: selectedChannel.channel_id,
+      channelName: selectedChannel.channel_name,
+      canPost: selectedChannel.can_post === true,
+      missingPermissions: Array.isArray(selectedChannel.missing_permissions) ? selectedChannel.missing_permissions : [],
+    };
+  }, [selectedChannel, selectedChannelId]);
   const channelFetchFailed = Boolean(channelsResponse?.manual_fallback || channelsResponse?.error_code || channelsWarning);
   const showManualFallback = advancedOpen || channelFetchFailed;
   const manualChannelValue = manualChannelId.trim();
   const channelForSave = selectedChannelId || manualChannelValue;
   const selectedLockedCount = selectedPostTypes.filter((postType) => !effectiveOptions.find((option) => option.key === postType)?.allowed_by_plan).length;
   const webhookFallbackConfigured = Boolean(webhookUrl.trim());
-  const channelCanPost = selectedChannel ? selectedChannel.can_post || webhookFallbackConfigured : webhookFallbackConfigured;
+  const channelCanPost = selectedChannel ? selectedChannelPermission.canPost || webhookFallbackConfigured : webhookFallbackConfigured;
   const canSave = Boolean(channelForSave && selectedPostTypes.length && selectedLockedCount === 0 && channelCanPost);
   const diagnostics = channelsResponse?.diagnostics;
   const botStatus = channelsResponse?.bot_connected === true
@@ -1555,6 +1583,33 @@ function DiscordAutoPostsPanel({
     setSelectedPostTypes((current) => current.includes(postType)
       ? current.filter((value) => value !== postType)
       : [...current, postType]);
+  }
+
+  function selectChannel(channelId: string) {
+    setSelectedChannelId(channelId);
+    setManualChannelId("");
+    setMessage("");
+  }
+
+  async function recheckSelectedChannel() {
+    if (!selectedChannelId) return;
+    setRecheckingChannel(true);
+    setMessage("");
+    try {
+      const response = await onChannelsRefresh();
+      const refreshedChannel = response?.channels.find((channel) => channel.channel_id === selectedChannelId);
+      if (!refreshedChannel) {
+        setMessage("Selected channel was not returned by Discord during recheck. Choose another channel or check bot access.");
+      } else if (refreshedChannel.can_post) {
+        setMessage("Selected channel rechecked. DZN Bot can post in this channel.");
+      } else {
+        setMessage(`Selected channel rechecked. Missing: ${refreshedChannel.missing_permissions.join(", ") || "channel permissions"}.`);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not recheck the selected Discord channel.");
+    } finally {
+      setRecheckingChannel(false);
+    }
   }
 
   async function saveSetup() {
@@ -1667,10 +1722,7 @@ function DiscordAutoPostsPanel({
             <p className="text-[10px] font-black uppercase text-zinc-400">Step 1: Choose Channel</p>
             <select
               value={selectedChannelId}
-              onChange={(event) => {
-                setSelectedChannelId(event.target.value);
-                setManualChannelId("");
-              }}
+              onChange={(event) => selectChannel(event.target.value)}
               disabled={channelsLoading || channels.length === 0}
               className="min-h-11 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40 disabled:opacity-55"
             >
@@ -1682,11 +1734,29 @@ function DiscordAutoPostsPanel({
               ))}
             </select>
             {selectedChannel ? (
-              <span className={`text-[11px] font-bold ${selectedChannel.can_post ? "text-emerald-200" : "text-amber-200"}`}>
-                {selectedChannel.can_post
-                  ? "Bot can post in this channel."
-                  : `DZN can see this channel, but cannot post here yet. Missing: ${selectedChannel.missing_permissions.join(", ")}. Private channels often override bot permissions. Add the DZN Bot role to the channel permissions or choose a public channel.`}
-              </span>
+              <div className="grid gap-2">
+                <span className={`text-[11px] font-bold ${selectedChannelPermission.canPost ? "text-emerald-200" : "text-amber-200"}`}>
+                  {selectedChannelPermission.canPost
+                    ? "DZN Bot can post in this channel."
+                    : `DZN can see this channel, but cannot post here yet. Missing: ${selectedChannelPermission.missingPermissions.join(", ") || "channel permissions"}. Make sure you select the DZN Bot role in Discord channel permissions, not @everyone, then allow Send Messages and Embed Links. Channel or category overrides may still block the bot; add the DZN Bot role directly to the channel permissions or choose another channel.`}
+                </span>
+                <div className="rounded-lg border border-white/10 bg-black/24 p-2 text-[10px] font-bold leading-5 text-zinc-400">
+                  <p className="font-black uppercase text-zinc-500">Selected channel debug</p>
+                  <p>ID: <span className="text-zinc-200">{selectedChannelPermission.channelId}</span></p>
+                  <p>Name: <span className="text-zinc-200">#{selectedChannelPermission.channelName}</span></p>
+                  <p>can_post: <span className={selectedChannelPermission.canPost ? "text-emerald-200" : "text-amber-200"}>{String(selectedChannelPermission.canPost)}</span></p>
+                  <p>missing_permissions: <span className="text-zinc-200">[{selectedChannelPermission.missingPermissions.join(", ")}]</span></p>
+                </div>
+                <button
+                  type="button"
+                  onClick={recheckSelectedChannel}
+                  disabled={recheckingChannel || channelsLoading}
+                  className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  <RefreshCw className={`h-3 w-3 ${recheckingChannel ? "animate-spin" : ""}`} />
+                  {recheckingChannel ? "Rechecking..." : "Recheck Selected Channel"}
+                </button>
+              </div>
             ) : (
               <span className="text-[11px] font-bold text-zinc-500">DZN uses the guild selected during onboarding.</span>
             )}
@@ -1758,6 +1828,7 @@ function DiscordAutoPostsPanel({
                 onChange={(event) => {
                   setManualChannelId(event.target.value);
                   setSelectedChannelId("");
+                  setMessage("");
                 }}
                 placeholder="Only use this if DZN cannot fetch channels"
                 className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs font-bold text-white outline-none focus:border-cyan-300/40"

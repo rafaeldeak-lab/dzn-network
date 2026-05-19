@@ -27,4 +27,16 @@ assert.equal(setupWizardSource.includes("discordBotConnected"), true);
 assert.equal(setupWizardSource.includes("discordChannelsAvailable"), true);
 assert.equal(setupWizardSource.includes("DZN Bot is not installed in this Discord server yet"), true);
 
+const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+assert.equal(dashboardSource.includes("function selectChannel"), true);
+assert.equal(dashboardSource.includes("setMessage(\"\")"), true);
+assert.equal(dashboardSource.includes("selectedChannelPermission"), true);
+assert.equal(dashboardSource.includes("DZN Bot can post in this channel."), true);
+assert.equal(dashboardSource.includes("DZN can see this channel, but cannot post here yet."), true);
+assert.equal(dashboardSource.includes("Selected channel debug"), true);
+assert.equal(dashboardSource.includes("missing_permissions:"), true);
+assert.equal(dashboardSource.includes("Recheck Selected Channel"), true);
+assert.equal(dashboardSource.includes("Make sure you select the DZN Bot role in Discord channel permissions, not @everyone"), true);
+assert.equal(dashboardSource.includes("Channel or category overrides may still block the bot"), true);
+
 console.log("Discord guild permission tests passed.");
