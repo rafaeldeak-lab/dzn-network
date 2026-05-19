@@ -125,7 +125,8 @@ assert.equal(dashboardSource.includes("Automation is running."), true);
 assert.equal(dashboardSource.includes("Cloudflare Worker Cron is active."), true);
 assert.equal(dashboardSource.includes("No recent automation cron check-in detected."), true);
 assert.equal(dashboardSource.includes("Server Status Sync:"), true);
-assert.equal(dashboardSource.includes("ADM Log Sync:"), true);
+assert.equal(dashboardSource.includes("ADM Discovery:"), true);
+assert.equal(dashboardSource.includes("ADM Processing:"), true);
 assert.equal(dashboardSource.includes("real-time logs"), false);
 assert.equal(dashboardSource.includes("instant stats"), false);
 

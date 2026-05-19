@@ -71,17 +71,36 @@ Source:
 
 - Nitrado ADM/backend log files.
 
-Plan intervals:
+## ADM Discovery vs ADM Processing
 
-| Plan | ADM logs checked |
+DZN splits ADM work into two phases:
+
+- ADM Discovery checks whether newer ADM files exist and whether the newest file is readable.
+- ADM Processing parses readable lines, updates stats/events/cache, and queues Discord posts.
+
+Discovery is intentionally lighter than processing. It can run more often without parsing the full ADM file or posting to Discord.
+
+Discovery intervals:
+
+| Plan | ADM discovery checked |
+| --- | --- |
+| Starter | Every 15 minutes |
+| Pro | Every 10 minutes |
+| Network | Every 5 minutes |
+| Partner | Every 3 minutes |
+
+Processing intervals:
+
+| Plan | ADM data processed |
 | --- | --- |
 | Starter | Every 60 minutes |
 | Pro | Every 30 minutes |
 | Network | Every 15 minutes |
 | Partner | Every 10 minutes |
 
-Hard floor:
+Hard floors:
 
+- ADM discovery must never run faster than every 3 minutes.
 - ADM/backend logs must never run faster than every 10 minutes.
 
 Nitrado reality:
@@ -98,11 +117,12 @@ Flow:
 Cloudflare Worker Cron, every minute
 -> POST /api/sync/adm/run
 -> functions/_lib/adm-sync.ts
--> get due active/trialing servers from server_sync_state
--> skip servers not due by plan interval
--> fetch/list/read Nitrado ADM files
+-> discovery phase: get due active/trialing servers by next_adm_discovery_due_at
+-> fetch/list/sample-read Nitrado ADM files
 -> sort ADM files by parsed filename timestamp, falling back to Nitrado modified time
--> compare newest available/readable ADM with the saved cursor
+-> update newest available/readable ADM evidence and adm_discovery_status
+-> processing phase: get due active/trialing servers by next_adm_pull_due_at
+-> skip heavy parsing until a readable ADM is known and processing is due
 -> parse only new lines
 -> write scoped stats/events/build data
 -> update adm_sync_state and server_sync_state
@@ -113,6 +133,8 @@ Cloudflare Worker Cron, every minute
 
 Important behavior:
 
+- Discovery checks files but does not spam Discord.
+- Processing creates stats, events, public cache updates, and Discord post queues.
 - No new ADM log is recorded as a normal state, not a fatal failure.
 - Waiting after restart is recorded as a normal state.
 - Readable old stats remain active while waiting.
@@ -153,6 +175,19 @@ Tracked ADM evidence:
 - `last_server_restart_at`
 - `last_restart_detected_source`
 - `last_restart_detected_at`
+- `last_adm_discovery_check_at`
+- `next_adm_discovery_due_at`
+- `last_successful_adm_discovery_at`
+- `last_failed_adm_discovery_at`
+- `last_adm_discovery_error`
+- `adm_discovery_status`
+
+Required Nitrado log settings:
+
+- Reduce Log Output: Disabled
+- Log Playerlist: Enabled
+
+Dashboard wording should treat these as a warning checklist, not a hard setup lock. If they are not confirmed, DZN should show: "ADM tracking may miss useful lines until these Nitrado settings are confirmed."
 
 ## C. Discord Auto-Post Dispatcher
 

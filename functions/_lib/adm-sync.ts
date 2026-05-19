@@ -21,9 +21,12 @@ import {
 } from "./nitrado";
 import { decryptToken } from "./crypto";
 import {
+  ensureAutomationSchema,
+  getDueAdmDiscoveryAutomationServers,
   getDueAdmAutomationServers,
   markAdmPullStarted,
   queueDiscordPostUpdatesForGuild,
+  recordAdmDiscoveryResult,
   recordAdmPullResult,
   upsertServerPublicCache,
 } from "./automation";
@@ -185,6 +188,20 @@ export type AdmSyncStatus = {
   last_duplicate_lines: number;
   last_sync_duration_ms: number | null;
   last_readable_route: string | null;
+  last_adm_discovery_check_at: string | null;
+  next_adm_discovery_due_at: string | null;
+  last_successful_adm_discovery_at: string | null;
+  last_failed_adm_discovery_at: string | null;
+  last_adm_discovery_error: string | null;
+  adm_discovery_status: string | null;
+  next_adm_pull_due_at: string | null;
+  newest_available_adm_filename: string | null;
+  newest_available_adm_timestamp: string | null;
+  newest_readable_adm_filename: string | null;
+  newest_readable_adm_timestamp: string | null;
+  nitrado_reduce_log_output_confirmed: boolean;
+  nitrado_log_playerlist_confirmed: boolean;
+  nitrado_log_settings_confirmed_at: string | null;
   last_sync_trigger: string | null;
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;
@@ -1195,6 +1212,7 @@ function emptyAdmSyncResult(values: {
 
 export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?: string | null): Promise<AdmSyncStatus> {
   await ensureAdmSyncSchema(env);
+  await ensureAutomationSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
 
@@ -1224,6 +1242,20 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
         adm_sync_state.last_parser_skipped_lines,
         adm_sync_state.last_unreadable_files_queued,
         adm_sync_state.last_newest_unprocessed_adm_file,
+        server_sync_state.last_adm_discovery_check_at,
+        server_sync_state.next_adm_discovery_due_at,
+        server_sync_state.last_successful_adm_discovery_at,
+        server_sync_state.last_failed_adm_discovery_at,
+        server_sync_state.last_adm_discovery_error,
+        server_sync_state.adm_discovery_status,
+        server_sync_state.next_adm_pull_due_at,
+        server_sync_state.newest_available_adm_filename,
+        server_sync_state.newest_available_adm_timestamp,
+        server_sync_state.newest_readable_adm_filename,
+        server_sync_state.newest_readable_adm_timestamp,
+        server_sync_state.nitrado_reduce_log_output_confirmed,
+        server_sync_state.nitrado_log_playerlist_confirmed,
+        server_sync_state.nitrado_log_settings_confirmed_at,
         server_stats.total_kills,
         server_stats.total_deaths,
         server_stats.total_joins,
@@ -1231,6 +1263,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
         server_stats.unique_players
        FROM linked_servers
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        WHERE linked_servers.id = ? AND linked_servers.user_id = ?
        LIMIT 1`,
@@ -1270,6 +1303,20 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     last_duplicate_lines: numberOrZero(row?.last_duplicate_lines),
     last_sync_duration_ms: row?.last_sync_duration_ms === null || row?.last_sync_duration_ms === undefined ? null : numberOrZero(row.last_sync_duration_ms),
     last_readable_route: typeof row?.last_readable_route === "string" ? row.last_readable_route : null,
+    last_adm_discovery_check_at: typeof row?.last_adm_discovery_check_at === "string" ? row.last_adm_discovery_check_at : null,
+    next_adm_discovery_due_at: typeof row?.next_adm_discovery_due_at === "string" ? row.next_adm_discovery_due_at : null,
+    last_successful_adm_discovery_at: typeof row?.last_successful_adm_discovery_at === "string" ? row.last_successful_adm_discovery_at : null,
+    last_failed_adm_discovery_at: typeof row?.last_failed_adm_discovery_at === "string" ? row.last_failed_adm_discovery_at : null,
+    last_adm_discovery_error: typeof row?.last_adm_discovery_error === "string" ? row.last_adm_discovery_error : null,
+    adm_discovery_status: typeof row?.adm_discovery_status === "string" ? row.adm_discovery_status : null,
+    next_adm_pull_due_at: typeof row?.next_adm_pull_due_at === "string" ? row.next_adm_pull_due_at : null,
+    newest_available_adm_filename: typeof row?.newest_available_adm_filename === "string" ? row.newest_available_adm_filename : null,
+    newest_available_adm_timestamp: typeof row?.newest_available_adm_timestamp === "string" ? row.newest_available_adm_timestamp : null,
+    newest_readable_adm_filename: typeof row?.newest_readable_adm_filename === "string" ? row.newest_readable_adm_filename : null,
+    newest_readable_adm_timestamp: typeof row?.newest_readable_adm_timestamp === "string" ? row.newest_readable_adm_timestamp : null,
+    nitrado_reduce_log_output_confirmed: Number(row?.nitrado_reduce_log_output_confirmed ?? 0) === 1,
+    nitrado_log_playerlist_confirmed: Number(row?.nitrado_log_playerlist_confirmed ?? 0) === 1,
+    nitrado_log_settings_confirmed_at: typeof row?.nitrado_log_settings_confirmed_at === "string" ? row.nitrado_log_settings_confirmed_at : null,
     last_sync_trigger: recentRuns[0]?.trigger_type ?? null,
     last_scheduled_sync_at: lastScheduledRun?.finished_at ?? lastScheduledRun?.started_at ?? null,
     last_manual_sync_at: lastManualRun?.finished_at ?? lastManualRun?.started_at ?? null,
@@ -1631,6 +1678,80 @@ export async function clearOldFailedSyncRuns(env: Env, userId: string, linkedSer
   return { ok: true, deletedCount: numberOrZero(result.meta?.changes) };
 }
 
+export type AdmDiscoveryResult = {
+  ok: boolean;
+  status: string;
+  message: string;
+  newestAvailableAdmFile: string | null;
+  newestAvailableAdmTimestamp: string | null;
+  newestReadableAdmFile: string | null;
+  newestReadableAdmTimestamp: string | null;
+  filesFound: number;
+  readableFilesFound: number;
+};
+
+export async function runAdmDiscoveryForLinkedServer(env: Env, userId: string, linkedServerId: string): Promise<AdmDiscoveryResult> {
+  await ensureAdmSyncSchema(env);
+  const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
+  if (!linkedServer) throw new Error("No linked server found");
+  const initialScope = verifyAdmServerScope(linkedServer, crypto.randomUUID());
+  const existingState = await getSyncState(env, initialScope.linkedServerId);
+  const isMock = isMockNitrado(env.MOCK_NITRADO);
+  const preferredAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
+  const preferredAdmFileName = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
+
+  try {
+    const batch = await getReadableAdmFilesForLinkedServer(env, linkedServer, {
+      isMock,
+      readMode: "sample",
+      preferredAdmPath,
+      previousLatestAdmFileName: preferredAdmFileName,
+      maxFiles: 6,
+    });
+    await recordDiscoveredAdmFiles(env, initialScope, batch.candidates);
+    const newestAvailableAdm = selectNewestDiscoveredAdmFile(batch.candidates) ?? (batch.newestAdmFileName ? {
+      name: batch.newestAdmFileName,
+      path: preferredAdmPath,
+      timestamp: extractAdmTimestampScore(batch.newestAdmFileName),
+    } : null);
+    const newestReadableAdm = selectNewestReadableAdmFile(batch.files);
+    const newestAvailableAdmTimestamp = timestampIso(newestAvailableAdm?.timestamp ?? extractAdmTimestampScore(newestAvailableAdm?.name));
+    const newestReadableAdmTimestamp = timestampIso(newestReadableAdm ? extractAdmTimestampScore(newestReadableAdm.name) : null);
+    const hasNewAvailable = Boolean(newestAvailableAdm?.name && newestAvailableAdm.name !== existingState?.latest_adm_file);
+    const status = newestReadableAdm
+      ? (hasNewAvailable ? "new_adm_readable" : "no_new_log_available")
+      : classifyUnavailableAdmFileStatus(newestAvailableAdm?.name ?? batch.newestAdmFileName, batch.filesFound > 0, batch.apiStatus);
+    const normalizedStatus = normalizeAdmSyncStateMachineStatus(status);
+    return {
+      ok: !isAdmSyncErrorStatus(status),
+      status: normalizedStatus === "latest_adm_unreadable" ? "latest_adm_unreadable" : normalizedStatus,
+      message: newestReadableAdm ? batch.message : getUnavailableAdmMessage(status),
+      newestAvailableAdmFile: newestAvailableAdm?.name ?? batch.newestAdmFileName ?? null,
+      newestAvailableAdmTimestamp,
+      newestReadableAdmFile: newestReadableAdm?.name ?? null,
+      newestReadableAdmTimestamp,
+      filesFound: batch.filesFound,
+      readableFilesFound: batch.files.length,
+    };
+  } catch (error) {
+    const latestAdmFile = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
+    const status = classifyNitradoExceptionStatus(error, latestAdmFile);
+    return {
+      ok: !isAdmSyncErrorStatus(status),
+      status: normalizeAdmSyncStateMachineStatus(status),
+      message: status === "adm_file_unreadable"
+        ? "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check."
+        : getUnavailableAdmMessage(status),
+      newestAvailableAdmFile: latestAdmFile,
+      newestAvailableAdmTimestamp: timestampIso(extractAdmTimestampScore(latestAdmFile)),
+      newestReadableAdmFile: null,
+      newestReadableAdmTimestamp: null,
+      filesFound: latestAdmFile ? 1 : 0,
+      readableFilesFound: 0,
+    };
+  }
+}
+
 export type ScheduledAdmSyncResult = {
   ok: true;
   processed: number;
@@ -1638,6 +1759,17 @@ export type ScheduledAdmSyncResult = {
   failed: number;
   unavailable: number;
   skipped: number;
+  discovery_due_count: number;
+  discovery_processed_count: number;
+  processing_due_count: number;
+  processing_processed_count: number;
+  skipped_not_due: number;
+  skipped_locked: number;
+  skipped_unreadable: number;
+  waiting_after_restart_count: number;
+  latest_adm_unreadable_count: number;
+  new_adm_readable_count: number;
+  new_data_found_count: number;
   cron: string | null;
   maxServers: number;
   maxLinesPerServer: number;
@@ -1661,14 +1793,60 @@ export async function runScheduledAdmSync(
     maxServers,
     skipFreshWithinMs: 5 * 60 * 1000,
   });
+  const discoveryServers = await getDueAdmDiscoveryAutomationServers(env, maxServers);
+  const discoveryResults = new Map<string, AdmDiscoveryResult>();
+  let discoveryProcessed = 0;
+  let skippedUnreadable = 0;
+  let waitingAfterRestartCount = 0;
+  let latestAdmUnreadableCount = 0;
+  let newAdmReadableCount = 0;
+
+  for (const server of discoveryServers) {
+    try {
+      const discovery = await runAdmDiscoveryForLinkedServer(env, server.user_id, server.id);
+      discoveryResults.set(server.guild_id, discovery);
+      discoveryProcessed += 1;
+      if (discovery.status === "waiting_after_restart" || discovery.status === "delayed_after_restart") waitingAfterRestartCount += 1;
+      if (discovery.status === "latest_adm_unreadable") latestAdmUnreadableCount += 1;
+      if (discovery.status === "new_adm_readable") newAdmReadableCount += 1;
+      await recordAdmDiscoveryResult(env, {
+        guildId: server.guild_id,
+        planKey: server.plan_key,
+        ok: discovery.ok,
+        status: discovery.status,
+        error: discovery.ok ? null : discovery.message,
+        newestAvailableAdmFile: discovery.newestAvailableAdmFile,
+        newestAvailableAdmTimestamp: discovery.newestAvailableAdmTimestamp,
+        newestReadableAdmFile: discovery.newestReadableAdmFile,
+        newestReadableAdmTimestamp: discovery.newestReadableAdmTimestamp,
+      });
+    } catch (error) {
+      await recordAdmDiscoveryResult(env, {
+        guildId: server.guild_id,
+        planKey: server.plan_key,
+        ok: false,
+        status: "failed",
+        error: safeSyncErrorMessage(error),
+      }).catch(() => null);
+    }
+  }
+
   const eligibleServers = await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs);
   let succeeded = 0;
   let failed = 0;
   let unavailable = 0;
+  let processingProcessed = 0;
+  let newDataFoundCount = 0;
 
   for (const server of eligibleServers) {
+    const discoveredReadable = discoveryResults.get(server.guild_id)?.newestReadableAdmFile ?? server.newest_readable_adm_filename ?? null;
+    if (!discoveredReadable) {
+      skippedUnreadable += 1;
+      continue;
+    }
     try {
       await markAdmPullStarted(env, server.guild_id);
+      processingProcessed += 1;
       const result = await runAdmSync(env, server.user_id, server.id, {
         triggerType: "scheduled",
         maxLinesPerRun: maxLinesPerServer,
@@ -1696,6 +1874,7 @@ export async function runScheduledAdmSync(
         processedLine: result.lastProcessedLine,
         newDataFound: result.eventsCreated > 0 || result.killsCreated > 0 || result.buildEventsStored > 0,
       });
+      if (result.eventsCreated > 0 || result.killsCreated > 0 || result.buildEventsStored > 0) newDataFoundCount += 1;
       if (ok) {
         await upsertServerPublicCache(env, {
           guildId: server.guild_id,
@@ -1748,11 +1927,22 @@ export async function runScheduledAdmSync(
 
   return {
     ok: true,
-    processed: eligibleServers.length,
+    processed: processingProcessed,
     succeeded,
     failed,
     unavailable,
-    skipped: Math.max(0, maxServers - eligibleServers.length),
+    skipped: Math.max(0, maxServers - processingProcessed),
+    discovery_due_count: discoveryServers.length,
+    discovery_processed_count: discoveryProcessed,
+    processing_due_count: eligibleServers.length,
+    processing_processed_count: processingProcessed,
+    skipped_not_due: Math.max(0, maxServers - Math.max(discoveryServers.length, eligibleServers.length)),
+    skipped_locked: 0,
+    skipped_unreadable: skippedUnreadable,
+    waiting_after_restart_count: waitingAfterRestartCount,
+    latest_adm_unreadable_count: latestAdmUnreadableCount,
+    new_adm_readable_count: newAdmReadableCount,
+    new_data_found_count: newDataFoundCount,
     cron: options.cron ?? null,
     maxServers,
     maxLinesPerServer,

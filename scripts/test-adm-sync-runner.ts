@@ -118,6 +118,11 @@ assert.equal(admSyncSource.includes("force: triggerType === \"manual\" || trigge
 assert.equal(admSyncSource.includes("softFail: true"), true);
 assert.equal(admSyncSource.includes("refreshLivePlayerCountsForActiveServers"), true);
 assert.equal(admSyncSource.includes("metadata,"), true);
+assert.equal(admSyncSource.includes("runAdmDiscoveryForLinkedServer"), true);
+assert.equal(admSyncSource.includes("readMode: \"sample\""), true);
+assert.equal(admSyncSource.includes("discovery_due_count"), true);
+assert.equal(admSyncSource.includes("processing_due_count"), true);
+assert.equal(admSyncSource.includes("skipped_unreadable"), true);
 
 const env = { DZN_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
@@ -165,6 +170,17 @@ async function runEndpointTests() {
       failed: 0,
       unavailable: 0,
       skipped: 0,
+      discovery_due_count: 1,
+      discovery_processed_count: 1,
+      processing_due_count: 1,
+      processing_processed_count: 1,
+      skipped_not_due: 0,
+      skipped_locked: 0,
+      skipped_unreadable: 0,
+      waiting_after_restart_count: 0,
+      latest_adm_unreadable_count: 0,
+      new_adm_readable_count: 1,
+      new_data_found_count: 1,
       cron: null,
       maxServers: 25,
       maxLinesPerServer: 50000,
@@ -197,6 +213,17 @@ async function runEndpointTests() {
       failed: 0,
       unavailable: 0,
       skipped: 0,
+      discovery_due_count: 0,
+      discovery_processed_count: 0,
+      processing_due_count: 0,
+      processing_processed_count: 0,
+      skipped_not_due: 0,
+      skipped_locked: 0,
+      skipped_unreadable: 0,
+      waiting_after_restart_count: 0,
+      latest_adm_unreadable_count: 0,
+      new_adm_readable_count: 0,
+      new_data_found_count: 0,
       cron: null,
       maxServers: 25,
       maxLinesPerServer: 50000,
@@ -226,6 +253,17 @@ async function runEndpointTests() {
       failed: 0,
       unavailable: 0,
       skipped: 0,
+      discovery_due_count: 0,
+      discovery_processed_count: 0,
+      processing_due_count: 0,
+      processing_processed_count: 0,
+      skipped_not_due: 0,
+      skipped_locked: 0,
+      skipped_unreadable: 0,
+      waiting_after_restart_count: 0,
+      latest_adm_unreadable_count: 0,
+      new_adm_readable_count: 0,
+      new_data_found_count: 0,
       cron: null,
       maxServers: 25,
       maxLinesPerServer: 50000,

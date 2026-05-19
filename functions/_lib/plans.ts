@@ -5,6 +5,7 @@ import {
   AUTO_POST_OPTIONS,
   BILLING_PLAN_CONFIG,
   PAID_PLAN_KEYS,
+  getAdmDiscoveryIntervalMinutes as centralAdmDiscoveryInterval,
   getAdmPullInterval as centralAdmPullInterval,
   getManualRefreshCooldown as centralManualRefreshCooldown,
   getPlanByStripePriceId,
@@ -26,6 +27,7 @@ export type PlanEntitlements = {
   monthly_price: number;
   stripe_price_env_key: string | null;
   server_status_interval_minutes: number;
+  adm_discovery_interval_minutes: number;
   adm_pull_interval_minutes: number;
   manual_adm_refresh_cooldown_minutes: number;
   allowed_features: PlanFeature[];
@@ -234,6 +236,10 @@ export function getServerStatusInterval(planKey: unknown) {
 
 export function getAdmPullInterval(planKey: unknown) {
   return centralAdmPullInterval(planKey);
+}
+
+export function getAdmDiscoveryIntervalMinutes(planKey: unknown) {
+  return centralAdmDiscoveryInterval(planKey);
 }
 
 export function getManualRefreshCooldown(planKey: unknown) {
@@ -510,6 +516,7 @@ function automationPlan(planKey: PlanKey) {
     monthly_price: plan.monthly_price,
     stripe_price_env_key: plan.stripe_price_env_key,
     server_status_interval_minutes: plan.server_status_interval_minutes,
+    adm_discovery_interval_minutes: plan.adm_discovery_interval_minutes,
     adm_pull_interval_minutes: plan.adm_pull_interval_minutes,
     manual_adm_refresh_cooldown_minutes: plan.manual_adm_refresh_cooldown_minutes,
     allowed_features: plan.allowed_features,

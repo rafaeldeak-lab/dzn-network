@@ -4,10 +4,12 @@ import path from "node:path";
 import {
   AUTO_POST_TYPES,
   BILLING_PLAN_CONFIG,
+  MIN_ADM_DISCOVERY_INTERVAL_MINUTES,
   MIN_ADM_PULL_INTERVAL_MINUTES,
   MIN_SERVER_STATUS_INTERVAL_MINUTES,
   PAID_PLAN_KEYS,
   getAdmPullInterval,
+  getAdmDiscoveryIntervalMinutes,
   getServerStatusInterval,
   hasAutoPost,
 } from "../lib/billing/plans";
@@ -136,6 +138,9 @@ function auditBillingPlans() {
     if (plan.adm_pull_interval_minutes >= MIN_ADM_PULL_INTERVAL_MINUTES) pass(`Plan ${key} ADM interval`, `${plan.adm_pull_interval_minutes} minutes.`);
     else fail(`Plan ${key} ADM interval`, "Below hard floor.");
 
+    if (plan.adm_discovery_interval_minutes >= MIN_ADM_DISCOVERY_INTERVAL_MINUTES) pass(`Plan ${key} ADM discovery interval`, `${plan.adm_discovery_interval_minutes} minutes.`);
+    else fail(`Plan ${key} ADM discovery interval`, "Below discovery hard floor.");
+
     if (plan.manual_adm_refresh_cooldown_minutes >= MIN_ADM_PULL_INTERVAL_MINUTES) pass(`Plan ${key} manual cooldown`, `${plan.manual_adm_refresh_cooldown_minutes} minutes.`);
     else fail(`Plan ${key} manual cooldown`, "Below ADM hard floor.");
 
@@ -151,14 +156,16 @@ function auditBillingPlans() {
   }
 
   const expectedIntervals = [
-    ["starter", 7, 60],
-    ["pro", 5, 30],
-    ["network", 3, 15],
-    ["partner", 1, 10],
+    ["starter", 7, 15, 60],
+    ["pro", 5, 10, 30],
+    ["network", 3, 5, 15],
+    ["partner", 1, 3, 10],
   ] as const;
-  for (const [planKey, statusInterval, admInterval] of expectedIntervals) {
+  for (const [planKey, statusInterval, discoveryInterval, admInterval] of expectedIntervals) {
     if (getServerStatusInterval(planKey) === statusInterval) pass(`${planKey} status cadence`, `Status sync every ${statusInterval} minutes.`);
     else fail(`${planKey} status cadence`, `Expected ${statusInterval}, got ${getServerStatusInterval(planKey)}.`);
+    if (getAdmDiscoveryIntervalMinutes(planKey) === discoveryInterval) pass(`${planKey} ADM discovery cadence`, `ADM discovery every ${discoveryInterval} minutes.`);
+    else fail(`${planKey} ADM discovery cadence`, `Expected ${discoveryInterval}, got ${getAdmDiscoveryIntervalMinutes(planKey)}.`);
     if (getAdmPullInterval(planKey) === admInterval) pass(`${planKey} ADM cadence`, `ADM sync every ${admInterval} minutes.`);
     else fail(`${planKey} ADM cadence`, `Expected ${admInterval}, got ${getAdmPullInterval(planKey)}.`);
   }
@@ -229,9 +236,13 @@ function auditDatabaseMigrations() {
   checkFile("migrations/0016_automation_cron_runs.sql", "Migration 0016 automation cron runs");
   checkFile("migrations/0017_discord_post_dispatch_state.sql", "Migration 0017 Discord dispatch state");
   checkFile("migrations/0018_adm_reset_state_tracking.sql", "Migration 0018 ADM reset state tracking");
+  checkFile("migrations/0019_adm_discovery_and_nitrado_settings.sql", "Migration 0019 ADM discovery and Nitrado settings");
   checkIncludes("migrations/0017_discord_post_dispatch_state.sql", "last_dispatch_status", "Discord dispatch state migration columns");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_available_adm_filename", "ADM reset state migration columns");
+  checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "ADM discovery due migration columns");
+  checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "nitrado_log_playerlist_confirmed", "Nitrado log settings migration columns");
   checkIncludes("functions/_lib/automation.ts", "last_seen_adm_timestamp", "ADM timestamp tracking columns");
+  checkIncludes("functions/_lib/automation.ts", "last_adm_discovery_check_at", "ADM discovery check tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_available_adm_filename", "Newest available ADM tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_readable_adm_filename", "Newest readable ADM tracking");
   checkIncludes("functions/_lib/automation.ts", "last_restart_detected_source", "Restart detection source tracking");
@@ -258,6 +269,9 @@ function auditDashboardStructure() {
   }
   checkIncludes(dashboard, "Last Sync Details", "Sync details are expandable");
   checkIncludes(dashboard, "ADM API Diagnostics", "ADM diagnostics are expandable");
+  checkIncludes(dashboard, "Nitrado Log Settings", "Nitrado log settings checklist is visible");
+  checkIncludes(dashboard, "Checks for new ADM files every", "ADM discovery timing is visible");
+  checkIncludes(dashboard, "Processes readable ADM data every", "ADM processing timing is visible");
 }
 
 function auditDiscordAutoPosts() {

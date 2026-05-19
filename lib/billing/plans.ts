@@ -43,6 +43,7 @@ export type BillingPlanConfig = {
   monthly_price: number;
   stripe_price_env_key: string | null;
   server_status_interval_minutes: number;
+  adm_discovery_interval_minutes: number;
   adm_pull_interval_minutes: number;
   manual_adm_refresh_cooldown_minutes: number;
   allowed_features: PlanFeature[];
@@ -60,6 +61,7 @@ export type AutoPostOption = {
 };
 
 export const MIN_SERVER_STATUS_INTERVAL_MINUTES = 1;
+export const MIN_ADM_DISCOVERY_INTERVAL_MINUTES = 3;
 export const MIN_ADM_PULL_INTERVAL_MINUTES = 10;
 
 export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
@@ -69,6 +71,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
     monthly_price: 0,
     stripe_price_env_key: null,
     server_status_interval_minutes: 60,
+    adm_discovery_interval_minutes: 60,
     adm_pull_interval_minutes: 1440,
     manual_adm_refresh_cooldown_minutes: 1440,
     allowed_features: ["server_profile", "basic_status"],
@@ -81,6 +84,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
     monthly_price: 4.99,
     stripe_price_env_key: "STRIPE_PRICE_STARTER",
     server_status_interval_minutes: 7,
+    adm_discovery_interval_minutes: 15,
     adm_pull_interval_minutes: 60,
     manual_adm_refresh_cooldown_minutes: 60,
     allowed_features: ["server_profile", "basic_stats", "basic_status", "billing_portal"],
@@ -93,6 +97,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
     monthly_price: 9.99,
     stripe_price_env_key: "STRIPE_PRICE_PRO",
     server_status_interval_minutes: 5,
+    adm_discovery_interval_minutes: 10,
     adm_pull_interval_minutes: 30,
     manual_adm_refresh_cooldown_minutes: 30,
     allowed_features: [
@@ -113,6 +118,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
     monthly_price: 19.99,
     stripe_price_env_key: "STRIPE_PRICE_NETWORK",
     server_status_interval_minutes: 3,
+    adm_discovery_interval_minutes: 5,
     adm_pull_interval_minutes: 15,
     manual_adm_refresh_cooldown_minutes: 15,
     allowed_features: [
@@ -143,6 +149,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
     monthly_price: 29.99,
     stripe_price_env_key: "STRIPE_PRICE_PARTNER",
     server_status_interval_minutes: 1,
+    adm_discovery_interval_minutes: 3,
     adm_pull_interval_minutes: 10,
     manual_adm_refresh_cooldown_minutes: 10,
     allowed_features: [
@@ -248,6 +255,10 @@ export function getServerStatusInterval(planKey: unknown) {
 
 export function getAdmPullInterval(planKey: unknown) {
   return Math.max(getPlanByKey(planKey).adm_pull_interval_minutes, MIN_ADM_PULL_INTERVAL_MINUTES);
+}
+
+export function getAdmDiscoveryIntervalMinutes(planKey: unknown) {
+  return Math.max(getPlanByKey(planKey).adm_discovery_interval_minutes, MIN_ADM_DISCOVERY_INTERVAL_MINUTES);
 }
 
 export function getManualRefreshCooldown(planKey: unknown) {

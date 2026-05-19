@@ -1,5 +1,6 @@
 import { requireDb } from "./db";
 import {
+  getAdmDiscoveryIntervalMinutes,
   getAdmPullInterval,
   getPlanConfig,
   getPlanPriority,
@@ -38,7 +39,12 @@ export type AutomationSyncServer = {
   plan_key: PlanKey;
   subscription_status: string;
   next_status_check_due_at: string | null;
+  next_adm_discovery_due_at: string | null;
   next_adm_pull_due_at: string | null;
+  newest_available_adm_filename?: string | null;
+  newest_available_adm_timestamp?: string | null;
+  newest_readable_adm_filename?: string | null;
+  newest_readable_adm_timestamp?: string | null;
 };
 
 export async function ensureAutomationSchema(env: Env) {
@@ -221,13 +227,17 @@ export async function upsertServerSubscription(env: Env, input: {
   await db
     .prepare(
       `INSERT INTO server_sync_state (
-        id, guild_id, next_status_check_due_at, next_adm_pull_due_at, status_data_freshness,
+        id, guild_id, next_status_check_due_at, next_adm_discovery_due_at, next_adm_pull_due_at, status_data_freshness,
         adm_status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         next_status_check_due_at = CASE
           WHEN ? THEN ?
           ELSE COALESCE(server_sync_state.next_status_check_due_at, ?)
+        END,
+        next_adm_discovery_due_at = CASE
+          WHEN ? THEN ?
+          ELSE COALESCE(server_sync_state.next_adm_discovery_due_at, ?)
         END,
         next_adm_pull_due_at = CASE
           WHEN ? THEN ?
@@ -240,8 +250,12 @@ export async function upsertServerSubscription(env: Env, input: {
       input.guildId,
       now,
       now,
+      now,
       "unknown",
       "waiting_for_schedule",
+      now,
+      now,
+      input.forceDue ? 1 : 0,
       now,
       now,
       input.forceDue ? 1 : 0,
@@ -302,7 +316,8 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
               linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
-              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_pull_due_at
+              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+              server_sync_state.next_adm_pull_due_at
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
@@ -422,7 +437,10 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
               linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
-              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_pull_due_at
+              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+              server_sync_state.next_adm_pull_due_at,
+              server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
+              server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
@@ -446,10 +464,136 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
 
+export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: number): Promise<AutomationSyncServer[]> {
+  await ensureAutomationRowsForLinkedServers(env);
+  await recoverStuckAutomationLocks(env);
+  const now = new Date().toISOString();
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+              linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
+              linked_servers.server_name, linked_servers.nitrado_service_name,
+              linked_servers.current_players, linked_servers.max_players,
+              linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
+              linked_servers.player_count_status, server_subscriptions.plan_key,
+              server_subscriptions.status AS subscription_status,
+              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+              server_sync_state.next_adm_pull_due_at,
+              server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
+              server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
+       FROM linked_servers
+       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
+       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+         AND linked_servers.nitrado_service_id IS NOT NULL
+         AND linked_servers.nitrado_service_id != ''
+         AND lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+         AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY server_sync_state.next_adm_discovery_due_at ASC, linked_servers.updated_at DESC
+       LIMIT ?`,
+    )
+    .bind(now, maxServers)
+    .all<AutomationSyncServer>();
+  return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
+}
+
 export async function markAdmPullStarted(env: Env, guildId: string) {
   await requireDb(env)
     .prepare("UPDATE server_sync_state SET currently_syncing_adm = 1, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?")
     .bind(guildId)
+    .run();
+}
+
+export async function recordAdmDiscoveryResult(env: Env, values: {
+  guildId: string;
+  planKey: PlanKey;
+  ok: boolean;
+  status: string;
+  error?: string | null;
+  newestAvailableAdmFile?: string | null;
+  newestAvailableAdmTimestamp?: string | null;
+  newestReadableAdmFile?: string | null;
+  newestReadableAdmTimestamp?: string | null;
+}) {
+  await ensureAutomationSchema(env);
+  const db = requireDb(env);
+  const now = new Date().toISOString();
+  const nextDue = addMinutesIso(now, getAdmDiscoveryIntervalMinutes(values.planKey));
+  const currentState = await db
+    .prepare(
+      `SELECT last_seen_adm_filename, last_server_restart_at
+       FROM server_sync_state
+       WHERE guild_id = ?
+       LIMIT 1`,
+    )
+    .bind(values.guildId)
+    .first<{ last_seen_adm_filename: string | null; last_server_restart_at: string | null }>()
+    .catch(() => null);
+  const newestAvailableFile = values.newestAvailableAdmFile ?? null;
+  const newestAvailableTimestamp = values.newestAvailableAdmTimestamp ?? null;
+  const restartFromAdmFile = detectAdmRestartFromAdmFilenames(currentState?.last_seen_adm_filename ?? null, newestAvailableFile);
+  const restartAt = restartFromAdmFile
+    ? newestAvailableTimestamp ?? now
+    : currentState?.last_server_restart_at ?? null;
+  const normalizedStatus = normalizeAdmAutomationStatus(values.status, {
+    latestAdmFile: newestAvailableFile,
+    lastServerRestartAt: restartAt,
+  });
+
+  await db
+    .prepare(
+      `UPDATE server_sync_state SET
+        last_adm_discovery_check_at = ?,
+        next_adm_discovery_due_at = ?,
+        last_successful_adm_discovery_at = CASE WHEN ? THEN ? ELSE last_successful_adm_discovery_at END,
+        last_failed_adm_discovery_at = CASE WHEN ? THEN last_failed_adm_discovery_at ELSE ? END,
+        last_adm_discovery_error = CASE WHEN ? THEN NULL ELSE ? END,
+        adm_discovery_status = ?,
+        last_seen_adm_filename = COALESCE(?, last_seen_adm_filename),
+        last_seen_adm_timestamp = COALESCE(?, last_seen_adm_timestamp),
+        newest_available_adm_filename = COALESCE(?, newest_available_adm_filename),
+        newest_available_adm_timestamp = COALESCE(?, newest_available_adm_timestamp),
+        newest_readable_adm_filename = COALESCE(?, newest_readable_adm_filename),
+        newest_readable_adm_timestamp = COALESCE(?, newest_readable_adm_timestamp),
+        last_server_restart_at = CASE WHEN ? THEN ? ELSE last_server_restart_at END,
+        last_restart_detected_source = CASE WHEN ? THEN 'adm_filename' ELSE last_restart_detected_source END,
+        last_restart_detected_at = CASE WHEN ? THEN ? ELSE last_restart_detected_at END,
+        adm_status = CASE
+          WHEN ? IN ('new_adm_detected', 'new_adm_readable', 'waiting_after_restart', 'latest_adm_unreadable', 'delayed_after_restart', 'no_new_log_available')
+          THEN ?
+          ELSE adm_status
+        END,
+        updated_at = ?
+       WHERE guild_id = ?`,
+    )
+    .bind(
+      now,
+      nextDue,
+      values.ok ? 1 : 0,
+      now,
+      values.ok ? 1 : 0,
+      now,
+      values.ok ? 1 : 0,
+      values.error ?? null,
+      normalizedStatus,
+      newestAvailableFile,
+      newestAvailableTimestamp,
+      newestAvailableFile,
+      newestAvailableTimestamp,
+      values.newestReadableAdmFile ?? null,
+      values.newestReadableAdmTimestamp ?? null,
+      restartFromAdmFile ? 1 : 0,
+      restartAt,
+      restartFromAdmFile ? 1 : 0,
+      restartFromAdmFile ? 1 : 0,
+      now,
+      normalizedStatus,
+      normalizedStatus,
+      now,
+      values.guildId,
+    )
     .run();
 }
 
@@ -650,6 +794,56 @@ export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string,
   }
 }
 
+export async function getNitradoLogSettingsConfirmation(env: Env, guildId: string) {
+  await ensureAutomationSchema(env);
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT nitrado_reduce_log_output_confirmed, nitrado_log_playerlist_confirmed, nitrado_log_settings_confirmed_at
+       FROM server_sync_state
+       WHERE guild_id = ?
+       LIMIT 1`,
+    )
+    .bind(guildId)
+    .first<{
+      nitrado_reduce_log_output_confirmed: number | null;
+      nitrado_log_playerlist_confirmed: number | null;
+      nitrado_log_settings_confirmed_at: string | null;
+    }>();
+  return {
+    nitrado_reduce_log_output_confirmed: Number(row?.nitrado_reduce_log_output_confirmed ?? 0) === 1,
+    nitrado_log_playerlist_confirmed: Number(row?.nitrado_log_playerlist_confirmed ?? 0) === 1,
+    nitrado_log_settings_confirmed_at: row?.nitrado_log_settings_confirmed_at ?? null,
+  };
+}
+
+export async function updateNitradoLogSettingsConfirmation(env: Env, input: {
+  guildId: string;
+  reduceLogOutputConfirmed: boolean;
+  logPlayerlistConfirmed: boolean;
+}) {
+  await ensureAutomationSchema(env);
+  const now = new Date().toISOString();
+  const confirmedAt = input.reduceLogOutputConfirmed && input.logPlayerlistConfirmed ? now : null;
+  await requireDb(env)
+    .prepare(
+      `UPDATE server_sync_state SET
+        nitrado_reduce_log_output_confirmed = ?,
+        nitrado_log_playerlist_confirmed = ?,
+        nitrado_log_settings_confirmed_at = ?,
+        updated_at = ?
+       WHERE guild_id = ?`,
+    )
+    .bind(
+      input.reduceLogOutputConfirmed ? 1 : 0,
+      input.logPlayerlistConfirmed ? 1 : 0,
+      confirmedAt,
+      now,
+      input.guildId,
+    )
+    .run();
+  return getNitradoLogSettingsConfirmation(env, input.guildId);
+}
+
 export async function recoverStuckAutomationLocks(env: Env) {
   await ensureAutomationSchema(env);
   const db = requireDb(env);
@@ -716,6 +910,7 @@ export async function getAutomationHealth(env: Env) {
     latestGithubCronRun,
     migrationState,
     dueMetadata,
+    dueAdmDiscovery,
     dueAdm,
     queuedDiscord,
     failedJobs,
@@ -728,12 +923,14 @@ export async function getAutomationHealth(env: Env) {
       .prepare(
         `SELECT
           MAX(last_status_check_at) AS last_metadata_sync_run,
+          MAX(last_adm_discovery_check_at) AS last_adm_discovery_run,
           MAX(last_adm_pull_at) AS last_adm_sync_run,
           (SELECT MAX(updated_at) FROM automation_jobs WHERE job_type = 'discord-post-update') AS last_discord_dispatcher_run
          FROM server_sync_state`,
       )
       .first<{
         last_metadata_sync_run: string | null;
+        last_adm_discovery_run: string | null;
         last_adm_sync_run: string | null;
         last_discord_dispatcher_run: string | null;
       }>(),
@@ -754,6 +951,14 @@ export async function getAutomationHealth(env: Env) {
        WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
          AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
          AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?`,
+      now),
+    countFirst(db,
+      `SELECT COUNT(*) AS count
+       FROM server_subscriptions
+       JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
+       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+         AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?`,
       now),
     countFirst(db,
       `SELECT COUNT(*) AS count
@@ -787,6 +992,7 @@ export async function getAutomationHealth(env: Env) {
     ok: true,
     checked_at: now,
     last_metadata_sync_run: lastRuns?.last_metadata_sync_run ?? null,
+    last_adm_discovery_run: lastRuns?.last_adm_discovery_run ?? null,
     last_adm_sync_run: lastRuns?.last_adm_sync_run ?? null,
     last_discord_dispatcher_run: lastRuns?.last_discord_dispatcher_run ?? null,
     last_cron_trigger_source: latestCronRun?.source ?? "unknown",
@@ -798,6 +1004,7 @@ export async function getAutomationHealth(env: Env) {
     latest_cloudflare_cron_run_at: latestCloudflareCronRun?.created_at ?? null,
     latest_github_backup_cron_run_at: latestGithubCronRun?.created_at ?? null,
     due_metadata_jobs: dueMetadata,
+    due_adm_discovery_jobs: dueAdmDiscovery,
     due_adm_jobs: dueAdm,
     queued_discord_post_jobs: queuedDiscord,
     failed_jobs: failedJobs,
@@ -903,6 +1110,12 @@ async function ensureAutomationCronRunsColumns(db: D1Database) {
 async function ensureServerSyncStateAdmColumns(db: D1Database) {
   const columns = await getTableColumns(db, "server_sync_state");
   const requiredColumns: Record<string, string> = {
+    last_adm_discovery_check_at: "ALTER TABLE server_sync_state ADD COLUMN last_adm_discovery_check_at TEXT",
+    next_adm_discovery_due_at: "ALTER TABLE server_sync_state ADD COLUMN next_adm_discovery_due_at TEXT",
+    last_successful_adm_discovery_at: "ALTER TABLE server_sync_state ADD COLUMN last_successful_adm_discovery_at TEXT",
+    last_failed_adm_discovery_at: "ALTER TABLE server_sync_state ADD COLUMN last_failed_adm_discovery_at TEXT",
+    last_adm_discovery_error: "ALTER TABLE server_sync_state ADD COLUMN last_adm_discovery_error TEXT",
+    adm_discovery_status: "ALTER TABLE server_sync_state ADD COLUMN adm_discovery_status TEXT",
     last_seen_adm_timestamp: "ALTER TABLE server_sync_state ADD COLUMN last_seen_adm_timestamp TEXT",
     newest_available_adm_filename: "ALTER TABLE server_sync_state ADD COLUMN newest_available_adm_filename TEXT",
     newest_available_adm_timestamp: "ALTER TABLE server_sync_state ADD COLUMN newest_available_adm_timestamp TEXT",
@@ -911,6 +1124,9 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
     last_processed_adm_line: "ALTER TABLE server_sync_state ADD COLUMN last_processed_adm_line INTEGER",
     last_restart_detected_source: "ALTER TABLE server_sync_state ADD COLUMN last_restart_detected_source TEXT",
     last_restart_detected_at: "ALTER TABLE server_sync_state ADD COLUMN last_restart_detected_at TEXT",
+    nitrado_reduce_log_output_confirmed: "ALTER TABLE server_sync_state ADD COLUMN nitrado_reduce_log_output_confirmed INTEGER NOT NULL DEFAULT 0",
+    nitrado_log_playerlist_confirmed: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_playerlist_confirmed INTEGER NOT NULL DEFAULT 0",
+    nitrado_log_settings_confirmed_at: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_confirmed_at TEXT",
   };
 
   for (const [column, statement] of Object.entries(requiredColumns)) {
@@ -918,6 +1134,7 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
       await db.prepare(statement).run();
     }
   }
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_discovery_due ON server_sync_state(next_adm_discovery_due_at)").run();
 }
 
 async function ensureServerPostingStateDispatchColumns(db: D1Database) {
@@ -1006,6 +1223,12 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     server_status TEXT,
     status_data_freshness TEXT,
     currently_checking_status INTEGER NOT NULL DEFAULT 0,
+    last_adm_discovery_check_at TEXT,
+    next_adm_discovery_due_at TEXT,
+    last_successful_adm_discovery_at TEXT,
+    last_failed_adm_discovery_at TEXT,
+    last_adm_discovery_error TEXT,
+    adm_discovery_status TEXT,
     last_adm_pull_at TEXT,
     next_adm_pull_due_at TEXT,
     last_successful_adm_pull_at TEXT,
@@ -1026,12 +1249,16 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     last_restart_detected_source TEXT,
     last_restart_detected_at TEXT,
     adm_status TEXT,
+    nitrado_reduce_log_output_confirmed INTEGER NOT NULL DEFAULT 0,
+    nitrado_log_playerlist_confirmed INTEGER NOT NULL DEFAULT 0,
+    nitrado_log_settings_confirmed_at TEXT,
     currently_syncing_adm INTEGER NOT NULL DEFAULT 0,
     manual_refresh_locked_until TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_due ON server_sync_state(next_status_check_due_at)",
+  "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_discovery_due ON server_sync_state(next_adm_discovery_due_at)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_due ON server_sync_state(next_adm_pull_due_at)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_lock ON server_sync_state(currently_checking_status)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_lock ON server_sync_state(currently_syncing_adm)",

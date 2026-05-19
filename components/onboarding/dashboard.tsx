@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -205,6 +205,8 @@ function ServerDashboard({
   const [discordChannelsWarning, setDiscordChannelsWarning] = useState("");
   const [discordChannelFetchFailure, setDiscordChannelFetchFailure] = useState<DiscordChannelFetchFailure | null>(null);
   const [automationHealth, setAutomationHealth] = useState<AutomationHealth | null>(null);
+  const [nitradoLogSettings, setNitradoLogSettings] = useState<NitradoLogSettingsConfirmation | null>(null);
+  const [savingNitradoLogSettings, setSavingNitradoLogSettings] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
@@ -284,6 +286,8 @@ function ServerDashboard({
       if (posting?.setups) setPostingSetups(posting.setups);
       if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
       await refreshDiscordChannels();
+      const logSettings = await getNitradoLogSettings(server.id).catch(() => null);
+      if (logSettings?.settings) setNitradoLogSettings(logSettings.settings);
       const health = await getAutomationHealth().catch(() => null);
       setAutomationHealth(health);
     } catch (error) {
@@ -355,6 +359,8 @@ function ServerDashboard({
     server.player_count_last_checked_at,
     server.player_count_status,
   );
+  const admDiscoveryInterval = billingStatus?.entitlements.adm_discovery_interval_minutes ?? null;
+  const admProcessingInterval = billingStatus?.entitlements.adm_pull_interval_minutes ?? null;
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -371,10 +377,15 @@ function ServerDashboard({
     if (options.manual) setManualRefreshing(true);
     setRefreshingSyncData(true);
 
-    const refreshPromise = Promise.all([getSyncStatus(server.id), getRecentSyncEvents(server.id)])
-      .then(([statusResult, eventsResult]) => {
+    const refreshPromise = Promise.all([
+      getSyncStatus(server.id),
+      getRecentSyncEvents(server.id),
+      getNitradoLogSettings(server.id).catch(() => null),
+    ])
+      .then(([statusResult, eventsResult, logSettings]) => {
         setSyncStatus(statusResult.status);
         setRecentEvents(eventsResult.events);
+        if (logSettings?.settings) setNitradoLogSettings(logSettings.settings);
         setLastRefreshedAt(new Date().toISOString());
         setLiveRefreshWarning("");
         return true;
@@ -448,6 +459,23 @@ function ServerDashboard({
       setActionMessage("Could not refresh server info. Try again.");
     } finally {
       setRefreshingServerInfo(false);
+    }
+  }
+
+  async function saveNitradoChecklist(next: NitradoLogSettingsConfirmation) {
+    setSavingNitradoLogSettings(true);
+    setActionMessage("");
+    try {
+      const result = await saveNitradoLogSettings(server.id, next);
+      setNitradoLogSettings(result.settings);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
+      setActionMessage(result.settings.nitrado_reduce_log_output_confirmed && result.settings.nitrado_log_playerlist_confirmed
+        ? "Nitrado log settings confirmed for ADM tracking."
+        : "Nitrado log settings checklist updated.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to save Nitrado log settings.");
+    } finally {
+      setSavingNitradoLogSettings(false);
     }
   }
 
@@ -618,6 +646,7 @@ function ServerDashboard({
     ["Discord Connected", Boolean(server.guild_id)],
     ["DZN Bot Installed", discordBotInstalled],
     ["Channels Discovered", discordChannelsDiscovered],
+    ["Nitrado Log Settings", Boolean(nitradoLogSettings?.nitrado_reduce_log_output_confirmed && nitradoLogSettings.nitrado_log_playerlist_confirmed)],
     ["Stats Sync Active", statsSyncActive],
   ] as const;
 
@@ -807,7 +836,7 @@ function ServerDashboard({
             <div className="h-full bg-gradient-to-r from-violet-300 via-cyan-300 to-emerald-300" style={{ width: `${progress}%` }} />
           </div>
           <div className="mt-4 grid gap-2">
-            {setupChecks.slice(0, 5).map(([label, done]) => <SetupCheck key={label} label={label} done={done} />)}
+            {setupChecks.slice(0, 7).map(([label, done]) => <SetupCheck key={label} label={label} done={done} />)}
           </div>
           <Link href="/setup#review-test" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white">
             View Setup Guide <LifeBuoy className="h-4 w-4" />
@@ -895,6 +924,12 @@ function ServerDashboard({
               </div>
             </DashboardPanel>
 
+            <NitradoLogSettingsChecklist
+              settings={nitradoLogSettings}
+              saving={savingNitradoLogSettings}
+              onSave={saveNitradoChecklist}
+            />
+
             <DashboardPanel className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <PanelHeader icon={<DatabaseZap className={`h-5 w-5 ${refreshingSyncData ? "animate-pulse" : ""}`} />} title="Sync Engine Status" />
@@ -912,7 +947,14 @@ function ServerDashboard({
                 <MiniInfo label="Auto-refresh" value="On (15s)" />
                 <MiniInfo label="Last Refreshed" value={lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "Starting..."} />
                 <MiniInfo label="Status" value={syncHealth.status === "error" ? "Needs Action" : formatSyncStatus(effectiveSyncStatus)} />
-                <MiniInfo label="Latest ADM File" value={latestAdmFile} />
+                <MiniInfo label="ADM Discovery" value={admDiscoveryInterval ? `Checks for new ADM files every ${admDiscoveryInterval} minutes` : "Plan loading"} />
+                <MiniInfo label="Last Discovery Check" value={syncStatus?.last_adm_discovery_check_at ? formatDashboardDate(syncStatus.last_adm_discovery_check_at) : "Not checked"} />
+                <MiniInfo label="Next Discovery Check" value={syncStatus?.next_adm_discovery_due_at ? formatDashboardDate(syncStatus.next_adm_discovery_due_at) : "Not scheduled"} />
+                <MiniInfo label="Discovery Status" value={formatSyncStatus(syncStatus?.adm_discovery_status ?? effectiveSyncStatus)} />
+                <MiniInfo label="Newest Available ADM" value={syncStatus?.newest_available_adm_filename ?? latestAdmFile} />
+                <MiniInfo label="Newest Readable ADM" value={syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
+                <MiniInfo label="ADM Processing" value={admProcessingInterval ? `Processes readable ADM data every ${admProcessingInterval} minutes` : "Plan loading"} />
+                <MiniInfo label="Next Processing Check" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(syncStatus.next_adm_pull_due_at) : "Not scheduled"} />
                 <MiniInfo label="Latest File Readable" value={latestAdmReadable} />
                 <MiniInfo label="ADM Health" value={syncStatus?.adm_health_label ?? "Delayed"} />
                 <MiniInfo label="Latest ADM Processed" value={syncStatus?.latest_adm_processed ?? "Not processed"} />
@@ -935,6 +977,9 @@ function ServerDashboard({
                 <MiniInfo label="Parser Skipped Lines" value={String(syncStatus?.parser_skipped_lines ?? 0)} />
                 <MiniInfo label="Recovery Action" value={syncStatus?.current_recovery_action ?? "ADM sync healthy"} />
               </div>
+              <p className="mt-4 rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-xs font-bold leading-5 text-zinc-300">
+                DZN can check whether a new ADM file exists more often than it processes the full file. Nitrado still controls when the ADM file is uploaded and readable.
+              </p>
               <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_220px]">
                 <div className="space-y-3">
                   <ProgressLine label="Read Status" value={`${processedPercent.toFixed(1)}%`} percent={processedPercent} />
@@ -1136,6 +1181,65 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
     <section className={`glass-surface animated-border rounded-lg ${className}`}>
       <div className="relative z-10">{children}</div>
     </section>
+  );
+}
+
+function NitradoLogSettingsChecklist({
+  settings,
+  saving,
+  onSave,
+}: {
+  settings: NitradoLogSettingsConfirmation | null;
+  saving: boolean;
+  onSave: (settings: NitradoLogSettingsConfirmation) => void;
+}) {
+  const reduceConfirmed = settings?.nitrado_reduce_log_output_confirmed ?? false;
+  const playerlistConfirmed = settings?.nitrado_log_playerlist_confirmed ?? false;
+  const fullyConfirmed = reduceConfirmed && playerlistConfirmed;
+  const nextSettings = (patch: Partial<NitradoLogSettingsConfirmation>): NitradoLogSettingsConfirmation => ({
+    nitrado_reduce_log_output_confirmed: reduceConfirmed,
+    nitrado_log_playerlist_confirmed: playerlistConfirmed,
+    nitrado_log_settings_confirmed_at: settings?.nitrado_log_settings_confirmed_at ?? null,
+    ...patch,
+  });
+
+  return (
+    <DashboardPanel className={`p-4 ${fullyConfirmed ? "border-emerald-300/20" : "border-amber-300/20"}`}>
+      <PanelHeader icon={<ListChecks className="h-5 w-5" />} title="Nitrado Log Settings" />
+      <p className="mt-3 text-sm leading-6 text-zinc-300">
+        For best ADM tracking, disable Reduce Log Output and enable Log Playerlist in your Nitrado general settings.
+      </p>
+      {!fullyConfirmed ? (
+        <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-sm font-bold leading-6 text-amber-50">
+          ADM tracking may miss useful lines until these Nitrado settings are confirmed.
+        </p>
+      ) : (
+        <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm font-bold leading-6 text-emerald-50">
+          Required Nitrado log settings were confirmed{settings?.nitrado_log_settings_confirmed_at ? ` ${formatRelativeTime(settings.nitrado_log_settings_confirmed_at)}` : ""}.
+        </p>
+      )}
+      <div className="mt-4 grid gap-2">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => onSave(nextSettings({ nitrado_reduce_log_output_confirmed: !reduceConfirmed }))}
+          className={`flex items-center justify-between rounded-lg border px-3 py-3 text-left text-sm font-black transition ${reduceConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-50" : "border-white/10 bg-black/24 text-zinc-200"}`}
+        >
+          <span>I have disabled Reduce Log Output</span>
+          {reduceConfirmed ? <CircleCheck className="h-4 w-4" /> : <span className="text-[10px] uppercase text-zinc-500">Required</span>}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => onSave(nextSettings({ nitrado_log_playerlist_confirmed: !playerlistConfirmed }))}
+          className={`flex items-center justify-between rounded-lg border px-3 py-3 text-left text-sm font-black transition ${playerlistConfirmed ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-50" : "border-white/10 bg-black/24 text-zinc-200"}`}
+        >
+          <span>I have enabled Log Playerlist</span>
+          {playerlistConfirmed ? <CircleCheck className="h-4 w-4" /> : <span className="text-[10px] uppercase text-zinc-500">Required</span>}
+        </button>
+      </div>
+      {saving ? <p className="mt-3 text-xs font-bold uppercase text-cyan-100">Saving checklist...</p> : null}
+    </DashboardPanel>
   );
 }
 
@@ -1604,7 +1708,8 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
                 </p>
                 <div className="mt-2 grid gap-1 text-[11px] leading-5 text-zinc-500">
                   <p><span className="font-black uppercase text-zinc-400">Server Status Sync:</span> player count, online/offline, slots, and basic status checked every {plan.server_status_interval_minutes ?? "?"} minute{plan.server_status_interval_minutes === 1 ? "" : "s"}.</p>
-                  <p><span className="font-black uppercase text-zinc-400">ADM Log Sync:</span> kills, deaths, K/D, leaderboards, and events checked every {plan.adm_pull_interval_minutes ?? "?"} minutes.</p>
+                  <p><span className="font-black uppercase text-zinc-400">ADM Discovery:</span> new ADM files checked every {plan.adm_discovery_interval_minutes ?? "?"} minutes.</p>
+                  <p><span className="font-black uppercase text-zinc-400">ADM Processing:</span> kills, deaths, K/D, leaderboards, and events processed every {plan.adm_pull_interval_minutes ?? "?"} minutes.</p>
                 </div>
                 <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                   {plan.configured ? "Checkout configured" : "Checkout not configured"}
@@ -2374,6 +2479,7 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
       ) : null}
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MiniInfo label="Last Metadata Run" value={health.last_metadata_sync_run ? formatDashboardDate(health.last_metadata_sync_run) : "Waiting"} />
+        <MiniInfo label="Last ADM Discovery" value={health.last_adm_discovery_run ? formatDashboardDate(health.last_adm_discovery_run) : "Waiting"} />
         <MiniInfo label="Last ADM Run" value={health.last_adm_sync_run ? formatDashboardDate(health.last_adm_sync_run) : "Waiting"} />
         <MiniInfo label="Last Discord Dispatch" value={health.last_discord_dispatcher_run ? formatDashboardDate(health.last_discord_dispatcher_run) : "Waiting"} />
         <MiniInfo label="Last Cron Source" value={formatCronSource(health.last_cron_trigger_source)} />
@@ -2382,6 +2488,7 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
         <MiniInfo label="GitHub Backup" value={health.latest_github_backup_cron_run_at ? formatDashboardDate(health.latest_github_backup_cron_run_at) : "Waiting"} />
         <MiniInfo label="Cron Table" value={health.automation_cron_runs_table_exists ? health.automation_cron_runs_migration_applied ? "Migration applied" : "Runtime-created" : "Missing"} />
         <MiniInfo label="Due Metadata Jobs" value={String(health.due_metadata_jobs)} />
+        <MiniInfo label="Due ADM Discovery" value={String(health.due_adm_discovery_jobs ?? 0)} />
         <MiniInfo label="Due ADM Jobs" value={String(health.due_adm_jobs)} />
         <MiniInfo label="Queued Discord Jobs" value={String(health.queued_discord_post_jobs)} />
         <MiniInfo label="Failed Jobs" value={String(health.failed_jobs)} />

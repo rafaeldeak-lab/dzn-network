@@ -264,6 +264,7 @@ export type BillingStatus = {
     can_use_featured_slots: boolean;
     stat_history_days: number;
     server_status_interval_minutes?: number;
+    adm_discovery_interval_minutes?: number;
     adm_pull_interval_minutes?: number;
     manual_adm_refresh_cooldown_minutes?: number;
     allowed_auto_posts?: string[];
@@ -293,6 +294,7 @@ export type BillingPlanSummary = {
   can_use_featured_slots: boolean;
   stat_history_days: number;
   server_status_interval_minutes?: number;
+  adm_discovery_interval_minutes?: number;
   adm_pull_interval_minutes?: number;
   manual_adm_refresh_cooldown_minutes?: number;
   allowed_auto_posts?: string[];
@@ -471,6 +473,7 @@ export type AutomationHealth = {
   ok: boolean;
   checked_at: string;
   last_metadata_sync_run: string | null;
+  last_adm_discovery_run: string | null;
   last_adm_sync_run: string | null;
   last_discord_dispatcher_run: string | null;
   last_cron_trigger_source: "cloudflare" | "github-backup" | "manual" | string | null;
@@ -482,6 +485,7 @@ export type AutomationHealth = {
   latest_cloudflare_cron_run_at: string | null;
   latest_github_backup_cron_run_at: string | null;
   due_metadata_jobs: number;
+  due_adm_discovery_jobs: number;
   due_adm_jobs: number;
   queued_discord_post_jobs: number;
   failed_jobs: number;
@@ -503,6 +507,12 @@ export type AdvertisingBumpStatus = {
   bump_period_end: string | null;
   included_bumps_per_month: number;
   bump_cooldown_hours: number;
+};
+
+export type NitradoLogSettingsConfirmation = {
+  nitrado_reduce_log_output_confirmed: boolean;
+  nitrado_log_playerlist_confirmed: boolean;
+  nitrado_log_settings_confirmed_at: string | null;
 };
 
 export type ScoreBreakdown = {
@@ -538,6 +548,20 @@ export type AdmSyncStatus = {
   last_duplicate_lines: number;
   last_sync_duration_ms: number | null;
   last_readable_route: string | null;
+  last_adm_discovery_check_at: string | null;
+  next_adm_discovery_due_at: string | null;
+  last_successful_adm_discovery_at: string | null;
+  last_failed_adm_discovery_at: string | null;
+  last_adm_discovery_error: string | null;
+  adm_discovery_status: string | null;
+  next_adm_pull_due_at: string | null;
+  newest_available_adm_filename: string | null;
+  newest_available_adm_timestamp: string | null;
+  newest_readable_adm_filename: string | null;
+  newest_readable_adm_timestamp: string | null;
+  nitrado_reduce_log_output_confirmed: boolean;
+  nitrado_log_playerlist_confirmed: boolean;
+  nitrado_log_settings_confirmed_at: string | null;
   last_sync_trigger: string | null;
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;

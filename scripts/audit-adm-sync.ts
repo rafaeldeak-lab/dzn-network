@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { getAdmPullInterval } from "../lib/billing/plans";
+import { getAdmDiscoveryIntervalMinutes, getAdmPullInterval } from "../lib/billing/plans";
 
 type CheckStatus = "pass" | "warn" | "fail";
 
@@ -47,20 +47,27 @@ function checkIncludes(relativePath: string, expected: string, title: string, de
 }
 
 function checkPlanIntervals() {
+  checkIncludes("lib/billing/plans.ts", "adm_discovery_interval_minutes", "Plan config includes adm_discovery_interval_minutes");
   const expected = [
-    ["starter", 60],
-    ["pro", 30],
-    ["network", 15],
-    ["partner", 10],
+    ["starter", 15, 60],
+    ["pro", 10, 30],
+    ["network", 5, 15],
+    ["partner", 3, 10],
   ] as const;
 
-  for (const [plan, interval] of expected) {
+  for (const [plan, discoveryInterval, interval] of expected) {
+    const discoveryActual = getAdmDiscoveryIntervalMinutes(plan);
+    if (discoveryActual === discoveryInterval) pass(`${plan} ADM discovery interval`, `ADM discovery checks every ${discoveryInterval} minutes.`);
+    else fail(`${plan} ADM discovery interval`, `Expected ${discoveryInterval} minutes, got ${discoveryActual}.`);
     const actual = getAdmPullInterval(plan);
-    if (actual === interval) pass(`${plan} ADM interval`, `ADM checks every ${interval} minutes.`);
+    if (actual === interval) pass(`${plan} ADM processing interval`, `ADM processing checks every ${interval} minutes.`);
     else fail(`${plan} ADM interval`, `Expected ${interval} minutes, got ${actual}.`);
   }
 
   for (const [plan] of expected) {
+    const discoveryActual = getAdmDiscoveryIntervalMinutes(plan);
+    if (discoveryActual >= 3) pass(`${plan} ADM discovery hard floor`, `${discoveryActual} minutes is at or above the 3-minute floor.`);
+    else fail(`${plan} ADM discovery hard floor`, `${discoveryActual} minutes is below the 3-minute floor.`);
     const actual = getAdmPullInterval(plan);
     if (actual >= 10) pass(`${plan} ADM hard floor`, `${actual} minutes is at or above the 10-minute floor.`);
     else fail(`${plan} ADM hard floor`, `${actual} minutes is below the 10-minute floor.`);
@@ -103,6 +110,9 @@ function auditRestartStateMachine() {
   checkIncludes("functions/_lib/automation.ts", "adm_filename", "ADM filename can detect new reset file");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "last_restart_detected_source", "Migration stores restart detection source");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_readable_adm_filename", "Migration stores newest readable ADM evidence");
+  checkFile("migrations/0019_adm_discovery_and_nitrado_settings.sql", "ADM discovery/settings migration");
+  checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "Migration stores ADM discovery due state");
+  checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "nitrado_reduce_log_output_confirmed", "Migration stores Nitrado Reduce Log Output confirmation");
 }
 
 function auditNoWipeAndUnreadableHandling() {
@@ -115,12 +125,17 @@ function auditNoWipeAndUnreadableHandling() {
 }
 
 function auditDueServerSelection() {
+  checkIncludes("functions/_lib/automation.ts", "getDueAdmDiscoveryAutomationServers", "Due ADM discovery selector exists");
   checkIncludes("functions/_lib/automation.ts", "getDueAdmAutomationServers", "Due ADM server selector exists");
   checkIncludes("functions/_lib/automation.ts", "lower(server_subscriptions.status) IN ('active', 'trialing')", "Only active/trialing subscriptions are due");
   checkIncludes("functions/_lib/automation.ts", "next_adm_pull_due_at", "ADM due-state controls checks");
+  checkIncludes("functions/_lib/automation.ts", "next_adm_discovery_due_at", "ADM discovery due-state controls checks");
   checkIncludes("functions/_lib/automation.ts", "currently_syncing_adm", "Already-syncing servers are skipped");
   checkIncludes("functions/_lib/automation.ts", "minSyncIntervalMs", "Minimum ADM sync interval is enforced");
   checkIncludes("functions/_lib/adm-sync.ts", "Math.max(clampPositiveInteger(options.minSyncIntervalMs ?? 10 * 60 * 1000", "Scheduled ADM runner enforces 10-minute floor");
+  checkIncludes("functions/_lib/adm-sync.ts", "runAdmDiscoveryForLinkedServer", "Scheduled ADM runner has lightweight discovery phase");
+  checkIncludes("functions/_lib/adm-sync.ts", "readMode: \"sample\"", "ADM discovery uses sample reads instead of full parsing");
+  checkIncludes("functions/_lib/adm-sync.ts", "skipped_unreadable", "Processing skips unreadable newest ADM safely");
 }
 
 function auditDiscordQueues() {
@@ -131,6 +146,9 @@ function auditDiscordQueues() {
 }
 
 function auditDashboardWording() {
+  checkIncludes("components/onboarding/dashboard.tsx", "ADM Discovery", "Dashboard shows ADM discovery section");
+  checkIncludes("components/onboarding/dashboard.tsx", "ADM Processing", "Dashboard shows ADM processing section");
+  checkIncludes("components/onboarding/dashboard.tsx", "Nitrado Log Settings", "Dashboard shows Nitrado settings checklist");
   checkIncludes("components/onboarding/dashboard.tsx", "Server restart detected. Waiting for Nitrado to publish the next ADM log.", "Dashboard waiting-after-restart wording");
   checkIncludes("components/onboarding/dashboard.tsx", "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.", "Dashboard latest-unreadable wording");
   checkIncludes("components/onboarding/dashboard.tsx", "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.", "Dashboard delayed-after-restart wording");

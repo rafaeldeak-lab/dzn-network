@@ -11,6 +11,7 @@ import type {
   DiscordGuild,
   DiscordChannelsResponse,
   LinkedServer,
+  NitradoLogSettingsConfirmation,
   NitradoLogAccessDiagnostics,
   NitradoService,
   OnboardingChecks,
@@ -146,6 +147,19 @@ export async function getRecentSyncEvents(linkedServerId?: string) {
 
 export async function runLogAccessDiagnostics() {
   return request<{ diagnostics: NitradoLogAccessDiagnostics }>("/api/nitrado/log-access-diagnostics");
+}
+
+export async function getNitradoLogSettings(linkedServerId: string) {
+  return request<{ ok: boolean; settings: NitradoLogSettingsConfirmation }>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings`, {
+    cache: "no-store",
+  });
+}
+
+export async function saveNitradoLogSettings(linkedServerId: string, data: NitradoLogSettingsConfirmation) {
+  return request<{ ok: boolean; settings: NitradoLogSettingsConfirmation }>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export async function runManualSync(linkedServerId?: string) {

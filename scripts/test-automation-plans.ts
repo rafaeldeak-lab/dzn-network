@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  getAdmDiscoveryIntervalMinutes,
   getAdmPullInterval,
   getManualRefreshCooldown,
   getPlanByKey,
@@ -16,12 +17,17 @@ import { isDiscordPostCronAuthorized } from "../functions/api/sync/discord-posts
 import type { Env } from "../functions/_lib/types";
 
 assert.equal(getPlanByKey("starter").server_status_interval_minutes, 7);
+assert.equal(getPlanByKey("starter").adm_discovery_interval_minutes, 15);
 assert.equal(getPlanByKey("starter").adm_pull_interval_minutes, 60);
 assert.equal(getPlanByKey("pro").server_status_interval_minutes, 5);
+assert.equal(getPlanByKey("pro").adm_discovery_interval_minutes, 10);
 assert.equal(getPlanByKey("pro").adm_pull_interval_minutes, 30);
 assert.equal(getPlanByKey("network").server_status_interval_minutes, 3);
+assert.equal(getPlanByKey("network").adm_discovery_interval_minutes, 5);
 assert.equal(getPlanByKey("network").adm_pull_interval_minutes, 15);
 assert.equal(getPlanByKey("partner").server_status_interval_minutes, 1);
+assert.equal(getAdmDiscoveryIntervalMinutes("partner"), 3);
+assert.equal(getAdmDiscoveryIntervalMinutes("free") >= 3, true);
 assert.equal(getAdmPullInterval("partner"), 10);
 assert.equal(getAdmPullInterval("free") >= 10, true);
 assert.equal(getServerStatusInterval("partner"), 1);
@@ -64,7 +70,9 @@ assert.equal(automationSource.includes("recordAutomationCronRun"), true);
 assert.equal(automationSource.includes("last_cron_trigger_source"), true);
 assert.equal(automationSource.includes("queueDiscordPostUpdatesForGuild"), true);
 assert.equal(automationSource.includes("getDueStatusAutomationServers"), true);
+assert.equal(automationSource.includes("getDueAdmDiscoveryAutomationServers"), true);
 assert.equal(automationSource.includes("getDueAdmAutomationServers"), true);
+assert.equal(automationSource.includes("recordAdmDiscoveryResult"), true);
 assert.equal(automationSource.includes("recoverStuckAutomationLocks"), true);
 assert.equal(automationSource.includes("Recovered stale status sync lock after 10 minutes."), true);
 assert.equal(automationSource.includes("Recovered stale ADM sync lock after 30 minutes."), true);
@@ -76,6 +84,10 @@ assert.equal(automationSource.includes("metadata_status"), true);
 assert.equal(automationSource.includes("adm_filename"), true);
 assert.equal(automationSource.includes("latest_adm_unreadable"), true);
 assert.equal(automationSource.includes("delayed_after_restart"), true);
+assert.equal(automationSource.includes("last_adm_discovery_check_at"), true);
+assert.equal(automationSource.includes("next_adm_discovery_due_at"), true);
+assert.equal(automationSource.includes("nitrado_reduce_log_output_confirmed"), true);
+assert.equal(automationSource.includes("nitrado_log_playerlist_confirmed"), true);
 
 const postingSource = readFileSync("functions/_lib/discord-posting.ts", "utf8");
 assert.equal(postingSource.includes("last_payload_hash"), true);
@@ -195,15 +207,19 @@ assert.equal(systemAuditSource.includes("functions/api/sync/discord-posts/run.ts
 assert.equal(systemAuditSource.includes("functions/api/servers/[serverId]/auto-posts/run-now.ts"), true);
 assert.equal(systemAuditSource.includes("auditAdmSyncWiring"), true);
 assert.equal(systemAuditSource.includes("0018_adm_reset_state_tracking.sql"), true);
+assert.equal(systemAuditSource.includes("0019_adm_discovery_and_nitrado_settings.sql"), true);
 assert.equal(systemAuditSource.includes("Total checks"), true);
 
 const admAuditSource = readFileSync("scripts/audit-adm-sync.ts", "utf8");
 assert.equal(admAuditSource.includes("pickNewestAdmFile"), true);
+assert.equal(admAuditSource.includes("adm_discovery_interval_minutes"), true);
+assert.equal(admAuditSource.includes("runAdmDiscoveryForLinkedServer"), true);
 assert.equal(admAuditSource.includes("waiting_after_restart"), true);
 assert.equal(admAuditSource.includes("latest_adm_unreadable"), true);
 assert.equal(admAuditSource.includes("delayed_after_restart"), true);
 assert.equal(admAuditSource.includes("queueDiscordPostUpdatesForGuild"), true);
 assert.equal(readFileSync("migrations/0018_adm_reset_state_tracking.sql", "utf8").includes("last_restart_detected_source"), true);
+assert.equal(readFileSync("migrations/0019_adm_discovery_and_nitrado_settings.sql", "utf8").includes("nitrado_log_playerlist_confirmed"), true);
 
 const liveCheckSource = readFileSync("scripts/check-automation-live.ts", "utf8");
 assert.equal(liveCheckSource.includes("https://dzn-network.pages.dev"), true);
@@ -226,6 +242,8 @@ assert.equal(buttonMapDoc.includes("Current status"), true);
 const syncMapDoc = readFileSync("docs/SYNC_SYSTEM_MAP.md", "utf8");
 assert.equal(syncMapDoc.includes("Fast Server Status Sync"), true);
 assert.equal(syncMapDoc.includes("ADM / Backend Log Sync"), true);
+assert.equal(syncMapDoc.includes("ADM Discovery vs ADM Processing"), true);
+assert.equal(syncMapDoc.includes("Reduce Log Output"), true);
 assert.equal(syncMapDoc.includes("Discord Auto-Post Dispatcher"), true);
 assert.equal(syncMapDoc.includes("Cloudflare Worker Cron"), true);
 assert.equal(syncMapDoc.includes("GitHub Actions Backup"), true);
@@ -250,7 +268,10 @@ assert.equal(dashboardSource.includes("BOT MODE"), true);
 assert.equal(dashboardSource.includes("WEBHOOK FALLBACK"), true);
 assert.equal(dashboardSource.includes("Active"), true);
 assert.equal(dashboardSource.includes("Server Status Sync:"), true);
-assert.equal(dashboardSource.includes("ADM Log Sync:"), true);
+assert.equal(dashboardSource.includes("ADM Discovery:"), true);
+assert.equal(dashboardSource.includes("Nitrado Log Settings"), true);
+assert.equal(dashboardSource.includes("Checks for new ADM files every"), true);
+assert.equal(dashboardSource.includes("Processes readable ADM data every"), true);
 assert.equal(dashboardSource.includes("Last Cron Source"), true);
 assert.equal(dashboardSource.includes("Missing permissions"), true);
 assert.equal(dashboardSource.includes("ADM logs can appear 5-45 minutes after a restart"), true);
