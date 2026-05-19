@@ -70,7 +70,13 @@ export async function handleAdmSyncRun(
       });
     } catch (error) {
       await safeRecordCronRun(env, source, "failed", startedAt, error);
-      throw error;
+      const message = error instanceof Error ? error.message : "ADM sync failed";
+      return json({
+        ok: false,
+        error: "ADM sync failed",
+        message,
+        source,
+      }, { status: 500 });
     }
     console.log("DZN ADM SYNC POST ENDPOINT FIXED");
     console.log("DZN RELIABLE ADM AUTO SYNC READY", {
