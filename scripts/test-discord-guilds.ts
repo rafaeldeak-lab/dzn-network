@@ -2,12 +2,94 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { canManageDiscordGuild } from "../functions/_lib/discord";
+import { evaluateDiscordChannelPermissionsForTest } from "../functions/_lib/discord-posting";
 
 assert.equal(canManageDiscordGuild({ owner: true, permissions: "0" }), true);
 assert.equal(canManageDiscordGuild({ owner: false, permissions: "8" }), true);
 assert.equal(canManageDiscordGuild({ owner: false, permissions: "1099511627784" }), true);
 assert.equal(canManageDiscordGuild({ owner: false, permissions: "0" }), false);
 assert.equal(canManageDiscordGuild({ owner: false, permissions: "not-a-number" }), false);
+
+const permissionOne = BigInt(1);
+const administrator = permissionOne << BigInt(3);
+const viewChannel = permissionOne << BigInt(10);
+const sendMessages = permissionOne << BigInt(11);
+const embedLinks = permissionOne << BigInt(14);
+const readHistory = permissionOne << BigInt(16);
+const requiredPostingPermissions = viewChannel | sendMessages | embedLinks | readHistory;
+const guildId = "guild-1";
+const botUserId = "bot-1";
+const botRoleId = "bot-role";
+
+const administratorResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botRoleNames: ["DZN Bot"],
+  basePermissions: administrator,
+});
+assert.equal(administratorResult.can_post, true);
+assert.equal(administratorResult.permission_source, "administrator");
+assert.equal(administratorResult.missing_permissions.length, 0);
+assert.equal(administratorResult.diagnostics.bot_has_administrator, true);
+
+const guildRoleResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+});
+assert.equal(guildRoleResult.can_post, true);
+assert.equal(guildRoleResult.missing_permissions.length, 0);
+
+const channelDenyResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: botRoleId, type: 0, allow: "0", deny: sendMessages.toString() },
+  ],
+});
+assert.equal(channelDenyResult.can_post, false);
+assert.deepEqual(channelDenyResult.missing_permissions, ["Send Messages"]);
+assert.equal(channelDenyResult.permission_source, "channel_overwrite");
+
+const memberAllowResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: botRoleId, type: 0, allow: "0", deny: sendMessages.toString() },
+    { id: botUserId, type: 1, allow: sendMessages.toString(), deny: "0" },
+  ],
+});
+assert.equal(memberAllowResult.can_post, true);
+assert.equal(memberAllowResult.permission_source, "member_overwrite");
+assert.equal(memberAllowResult.missing_permissions.length, 0);
+
+const categoryDenyResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  categoryPermissionOverwrites: [
+    { id: botRoleId, type: 0, allow: "0", deny: sendMessages.toString() },
+  ],
+});
+assert.equal(categoryDenyResult.can_post, false);
+assert.deepEqual(categoryDenyResult.missing_permissions, ["Send Messages"]);
+assert.equal(categoryDenyResult.permission_source, "category_overwrite");
+
+const missingSendOnlyResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: viewChannel | embedLinks | readHistory,
+});
+assert.equal(missingSendOnlyResult.can_post, false);
+assert.deepEqual(missingSendOnlyResult.missing_permissions, ["Send Messages"]);
 
 const botStatusSource = readFileSync("functions/api/discord/bot-status.ts", "utf8");
 assert.equal(botStatusSource.includes("DISCORD_BOT_TOKEN"), true);
@@ -32,9 +114,14 @@ assert.equal(dashboardSource.includes("function selectChannel"), true);
 assert.equal(dashboardSource.includes("setMessage(\"\")"), true);
 assert.equal(dashboardSource.includes("selectedChannelPermission"), true);
 assert.equal(dashboardSource.includes("DZN Bot can post in this channel."), true);
+assert.equal(dashboardSource.includes("DZN Bot has Administrator and can post in this channel."), true);
 assert.equal(dashboardSource.includes("DZN can see this channel, but cannot post here yet."), true);
 assert.equal(dashboardSource.includes("Selected channel debug"), true);
 assert.equal(dashboardSource.includes("missing_permissions:"), true);
+assert.equal(dashboardSource.includes("bot_has_administrator:"), true);
+assert.equal(dashboardSource.includes("permission source:"), true);
+assert.equal(dashboardSource.includes("base guild permissions:"), true);
+assert.equal(dashboardSource.includes("effective channel permissions:"), true);
 assert.equal(dashboardSource.includes("Recheck Selected Channel"), true);
 assert.equal(dashboardSource.includes("Make sure you select the DZN Bot role in Discord channel permissions, not @everyone"), true);
 assert.equal(dashboardSource.includes("Channel or category overrides may still block the bot"), true);

@@ -334,6 +334,19 @@ export type DiscordPostingChannel = {
   can_manage_messages: boolean;
   can_post: boolean;
   missing_permissions: string[];
+  permission_source?: "administrator" | "guild_roles" | "category_overwrite" | "channel_overwrite" | "member_overwrite" | "unknown" | string;
+  permission_diagnostics?: {
+    selected_channel_id: string;
+    selected_channel_name: string;
+    bot_user_id: string | null;
+    bot_role_ids: string[];
+    bot_role_names: string[];
+    bot_has_administrator: boolean;
+    base_guild_permissions: string | null;
+    effective_channel_permissions: string | null;
+    permission_source: string;
+    missing_permissions: string[];
+  };
 };
 
 export type PostingOptionSummary = {

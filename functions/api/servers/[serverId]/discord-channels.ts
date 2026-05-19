@@ -349,6 +349,7 @@ function sanitizeLinkedServerId(value: unknown) {
 }
 
 function mockChannel(channelId: string, channelName: string, categoryName: string, missingPermissions: string[] = []): DiscordPostingChannel {
+  const canPost = missingPermissions.length === 0;
   return {
     channel_id: channelId,
     channel_name: channelName,
@@ -361,7 +362,20 @@ function mockChannel(channelId: string, channelName: string, categoryName: strin
     can_embed: !missingPermissions.includes("Embed Links"),
     can_read_history: !missingPermissions.includes("Read Message History"),
     can_manage_messages: !missingPermissions.includes("Manage Messages"),
-    can_post: missingPermissions.length === 0,
+    can_post: canPost,
     missing_permissions: missingPermissions,
+    permission_source: canPost ? "administrator" : "channel_overwrite",
+    permission_diagnostics: {
+      selected_channel_id: channelId,
+      selected_channel_name: channelName,
+      bot_user_id: "mock-bot",
+      bot_role_ids: ["mock-dzn-bot-role"],
+      bot_role_names: ["DZN Bot"],
+      bot_has_administrator: canPost,
+      base_guild_permissions: canPost ? "8" : "0",
+      effective_channel_permissions: canPost ? "8" : "0",
+      permission_source: canPost ? "administrator" : "channel_overwrite",
+      missing_permissions: missingPermissions,
+    },
   };
 }

@@ -62,6 +62,27 @@ export type DiscordPostingChannel = {
   can_manage_messages: boolean;
   can_post: boolean;
   missing_permissions: string[];
+  permission_source: DiscordPermissionSource;
+  permission_diagnostics: DiscordPostingChannelPermissionDiagnostics;
+};
+export type DiscordPermissionSource =
+  | "administrator"
+  | "guild_roles"
+  | "category_overwrite"
+  | "channel_overwrite"
+  | "member_overwrite"
+  | "unknown";
+export type DiscordPostingChannelPermissionDiagnostics = {
+  selected_channel_id: string;
+  selected_channel_name: string;
+  bot_user_id: string | null;
+  bot_role_ids: string[];
+  bot_role_names: string[];
+  bot_has_administrator: boolean;
+  base_guild_permissions: string | null;
+  effective_channel_permissions: string | null;
+  permission_source: DiscordPermissionSource;
+  missing_permissions: string[];
 };
 export type DiscordChannelFetchErrorCode =
   | "missing_bot_token"
@@ -324,24 +345,31 @@ export async function fetchDiscordPostingChannels(env: Env, guildId: string): Pr
     throw new DiscordChannelFetchError("discord_api_invalid_response", "Discord returned an unexpected channel response.");
   }
   const permissionContext = await getBotGuildPermissionContext(botToken, guildId);
-  const categories = new Map<string, { name: string | null; position: number | null }>(
+  const categories = new Map<string, { name: string | null; position: number | null; channel: DiscordChannel }>(
     channels
       .filter((channel) => Number(channel.type) === 4 && typeof channel.name === "string")
-      .map((channel) => [String(channel.id), { name: channel.name ?? null, position: numberOrNull(channel.position) }]),
+      .map((channel) => [String(channel.id), { name: channel.name ?? null, position: numberOrNull(channel.position), channel }]),
   );
 
   return channels
     .filter((channel) => isPostableChannelType(channel.type) && typeof channel.id === "string")
     .map((channel) => {
-      const permissions = permissionContext ? getChannelPermissionBitsFromContext(permissionContext, channel) : parsePermissionBits(channel.permissions);
-      const missing = permissions === null ? [] : REQUIRED_BOT_CHANNEL_PERMISSIONS
-        .filter(([, bit]) => (permissions & bit) !== bit)
-        .map(([label]) => label);
-      const canManageMessages = permissions === null ? false : OPTIONAL_BOT_CHANNEL_PERMISSIONS.every(([, bit]) => (permissions & bit) === bit);
       const category = typeof channel.parent_id === "string" ? categories.get(channel.parent_id) ?? null : null;
+      const evaluation = permissionContext
+        ? getChannelPermissionEvaluationFromContext(permissionContext, channel, category?.channel ?? null)
+        : {
+            permissions: parsePermissionBits(channel.permissions),
+            source: "unknown" as const,
+            botHasAdministrator: false,
+          };
+      const permissions = evaluation.permissions;
+      const missing = getMissingRequiredBotPermissions(evaluation);
+      const canManageMessages = permissions === null ? false : OPTIONAL_BOT_CHANNEL_PERMISSIONS.every(([, bit]) => (permissions & bit) === bit);
+      const channelId = String(channel.id);
+      const channelName = String(channel.name ?? "unknown-channel");
       return {
-        channel_id: String(channel.id),
-        channel_name: String(channel.name ?? "unknown-channel"),
+        channel_id: channelId,
+        channel_name: channelName,
         channel_type: Number(channel.type) === 5 ? "announcement" as const : "text" as const,
         category_name: category?.name ?? null,
         position: numberOrNull(channel.position) ?? 0,
@@ -350,9 +378,11 @@ export async function fetchDiscordPostingChannels(env: Env, guildId: string): Pr
         can_send: permissions === null ? true : !missing.includes("Send Messages"),
         can_embed: permissions === null ? true : !missing.includes("Embed Links"),
         can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
-        can_manage_messages: canManageMessages,
-        can_post: permissions === null ? true : missing.length === 0,
+        can_manage_messages: evaluation.botHasAdministrator || canManageMessages,
+        can_post: evaluation.botHasAdministrator || permissions === null ? true : missing.length === 0,
         missing_permissions: missing,
+        permission_source: evaluation.source,
+        permission_diagnostics: buildChannelPermissionDiagnostics(channelId, channelName, permissionContext ?? null, evaluation, missing),
       };
     })
     .sort((a, b) =>
@@ -370,25 +400,34 @@ export async function verifyDiscordPostingChannel(env: Env, guildId: string, cha
   const channel = await response.json().catch(() => null) as DiscordChannel | null;
   if (!channel || channel.guild_id !== guildId || !isPostableChannelType(channel.type)) return null;
   const permissionContext = await getBotGuildPermissionContext(botToken, guildId);
-  const permissions = permissionContext ? getChannelPermissionBitsFromContext(permissionContext, channel) : await getBotChannelPermissionBits(botToken, channel);
-  const missing = permissions === null ? [] : REQUIRED_BOT_CHANNEL_PERMISSIONS
-    .filter(([, bit]) => (permissions & bit) !== bit)
-    .map(([label]) => label);
+  const category = await getChannelParentCategory(botToken, guildId, channel);
+  const evaluation = permissionContext
+    ? getChannelPermissionEvaluationFromContext(permissionContext, channel, category)
+    : {
+        permissions: await getBotChannelPermissionBits(botToken, channel),
+        source: "unknown" as const,
+        botHasAdministrator: false,
+      };
+  const permissions = evaluation.permissions;
+  const missing = getMissingRequiredBotPermissions(evaluation);
   const canManageMessages = permissions === null ? false : OPTIONAL_BOT_CHANNEL_PERMISSIONS.every(([, bit]) => (permissions & bit) === bit);
+  const channelName = String(channel.name ?? "unknown-channel");
   return {
     channel_id: channelId,
-    channel_name: String(channel.name ?? "unknown-channel"),
+    channel_name: channelName,
     channel_type: Number(channel.type) === 5 ? "announcement" : "text",
-    category_name: null,
+    category_name: typeof category?.name === "string" ? category.name : null,
     position: numberOrNull(channel.position) ?? 0,
-    category_position: null,
+    category_position: numberOrNull(category?.position),
     can_view: permissions === null ? true : !missing.includes("View Channel"),
     can_send: permissions === null ? true : !missing.includes("Send Messages"),
     can_embed: permissions === null ? true : !missing.includes("Embed Links"),
     can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
-    can_manage_messages: canManageMessages,
-    can_post: permissions === null ? true : missing.length === 0,
+    can_manage_messages: evaluation.botHasAdministrator || canManageMessages,
+    can_post: evaluation.botHasAdministrator || permissions === null ? true : missing.length === 0,
     missing_permissions: missing,
+    permission_source: evaluation.source,
+    permission_diagnostics: buildChannelPermissionDiagnostics(channelId, channelName, permissionContext ?? null, evaluation, missing),
   };
 }
 
@@ -625,7 +664,16 @@ type BotPermissionContext = {
   botUserId: string;
   guildId: string;
   roleIds: Set<string>;
+  roleNames: string[];
   basePermissions: bigint;
+};
+
+type PermissionOverwrite = NonNullable<DiscordChannel["permission_overwrites"]>[number];
+
+type PermissionEvaluation = {
+  permissions: bigint | null;
+  source: DiscordPermissionSource;
+  botHasAdministrator: boolean;
 };
 
 async function fetchDiscordApi(botToken: string, path: string) {
@@ -642,7 +690,7 @@ async function getBotChannelPermissionBits(botToken: string, channel: DiscordCha
 
   try {
     const context = await getBotGuildPermissionContext(botToken, guildId);
-    return context ? getChannelPermissionBitsFromContext(context, channel) : null;
+    return context ? getChannelPermissionEvaluationFromContext(context, channel).permissions : null;
   } catch {
     return null;
   }
@@ -660,38 +708,135 @@ async function getBotGuildPermissionContext(botToken: string, guildId: string): 
     fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/roles`),
   ]);
   if (!memberResponse.ok || !rolesResponse.ok) return null;
-  const member = await memberResponse.json().catch(() => null) as { roles?: string[] } | null;
-  const roles = await rolesResponse.json().catch(() => null) as Array<{ id?: string; permissions?: string | number | null }> | null;
+  const member = await memberResponse.json().catch(() => null) as { roles?: Array<string | number> } | null;
+  const roles = await rolesResponse.json().catch(() => null) as Array<{ id?: string | number; name?: string | null; permissions?: string | number | null }> | null;
   if (!Array.isArray(roles)) return null;
 
-  const roleIds = new Set(Array.isArray(member?.roles) ? member.roles : []);
+  const roleIds = new Set(Array.isArray(member?.roles) ? member.roles.map(String) : []);
   let basePermissions = BigInt(0);
+  const roleNames: string[] = [];
   for (const role of roles) {
-    if (role.id === guildId || (role.id && roleIds.has(role.id))) {
+    const roleId = typeof role.id === "string" || typeof role.id === "number" ? String(role.id) : null;
+    if (roleId === guildId || (roleId && roleIds.has(roleId))) {
       basePermissions |= parsePermissionBits(role.permissions) ?? BigInt(0);
+      if (roleId !== guildId && typeof role.name === "string" && role.name.trim()) {
+        roleNames.push(role.name.trim());
+      }
     }
   }
-  return { botUserId, guildId, roleIds, basePermissions };
+  return { botUserId, guildId, roleIds, roleNames, basePermissions };
 }
 
-function getChannelPermissionBitsFromContext(context: BotPermissionContext, channel: DiscordChannel | null) {
-  if (!channel) return null;
-  if ((context.basePermissions & DISCORD_ADMINISTRATOR_PERMISSION) === DISCORD_ADMINISTRATOR_PERMISSION) return context.basePermissions;
-  const overwrites = Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : [];
-  const everyoneOverwrite = overwrites.find((overwrite) => overwrite.id === context.guildId && String(overwrite.type) === "0");
-  let permissions = applyPermissionOverwrite(context.basePermissions, everyoneOverwrite);
+function getChannelPermissionEvaluationFromContext(context: BotPermissionContext, channel: DiscordChannel | null, category: DiscordChannel | null = null): PermissionEvaluation {
+  if (!channel) return { permissions: null, source: "unknown", botHasAdministrator: false };
+  const botHasAdministrator = hasPermission(context.basePermissions, DISCORD_ADMINISTRATOR_PERMISSION);
+  if (botHasAdministrator) {
+    return {
+      permissions: context.basePermissions | getRequiredBotPermissionBits() | getOptionalBotPermissionBits(),
+      source: "administrator",
+      botHasAdministrator: true,
+    };
+  }
+
+  let permissions = context.basePermissions;
+  let source: DiscordPermissionSource = "guild_roles";
+  const categoryOverwrites = Array.isArray(category?.permission_overwrites) ? category.permission_overwrites : [];
+  if (categoryOverwrites.length > 0) {
+    const categoryResult = applyPermissionOverwritesForContext(permissions, categoryOverwrites, context, "category_overwrite");
+    permissions = categoryResult.permissions;
+    source = categoryResult.source;
+  }
+
+  const channelOverwrites = Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : [];
+  if (channelOverwrites.length > 0) {
+    const channelResult = applyPermissionOverwritesForContext(permissions, channelOverwrites, context, "channel_overwrite");
+    permissions = channelResult.permissions;
+    if (channelResult.source !== "guild_roles") {
+      source = channelResult.source;
+    }
+  }
+
+  return { permissions, source, botHasAdministrator };
+}
+
+function applyPermissionOverwritesForContext(
+  startingPermissions: bigint,
+  overwrites: PermissionOverwrite[],
+  context: BotPermissionContext,
+  overwriteSource: "category_overwrite" | "channel_overwrite",
+) {
+  const everyoneOverwrite = overwrites.find((overwrite) => String(overwrite.id) === context.guildId && String(overwrite.type) === "0");
+  let permissions = applyPermissionOverwrite(startingPermissions, everyoneOverwrite);
+  let source: DiscordPermissionSource = everyoneOverwrite ? overwriteSource : "guild_roles";
 
   let roleAllow = BigInt(0);
   let roleDeny = BigInt(0);
   for (const overwrite of overwrites) {
-    if (String(overwrite.type) !== "0" || !context.roleIds.has(overwrite.id)) continue;
+    if (String(overwrite.type) !== "0" || !context.roleIds.has(String(overwrite.id))) continue;
     roleAllow |= parsePermissionBits(overwrite.allow) ?? BigInt(0);
     roleDeny |= parsePermissionBits(overwrite.deny) ?? BigInt(0);
   }
+  if (roleAllow !== BigInt(0) || roleDeny !== BigInt(0)) {
+    source = overwriteSource;
+  }
   permissions = (permissions & ~roleDeny) | roleAllow;
 
-  const memberOverwrite = overwrites.find((overwrite) => overwrite.id === context.botUserId && String(overwrite.type) === "1");
-  return applyPermissionOverwrite(permissions, memberOverwrite);
+  const memberOverwrite = overwrites.find((overwrite) => String(overwrite.id) === context.botUserId && String(overwrite.type) === "1");
+  if (memberOverwrite) source = "member_overwrite";
+  return {
+    permissions: applyPermissionOverwrite(permissions, memberOverwrite),
+    source,
+  };
+}
+
+async function getChannelParentCategory(botToken: string, guildId: string, channel: DiscordChannel | null) {
+  const parentId = typeof channel?.parent_id === "string" ? channel.parent_id : null;
+  if (!parentId) return null;
+  try {
+    const response = await fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/channels`);
+    if (!response.ok) return null;
+    const channels = await response.json().catch(() => null) as DiscordChannel[] | null;
+    if (!Array.isArray(channels)) return null;
+    return channels.find((item) => item.id === parentId && Number(item.type) === 4) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function buildChannelPermissionDiagnostics(
+  channelId: string,
+  channelName: string,
+  context: BotPermissionContext | null,
+  evaluation: PermissionEvaluation,
+  missingPermissions: string[],
+): DiscordPostingChannelPermissionDiagnostics {
+  return {
+    selected_channel_id: channelId,
+    selected_channel_name: channelName,
+    bot_user_id: context?.botUserId ?? null,
+    bot_role_ids: context ? [...context.roleIds] : [],
+    bot_role_names: context?.roleNames ?? [],
+    bot_has_administrator: evaluation.botHasAdministrator,
+    base_guild_permissions: context ? context.basePermissions.toString() : null,
+    effective_channel_permissions: evaluation.permissions?.toString() ?? null,
+    permission_source: evaluation.source,
+    missing_permissions: missingPermissions,
+  };
+}
+
+function getMissingRequiredBotPermissions(evaluation: PermissionEvaluation) {
+  if (evaluation.botHasAdministrator || evaluation.permissions === null) return [];
+  return REQUIRED_BOT_CHANNEL_PERMISSIONS
+    .filter(([, bit]) => (evaluation.permissions! & bit) !== bit)
+    .map(([label]) => label);
+}
+
+function getRequiredBotPermissionBits() {
+  return REQUIRED_BOT_CHANNEL_PERMISSIONS.reduce((bits, [, bit]) => bits | bit, BigInt(0));
+}
+
+function getOptionalBotPermissionBits() {
+  return OPTIONAL_BOT_CHANNEL_PERMISSIONS.reduce((bits, [, bit]) => bits | bit, BigInt(0));
 }
 
 function isPostableChannelType(value: unknown) {
@@ -714,6 +859,47 @@ function applyPermissionOverwrite(
   return (permissions & ~deny) | allow;
 }
 
+function hasPermission(permissions: bigint, permission: bigint) {
+  return (permissions & permission) === permission;
+}
+
+export function evaluateDiscordChannelPermissionsForTest(input: {
+  guildId: string;
+  botUserId: string;
+  botRoleIds: string[];
+  botRoleNames?: string[];
+  basePermissions: string | number | bigint;
+  channelId?: string;
+  channelName?: string;
+  channelPermissionOverwrites?: PermissionOverwrite[];
+  categoryPermissionOverwrites?: PermissionOverwrite[];
+}) {
+  const context: BotPermissionContext = {
+    guildId: input.guildId,
+    botUserId: input.botUserId,
+    roleIds: new Set(input.botRoleIds),
+    roleNames: input.botRoleNames ?? [],
+    basePermissions: parsePermissionBits(input.basePermissions) ?? BigInt(0),
+  };
+  const channel: DiscordChannel = {
+    id: input.channelId ?? "channel",
+    name: input.channelName ?? "channel",
+    type: 0,
+    permission_overwrites: input.channelPermissionOverwrites ?? [],
+  };
+  const category: DiscordChannel | null = input.categoryPermissionOverwrites
+    ? { id: "category", name: "category", type: 4, permission_overwrites: input.categoryPermissionOverwrites }
+    : null;
+  const evaluation = getChannelPermissionEvaluationFromContext(context, channel, category);
+  const missing = getMissingRequiredBotPermissions(evaluation);
+  return {
+    can_post: evaluation.botHasAdministrator || evaluation.permissions === null ? true : missing.length === 0,
+    missing_permissions: missing,
+    permission_source: evaluation.source,
+    diagnostics: buildChannelPermissionDiagnostics(channel.id ?? "channel", channel.name ?? "channel", context, evaluation, missing),
+  };
+}
+
 function permissionWarning(missing: readonly string[]) {
   return missing.length
     ? `${DISCORD_CHANNEL_PERMISSION_WARNING} Missing: ${missing.join(", ")}.`
@@ -726,6 +912,7 @@ function normalizeBotToken(value: string | undefined | null) {
 }
 
 function parsePermissionBits(value: unknown): bigint | null {
+  if (typeof value === "bigint") return value;
   if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.trunc(value));
   if (typeof value !== "string" || !value.trim()) return null;
   try {

@@ -1553,13 +1553,33 @@ function DiscordAutoPostsPanel({
         channelName: null,
         canPost: false,
         missingPermissions: [] as string[],
+        permissionSource: "unknown",
+        botUserId: null as string | null,
+        botRoleIds: [] as string[],
+        botRoleNames: [] as string[],
+        botHasAdministrator: false,
+        baseGuildPermissions: null as string | null,
+        effectiveChannelPermissions: null as string | null,
       };
     }
+    const diagnostics = selectedChannel.permission_diagnostics;
+    const botHasAdministrator = diagnostics?.bot_has_administrator === true || selectedChannel.permission_source === "administrator";
     return {
       channelId: selectedChannel.channel_id,
       channelName: selectedChannel.channel_name,
-      canPost: selectedChannel.can_post === true,
-      missingPermissions: Array.isArray(selectedChannel.missing_permissions) ? selectedChannel.missing_permissions : [],
+      canPost: selectedChannel.can_post === true || botHasAdministrator,
+      missingPermissions: botHasAdministrator
+        ? []
+        : Array.isArray(selectedChannel.missing_permissions)
+          ? selectedChannel.missing_permissions
+          : [],
+      permissionSource: diagnostics?.permission_source ?? selectedChannel.permission_source ?? "unknown",
+      botUserId: diagnostics?.bot_user_id ?? null,
+      botRoleIds: diagnostics?.bot_role_ids ?? [],
+      botRoleNames: diagnostics?.bot_role_names ?? [],
+      botHasAdministrator,
+      baseGuildPermissions: diagnostics?.base_guild_permissions ?? null,
+      effectiveChannelPermissions: diagnostics?.effective_channel_permissions ?? null,
     };
   }, [selectedChannel, selectedChannelId]);
   const channelFetchFailed = Boolean(channelsResponse?.manual_fallback || channelsResponse?.error_code || channelsWarning);
@@ -1600,6 +1620,8 @@ function DiscordAutoPostsPanel({
       const refreshedChannel = response?.channels.find((channel) => channel.channel_id === selectedChannelId);
       if (!refreshedChannel) {
         setMessage("Selected channel was not returned by Discord during recheck. Choose another channel or check bot access.");
+      } else if (refreshedChannel.permission_diagnostics?.bot_has_administrator === true || refreshedChannel.permission_source === "administrator") {
+        setMessage("Selected channel rechecked. DZN Bot has Administrator and can post in this channel.");
       } else if (refreshedChannel.can_post) {
         setMessage("Selected channel rechecked. DZN Bot can post in this channel.");
       } else {
@@ -1736,7 +1758,9 @@ function DiscordAutoPostsPanel({
             {selectedChannel ? (
               <div className="grid gap-2">
                 <span className={`text-[11px] font-bold ${selectedChannelPermission.canPost ? "text-emerald-200" : "text-amber-200"}`}>
-                  {selectedChannelPermission.canPost
+                  {selectedChannelPermission.botHasAdministrator
+                    ? "DZN Bot has Administrator and can post in this channel."
+                    : selectedChannelPermission.canPost
                     ? "DZN Bot can post in this channel."
                     : `DZN can see this channel, but cannot post here yet. Missing: ${selectedChannelPermission.missingPermissions.join(", ") || "channel permissions"}. Make sure you select the DZN Bot role in Discord channel permissions, not @everyone, then allow Send Messages and Embed Links. Channel or category overrides may still block the bot; add the DZN Bot role directly to the channel permissions or choose another channel.`}
                 </span>
@@ -1744,6 +1768,13 @@ function DiscordAutoPostsPanel({
                   <p className="font-black uppercase text-zinc-500">Selected channel debug</p>
                   <p>ID: <span className="text-zinc-200">{selectedChannelPermission.channelId}</span></p>
                   <p>Name: <span className="text-zinc-200">#{selectedChannelPermission.channelName}</span></p>
+                  <p>Bot user ID: <span className="text-zinc-200">{selectedChannelPermission.botUserId ?? "unknown"}</span></p>
+                  <p>Bot role IDs: <span className="text-zinc-200">[{selectedChannelPermission.botRoleIds.join(", ")}]</span></p>
+                  <p>Bot role names: <span className="text-zinc-200">[{selectedChannelPermission.botRoleNames.join(", ")}]</span></p>
+                  <p>bot_has_administrator: <span className={selectedChannelPermission.botHasAdministrator ? "text-emerald-200" : "text-zinc-200"}>{String(selectedChannelPermission.botHasAdministrator)}</span></p>
+                  <p>base guild permissions: <span className="text-zinc-200">{selectedChannelPermission.baseGuildPermissions ?? "unknown"}</span></p>
+                  <p>effective channel permissions: <span className="text-zinc-200">{selectedChannelPermission.effectiveChannelPermissions ?? "unknown"}</span></p>
+                  <p>permission source: <span className="text-zinc-200">{selectedChannelPermission.permissionSource}</span></p>
                   <p>can_post: <span className={selectedChannelPermission.canPost ? "text-emerald-200" : "text-amber-200"}>{String(selectedChannelPermission.canPost)}</span></p>
                   <p>missing_permissions: <span className="text-zinc-200">[{selectedChannelPermission.missingPermissions.join(", ")}]</span></p>
                 </div>
