@@ -1,0 +1,25 @@
+AdminLog started on 2026-05-19 at 16:01:55
+16:04:58 | ##### PlayerList log: 3 players
+16:04:58 | #####
+16:04:58 | Player "mustard_coffer74" (id=MUSTARD_ID pos=<6361.0, 8030.0, 333.0>)
+16:04:58 | Player "Uractuallybadzzz" (id=UR_ID pos=<6365.0, 8034.0, 333.0>)
+16:04:58 | Player "xAKA-MINI_KickAs" (id=XAKA_ID pos=<6368.0, 8035.0, 333.0>)
+16:05:47 | Player "mustard_coffer74" (DEAD) (id=MUSTARD_ID pos=<6361.0, 8030.0, 333.0>) killed by Player "Uractuallybadzzz" (id=UR_ID pos=<6364.9, 8031.7, 333.0>) with M4-A1 from 4.23161 meters
+16:05:48 | Player "mustard_coffer74" (DEAD) (id=MUSTARD_ID pos=<6361.0, 8030.0, 333.0>)[HP: 0] hit by Player "Uractuallybadzzz" (id=UR_ID pos=<6364.9, 8031.7, 333.0>) into Torso(1) for 11.2 damage (Bullet_556x45) with M4-A1 from 4.23161 meters
+16:06:03 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6364.9, 8031.7, 333.0>) committed suicide
+16:06:51 | Player "mustard_coffer74" (id=MUSTARD_ID pos=<6362.0, 8032.0, 333.0>) is connected
+16:07:05 | Player "mustard_coffer74" (id=MUSTARD_ID pos=<6362.8, 8032.6, 333.0>) is unconscious
+16:07:16 | Player "mustard_coffer74" (DEAD) (id=MUSTARD_ID pos=<6362.9, 8032.7, 333.0>) is choosing to respawn
+16:07:17 | Player "mustard_coffer74" (DEAD) (id=MUSTARD_ID pos=<6362.9, 8032.7, 333.0>) died. Stats> Water: 441.21 Energy: 392.44 Bleed sources: 0
+16:07:39 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6364.8, 8033.7, 333.0>) killed by Player "mustard_coffer74" (id=MUSTARD_ID pos=<6361.2, 8032.3, 333.0>) with M4-A1 from 3.95237 meters
+16:07:40 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6364.8, 8033.7, 333.0>)[HP: 0] hit by Player "mustard_coffer74" (id=MUSTARD_ID pos=<6361.2, 8032.3, 333.0>) into Head(0) for 9.6 damage (Bullet_556x45) with M4-A1 from 3.95237 meters
+16:08:39 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6370.2, 8037.4, 333.0>) killed by Player "mustard_coffer74" (id=MUSTARD_ID pos=<6362.1, 8034.6, 333.0>) with M4-A1 from 8.60826 meters
+16:08:40 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6370.2, 8037.4, 333.0>)[HP: 0] hit by Player "mustard_coffer74" (id=MUSTARD_ID pos=<6362.1, 8034.6, 333.0>) into LeftArm(18) for 7.3 damage (Bullet_556x45) with M4-A1 from 8.60826 meters
+16:09:25 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6366.6, 8035.5, 333.0>) killed by Player "mustard_coffer74" (id=MUSTARD_ID pos=<6362.4, 8033.9, 333.0>) with M4-A1 from 4.68658 meters
+16:10:33 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6372.1, 8039.2, 333.0>) killed by Player "mustard_coffer74" (id=MUSTARD_ID pos=<6363.5, 8035.7, 333.0>) with M4-A1 from 9.29149 meters
+16:11:27 | Player "mustard_coffer74" (DEAD) (id=MUSTARD_ID pos=<6362.7, 8036.1, 333.0>) killed by Player "Uractuallybadzzz" (id=UR_ID pos=<6368.8, 8038.0, 333.0>) with M4-A1 from 6.46832 meters
+16:12:21 | Player "mustard_coffer74" (DEAD) (id=MUSTARD_ID pos=<6365.2, 8040.8, 333.0>) killed by Player "Uractuallybadzzz" (id=UR_ID pos=<6376.1, 8045.8, 333.0>) with M4-A1 from 12.0174 meters
+16:13:04 | Player "Uractuallybadzzz" (DEAD) (id=UR_ID pos=<6410.0, 8060.1, 333.0>) killed by Player "mustard_coffer74" (id=MUSTARD_ID pos=<6365.2, 8041.3, 333.0>) with M4-A1 from 48.5404 meters
+16:15:57 | Player "mustard_coffer74" (DEAD) (id=MUSTARD_ID pos=<6370.1, 8044.1, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=XAKA_ID pos=<6376.9, 8047.1, 333.0>) with M4-A1 from 7.43367 meters
+16:16:04 | Player "xAKA-MINI_KickAs" (DEAD) (id=XAKA_ID pos=<6376.9, 8047.1, 333.0>) killed by Player "Uractuallybadzzz" (id=UR_ID pos=<6374.0, 8045.0, 333.0>) with M4-A1 from 3.54201 meters
+16:37:28 | Player "agam_Vesper" (DEAD) (id=AGAM_ID pos=<6390.0, 8060.0, 333.0>) committed suicide

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { parseAdmLine, parseAdmLines } from "../functions/_lib/adm-parser";
+import { buildAdmImportDebugReport } from "../functions/_lib/adm-sync";
 
 const context = { admDate: "2026-05-14" };
 
@@ -256,6 +258,73 @@ const nonKillDamageLines = parseAdmLines([
   '19:45:35 | Player "xAKA-MINI_KickAs" (DEAD) (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6363.7, 8031.0, 333.0>) died. Stats> Water: 100 Energy: 100 Bleed sources: 0',
 ], { admDate: "2026-05-15" });
 assert.equal(nonKillDamageLines.filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length, 0);
+
+const uploadedAdmFixtureName = "DayZServer_PS4_x64_2026-05-19_16-01-55.ADM";
+const uploadedAdmFixtureLines = readFileSync(`scripts/fixtures/${uploadedAdmFixtureName}`, "utf8")
+  .split(/\r?\n/)
+  .filter((line) => line.trim().length > 0);
+const uploadedAdmEvents = parseAdmLines(uploadedAdmFixtureLines, { admDate: "2026-05-19" });
+const uploadedPvpKills = uploadedAdmEvents.filter((event) => event.eventType === "player_killed" && event.isCreditedKill);
+const uploadedSuicides = uploadedAdmEvents.filter((event) => event.eventType === "player_suicide");
+const uploadedUncreditedDeaths = uploadedAdmEvents.filter((event) => event.eventType === "player_died_stats");
+const uploadedRespawnChoices = uploadedAdmEvents.filter((event) => event.eventType === "player_choosing_respawn");
+const uploadedDeadHits = uploadedAdmEvents.filter((event) => event.eventType === "player_hit" && event.victimDead && !event.isCreditedKill);
+const uploadedImportReport = buildAdmImportDebugReport(uploadedAdmFixtureLines, { admFileName: uploadedAdmFixtureName });
+
+assert.equal(uploadedAdmFixtureLines.filter((line) => /\bkilled by\s+Player\s+"/i.test(line)).length, 10);
+assert.equal(uploadedPvpKills.length, 10);
+assert.equal(uploadedImportReport.rawKilledByLinesFound, 10);
+assert.equal(uploadedImportReport.parsedPvpKills, 10);
+assert.equal(uploadedImportReport.duplicateSkips, 0);
+assert.equal(uploadedImportReport.cursorStart, 0);
+assert.equal(uploadedImportReport.cursorEnd, uploadedAdmFixtureLines.length);
+assert.equal(uploadedImportReport.skippedDeadHitLines, 3);
+assert.equal(uploadedDeadHits.length, 3);
+assert.equal(uploadedDeadHits.some((event) => event.eventType === "player_killed" || event.isCreditedKill), false);
+assert.equal(uploadedSuicides.length, 2);
+assert.equal(uploadedImportReport.parsedSuicides, 2);
+assert.equal(uploadedUncreditedDeaths.length, 1);
+assert.equal(uploadedImportReport.parsedUncreditedDeaths, 1);
+assert.equal(uploadedRespawnChoices.length, 1);
+assert.equal(uploadedRespawnChoices[0]?.eventType, "player_choosing_respawn");
+assert.equal(uploadedRespawnChoices[0]?.isCreditedKill, false);
+
+const expectedUploadedKills = [
+  ["16:05:47", "Uractuallybadzzz", "mustard_coffer74", "M4-A1", 4.23161],
+  ["16:07:39", "mustard_coffer74", "Uractuallybadzzz", "M4-A1", 3.95237],
+  ["16:08:39", "mustard_coffer74", "Uractuallybadzzz", "M4-A1", 8.60826],
+  ["16:09:25", "mustard_coffer74", "Uractuallybadzzz", "M4-A1", 4.68658],
+  ["16:10:33", "mustard_coffer74", "Uractuallybadzzz", "M4-A1", 9.29149],
+  ["16:11:27", "Uractuallybadzzz", "mustard_coffer74", "M4-A1", 6.46832],
+  ["16:12:21", "Uractuallybadzzz", "mustard_coffer74", "M4-A1", 12.0174],
+  ["16:13:04", "mustard_coffer74", "Uractuallybadzzz", "M4-A1", 48.5404],
+  ["16:15:57", "xAKA-MINI_KickAs", "mustard_coffer74", "M4-A1", 7.43367],
+  ["16:16:04", "Uractuallybadzzz", "xAKA-MINI_KickAs", "M4-A1", 3.54201],
+] as const;
+
+for (const [index, [time, killer, victim, weapon, distance]] of expectedUploadedKills.entries()) {
+  const parsed = uploadedPvpKills[index];
+  assert.equal(parsed?.occurredAt, `2026-05-19T${time}.000Z`);
+  assert.equal(parsed?.killerName, killer);
+  assert.equal(parsed?.victimName, victim);
+  assert.equal(parsed?.weapon, weapon);
+  assert.equal(parsed?.distance, distance);
+  assert.equal(parsed?.isPvpKill, true);
+  assert.equal(parsed?.isCreditedKill, true);
+}
+
+const uploadedKillTotals = uploadedPvpKills.reduce<Record<string, number>>((totals, event) => {
+  const killer = event.killerName ?? "unknown";
+  totals[killer] = (totals[killer] ?? 0) + 1;
+  return totals;
+}, {});
+assert.deepEqual(uploadedKillTotals, {
+  mustard_coffer74: 5,
+  Uractuallybadzzz: 4,
+  "xAKA-MINI_KickAs": 1,
+});
+
+console.log("DZN ADM IMPORT DEBUG REPORT", uploadedImportReport);
 
 console.log("ADM parser tests passed");
 

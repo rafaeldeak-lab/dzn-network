@@ -123,6 +123,19 @@ export type AdmSyncOptions = {
   maxLinesPerRun?: number;
 };
 
+export type AdmImportDebugReport = {
+  admFileName: string | null;
+  cursorStart: number;
+  cursorEnd: number;
+  rawKilledByLinesFound: number;
+  parsedPvpKills: number;
+  skippedDeadHitLines: number;
+  parsedSuicides: number;
+  parsedUncreditedDeaths: number;
+  duplicateSkips: number;
+  pvpKillLineNumbers: number[];
+};
+
 export type AdmSyncStatusCode =
   | "completed"
   | "no_new_lines"
@@ -1201,6 +1214,67 @@ function collectReadableAdmFilesUntilUnreadable(candidates: DiscoveredAdmFileFor
 
 function hasRawPlayerKillLine(line: string) {
   return /\bkilled by\s+Player\s+"/i.test(line);
+}
+
+export function buildAdmImportDebugReport(
+  lines: string[],
+  options: { admFileName?: string | null; cursorStart?: number; cursorEnd?: number } = {},
+): AdmImportDebugReport {
+  const admFileName = options.admFileName ?? null;
+  const cursorStart = clampCursorLine(options.cursorStart ?? 0, lines.length);
+  const cursorEnd = clampCursorLine(options.cursorEnd ?? lines.length, lines.length);
+  const parsed = parseAdmLines(lines, { admDate: extractAdmDateFromFile(admFileName) ?? undefined });
+  const pendingLines = lines.slice(cursorStart, cursorEnd);
+  const pendingEvents = parsed.slice(cursorStart, cursorEnd);
+  const pvpKillLineNumbers: number[] = [];
+  const seenKillKeys = new Set<string>();
+  let duplicateSkips = 0;
+
+  for (let index = 0; index < pendingEvents.length; index += 1) {
+    const event = pendingEvents[index];
+    if (!event || !isCreditedKillEvent(event)) continue;
+    pvpKillLineNumbers.push(cursorStart + index + 1);
+    const key = importDebugKillKey(event);
+    if (seenKillKeys.has(key)) duplicateSkips += 1;
+    else seenKillKeys.add(key);
+  }
+
+  return {
+    admFileName,
+    cursorStart,
+    cursorEnd,
+    rawKilledByLinesFound: pendingLines.filter(hasRawPlayerKillLine).length,
+    parsedPvpKills: pvpKillLineNumbers.length,
+    skippedDeadHitLines: pendingEvents.filter(isDeadHitNonKillEvent).length,
+    parsedSuicides: pendingEvents.filter((event) => event.eventType === "player_suicide").length,
+    parsedUncreditedDeaths: pendingEvents.filter((event) => event.eventType === "player_died_stats").length,
+    duplicateSkips,
+    pvpKillLineNumbers,
+  };
+}
+
+function clampCursorLine(value: number, lineCount: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(Math.trunc(numeric), lineCount));
+}
+
+function isDeadHitNonKillEvent(event: ParsedAdmEvent) {
+  return (
+    event.eventType === "player_hit" &&
+    event.victimDead &&
+    !event.isCreditedKill
+  );
+}
+
+function importDebugKillKey(event: ParsedAdmEvent) {
+  return [
+    event.occurredAt ?? "",
+    event.killerId ?? event.killerName ?? "",
+    event.victimId ?? event.victimName ?? "",
+    event.weapon ?? "",
+    event.distance === null ? "" : event.distance.toFixed(4),
+  ].join("|");
 }
 
 class AdmParserMismatchError extends Error {
