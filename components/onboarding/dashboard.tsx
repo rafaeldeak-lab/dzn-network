@@ -3136,6 +3136,21 @@ function LastSyncDetails({
           <MiniInfo label="Build Events Stored" value={String(values.buildEventsStored)} />
           <MiniInfo label="Parser Unknown Lines" value={String(values.unknownLines)} />
           <MiniInfo label="Skipped Duplicate Lines" value={String(values.duplicateLines)} />
+          {syncStatus?.last_adm_import_report ? (
+            <div className="rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-3">
+              <p className="text-[10px] font-black uppercase text-cyan-100">Last ADM Import Report</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <MiniInfo label="Parsed Kills" value={String(syncStatus.last_adm_import_report.parsedPvpKills)} />
+                <MiniInfo label="Written Kills" value={String(syncStatus.last_adm_import_report.writtenKills)} />
+                <MiniInfo label="Duplicate Skips" value={String(syncStatus.last_adm_import_report.duplicateSkips)} />
+                <MiniInfo label="Failed Writes" value={String(syncStatus.last_adm_import_report.failedWrites)} />
+                <MiniInfo label="Cursor Advanced" value={syncStatus.last_adm_import_report.cursorAdvanced ? "Yes" : "No"} />
+                <MiniInfo label="Cursor Before / After" value={`${syncStatus.last_adm_import_report.cursorBefore} -> ${syncStatus.last_adm_import_report.cursorAfter}`} />
+                <MiniInfo label="Public Cache Updated" value={syncStatus.last_adm_import_report.publicCacheUpdated ? "Yes" : syncStatus.last_adm_import_report.cacheRefreshStatus} />
+                <MiniInfo label="Discord Queues Created" value={String(syncStatus.last_adm_import_report.discordQueuesCreated)} />
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

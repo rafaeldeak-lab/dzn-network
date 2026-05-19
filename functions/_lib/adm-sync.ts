@@ -36,6 +36,7 @@ import {
   refreshNitradoServerMetadata,
   type ScheduledMetadataSyncResult,
 } from "./server-metadata";
+import type { PlanKey } from "./plans";
 import type { Env } from "./types";
 
 export type SyncLinkedServer = {
@@ -134,6 +135,31 @@ export type AdmImportDebugReport = {
   parsedUncreditedDeaths: number;
   duplicateSkips: number;
   pvpKillLineNumbers: number[];
+};
+
+export type AdmDatabaseImportReport = AdmImportDebugReport & {
+  attemptedDbWrites: number;
+  successfulDbWrites: number;
+  writtenKills: number;
+  failedWrites: number;
+  cursorBefore: number;
+  cursorAfter: number;
+  cursorAdvanced: boolean;
+  publicCacheUpdated: boolean;
+  discordQueuesCreated: number;
+  cacheRefreshStatus: "updated" | "skipped" | "failed";
+  discordQueueStatus: "queued" | "skipped" | "failed";
+};
+
+export type AdmFixtureImportResult = {
+  status: AdmSyncStatusCode;
+  message: string;
+  report: AdmDatabaseImportReport;
+  cursorBefore: number;
+  cursorAfter: number;
+  totalKills: number;
+  totalDeaths: number;
+  longestKillDistance: number;
 };
 
 export type AdmSyncStatusCode =
@@ -244,6 +270,7 @@ export type AdmSyncStatus = {
   raw_kill_lines_found: number;
   parsed_kill_lines_found: number;
   parser_skipped_lines: number;
+  last_adm_import_report: AdmDatabaseImportReport | null;
   current_recovery_action: string;
   recent_sync_runs: AdmSyncRunSummary[];
 };
@@ -855,6 +882,24 @@ export async function runAdmSync(
       parserSkippedLines,
       unreadableFilesQueued: await countQueuedUnreadableAdmFiles(env, initialScope.linkedServerId),
       newestUnprocessedAdmFile: cursorFile,
+      importReportJson: JSON.stringify({
+        ...buildAdmImportDebugReport(lines, {
+          admFileName: cursorFile ?? latestAdmFile,
+          cursorStart: Number(existingState?.last_processed_line ?? 0),
+          cursorEnd: Number(existingState?.last_processed_line ?? 0),
+        }),
+        attemptedDbWrites: rawEventsStored + playerEventsStored + killEventsStored + buildEventsStored + 1,
+        successfulDbWrites: rawEventsStored + playerEventsStored + killEventsStored + buildEventsStored,
+        writtenKills: killEventsStored,
+        failedWrites: 1,
+        cursorBefore: Number(existingState?.last_processed_line ?? 0),
+        cursorAfter: Number(existingState?.last_processed_line ?? 0),
+        cursorAdvanced: false,
+        publicCacheUpdated: false,
+        discordQueuesCreated: 0,
+        cacheRefreshStatus: "skipped",
+        discordQueueStatus: "skipped",
+      } satisfies AdmDatabaseImportReport),
     });
     await recordSyncRun(env, {
       id: syncRunId,
@@ -923,6 +968,24 @@ export async function runAdmSync(
     lastUsefulAdmEventAt,
     lastPlayerlistAt,
   });
+  const importReport: AdmDatabaseImportReport = {
+    ...buildAdmImportDebugReport(lines, {
+      admFileName: cursorFile ?? latestAdmFile,
+      cursorStart: Number(existingState?.last_processed_line ?? 0),
+      cursorEnd: cursorLine,
+    }),
+    attemptedDbWrites: totalLinesProcessed + eventsCreated,
+    successfulDbWrites: rawEventsStored + playerEventsStored + killEventsStored + buildEventsStored,
+    writtenKills: killEventsStored,
+    failedWrites: 0,
+    cursorBefore: Number(existingState?.last_processed_line ?? 0),
+    cursorAfter: cursorLine,
+    cursorAdvanced: cursorLine > Number(existingState?.last_processed_line ?? 0),
+    publicCacheUpdated: false,
+    discordQueuesCreated: 0,
+    cacheRefreshStatus: "skipped",
+    discordQueueStatus: "skipped",
+  };
   if (buildEventsStored > 0) console.log("DZN ADM BUILD EVENTS SYNCED", { linkedServerId: initialScope.linkedServerId, buildEventsStored });
   await upsertSyncState(env, initialScope.linkedServerId, {
     latestAdmFile,
@@ -950,6 +1013,7 @@ export async function runAdmSync(
     parserSkippedLines,
     unreadableFilesQueued: await countQueuedUnreadableAdmFiles(env, initialScope.linkedServerId),
     newestUnprocessedAdmFile: unreadableBeforeProcessing?.name ?? null,
+    importReportJson: JSON.stringify(importReport),
   });
   await recordSyncRun(env, {
     id: syncRunId,
@@ -1253,6 +1317,263 @@ export function buildAdmImportDebugReport(
   };
 }
 
+export async function importReadableAdmLinesIntoDatabase(
+  env: Env,
+  input: {
+    context: AdmSyncContext;
+    lines: string[];
+    admPath?: string | null;
+    triggerType?: "manual" | "scheduled" | string;
+    maxLinesPerRun?: number;
+    guildId?: string | null;
+    planKey?: PlanKey;
+    publicServerName?: string | null;
+    updatePublicCache?: boolean;
+    queueDiscordPosts?: boolean;
+  },
+): Promise<AdmFixtureImportResult> {
+  await ensureAdmSyncSchema(env);
+  const now = new Date().toISOString();
+  const triggerType: "manual" | "scheduled" = input.triggerType === "scheduled" ? "scheduled" : "manual";
+  const maxLinesPerRun = clampPositiveInteger(input.maxLinesPerRun ?? 50000, 50000);
+  const existingState = await getSyncState(env, input.context.linkedServerId);
+  const cursorBefore = Number(existingState?.last_processed_line ?? 0);
+  const fileStartLine = existingState?.last_processed_file === input.context.admFileName ? cursorBefore : 0;
+  const pendingLines = input.lines.slice(fileStartLine, fileStartLine + maxLinesPerRun);
+  const parsedLines = parseAdmLines(input.lines, { admDate: extractAdmDateFromFile(input.context.admFileName) ?? undefined });
+  const pendingParsedEvents = parsedLines.slice(fileStartLine, fileStartLine + maxLinesPerRun);
+  const baseReport = buildAdmImportDebugReport(input.lines, {
+    admFileName: input.context.admFileName,
+    cursorStart: fileStartLine,
+    cursorEnd: fileStartLine + pendingParsedEvents.length,
+  });
+  const recentDeathLines = new Map<string, number>();
+  const syncRunId = input.context.syncRunId ?? crypto.randomUUID();
+  const context = { ...input.context, syncRunId };
+  const startedAt = now;
+  let attemptedDbWrites = 0;
+  let successfulDbWrites = 0;
+  let rawEventsStored = 0;
+  let playerEventsStored = 0;
+  let killEventsStored = 0;
+  let buildEventsStored = 0;
+  let eventsCreated = 0;
+  let killsCreated = 0;
+  let deathsCreated = 0;
+  let joinsCreated = 0;
+  let disconnectsCreated = 0;
+  let unknownLines = 0;
+  let duplicateLines = 0;
+  let lastEventAt: string | null = null;
+  let cursorAfter = cursorBefore;
+  let publicCacheUpdated = false;
+  let discordQueuesCreated = 0;
+  let cacheRefreshStatus: AdmDatabaseImportReport["cacheRefreshStatus"] = "skipped";
+  let discordQueueStatus: AdmDatabaseImportReport["discordQueueStatus"] = "skipped";
+
+  const buildReport = (values: { failedWrites?: number; cursorLine?: number } = {}): AdmDatabaseImportReport => ({
+    ...baseReport,
+    attemptedDbWrites,
+    successfulDbWrites,
+    writtenKills: killEventsStored,
+    failedWrites: values.failedWrites ?? 0,
+    cursorBefore,
+    cursorAfter: values.cursorLine ?? cursorAfter,
+    cursorAdvanced: (values.cursorLine ?? cursorAfter) > cursorBefore,
+    publicCacheUpdated,
+    discordQueuesCreated,
+    cacheRefreshStatus,
+    discordQueueStatus,
+  });
+
+  try {
+    for (let index = 0; index < pendingParsedEvents.length; index += 1) {
+      const parsed = pendingParsedEvents[index];
+      const rawLine = parsed.rawLine;
+      const lineNumber = fileStartLine + index + 1;
+      attemptedDbWrites += 1;
+      const rawInserted = await insertRawEvent(env, context, lineNumber, rawLine, parsed);
+      if (rawInserted) {
+        rawEventsStored += 1;
+        successfulDbWrites += 1;
+      } else {
+        duplicateLines += 1;
+      }
+      if (parsed.eventType === "unknown") unknownLines += 1;
+
+      if (![
+        "admin_log_started",
+        "playerlist_snapshot",
+        "playerlist_delimiter",
+        "unknown",
+      ].includes(parsed.eventType)) {
+        attemptedDbWrites += 1;
+      }
+      const eventResult = await persistParsedEvent(env, context, lineNumber, parsed, { recentDeathLines });
+      const eventWrites = eventResult.playerEventsCreated + eventResult.killEventsCreated + eventResult.buildEventsCreated;
+      successfulDbWrites += eventWrites;
+      eventsCreated += eventResult.eventsCreated;
+      playerEventsStored += eventResult.playerEventsCreated;
+      killEventsStored += eventResult.killEventsCreated;
+      buildEventsStored += eventResult.buildEventsCreated;
+      killsCreated += eventResult.killsCreated;
+      deathsCreated += eventResult.deathsCreated;
+      joinsCreated += eventResult.joinsCreated;
+      disconnectsCreated += eventResult.disconnectsCreated;
+      if (eventWrites === 0 && parsed.eventType !== "admin_log_started" && parsed.eventType !== "playerlist_snapshot" && parsed.eventType !== "playerlist_delimiter" && parsed.eventType !== "unknown") {
+        duplicateLines += 1;
+      }
+      if (eventResult.eventsCreated > 0) lastEventAt = parsed.occurredAt ?? now;
+    }
+
+    cursorAfter = fileStartLine + pendingParsedEvents.length;
+    const uniquePlayers = await countUniquePlayers(env, context.linkedServerId);
+    await upsertServerStats(env, context.linkedServerId, {
+      sourceServiceId: context.nitradoServiceId,
+      kills: killsCreated,
+      deaths: deathsCreated,
+      joins: joinsCreated,
+      disconnects: disconnectsCreated,
+      uniquePlayers,
+      lastEventAt,
+    });
+    await rebuildServerStats(env, context.linkedServerId);
+
+    if (input.updatePublicCache && input.guildId && input.planKey) {
+      try {
+        await upsertServerPublicCache(env, {
+          guildId: input.guildId,
+          planKey: input.planKey,
+          publicServerName: input.publicServerName,
+          lastAdmUpdateAt: now,
+        });
+        publicCacheUpdated = true;
+        cacheRefreshStatus = "updated";
+      } catch {
+        cacheRefreshStatus = "failed";
+      }
+    }
+
+    if (input.queueDiscordPosts && input.guildId && input.planKey && (eventsCreated > 0 || killsCreated > 0 || buildEventsStored > 0)) {
+      try {
+        discordQueuesCreated = await queueDiscordPostUpdatesForGuild(env, input.guildId, input.planKey, [
+          "leaderboard_embed",
+          "daily_summary_embed",
+          "event_leaderboard_embed",
+          "network_ranking_embed",
+          "server_vs_server_embed",
+          "killfeed_embed",
+          "pve_feed_embed",
+          "hit_feed_embed",
+          "connection_feed_embed",
+          "build_feed_embed",
+          "admin_alerts_embed",
+          "admin_logs_embed",
+        ], "adm-data-change");
+        discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
+      } catch {
+        discordQueueStatus = "failed";
+      }
+    }
+
+    const report = buildReport({ cursorLine: cursorAfter });
+    await upsertSyncState(env, context.linkedServerId, {
+      latestAdmFile: context.admFileName,
+      latestAdmPath: input.admPath ?? context.admFileName,
+      sourceServiceId: context.nitradoServiceId,
+      lastProcessedFile: context.admFileName,
+      lastProcessedLine: cursorAfter,
+      lastProcessedOffset: pendingLines.reduce((total, line) => total + line.length + 1, 0),
+      status: "completed",
+      message: `Fixture ADM import completed. Kill events inserted this check: ${killsCreated}.`,
+      lastSyncAt: now,
+      linesRead: input.lines.length,
+      linesProcessed: pendingParsedEvents.length,
+      rawEventsStored,
+      playerEventsStored,
+      killEventsStored,
+      eventsCreated,
+      killsCreated,
+      unknownLines,
+      duplicateLines,
+      syncDurationMs: 0,
+      readableRoute: "fixture",
+      rawKillLinesFound: baseReport.rawKilledByLinesFound,
+      parsedKillLinesFound: baseReport.parsedPvpKills,
+      parserSkippedLines: baseReport.skippedDeadHitLines,
+      unreadableFilesQueued: 0,
+      newestUnprocessedAdmFile: null,
+      importReportJson: JSON.stringify(report),
+    });
+    await recordSyncRun(env, {
+      id: syncRunId,
+      linkedServerId: context.linkedServerId,
+      sourceServiceId: context.nitradoServiceId,
+      triggerType,
+      status: "completed",
+      message: "Fixture ADM import completed.",
+      linesRead: input.lines.length,
+      linesProcessed: pendingParsedEvents.length,
+      eventsCreated,
+      killsCreated,
+      startedAt,
+      finishedAt: now,
+      durationMs: 0,
+    });
+    const totals = await getAdmImportTotals(env, context.linkedServerId);
+    return {
+      status: "completed",
+      message: "Fixture ADM import completed.",
+      report,
+      cursorBefore,
+      cursorAfter,
+      totalKills: totals.totalKills,
+      totalDeaths: totals.totalDeaths,
+      longestKillDistance: totals.longestKillDistance,
+    };
+  } catch (error) {
+    const report = buildReport({ failedWrites: 1, cursorLine: cursorBefore });
+    await upsertSyncState(env, context.linkedServerId, {
+      latestAdmFile: context.admFileName,
+      latestAdmPath: input.admPath ?? context.admFileName,
+      sourceServiceId: context.nitradoServiceId,
+      lastProcessedFile: existingState?.last_processed_file ?? null,
+      lastProcessedLine: cursorBefore,
+      lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
+      status: "dzn_write_error",
+      message: `ADM write failed. ${safeSyncErrorMessage(error)}`,
+      lastSyncAt: now,
+      linesRead: input.lines.length,
+      linesProcessed: 0,
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      unknownLines: 0,
+      duplicateLines: 0,
+      syncDurationMs: 0,
+      readableRoute: "fixture",
+      rawKillLinesFound: baseReport.rawKilledByLinesFound,
+      parsedKillLinesFound: baseReport.parsedPvpKills,
+      parserSkippedLines: baseReport.skippedDeadHitLines,
+      unreadableFilesQueued: 0,
+      newestUnprocessedAdmFile: context.admFileName,
+      importReportJson: JSON.stringify(report),
+    });
+    return {
+      status: "dzn_write_error",
+      message: `ADM write failed. ${safeSyncErrorMessage(error)}`,
+      report,
+      cursorBefore,
+      cursorAfter: cursorBefore,
+      totalKills: 0,
+      totalDeaths: 0,
+      longestKillDistance: 0,
+    };
+  }
+}
+
 function clampCursorLine(value: number, lineCount: number) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -1362,6 +1683,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
         adm_sync_state.last_parser_skipped_lines,
         adm_sync_state.last_unreadable_files_queued,
         adm_sync_state.last_newest_unprocessed_adm_file,
+        adm_sync_state.last_import_report_json,
         server_sync_state.last_adm_discovery_check_at,
         server_sync_state.next_adm_discovery_due_at,
         server_sync_state.last_successful_adm_discovery_at,
@@ -1481,6 +1803,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     raw_kill_lines_found: numberOrZero(row?.last_raw_kill_lines_found),
     parsed_kill_lines_found: numberOrZero(row?.last_parsed_kill_lines_found),
     parser_skipped_lines: numberOrZero(row?.last_parser_skipped_lines),
+    last_adm_import_report: parseAdmDatabaseImportReport(row?.last_import_report_json),
     current_recovery_action: getAdmRecoveryAction(currentStatus, unreadableQueued),
     recent_sync_runs: recentRuns,
   };
@@ -2032,14 +2355,20 @@ export async function runScheduledAdmSync(
       });
       if (result.eventsCreated > 0 || result.killsCreated > 0 || result.buildEventsStored > 0) newDataFoundCount += 1;
       if (ok) {
+        let publicCacheUpdated = false;
+        let discordQueuesCreated = 0;
+        let cacheRefreshStatus: AdmDatabaseImportReport["cacheRefreshStatus"] = "skipped";
+        let discordQueueStatus: AdmDatabaseImportReport["discordQueueStatus"] = "skipped";
         await upsertServerPublicCache(env, {
           guildId: server.guild_id,
           planKey: server.plan_key,
           publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
           lastAdmUpdateAt: result.lastSyncAt,
         });
+        publicCacheUpdated = true;
+        cacheRefreshStatus = "updated";
         if (result.eventsCreated > 0 || result.killsCreated > 0) {
-          await queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
+          discordQueuesCreated = await queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
             "leaderboard_embed",
             "daily_summary_embed",
             "event_leaderboard_embed",
@@ -2053,7 +2382,14 @@ export async function runScheduledAdmSync(
             "admin_alerts_embed",
             "admin_logs_embed",
           ], "adm-data-change");
+          discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
         }
+        await updateLastAdmImportReport(env, server.id, {
+          publicCacheUpdated,
+          discordQueuesCreated,
+          cacheRefreshStatus,
+          discordQueueStatus,
+        });
       }
     } catch (error) {
       failed += 1;
@@ -2168,6 +2504,7 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["last_parser_skipped_lines", "INTEGER DEFAULT 0"],
     ["last_unreadable_files_queued", "INTEGER DEFAULT 0"],
     ["last_newest_unprocessed_adm_file", "TEXT"],
+    ["last_import_report_json", "TEXT"],
   ]);
   await ensureMissingColumns(db, "adm_raw_events", [
     ["source_service_id", "TEXT"],
@@ -2242,6 +2579,7 @@ async function upsertSyncState(
     parserSkippedLines?: number;
     unreadableFilesQueued?: number;
     newestUnprocessedAdmFile?: string | null;
+    importReportJson?: string | null;
   },
 ) {
   const db = requireDb(env);
@@ -2255,8 +2593,9 @@ async function upsertSyncState(
         last_kills_created, last_unknown_lines, last_duplicate_lines, last_sync_duration_ms,
         last_readable_route, last_raw_kill_lines_found, last_parsed_kill_lines_found,
         last_parser_skipped_lines, last_unreadable_files_queued, last_newest_unprocessed_adm_file,
+        last_import_report_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(linked_server_id) DO UPDATE SET
         source_service_id = COALESCE(excluded.source_service_id, adm_sync_state.source_service_id),
         latest_adm_file = excluded.latest_adm_file,
@@ -2283,6 +2622,7 @@ async function upsertSyncState(
         last_parser_skipped_lines = excluded.last_parser_skipped_lines,
         last_unreadable_files_queued = excluded.last_unreadable_files_queued,
         last_newest_unprocessed_adm_file = excluded.last_newest_unprocessed_adm_file,
+        last_import_report_json = COALESCE(excluded.last_import_report_json, adm_sync_state.last_import_report_json),
         updated_at = CURRENT_TIMESTAMP`,
     )
     .bind(
@@ -2313,6 +2653,7 @@ async function upsertSyncState(
       values.parserSkippedLines ?? 0,
       values.unreadableFilesQueued ?? 0,
       values.newestUnprocessedAdmFile ?? null,
+      values.importReportJson ?? null,
     )
     .run();
 }
@@ -3086,6 +3427,47 @@ async function rebuildServerStats(env: Env, linkedServerId: string) {
     .run();
 }
 
+async function getAdmImportTotals(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const [kills, deathsFromKills, deathsFromPlayerEvents, longestKill] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM kill_events WHERE linked_server_id = ? AND victim_name IS NOT NULL").bind(linkedServerId).first<{ count: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM player_events
+         WHERE linked_server_id = ?
+           AND event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats')`,
+      )
+      .bind(linkedServerId)
+      .first<{ count: number }>(),
+    db.prepare("SELECT MAX(COALESCE(distance, 0)) AS distance FROM kill_events WHERE linked_server_id = ?").bind(linkedServerId).first<{ distance: number | null }>(),
+  ]);
+  return {
+    totalKills: numberOrZero(kills?.count),
+    totalDeaths: numberOrZero(deathsFromKills?.count) + numberOrZero(deathsFromPlayerEvents?.count),
+    longestKillDistance: numberOrZero(longestKill?.distance),
+  };
+}
+
+async function updateLastAdmImportReport(env: Env, linkedServerId: string, patch: Partial<Pick<AdmDatabaseImportReport, "publicCacheUpdated" | "discordQueuesCreated" | "cacheRefreshStatus" | "discordQueueStatus">>) {
+  const db = requireDb(env);
+  const row = await db
+    .prepare("SELECT last_import_report_json FROM adm_sync_state WHERE linked_server_id = ? LIMIT 1")
+    .bind(linkedServerId)
+    .first<{ last_import_report_json: string | null }>();
+  if (!row?.last_import_report_json) return;
+  try {
+    const current = JSON.parse(row.last_import_report_json) as AdmDatabaseImportReport;
+    await db
+      .prepare("UPDATE adm_sync_state SET last_import_report_json = ?, updated_at = CURRENT_TIMESTAMP WHERE linked_server_id = ?")
+      .bind(JSON.stringify({ ...current, ...patch }), linkedServerId)
+      .run();
+  } catch {
+    return;
+  }
+}
+
 export async function recordSyncRun(
   env: Env,
   values: {
@@ -3461,6 +3843,38 @@ function nullablePositiveInteger(value: unknown) {
   return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : null;
 }
 
+function parseAdmDatabaseImportReport(value: unknown): AdmDatabaseImportReport | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<AdmDatabaseImportReport>;
+    return {
+      admFileName: typeof parsed.admFileName === "string" ? parsed.admFileName : null,
+      cursorStart: numberOrZero(parsed.cursorStart),
+      cursorEnd: numberOrZero(parsed.cursorEnd),
+      rawKilledByLinesFound: numberOrZero(parsed.rawKilledByLinesFound),
+      parsedPvpKills: numberOrZero(parsed.parsedPvpKills),
+      skippedDeadHitLines: numberOrZero(parsed.skippedDeadHitLines),
+      parsedSuicides: numberOrZero(parsed.parsedSuicides),
+      parsedUncreditedDeaths: numberOrZero(parsed.parsedUncreditedDeaths),
+      duplicateSkips: numberOrZero(parsed.duplicateSkips),
+      pvpKillLineNumbers: Array.isArray(parsed.pvpKillLineNumbers) ? parsed.pvpKillLineNumbers.map(numberOrZero).filter((line) => line > 0) : [],
+      attemptedDbWrites: numberOrZero(parsed.attemptedDbWrites),
+      successfulDbWrites: numberOrZero(parsed.successfulDbWrites),
+      writtenKills: numberOrZero(parsed.writtenKills),
+      failedWrites: numberOrZero(parsed.failedWrites),
+      cursorBefore: numberOrZero(parsed.cursorBefore),
+      cursorAfter: numberOrZero(parsed.cursorAfter),
+      cursorAdvanced: Boolean(parsed.cursorAdvanced),
+      publicCacheUpdated: Boolean(parsed.publicCacheUpdated),
+      discordQueuesCreated: numberOrZero(parsed.discordQueuesCreated),
+      cacheRefreshStatus: parsed.cacheRefreshStatus === "updated" || parsed.cacheRefreshStatus === "failed" ? parsed.cacheRefreshStatus : "skipped",
+      discordQueueStatus: parsed.discordQueueStatus === "queued" || parsed.discordQueueStatus === "failed" ? parsed.discordQueueStatus : "skipped",
+    };
+  } catch {
+    return null;
+  }
+}
+
 function nullableBoolean(value: unknown) {
   if (value === null || value === undefined) return null;
   return Number(value) === 1;
@@ -3534,6 +3948,7 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_parser_skipped_lines INTEGER DEFAULT 0,
     last_unreadable_files_queued INTEGER DEFAULT 0,
     last_newest_unprocessed_adm_file TEXT,
+    last_import_report_json TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,

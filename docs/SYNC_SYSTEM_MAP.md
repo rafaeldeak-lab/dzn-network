@@ -124,7 +124,8 @@ Cloudflare Worker Cron, every minute
 -> processing phase: get due active/trialing servers by next_adm_pull_due_at
 -> skip heavy parsing until a readable ADM is known and processing is due
 -> parse only new lines
--> write scoped stats/events/build data
+-> write scoped raw events, player events, kill events, profiles, stats, and build data
+-> advance the ADM cursor only after the database write path succeeds
 -> update adm_sync_state and server_sync_state
 -> update public cache/snapshots where applicable
 -> queue Discord post updates allowed by plan
@@ -136,6 +137,9 @@ Important behavior:
 - Discovery checks files but does not spam Discord.
 - Processing creates stats, events, public cache updates, and Discord post queues.
 - Processing also records observed ADM cadence from real ADM lines, especially PlayerList snapshots.
+- Sync Health includes a collapsed Last ADM Import Report with raw killed-by lines, parsed PvP kills, written kills, duplicate skips, failed writes, cursor before/after, public cache status, and Discord queue count.
+- Parser/write failures keep the previous cursor so the next run can retry the same ADM lines safely.
+- Duplicate protection includes server/service, ADM source evidence, timestamp, players, weapon, and distance, so repeated separate kills between the same players with the same weapon are not collapsed.
 - No new ADM log is recorded as a normal state, not a fatal failure.
 - Waiting after restart is recorded as a normal state.
 - Readable old stats remain active while waiting.

@@ -117,6 +117,8 @@ function auditRestartStateMachine() {
   checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_log_settings_verification_source", "Migration stores Nitrado settings verification source");
   checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_admin_log_enabled", "Migration stores Admin Log verification");
   checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_server_log_enabled", "Migration stores Server Log verification");
+  checkFile("migrations/0022_adm_import_report.sql", "ADM import report migration");
+  checkIncludes("migrations/0022_adm_import_report.sql", "last_import_report_json", "Migration stores latest ADM import report");
   checkFile("migrations/0020_adm_observed_cadence.sql", "ADM observed cadence migration");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "first_adm_after_restart_delay_minutes", "Migration stores first ADM after restart delay");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_playerlist_interval_minutes", "Migration stores observed PlayerList interval");
@@ -144,6 +146,9 @@ function auditDueServerSelection() {
   checkIncludes("functions/_lib/adm-sync.ts", "runAdmDiscoveryForLinkedServer", "Scheduled ADM runner has lightweight discovery phase");
   checkIncludes("functions/_lib/adm-sync.ts", "readMode: \"sample\"", "ADM discovery uses sample reads instead of full parsing");
   checkIncludes("functions/_lib/adm-sync.ts", "skipped_unreadable", "Processing skips unreadable newest ADM safely");
+  checkIncludes("functions/_lib/adm-sync.ts", "importReadableAdmLinesIntoDatabase", "Fixture import uses production database write helpers");
+  checkIncludes("functions/_lib/adm-sync.ts", "last_import_report_json", "Last ADM import report is saved");
+  checkIncludes("functions/_lib/adm-sync.ts", "cursorAdvanced", "Import report tracks cursor advancement");
 }
 
 function auditDiscordQueues() {
@@ -169,6 +174,7 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "Observed ADM Cadence", "Dashboard shows observed ADM cadence");
   checkIncludes("components/onboarding/dashboard.tsx", "Last PlayerList", "Dashboard shows last PlayerList time");
   checkIncludes("components/onboarding/dashboard.tsx", "Next Expected ADM Update", "Dashboard shows next expected ADM update");
+  checkIncludes("components/onboarding/dashboard.tsx", "Last ADM Import Report", "Dashboard shows last ADM import report diagnostics");
 }
 
 function auditPackageCommand() {

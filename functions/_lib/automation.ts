@@ -862,6 +862,7 @@ export async function upsertServerPublicCache(env: Env, input: {
 export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string, planKey: PlanKey, postTypes: AutoPostType[], reason: string) {
   await ensureAutomationSchema(env);
   const now = new Date().toISOString();
+  let queued = 0;
   for (const postType of postTypes) {
     if (!hasAutoPost(planKey, postType)) continue;
     const update = await requireDb(env)
@@ -880,9 +881,12 @@ export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string,
       )
       .bind(reason, now, now, guildId, postType)
       .run();
-    if (Number(update.meta?.changes ?? 0) > 0) continue;
+    if (Number(update.meta?.changes ?? 0) > 0) {
+      queued += 1;
+      continue;
+    }
 
-    await requireDb(env)
+    const insert = await requireDb(env)
       .prepare(
         `INSERT OR IGNORE INTO automation_jobs (
           id, guild_id, job_type, post_type, status, attempts, max_attempts, last_error, run_after, created_at, updated_at
@@ -890,7 +894,9 @@ export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string,
       )
       .bind(crypto.randomUUID(), guildId, postType, reason, now, now, now)
       .run();
+    if (Number(insert.meta?.changes ?? 0) > 0) queued += 1;
   }
+  return queued;
 }
 
 export async function getNitradoLogSettingsConfirmation(env: Env, guildId: string) {

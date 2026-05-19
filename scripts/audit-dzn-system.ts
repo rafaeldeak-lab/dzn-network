@@ -239,12 +239,14 @@ function auditDatabaseMigrations() {
   checkFile("migrations/0019_adm_discovery_and_nitrado_settings.sql", "Migration 0019 ADM discovery and Nitrado settings");
   checkFile("migrations/0020_adm_observed_cadence.sql", "Migration 0020 ADM observed cadence");
   checkFile("migrations/0021_nitrado_log_settings_verification.sql", "Migration 0021 Nitrado log settings verification");
+  checkFile("migrations/0022_adm_import_report.sql", "Migration 0022 ADM import report");
   checkIncludes("migrations/0017_discord_post_dispatch_state.sql", "last_dispatch_status", "Discord dispatch state migration columns");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_available_adm_filename", "ADM reset state migration columns");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "ADM discovery due migration columns");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "nitrado_log_playerlist_confirmed", "Nitrado log settings migration columns");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_adm_cadence_minutes", "ADM observed cadence migration columns");
   checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_log_settings_verification_source", "Nitrado settings verification migration columns");
+  checkIncludes("migrations/0022_adm_import_report.sql", "last_import_report_json", "ADM import report migration columns");
   checkIncludes("functions/_lib/automation.ts", "last_seen_adm_timestamp", "ADM timestamp tracking columns");
   checkIncludes("functions/_lib/automation.ts", "last_adm_discovery_check_at", "ADM discovery check tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_available_adm_filename", "Newest available ADM tracking");
@@ -278,6 +280,7 @@ function auditDashboardStructure() {
   checkIncludes(dashboard, "Check Nitrado Log Settings", "Nitrado log settings can be checked automatically");
   checkIncludes(dashboard, "Checks for new ADM files every", "ADM discovery timing is visible");
   checkIncludes(dashboard, "Processes readable ADM data every", "ADM processing timing is visible");
+  checkIncludes(dashboard, "Last ADM Import Report", "ADM import report diagnostics are visible when expanded");
 }
 
 function auditDiscordAutoPosts() {
@@ -295,7 +298,7 @@ function auditDiscordAutoPosts() {
 
 function auditPackageCommands() {
   const packageJson = JSON.parse(readSource("package.json")) as { scripts?: Record<string, string> };
-  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "test:full-system"]) {
+  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "test:adm-import-pipeline", "test:full-system"]) {
     if (packageJson.scripts?.[command]) pass(`Package command ${command}`, packageJson.scripts[command]);
     else fail(`Package command ${command}`, "Package command is missing.");
   }
@@ -313,6 +316,8 @@ function auditAdmSyncWiring() {
   checkIncludes("functions/_lib/automation.ts", "lower(server_subscriptions.status) IN ('active', 'trialing')", "ADM automation filters active/trialing subscriptions");
   checkIncludes("functions/_lib/automation.ts", "currently_syncing_adm", "ADM automation lock is enforced");
   checkIncludes("functions/_lib/adm-sync.ts", "queueDiscordPostUpdatesForGuild", "ADM data changes queue Discord post updates");
+  checkIncludes("functions/_lib/adm-sync.ts", "importReadableAdmLinesIntoDatabase", "ADM fixture import uses database write path");
+  checkIncludes("functions/_lib/adm-sync.ts", "last_import_report_json", "ADM import report is stored with sync state");
 }
 
 function printReport() {
