@@ -113,6 +113,10 @@ function auditRestartStateMachine() {
   checkFile("migrations/0019_adm_discovery_and_nitrado_settings.sql", "ADM discovery/settings migration");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "Migration stores ADM discovery due state");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "nitrado_reduce_log_output_confirmed", "Migration stores Nitrado Reduce Log Output confirmation");
+  checkFile("migrations/0020_adm_observed_cadence.sql", "ADM observed cadence migration");
+  checkIncludes("migrations/0020_adm_observed_cadence.sql", "first_adm_after_restart_delay_minutes", "Migration stores first ADM after restart delay");
+  checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_playerlist_interval_minutes", "Migration stores observed PlayerList interval");
+  checkIncludes("migrations/0020_adm_observed_cadence.sql", "last_useful_adm_event_at", "Migration stores last useful ADM event");
 }
 
 function auditNoWipeAndUnreadableHandling() {
@@ -153,6 +157,9 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.", "Dashboard latest-unreadable wording");
   checkIncludes("components/onboarding/dashboard.tsx", "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.", "Dashboard delayed-after-restart wording");
   checkIncludes("components/onboarding/dashboard.tsx", "No new ADM lines.", "Dashboard no-new-log wording");
+  checkIncludes("components/onboarding/dashboard.tsx", "Observed ADM Cadence", "Dashboard shows observed ADM cadence");
+  checkIncludes("components/onboarding/dashboard.tsx", "Last PlayerList", "Dashboard shows last PlayerList time");
+  checkIncludes("components/onboarding/dashboard.tsx", "Next Expected ADM Update", "Dashboard shows next expected ADM update");
 }
 
 function auditPackageCommand() {

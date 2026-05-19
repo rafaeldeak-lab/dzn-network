@@ -26,6 +26,7 @@ import {
   getDueAdmAutomationServers,
   markAdmPullStarted,
   queueDiscordPostUpdatesForGuild,
+  recordAdmCadenceObservation,
   recordAdmDiscoveryResult,
   recordAdmPullResult,
   upsertServerPublicCache,
@@ -100,6 +101,9 @@ export type AdmSyncResult = {
   newestAvailableAdmTimestamp?: string | null;
   newestReadableAdmFile?: string | null;
   newestReadableAdmTimestamp?: string | null;
+  firstUsefulAdmLineAt?: string | null;
+  lastUsefulAdmEventAt?: string | null;
+  lastPlayerlistAt?: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;
   readableRouteUsed: string | null;
@@ -199,6 +203,15 @@ export type AdmSyncStatus = {
   newest_available_adm_timestamp: string | null;
   newest_readable_adm_filename: string | null;
   newest_readable_adm_timestamp: string | null;
+  first_adm_after_restart_at: string | null;
+  first_adm_after_restart_delay_minutes: number | null;
+  first_useful_adm_line_after_restart_at: string | null;
+  observed_playerlist_interval_minutes: number | null;
+  observed_adm_cadence_minutes: number | null;
+  newest_adm_file_age_minutes: number | null;
+  last_useful_adm_event_at: string | null;
+  last_playerlist_at: string | null;
+  next_expected_adm_update_at: string | null;
   nitrado_reduce_log_output_confirmed: boolean;
   nitrado_log_playerlist_confirmed: boolean;
   nitrado_log_settings_confirmed_at: string | null;
@@ -659,6 +672,9 @@ export async function runAdmSync(
   let creditedKillLinesFound = 0;
   let parsedKillLinesFound = 0;
   let parserSkippedLines = 0;
+  let firstUsefulAdmLineAt: string | null = null;
+  let lastUsefulAdmEventAt: string | null = null;
+  let lastPlayerlistAt: string | null = null;
   let cursorFile = existingState?.last_processed_file ?? null;
   let cursorLine = Number(existingState?.last_processed_line ?? 0);
   let cursorOffset = Number(existingState?.last_processed_offset ?? 0);
@@ -736,6 +752,14 @@ export async function runAdmSync(
         const parsed = pendingParsedEvents[index];
         const rawLine = parsed.rawLine;
         const lineNumber = fileStartLine + index + 1;
+        const cadenceTimestamp = parsed.occurredAt ?? now;
+        if (isUsefulAdmCadenceEvent(parsed)) {
+          firstUsefulAdmLineAt ??= cadenceTimestamp;
+          lastUsefulAdmEventAt = cadenceTimestamp;
+        }
+        if (parsed.eventType === "playerlist_snapshot") {
+          lastPlayerlistAt = cadenceTimestamp;
+        }
         const rawInserted = await insertRawEvent(env, fileScope, lineNumber, rawLine, parsed);
         processedOffset += rawLine.length + 1;
         if (!rawInserted) duplicateLines += 1;
@@ -875,6 +899,12 @@ export async function runAdmSync(
     lastEventAt,
   });
   await rebuildServerBuildStats(env, initialScope.linkedServerId);
+  await recordAdmCadenceObservation(env, {
+    linkedServerId: initialScope.linkedServerId,
+    firstUsefulAdmLineAt,
+    lastUsefulAdmEventAt,
+    lastPlayerlistAt,
+  });
   if (buildEventsStored > 0) console.log("DZN ADM BUILD EVENTS SYNCED", { linkedServerId: initialScope.linkedServerId, buildEventsStored });
   await upsertSyncState(env, initialScope.linkedServerId, {
     latestAdmFile,
@@ -942,6 +972,9 @@ export async function runAdmSync(
     newestAvailableAdmTimestamp,
     newestReadableAdmFile: newestReadableAdm?.name ?? null,
     newestReadableAdmTimestamp,
+    firstUsefulAdmLineAt,
+    lastUsefulAdmEventAt,
+    lastPlayerlistAt,
     lastProcessedLine: cursorLine,
     lastSyncAt: now,
     readableRouteUsed,
@@ -971,6 +1004,14 @@ export function classifyAdmSyncOutcome(values: {
   }
   if (values.eventsCreated <= 0 && values.killsCreated <= 0 && values.buildEventsStored <= 0) return "no_supported_events";
   return "completed";
+}
+
+function isUsefulAdmCadenceEvent(parsed: ParsedAdmEvent) {
+  return ![
+    "admin_log_started",
+    "playerlist_delimiter",
+    "unknown",
+  ].includes(parsed.eventType);
 }
 
 export function isAdmSyncErrorStatus(status: string | null | undefined) {
@@ -1253,6 +1294,13 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
         server_sync_state.newest_available_adm_timestamp,
         server_sync_state.newest_readable_adm_filename,
         server_sync_state.newest_readable_adm_timestamp,
+        server_sync_state.first_adm_after_restart_at,
+        server_sync_state.first_adm_after_restart_delay_minutes,
+        server_sync_state.first_useful_adm_line_after_restart_at,
+        server_sync_state.observed_playerlist_interval_minutes,
+        server_sync_state.observed_adm_cadence_minutes,
+        server_sync_state.last_useful_adm_event_at,
+        server_sync_state.last_playerlist_at,
         server_sync_state.nitrado_reduce_log_output_confirmed,
         server_sync_state.nitrado_log_playerlist_confirmed,
         server_sync_state.nitrado_log_settings_confirmed_at,
@@ -1279,6 +1327,13 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     getNewestUnprocessedAdmFile(env, linkedServer.id),
   ]);
   const currentStatus = stringOrDefault(row?.last_sync_status, "not_started");
+  const newestAvailableAdmTimestamp = typeof row?.newest_available_adm_timestamp === "string" ? row.newest_available_adm_timestamp : null;
+  const observedAdmCadenceMinutes = nullablePositiveInteger(row?.observed_adm_cadence_minutes);
+  const lastCadenceAnchor = typeof row?.last_playerlist_at === "string"
+    ? row.last_playerlist_at
+    : typeof row?.last_useful_adm_event_at === "string"
+      ? row.last_useful_adm_event_at
+      : null;
 
   return {
     last_sync_status: currentStatus,
@@ -1311,9 +1366,18 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     adm_discovery_status: typeof row?.adm_discovery_status === "string" ? row.adm_discovery_status : null,
     next_adm_pull_due_at: typeof row?.next_adm_pull_due_at === "string" ? row.next_adm_pull_due_at : null,
     newest_available_adm_filename: typeof row?.newest_available_adm_filename === "string" ? row.newest_available_adm_filename : null,
-    newest_available_adm_timestamp: typeof row?.newest_available_adm_timestamp === "string" ? row.newest_available_adm_timestamp : null,
+    newest_available_adm_timestamp: newestAvailableAdmTimestamp,
     newest_readable_adm_filename: typeof row?.newest_readable_adm_filename === "string" ? row.newest_readable_adm_filename : null,
     newest_readable_adm_timestamp: typeof row?.newest_readable_adm_timestamp === "string" ? row.newest_readable_adm_timestamp : null,
+    first_adm_after_restart_at: typeof row?.first_adm_after_restart_at === "string" ? row.first_adm_after_restart_at : null,
+    first_adm_after_restart_delay_minutes: nullablePositiveInteger(row?.first_adm_after_restart_delay_minutes),
+    first_useful_adm_line_after_restart_at: typeof row?.first_useful_adm_line_after_restart_at === "string" ? row.first_useful_adm_line_after_restart_at : null,
+    observed_playerlist_interval_minutes: nullablePositiveInteger(row?.observed_playerlist_interval_minutes),
+    observed_adm_cadence_minutes: observedAdmCadenceMinutes,
+    newest_adm_file_age_minutes: newestAvailableAdmTimestamp ? minutesSinceIso(newestAvailableAdmTimestamp) : null,
+    last_useful_adm_event_at: typeof row?.last_useful_adm_event_at === "string" ? row.last_useful_adm_event_at : null,
+    last_playerlist_at: typeof row?.last_playerlist_at === "string" ? row.last_playerlist_at : null,
+    next_expected_adm_update_at: lastCadenceAnchor && observedAdmCadenceMinutes ? addMinutesToIso(lastCadenceAnchor, observedAdmCadenceMinutes) : null,
     nitrado_reduce_log_output_confirmed: Number(row?.nitrado_reduce_log_output_confirmed ?? 0) === 1,
     nitrado_log_playerlist_confirmed: Number(row?.nitrado_log_playerlist_confirmed ?? 0) === 1,
     nitrado_log_settings_confirmed_at: typeof row?.nitrado_log_settings_confirmed_at === "string" ? row.nitrado_log_settings_confirmed_at : null,
@@ -1869,6 +1933,9 @@ export async function runScheduledAdmSync(
         newestAvailableAdmTimestamp: result.newestAvailableAdmTimestamp ?? result.latestAdmTimestamp ?? null,
         newestReadableAdmFile: result.newestReadableAdmFile ?? null,
         newestReadableAdmTimestamp: result.newestReadableAdmTimestamp ?? null,
+        firstUsefulAdmLineAt: result.firstUsefulAdmLineAt ?? null,
+        lastUsefulAdmEventAt: result.lastUsefulAdmEventAt ?? null,
+        lastPlayerlistAt: result.lastPlayerlistAt ?? null,
         processedAdmFile: result.latestAdmFile,
         processedOffset: result.lastProcessedLine,
         processedLine: result.lastProcessedLine,
@@ -3298,6 +3365,23 @@ function stringOrDefault(value: unknown, fallback: string) {
 
 function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0) || 0;
+}
+
+function nullablePositiveInteger(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : null;
+}
+
+function minutesSinceIso(value: string, nowMs = Date.now()) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp) || timestamp > nowMs) return null;
+  return Math.max(0, Math.round((nowMs - timestamp) / 60000));
+}
+
+function addMinutesToIso(value: string, minutes: number) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  return new Date(timestamp + Math.max(0, Math.round(minutes)) * 60000).toISOString();
 }
 
 function firstString(...values: unknown[]) {

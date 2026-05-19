@@ -135,12 +135,34 @@ Important behavior:
 
 - Discovery checks files but does not spam Discord.
 - Processing creates stats, events, public cache updates, and Discord post queues.
+- Processing also records observed ADM cadence from real ADM lines, especially PlayerList snapshots.
 - No new ADM log is recorded as a normal state, not a fatal failure.
 - Waiting after restart is recorded as a normal state.
 - Readable old stats remain active while waiting.
 - DZN must not wipe stats because Nitrado has not published a new file yet.
 - Parser/write failures do not advance the cursor.
 - Old failed sync rows can be cleared after a later successful sync.
+
+Observed cadence fields:
+
+| Field | Meaning |
+| --- | --- |
+| `first_adm_after_restart_at` | First ADM file timestamp observed after the last detected restart. |
+| `first_adm_after_restart_delay_minutes` | Minutes between detected restart and first observed ADM file. |
+| `first_useful_adm_line_after_restart_at` | First parsed useful ADM line after restart. |
+| `observed_playerlist_interval_minutes` | Interval between the last two observed PlayerList snapshots. |
+| `observed_adm_cadence_minutes` | Best current cadence estimate, preferring PlayerList interval when available. |
+| `last_playerlist_at` | Last observed `PlayerList log` timestamp. |
+| `last_useful_adm_event_at` | Last parsed useful ADM event timestamp. |
+| `newest_adm_file_age_minutes` | Current age of the newest available ADM file, computed for the dashboard. |
+| `next_expected_adm_update_at` | Estimated next ADM update time based on observed cadence. |
+
+Dashboard wording examples:
+
+- `Observed ADM cadence: around 5 minutes`
+- `Last ADM event: 14:28`
+- `Last PlayerList: 14:28`
+- `Next expected ADM update: around 14:33`
 
 Reset-aware states:
 

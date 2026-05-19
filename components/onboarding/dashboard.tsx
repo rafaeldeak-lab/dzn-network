@@ -952,7 +952,14 @@ function ServerDashboard({
                 <MiniInfo label="Next Discovery Check" value={syncStatus?.next_adm_discovery_due_at ? formatDashboardDate(syncStatus.next_adm_discovery_due_at) : "Not scheduled"} />
                 <MiniInfo label="Discovery Status" value={formatSyncStatus(syncStatus?.adm_discovery_status ?? effectiveSyncStatus)} />
                 <MiniInfo label="Newest Available ADM" value={syncStatus?.newest_available_adm_filename ?? latestAdmFile} />
+                <MiniInfo label="Newest ADM Age" value={formatMinutesAgo(syncStatus?.newest_adm_file_age_minutes, "Waiting for ADM")} />
                 <MiniInfo label="Newest Readable ADM" value={syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
+                <MiniInfo label="Observed ADM Cadence" value={formatAdmCadence(syncStatus?.observed_adm_cadence_minutes)} />
+                <MiniInfo label="Last ADM Event" value={syncStatus?.last_useful_adm_event_at ? formatCompactDate(syncStatus.last_useful_adm_event_at) : "No useful event yet"} />
+                <MiniInfo label="Last PlayerList" value={syncStatus?.last_playerlist_at ? formatCompactDate(syncStatus.last_playerlist_at) : "No PlayerList yet"} />
+                <MiniInfo label="Next Expected ADM Update" value={syncStatus?.next_expected_adm_update_at ? `around ${formatCompactDate(syncStatus.next_expected_adm_update_at)}` : "Waiting for cadence"} />
+                <MiniInfo label="First ADM After Restart" value={formatFirstAdmAfterRestart(syncStatus)} />
+                <MiniInfo label="First Useful Line After Restart" value={syncStatus?.first_useful_adm_line_after_restart_at ? formatDashboardDate(syncStatus.first_useful_adm_line_after_restart_at) : "Waiting"} />
                 <MiniInfo label="ADM Processing" value={admProcessingInterval ? `Processes readable ADM data every ${admProcessingInterval} minutes` : "Plan loading"} />
                 <MiniInfo label="Next Processing Check" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(syncStatus.next_adm_pull_due_at) : "Not scheduled"} />
                 <MiniInfo label="Latest File Readable" value={latestAdmReadable} />
@@ -3786,6 +3793,24 @@ function formatCompactDate(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatAdmCadence(value: number | null | undefined) {
+  if (!value || !Number.isFinite(value)) return "Learning from ADM";
+  return `around ${Math.round(value)} minutes`;
+}
+
+function formatMinutesAgo(value: number | null | undefined, fallback: string) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return fallback;
+  if (value <= 0) return "just now";
+  return `${Math.round(value)} minutes old`;
+}
+
+function formatFirstAdmAfterRestart(syncStatus: AdmSyncStatus | null | undefined) {
+  if (!syncStatus?.first_adm_after_restart_at) return "Waiting";
+  const delay = syncStatus.first_adm_after_restart_delay_minutes;
+  const suffix = delay ? ` (${delay} min after restart)` : "";
+  return `${formatCompactDate(syncStatus.first_adm_after_restart_at)}${suffix}`;
 }
 
 function formatClockTime(value: string | null) {

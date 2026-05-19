@@ -559,6 +559,15 @@ export type AdmSyncStatus = {
   newest_available_adm_timestamp: string | null;
   newest_readable_adm_filename: string | null;
   newest_readable_adm_timestamp: string | null;
+  first_adm_after_restart_at: string | null;
+  first_adm_after_restart_delay_minutes: number | null;
+  first_useful_adm_line_after_restart_at: string | null;
+  observed_playerlist_interval_minutes: number | null;
+  observed_adm_cadence_minutes: number | null;
+  newest_adm_file_age_minutes: number | null;
+  last_useful_adm_event_at: string | null;
+  last_playerlist_at: string | null;
+  next_expected_adm_update_at: string | null;
   nitrado_reduce_log_output_confirmed: boolean;
   nitrado_log_playerlist_confirmed: boolean;
   nitrado_log_settings_confirmed_at: string | null;

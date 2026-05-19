@@ -208,6 +208,7 @@ assert.equal(systemAuditSource.includes("functions/api/servers/[serverId]/auto-p
 assert.equal(systemAuditSource.includes("auditAdmSyncWiring"), true);
 assert.equal(systemAuditSource.includes("0018_adm_reset_state_tracking.sql"), true);
 assert.equal(systemAuditSource.includes("0019_adm_discovery_and_nitrado_settings.sql"), true);
+assert.equal(systemAuditSource.includes("0020_adm_observed_cadence.sql"), true);
 assert.equal(systemAuditSource.includes("Total checks"), true);
 
 const admAuditSource = readFileSync("scripts/audit-adm-sync.ts", "utf8");
@@ -220,6 +221,7 @@ assert.equal(admAuditSource.includes("delayed_after_restart"), true);
 assert.equal(admAuditSource.includes("queueDiscordPostUpdatesForGuild"), true);
 assert.equal(readFileSync("migrations/0018_adm_reset_state_tracking.sql", "utf8").includes("last_restart_detected_source"), true);
 assert.equal(readFileSync("migrations/0019_adm_discovery_and_nitrado_settings.sql", "utf8").includes("nitrado_log_playerlist_confirmed"), true);
+assert.equal(readFileSync("migrations/0020_adm_observed_cadence.sql", "utf8").includes("observed_adm_cadence_minutes"), true);
 
 const liveCheckSource = readFileSync("scripts/check-automation-live.ts", "utf8");
 assert.equal(liveCheckSource.includes("https://dzn-network.pages.dev"), true);
@@ -243,6 +245,7 @@ const syncMapDoc = readFileSync("docs/SYNC_SYSTEM_MAP.md", "utf8");
 assert.equal(syncMapDoc.includes("Fast Server Status Sync"), true);
 assert.equal(syncMapDoc.includes("ADM / Backend Log Sync"), true);
 assert.equal(syncMapDoc.includes("ADM Discovery vs ADM Processing"), true);
+assert.equal(syncMapDoc.includes("Observed ADM cadence"), true);
 assert.equal(syncMapDoc.includes("Reduce Log Output"), true);
 assert.equal(syncMapDoc.includes("Discord Auto-Post Dispatcher"), true);
 assert.equal(syncMapDoc.includes("Cloudflare Worker Cron"), true);
@@ -272,6 +275,8 @@ assert.equal(dashboardSource.includes("ADM Discovery:"), true);
 assert.equal(dashboardSource.includes("Nitrado Log Settings"), true);
 assert.equal(dashboardSource.includes("Checks for new ADM files every"), true);
 assert.equal(dashboardSource.includes("Processes readable ADM data every"), true);
+assert.equal(dashboardSource.includes("Observed ADM Cadence"), true);
+assert.equal(dashboardSource.includes("Next Expected ADM Update"), true);
 assert.equal(dashboardSource.includes("Last Cron Source"), true);
 assert.equal(dashboardSource.includes("Missing permissions"), true);
 assert.equal(dashboardSource.includes("ADM logs can appear 5-45 minutes after a restart"), true);

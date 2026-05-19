@@ -237,15 +237,18 @@ function auditDatabaseMigrations() {
   checkFile("migrations/0017_discord_post_dispatch_state.sql", "Migration 0017 Discord dispatch state");
   checkFile("migrations/0018_adm_reset_state_tracking.sql", "Migration 0018 ADM reset state tracking");
   checkFile("migrations/0019_adm_discovery_and_nitrado_settings.sql", "Migration 0019 ADM discovery and Nitrado settings");
+  checkFile("migrations/0020_adm_observed_cadence.sql", "Migration 0020 ADM observed cadence");
   checkIncludes("migrations/0017_discord_post_dispatch_state.sql", "last_dispatch_status", "Discord dispatch state migration columns");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_available_adm_filename", "ADM reset state migration columns");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "ADM discovery due migration columns");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "nitrado_log_playerlist_confirmed", "Nitrado log settings migration columns");
+  checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_adm_cadence_minutes", "ADM observed cadence migration columns");
   checkIncludes("functions/_lib/automation.ts", "last_seen_adm_timestamp", "ADM timestamp tracking columns");
   checkIncludes("functions/_lib/automation.ts", "last_adm_discovery_check_at", "ADM discovery check tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_available_adm_filename", "Newest available ADM tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_readable_adm_filename", "Newest readable ADM tracking");
   checkIncludes("functions/_lib/automation.ts", "last_restart_detected_source", "Restart detection source tracking");
+  checkIncludes("functions/_lib/automation.ts", "recordAdmCadenceObservation", "Observed ADM cadence tracking");
 }
 
 function auditDashboardStructure() {

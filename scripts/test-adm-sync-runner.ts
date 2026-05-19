@@ -123,6 +123,14 @@ assert.equal(admSyncSource.includes("readMode: \"sample\""), true);
 assert.equal(admSyncSource.includes("discovery_due_count"), true);
 assert.equal(admSyncSource.includes("processing_due_count"), true);
 assert.equal(admSyncSource.includes("skipped_unreadable"), true);
+assert.equal(admSyncSource.includes("recordAdmCadenceObservation"), true);
+assert.equal(admSyncSource.includes("isUsefulAdmCadenceEvent"), true);
+assert.equal(admSyncSource.includes("lastPlayerlistAt"), true);
+const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
+assert.equal(automationSource.includes("first_adm_after_restart_delay_minutes"), true);
+assert.equal(automationSource.includes("observed_playerlist_interval_minutes"), true);
+const cadenceMigrationSource = readFileSync("migrations/0020_adm_observed_cadence.sql", "utf8");
+assert.equal(cadenceMigrationSource.includes("last_useful_adm_event_at"), true);
 
 const env = { DZN_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {

@@ -45,6 +45,9 @@ export type AutomationSyncServer = {
   newest_available_adm_timestamp?: string | null;
   newest_readable_adm_filename?: string | null;
   newest_readable_adm_timestamp?: string | null;
+  observed_adm_cadence_minutes?: number | null;
+  last_playerlist_at?: string | null;
+  last_useful_adm_event_at?: string | null;
 };
 
 export async function ensureAutomationSchema(env: Env) {
@@ -523,13 +526,13 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
   const nextDue = addMinutesIso(now, getAdmDiscoveryIntervalMinutes(values.planKey));
   const currentState = await db
     .prepare(
-      `SELECT last_seen_adm_filename, last_server_restart_at
+      `SELECT last_seen_adm_filename, last_server_restart_at, first_adm_after_restart_at
        FROM server_sync_state
        WHERE guild_id = ?
        LIMIT 1`,
     )
     .bind(values.guildId)
-    .first<{ last_seen_adm_filename: string | null; last_server_restart_at: string | null }>()
+    .first<{ last_seen_adm_filename: string | null; last_server_restart_at: string | null; first_adm_after_restart_at: string | null }>()
     .catch(() => null);
   const newestAvailableFile = values.newestAvailableAdmFile ?? null;
   const newestAvailableTimestamp = values.newestAvailableAdmTimestamp ?? null;
@@ -541,6 +544,12 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
     latestAdmFile: newestAvailableFile,
     lastServerRestartAt: restartAt,
   });
+  const firstAdmAfterRestartAt = getFirstObservationAfterRestart(
+    currentState?.first_adm_after_restart_at ?? null,
+    restartAt,
+    newestAvailableTimestamp ?? values.newestReadableAdmTimestamp ?? null,
+  );
+  const firstAdmDelayMinutes = firstAdmAfterRestartAt && restartAt ? minutesBetweenIso(restartAt, firstAdmAfterRestartAt) : null;
 
   await db
     .prepare(
@@ -557,6 +566,8 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
         newest_available_adm_timestamp = COALESCE(?, newest_available_adm_timestamp),
         newest_readable_adm_filename = COALESCE(?, newest_readable_adm_filename),
         newest_readable_adm_timestamp = COALESCE(?, newest_readable_adm_timestamp),
+        first_adm_after_restart_at = CASE WHEN ? THEN ? ELSE first_adm_after_restart_at END,
+        first_adm_after_restart_delay_minutes = CASE WHEN ? THEN ? ELSE first_adm_after_restart_delay_minutes END,
         last_server_restart_at = CASE WHEN ? THEN ? ELSE last_server_restart_at END,
         last_restart_detected_source = CASE WHEN ? THEN 'adm_filename' ELSE last_restart_detected_source END,
         last_restart_detected_at = CASE WHEN ? THEN ? ELSE last_restart_detected_at END,
@@ -584,6 +595,10 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
       newestAvailableTimestamp,
       values.newestReadableAdmFile ?? null,
       values.newestReadableAdmTimestamp ?? null,
+      firstAdmAfterRestartAt ? 1 : 0,
+      firstAdmAfterRestartAt,
+      firstAdmDelayMinutes !== null ? 1 : 0,
+      firstAdmDelayMinutes,
       restartFromAdmFile ? 1 : 0,
       restartAt,
       restartFromAdmFile ? 1 : 0,
@@ -593,6 +608,88 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
       normalizedStatus,
       now,
       values.guildId,
+    )
+    .run();
+}
+
+export async function recordAdmCadenceObservation(env: Env, values: {
+  linkedServerId: string;
+  firstUsefulAdmLineAt?: string | null;
+  lastUsefulAdmEventAt?: string | null;
+  lastPlayerlistAt?: string | null;
+}) {
+  await ensureAutomationSchema(env);
+  const db = requireDb(env);
+  const row = await db
+    .prepare(
+      `SELECT linked_servers.guild_id,
+              server_sync_state.last_server_restart_at,
+              server_sync_state.first_useful_adm_line_after_restart_at,
+              server_sync_state.last_useful_adm_event_at,
+              server_sync_state.previous_playerlist_at,
+              server_sync_state.last_playerlist_at,
+              server_sync_state.observed_playerlist_interval_minutes,
+              server_sync_state.observed_adm_cadence_minutes
+       FROM linked_servers
+       LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
+       WHERE linked_servers.id = ?
+       LIMIT 1`,
+    )
+    .bind(values.linkedServerId)
+    .first<{
+      guild_id: string | null;
+      last_server_restart_at: string | null;
+      first_useful_adm_line_after_restart_at: string | null;
+      last_useful_adm_event_at: string | null;
+      previous_playerlist_at: string | null;
+      last_playerlist_at: string | null;
+      observed_playerlist_interval_minutes: number | null;
+      observed_adm_cadence_minutes: number | null;
+    }>();
+
+  const guildId = row?.guild_id;
+  if (!guildId) return;
+
+  const restartAt = row.last_server_restart_at ?? null;
+  const firstUsefulAfterRestartAt = getFirstObservationAfterRestart(
+    row.first_useful_adm_line_after_restart_at ?? null,
+    restartAt,
+    values.firstUsefulAdmLineAt ?? null,
+  );
+  const nextLastUseful = maxIso(row.last_useful_adm_event_at ?? null, values.lastUsefulAdmEventAt ?? null);
+  const nextPlayerlistAt = maxIso(row.last_playerlist_at ?? null, values.lastPlayerlistAt ?? null);
+  const playerlistAdvanced = Boolean(values.lastPlayerlistAt && nextPlayerlistAt === values.lastPlayerlistAt && nextPlayerlistAt !== row.last_playerlist_at);
+  const usefulAdvanced = Boolean(values.lastUsefulAdmEventAt && nextLastUseful === values.lastUsefulAdmEventAt && nextLastUseful !== row.last_useful_adm_event_at);
+  const playerlistInterval = playerlistAdvanced
+    ? minutesBetweenIso(row.last_playerlist_at ?? null, nextPlayerlistAt)
+    : row.observed_playerlist_interval_minutes ?? null;
+  const usefulInterval = usefulAdvanced
+    ? minutesBetweenIso(row.last_useful_adm_event_at ?? null, nextLastUseful)
+    : null;
+  const observedCadence = playerlistInterval ?? usefulInterval ?? row.observed_adm_cadence_minutes ?? null;
+
+  await db
+    .prepare(
+      `UPDATE server_sync_state SET
+        first_useful_adm_line_after_restart_at = CASE WHEN ? THEN ? ELSE first_useful_adm_line_after_restart_at END,
+        previous_playerlist_at = CASE WHEN ? THEN last_playerlist_at ELSE previous_playerlist_at END,
+        last_playerlist_at = COALESCE(?, last_playerlist_at),
+        observed_playerlist_interval_minutes = COALESCE(?, observed_playerlist_interval_minutes),
+        last_useful_adm_event_at = COALESCE(?, last_useful_adm_event_at),
+        observed_adm_cadence_minutes = COALESCE(?, observed_adm_cadence_minutes),
+        updated_at = ?
+       WHERE guild_id = ?`,
+    )
+    .bind(
+      firstUsefulAfterRestartAt ? 1 : 0,
+      firstUsefulAfterRestartAt,
+      playerlistAdvanced ? 1 : 0,
+      nextPlayerlistAt,
+      playerlistInterval,
+      nextLastUseful,
+      observedCadence,
+      new Date().toISOString(),
+      guildId,
     )
     .run();
 }
@@ -609,6 +706,9 @@ export async function recordAdmPullResult(env: Env, values: {
   newestAvailableAdmTimestamp?: string | null;
   newestReadableAdmFile?: string | null;
   newestReadableAdmTimestamp?: string | null;
+  firstUsefulAdmLineAt?: string | null;
+  lastUsefulAdmEventAt?: string | null;
+  lastPlayerlistAt?: string | null;
   processedAdmFile?: string | null;
   processedOffset?: number | null;
   processedLine?: number | null;
@@ -640,7 +740,6 @@ export async function recordAdmPullResult(env: Env, values: {
     latestAdmFile: newestAvailableFile,
     lastServerRestartAt: restartAt,
   });
-
   await db
     .prepare(
       `UPDATE server_sync_state SET
@@ -1028,6 +1127,34 @@ export function addMinutesIso(value: string, minutes: number) {
   return new Date(Date.parse(value) + Math.max(0, minutes) * 60 * 1000).toISOString();
 }
 
+function minutesBetweenIso(start: string | null | undefined, end: string | null | undefined) {
+  if (!start || !end) return null;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return null;
+  return Math.max(1, Math.round((endMs - startMs) / 60000));
+}
+
+function maxIso(current: string | null | undefined, candidate: string | null | undefined) {
+  if (!candidate) return current ?? null;
+  if (!current) return candidate;
+  const currentMs = Date.parse(current);
+  const candidateMs = Date.parse(candidate);
+  if (!Number.isFinite(candidateMs)) return current;
+  if (!Number.isFinite(currentMs)) return candidate;
+  return candidateMs > currentMs ? candidate : current;
+}
+
+function getFirstObservationAfterRestart(existing: string | null, restartAt: string | null | undefined, observedAt: string | null | undefined) {
+  if (!restartAt || !observedAt) return null;
+  const restartMs = Date.parse(restartAt);
+  const observedMs = Date.parse(observedAt);
+  const existingMs = existing ? Date.parse(existing) : Number.NaN;
+  if (!Number.isFinite(restartMs) || !Number.isFinite(observedMs) || observedMs < restartMs) return null;
+  if (existing && Number.isFinite(existingMs) && existingMs >= restartMs) return null;
+  return observedAt;
+}
+
 function normalizeAdmAutomationStatus(value: string, context: { latestAdmFile?: string | null; lastServerRestartAt?: string | null } = {}) {
   const normalized = value.toLowerCase();
   if (normalized === "completed") return "new_data_found";
@@ -1124,6 +1251,14 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
     last_processed_adm_line: "ALTER TABLE server_sync_state ADD COLUMN last_processed_adm_line INTEGER",
     last_restart_detected_source: "ALTER TABLE server_sync_state ADD COLUMN last_restart_detected_source TEXT",
     last_restart_detected_at: "ALTER TABLE server_sync_state ADD COLUMN last_restart_detected_at TEXT",
+    first_adm_after_restart_at: "ALTER TABLE server_sync_state ADD COLUMN first_adm_after_restart_at TEXT",
+    first_adm_after_restart_delay_minutes: "ALTER TABLE server_sync_state ADD COLUMN first_adm_after_restart_delay_minutes INTEGER",
+    first_useful_adm_line_after_restart_at: "ALTER TABLE server_sync_state ADD COLUMN first_useful_adm_line_after_restart_at TEXT",
+    observed_playerlist_interval_minutes: "ALTER TABLE server_sync_state ADD COLUMN observed_playerlist_interval_minutes INTEGER",
+    observed_adm_cadence_minutes: "ALTER TABLE server_sync_state ADD COLUMN observed_adm_cadence_minutes INTEGER",
+    previous_playerlist_at: "ALTER TABLE server_sync_state ADD COLUMN previous_playerlist_at TEXT",
+    last_playerlist_at: "ALTER TABLE server_sync_state ADD COLUMN last_playerlist_at TEXT",
+    last_useful_adm_event_at: "ALTER TABLE server_sync_state ADD COLUMN last_useful_adm_event_at TEXT",
     nitrado_reduce_log_output_confirmed: "ALTER TABLE server_sync_state ADD COLUMN nitrado_reduce_log_output_confirmed INTEGER NOT NULL DEFAULT 0",
     nitrado_log_playerlist_confirmed: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_playerlist_confirmed INTEGER NOT NULL DEFAULT 0",
     nitrado_log_settings_confirmed_at: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_confirmed_at TEXT",
@@ -1135,6 +1270,7 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
     }
   }
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_discovery_due ON server_sync_state(next_adm_discovery_due_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_last_useful_adm_event ON server_sync_state(last_useful_adm_event_at)").run();
 }
 
 async function ensureServerPostingStateDispatchColumns(db: D1Database) {
@@ -1248,6 +1384,14 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     last_server_restart_at TEXT,
     last_restart_detected_source TEXT,
     last_restart_detected_at TEXT,
+    first_adm_after_restart_at TEXT,
+    first_adm_after_restart_delay_minutes INTEGER,
+    first_useful_adm_line_after_restart_at TEXT,
+    observed_playerlist_interval_minutes INTEGER,
+    observed_adm_cadence_minutes INTEGER,
+    previous_playerlist_at TEXT,
+    last_playerlist_at TEXT,
+    last_useful_adm_event_at TEXT,
     adm_status TEXT,
     nitrado_reduce_log_output_confirmed INTEGER NOT NULL DEFAULT 0,
     nitrado_log_playerlist_confirmed INTEGER NOT NULL DEFAULT 0,
@@ -1260,6 +1404,7 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_due ON server_sync_state(next_status_check_due_at)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_discovery_due ON server_sync_state(next_adm_discovery_due_at)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_due ON server_sync_state(next_adm_pull_due_at)",
+  "CREATE INDEX IF NOT EXISTS idx_server_sync_state_last_useful_adm_event ON server_sync_state(last_useful_adm_event_at)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_lock ON server_sync_state(currently_checking_status)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_lock ON server_sync_state(currently_syncing_adm)",
   `CREATE TABLE IF NOT EXISTS server_posting_destinations (
