@@ -68,6 +68,14 @@ assert.equal(automationSource.includes("getDueAdmAutomationServers"), true);
 assert.equal(automationSource.includes("recoverStuckAutomationLocks"), true);
 assert.equal(automationSource.includes("Recovered stale status sync lock after 10 minutes."), true);
 assert.equal(automationSource.includes("Recovered stale ADM sync lock after 30 minutes."), true);
+assert.equal(automationSource.includes("last_seen_adm_timestamp"), true);
+assert.equal(automationSource.includes("newest_available_adm_filename"), true);
+assert.equal(automationSource.includes("newest_readable_adm_filename"), true);
+assert.equal(automationSource.includes("last_restart_detected_source"), true);
+assert.equal(automationSource.includes("metadata_status"), true);
+assert.equal(automationSource.includes("adm_filename"), true);
+assert.equal(automationSource.includes("latest_adm_unreadable"), true);
+assert.equal(automationSource.includes("delayed_after_restart"), true);
 
 const postingSource = readFileSync("functions/_lib/discord-posting.ts", "utf8");
 assert.equal(postingSource.includes("last_payload_hash"), true);
@@ -170,6 +178,59 @@ assert.equal(workerSource.indexOf("/api/sync/adm/run") < workerSource.indexOf("/
 const cronAuthSource = readFileSync("functions/_lib/cron-auth.ts", "utf8");
 assert.equal(cronAuthSource.includes("env.DZN_CRON_SECRET || null"), true);
 assert.equal(cronAuthSource.includes("env.SYNC_CRON_SECRET"), false);
+
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts: Record<string, string> };
+assert.equal(packageJson.scripts["audit:system"], "tsx scripts/audit-dzn-system.ts");
+assert.equal(packageJson.scripts["audit:adm-sync"], "tsx scripts/audit-adm-sync.ts");
+assert.equal(packageJson.scripts["check:automation-live"], "tsx scripts/check-automation-live.ts");
+assert.equal(packageJson.scripts["test:full-system"], "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run check:automation-live");
+
+const systemAuditSource = readFileSync("scripts/audit-dzn-system.ts", "utf8");
+assert.equal(systemAuditSource.includes("DISCORD_BOT_TOKEN"), true);
+assert.equal(systemAuditSource.includes("DZN_CRON_SECRET"), true);
+assert.equal(systemAuditSource.includes("STRIPE_PRICE_PARTNER"), true);
+assert.equal(systemAuditSource.includes("workers/adm-sync-worker.ts"), true);
+assert.equal(systemAuditSource.includes("functions/api/sync/metadata/run.ts"), true);
+assert.equal(systemAuditSource.includes("functions/api/sync/discord-posts/run.ts"), true);
+assert.equal(systemAuditSource.includes("functions/api/servers/[serverId]/auto-posts/run-now.ts"), true);
+assert.equal(systemAuditSource.includes("auditAdmSyncWiring"), true);
+assert.equal(systemAuditSource.includes("0018_adm_reset_state_tracking.sql"), true);
+assert.equal(systemAuditSource.includes("Total checks"), true);
+
+const admAuditSource = readFileSync("scripts/audit-adm-sync.ts", "utf8");
+assert.equal(admAuditSource.includes("pickNewestAdmFile"), true);
+assert.equal(admAuditSource.includes("waiting_after_restart"), true);
+assert.equal(admAuditSource.includes("latest_adm_unreadable"), true);
+assert.equal(admAuditSource.includes("delayed_after_restart"), true);
+assert.equal(admAuditSource.includes("queueDiscordPostUpdatesForGuild"), true);
+assert.equal(readFileSync("migrations/0018_adm_reset_state_tracking.sql", "utf8").includes("last_restart_detected_source"), true);
+
+const liveCheckSource = readFileSync("scripts/check-automation-live.ts", "utf8");
+assert.equal(liveCheckSource.includes("https://dzn-network.pages.dev"), true);
+assert.equal(liveCheckSource.includes("/api/public/home-stats"), true);
+assert.equal(liveCheckSource.includes("x-dzn-cron-secret"), true);
+assert.equal(liveCheckSource.includes("/api/sync/metadata/run"), true);
+assert.equal(liveCheckSource.includes("/api/sync/adm/run"), true);
+assert.equal(liveCheckSource.includes("/api/sync/discord-posts/run"), true);
+assert.equal(liveCheckSource.includes("/api/automation/health"), true);
+assert.equal(liveCheckSource.includes("Skipped because DZN_CRON_SECRET is not set"), true);
+
+const buttonMapDoc = readFileSync("docs/DASHBOARD_BUTTON_MAP.md", "utf8");
+assert.equal(buttonMapDoc.includes("View Public Page"), true);
+assert.equal(buttonMapDoc.includes("Refresh Server Info"), true);
+assert.equal(buttonMapDoc.includes("Run Auto Post Dispatcher Now"), true);
+assert.equal(buttonMapDoc.includes("Remove Server From DZN"), true);
+assert.equal(buttonMapDoc.includes("Handler / link"), true);
+assert.equal(buttonMapDoc.includes("Current status"), true);
+
+const syncMapDoc = readFileSync("docs/SYNC_SYSTEM_MAP.md", "utf8");
+assert.equal(syncMapDoc.includes("Fast Server Status Sync"), true);
+assert.equal(syncMapDoc.includes("ADM / Backend Log Sync"), true);
+assert.equal(syncMapDoc.includes("Discord Auto-Post Dispatcher"), true);
+assert.equal(syncMapDoc.includes("Cloudflare Worker Cron"), true);
+assert.equal(syncMapDoc.includes("GitHub Actions Backup"), true);
+assert.equal(syncMapDoc.includes("Partner | Every 1 minute"), true);
+assert.equal(syncMapDoc.includes("ADM remains limited to 10 minutes minimum"), true);
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Discord Auto Posts"), true);

@@ -5,8 +5,11 @@ import {
   classifyAdmSyncOutcome,
   classifyUnavailableAdmFileStatus,
   compareAdmFileNamesChronological,
+  detectAdmRestartFromFiles,
+  isAdmDelayedAfterRestart,
   isAdmSyncErrorStatus,
   isAdmSyncTemporarilyUnavailableStatus,
+  normalizeAdmSyncStateMachineStatus,
 } from "../functions/_lib/adm-sync";
 import { parseAdmLines } from "../functions/_lib/adm-parser";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
@@ -52,12 +55,23 @@ assert.equal(isAdmSyncErrorStatus("write_error"), true);
 assert.equal(isAdmSyncErrorStatus("no_new_lines"), false);
 assert.equal(isAdmSyncErrorStatus("adm_file_unreadable"), false);
 assert.equal(isAdmSyncTemporarilyUnavailableStatus("adm_file_unreadable"), true);
+assert.equal(isAdmSyncTemporarilyUnavailableStatus("latest_adm_unreadable"), true);
+assert.equal(isAdmSyncTemporarilyUnavailableStatus("waiting_after_restart"), true);
 assert.equal(classifyUnavailableAdmFileStatus(null, false), "adm_not_generated_yet");
 assert.equal(classifyUnavailableAdmFileStatus("DayZServer_PS4_x64_2026-05-17_16-02-20.ADM", false), "adm_file_unreadable");
 assert.equal(classifyUnavailableAdmFileStatus(null, true), "adm_file_unreadable");
 assert.equal(classifyUnavailableAdmFileStatus(null, false, "error"), "nitrado_down");
 assert.equal(classifyUnavailableAdmFileStatus(null, false, "401"), "nitrado_auth_invalid");
 assert.equal(classifyUnavailableAdmFileStatus(null, false, "429"), "nitrado_rate_limited");
+assert.equal(classifyUnavailableAdmFileStatus(null, false, null, "2026-05-17T16:00:00.000Z", Date.parse("2026-05-17T17:00:01.000Z")), "delayed_after_restart");
+assert.equal(isAdmDelayedAfterRestart("2026-05-17T16:00:00.000Z", Date.parse("2026-05-17T16:44:59.000Z")), false);
+assert.equal(isAdmDelayedAfterRestart("2026-05-17T16:00:00.000Z", Date.parse("2026-05-17T16:45:00.000Z")), true);
+assert.equal(detectAdmRestartFromFiles("DayZServer_PS4_x64_2026-05-17_16-02-20.ADM", "DayZServer_PS4_x64_2026-05-17_17-02-20.ADM"), true);
+assert.equal(detectAdmRestartFromFiles("DayZServer_PS4_x64_2026-05-17_17-02-20.ADM", "DayZServer_PS4_x64_2026-05-17_16-02-20.ADM"), false);
+assert.equal(normalizeAdmSyncStateMachineStatus("completed"), "new_data_found");
+assert.equal(normalizeAdmSyncStateMachineStatus("no_new_lines"), "no_new_log_available");
+assert.equal(normalizeAdmSyncStateMachineStatus("adm_file_unreadable"), "latest_adm_unreadable");
+assert.equal(normalizeAdmSyncStateMachineStatus("adm_not_generated_yet"), "waiting_after_restart");
 
 const admFilesChronological = [
   "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
@@ -80,6 +94,12 @@ assert.equal(admSyncSource.includes("DZN ADM FEED SYNC STATUS IMPROVED"), true);
 assert.equal(admSyncSource.includes("preferredAdmFileName"), true);
 assert.equal(admSyncSource.includes("selectAdmFilesForCursor"), true);
 assert.equal(admSyncSource.includes("Kill lines parsed this check"), true);
+assert.equal(admSyncSource.includes("waiting_after_restart"), true);
+assert.equal(admSyncSource.includes("latest_adm_unreadable"), true);
+assert.equal(admSyncSource.includes("delayed_after_restart"), true);
+assert.equal(admSyncSource.includes("detectAdmRestartFromFiles"), true);
+assert.equal(admSyncSource.includes("selectNewestDiscoveredAdmFile"), true);
+assert.equal(admSyncSource.includes("compareAdmCandidatesChronological"), true);
 const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
 assert.equal(nitradoSource.includes("DZN ADM FILE READ VARIANT USED"), true);
 assert.equal(nitradoSource.includes("DZN ADM LATEST FILE SELECTION FIXED"), true);
@@ -114,8 +134,9 @@ const dashboardApi = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(dashboardApi.includes("/api/sync/adm/run"), true);
 const dashboardUi = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardUi.includes("No ADM File"), false);
-assert.equal(dashboardUi.includes("ADM File Temporarily Unavailable"), true);
-assert.equal(dashboardUi.includes("ADM sync checked Nitrado, but the latest ADM file was not readable this time."), true);
+assert.equal(dashboardUi.includes("Latest ADM Not Readable Yet"), true);
+assert.equal(dashboardUi.includes("Latest ADM file found but not readable yet. DZN will retry on the next scheduled check."), true);
+assert.equal(dashboardUi.includes("Server restart detected. Waiting for Nitrado to publish the next ADM log."), true);
 assert.equal(dashboardUi.includes("Feed last updated"), true);
 assert.equal(dashboardUi.includes("getDashboardSyncStatusBanner"), true);
 

@@ -38,7 +38,11 @@
     "db:migrate:remote": "wrangler d1 migrations apply dzn_network_db --remote",
     "worker:adm-sync:dev": "wrangler dev --config wrangler.adm-sync.toml --test-scheduled",
     "worker:adm-sync:dry-run": "wrangler deploy --config wrangler.adm-sync.toml --dry-run",
-    "worker:adm-sync:deploy": "wrangler deploy --config wrangler.adm-sync.toml"
+    "worker:adm-sync:deploy": "wrangler deploy --config wrangler.adm-sync.toml",
+    "audit:system": "tsx scripts/audit-dzn-system.ts",
+    "audit:adm-sync": "tsx scripts/audit-adm-sync.ts",
+    "check:automation-live": "tsx scripts/check-automation-live.ts",
+    "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run check:automation-live"
   },
   "dependencies": {
     "d3-geo": "^3.1.1",

@@ -46,6 +46,7 @@ export async function ensureAutomationSchema(env: Env) {
   for (const statement of AUTOMATION_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();
   }
+  await ensureServerSyncStateAdmColumns(db);
   await ensureAutomationCronRunsColumns(db);
   await ensureServerPostingStateDispatchColumns(db);
 }
@@ -357,10 +358,12 @@ export async function recordStatusCheckResult(env: Env, values: {
   serverStatus?: string | null;
   error?: string | null;
 }) {
+  await ensureAutomationSchema(env);
   const db = requireDb(env);
   const now = new Date().toISOString();
   const nextDue = addMinutesIso(now, getServerStatusInterval(values.planKey));
   const freshness = values.ok ? "fresh" : "failed";
+  const restartDetected = values.ok && isRestartLikeServerStatus(values.serverStatus);
   await db
     .prepare(
       `UPDATE server_sync_state SET
@@ -374,6 +377,9 @@ export async function recordStatusCheckResult(env: Env, values: {
         server_online = COALESCE(?, server_online),
         server_status = COALESCE(?, server_status),
         status_data_freshness = ?,
+        last_server_restart_at = CASE WHEN ? THEN ? ELSE last_server_restart_at END,
+        last_restart_detected_source = CASE WHEN ? THEN 'metadata_status' ELSE last_restart_detected_source END,
+        last_restart_detected_at = CASE WHEN ? THEN ? ELSE last_restart_detected_at END,
         currently_checking_status = 0,
         updated_at = ?
        WHERE guild_id = ?`,
@@ -392,6 +398,11 @@ export async function recordStatusCheckResult(env: Env, values: {
       values.serverOnline === true || values.serverOnline === 1 ? 1 : values.serverOnline === false || values.serverOnline === 0 ? 0 : null,
       values.serverStatus ?? null,
       freshness,
+      restartDetected ? 1 : 0,
+      now,
+      restartDetected ? 1 : 0,
+      restartDetected ? 1 : 0,
+      now,
       now,
       values.guildId,
     )
@@ -449,13 +460,44 @@ export async function recordAdmPullResult(env: Env, values: {
   status: string;
   error?: string | null;
   latestAdmFile?: string | null;
+  latestAdmTimestamp?: string | null;
+  newestAvailableAdmFile?: string | null;
+  newestAvailableAdmTimestamp?: string | null;
+  newestReadableAdmFile?: string | null;
+  newestReadableAdmTimestamp?: string | null;
   processedAdmFile?: string | null;
   processedOffset?: number | null;
+  processedLine?: number | null;
   newDataFound?: boolean;
 }) {
+  await ensureAutomationSchema(env);
+  const db = requireDb(env);
   const now = new Date().toISOString();
   const nextDue = addMinutesIso(now, getAdmPullInterval(values.planKey));
-  await requireDb(env)
+  const currentState = await db
+    .prepare(
+      `SELECT last_seen_adm_filename, last_server_restart_at
+       FROM server_sync_state
+       WHERE guild_id = ?
+       LIMIT 1`,
+    )
+    .bind(values.guildId)
+    .first<{ last_seen_adm_filename: string | null; last_server_restart_at: string | null }>()
+    .catch(() => null);
+  const newestAvailableFile = values.newestAvailableAdmFile ?? values.latestAdmFile ?? null;
+  const newestAvailableTimestamp = values.newestAvailableAdmTimestamp ?? values.latestAdmTimestamp ?? null;
+  const newestReadableFile = values.newestReadableAdmFile ?? null;
+  const newestReadableTimestamp = values.newestReadableAdmTimestamp ?? null;
+  const restartFromAdmFile = detectAdmRestartFromAdmFilenames(currentState?.last_seen_adm_filename ?? null, newestAvailableFile);
+  const restartAt = restartFromAdmFile
+    ? newestAvailableTimestamp ?? now
+    : currentState?.last_server_restart_at ?? null;
+  const normalizedStatus = normalizeAdmAutomationStatus(values.status, {
+    latestAdmFile: newestAvailableFile,
+    lastServerRestartAt: restartAt,
+  });
+
+  await db
     .prepare(
       `UPDATE server_sync_state SET
         last_adm_pull_at = ?,
@@ -464,9 +506,18 @@ export async function recordAdmPullResult(env: Env, values: {
         last_failed_adm_pull_at = CASE WHEN ? THEN last_failed_adm_pull_at ELSE ? END,
         last_adm_error = CASE WHEN ? THEN NULL ELSE ? END,
         last_seen_adm_filename = COALESCE(?, last_seen_adm_filename),
+        last_seen_adm_timestamp = COALESCE(?, last_seen_adm_timestamp),
+        newest_available_adm_filename = COALESCE(?, newest_available_adm_filename),
+        newest_available_adm_timestamp = COALESCE(?, newest_available_adm_timestamp),
+        newest_readable_adm_filename = COALESCE(?, newest_readable_adm_filename),
+        newest_readable_adm_timestamp = COALESCE(?, newest_readable_adm_timestamp),
         last_processed_adm_filename = COALESCE(?, last_processed_adm_filename),
         last_processed_adm_offset = COALESCE(?, last_processed_adm_offset),
+        last_processed_adm_line = COALESCE(?, last_processed_adm_line),
         last_new_adm_found_at = CASE WHEN ? THEN ? ELSE last_new_adm_found_at END,
+        last_server_restart_at = CASE WHEN ? THEN ? ELSE last_server_restart_at END,
+        last_restart_detected_source = CASE WHEN ? THEN 'adm_filename' ELSE last_restart_detected_source END,
+        last_restart_detected_at = CASE WHEN ? THEN ? ELSE last_restart_detected_at END,
         adm_status = ?,
         currently_syncing_adm = 0,
         manual_refresh_locked_until = ?,
@@ -482,12 +533,23 @@ export async function recordAdmPullResult(env: Env, values: {
       now,
       values.ok ? 1 : 0,
       values.error ?? null,
-      values.latestAdmFile ?? null,
+      newestAvailableFile,
+      newestAvailableTimestamp,
+      newestAvailableFile,
+      newestAvailableTimestamp,
+      newestReadableFile,
+      newestReadableTimestamp,
       values.processedAdmFile ?? null,
       values.processedOffset ?? null,
+      values.processedLine ?? null,
       values.newDataFound ? 1 : 0,
       now,
-      normalizeAdmAutomationStatus(values.status),
+      restartFromAdmFile ? 1 : 0,
+      restartAt,
+      restartFromAdmFile ? 1 : 0,
+      restartFromAdmFile ? 1 : 0,
+      now,
+      normalizedStatus,
       addMinutesIso(now, getPlanConfig(values.planKey).manual_adm_refresh_cooldown_minutes),
       now,
       values.guildId,
@@ -617,7 +679,10 @@ export async function recoverStuckAutomationLocks(env: Env) {
         currently_syncing_adm = 0,
         last_failed_adm_pull_at = COALESCE(last_failed_adm_pull_at, ?),
         last_adm_error = ?,
-        adm_status = CASE WHEN adm_status IN ('new_data_found', 'no_new_log_available') THEN adm_status ELSE 'failed' END,
+        adm_status = CASE
+          WHEN adm_status IN ('new_data_found', 'no_new_log_available', 'waiting_after_restart', 'latest_adm_unreadable', 'delayed_after_restart') THEN adm_status
+          ELSE 'failed'
+        END,
         updated_at = ?
        WHERE COALESCE(currently_syncing_adm, 0) = 1
          AND updated_at < ?`,
@@ -756,13 +821,40 @@ export function addMinutesIso(value: string, minutes: number) {
   return new Date(Date.parse(value) + Math.max(0, minutes) * 60 * 1000).toISOString();
 }
 
-function normalizeAdmAutomationStatus(value: string) {
+function normalizeAdmAutomationStatus(value: string, context: { latestAdmFile?: string | null; lastServerRestartAt?: string | null } = {}) {
   const normalized = value.toLowerCase();
   if (normalized === "completed") return "new_data_found";
   if (normalized === "no_new_lines") return "no_new_log_available";
-  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file") return "waiting_after_restart";
-  if (normalized === "adm_file_unreadable") return "waiting_for_nitrado_log";
+  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file") {
+    return isAdmDelayedAfterRestart(context.lastServerRestartAt) ? "delayed_after_restart" : "waiting_after_restart";
+  }
+  if (normalized === "adm_file_unreadable") return "latest_adm_unreadable";
+  if (normalized === "waiting_after_restart" || normalized === "delayed_after_restart" || normalized === "latest_adm_unreadable") return normalized;
+  if (normalized === "new_adm_detected" || normalized === "new_adm_readable" || normalized === "new_data_found" || normalized === "no_new_log_available") return normalized;
   return normalized;
+}
+
+function isAdmDelayedAfterRestart(value: string | null | undefined, nowMs = Date.now()) {
+  if (!value) return false;
+  const restartedAt = Date.parse(value);
+  return Number.isFinite(restartedAt) && nowMs - restartedAt >= 45 * 60 * 1000;
+}
+
+function detectAdmRestartFromAdmFilenames(previousFile: string | null | undefined, newestFile: string | null | undefined) {
+  const previous = admTimestampFromName(previousFile);
+  const newest = admTimestampFromName(newestFile);
+  return previous !== null && newest !== null && newest > previous;
+}
+
+function admTimestampFromName(value: string | null | undefined) {
+  const match = value?.match(/(\d{4})[-_](\d{2})[-_](\d{2})[_-](\d{2})[-_](\d{2})[-_](\d{2})/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+}
+
+function isRestartLikeServerStatus(value: string | null | undefined) {
+  return /\b(restart|restarting|starting|stopping|stopped|offline)\b/i.test(String(value ?? ""));
 }
 
 function firstString(...values: Array<string | null | undefined>) {
@@ -806,6 +898,26 @@ async function ensureAutomationCronRunsColumns(db: D1Database) {
   await db.prepare("UPDATE automation_cron_runs SET finished_at = COALESCE(finished_at, created_at) WHERE finished_at IS NULL").run();
   await db.prepare("UPDATE automation_cron_runs SET status = 'success' WHERE status IN ('completed', 'manual')").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_job_type ON automation_cron_runs(job_type)").run();
+}
+
+async function ensureServerSyncStateAdmColumns(db: D1Database) {
+  const columns = await getTableColumns(db, "server_sync_state");
+  const requiredColumns: Record<string, string> = {
+    last_seen_adm_timestamp: "ALTER TABLE server_sync_state ADD COLUMN last_seen_adm_timestamp TEXT",
+    newest_available_adm_filename: "ALTER TABLE server_sync_state ADD COLUMN newest_available_adm_filename TEXT",
+    newest_available_adm_timestamp: "ALTER TABLE server_sync_state ADD COLUMN newest_available_adm_timestamp TEXT",
+    newest_readable_adm_filename: "ALTER TABLE server_sync_state ADD COLUMN newest_readable_adm_filename TEXT",
+    newest_readable_adm_timestamp: "ALTER TABLE server_sync_state ADD COLUMN newest_readable_adm_timestamp TEXT",
+    last_processed_adm_line: "ALTER TABLE server_sync_state ADD COLUMN last_processed_adm_line INTEGER",
+    last_restart_detected_source: "ALTER TABLE server_sync_state ADD COLUMN last_restart_detected_source TEXT",
+    last_restart_detected_at: "ALTER TABLE server_sync_state ADD COLUMN last_restart_detected_at TEXT",
+  };
+
+  for (const [column, statement] of Object.entries(requiredColumns)) {
+    if (!columns.has(column)) {
+      await db.prepare(statement).run();
+    }
+  }
 }
 
 async function ensureServerPostingStateDispatchColumns(db: D1Database) {
@@ -901,10 +1013,18 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     last_adm_error TEXT,
     last_seen_adm_filename TEXT,
     last_seen_adm_modified_at TEXT,
+    last_seen_adm_timestamp TEXT,
+    newest_available_adm_filename TEXT,
+    newest_available_adm_timestamp TEXT,
+    newest_readable_adm_filename TEXT,
+    newest_readable_adm_timestamp TEXT,
     last_processed_adm_filename TEXT,
     last_processed_adm_offset INTEGER,
+    last_processed_adm_line INTEGER,
     last_new_adm_found_at TEXT,
     last_server_restart_at TEXT,
+    last_restart_detected_source TEXT,
+    last_restart_detected_at TEXT,
     adm_status TEXT,
     currently_syncing_adm INTEGER NOT NULL DEFAULT 0,
     manual_refresh_locked_until TEXT,

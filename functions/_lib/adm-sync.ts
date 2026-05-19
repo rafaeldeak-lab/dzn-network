@@ -92,6 +92,11 @@ export type AdmSyncResult = {
   duplicateKillsSkipped: number;
   playersUpdated: number;
   latestAdmFile: string | null;
+  latestAdmTimestamp?: string | null;
+  newestAvailableAdmFile?: string | null;
+  newestAvailableAdmTimestamp?: string | null;
+  newestReadableAdmFile?: string | null;
+  newestReadableAdmTimestamp?: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;
   readableRouteUsed: string | null;
@@ -115,6 +120,14 @@ export type AdmSyncStatusCode =
   | "completed"
   | "no_new_lines"
   | "no_supported_events"
+  | "checking"
+  | "waiting_after_restart"
+  | "new_adm_detected"
+  | "new_adm_readable"
+  | "new_data_found"
+  | "no_new_log_available"
+  | "latest_adm_unreadable"
+  | "delayed_after_restart"
   | "adm_not_generated_yet"
   | "adm_file_unreadable"
   | "nitrado_down"
@@ -413,11 +426,22 @@ export async function runAdmSync(
       timestamp: extractAdmTimestampScore(file.name),
     }));
   }
+  const newestAvailableAdm = selectNewestDiscoveredAdmFile(discoveredAdmFiles) ?? (latestAdmFile ? {
+    name: latestAdmFile,
+    path: latestAdmPath,
+    timestamp: extractAdmTimestampScore(latestAdmFile),
+  } : null);
+  const newestReadableAdm = selectNewestReadableAdmFile(readableFiles);
+  const newestAvailableAdmTimestamp = timestampIso(newestAvailableAdm?.timestamp ?? null);
+  const newestReadableAdmTimestamp = timestampIso(newestReadableAdm ? extractAdmTimestampScore(newestReadableAdm.name) : null);
+  const latestAdmTimestamp = newestAvailableAdmTimestamp ?? timestampIso(extractAdmTimestampScore(latestAdmFile));
   console.log("DZN ADM FILE DISCOVERY", {
     server: initialScope.serverName,
     serviceId: initialScope.nitradoServiceId,
     filesFound: discoveredFilesFound,
     newestAdmFile: latestAdmFile,
+    newestAvailableAdmFile: newestAvailableAdm?.name ?? null,
+    newestReadableAdmFile: newestReadableAdm?.name ?? null,
     previousLatestAdmFile: existingState?.latest_adm_file ?? null,
   });
   await recordDiscoveredAdmFiles(env, initialScope, discoveredAdmFiles);
@@ -513,6 +537,11 @@ export async function runAdmSync(
       duplicateKillsSkipped: 0,
       playersUpdated: 0,
       latestAdmFile,
+      latestAdmTimestamp,
+      newestAvailableAdmFile: newestAvailableAdm?.name ?? latestAdmFile,
+      newestAvailableAdmTimestamp,
+      newestReadableAdmFile: newestReadableAdm?.name ?? null,
+      newestReadableAdmTimestamp,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastSyncAt: now,
       readableRouteUsed: readable.readableRouteUsed,
@@ -580,6 +609,11 @@ export async function runAdmSync(
       status,
       message,
       latestAdmFile,
+      latestAdmTimestamp,
+      newestAvailableAdmFile: newestAvailableAdm?.name ?? latestAdmFile,
+      newestAvailableAdmTimestamp,
+      newestReadableAdmFile: newestReadableAdm?.name ?? null,
+      newestReadableAdmTimestamp,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastSyncAt: now,
       readableRouteUsed: readable.readableRouteUsed,
@@ -886,6 +920,11 @@ export async function runAdmSync(
     duplicateKillsSkipped,
     playersUpdated: uniquePlayers,
     latestAdmFile,
+    latestAdmTimestamp,
+    newestAvailableAdmFile: newestAvailableAdm?.name ?? latestAdmFile,
+    newestAvailableAdmTimestamp,
+    newestReadableAdmFile: newestReadableAdm?.name ?? null,
+    newestReadableAdmTimestamp,
     lastProcessedLine: cursorLine,
     lastSyncAt: now,
     readableRouteUsed,
@@ -934,7 +973,13 @@ export function isAdmSyncErrorStatus(status: string | null | undefined) {
 }
 
 export function isAdmSyncTemporarilyUnavailableStatus(status: string | null | undefined) {
-  return ["adm_file_unreadable", "nitrado_file_unavailable"].includes(String(status ?? "").toLowerCase());
+  return [
+    "adm_file_unreadable",
+    "nitrado_file_unavailable",
+    "latest_adm_unreadable",
+    "waiting_after_restart",
+    "delayed_after_restart",
+  ].includes(String(status ?? "").toLowerCase());
 }
 
 function buildSyncRunMessage(values: {
@@ -964,10 +1009,13 @@ export function classifyUnavailableAdmFileStatus(
   latestAdmFile: string | null | undefined,
   admAvailable: boolean,
   apiStatus?: string | null,
-): "adm_file_unreadable" | "adm_not_generated_yet" | "nitrado_down" | "nitrado_auth_invalid" | "nitrado_rate_limited" {
+  lastServerRestartAt?: string | null,
+  nowMs = Date.now(),
+): "adm_file_unreadable" | "adm_not_generated_yet" | "delayed_after_restart" | "nitrado_down" | "nitrado_auth_invalid" | "nitrado_rate_limited" {
   if (apiStatus === "401" || apiStatus === "403") return "nitrado_auth_invalid";
   if (apiStatus === "429") return "nitrado_rate_limited";
   if (apiStatus === "error" && !latestAdmFile && !admAvailable) return "nitrado_down";
+  if (!latestAdmFile && !admAvailable && isAdmDelayedAfterRestart(lastServerRestartAt, nowMs)) return "delayed_after_restart";
   return latestAdmFile || admAvailable ? "adm_file_unreadable" : "adm_not_generated_yet";
 }
 
@@ -975,15 +1023,17 @@ function getUnavailableAdmMessage(status: AdmSyncStatusCode) {
   if (status === "nitrado_auth_invalid") return "Nitrado token or service permission is invalid, expired, or forbidden.";
   if (status === "nitrado_rate_limited") return "Nitrado rate limited ADM access. DZN will retry automatically.";
   if (status === "nitrado_down") return "Nitrado is currently unavailable. DZN will retry automatically.";
-  if (status === "adm_file_unreadable") return "Latest ADM file found, but Nitrado has not returned readable content yet. DZN will retry automatically.";
-  return "No ADM file is available yet for this reset/window. DZN will retry automatically.";
+  if (status === "adm_file_unreadable" || status === "latest_adm_unreadable") return "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.";
+  if (status === "delayed_after_restart") return "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.";
+  return "Server restart detected. Waiting for Nitrado to publish the next ADM log.";
 }
 
 function getAdmHealthLabel(status: string | null | undefined) {
   const normalized = String(status ?? "").toLowerCase();
-  if (["completed", "no_new_lines", "no_supported_events", "active", "idle"].includes(normalized)) return "Healthy";
-  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file") return "Waiting for ADM";
-  if (normalized === "adm_file_unreadable" || normalized === "nitrado_file_unavailable") return "ADM temporarily unreadable";
+  if (["completed", "no_new_lines", "no_supported_events", "new_data_found", "no_new_log_available", "active", "idle"].includes(normalized)) return "Healthy";
+  if (["adm_not_generated_yet", "no_adm_file", "waiting_after_restart"].includes(normalized)) return "Waiting for ADM";
+  if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable"].includes(normalized)) return "ADM temporarily unreadable";
+  if (normalized === "delayed_after_restart") return "Delayed after restart";
   if (normalized === "nitrado_down" || normalized === "nitrado_rate_limited" || normalized === "nitrado_error") return "Nitrado unavailable";
   if (normalized === "nitrado_auth_invalid") return "Token/service issue";
   if (normalized === "dzn_parser_error" || normalized === "parser_error") return "Parser attention needed";
@@ -996,8 +1046,9 @@ function getAdmRecoveryAction(status: string | null | undefined, unreadableQueue
   if (normalized === "nitrado_auth_invalid") return "Reconnect or refresh the server owner's Nitrado token/service permission.";
   if (normalized === "nitrado_down") return "Nitrado is unavailable. DZN will retry automatically.";
   if (normalized === "nitrado_rate_limited") return "Nitrado throttled requests. DZN will retry on the next scheduled run.";
-  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file") return "Waiting for Nitrado to generate or release the next ADM log.";
-  if (normalized === "adm_file_unreadable") return "ADM file is queued for retry. DZN will self-heal when Nitrado returns readable content.";
+  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file" || normalized === "waiting_after_restart") return "Waiting for Nitrado to publish a readable ADM log. This is normal after restart.";
+  if (normalized === "delayed_after_restart") return "Nitrado has not published a readable ADM log yet. DZN will keep checking on the plan schedule.";
+  if (normalized === "adm_file_unreadable" || normalized === "latest_adm_unreadable") return "ADM file is queued for retry. DZN will self-heal when Nitrado returns readable content.";
   if (normalized === "dzn_parser_error" || normalized === "parser_error") return "Parser update required; raw kill lines are preserved for diagnosis.";
   if (normalized === "dzn_write_error" || normalized === "write_error") return "Database write failed; cursor was not advanced and DZN will retry.";
   if (normalized === "dzn_scope_blocked") return "Server scope guardrail blocked a write; review linked_server_id/service mapping.";
@@ -1012,6 +1063,40 @@ export function compareAdmFileNamesChronological(a: string | null | undefined, b
   return String(a ?? "").localeCompare(String(b ?? ""));
 }
 
+export function normalizeAdmSyncStateMachineStatus(status: string | null | undefined): string {
+  const normalized = String(status ?? "").toLowerCase();
+  if (normalized === "completed") return "new_data_found";
+  if (normalized === "no_new_lines") return "no_new_log_available";
+  if (normalized === "adm_file_unreadable") return "latest_adm_unreadable";
+  if (normalized === "adm_not_generated_yet" || normalized === "no_adm_file") return "waiting_after_restart";
+  if ([
+    "idle",
+    "checking",
+    "waiting_after_restart",
+    "new_adm_detected",
+    "new_adm_readable",
+    "new_data_found",
+    "no_new_log_available",
+    "latest_adm_unreadable",
+    "delayed_after_restart",
+    "failed",
+  ].includes(normalized)) return normalized;
+  return normalized || "idle";
+}
+
+export function isAdmDelayedAfterRestart(lastServerRestartAt: string | null | undefined, nowMs = Date.now()) {
+  if (!lastServerRestartAt) return false;
+  const restartedAt = Date.parse(lastServerRestartAt);
+  return Number.isFinite(restartedAt) && nowMs - restartedAt >= 45 * 60 * 1000;
+}
+
+export function detectAdmRestartFromFiles(previousLatestAdmFile: string | null | undefined, newestAdmFile: string | null | undefined) {
+  const previousScore = extractAdmTimestampScore(previousLatestAdmFile);
+  const newestScore = extractAdmTimestampScore(newestAdmFile);
+  if (previousScore === null || newestScore === null) return false;
+  return newestScore > previousScore;
+}
+
 function selectAdmFilesForCursor(files: ReadableAdmFileForSync[], lastProcessedFile: string | null | undefined) {
   const ordered = [...files].sort((a, b) => compareAdmFileNamesChronological(a.name, b.name));
   if (!lastProcessedFile) return ordered;
@@ -1019,9 +1104,26 @@ function selectAdmFilesForCursor(files: ReadableAdmFileForSync[], lastProcessedF
 }
 
 function selectAdmCandidatesForCursor(files: DiscoveredAdmFileForSync[], lastProcessedFile: string | null | undefined) {
-  const ordered = [...files].sort((a, b) => compareAdmFileNamesChronological(a.name, b.name));
+  const ordered = [...files].sort(compareAdmCandidatesChronological);
   if (!lastProcessedFile) return ordered;
   return ordered.filter((file) => compareAdmFileNamesChronological(file.name, lastProcessedFile) >= 0);
+}
+
+function selectNewestDiscoveredAdmFile(files: DiscoveredAdmFileForSync[]) {
+  return [...files].sort((a, b) => compareAdmCandidatesChronological(b, a))[0] ?? null;
+}
+
+function selectNewestReadableAdmFile(files: ReadableAdmFileForSync[]) {
+  return [...files].sort((a, b) => compareAdmFileNamesChronological(b.name, a.name))[0] ?? null;
+}
+
+function timestampIso(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? new Date(value).toISOString() : null;
+}
+
+function compareAdmCandidatesChronological(a: DiscoveredAdmFileForSync, b: DiscoveredAdmFileForSync) {
+  if (a.timestamp !== null && b.timestamp !== null && a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+  return compareAdmFileNamesChronological(a.name, b.name);
 }
 
 function collectReadableAdmFilesUntilUnreadable(candidates: DiscoveredAdmFileForSync[], readableByName: Map<string, ReadableAdmFileForSync>) {
@@ -1048,6 +1150,11 @@ function emptyAdmSyncResult(values: {
   status: AdmSyncStatusCode;
   message: string;
   latestAdmFile: string | null;
+  latestAdmTimestamp?: string | null;
+  newestAvailableAdmFile?: string | null;
+  newestAvailableAdmTimestamp?: string | null;
+  newestReadableAdmFile?: string | null;
+  newestReadableAdmTimestamp?: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;
   readableRouteUsed?: string | null;
@@ -1066,6 +1173,11 @@ function emptyAdmSyncResult(values: {
     duplicateKillsSkipped: 0,
     playersUpdated: 0,
     latestAdmFile: values.latestAdmFile,
+    latestAdmTimestamp: values.latestAdmTimestamp ?? null,
+    newestAvailableAdmFile: values.newestAvailableAdmFile ?? values.latestAdmFile,
+    newestAvailableAdmTimestamp: values.newestAvailableAdmTimestamp ?? values.latestAdmTimestamp ?? null,
+    newestReadableAdmFile: values.newestReadableAdmFile ?? null,
+    newestReadableAdmTimestamp: values.newestReadableAdmTimestamp ?? null,
     lastProcessedLine: values.lastProcessedLine,
     lastSyncAt: values.lastSyncAt,
     readableRouteUsed: values.readableRouteUsed ?? null,
@@ -1574,8 +1686,14 @@ export async function runScheduledAdmSync(
         status: result.status,
         error: ok ? null : result.message,
         latestAdmFile: result.latestAdmFile,
+        latestAdmTimestamp: result.latestAdmTimestamp ?? null,
+        newestAvailableAdmFile: result.newestAvailableAdmFile ?? result.latestAdmFile,
+        newestAvailableAdmTimestamp: result.newestAvailableAdmTimestamp ?? result.latestAdmTimestamp ?? null,
+        newestReadableAdmFile: result.newestReadableAdmFile ?? null,
+        newestReadableAdmTimestamp: result.newestReadableAdmTimestamp ?? null,
         processedAdmFile: result.latestAdmFile,
         processedOffset: result.lastProcessedLine,
+        processedLine: result.lastProcessedLine,
         newDataFound: result.eventsCreated > 0 || result.killsCreated > 0 || result.buildEventsStored > 0,
       });
       if (ok) {

@@ -1,0 +1,347 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+
+import {
+  AUTO_POST_TYPES,
+  BILLING_PLAN_CONFIG,
+  MIN_ADM_PULL_INTERVAL_MINUTES,
+  MIN_SERVER_STATUS_INTERVAL_MINUTES,
+  PAID_PLAN_KEYS,
+  getAdmPullInterval,
+  getServerStatusInterval,
+  hasAutoPost,
+} from "../lib/billing/plans";
+
+type CheckStatus = "pass" | "warn" | "fail";
+
+type AuditCheck = {
+  status: CheckStatus;
+  title: string;
+  detail: string;
+};
+
+const checks: AuditCheck[] = [];
+const root = process.cwd();
+
+const REQUIRED_ENV = [
+  "DISCORD_CLIENT_ID",
+  "DISCORD_CLIENT_SECRET",
+  "DISCORD_REDIRECT_URI",
+  "DISCORD_BOT_TOKEN",
+  "DZN_CRON_SECRET",
+  "DZN_APP_URL",
+  "SESSION_SECRET",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+  "STRIPE_PRICE_STARTER",
+  "STRIPE_PRICE_PRO",
+  "STRIPE_PRICE_NETWORK",
+  "STRIPE_PRICE_PARTNER",
+  "TOKEN_ENCRYPTION_KEY",
+] as const;
+
+function add(status: CheckStatus, title: string, detail: string) {
+  checks.push({ status, title, detail });
+}
+
+function pass(title: string, detail: string) {
+  add("pass", title, detail);
+}
+
+function warn(title: string, detail: string) {
+  add("warn", title, detail);
+}
+
+function fail(title: string, detail: string) {
+  add("fail", title, detail);
+}
+
+function repoPath(relativePath: string) {
+  return path.join(root, relativePath);
+}
+
+function fileExists(relativePath: string) {
+  return existsSync(repoPath(relativePath));
+}
+
+function readSource(relativePath: string) {
+  const fullPath = repoPath(relativePath);
+  return existsSync(fullPath) ? readFileSync(fullPath, "utf8") : "";
+}
+
+function checkFile(relativePath: string, label = relativePath) {
+  if (fileExists(relativePath)) pass(label, `${relativePath} exists.`);
+  else fail(label, `${relativePath} is missing.`);
+}
+
+function checkIncludes(relativePath: string, expected: string, title: string, detail?: string) {
+  const source = readSource(relativePath);
+  if (source.includes(expected)) pass(title, detail ?? `${relativePath} contains ${expected}.`);
+  else fail(title, `${relativePath} does not contain ${expected}.`);
+}
+
+function checkNotIncludes(relativePath: string, unexpected: string, title: string) {
+  const source = readSource(relativePath);
+  if (!source.includes(unexpected)) pass(title, `${relativePath} does not contain ${unexpected}.`);
+  else fail(title, `${relativePath} still contains ${unexpected}.`);
+}
+
+function likelyFormatWarning(key: string, value: string) {
+  if (key === "DZN_APP_URL" || key === "DISCORD_REDIRECT_URI") {
+    try {
+      new URL(value);
+    } catch {
+      return "Value is not a valid URL.";
+    }
+  }
+  if (key === "STRIPE_SECRET_KEY" && !value.startsWith("sk_")) return "Stripe secret key should usually start with sk_.";
+  if (key === "STRIPE_WEBHOOK_SECRET" && !value.startsWith("whsec_")) return "Stripe webhook secret should usually start with whsec_.";
+  if (key === "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY" && !value.startsWith("pk_")) return "Stripe publishable key should usually start with pk_.";
+  if (key.startsWith("STRIPE_PRICE_") && !value.startsWith("price_")) return "Stripe price IDs should usually start with price_.";
+  if (key === "SESSION_SECRET" && value.length < 24) return "Session secret looks short.";
+  if (key === "DZN_CRON_SECRET" && value.length < 24) return "Cron secret looks short.";
+  if (key === "TOKEN_ENCRYPTION_KEY" && value.length < 32) return "Token encryption key looks short.";
+  return null;
+}
+
+function auditEnvironment() {
+  for (const key of REQUIRED_ENV) {
+    const value = process.env[key]?.trim();
+    if (!value) {
+      warn(`Env ${key}`, "Missing in this local shell. Set it in Cloudflare Pages/Worker if required for production.");
+      continue;
+    }
+    const formatWarning = likelyFormatWarning(key, value);
+    if (formatWarning) warn(`Env ${key}`, `Present, but ${formatWarning}`);
+    else pass(`Env ${key}`, "Present. Value hidden.");
+  }
+}
+
+function auditBillingPlans() {
+  for (const key of PAID_PLAN_KEYS) {
+    const plan = BILLING_PLAN_CONFIG[key];
+    if (plan) pass(`Plan ${key}`, `${plan.name} exists.`);
+    else {
+      fail(`Plan ${key}`, "Plan is missing.");
+      continue;
+    }
+
+    if (plan.stripe_price_env_key) pass(`Plan ${key} Stripe env`, `Uses ${plan.stripe_price_env_key}.`);
+    else fail(`Plan ${key} Stripe env`, "Paid plan is missing a Stripe price env key.");
+
+    if (plan.server_status_interval_minutes >= MIN_SERVER_STATUS_INTERVAL_MINUTES) pass(`Plan ${key} status interval`, `${plan.server_status_interval_minutes} minutes.`);
+    else fail(`Plan ${key} status interval`, "Below hard floor.");
+
+    if (plan.adm_pull_interval_minutes >= MIN_ADM_PULL_INTERVAL_MINUTES) pass(`Plan ${key} ADM interval`, `${plan.adm_pull_interval_minutes} minutes.`);
+    else fail(`Plan ${key} ADM interval`, "Below hard floor.");
+
+    if (plan.manual_adm_refresh_cooldown_minutes >= MIN_ADM_PULL_INTERVAL_MINUTES) pass(`Plan ${key} manual cooldown`, `${plan.manual_adm_refresh_cooldown_minutes} minutes.`);
+    else fail(`Plan ${key} manual cooldown`, "Below ADM hard floor.");
+
+    if (plan.allowed_features.length > 0) pass(`Plan ${key} features`, `${plan.allowed_features.length} features configured.`);
+    else fail(`Plan ${key} features`, "No allowed features configured.");
+
+    if (key === "starter" && plan.allowed_auto_posts.length === 1 && plan.allowed_auto_posts[0] === "basic_status_embed") {
+      pass("Starter auto-post limit", "Starter only allows Basic Server Status.");
+    }
+    if (key === "partner" && AUTO_POST_TYPES.every((postType) => hasAutoPost("partner", postType))) {
+      pass("Partner auto-post limit", "Partner allows every configured auto-post type.");
+    }
+  }
+
+  const expectedIntervals = [
+    ["starter", 7, 60],
+    ["pro", 5, 30],
+    ["network", 3, 15],
+    ["partner", 1, 10],
+  ] as const;
+  for (const [planKey, statusInterval, admInterval] of expectedIntervals) {
+    if (getServerStatusInterval(planKey) === statusInterval) pass(`${planKey} status cadence`, `Status sync every ${statusInterval} minutes.`);
+    else fail(`${planKey} status cadence`, `Expected ${statusInterval}, got ${getServerStatusInterval(planKey)}.`);
+    if (getAdmPullInterval(planKey) === admInterval) pass(`${planKey} ADM cadence`, `ADM sync every ${admInterval} minutes.`);
+    else fail(`${planKey} ADM cadence`, `Expected ${admInterval}, got ${getAdmPullInterval(planKey)}.`);
+  }
+}
+
+function auditDiscordConfig() {
+  const clientId = process.env.DISCORD_CLIENT_ID?.trim();
+  if (clientId) {
+    const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&permissions=8&scope=bot%20applications.commands`;
+    pass("Discord bot invite URL", `Can be generated: ${inviteUrl.replace(clientId, "[client_id]")}`);
+  } else {
+    warn("Discord bot invite URL", "DISCORD_CLIENT_ID missing locally, so invite URL cannot be generated here.");
+  }
+  checkFile("functions/api/discord/bot-status.ts", "Bot status endpoint");
+  checkFile("functions/api/servers/[serverId]/discord-channels.ts", "Discord channel endpoint");
+  checkIncludes("components/onboarding/setup-wizard.tsx", "Add DZN Bot", "Onboarding bot install step");
+  checkIncludes("components/onboarding/setup-wizard.tsx", "Verify Bot Connection", "Onboarding bot verification step");
+  checkIncludes("functions/_lib/discord-posting.ts", "DISCORD_ADMINISTRATOR_PERMISSION", "Discord Administrator resolver");
+  checkIncludes("functions/_lib/discord-posting.ts", "sendOrEditWithBot", "Discord bot posting");
+  checkIncludes("functions/_lib/discord-posting.ts", "sendOrEditWithWebhook", "Discord webhook fallback");
+}
+
+function auditCronConfig() {
+  checkFile("workers/adm-sync-worker.ts", "Cloudflare Worker cron");
+  checkFile("wrangler.adm-sync.toml", "Worker Wrangler config");
+  checkIncludes("wrangler.adm-sync.toml", "crons = [\"* * * * *\"]", "Worker 1-minute schedule");
+  for (const endpoint of ["/api/sync/metadata/run", "/api/sync/adm/run", "/api/sync/discord-posts/run"]) {
+    checkIncludes("workers/adm-sync-worker.ts", endpoint, `Worker calls ${endpoint}`);
+  }
+  checkIncludes("workers/adm-sync-worker.ts", "x-dzn-cron-secret", "Worker sends cron secret header");
+  checkIncludes(".github/workflows/dzn-adm-sync.yml", "Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only.", "GitHub backup comment");
+  checkIncludes(".github/workflows/dzn-adm-sync.yml", "- cron: \"*/5 * * * *\"", "GitHub backup cadence");
+  checkIncludes(".github/workflows/dzn-adm-sync.yml", "x-dzn-cron-secret", "GitHub sends cron secret header");
+}
+
+function auditSyncEndpoints() {
+  const endpoints = [
+    "functions/api/sync/metadata/run.ts",
+    "functions/api/sync/adm/run.ts",
+    "functions/api/sync/discord-posts/run.ts",
+  ];
+  for (const endpoint of endpoints) {
+    checkFile(endpoint, endpoint);
+    checkIncludes(endpoint, "requireCronSecret", `${endpoint} uses shared cron auth`);
+  }
+  checkFile("functions/_lib/cron-auth.ts", "Shared cron auth helper");
+  checkIncludes("functions/_lib/cron-auth.ts", "env.DZN_CRON_SECRET || null", "Cron auth uses DZN_CRON_SECRET");
+  checkNotIncludes("functions/_lib/cron-auth.ts", "SYNC_CRON_SECRET", "Cron auth does not accept old SYNC_CRON_SECRET");
+  checkFile("functions/api/automation/health.ts", "Automation health endpoint");
+  checkIncludes("functions/api/automation/health.ts", "requireDznAdmin", "Automation health is Owner/Admin only");
+  checkFile("functions/api/servers/[serverId]/auto-posts/run-now.ts", "Server Run Now endpoint");
+}
+
+function auditDatabaseMigrations() {
+  const migrationSource = readSource("migrations/0015_automation_pipeline.sql") + "\n" + readSource("functions/_lib/automation.ts");
+  for (const table of [
+    "server_subscriptions",
+    "server_sync_state",
+    "server_posting_destinations",
+    "server_posting_state",
+    "server_public_cache",
+    "automation_jobs",
+    "automation_cron_runs",
+  ]) {
+    if (migrationSource.includes(table)) pass(`Database table ${table}`, "Defined in migration or runtime schema.");
+    else fail(`Database table ${table}`, "Missing from migration/runtime schema.");
+  }
+  checkFile("migrations/0016_automation_cron_runs.sql", "Migration 0016 automation cron runs");
+  checkFile("migrations/0017_discord_post_dispatch_state.sql", "Migration 0017 Discord dispatch state");
+  checkFile("migrations/0018_adm_reset_state_tracking.sql", "Migration 0018 ADM reset state tracking");
+  checkIncludes("migrations/0017_discord_post_dispatch_state.sql", "last_dispatch_status", "Discord dispatch state migration columns");
+  checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_available_adm_filename", "ADM reset state migration columns");
+  checkIncludes("functions/_lib/automation.ts", "last_seen_adm_timestamp", "ADM timestamp tracking columns");
+  checkIncludes("functions/_lib/automation.ts", "newest_available_adm_filename", "Newest available ADM tracking");
+  checkIncludes("functions/_lib/automation.ts", "newest_readable_adm_filename", "Newest readable ADM tracking");
+  checkIncludes("functions/_lib/automation.ts", "last_restart_detected_source", "Restart detection source tracking");
+}
+
+function auditDashboardStructure() {
+  const dashboard = "components/onboarding/dashboard.tsx";
+  for (const label of ["Overview", "Sync Health", "Public Listing", "Billing & Boosts", "Discord Posts", "Settings & Danger"]) {
+    checkIncludes(dashboard, label, `Dashboard tab ${label}`);
+  }
+  for (const action of [
+    "refreshServerInfo",
+    "runSync",
+    "runDiagnostics",
+    "rerunLogCheck",
+    "clearTestData",
+    "confirmDangerAction",
+    "openBillingPortal",
+    "runDispatcherNow",
+    "runSetupAction",
+    "saveSetup",
+  ]) {
+    checkIncludes(dashboard, action, `Dashboard handler ${action}`);
+  }
+  checkIncludes(dashboard, "Last Sync Details", "Sync details are expandable");
+  checkIncludes(dashboard, "ADM API Diagnostics", "ADM diagnostics are expandable");
+}
+
+function auditDiscordAutoPosts() {
+  checkIncludes("functions/api/servers/[serverId]/discord-channels.ts", "fetchDiscordPostingChannels", "Channel discovery route uses Discord posting channel resolver");
+  checkIncludes("functions/_lib/discord-posting.ts", "source: \"administrator\"", "Permission resolver detects Administrator");
+  checkIncludes("functions/_lib/discord-posting.ts", "deliverDiscordPayload", "Dispatcher delivery helper exists");
+  checkIncludes("functions/_lib/discord-posting.ts", "state?.last_payload_hash === payloadHash", "Dispatcher avoids unchanged edits in scheduled mode");
+  checkIncludes("functions/_lib/discord-posting.ts", "recordDiscordPostingDeliveryState", "Test and dispatcher record message state");
+  checkIncludes("functions/api/servers/[serverId]/auto-posts/run-now.ts", "force: true", "Run Now force dispatches");
+  checkIncludes("components/onboarding/dashboard.tsx", "Run Auto Post Dispatcher Now", "Run Now button exists");
+  checkIncludes("components/onboarding/dashboard.tsx", "Run Now Result", "Run Now result panel exists");
+  checkIncludes("components/onboarding/dashboard.tsx", "loadDiscordChannelCache", "Channel cache exists for temporary fetch failures");
+  checkIncludes("components/onboarding/dashboard.tsx", "Saved auto-post setups continue running even if channel refresh temporarily fails.", "503 channel fetch warning preserves saved setup status");
+}
+
+function auditPackageCommands() {
+  const packageJson = JSON.parse(readSource("package.json")) as { scripts?: Record<string, string> };
+  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "test:full-system"]) {
+    if (packageJson.scripts?.[command]) pass(`Package command ${command}`, packageJson.scripts[command]);
+    else fail(`Package command ${command}`, "Package command is missing.");
+  }
+}
+
+function auditAdmSyncWiring() {
+  checkIncludes("functions/_lib/nitrado.ts", "timestampScore(entry)", "Nitrado ADM sorting parses filename timestamp and modified fallback");
+  checkIncludes("functions/_lib/nitrado.ts", "pickNewestAdmFile", "Nitrado newest ADM file selection helper exists");
+  checkIncludes("functions/_lib/adm-sync.ts", "compareAdmCandidatesChronological", "ADM candidate sorting uses parsed timestamp fallback");
+  checkIncludes("functions/_lib/adm-sync.ts", "selectNewestDiscoveredAdmFile", "Newest discovered ADM evidence is tracked");
+  checkIncludes("functions/_lib/adm-sync.ts", "latest_adm_unreadable", "Latest unreadable ADM state exists");
+  checkIncludes("functions/_lib/adm-sync.ts", "delayed_after_restart", "Delayed-after-restart state exists");
+  checkIncludes("functions/_lib/adm-sync.ts", "detectAdmRestartFromFiles", "ADM filename restart detection helper exists");
+  checkIncludes("functions/_lib/automation.ts", "getDueAdmAutomationServers", "Scheduled ADM sync selects all due connected servers");
+  checkIncludes("functions/_lib/automation.ts", "lower(server_subscriptions.status) IN ('active', 'trialing')", "ADM automation filters active/trialing subscriptions");
+  checkIncludes("functions/_lib/automation.ts", "currently_syncing_adm", "ADM automation lock is enforced");
+  checkIncludes("functions/_lib/adm-sync.ts", "queueDiscordPostUpdatesForGuild", "ADM data changes queue Discord post updates");
+}
+
+function printReport() {
+  const icons: Record<CheckStatus, string> = {
+    pass: "✅ PASS",
+    warn: "⚠️ WARN",
+    fail: "❌ FAIL",
+  };
+  console.log("\nDZN Network System Audit");
+  console.log("========================");
+  for (const check of checks) {
+    console.log(`${icons[check.status]} ${check.title}`);
+    console.log(`   ${check.detail}`);
+  }
+
+  const passed = checks.filter((check) => check.status === "pass").length;
+  const warnings = checks.filter((check) => check.status === "warn").length;
+  const failed = checks.filter((check) => check.status === "fail").length;
+
+  console.log("\nSummary");
+  console.log("-------");
+  console.log(`Total checks: ${checks.length}`);
+  console.log(`Passed: ${passed}`);
+  console.log(`Warnings: ${warnings}`);
+  console.log(`Failed: ${failed}`);
+
+  console.log("\nRecommended next fixes");
+  console.log("----------------------");
+  if (failed > 0) {
+    for (const check of checks.filter((item) => item.status === "fail")) {
+      console.log(`- Fix: ${check.title} - ${check.detail}`);
+    }
+  } else if (warnings > 0) {
+    console.log("- Review warnings above, especially missing local env vars or Cloudflare-only secrets.");
+  } else {
+    console.log("- No immediate wiring fixes detected by the source audit.");
+  }
+
+  if (failed > 0) process.exitCode = 1;
+}
+
+auditEnvironment();
+auditBillingPlans();
+auditDiscordConfig();
+auditCronConfig();
+auditSyncEndpoints();
+auditDatabaseMigrations();
+auditDashboardStructure();
+auditDiscordAutoPosts();
+auditAdmSyncWiring();
+auditPackageCommands();
+printReport();

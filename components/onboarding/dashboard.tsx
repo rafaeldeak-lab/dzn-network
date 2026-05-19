@@ -3305,11 +3305,14 @@ function getManualSyncMessage(result: AdmSyncRunResult) {
   if (result.status === "no_supported_events") {
     return "Latest ADM checked just now. No supported ADM events found.";
   }
-  if (result.status === "adm_not_generated_yet" || result.status === "no_adm_file") {
-    return "Sync checked Nitrado. Waiting for the next ADM file.";
+  if (["adm_not_generated_yet", "no_adm_file", "waiting_after_restart"].includes(result.status)) {
+    return "Server restart detected. Waiting for Nitrado to publish the next ADM log.";
   }
-  if (result.status === "adm_file_unreadable") {
-    return "Latest ADM file found, but Nitrado did not return readable log content during this sync.";
+  if (["adm_file_unreadable", "latest_adm_unreadable"].includes(result.status)) {
+    return "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.";
+  }
+  if (result.status === "delayed_after_restart") {
+    return "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.";
   }
   if (["nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error"].includes(result.status)) {
     return result.message || "ADM sync needs attention.";
@@ -3407,9 +3410,10 @@ function getDashboardSyncStatusBanner(
 
 function getLatestAdmReadableLabel(currentStatus: string) {
   const normalizedStatus = currentStatus.toLowerCase();
-  if (["adm_file_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) return "Temporarily unavailable";
-  if (normalizedStatus === "adm_not_generated_yet" || normalizedStatus === "no_adm_file") return "No ADM file found";
-  if (["completed", "no_new_lines", "no_supported_events"].includes(normalizedStatus)) return "Yes";
+  if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) return "Latest ADM file found but not readable yet";
+  if (["adm_not_generated_yet", "no_adm_file", "waiting_after_restart"].includes(normalizedStatus)) return "Waiting for Nitrado log";
+  if (normalizedStatus === "delayed_after_restart") return "Delayed after restart";
+  if (["completed", "new_data_found", "no_new_lines", "no_new_log_available", "no_supported_events"].includes(normalizedStatus)) return "Yes";
   if (normalizedStatus === "read_pending") return "Waiting for readable content";
   return "Unknown";
 }
@@ -3417,10 +3421,13 @@ function getLatestAdmReadableLabel(currentStatus: string) {
 function getRecentFeedBadge(recentEventsAreMock: boolean, currentStatus: string): { label: string; tone: "emerald" | "orange" | "zinc" } {
   if (recentEventsAreMock) return { label: "Mock Sync Data", tone: "orange" };
   const normalizedStatus = currentStatus.toLowerCase();
-  if (["adm_file_unreadable", "nitrado_file_unavailable", "adm_not_generated_yet", "no_adm_file", "nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error"].includes(normalizedStatus)) {
+  if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable", "adm_not_generated_yet", "waiting_after_restart", "delayed_after_restart", "no_adm_file"].includes(normalizedStatus)) {
+    return { label: "Waiting For Nitrado Log", tone: "orange" };
+  }
+  if (["nitrado_down", "nitrado_auth_invalid", "nitrado_rate_limited", "dzn_parser_error", "dzn_write_error", "dzn_scope_blocked", "nitrado_error", "parser_error", "write_error"].includes(normalizedStatus)) {
     return { label: "Feed Check Issue", tone: "orange" };
   }
-  if (["no_new_lines", "no_supported_events"].includes(normalizedStatus)) return { label: "Feed Checked", tone: "zinc" };
+  if (["no_new_lines", "no_new_log_available", "no_supported_events"].includes(normalizedStatus)) return { label: "Feed Checked", tone: "zinc" };
   return { label: "Live Feed Active", tone: "emerald" };
 }
 
@@ -3429,7 +3436,7 @@ function getRecentFeedStatus(syncStatus: AdmSyncStatus | null, currentStatus: st
   const lastChecked = syncStatus?.last_sync_at ? formatRelativeTime(syncStatus.last_sync_at) : "not checked yet";
   const lastSuccessful = syncStatus?.last_successful_sync_at ? formatRelativeTime(syncStatus.last_successful_sync_at) : null;
 
-  if (normalizedStatus === "no_new_lines") {
+  if (normalizedStatus === "no_new_lines" || normalizedStatus === "no_new_log_available") {
     return {
       message: `Feed checked ${lastChecked}. No new ADM lines.`,
       className: "border-cyan-300/15 bg-cyan-400/8 text-cyan-50",
@@ -3443,16 +3450,23 @@ function getRecentFeedStatus(syncStatus: AdmSyncStatus | null, currentStatus: st
     };
   }
 
-  if (["adm_file_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) {
+  if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) {
     return {
-      message: `Feed last updated ${lastSuccessful ?? "previously"}. Latest ADM file was temporarily unavailable from Nitrado.`,
+      message: `Feed last updated ${lastSuccessful ?? "previously"}. Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.`,
       className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
     };
   }
 
-  if (normalizedStatus === "adm_not_generated_yet" || normalizedStatus === "no_adm_file") {
+  if (["adm_not_generated_yet", "waiting_after_restart", "no_adm_file"].includes(normalizedStatus)) {
     return {
-      message: "Waiting for next ADM file from Nitrado. Existing feed data remains preserved.",
+      message: "Server restart detected. Waiting for Nitrado to publish the next ADM log. Existing feed data remains preserved.",
+      className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
+    };
+  }
+
+  if (normalizedStatus === "delayed_after_restart") {
+    return {
+      message: "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.",
       className: "border-orange-300/20 bg-orange-400/10 text-orange-50",
     };
   }
@@ -3538,11 +3552,11 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     };
   }
 
-  if (normalizedStatus === "adm_file_unreadable") {
+  if (["adm_file_unreadable", "latest_adm_unreadable"].includes(normalizedStatus)) {
     return {
       status: "pending" as const,
-      title: "ADM File Temporarily Unavailable",
-      message: "ADM sync checked Nitrado, but the latest ADM file was not readable this time.",
+      title: "Latest ADM Not Readable Yet",
+      message: "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.",
       detail: latestSuccessTime
         ? `The last successful feed sync remains active from ${formatDashboardDate(latestSuccessTime)}.`
         : "The last successful feed sync remains active when available.",
@@ -3551,13 +3565,26 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     };
   }
 
-  if (normalizedStatus === "adm_not_generated_yet" || normalizedStatus === "no_adm_file") {
+  if (["adm_not_generated_yet", "waiting_after_restart", "no_adm_file"].includes(normalizedStatus)) {
     return {
       status: "pending" as const,
-      title: "Waiting For ADM File",
-      message: "Sync checked Nitrado. No ADM file is available yet.",
-      detail: "DZN will process activity when Nitrado exposes the next ADM log file.",
+      title: "Waiting For Nitrado Log",
+      message: "Server restart detected. Waiting for Nitrado to publish the next ADM log.",
+      detail: "DZN will process activity when Nitrado exposes the next readable ADM log file.",
       nextAction: "Waiting for next ADM file",
+      latestSuccessTime,
+    };
+  }
+
+  if (normalizedStatus === "delayed_after_restart") {
+    return {
+      status: "pending" as const,
+      title: "ADM Delayed After Restart",
+      message: "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.",
+      detail: latestSuccessTime
+        ? `The last successful feed sync remains active from ${formatDashboardDate(latestSuccessTime)}.`
+        : "Existing stats remain preserved while DZN waits for Nitrado.",
+      nextAction: "DZN will retry on the next scheduled check",
       latestSuccessTime,
     };
   }
@@ -3573,7 +3600,7 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     };
   }
 
-  if (normalizedStatus === "no_new_lines") {
+  if (normalizedStatus === "no_new_lines" || normalizedStatus === "no_new_log_available") {
     return {
       status: "active" as const,
       title: "Sync Checked",
@@ -3606,7 +3633,7 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
 }
 
 function getProcessedPercent(syncStatus: AdmSyncStatus | null) {
-  if (syncStatus?.last_sync_status === "no_new_lines") return 100;
+  if (syncStatus?.last_sync_status === "no_new_lines" || syncStatus?.last_sync_status === "no_new_log_available") return 100;
   const linesRead = syncStatus?.last_lines_read ?? 0;
   const linesProcessed = syncStatus?.last_lines_processed ?? 0;
   if (linesRead > 0) return Math.min(100, (linesProcessed / linesRead) * 100);
@@ -3621,7 +3648,7 @@ function getNextScheduledSync(lastScheduledSync: string | null) {
 }
 
 function isSuccessfulRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
-  return ["completed", "idle", "no_new_lines", "no_supported_events"].includes(run.status.toLowerCase());
+  return ["completed", "new_data_found", "idle", "no_new_lines", "no_new_log_available", "no_supported_events"].includes(run.status.toLowerCase());
 }
 
 function isFailedRun(run: AdmSyncStatus["recent_sync_runs"][number]) {
@@ -3689,11 +3716,14 @@ function formatServerStatus(status: LinkedServer["status"]) {
 function formatSyncStatus(value: string) {
   if (value === "read_pending") return "Read Pending";
   if (value === "completed") return "Completed";
+  if (value === "new_data_found") return "New ADM Data Processed";
   if (value === "idle") return "Idle";
   if (value === "no_new_lines") return "No New Lines";
+  if (value === "no_new_log_available") return "No New ADM Data";
   if (value === "no_supported_events") return "No Supported Events";
-  if (value === "adm_not_generated_yet" || value === "no_adm_file") return "Waiting For ADM File";
-  if (value === "adm_file_unreadable") return "ADM File Temporarily Unavailable";
+  if (value === "adm_not_generated_yet" || value === "waiting_after_restart" || value === "no_adm_file") return "Waiting For Nitrado Log";
+  if (value === "adm_file_unreadable" || value === "latest_adm_unreadable") return "Latest ADM Not Readable Yet";
+  if (value === "delayed_after_restart") return "ADM Delayed After Restart";
   if (value === "nitrado_down") return "Nitrado Unavailable";
   if (value === "nitrado_auth_invalid") return "Token/Service Issue";
   if (value === "nitrado_rate_limited") return "Nitrado Rate Limited";

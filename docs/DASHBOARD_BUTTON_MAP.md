@@ -1,0 +1,79 @@
+# DZN Dashboard Button Map
+
+This map documents the visible dashboard controls after the dashboard layout refactor. It is source-mapped to `components/onboarding/dashboard.tsx` and `components/onboarding/api.ts`.
+
+## Overview
+
+| Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| View Public Page | Overview hero | `publicServerProfileHref(server.public_slug)` | Public route `/servers/profile?slug=...` | Public | Opens the public server profile. | Public profile opens. | Hidden when no slug exists. | Working |
+| Server Settings | Overview hero | `setActiveTab("public-listing")` | None | Owner/Admin | Moves to the Public Listing editor tab. | Public Listing tab opens. | None expected. | Working |
+| View All | Recent Synced Events | `setActiveTab("sync-health")` | None | Owner/Admin | Moves to detailed Sync Health. | Sync Health tab opens. | None expected. | Working |
+| View Sync Details | Recent Synced Events | `setActiveTab("sync-health")` | None | Owner/Admin | Moves to detailed Sync Health. | Sync Health tab opens. | None expected. | Working |
+| View Setup Guide | Setup Progress | Link to `/setup#review-test` | Static app route | Owner/Admin | Opens setup guide/review test section. | Setup guide opens. | Route fallback if anchor changes. | Working |
+| Manage Billing | Current Plan | `openBillingPortal` | `POST /api/billing/create-portal-session` | Owner/Admin | Opens Stripe Billing Portal. | Browser navigates to Stripe portal. | Shows billing error message. | Working |
+| View Kill Feed | Quick Actions | Link to `/leaderboards` | Public route | Member+ | Opens leaderboards/kill-feed view. | Leaderboards page opens. | Public route error if unavailable. | Working |
+| Edit Server | Quick Actions | `setActiveTab("public-listing")` | None | Owner/Admin | Opens Public Listing editor. | Public Listing tab opens. | None expected. | Working |
+| Refresh Server Info | Quick Actions | `refreshServerInfo` | `POST /api/servers/[serverId]/refresh-metadata` | Owner/Admin | Refreshes saved Nitrado metadata/player count for the selected server. | Dashboard state updates with latest metadata. | Shows clean error in action message. | Working |
+| Run Manual Sync | Quick Actions | `runSync` | `POST /api/sync/adm/run` | Owner/Admin | Runs manual ADM sync for selected server. | Sync state, events, and stats refresh. | Shows sync error/action message. | Working |
+| View Details | Sync Health summary | `setActiveTab("sync-health")` | None | Owner/Admin | Opens Sync Health tab. | Sync Health tab opens. | None expected. | Working |
+
+## Sync Health
+
+| Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Refresh Status | Sync Engine Status | `refreshNow` | Dashboard data refresh via existing `onRefresh` | Owner/Admin | Refreshes dashboard status from DZN APIs/cache. | Last refreshed time updates. | Shows temporary refresh warning. | Working |
+| Run Manual Sync | Settings & Danger quick actions, also available from overview | `runSync` | `POST /api/sync/adm/run` | Owner/Admin | Runs manual ADM sync. | Latest sync result displays. | Shows error/action message. | Working |
+| Re-run Log Check | Settings & Danger quick actions | `rerunLogCheck` | `POST /api/onboarding/test` | Owner/Admin | Rechecks onboarding/log availability. | Dashboard refreshes and action message updates. | Shows clean error/action message. | Working |
+| Run Log Access Diagnostics | Settings & Danger quick actions | `runDiagnostics` | `GET /api/nitrado/log-access-diagnostics` | Owner/Admin | Runs detailed Nitrado log route diagnostics. | Diagnostics panel becomes available. | Shows diagnostics error. | Working |
+| Show / Hide Last Sync Details | Sync Engine Status | `setSyncDetailsOpen` | None | Owner/Admin | Expands raw sync counters. | Raw counters visible only when expanded. | None expected. | Working |
+| Show / Hide ADM API Diagnostics | Settings & Danger diagnostics panel | `setDiagnosticsOpen` | None | Owner/Admin | Expands Nitrado diagnostic attempts. | Diagnostic table appears. | None expected. | Working |
+| Clear Old Failed Sync Runs | Sync Runs History | `clearFailedRuns` | `POST /api/sync/clear-failed-runs` | Owner/Admin | Clears historical failed sync rows after a newer success exists. | Failed rows removed from history. | Shows action error. | Working |
+| Recheck locks if any | Automation health | Automatic via `recoverStuckAutomationLocks` | `GET /api/automation/health` side effect | Owner/Admin | Stuck locks are recovered when automation health/schedulers run. | Lock counts return to zero. | No separate visible button currently. | Not implemented as standalone button |
+
+## Public Listing
+
+| Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Save Public Listing | Public Listing tab | `saveListing` | `PATCH /api/servers/[serverId]/public-listing` | Owner/Admin | Saves tagline, description, links, rules, language, and region. | Save message and server state update. | Shows save error. | Working |
+| View Public Page | Public Listing preview | `publicServerProfileHref(slug)` | Public route `/servers/profile?slug=...` | Public | Opens public server profile. | Public profile opens. | Hidden when slug is missing. | Working |
+
+## Billing & Boosts
+
+| Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Manage Billing | Billing card | `manageBilling` / `openBillingPortal` | `POST /api/billing/create-portal-session` | Owner/Admin | Opens Stripe Billing Portal. | Stripe portal opens. | Shows billing error. | Working |
+| Upgrade | Plan cards | `upgrade(planKey)` | `POST /api/billing/create-checkout-session` | Owner/Admin | Creates Stripe Checkout Session for selected plan. | Browser navigates to Stripe Checkout. | Shows billing error. | Working |
+| Bump Server | Advertising Boosts | `bump` | `POST /api/servers/[serverId]/advertising/bump` | Owner/Admin, plan-gated | Uses an included bump if plan allows it and cooldown permits. | Advertising state updates. | Shows cooldown/upgrade/error message. | Working |
+| Refresh billing state | Billing & Boosts | `onRefresh` / `refreshBilling` | `GET /api/billing/status`, `GET /api/billing/plans` | Owner/Admin | Reloads billing state and plan config. | Billing panel updates. | Shows billing error. | Working |
+
+## Discord Posts
+
+| Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Save Auto Post Setup | Builder | `saveSetup` | `POST /api/servers/[serverId]/posting-destinations` | Owner/Admin, active/trialing plan | Saves one or more post types for the selected channel. | Setup appears grouped by channel. | Shows plan/permission/channel error. | Working |
+| Recheck Channels | Channel Discovery warning/header | `onChannelsRefresh` | `GET /api/servers/[serverId]/discord-channels` | Owner/Admin | Refetches Discord channel list with bot token. | Channel dropdown/cached state updates. | Friendly retryable warning; saved setups remain active. | Working |
+| Recheck Selected Channel | Builder selected channel | `recheckSelectedChannel` | `GET /api/servers/[serverId]/discord-channels` | Owner/Admin | Refetches channels and recalculates selected channel permission state. | Permission message updates for selected channel only. | Shows fetch warning and preserves cache. | Working |
+| Test | Saved setup card | `runSetupAction(setup, "test")` | `POST /api/servers/[serverId]/posting-destinations` | Owner/Admin, active/trialing plan | Sends/edits a test payload using bot first, webhook fallback second. | `server_posting_state.discord_message_id` is saved/updated. | Shows missing permission/setup error. | Working |
+| Run Auto Post Dispatcher Now | Saved setups header | `runDispatcherNow` | `POST /api/servers/[serverId]/auto-posts/run-now` | Owner/Admin, active/trialing plan | Force-runs the production dispatcher for this server. | Result panel shows processed/edited/sent/skipped/failed. | Shows dispatch error/result failure. | Working |
+| Edit | Saved setup card | `editSetup` | None until saved | Owner/Admin | Loads the setup into the builder for edits. | Builder fields update. | None expected. | Working |
+| Disable | Saved setup card | `runSetupAction(setup, "disable")` | `POST /api/servers/[serverId]/posting-destinations` | Owner/Admin | Disables all destinations for that channel. | Setup status updates. | Shows API error. | Working |
+| Delete | Saved setup card | `runSetupAction(setup, "delete")` | `POST /api/servers/[serverId]/posting-destinations` | Owner/Admin | Deletes saved destinations for that channel. | Setup disappears. | Shows API error. | Working |
+| Show dispatch diagnostics | Saved setup card | `setDispatchDiagnosticsOpenByChannel` | None | Owner/Admin | Expands message ID, payload hash, dispatch status, job info. | Diagnostics visible. | None expected. | Working |
+| Show advanced manual setup | Builder | `setAdvancedOpen` | None until saved | Owner/Admin | Shows manual channel ID and webhook fallback fields. | Manual fallback inputs visible. | None expected. | Working |
+
+## Settings & Danger
+
+| Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Clear Mock/Test Sync Data | Settings quick actions | `clearTestData` | `POST /api/sync/clear-test-data` | Owner/Admin | Deletes mock/test sync data for selected server. | Action message confirms cleanup. | Shows cleanup error. | Dangerous/action guarded |
+| Remove Server From DZN | Danger Zone | `setDangerAction("server")`, then `confirmDangerAction` | `POST /api/server/delete` | Original owner only | Opens two-step confirmation and removes selected server data from DZN. | Redirect/summary from delete endpoint. | Disabled for non-original owner or shows endpoint error. | Dangerous/action guarded |
+| Download My DZN Data Summary | Danger Zone | `downloadDataSummary` | Browser-generated JSON file | Owner/Admin | Downloads a local summary of visible DZN account/server state. | JSON file downloads. | Browser download may be blocked by client settings. | Working |
+| Close DZN Account | Danger Zone | `setDangerAction("account")`, then `confirmDangerAction` | `POST /api/account/delete` | Original owner only | Opens two-step confirmation and deletes DZN account data. | Redirect/summary from delete endpoint. | Disabled for non-original owner or shows endpoint error. | Dangerous/action guarded |
+| Logout | Top bar | `onLogout` from `Dashboard`, calls `signOut` | `POST /api/auth/logout` | Logged-in user | Clears client auth state and returns to homepage. | Browser navigates to `/`. | Local state cleared even if logout endpoint fails. | Working |
+
+## Notes
+
+- Technical fields such as raw ADM filenames, parser counters, payload hashes, message IDs, cron job IDs, and route diagnostics are intentionally kept out of the default Overview.
+- Diagnostics remain available in Sync Health, Settings & Danger, or collapsed Discord Posts diagnostics for Owner/Admin users.
+- Every visible button in the refactored layout either maps to an existing handler/route or is documented above as not implemented as a standalone button.

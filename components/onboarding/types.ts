@@ -635,6 +635,11 @@ export type AdmSyncRunResult = {
   duplicateKillsSkipped: number;
   playersUpdated: number;
   latestAdmFile: string | null;
+  latestAdmTimestamp?: string | null;
+  newestAvailableAdmFile?: string | null;
+  newestAvailableAdmTimestamp?: string | null;
+  newestReadableAdmFile?: string | null;
+  newestReadableAdmTimestamp?: string | null;
   lastProcessedLine: number;
   lastSyncAt: string;
   readableRouteUsed: string | null;
