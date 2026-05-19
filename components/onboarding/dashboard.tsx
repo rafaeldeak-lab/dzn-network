@@ -112,93 +112,28 @@ export function Dashboard() {
   const server = manageableServers.find((item) => item.id === selectedServerId) ?? auth.linkedServer ?? manageableServers[0] ?? null;
 
   return (
-    <DashboardFrame
-      onLogout={signOut}
-      serverName={server?.server_name ?? server?.guild_name ?? null}
-      servers={manageableServers}
-      selectedServerId={server?.id ?? null}
-      onSelectServer={setSelectedServerId}
-    >
-      {server ? <ServerDashboard key={server.id} server={server} onRefresh={async () => setAuth(await getMe())} /> : <EmptyDashboard />}
+    <DashboardFrame>
+      {server ? (
+        <ServerDashboard
+          key={server.id}
+          server={server}
+          servers={manageableServers}
+          selectedServerId={server.id}
+          onSelectServer={setSelectedServerId}
+          onLogout={signOut}
+          onRefresh={async () => setAuth(await getMe())}
+        />
+      ) : <EmptyDashboard />}
     </DashboardFrame>
   );
 }
 
-function DashboardFrame({
-  children,
-  onLogout,
-  serverName,
-  servers = [],
-  selectedServerId,
-  onSelectServer,
-}: {
-  children: React.ReactNode;
-  onLogout?: () => void;
-  serverName?: string | null;
-  servers?: LinkedServer[];
-  selectedServerId?: string | null;
-  onSelectServer?: (serverId: string) => void;
-}) {
-  const navItems = [
-    { label: "Dashboard", href: "/dashboard" },
-    { label: "Servers", href: "/servers" },
-    { label: "Analytics", href: "/leaderboards" },
-    { label: "Players", href: "/leaderboards" },
-    { label: "Settings", href: "/setup" },
-    { label: "Support", href: "#" },
-  ];
-
+function DashboardFrame({ children }: { children: React.ReactNode }) {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-4 py-5 text-white sm:px-6 lg:px-8">
+    <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(139,92,246,0.26),transparent_30%),radial-gradient(circle_at_78%_18%,rgba(14,165,233,0.14),transparent_28%),linear-gradient(180deg,#02030a_0%,#07101f_52%,#02030a_100%)]" />
       <div className="scanline absolute inset-0 opacity-20" />
-      <div className="relative z-10 mx-auto max-w-[1500px]">
-        <nav className="mb-5 flex flex-col gap-4 rounded-lg border border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl lg:min-h-[104px] lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-4">
-            <DznLogo compact />
-            <div className="rounded-lg border border-violet-300/20 bg-violet-400/10 px-3 py-2">
-              <p className="text-[10px] font-black uppercase text-violet-200/75">Owner Dashboard</p>
-              <p className="mt-0.5 max-w-[220px] truncate text-xs font-black uppercase text-white">{serverName ?? "Server Console"}</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {navItems.map((item) => (
-              <Link key={item.label} href={item.href} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200 transition hover:border-cyan-300/35 hover:text-white">
-                {item.label}
-              </Link>
-            ))}
-            <button type="button" aria-label="Notifications" className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-200">
-              <Bell className="h-4 w-4" />
-            </button>
-            {servers.length > 1 && onSelectServer ? (
-              <label className="relative inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
-                <select
-                  value={selectedServerId ?? ""}
-                  onChange={(event) => onSelectServer(event.target.value)}
-                  className="max-w-[220px] appearance-none bg-transparent pr-5 text-[11px] font-black uppercase text-white outline-none"
-                  aria-label="Select dashboard server"
-                >
-                  {servers.map((server) => (
-                    <option key={server.id} value={server.id} className="bg-[#080b16] text-white">
-                      {server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 h-3.5 w-3.5" />
-              </label>
-            ) : (
-              <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
-                {serverName ?? "Server"}
-                <ChevronDown className="h-3.5 w-3.5" />
-              </button>
-            )}
-            {onLogout ? (
-              <button type="button" onClick={onLogout} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[11px] font-black uppercase text-zinc-200">
-                <LogOut className="inline h-4 w-4" /> Logout
-              </button>
-            ) : null}
-          </div>
-        </nav>
+      <div className="relative z-10">
         {children}
       </div>
     </main>
@@ -223,7 +158,24 @@ function EmptyDashboard() {
   );
 }
 
-function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServer; onRefresh: () => Promise<void> }) {
+type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "billing" | "discord-posts" | "settings-danger";
+
+function ServerDashboard({
+  server: serverProp,
+  servers,
+  selectedServerId,
+  onSelectServer,
+  onLogout,
+  onRefresh,
+}: {
+  server: LinkedServer;
+  servers: LinkedServer[];
+  selectedServerId: string | null;
+  onSelectServer: (serverId: string) => void;
+  onLogout: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [activeTab, setActiveTab] = useState<DashboardTabKey>("overview");
   const [checkingLogs, setCheckingLogs] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
@@ -639,8 +591,107 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
     URL.revokeObjectURL(url);
   }
 
+  async function openBillingPortal() {
+    try {
+      const session = await createPortalSession();
+      window.location.assign(session.url);
+    } catch (error) {
+      setBillingMessage(error instanceof Error ? error.message : "Could not open billing portal.");
+      setActiveTab("billing");
+    }
+  }
+
+  const tabItems: Array<{ key: DashboardTabKey; label: string; icon: React.ReactNode }> = [
+    { key: "overview", label: "Overview", icon: <Server className="h-4 w-4" /> },
+    { key: "sync-health", label: "Sync Health", icon: <RefreshCw className="h-4 w-4" /> },
+    { key: "public-listing", label: "Public Listing", icon: <ExternalLink className="h-4 w-4" /> },
+    { key: "billing", label: "Billing & Boosts", icon: <Gauge className="h-4 w-4" /> },
+    { key: "discord-posts", label: "Discord Posts", icon: <Bell className="h-4 w-4" /> },
+    { key: "settings-danger", label: "Settings & Danger", icon: <Settings className="h-4 w-4" /> },
+  ];
+  const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
+  const currentPlanName = planLabel(billingStatus?.plan_key ?? "free");
+  const setupChecks = [
+    ["ADM Discovered", admState.isDiscovered],
+    ["Log Sync Active", statsSyncActive],
+    ["Events Processing", (syncStatus?.last_events_created ?? 0) > 0 || (syncStatus?.total_joins ?? 0) > 0],
+    ["Discord Connected", Boolean(server.guild_id)],
+    ["DZN Bot Installed", discordBotInstalled],
+    ["Channels Discovered", discordChannelsDiscovered],
+    ["Stats Sync Active", statsSyncActive],
+  ] as const;
+
   return (
-    <div className="space-y-5">
+    <div className="min-h-screen lg:grid lg:grid-cols-[250px_minmax(0,1fr)]">
+      <aside className="border-b border-white/10 bg-[#050913]/85 p-4 backdrop-blur-xl lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
+        <div className="flex items-center justify-between gap-3 lg:block">
+          <DznLogo compact />
+          <button type="button" aria-label="Notifications" className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-200 lg:hidden">
+            <Bell className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-5 rounded-xl border border-violet-300/20 bg-violet-400/10 p-3">
+          <p className="text-[10px] font-black uppercase text-violet-200/75">Selected Server</p>
+          <p className="mt-1 truncate text-sm font-black text-white">{selectedServerLabel}</p>
+          <div className="mt-2 flex items-center gap-2 text-[11px] font-bold text-emerald-200">
+            <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
+            {statsSyncActive ? "Synced" : formatServerStatus(server.status)}
+          </div>
+        </div>
+        <nav className="mt-5 grid gap-2">
+          {tabItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setActiveTab(item.key)}
+              className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-bold transition ${activeTab === item.key ? "border-violet-300/40 bg-violet-500/24 text-white shadow-[0_0_28px_rgba(139,92,246,0.18)]" : "border-transparent bg-transparent text-zinc-400 hover:border-white/10 hover:bg-white/[0.04] hover:text-white"}`}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="mt-6 rounded-xl border border-white/10 bg-black/24 p-3">
+          <p className="text-xs font-black uppercase text-zinc-200">Need help?</p>
+          <p className="mt-2 text-xs leading-5 text-zinc-500">Everything you need to manage your server.</p>
+          <Link href="/setup#review-test" className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white">View Setup Guide</Link>
+          <a href="https://discord.gg/T2cgcTYPFV" target="_blank" rel="noreferrer" className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100">Support Discord</a>
+        </div>
+      </aside>
+      <div className="min-w-0">
+        <header className="sticky top-0 z-20 border-b border-white/10 bg-[#030711]/88 px-4 py-3 backdrop-blur-xl sm:px-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <label className="relative grid gap-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 md:min-w-[260px]">
+              <span className="text-[9px] font-black uppercase text-zinc-500">Selected Server</span>
+              <select
+                value={selectedServerId ?? server.id}
+                onChange={(event) => onSelectServer(event.target.value)}
+                className="appearance-none bg-transparent pr-8 text-sm font-black text-white outline-none"
+                aria-label="Select dashboard server"
+              >
+                {servers.map((item) => (
+                  <option key={item.id} value={item.id} className="bg-[#080b16] text-white">
+                    {item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 text-zinc-400" />
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link href="/servers" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">View Network</Link>
+              <Link href="/setup" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">Setup</Link>
+              <button type="button" aria-label="Notifications" className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-200">
+                <Bell className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={onLogout} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">
+                <LogOut className="h-4 w-4" /> Logout
+              </button>
+            </div>
+          </div>
+        </header>
+        <div className="space-y-5 px-4 py-5 sm:px-5 xl:px-6">
+      {activeTab === "overview" ? (
+      <>
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
         <DashboardPanel className="p-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
@@ -719,9 +770,86 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
           </div>
         </div>
       </section>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Players Online" value={playerSlotsLabel} detail={playerCountFreshnessDetail} tone="cyan" />
+        <DashboardStatTile icon={<Crosshair className="h-5 w-5" />} label="Kills" value={String(syncStatus?.total_kills ?? 0)} detail="Total" tone="red" />
+        <DashboardStatTile icon={<AlertTriangle className="h-5 w-5" />} label="Deaths" value={String(syncStatus?.total_deaths ?? 0)} detail="Total" tone="orange" />
+        <DashboardStatTile icon={<ArrowRight className="h-5 w-5" />} label="Joins" value={String(syncStatus?.total_joins ?? 0)} detail="Total" tone="emerald" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Disconnects" value={String(syncStatus?.total_disconnects ?? 0)} detail="Total" tone="zinc" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Unique Players" value={String(syncStatus?.unique_players ?? 0)} detail="Total" tone="violet" />
+        <DashboardStatTile icon={<Gauge className="h-5 w-5" />} label="Server Score" value={scoreLabel} detail="Score" tone="violet" />
+        <DashboardStatTile icon={<BarChart3 className="h-5 w-5" />} label="Global Rank" value={globalRankLabel} detail="Rank" tone="orange" />
+      </section>
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)_minmax(320px,0.72fr)]">
+        <DashboardPanel className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <PanelHeader icon={<Activity className="h-5 w-5" />} title="Recent Synced Events" />
+            <button type="button" onClick={() => setActiveTab("sync-health")} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">View All</button>
+          </div>
+          <div className="mt-4 grid max-h-[340px] gap-2 overflow-auto pr-1">
+            {recentEvents.length ? recentEvents.slice(0, 5).map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />) : (
+              <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">No recent events yet. Activity will appear after synced ADM events.</div>
+            )}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[11px] font-bold text-zinc-500">Feed last updated {lastRefreshedAt ? formatRelativeTime(lastRefreshedAt) : "when data syncs"}.</p>
+            <button type="button" onClick={() => setActiveTab("sync-health")} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50">
+              View Sync Details <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </DashboardPanel>
+        <DashboardPanel className="p-4">
+          <div className="flex items-center justify-between">
+            <PanelHeader icon={<CircleCheck className="h-5 w-5" />} title="Setup Progress" />
+            <span className="text-xs font-black uppercase text-emerald-100">{progress}% Complete</span>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-sm bg-white/10">
+            <div className="h-full bg-gradient-to-r from-violet-300 via-cyan-300 to-emerald-300" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="mt-4 grid gap-2">
+            {setupChecks.slice(0, 5).map(([label, done]) => <SetupCheck key={label} label={label} done={done} />)}
+          </div>
+          <Link href="/setup#review-test" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white">
+            View Setup Guide <LifeBuoy className="h-4 w-4" />
+          </Link>
+        </DashboardPanel>
+        <div className="grid gap-4">
+          <DashboardPanel className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <PanelHeader icon={<Gauge className="h-5 w-5" />} title="Current Plan" />
+              <button type="button" disabled={!billingStatus?.stripe_customer_exists} onClick={openBillingPortal} className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50 disabled:opacity-55">Manage Billing</button>
+            </div>
+            <p className="mt-4 text-2xl font-black uppercase text-violet-100">{currentPlanName}</p>
+            <div className="mt-4 grid grid-cols-3 gap-3">
+              <MiniInfo label="Servers Used" value={billingStatus ? `${billingStatus.linked_server_count} / ${billingStatus.entitlements.max_linked_servers}` : "Loading"} />
+              <MiniInfo label="Bumps This Month" value={advertisingStatus ? `${advertisingStatus.bump_count_current_period} / ${advertisingStatus.included_bumps_per_month}` : String(billingStatus?.entitlements.included_bumps_per_month ?? 0)} />
+              <MiniInfo label="Renews" value={billingRenewalLabel(billingStatus)} />
+            </div>
+          </DashboardPanel>
+          <DashboardPanel className="p-4">
+            <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions" />
+            <div className="mt-3 grid gap-2">
+              <ActionLink href="/leaderboards" icon={<Crosshair className="h-4 w-4" />} label="View Kill Feed" />
+              <button type="button" onClick={() => setActiveTab("public-listing")} className="inline-flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm font-bold text-zinc-100">Edit Server <ArrowRight className="h-4 w-4" /></button>
+              <button type="button" disabled={refreshingServerInfo} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 disabled:opacity-55">Refresh Server Info <RefreshCw className={`h-4 w-4 ${refreshingServerInfo ? "animate-spin" : ""}`} /></button>
+              <button type="button" disabled={syncing} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 disabled:opacity-55">Run Manual Sync <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} /></button>
+            </div>
+          </DashboardPanel>
+          <DashboardPanel className="p-4">
+            <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Sync Health" />
+            <p className={`mt-3 text-sm font-black ${syncHealth.status === "error" ? "text-amber-100" : "text-emerald-100"}`}>{syncHealth.status === "error" ? syncHealth.title : "All systems operational"}</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">{syncHealth.status === "error" ? syncHealth.nextAction : "Status, ADM, and Discord automation are tracked in Sync Health."}</p>
+            <button type="button" onClick={() => setActiveTab("sync-health")} className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100">View Details</button>
+          </DashboardPanel>
+        </div>
+      </section>
+      </>
+      ) : null}
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]">
-        <div className="grid gap-5">
+      {activeTab !== "overview" ? (
+      <section className={`grid gap-5 ${activeTab === "sync-health" || activeTab === "public-listing" ? "xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]" : ""}`}>
+        <div className={activeTab === "billing" || activeTab === "settings-danger" ? "hidden" : "grid gap-5"}>
+          {activeTab === "sync-health" ? (
           <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
             <DashboardPanel className="p-4">
               <PanelHeader icon={<Server className="h-5 w-5" />} title="Server Overview" />
@@ -828,7 +956,9 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               <LastSyncDetails open={syncDetailsOpen} onToggle={() => setSyncDetailsOpen((value) => !value)} latestAdmFile={latestAdmFile} syncStatus={syncStatus} lastSyncResult={lastSyncResult} />
             </DashboardPanel>
           </div>
+          ) : null}
 
+          {activeTab === "public-listing" ? (
           <PublicListingEditor
             key={`${server.id}-public-listing`}
             server={server}
@@ -842,7 +972,9 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               }));
             }}
           />
+          ) : null}
 
+          {activeTab === "discord-posts" ? (
           <DiscordAutoPostsPanel
             serverId={server.id}
             setups={postingSetups}
@@ -861,7 +993,9 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               if (result.post_type_options) setPostingOptions(result.post_type_options);
             }}
           />
+          ) : null}
 
+          {activeTab === "sync-health" ? (
           <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
             <DashboardPanel className="p-4">
               <div className="flex items-center justify-between gap-3">
@@ -888,10 +1022,14 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               <SyncRunsHistory runs={syncRuns} latestSuccessTime={syncHealth.latestSuccessTime} onClearFailedRuns={clearFailedRuns} clearingFailedRuns={clearingFailedRuns} />
             </DashboardPanel>
           </div>
+          ) : null}
         </div>
 
-        <aside className="grid content-start gap-5">
+        <aside className={activeTab === "discord-posts" ? "hidden" : "grid content-start gap-5"}>
+          {activeTab === "billing" ? (
           <BillingPlanPanel billing={billingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBilling} />
+          ) : null}
+          {activeTab === "billing" ? (
           <AdvertisingBoostPanel
             serverId={server.id}
             billing={billingStatus}
@@ -902,7 +1040,9 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               void refreshBilling();
             }}
           />
-          {automationHealth ? <AutomationHealthPanel health={automationHealth} /> : null}
+          ) : null}
+          {activeTab === "sync-health" && automationHealth ? <AutomationHealthPanel health={automationHealth} /> : null}
+          {activeTab === "settings-danger" ? (
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions & Setup" />
             <div className="mt-4 grid gap-3">
@@ -960,15 +1100,19 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
               <LogDiagnosticsPanel diagnostics={logDiagnostics} open={diagnosticsOpen} onToggle={() => setDiagnosticsOpen((value) => !value)} />
             ) : null}
           </DashboardPanel>
-          {server.public_slug ? <DashboardPublicReviewsSummary slug={server.public_slug} /> : null}
+          ) : null}
+          {activeTab === "public-listing" && server.public_slug ? <DashboardPublicReviewsSummary slug={server.public_slug} /> : null}
+          {activeTab === "settings-danger" ? (
           <DangerZonePanel
             isOriginalOwner={isOriginalOwner}
             onRemoveServer={() => setDangerAction("server")}
             onCloseAccount={() => setDangerAction("account")}
             onDownloadSummary={downloadDataSummary}
           />
+          ) : null}
         </aside>
       </section>
+      ) : null}
       {dangerAction ? (
         <DangerZoneModal
           action={dangerAction}
@@ -981,6 +1125,8 @@ function ServerDashboard({ server: serverProp, onRefresh }: { server: LinkedServ
           onConfirm={confirmDangerAction}
         />
       ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1326,6 +1472,42 @@ function MetricTile({ label, value }: { label: string; value: number }) {
     <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2">
       <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
       <p className="mt-1 text-lg font-black text-white">{value.toLocaleString()}</p>
+    </div>
+  );
+}
+
+function DashboardStatTile({
+  icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  detail: string;
+  tone: "cyan" | "red" | "orange" | "emerald" | "zinc" | "violet";
+}) {
+  const classes = {
+    cyan: "text-cyan-200 border-cyan-300/20 bg-cyan-400/8",
+    red: "text-red-200 border-red-300/20 bg-red-400/8",
+    orange: "text-amber-200 border-amber-300/20 bg-amber-400/8",
+    emerald: "text-emerald-200 border-emerald-300/20 bg-emerald-400/8",
+    zinc: "text-zinc-200 border-zinc-300/15 bg-zinc-400/8",
+    violet: "text-violet-200 border-violet-300/20 bg-violet-400/8",
+  }[tone];
+
+  return (
+    <div className={`rounded-xl border p-3 ${classes}`}>
+      <div className="flex items-center gap-2">
+        <span className="grid h-9 w-9 place-items-center rounded-lg bg-black/30 shadow-[0_0_18px_currentColor]">{icon}</span>
+        <div className="min-w-0">
+          <p className="text-[9px] font-black uppercase text-zinc-500">{label}</p>
+          <p className="mt-1 truncate text-xl font-black text-white">{value}</p>
+        </div>
+      </div>
+      <p className="mt-2 text-[10px] font-bold text-zinc-500">{detail}</p>
     </div>
   );
 }
