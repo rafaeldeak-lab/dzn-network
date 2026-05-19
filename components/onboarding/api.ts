@@ -20,6 +20,8 @@ import type {
   PostingDestinationsResponse,
   PostingTestPostResult,
   AutoPostDispatchNowResult,
+  PublicCacheDebug,
+  PublicCacheRebuildResult,
 } from "./types";
 
 export async function getMe() {
@@ -242,6 +244,16 @@ export async function getDiscordPostingChannels(linkedServerId: string) {
 
 export async function getAutomationHealth() {
   return request<AutomationHealth>("/api/automation/health", { cache: "no-store" });
+}
+
+export async function getPublicCacheDebug(linkedServerId: string) {
+  return request<PublicCacheDebug>(`/api/servers/${encodeURIComponent(linkedServerId)}/public-cache/debug`, { cache: "no-store" });
+}
+
+export async function rebuildPublicCache(linkedServerId: string) {
+  return request<PublicCacheRebuildResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/public-cache/rebuild`, {
+    method: "POST",
+  });
 }
 
 export async function clearMockTestSyncData(linkedServerId?: string) {

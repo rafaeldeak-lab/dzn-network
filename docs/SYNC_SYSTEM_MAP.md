@@ -404,7 +404,38 @@ Auto-post limits:
 | Network | Pro posts plus Event Leaderboard, Network Ranking, Server-vs-Server Progress |
 | Partner | Everything, including feeds, admin posts, partner featured, priority status |
 
-## I. Common Failure States
+## I. Public Profile Cache
+
+Public server profiles load data through `GET /api/public/servers?slug=...`.
+
+Public profile status fields read from `server_public_cache` first, then fall back to `linked_servers`:
+
+- current player count
+- max player count
+- online/offline status
+- server status
+- status last checked timestamp
+
+ADM/stat fields read from the event/stat tables:
+
+- PvP kills and deaths from `kill_events`
+- joins, disconnects, and unique players from `server_stats`
+- top players from the public leaderboard helpers scoped to the linked server
+
+Metadata/status sync updates `linked_servers`, `server_sync_state`, and `server_public_cache.last_status_update_at`.
+
+ADM processing updates event/stat tables, `server_stats`, `server_public_cache.last_adm_update_at`, and allowed Discord post queues.
+
+The public profile `last_sync_at` uses the freshest real data timestamp from metadata, player-count checks, ADM sync, stats, and sync runs. A delayed ADM run should not make a fresh status check look two days old, and a maintenance-only cache write should not hide a stale sync.
+
+Owner/Admin recovery:
+
+- `GET /api/servers/[serverId]/public-cache/debug`
+- `POST /api/servers/[serverId]/public-cache/rebuild`
+
+The debug endpoint compares public cache with linked server metadata, sync state, stats, subscription state, and cron check-ins. The rebuild endpoint safely refreshes `server_public_cache` from current data without wiping stats or events.
+
+## J. Common Failure States
 
 | State | Meaning | Serious? | What to do |
 | --- | --- | --- | --- |

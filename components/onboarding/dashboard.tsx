@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, rebuildPublicCache, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -205,6 +205,9 @@ function ServerDashboard({
   const [discordChannelsWarning, setDiscordChannelsWarning] = useState("");
   const [discordChannelFetchFailure, setDiscordChannelFetchFailure] = useState<DiscordChannelFetchFailure | null>(null);
   const [automationHealth, setAutomationHealth] = useState<AutomationHealth | null>(null);
+  const [publicCacheDebug, setPublicCacheDebug] = useState<PublicCacheDebug | null>(null);
+  const [publicCacheRebuildResult, setPublicCacheRebuildResult] = useState<PublicCacheRebuildResult | null>(null);
+  const [rebuildingPublicCache, setRebuildingPublicCache] = useState(false);
   const [nitradoLogSettings, setNitradoLogSettings] = useState<NitradoLogSettingsConfirmation | null>(null);
   const [nitradoLogSettingsCheck, setNitradoLogSettingsCheck] = useState<NitradoLogSettingsCheckResponse | null>(null);
   const [savingNitradoLogSettings, setSavingNitradoLogSettings] = useState(false);
@@ -295,6 +298,8 @@ function ServerDashboard({
       }
       const health = await getAutomationHealth().catch(() => null);
       setAutomationHealth(health);
+      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
+      setPublicCacheDebug(cacheDebug);
     } catch (error) {
       setDiscordChannelsLoading(false);
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
@@ -304,6 +309,21 @@ function ServerDashboard({
   useEffect(() => {
     void Promise.resolve().then(refreshBilling);
   }, [refreshBilling]);
+
+  const rebuildPublicProfileCache = useCallback(async () => {
+    setRebuildingPublicCache(true);
+    setActionMessage("");
+    try {
+      const result = await rebuildPublicCache(server.id);
+      setPublicCacheRebuildResult(result);
+      setPublicCacheDebug(result.after);
+      setActionMessage("Public profile cache rebuilt from current server, stats, and sync data.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Could not rebuild public profile cache.");
+    } finally {
+      setRebuildingPublicCache(false);
+    }
+  }, [server.id]);
 
   const serverDisplayName = server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name;
   const effectiveServerMode = server.server_mode ?? server.server_type;
@@ -366,6 +386,14 @@ function ServerDashboard({
   );
   const admDiscoveryInterval = billingStatus?.entitlements.adm_discovery_interval_minutes ?? null;
   const admProcessingInterval = billingStatus?.entitlements.adm_pull_interval_minutes ?? null;
+  const publicCacheFlags = publicCacheDebug?.problem_flags ?? [];
+  const publicCacheStale = publicCacheFlags.some((flag) => [
+    "public_cache_missing",
+    "public_cache_stale",
+    "metadata_newer_than_public_cache",
+    "status_sync_newer_than_public_cache",
+    "adm_newer_than_public_cache",
+  ].includes(flag));
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -462,6 +490,8 @@ function ServerDashboard({
         },
       }));
       await onRefresh();
+      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
+      if (cacheDebug) setPublicCacheDebug(cacheDebug);
       setActionMessage("Server info checked from Nitrado just now.");
     } catch {
       setActionMessage("Could not refresh server info. Try again.");
@@ -533,6 +563,8 @@ function ServerDashboard({
       setLastSyncResult(result);
       await refreshSyncData({ warnOnError: false, queueIfBusy: true });
       await onRefresh();
+      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
+      if (cacheDebug) setPublicCacheDebug(cacheDebug);
       setActionMessage(getManualSyncMessage(result));
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Unable to run manual sync.");
@@ -1040,6 +1072,15 @@ function ServerDashboard({
                 <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
                   {liveRefreshWarning}
                 </p>
+              ) : null}
+              {publicCacheDebug ? (
+                <PublicCacheHealthPanel
+                  debug={publicCacheDebug}
+                  rebuildResult={publicCacheRebuildResult}
+                  stale={publicCacheStale}
+                  rebuilding={rebuildingPublicCache}
+                  onRebuild={rebuildPublicProfileCache}
+                />
               ) : null}
               <LastSyncDetails open={syncDetailsOpen} onToggle={() => setSyncDetailsOpen((value) => !value)} latestAdmFile={latestAdmFile} syncStatus={syncStatus} lastSyncResult={lastSyncResult} />
             </DashboardPanel>
@@ -2627,6 +2668,7 @@ function DiscordAutoPostsPanel({
 
 function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
   const summary = getAutomationHealthSummary(health);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   return (
     <DashboardPanel className="p-4">
       <PanelHeader icon={<Activity className="h-5 w-5" />} title="Automation Health" />
@@ -2662,7 +2704,103 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
         <HealthCountLine label="Plans" counts={health.server_count_by_plan} />
         <HealthCountLine label="Subscriptions" counts={health.subscription_count_by_status} />
       </div>
+      {health.due_server_diagnostics?.length ? (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setDiagnosticsOpen((value) => !value)}
+            className="text-left text-[10px] font-black uppercase text-cyan-100 transition hover:text-cyan-50"
+          >
+            {diagnosticsOpen ? "Hide" : "Show"} Due Server Diagnostics
+          </button>
+          {diagnosticsOpen ? (
+            <div className="mt-3 grid gap-2">
+              {health.due_server_diagnostics.slice(0, 10).map((row) => (
+                <div key={row.linked_server_id} className="rounded-lg border border-white/10 bg-black/24 p-3 text-xs leading-5 text-zinc-300">
+                  <p className="font-black text-white">{row.server_name ?? row.public_slug ?? row.linked_server_id}</p>
+                  <p>Plan: {planLabel(row.plan_key)} / {row.subscription_status ?? "unknown"}</p>
+                  <p>Reason: {formatStatusLabel(row.skipped_reason)}</p>
+                  <p>Status due: {row.next_status_check_due_at ? formatDashboardDate(row.next_status_check_due_at) : "Now"}</p>
+                  <p>ADM discovery due: {row.next_adm_discovery_due_at ? formatDashboardDate(row.next_adm_discovery_due_at) : "Now"}</p>
+                  <p>ADM processing due: {row.next_adm_pull_due_at ? formatDashboardDate(row.next_adm_pull_due_at) : "Now"}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </DashboardPanel>
+  );
+}
+
+function PublicCacheHealthPanel({
+  debug,
+  rebuildResult,
+  stale,
+  rebuilding,
+  onRebuild,
+}: {
+  debug: PublicCacheDebug;
+  rebuildResult: PublicCacheRebuildResult | null;
+  stale: boolean;
+  rebuilding: boolean;
+  onRebuild: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const flags = debug.problem_flags.length ? debug.problem_flags.map(formatStatusLabel).join(", ") : "None";
+  return (
+    <div className={`mt-4 rounded-lg border p-3 ${stale ? "border-amber-300/20 bg-amber-400/10" : "border-emerald-300/20 bg-emerald-400/10"}`}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className={`text-xs font-black uppercase ${stale ? "text-amber-100" : "text-emerald-100"}`}>Public Profile Cache</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-zinc-200">
+            {stale ? "Public profile cache is stale. Rebuild recommended." : "Public profile cache is aligned with current sync data."}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-400">
+            Profile last sync uses {formatStatusLabel(debug.timestamps.profile_last_sync_display_source)} at {debug.timestamps.profile_last_sync_display_at ? formatDashboardDate(debug.timestamps.profile_last_sync_display_at) : "no recorded sync"}.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={rebuilding}
+          onClick={onRebuild}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${rebuilding ? "animate-spin" : ""}`} />
+          {rebuilding ? "Rebuilding..." : "Rebuild Public Cache Now"}
+        </button>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="Public Cache Updated" value={debug.timestamps.public_cache_updated_at ? formatDashboardDate(debug.timestamps.public_cache_updated_at) : "Missing"} />
+        <MiniInfo label="Metadata Checked" value={debug.timestamps.metadata_last_checked_at ? formatDashboardDate(debug.timestamps.metadata_last_checked_at) : "Not checked"} />
+        <MiniInfo label="ADM Processed" value={debug.timestamps.adm_last_processed_at ? formatDashboardDate(debug.timestamps.adm_last_processed_at) : "Not processed"} />
+        <MiniInfo label="Flags" value={flags} />
+      </div>
+      {rebuildResult ? (
+        <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-50">
+          Rebuilt {formatRelativeTime(rebuildResult.rebuilt_at)}. Cache age is now {rebuildResult.after.staleness.public_cache_age_minutes ?? 0} minutes.
+        </p>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="mt-3 text-left text-[10px] font-black uppercase text-cyan-100 transition hover:text-cyan-50"
+      >
+        {open ? "Hide" : "Show"} Public Cache Diagnostics
+      </button>
+      {open ? (
+        <div className="mt-3 grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs leading-5 text-zinc-300 md:grid-cols-2">
+          <MiniInfo label="Plan" value={`${planLabel(debug.plan_key)} / ${debug.subscription_status ?? "unknown"}`} />
+          <MiniInfo label="Status Due" value={debug.plan_due_state.next_status_due_at ? formatDashboardDate(debug.plan_due_state.next_status_due_at) : "Now"} />
+          <MiniInfo label="ADM Discovery Due" value={debug.plan_due_state.next_adm_discovery_due_at ? formatDashboardDate(debug.plan_due_state.next_adm_discovery_due_at) : "Now"} />
+          <MiniInfo label="ADM Processing Due" value={debug.plan_due_state.next_adm_pull_due_at ? formatDashboardDate(debug.plan_due_state.next_adm_pull_due_at) : "Now"} />
+          <MiniInfo label="Plan Skip Reason" value={debug.plan_due_state.skipped_reason ? formatStatusLabel(debug.plan_due_state.skipped_reason) : "Due or active"} />
+          <MiniInfo label="Last Cloudflare Cron" value={debug.cron.last_cloudflare_cron_at ? formatDashboardDate(debug.cron.last_cloudflare_cron_at) : "No check-in"} />
+          <MiniInfo label="Last Metadata Cron" value={debug.cron.last_metadata_cron_at ? formatDashboardDate(debug.cron.last_metadata_cron_at) : "No check-in"} />
+          <MiniInfo label="Last ADM Cron" value={debug.cron.last_adm_cron_at ? formatDashboardDate(debug.cron.last_adm_cron_at) : "No check-in"} />
+        </div>
+      ) : null}
+    </div>
   );
 }
 

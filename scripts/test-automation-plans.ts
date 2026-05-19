@@ -195,7 +195,8 @@ const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { script
 assert.equal(packageJson.scripts["audit:system"], "tsx scripts/audit-dzn-system.ts");
 assert.equal(packageJson.scripts["audit:adm-sync"], "tsx scripts/audit-adm-sync.ts");
 assert.equal(packageJson.scripts["check:automation-live"], "tsx scripts/check-automation-live.ts");
-assert.equal(packageJson.scripts["test:full-system"], "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run check:automation-live");
+assert.equal(packageJson.scripts["test:public-profile-sync"], "tsx scripts/test-public-profile-sync.ts");
+assert.equal(packageJson.scripts["test:full-system"], "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live");
 
 const systemAuditSource = readFileSync("scripts/audit-dzn-system.ts", "utf8");
 assert.equal(systemAuditSource.includes("DISCORD_BOT_TOKEN"), true);

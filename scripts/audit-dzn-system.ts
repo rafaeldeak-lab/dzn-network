@@ -217,6 +217,12 @@ function auditSyncEndpoints() {
   checkFile("functions/api/automation/health.ts", "Automation health endpoint");
   checkIncludes("functions/api/automation/health.ts", "requireDznAdmin", "Automation health is Owner/Admin only");
   checkFile("functions/api/servers/[serverId]/auto-posts/run-now.ts", "Server Run Now endpoint");
+  checkFile("functions/api/servers/[serverId]/public-cache/debug.ts", "Public cache debug endpoint");
+  checkFile("functions/api/servers/[serverId]/public-cache/rebuild.ts", "Public cache rebuild endpoint");
+  checkIncludes("functions/_lib/public-cache.ts", "metadata_newer_than_public_cache", "Public cache debug flags metadata/cache mismatch");
+  checkIncludes("functions/_lib/public-cache.ts", "adm_newer_than_public_cache", "Public cache debug flags ADM/cache mismatch");
+  checkIncludes("functions/api/public/servers.ts", "latestPublicTimestamp", "Public profile last sync uses freshest timestamp");
+  checkIncludes("functions/api/public/servers.ts", "server_public_cache.updated_at AS public_cache_updated_at", "Public profile reads public cache update time");
 }
 
 function auditDatabaseMigrations() {
@@ -285,6 +291,8 @@ function auditDashboardStructure() {
   checkIncludes(dashboard, "Last ADM Import Report", "ADM import report diagnostics are visible when expanded");
   checkIncludes(dashboard, "Cursor Validation", "ADM import report shows cursor validation status");
   checkIncludes(dashboard, "ADM cursor verified.", "ADM cursor hash validation wording is present");
+  checkIncludes(dashboard, "Rebuild Public Cache Now", "Public profile cache can be rebuilt from Sync Health");
+  checkIncludes(dashboard, "Public profile cache is stale. Rebuild recommended.", "Stale public profile cache warning is visible");
 }
 
 function auditDiscordAutoPosts() {
@@ -302,7 +310,7 @@ function auditDiscordAutoPosts() {
 
 function auditPackageCommands() {
   const packageJson = JSON.parse(readSource("package.json")) as { scripts?: Record<string, string> };
-  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "test:adm-import-pipeline", "test:full-system"]) {
+  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "test:adm-import-pipeline", "test:public-profile-sync", "test:full-system"]) {
     if (packageJson.scripts?.[command]) pass(`Package command ${command}`, packageJson.scripts[command]);
     else fail(`Package command ${command}`, "Package command is missing.");
   }

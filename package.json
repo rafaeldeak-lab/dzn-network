@@ -23,6 +23,7 @@
     "test:public-listing-reviews": "tsx scripts/test-public-listing-reviews.ts",
     "test:auth-return-flow": "tsx scripts/test-auth-return-flow.ts",
     "test:public-access-gating": "tsx scripts/test-public-access-gating.ts",
+    "test:public-profile-sync": "tsx scripts/test-public-profile-sync.ts",
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
     "check:billing-config": "tsx scripts/check-billing-config.ts",
     "adm:audit-health": "tsx scripts/adm-audit-health.ts",
@@ -44,7 +45,7 @@
     "audit:adm-sync": "tsx scripts/audit-adm-sync.ts",
     "compare:pandora-tracking": "tsx scripts/compare-pandora-dzn-tracking.ts",
     "check:automation-live": "tsx scripts/check-automation-live.ts",
-    "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run check:automation-live"
+    "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live"
   },
   "dependencies": {
     "d3-geo": "^3.1.1",

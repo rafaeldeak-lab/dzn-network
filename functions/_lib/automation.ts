@@ -1129,6 +1129,7 @@ export async function getAutomationHealth(env: Env) {
     stuckAdmLocks,
     planCounts,
     statusCounts,
+    dueServerDiagnostics,
   ] = await Promise.all([
     db
       .prepare(
@@ -1197,6 +1198,58 @@ export async function getAutomationHealth(env: Env) {
     db
       .prepare("SELECT status, COUNT(*) AS count FROM server_subscriptions GROUP BY status")
       .all<{ status: string; count: number }>(),
+    db
+      .prepare(
+        `SELECT
+          linked_servers.id AS linked_server_id,
+          linked_servers.guild_id,
+          linked_servers.public_slug,
+          COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+          linked_servers.nitrado_service_id,
+          server_subscriptions.plan_key,
+          server_subscriptions.status AS subscription_status,
+          server_sync_state.next_status_check_due_at,
+          server_sync_state.next_adm_discovery_due_at,
+          server_sync_state.next_adm_pull_due_at,
+          server_sync_state.currently_checking_status,
+          server_sync_state.currently_syncing_adm,
+          CASE
+            WHEN lower(COALESCE(linked_servers.status, 'pending')) != 'live' THEN 'not_live'
+            WHEN linked_servers.nitrado_service_id IS NULL OR linked_servers.nitrado_service_id = '' THEN 'missing_nitrado_token'
+            WHEN lower(COALESCE(server_subscriptions.status, '')) NOT IN ('active', 'trialing') THEN 'no_active_subscription'
+            WHEN COALESCE(server_sync_state.currently_checking_status, 0) = 1 THEN 'currently_checking_status'
+            WHEN COALESCE(server_sync_state.currently_syncing_adm, 0) = 1 THEN 'currently_syncing_adm'
+            WHEN COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+              OR COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
+              OR COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
+            THEN 'due'
+            ELSE 'not_due'
+          END AS skipped_reason
+         FROM linked_servers
+         LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+         LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
+         WHERE linked_servers.guild_id IS NOT NULL
+           AND linked_servers.guild_id != ''
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+         ORDER BY linked_servers.updated_at DESC
+         LIMIT 50`,
+      )
+      .bind(now, now, now)
+      .all<{
+        linked_server_id: string;
+        guild_id: string | null;
+        public_slug: string | null;
+        server_name: string | null;
+        nitrado_service_id: string | null;
+        plan_key: string | null;
+        subscription_status: string | null;
+        next_status_check_due_at: string | null;
+        next_adm_discovery_due_at: string | null;
+        next_adm_pull_due_at: string | null;
+        currently_checking_status: number | null;
+        currently_syncing_adm: number | null;
+        skipped_reason: string | null;
+      }>(),
   ]);
 
   return {
@@ -1223,6 +1276,21 @@ export async function getAutomationHealth(env: Env) {
     stuck_currently_syncing_adm_locks: stuckAdmLocks,
     server_count_by_plan: rowsToCountMap(planCounts.results ?? [], "plan_key", ["starter", "pro", "network", "partner"]),
     subscription_count_by_status: rowsToCountMap(statusCounts.results ?? [], "status", ["active", "trialing", "past_due", "canceled", "unpaid", "incomplete"]),
+    due_server_diagnostics: (dueServerDiagnostics.results ?? []).map((row) => ({
+      linked_server_id: row.linked_server_id,
+      guild_id: row.guild_id,
+      public_slug: row.public_slug,
+      server_name: row.server_name,
+      nitrado_service_id: row.nitrado_service_id,
+      plan_key: normalizePlanKey(row.plan_key),
+      subscription_status: row.subscription_status,
+      next_status_check_due_at: row.next_status_check_due_at,
+      next_adm_discovery_due_at: row.next_adm_discovery_due_at,
+      next_adm_pull_due_at: row.next_adm_pull_due_at,
+      currently_checking_status: Number(row.currently_checking_status ?? 0) === 1,
+      currently_syncing_adm: Number(row.currently_syncing_adm ?? 0) === 1,
+      skipped_reason: row.skipped_reason ?? "unknown",
+    })),
     automation_cron_runs_table_exists: migrationState.tableExists,
     automation_cron_runs_runtime_created: migrationState.runtimeCreated,
     automation_cron_runs_migration_applied: migrationState.migrationApplied,

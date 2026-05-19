@@ -50,6 +50,7 @@ type PublicServerRow = {
   total_disconnects: number | null;
   unique_players: number | null;
   server_stats_updated_at: string | null;
+  public_cache_updated_at: string | null;
   latest_success_sync_status: string | null;
   latest_success_sync_trigger: string | null;
   latest_success_sync_at: string | null;
@@ -288,6 +289,7 @@ async function queryPublicServers(env: Env) {
       server_stats.total_disconnects,
       server_stats.unique_players,
       server_stats.updated_at AS server_stats_updated_at,
+      server_public_cache.updated_at AS public_cache_updated_at,
       (
         SELECT status
         FROM sync_runs
@@ -488,7 +490,13 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     : latestAdmFile || row.adm_path
       ? "Pending"
       : "Not Started";
-  const lastSyncAt = row.latest_success_sync_at ?? row.adm_sync_at;
+  const lastSyncAt = latestPublicTimestamp([
+    row.latest_success_sync_at,
+    row.adm_sync_at,
+    row.metadata_last_checked_at,
+    row.player_count_last_checked_at,
+    row.server_stats_updated_at,
+  ]);
   const stats = {
     total_kills: numberOrZero(row.total_kills),
     total_deaths: numberOrZero(row.total_deaths),
@@ -993,6 +1001,13 @@ function dateValue(value: string | null) {
   if (!value) return 0;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function latestPublicTimestamp(values: Array<string | null | undefined>) {
+  const sorted = values
+    .filter((value): value is string => typeof value === "string" && value.length > 0 && dateValue(value) > 0)
+    .sort((a, b) => dateValue(b) - dateValue(a));
+  return sorted[0] ?? null;
 }
 
 function sanitizeSlug(value: string | null) {

@@ -493,11 +493,81 @@ export type AutomationHealth = {
   stuck_currently_syncing_adm_locks: number;
   server_count_by_plan: Record<string, number>;
   subscription_count_by_status: Record<string, number>;
+  due_server_diagnostics?: Array<{
+    linked_server_id: string;
+    guild_id: string | null;
+    public_slug: string | null;
+    server_name: string | null;
+    nitrado_service_id: string | null;
+    plan_key: string;
+    subscription_status: string | null;
+    next_status_check_due_at: string | null;
+    next_adm_discovery_due_at: string | null;
+    next_adm_pull_due_at: string | null;
+    currently_checking_status: boolean;
+    currently_syncing_adm: boolean;
+    skipped_reason: string;
+  }>;
   automation_cron_runs_table_exists: boolean;
   automation_cron_runs_runtime_created: boolean;
   automation_cron_runs_migration_applied: boolean | null;
   migrationWarning: boolean;
   migrationWarningMessage: string | null;
+};
+
+export type PublicCacheDebug = {
+  ok: boolean;
+  server_id: string;
+  guild_id: string | null;
+  public_slug: string | null;
+  plan_key: string;
+  subscription_status: string | null;
+  timestamps: {
+    metadata_last_checked_at: string | null;
+    status_last_checked_at: string | null;
+    adm_last_processed_at: string | null;
+    public_cache_updated_at: string | null;
+    public_cache_last_status_update_at: string | null;
+    public_cache_last_adm_update_at: string | null;
+    profile_last_sync_display_source: string;
+    profile_last_sync_display_at: string | null;
+  };
+  staleness: {
+    public_cache_age_minutes: number | null;
+    metadata_age_minutes: number | null;
+    status_age_minutes: number | null;
+    adm_age_minutes: number | null;
+  };
+  plan_due_state: {
+    status_interval_minutes: number;
+    adm_discovery_interval_minutes: number;
+    adm_processing_interval_minutes: number;
+    next_status_due_at: string | null;
+    next_adm_discovery_due_at: string | null;
+    next_adm_pull_due_at: string | null;
+    status_due: boolean;
+    adm_discovery_due: boolean;
+    adm_processing_due: boolean;
+    skipped_reason: string | null;
+  };
+  cron: {
+    last_metadata_cron_at: string | null;
+    last_adm_cron_at: string | null;
+    last_discord_posts_cron_at: string | null;
+    last_cloudflare_cron_at: string | null;
+    last_github_backup_cron_at: string | null;
+    last_cron_source: string | null;
+    last_cron_status: string | null;
+    last_cron_error: string | null;
+  };
+  problem_flags: string[];
+};
+
+export type PublicCacheRebuildResult = {
+  ok: boolean;
+  before: PublicCacheDebug;
+  after: PublicCacheDebug;
+  rebuilt_at: string;
 };
 
 export type AdvertisingBumpStatus = {
