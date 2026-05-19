@@ -374,8 +374,18 @@ export type PostingChannelSetup = {
     enabled: boolean;
     allowed_by_plan: boolean;
     setup_status?: string;
+    guild_id?: string;
+    discord_channel_id?: string;
+    discord_message_id?: string | null;
+    posting_mode?: string;
+    last_payload_hash?: string | null;
     last_posted_at?: string | null;
     last_edited_at?: string | null;
+    last_dispatch_attempt_at?: string | null;
+    last_dispatch_status?: string | null;
+    last_dispatch_error?: string | null;
+    queued_job_count?: number;
+    latest_automation_job_id?: string | null;
   }>;
 };
 

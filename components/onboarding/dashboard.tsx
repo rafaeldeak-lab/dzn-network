@@ -31,7 +31,7 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
 import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -1585,6 +1585,7 @@ function DiscordAutoPostsPanel({
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [recheckingChannel, setRecheckingChannel] = useState(false);
+  const [dispatchingNow, setDispatchingNow] = useState(false);
   const [busyChannel, setBusyChannel] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [testTypeByChannel, setTestTypeByChannel] = useState<Record<string, string>>({});
@@ -1745,6 +1746,21 @@ function DiscordAutoPostsPanel({
       setMessage(error instanceof Error ? error.message : `Could not ${action} Discord auto-post setup.`);
     } finally {
       setBusyChannel(null);
+    }
+  }
+
+  async function runDispatcherNow() {
+    setDispatchingNow(true);
+    setMessage("");
+    try {
+      const result = await runAutoPostDispatcherNow(serverId);
+      const refreshed = await getPostingDestinations(serverId).catch(() => null);
+      if (refreshed) onSaved(refreshed);
+      setMessage(`Auto post dispatcher run complete. Processed ${result.processed}, edited ${result.edited}, skipped ${result.skipped}, failed ${result.failed}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not run the auto post dispatcher.");
+    } finally {
+      setDispatchingNow(false);
     }
   }
 
@@ -1965,7 +1981,18 @@ function DiscordAutoPostsPanel({
 
       <div className="mt-5 flex items-center justify-between gap-3">
         <p className="text-sm font-black uppercase text-white">Saved Auto Post Setups</p>
-        <p className="text-[10px] font-black uppercase text-zinc-500">{setups.length} channels configured</p>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <p className="text-[10px] font-black uppercase text-zinc-500">{setups.length} channels configured</p>
+          <button
+            type="button"
+            onClick={runDispatcherNow}
+            disabled={dispatchingNow || setups.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-50 disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            <RefreshCw className={`h-3 w-3 ${dispatchingNow ? "animate-spin" : ""}`} />
+            {dispatchingNow ? "Running..." : "Run Auto Post Dispatcher Now"}
+          </button>
+        </div>
       </div>
       <div className="mt-3 grid gap-3">
         {setups.length ? setups.map((setup) => {
@@ -1991,6 +2018,28 @@ function DiscordAutoPostsPanel({
                       <span key={postType.key} className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase ${postType.allowed_by_plan ? "border-violet-300/20 bg-violet-400/10 text-violet-100" : "border-amber-300/25 bg-amber-400/10 text-amber-100"}`}>
                         {postType.label}
                       </span>
+                    ))}
+                  </div>
+                  <div className="mt-3 grid gap-2 rounded-lg border border-white/10 bg-black/24 p-2 text-[10px] font-bold leading-5 text-zinc-400 sm:grid-cols-2">
+                    {setup.post_types.map((postType) => (
+                      <div key={`${postType.key}-debug`} className="min-w-0 rounded-md border border-white/10 bg-white/[0.03] p-2">
+                        <p className="font-black uppercase text-zinc-300">{postType.label}</p>
+                        <p>guild_id: <span className="text-zinc-200">{postType.guild_id ?? "unknown"}</span></p>
+                        <p>post_type: <span className="text-zinc-200">{postType.key}</span></p>
+                        <p>discord_channel_id: <span className="text-zinc-200">{postType.discord_channel_id ?? setup.channel_id}</span></p>
+                        <p>discord_message_id: <span className="text-zinc-200">{postType.discord_message_id ?? "none"}</span></p>
+                        <p>posting mode: <span className="text-zinc-200">{postType.posting_mode ?? setup.posting_mode}</span></p>
+                        <p>enabled: <span className="text-zinc-200">{String(postType.enabled)}</span></p>
+                        <p>plan allowed: <span className={postType.allowed_by_plan ? "text-emerald-200" : "text-amber-200"}>{String(postType.allowed_by_plan)}</span></p>
+                        <p>last_payload_hash: <span className="text-zinc-200">{postType.last_payload_hash ? `${postType.last_payload_hash.slice(0, 10)}...` : "none"}</span></p>
+                        <p>last_posted_at: <span className="text-zinc-200">{postType.last_posted_at ? formatDashboardDate(postType.last_posted_at) : "none"}</span></p>
+                        <p>last_edited_at: <span className="text-zinc-200">{postType.last_edited_at ? formatDashboardDate(postType.last_edited_at) : "none"}</span></p>
+                        <p>last_dispatch_attempt_at: <span className="text-zinc-200">{postType.last_dispatch_attempt_at ? formatDashboardDate(postType.last_dispatch_attempt_at) : "none"}</span></p>
+                        <p>last_dispatch_status: <span className="text-zinc-200">{postType.last_dispatch_status ?? "none"}</span></p>
+                        <p>last_dispatch_error: <span className="text-zinc-200">{postType.last_dispatch_error ?? "none"}</span></p>
+                        <p>queued job count: <span className="text-zinc-200">{postType.queued_job_count ?? 0}</span></p>
+                        <p>latest automation job id: <span className="text-zinc-200">{postType.latest_automation_job_id ?? "none"}</span></p>
+                      </div>
                     ))}
                   </div>
                 </div>

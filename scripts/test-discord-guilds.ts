@@ -133,6 +133,15 @@ assert.equal(dashboardSource.includes("effective channel permissions:"), true);
 assert.equal(dashboardSource.includes("Recheck Selected Channel"), true);
 assert.equal(dashboardSource.includes("Make sure you select the DZN Bot role in Discord channel permissions, not @everyone"), true);
 assert.equal(dashboardSource.includes("Channel or category overrides may still block the bot"), true);
+assert.equal(dashboardSource.includes("Run Auto Post Dispatcher Now"), true);
+assert.equal(dashboardSource.includes("last_dispatch_status"), true);
+assert.equal(dashboardSource.includes("discord_message_id"), true);
+assert.equal(dashboardSource.includes("queued job count"), true);
+assert.equal(dashboardSource.includes("last_payload_hash"), true);
+
+const autoPostRunNowSource = readFileSync("functions/api/servers/[serverId]/auto-posts/run-now.ts", "utf8");
+assert.equal(autoPostRunNowSource.includes("dispatchDiscordPostsForGuild"), true);
+assert.equal(autoPostRunNowSource.includes("active DZN subscription"), true);
 
 const discordChannelsEndpointSource = readFileSync("functions/api/servers/[serverId]/discord-channels.ts", "utf8");
 assert.equal(discordChannelsEndpointSource.includes("channel_fetch_unavailable"), true);

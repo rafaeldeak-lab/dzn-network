@@ -47,6 +47,7 @@ export async function ensureAutomationSchema(env: Env) {
     await db.prepare(statement).run();
   }
   await ensureAutomationCronRunsColumns(db);
+  await ensureServerPostingStateDispatchColumns(db);
 }
 
 export async function ensureAutomationRowsForLinkedServers(env: Env) {
@@ -558,6 +559,24 @@ export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string,
   const now = new Date().toISOString();
   for (const postType of postTypes) {
     if (!hasAutoPost(planKey, postType)) continue;
+    const update = await requireDb(env)
+      .prepare(
+        `UPDATE automation_jobs SET
+          status = 'queued',
+          attempts = 0,
+          max_attempts = 5,
+          last_error = ?,
+          run_after = ?,
+          updated_at = ?
+         WHERE guild_id = ?
+           AND job_type = 'discord-post-update'
+           AND post_type = ?
+           AND status != 'running'`,
+      )
+      .bind(reason, now, now, guildId, postType)
+      .run();
+    if (Number(update.meta?.changes ?? 0) > 0) continue;
+
     await requireDb(env)
       .prepare(
         `INSERT OR IGNORE INTO automation_jobs (
@@ -787,6 +806,21 @@ async function ensureAutomationCronRunsColumns(db: D1Database) {
   await db.prepare("UPDATE automation_cron_runs SET finished_at = COALESCE(finished_at, created_at) WHERE finished_at IS NULL").run();
   await db.prepare("UPDATE automation_cron_runs SET status = 'success' WHERE status IN ('completed', 'manual')").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_job_type ON automation_cron_runs(job_type)").run();
+}
+
+async function ensureServerPostingStateDispatchColumns(db: D1Database) {
+  const columns = await getTableColumns(db, "server_posting_state");
+  const requiredColumns: Record<string, string> = {
+    last_dispatch_attempt_at: "ALTER TABLE server_posting_state ADD COLUMN last_dispatch_attempt_at TEXT",
+    last_dispatch_status: "ALTER TABLE server_posting_state ADD COLUMN last_dispatch_status TEXT",
+    last_dispatch_error: "ALTER TABLE server_posting_state ADD COLUMN last_dispatch_error TEXT",
+  };
+
+  for (const [column, statement] of Object.entries(requiredColumns)) {
+    if (!columns.has(column)) {
+      await db.prepare(statement).run();
+    }
+  }
 }
 
 async function getAutomationCronMigrationState(db: D1Database) {

@@ -469,8 +469,8 @@ export async function refreshLivePlayerCountsForActiveServers(
         serverStatus: result.metadata?.server_status ?? null,
         lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
       });
-      if (changed) {
-        await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], "status-change");
+      if (result.ok) {
+        await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], changed ? "status-change" : "status-check");
       }
       results.push({
         linked_server_id: row.id,

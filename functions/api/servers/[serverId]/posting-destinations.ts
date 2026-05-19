@@ -353,6 +353,8 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
   const stateRows = await requireDb(env)
     .prepare(
       `SELECT post_type, discord_channel_id, last_error, last_posted_at, last_edited_at
+              , discord_message_id, last_payload_hash, last_dispatch_attempt_at,
+                last_dispatch_status, last_dispatch_error
        FROM server_posting_state
        WHERE guild_id = ?`,
     )
@@ -363,14 +365,41 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
       last_error: string | null;
       last_posted_at: string | null;
       last_edited_at: string | null;
+      discord_message_id: string | null;
+      last_payload_hash: string | null;
+      last_dispatch_attempt_at: string | null;
+      last_dispatch_status: string | null;
+      last_dispatch_error: string | null;
+    }>();
+  const jobRows = await requireDb(env)
+    .prepare(
+      `SELECT id, post_type, status, updated_at
+       FROM automation_jobs
+       WHERE guild_id = ?
+         AND job_type = 'discord-post-update'
+       ORDER BY updated_at DESC`,
+    )
+    .bind(guildId)
+    .all<{
+      id: string;
+      post_type: AutoPostType;
+      status: string;
+      updated_at: string | null;
     }>();
   const configured = new Map((rows.results ?? []).map((row) => [row.post_type, row]));
   const states = new Map((stateRows.results ?? []).map((row) => [`${row.post_type}:${row.discord_channel_id}`, row]));
+  const jobsByType = new Map<AutoPostType, Array<{ id: string; status: string; updated_at: string | null }>>();
+  for (const row of jobRows.results ?? []) {
+    const list = jobsByType.get(row.post_type) ?? [];
+    list.push(row);
+    jobsByType.set(row.post_type, list);
+  }
   const channelRows = await fetchDiscordPostingChannels(env, guildId).catch(() => []);
   const channelNames = new Map(channelRows.map((channel) => [channel.channel_id, channel]));
   const postTypeSummaries = await Promise.all(AUTO_POST_TYPES.map(async (postType) => {
       const row = configured.get(postType);
       const state = row?.discord_channel_id ? states.get(`${postType}:${row.discord_channel_id}`) : undefined;
+      const jobs = jobsByType.get(postType) ?? [];
       let deliveryMode = getPostingDeliveryMode(env, {
         discord_channel_id: row?.discord_channel_id ?? null,
         discord_webhook_url: row?.discord_webhook_url ?? null,
@@ -410,6 +439,13 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
         last_error: state?.last_error ?? null,
         last_posted_at: state?.last_posted_at ?? null,
         last_edited_at: state?.last_edited_at ?? null,
+        discord_message_id: state?.discord_message_id ?? null,
+        last_payload_hash: state?.last_payload_hash ?? null,
+        last_dispatch_attempt_at: state?.last_dispatch_attempt_at ?? null,
+        last_dispatch_status: state?.last_dispatch_status ?? (jobs.some((job) => job.status === "queued") ? "queued" : null),
+        last_dispatch_error: state?.last_dispatch_error ?? null,
+        queued_job_count: jobs.filter((job) => job.status === "queued").length,
+        latest_automation_job_id: jobs[0]?.id ?? null,
       };
     }));
   const summariesByType = new Map(postTypeSummaries.map((summary) => [summary.post_type, summary]));
@@ -463,8 +499,18 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
           enabled: postType.enabled,
           allowed_by_plan: postType.allowed,
           setup_status: postType.setup_status,
+          guild_id: guildId,
+          discord_channel_id: channelId,
+          discord_message_id: postType.discord_message_id,
+          posting_mode: postType.delivery_mode,
+          last_payload_hash: postType.last_payload_hash,
           last_posted_at: postType.last_posted_at,
           last_edited_at: postType.last_edited_at,
+          last_dispatch_attempt_at: postType.last_dispatch_attempt_at,
+          last_dispatch_status: postType.last_dispatch_status,
+          last_dispatch_error: postType.last_dispatch_error,
+          queued_job_count: postType.queued_job_count,
+          latest_automation_job_id: postType.latest_automation_job_id,
         })),
       };
     }),

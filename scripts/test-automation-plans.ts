@@ -80,6 +80,16 @@ assert.equal(postingSource.includes("DISCORD_BOT_TOKEN"), true);
 assert.equal(postingSource.includes("DZN DISCORD AUTO POST DISPATCH READY"), true);
 assert.equal(postingSource.includes("recordDiscordPostingDeliveryState"), true);
 assert.equal(postingSource.includes("classifyDiscordPostingError"), true);
+assert.equal(postingSource.includes("processDuePostingDestinations"), true);
+assert.equal(postingSource.includes("dispatchDiscordPostsForGuild"), true);
+assert.equal(postingSource.includes("last_dispatch_status"), true);
+assert.equal(postingSource.includes("DZN Server Status -"), true);
+assert.equal(postingSource.includes("Refresh interval: Every"), true);
+assert.equal(postingSource.includes("skipped_unchanged"), true);
+
+const metadataSource = readFileSync("functions/_lib/server-metadata.ts", "utf8");
+assert.equal(metadataSource.includes("status-check"), true);
+assert.equal(metadataSource.includes("queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, [\"basic_status_embed\", \"priority_status_embed\"]"), true);
 
 const postingEndpointSource = readFileSync("functions/api/servers/[serverId]/posting-destinations.ts", "utf8");
 assert.equal(postingEndpointSource.includes("existingDestination?.discord_webhook_url"), true);
@@ -92,6 +102,11 @@ assert.equal(postingEndpointSource.includes("has_webhook_url"), true);
 assert.equal(postingEndpointSource.includes("setup_status"), true);
 assert.equal(postingEndpointSource.includes("MISSING PERMISSIONS"), true);
 assert.equal(postingEndpointSource.includes("SETUP NEEDED"), true);
+assert.equal(postingEndpointSource.includes("discord_message_id"), true);
+assert.equal(postingEndpointSource.includes("queued_job_count"), true);
+const runNowEndpointSource = readFileSync("functions/api/servers/[serverId]/auto-posts/run-now.ts", "utf8");
+assert.equal(runNowEndpointSource.includes("dispatchDiscordPostsForGuild"), true);
+assert.equal(runNowEndpointSource.includes("isActiveSubscriptionStatus"), true);
 const discordChannelsEndpointSource = readFileSync("functions/api/servers/[serverId]/discord-channels.ts", "utf8");
 assert.equal(discordChannelsEndpointSource.includes("fetchDiscordPostingChannels"), true);
 assert.equal(discordChannelsEndpointSource.includes("can_post"), true);

@@ -202,6 +202,27 @@ export async function savePostingDestination(linkedServerId: string, data: {
   });
 }
 
+export async function runAutoPostDispatcherNow(linkedServerId: string) {
+  return request<{
+    ok: boolean;
+    processed: number;
+    edited: number;
+    posted?: number;
+    skipped: number;
+    failed: number;
+    results: Array<{
+      guild_id?: string;
+      post_type: string;
+      channel_id: string | null;
+      status: string;
+      message_id: string | null;
+      reason: string | null;
+    }>;
+  }>(`/api/servers/${encodeURIComponent(linkedServerId)}/auto-posts/run-now`, {
+    method: "POST",
+  });
+}
+
 export async function getDiscordPostingChannels(linkedServerId: string) {
   const response = await fetch(`/api/servers/${encodeURIComponent(linkedServerId)}/discord-channels`, {
     cache: "no-store",

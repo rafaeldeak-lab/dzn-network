@@ -1,6 +1,6 @@
 import { ensureAutomationSchema, isActiveSubscriptionStatus } from "./automation";
 import { requireDb } from "./db";
-import { hasAutoPost, normalizePlanKey } from "./plans";
+import { getAdmPullInterval, getServerStatusInterval, hasAutoPost, normalizePlanKey } from "./plans";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 
@@ -23,6 +23,10 @@ type PostingDestination = {
 type PostingState = {
   discord_message_id: string | null;
   last_payload_hash: string | null;
+  last_edited_at?: string | null;
+  last_dispatch_attempt_at?: string | null;
+  last_dispatch_status?: string | null;
+  last_dispatch_error?: string | null;
 };
 
 type PublicCache = {
@@ -48,6 +52,22 @@ export type PostingPermissionCheck = {
   checked_at: string | null;
 };
 export type DiscordDeliveryResult = { mode: DeliveryMode; messageId: string | null };
+export type DiscordPostDispatchStatus =
+  | "success"
+  | "skipped_unchanged"
+  | "skipped_plan_locked"
+  | "skipped_disabled"
+  | "failed"
+  | "no_message_id"
+  | "queued";
+export type DiscordPostDispatchDetail = {
+  guild_id: string;
+  post_type: AutoPostType;
+  channel_id: string | null;
+  status: DiscordPostDispatchStatus | "edited" | "posted" | "skipped";
+  message_id: string | null;
+  reason: string | null;
+};
 export type DiscordPostingChannel = {
   channel_id: string;
   channel_name: string;
@@ -148,17 +168,27 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
   let posted = 0;
   let skipped = 0;
   let failed = 0;
+  const results: DiscordPostDispatchDetail[] = [];
 
   for (const job of jobs.results ?? []) {
     processed += 1;
     await db.prepare("UPDATE automation_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ?").bind(now, job.id).run();
     try {
       const result = await processPostJob(env, job);
-      if (result === "posted") posted += 1;
+      results.push(result);
+      if (result.status === "edited" || result.status === "posted" || result.status === "success") posted += 1;
       else skipped += 1;
       await db.prepare("UPDATE automation_jobs SET status = 'completed', updated_at = ? WHERE id = ?").bind(new Date().toISOString(), job.id).run();
     } catch (error) {
       failed += 1;
+      results.push({
+        guild_id: job.guild_id,
+        post_type: job.post_type,
+        channel_id: null,
+        status: "failed",
+        message_id: null,
+        reason: error instanceof Error ? error.message : "Discord post update failed",
+      });
       const nextAttempt = job.attempts + 1;
       const finalStatus = nextAttempt >= job.max_attempts ? "failed" : "queued";
       const retryAt = new Date(Date.now() + Math.min(60, 2 ** nextAttempt) * 60 * 1000).toISOString();
@@ -169,60 +199,206 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
     }
   }
 
+  const due = await processDuePostingDestinations(env, {
+    maxJobs: Math.max(1, maxJobs - processed),
+  });
+  processed += due.processed;
+  posted += due.posted;
+  skipped += due.skipped;
+  failed += due.failed;
+  results.push(...due.results);
+
   console.log("DZN DISCORD AUTO POST DISPATCH READY", { processed, posted, skipped, failed });
-  return { ok: true, processed, posted, skipped, failed };
+  return { ok: true, processed, posted, skipped, failed, edited: posted, results };
 }
 
-async function processPostJob(env: Env, job: QueuedPostJob): Promise<"posted" | "skipped"> {
+async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPostDispatchDetail> {
   const db = requireDb(env);
   const subscription = await db
     .prepare("SELECT plan_key, status FROM server_subscriptions WHERE guild_id = ? LIMIT 1")
     .bind(job.guild_id)
     .first<{ plan_key: string | null; status: string | null }>();
   const planKey = normalizePlanKey(subscription?.plan_key);
-  if (!isActiveSubscriptionStatus(subscription?.status) || !hasAutoPost(planKey, job.post_type)) return "skipped";
+  if (!isActiveSubscriptionStatus(subscription?.status) || !hasAutoPost(planKey, job.post_type)) {
+    return {
+      guild_id: job.guild_id,
+      post_type: job.post_type,
+      channel_id: null,
+      status: "skipped_plan_locked",
+      message_id: null,
+      reason: "Subscription inactive or plan does not allow this auto-post type.",
+    };
+  }
 
   const destination = await db
     .prepare("SELECT guild_id, post_type, discord_channel_id, discord_webhook_url, enabled FROM server_posting_destinations WHERE guild_id = ? AND post_type = ? LIMIT 1")
     .bind(job.guild_id, job.post_type)
     .first<PostingDestination>();
-  if (!destination || Number(destination.enabled ?? 0) !== 1) return "skipped";
+  if (!destination) {
+    return {
+      guild_id: job.guild_id,
+      post_type: job.post_type,
+      channel_id: null,
+      status: "skipped_disabled",
+      message_id: null,
+      reason: "No saved posting destination exists.",
+    };
+  }
 
+  return processConfiguredPostingDestination(env, destination, planKey, { force: true });
+}
+
+async function processConfiguredPostingDestination(
+  env: Env,
+  destination: PostingDestination,
+  planKey: string,
+  options: { force?: boolean } = {},
+): Promise<DiscordPostDispatchDetail> {
+  if (Number(destination.enabled ?? 0) !== 1) {
+    await recordPostingDispatchStatus(env, destination, "skipped_disabled", "Posting destination is disabled.");
+    return {
+      guild_id: destination.guild_id,
+      post_type: destination.post_type,
+      channel_id: destination.discord_channel_id,
+      status: "skipped_disabled",
+      message_id: null,
+      reason: "Posting destination is disabled.",
+    };
+  }
+
+  if (!hasAutoPost(planKey, destination.post_type)) {
+    await recordPostingDispatchStatus(env, destination, "skipped_plan_locked", "Current plan does not allow this auto-post type.");
+    return {
+      guild_id: destination.guild_id,
+      post_type: destination.post_type,
+      channel_id: destination.discord_channel_id,
+      status: "skipped_plan_locked",
+      message_id: null,
+      reason: "Current plan does not allow this auto-post type.",
+    };
+  }
+
+  const db = requireDb(env);
   const cache = await db
     .prepare("SELECT * FROM server_public_cache WHERE guild_id = ? LIMIT 1")
-    .bind(job.guild_id)
+    .bind(destination.guild_id)
     .first<PublicCache>();
-  const payload = renderDiscordPostPayload(job.post_type, cache, planKey);
+  const payload = renderDiscordPostPayload(destination.post_type, cache, planKey);
   const payloadHash = await hashPayload(payload);
   const state = await db
     .prepare("SELECT discord_message_id, last_payload_hash FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
-    .bind(job.guild_id, job.post_type, destination.discord_channel_id)
+    .bind(destination.guild_id, destination.post_type, destination.discord_channel_id)
     .first<PostingState>();
-  if (state?.last_payload_hash === payloadHash) return "skipped";
-
-  const delivery = await deliverDiscordPayload(env, destination, payload, state?.discord_message_id ?? null);
-  if (delivery.mode === "not_configured") {
-    await recordPostingStateError(env, destination, "Configure the DZN bot token/channel permission or add a webhook URL.");
-    return "skipped";
+  if (!options.force && state?.last_payload_hash === payloadHash) {
+    await recordPostingDispatchStatus(env, destination, "skipped_unchanged", null);
+    return {
+      guild_id: destination.guild_id,
+      post_type: destination.post_type,
+      channel_id: destination.discord_channel_id,
+      status: "skipped_unchanged",
+      message_id: state.discord_message_id ?? null,
+      reason: "Payload unchanged.",
+    };
   }
 
-  const now = new Date().toISOString();
-  await db
+  try {
+    const delivery = await deliverDiscordPayload(env, destination, payload, state?.discord_message_id ?? null);
+    if (delivery.mode === "not_configured") {
+      await recordPostingStateError(env, destination, "Configure the DZN bot token/channel permission or add a webhook URL.");
+      return {
+        guild_id: destination.guild_id,
+        post_type: destination.post_type,
+        channel_id: destination.discord_channel_id,
+        status: "no_message_id",
+        message_id: state?.discord_message_id ?? null,
+        reason: "Configure the DZN bot token/channel permission or add a webhook URL.",
+      };
+    }
+
+    await recordDiscordPostingDeliveryState(env, destination, delivery, payloadHash, "success");
+    return {
+      guild_id: destination.guild_id,
+      post_type: destination.post_type,
+      channel_id: destination.discord_channel_id,
+      status: state?.discord_message_id ? "edited" : "posted",
+      message_id: delivery.messageId,
+      reason: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Discord post update failed";
+    await recordPostingStateError(env, destination, message);
+    throw error;
+  }
+}
+
+async function processDuePostingDestinations(env: Env, options: { maxJobs: number; guildId?: string; force?: boolean }) {
+  const db = requireDb(env);
+  const rows = await db
     .prepare(
-      `INSERT INTO server_posting_state (
-        id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
-        last_edited_at, last_payload_hash, last_error, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
-      ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
-        discord_message_id = COALESCE(excluded.discord_message_id, server_posting_state.discord_message_id),
-        last_edited_at = excluded.last_edited_at,
-        last_payload_hash = excluded.last_payload_hash,
-        last_error = NULL,
-        updated_at = excluded.updated_at`,
+      `SELECT destinations.guild_id, destinations.post_type, destinations.discord_channel_id,
+              destinations.discord_webhook_url, destinations.enabled,
+              subscriptions.plan_key, subscriptions.status AS subscription_status,
+              state.last_edited_at
+       FROM server_posting_destinations AS destinations
+       JOIN server_subscriptions AS subscriptions ON subscriptions.guild_id = destinations.guild_id
+       LEFT JOIN server_posting_state AS state
+         ON state.guild_id = destinations.guild_id
+        AND state.post_type = destinations.post_type
+        AND state.discord_channel_id = destinations.discord_channel_id
+       WHERE (? IS NULL OR destinations.guild_id = ?)
+         AND lower(COALESCE(subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         AND COALESCE(destinations.enabled, 0) = 1
+       ORDER BY COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') ASC
+       LIMIT ?`,
     )
-    .bind(crypto.randomUUID(), job.guild_id, job.post_type, destination.discord_channel_id, delivery.messageId, now, now, payloadHash, now, now)
-    .run();
-  return "posted";
+    .bind(options.guildId ?? null, options.guildId ?? null, Math.max(1, options.maxJobs * 4))
+    .all<PostingDestination & { plan_key: string | null; subscription_status: string | null; last_edited_at: string | null }>();
+
+  let processed = 0;
+  let posted = 0;
+  let skipped = 0;
+  let failed = 0;
+  const results: DiscordPostDispatchDetail[] = [];
+
+  for (const row of rows.results ?? []) {
+    if (processed >= options.maxJobs) break;
+    const planKey = normalizePlanKey(row.plan_key);
+    if (!options.force && !isAutoPostDue(row.post_type, planKey, row.last_edited_at)) continue;
+    processed += 1;
+    try {
+      const result = await processConfiguredPostingDestination(env, row, planKey, { force: options.force });
+      results.push(result);
+      if (result.status === "edited" || result.status === "posted" || result.status === "success") posted += 1;
+      else skipped += 1;
+    } catch (error) {
+      failed += 1;
+      results.push({
+        guild_id: row.guild_id,
+        post_type: row.post_type,
+        channel_id: row.discord_channel_id,
+        status: "failed",
+        message_id: null,
+        reason: error instanceof Error ? error.message : "Discord post update failed",
+      });
+    }
+  }
+
+  return { processed, posted, skipped, failed, results };
+}
+
+export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, options: { maxJobs?: number; force?: boolean } = {}) {
+  await ensureAutomationSchema(env);
+  const maxJobs = Math.max(1, Math.min(Math.trunc(Number(options.maxJobs ?? 25)) || 25, 100));
+  const result = await processDuePostingDestinations(env, { guildId, maxJobs, force: options.force ?? true });
+  return {
+    ok: result.failed === 0,
+    processed: result.processed,
+    edited: result.posted,
+    posted: result.posted,
+    skipped: result.skipped,
+    failed: result.failed,
+    results: result.results,
+  };
 }
 
 export async function sendDiscordTestPost(env: Env, destination: {
@@ -258,21 +434,25 @@ export async function recordDiscordPostingDeliveryState(env: Env, destination: {
   guild_id: string;
   post_type: AutoPostType;
   discord_channel_id: string;
-}, delivery: DiscordDeliveryResult, payloadHash: string | null = null) {
+}, delivery: DiscordDeliveryResult, payloadHash: string | null = null, dispatchStatus: DiscordPostDispatchStatus = "success") {
   if (delivery.mode === "not_configured") return;
   const now = new Date().toISOString();
   await requireDb(env)
     .prepare(
       `INSERT INTO server_posting_state (
         id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
-        last_edited_at, last_payload_hash, last_error, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        last_edited_at, last_payload_hash, last_error, last_dispatch_attempt_at,
+        last_dispatch_status, last_dispatch_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)
       ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
         discord_message_id = COALESCE(excluded.discord_message_id, server_posting_state.discord_message_id),
         last_posted_at = COALESCE(server_posting_state.last_posted_at, excluded.last_posted_at),
         last_edited_at = excluded.last_edited_at,
         last_payload_hash = excluded.last_payload_hash,
         last_error = NULL,
+        last_dispatch_attempt_at = excluded.last_dispatch_attempt_at,
+        last_dispatch_status = excluded.last_dispatch_status,
+        last_dispatch_error = NULL,
         updated_at = excluded.updated_at`,
     )
     .bind(
@@ -284,6 +464,8 @@ export async function recordDiscordPostingDeliveryState(env: Env, destination: {
       now,
       now,
       payloadHash,
+      now,
+      dispatchStatus,
       now,
       now,
     )
@@ -634,13 +816,53 @@ async function recordPostingStateError(env: Env, destination: PostingDestination
     .prepare(
       `INSERT INTO server_posting_state (
         id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
-        last_edited_at, last_payload_hash, last_error, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
+        last_edited_at, last_payload_hash, last_error, last_dispatch_attempt_at,
+        last_dispatch_status, last_dispatch_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, 'failed', ?, ?, ?)
       ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
         last_error = excluded.last_error,
+        last_dispatch_attempt_at = excluded.last_dispatch_attempt_at,
+        last_dispatch_status = excluded.last_dispatch_status,
+        last_dispatch_error = excluded.last_dispatch_error,
         updated_at = excluded.updated_at`,
     )
-    .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, message, now, now)
+    .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, message, now, message, now, now)
+    .run();
+}
+
+async function recordPostingDispatchStatus(
+  env: Env,
+  destination: PostingDestination,
+  status: DiscordPostDispatchStatus,
+  error: string | null,
+) {
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_posting_state (
+        id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
+        last_edited_at, last_payload_hash, last_error, last_dispatch_attempt_at,
+        last_dispatch_status, last_dispatch_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
+        last_error = COALESCE(excluded.last_error, server_posting_state.last_error),
+        last_dispatch_attempt_at = excluded.last_dispatch_attempt_at,
+        last_dispatch_status = excluded.last_dispatch_status,
+        last_dispatch_error = excluded.last_dispatch_error,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      destination.guild_id,
+      destination.post_type,
+      destination.discord_channel_id,
+      error,
+      now,
+      status,
+      error,
+      now,
+      now,
+    )
     .run();
 }
 
@@ -927,19 +1149,33 @@ function renderDiscordPostPayload(postType: AutoPostType, cache: PublicCache | n
   const current = numberOrUnknown(cache?.current_player_count);
   const max = numberOrUnknown(cache?.max_player_count);
   const status = cache?.server_status ?? (cache?.server_online ? "online" : "unknown");
+  const lastStatusChecked = cache?.last_status_update_at ?? "waiting for status check";
+  const planInterval = getServerStatusInterval(planKey);
   const title = postTitle(postType);
   const description = postType === "basic_status_embed" || postType === "priority_status_embed"
-    ? `Status: ${status}\nPlayers: ${current} / ${max}\nLast checked: ${cache?.last_status_update_at ?? "waiting for status check"}`
+    ? [
+        `Server: ${serverName}`,
+        `Status: ${status}`,
+        `Players: ${current} / ${max}`,
+        `Last checked: ${lastStatusChecked}`,
+        `Data freshness: ${cache?.last_status_update_at ? "Fresh" : "Waiting for fresh server data"}`,
+        `Plan: ${planKey.toUpperCase()}`,
+        `Refresh interval: Every ${planInterval} minute${planInterval === 1 ? "" : "s"}`,
+      ].join("\n")
     : `Latest ADM update: ${cache?.last_adm_update_at ?? "waiting for ADM check"}\nNetwork rank: ${cache?.network_rank ?? "pending"}`;
   return {
     username: "DZN Network",
     embeds: [
       {
-        title: `${title} - ${serverName}`,
+        title: postType === "basic_status_embed" || postType === "priority_status_embed"
+          ? `DZN Server Status - ${serverName}`
+          : `${title} - ${serverName}`,
         description,
         color: postType === "priority_status_embed" ? 0xfacc15 : 0x8b5cf6,
         footer: {
-          text: `DZN ${planKey.toUpperCase()} automation. Nitrado controls fresh log availability.`,
+          text: postType === "basic_status_embed" || postType === "priority_status_embed"
+            ? "DZN Network • Auto-updated from server status sync"
+            : `DZN ${planKey.toUpperCase()} automation. Nitrado controls fresh log availability.`,
         },
         timestamp: new Date().toISOString(),
       },
@@ -952,6 +1188,23 @@ function postTitle(postType: AutoPostType) {
     .replace(/_embed$/, "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function isAutoPostDue(postType: AutoPostType, planKey: string, lastEditedAt: string | null | undefined) {
+  if (!lastEditedAt) return true;
+  const editedAt = Date.parse(lastEditedAt);
+  if (!Number.isFinite(editedAt)) return true;
+  return Date.now() - editedAt >= getAutoPostIntervalMinutes(postType, planKey) * 60 * 1000;
+}
+
+function getAutoPostIntervalMinutes(postType: AutoPostType, planKey: string) {
+  if (postType === "basic_status_embed" || postType === "priority_status_embed") {
+    return getServerStatusInterval(planKey);
+  }
+  if (postType === "daily_summary_embed" || postType === "partner_featured_embed") {
+    return 24 * 60;
+  }
+  return getAdmPullInterval(planKey);
 }
 
 async function hashPayload(value: unknown) {
