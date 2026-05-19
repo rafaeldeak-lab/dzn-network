@@ -113,6 +113,14 @@ const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf
 assert.equal(dashboardSource.includes("function selectChannel"), true);
 assert.equal(dashboardSource.includes("setMessage(\"\")"), true);
 assert.equal(dashboardSource.includes("selectedChannelPermission"), true);
+assert.equal(dashboardSource.includes("loadDiscordChannelCache"), true);
+assert.equal(dashboardSource.includes("saveDiscordChannelCache"), true);
+assert.equal(dashboardSource.includes("last_channel_fetch_success_at"), true);
+assert.equal(dashboardSource.includes("Connected (last known)"), true);
+assert.equal(dashboardSource.includes("Last successful channel refresh"), true);
+assert.equal(dashboardSource.includes("Saved auto-post setups continue running even if channel refresh temporarily fails."), true);
+assert.equal(dashboardSource.includes("Recheck Channels"), true);
+assert.equal(dashboardSource.includes("Request failed: 503"), false);
 assert.equal(dashboardSource.includes("DZN Bot can post in this channel."), true);
 assert.equal(dashboardSource.includes("DZN Bot has Administrator and can post in this channel."), true);
 assert.equal(dashboardSource.includes("DZN can see this channel, but cannot post here yet."), true);
@@ -125,5 +133,17 @@ assert.equal(dashboardSource.includes("effective channel permissions:"), true);
 assert.equal(dashboardSource.includes("Recheck Selected Channel"), true);
 assert.equal(dashboardSource.includes("Make sure you select the DZN Bot role in Discord channel permissions, not @everyone"), true);
 assert.equal(dashboardSource.includes("Channel or category overrides may still block the bot"), true);
+
+const discordChannelsEndpointSource = readFileSync("functions/api/servers/[serverId]/discord-channels.ts", "utf8");
+assert.equal(discordChannelsEndpointSource.includes("channel_fetch_unavailable"), true);
+assert.equal(discordChannelsEndpointSource.includes("Existing saved setups remain active"), true);
+assert.equal(discordChannelsEndpointSource.includes("retryable"), true);
+assert.equal(discordChannelsEndpointSource.includes("status: 503"), true);
+assert.equal(discordChannelsEndpointSource.includes("last_fetch_success_at"), true);
+assert.equal(discordChannelsEndpointSource.includes("using_cached_channel_state"), true);
+
+const onboardingApiSource = readFileSync("components/onboarding/api.ts", "utf8");
+assert.equal(onboardingApiSource.includes("getDiscordPostingChannels"), true);
+assert.equal(onboardingApiSource.includes("!response.ok && !data.diagnostics"), true);
 
 console.log("Discord guild permission tests passed.");

@@ -19,6 +19,10 @@ type ChannelFetchDiagnostics = {
   postable_channels_count: number;
   last_fetch_error_code: string | null;
   last_fetch_error_message: string | null;
+  last_fetch_status: number | null;
+  last_fetch_attempt_at: string;
+  last_fetch_success_at: string | null;
+  using_cached_channel_state: boolean;
   last_fetch_time: string;
 };
 
@@ -104,6 +108,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       mockChannel("123456789012345680", "admin-alerts", "Admin", ["Embed Links"]),
     ];
     return json(channelResponse({
+      ok: true,
       channels,
       selectedServerId: server.id,
       selectedGuildId,
@@ -115,6 +120,8 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       warning: null,
       errorCode: null,
       errorMessage: null,
+      errorStatus: null,
+      retryable: false,
       botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
     }));
   }
@@ -122,6 +129,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   try {
     const channels = await fetchDiscordPostingChannels(env, selectedGuildId);
     return json(channelResponse({
+      ok: true,
       channels,
       selectedServerId: server.id,
       selectedGuildId,
@@ -133,6 +141,8 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       warning: null,
       errorCode: null,
       errorMessage: null,
+      errorStatus: null,
+      retryable: false,
       botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
     }));
   } catch (error) {
@@ -148,11 +158,13 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         fetchedAt,
         errorCode: classified.code,
         errorMessage: classified.message,
+        errorStatus: classified.status,
+        retryable: classified.retryable,
         botInviteUrl: classified.code === "bot_not_in_guild" ? buildBotInviteUrl(env, selectedGuildId) : null,
       }),
       warning: classified.message,
       bot_invite_url: classified.code === "bot_not_in_guild" ? buildBotInviteUrl(env, selectedGuildId) : null,
-    });
+    }, { status: classified.status });
   }
 };
 
@@ -183,6 +195,7 @@ async function resolveUser(env: Env, request: Request): Promise<SessionUser | nu
 }
 
 function channelResponse(input: {
+  ok: boolean;
   channels: DiscordPostingChannel[];
   selectedServerId: string;
   selectedGuildId: string | null;
@@ -194,9 +207,12 @@ function channelResponse(input: {
   warning: string | null;
   errorCode: string | null;
   errorMessage: string | null;
+  errorStatus: number | null;
+  retryable: boolean;
   botInviteUrl: string | null;
 }) {
   return {
+    ok: input.ok,
     channels: input.channels,
     manual_fallback: input.manualFallback,
     warning: input.warning ?? undefined,
@@ -207,6 +223,10 @@ function channelResponse(input: {
     bot_token_configured: input.botTokenConfigured,
     bot_connected: input.botConnected,
     error_code: input.errorCode,
+    errorCode: input.errorCode,
+    status: input.errorStatus,
+    message: input.warning ?? input.errorMessage ?? undefined,
+    retryable: input.retryable,
     bot_invite_url: input.botInviteUrl,
     diagnostics: buildDiagnostics({
       selectedServerId: input.selectedServerId,
@@ -218,6 +238,9 @@ function channelResponse(input: {
       channels: input.channels,
       errorCode: input.errorCode,
       errorMessage: input.errorMessage,
+      errorStatus: input.errorStatus,
+      lastFetchSuccessAt: input.errorCode ? null : input.fetchedAt,
+      usingCachedChannelState: false,
     }),
   };
 }
@@ -231,9 +254,12 @@ function emptyResponse(input: {
   fetchedAt: string;
   errorCode: string;
   errorMessage: string;
+  errorStatus?: number | null;
+  retryable?: boolean;
   botInviteUrl: string | null;
 }) {
   return {
+    ok: false,
     channels: [] as DiscordPostingChannel[],
     manual_fallback: true,
     fetched_at: input.fetchedAt,
@@ -243,6 +269,10 @@ function emptyResponse(input: {
     bot_token_configured: input.botTokenConfigured,
     bot_connected: input.botConnected,
     error_code: input.errorCode,
+    errorCode: input.errorCode,
+    status: input.errorStatus ?? null,
+    message: input.errorMessage,
+    retryable: Boolean(input.retryable),
     bot_invite_url: input.botInviteUrl,
     diagnostics: buildDiagnostics({
       selectedServerId: input.selectedServerId,
@@ -254,6 +284,9 @@ function emptyResponse(input: {
       channels: [],
       errorCode: input.errorCode,
       errorMessage: input.errorMessage,
+      errorStatus: input.errorStatus ?? null,
+      lastFetchSuccessAt: null,
+      usingCachedChannelState: false,
     }),
   };
 }
@@ -268,6 +301,9 @@ function buildDiagnostics(input: {
   channels: DiscordPostingChannel[];
   errorCode: string | null;
   errorMessage: string | null;
+  errorStatus: number | null;
+  lastFetchSuccessAt: string | null;
+  usingCachedChannelState: boolean;
 }): ChannelFetchDiagnostics {
   return {
     selected_server_id: input.selectedServerId,
@@ -279,6 +315,10 @@ function buildDiagnostics(input: {
     postable_channels_count: input.channels.filter((channel) => channel.can_post).length,
     last_fetch_error_code: input.errorCode,
     last_fetch_error_message: input.errorMessage,
+    last_fetch_status: input.errorStatus,
+    last_fetch_attempt_at: input.fetchedAt,
+    last_fetch_success_at: input.lastFetchSuccessAt,
+    using_cached_channel_state: input.usingCachedChannelState,
     last_fetch_time: input.fetchedAt,
   };
 }
@@ -289,7 +329,8 @@ function classifyChannelFetchError(error: unknown) {
       return {
         code: "missing_bot_token",
         message: "DISCORD_BOT_TOKEN is missing in Cloudflare Pages, so DZN cannot fetch Discord channels automatically.",
-        status: 503,
+        status: 424,
+        retryable: false,
         botConnected: null,
       };
     }
@@ -298,6 +339,7 @@ function classifyChannelFetchError(error: unknown) {
         code: "bot_not_in_guild",
         message: "DZN bot is not connected to this Discord server yet. Invite the bot to enable auto posts.",
         status: 424,
+        retryable: false,
         botConnected: false,
       };
     }
@@ -306,6 +348,16 @@ function classifyChannelFetchError(error: unknown) {
         code: "discord_api_403",
         message: "Discord returned 403 while DZN tried to fetch this server's channels. Check bot permissions and guild access.",
         status: 424,
+        retryable: false,
+        botConnected: null,
+      };
+    }
+    if ((error.status ?? 0) >= 500 || error.code === "discord_api_invalid_response") {
+      return {
+        code: "channel_fetch_unavailable",
+        message: "Discord channel refresh is temporarily unavailable. Existing saved setups remain active.",
+        status: 503,
+        retryable: true,
         botConnected: null,
       };
     }
@@ -313,13 +365,15 @@ function classifyChannelFetchError(error: unknown) {
       code: error.code,
       message: error.message,
       status: 424,
+      retryable: false,
       botConnected: null,
     };
   }
   return {
-    code: "discord_api_error",
-    message: error instanceof Error ? error.message : "Discord channel fetch failed.",
-    status: 424,
+    code: "channel_fetch_unavailable",
+    message: "Discord channel refresh is temporarily unavailable. Existing saved setups remain active.",
+    status: 503,
+    retryable: true,
     botConnected: null,
   };
 }

@@ -386,10 +386,15 @@ export type PostingDestinationsResponse = {
 };
 
 export type DiscordChannelsResponse = {
+  ok?: boolean;
   channels: DiscordPostingChannel[];
   manual_fallback: boolean;
   warning?: string;
   fetched_at: string;
+  retryable?: boolean;
+  status?: number;
+  message?: string;
+  errorCode?: string | null;
   selected_server_id?: string | null;
   selected_guild_id?: string | null;
   guild_name?: string | null;
@@ -407,6 +412,10 @@ export type DiscordChannelsResponse = {
     postable_channels_count: number;
     last_fetch_error_code: string | null;
     last_fetch_error_message: string | null;
+    last_fetch_status?: number | null;
+    last_fetch_attempt_at?: string | null;
+    last_fetch_success_at?: string | null;
+    using_cached_channel_state?: boolean;
     last_fetch_time: string;
   };
 };

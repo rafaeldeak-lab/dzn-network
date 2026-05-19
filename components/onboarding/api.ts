@@ -203,9 +203,18 @@ export async function savePostingDestination(linkedServerId: string, data: {
 }
 
 export async function getDiscordPostingChannels(linkedServerId: string) {
-  return request<DiscordChannelsResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/discord-channels`, {
+  const response = await fetch(`/api/servers/${encodeURIComponent(linkedServerId)}/discord-channels`, {
     cache: "no-store",
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+    },
   });
+  const data = (await response.json().catch(() => ({}))) as DiscordChannelsResponse & { error?: string };
+  if (!response.ok && !data.diagnostics && !data.error_code && !data.errorCode) {
+    throw new Error(data.error || `Request failed: ${response.status}`);
+  }
+  return data;
 }
 
 export async function getAutomationHealth() {
