@@ -2499,16 +2499,19 @@ export async function runScheduledAdmSync(
     maxServers?: number;
     maxLinesPerServer?: number;
     minSyncIntervalMs?: number;
+    refreshMetadata?: boolean;
   } = {},
 ): Promise<ScheduledAdmSyncResult> {
   await ensureAdmSyncSchema(env);
   const maxServers = clampPositiveInteger(options.maxServers ?? 10, 10);
   const maxLinesPerServer = clampPositiveInteger(options.maxLinesPerServer ?? 50000, 50000);
   const minSyncIntervalMs = Math.max(clampPositiveInteger(options.minSyncIntervalMs ?? 10 * 60 * 1000, 10 * 60 * 1000), 10 * 60 * 1000);
-  const metadata = await refreshLivePlayerCountsForActiveServers(env, {
-    maxServers,
-    skipFreshWithinMs: 5 * 60 * 1000,
-  });
+  const metadata = options.refreshMetadata === false
+    ? emptyScheduledMetadataSyncResult()
+    : await refreshLivePlayerCountsForActiveServers(env, {
+      maxServers,
+      skipFreshWithinMs: 5 * 60 * 1000,
+    });
   const discoveryServers = await getDueAdmDiscoveryAutomationServers(env, maxServers);
   const discoveryResults = new Map<string, AdmDiscoveryResult>();
   let discoveryProcessed = 0;
@@ -2679,6 +2682,17 @@ export async function runScheduledAdmSync(
     maxServers,
     maxLinesPerServer,
     metadata,
+  };
+}
+
+function emptyScheduledMetadataSyncResult(): ScheduledMetadataSyncResult {
+  return {
+    processed: 0,
+    succeeded: 0,
+    failed: 0,
+    skipped: 0,
+    updated_player_counts: 0,
+    results: [],
   };
 }
 

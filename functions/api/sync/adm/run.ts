@@ -62,6 +62,7 @@ export async function handleAdmSyncRun(
         maxServers: sanitizePositiveInteger(body.max_servers, 25),
         maxLinesPerServer: sanitizePositiveInteger(body.max_lines_per_server, 50000),
         minSyncIntervalMs: 0,
+        refreshMetadata: false,
       });
       await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
         processedCount: result.processing_processed_count,

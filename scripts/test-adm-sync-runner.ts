@@ -89,6 +89,7 @@ assert.equal(compareAdmFileNamesChronological(
 ) > 0, true);
 
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
+const endpointSource = readFileSync("functions/api/sync/adm/run.ts", "utf8");
 assert.equal(admSyncSource.includes("hasExistingPlayerEventBySourceLine"), true);
 assert.equal(admSyncSource.includes("DZN ADM FEED SYNC STATUS IMPROVED"), true);
 assert.equal(admSyncSource.includes("preferredAdmFileName"), true);
@@ -123,6 +124,7 @@ assert.equal(admSyncSource.includes("force: triggerType === \"manual\" || trigge
 assert.equal(admSyncSource.includes("softFail: true"), true);
 assert.equal(admSyncSource.includes("refreshLivePlayerCountsForActiveServers"), true);
 assert.equal(admSyncSource.includes("metadata,"), true);
+assert.equal(endpointSource.includes("refreshMetadata: false"), true);
 assert.equal(admSyncSource.includes("runAdmDiscoveryForLinkedServer"), true);
 assert.equal(admSyncSource.includes("readMode: \"sample\""), true);
 assert.equal(admSyncSource.includes("discovery_due_count"), true);
