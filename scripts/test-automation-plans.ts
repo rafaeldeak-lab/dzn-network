@@ -278,6 +278,10 @@ assert.equal(dashboardSource.includes("Nitrado Log Settings"), true);
 assert.equal(dashboardSource.includes("Check Nitrado Log Settings"), true);
 assert.equal(dashboardSource.includes("Nitrado log settings verified automatically"), true);
 assert.equal(dashboardSource.includes("Manual fallback"), true);
+assert.equal(dashboardSource.includes("Not checked yet"), true);
+assert.equal(dashboardSource.includes("Manual confirmation required"), true);
+assert.equal(dashboardSource.includes("Needs Change"), true);
+assert.equal(dashboardSource.includes("verificationStatus"), true);
 assert.equal(dashboardSource.includes("Checks for new ADM files every"), true);
 assert.equal(dashboardSource.includes("Processes readable ADM data every"), true);
 assert.equal(dashboardSource.includes("Observed ADM Cadence"), true);
@@ -292,11 +296,16 @@ const nitradoLogSettingsEndpointSource = readFileSync("functions/api/servers/[se
 assert.equal(nitradoLogSettingsEndpointSource.includes("fetchNitradoLogSettingsVerification"), true);
 assert.equal(nitradoLogSettingsEndpointSource.includes("recordNitradoLogSettingsVerification"), true);
 assert.equal(nitradoLogSettingsEndpointSource.includes("manual_required"), true);
+assert.equal(nitradoLogSettingsEndpointSource.includes("verificationStatus"), true);
+assert.equal(nitradoLogSettingsEndpointSource.includes("not_checked"), true);
+assert.equal(nitradoLogSettingsEndpointSource.includes("verified_wrong"), true);
 
 const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
 assert.equal(nitradoSource.includes("fetchNitradoLogSettingsVerification"), true);
 assert.equal(nitradoSource.includes("reduce_log_output_disabled"), true);
 assert.equal(nitradoSource.includes("log_playerlist_enabled"), true);
+assert.equal(nitradoSource.includes("function isEnabled"), true);
+assert.equal(nitradoSource.includes("function isDisabled"), true);
 
 const healthEndpointSource = readFileSync("functions/api/automation/health.ts", "utf8");
 assert.equal(healthEndpointSource.includes("requireDznAdmin"), true);

@@ -211,7 +211,9 @@ Required Nitrado log settings:
 - Reduce Log Output: Disabled
 - Log Playerlist: Enabled
 
-DZN attempts to verify these automatically using the connected Nitrado token and service through `GET /api/servers/[serverId]/nitrado-log-settings`. When Nitrado exposes the settings, DZN saves the verification source as `nitrado_api`, stores Admin Log / Server Log values, and auto-confirms the two required checklist items when Reduce Log Output is disabled and Log Playerlist is enabled.
+DZN attempts to verify these automatically using the connected Nitrado token and service. DZN reads the saved checklist state through `GET /api/servers/[serverId]/nitrado-log-settings`. The dashboard only runs a live Nitrado verification when the owner clicks **Check Nitrado Log Settings**, which calls `GET /api/servers/[serverId]/nitrado-log-settings?check=1`. Before a live check runs, unknown values are shown as `Not checked yet` instead of `Needs Change`.
+
+When Nitrado exposes the settings, DZN saves the verification source as `nitrado_api`, stores Admin Log / Server Log values, and auto-confirms the two required checklist items when Reduce Log Output is disabled and Log Playerlist is enabled.
 
 If Nitrado does not expose the exact settings or the token cannot read them, the dashboard falls back to manual confirmation. This is a warning checklist, not a hard setup lock. If they are not confirmed, DZN should show: "ADM tracking may miss useful lines until these Nitrado settings are confirmed."
 

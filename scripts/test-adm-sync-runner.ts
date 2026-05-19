@@ -107,6 +107,8 @@ assert.equal(nitradoSource.includes("fetchReadableNitradoAdmFiles"), true);
 assert.equal(nitradoSource.includes("fetchNitradoLogSettingsVerification"), true);
 assert.equal(nitradoSource.includes("admin_log_enabled"), true);
 assert.equal(nitradoSource.includes("server_log_enabled"), true);
+assert.equal(nitradoSource.includes("function isEnabled"), true);
+assert.equal(nitradoSource.includes("function isDisabled"), true);
 const packageSource = readFileSync("package.json", "utf8");
 assert.equal(packageSource.includes("diagnose:adm-import"), true);
 assert.equal(packageSource.includes("adm:audit-health"), true);

@@ -160,6 +160,8 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "Check Nitrado Log Settings", "Dashboard can verify Nitrado settings automatically");
   checkIncludes("functions/api/servers/[serverId]/nitrado-log-settings.ts", "fetchNitradoLogSettingsVerification", "Nitrado settings endpoint uses connected service verification");
   checkIncludes("functions/api/servers/[serverId]/nitrado-log-settings.ts", "manual_required", "Nitrado settings endpoint falls back to manual confirmation");
+  checkIncludes("functions/api/servers/[serverId]/nitrado-log-settings.ts", "not_checked", "Nitrado settings endpoint distinguishes unchecked settings");
+  checkIncludes("functions/api/servers/[serverId]/nitrado-log-settings.ts", "verified_wrong", "Nitrado settings endpoint reports confirmed wrong settings separately");
   checkIncludes("components/onboarding/dashboard.tsx", "Server restart detected. Waiting for Nitrado to publish the next ADM log.", "Dashboard waiting-after-restart wording");
   checkIncludes("components/onboarding/dashboard.tsx", "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.", "Dashboard latest-unreadable wording");
   checkIncludes("components/onboarding/dashboard.tsx", "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.", "Dashboard delayed-after-restart wording");

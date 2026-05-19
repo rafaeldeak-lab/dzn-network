@@ -62,6 +62,7 @@ export type NitradoLogSettingsVerification = {
   source: "nitrado_api" | "manual_required";
   checkedAt: string;
   reason: string | null;
+  discoveredSettingKeys: string[];
   settings: {
     admin_log_enabled: boolean | null;
     server_log_enabled: boolean | null;
@@ -381,13 +382,15 @@ export async function fetchNitradoLogSettingsVerification(
   if (!response.ok) throw new NitradoServiceLookupError("api_unavailable");
 
   const payload = await response.json().catch(() => null);
-  const settings = extractNitradoLogSettings(payload);
+  const extracted = extractNitradoLogSettings(payload);
+  const settings = extracted.settings;
   const requiredKnown = settings.reduce_log_output_disabled !== null && settings.log_playerlist_enabled !== null;
   return {
     verified: requiredKnown,
     source: requiredKnown ? "nitrado_api" : "manual_required",
     checkedAt,
     reason: requiredKnown ? null : "DZN could not verify these settings automatically from Nitrado.",
+    discoveredSettingKeys: extracted.discoveredSettingKeys,
     settings,
   };
 }
@@ -2795,26 +2798,37 @@ function firstNumber(...values: unknown[]) {
   return undefined;
 }
 
-function extractNitradoLogSettings(payload: unknown): NitradoLogSettingsVerification["settings"] {
+function extractNitradoLogSettings(payload: unknown): {
+  settings: NitradoLogSettingsVerification["settings"];
+  discoveredSettingKeys: string[];
+} {
   const candidates = flattenSettingCandidates(payload);
+  const discoveredSettingKeys = candidates
+    .map((candidate) => candidate.key)
+    .filter((key) => /(admin|server|reduce|playerlist|player|log|adm)/i.test(key))
+    .filter((key, index, values) => values.indexOf(key) === index)
+    .slice(0, 80);
   return {
-    admin_log_enabled: findSetting(candidates, [
-      { includes: ["admin", "log"], invert: false },
-      { includes: ["adm", "log"], invert: false },
-    ]),
-    server_log_enabled: findSetting(candidates, [
-      { includes: ["server", "log"], invert: false },
-      { includes: ["game", "log"], invert: false },
-    ]),
-    reduce_log_output_disabled: findSetting(candidates, [
-      { includes: ["reduce", "log", "output"], invert: true },
-      { includes: ["reduced", "log", "output"], invert: true },
-    ]),
-    log_playerlist_enabled: findSetting(candidates, [
-      { includes: ["log", "playerlist"], invert: false },
-      { includes: ["playerlist", "log"], invert: false },
-      { includes: ["player", "list", "log"], invert: false },
-    ]),
+    discoveredSettingKeys,
+    settings: {
+      admin_log_enabled: findEnabledSetting(candidates, [
+        ["admin", "log"],
+        ["adm", "log"],
+      ]),
+      server_log_enabled: findEnabledSetting(candidates, [
+        ["server", "log"],
+        ["game", "log"],
+      ]),
+      reduce_log_output_disabled: findDisabledSetting(candidates, [
+        ["reduce", "log", "output"],
+        ["reduced", "log", "output"],
+      ]),
+      log_playerlist_enabled: findEnabledSetting(candidates, [
+        ["log", "playerlist"],
+        ["playerlist", "log"],
+        ["player", "list", "log"],
+      ]),
+    },
   };
 }
 
@@ -2832,20 +2846,34 @@ function flattenSettingCandidates(value: unknown, keyPath: string[] = [], result
   return results;
 }
 
+function findEnabledSetting(candidates: Array<{ key: string; value: unknown }>, rules: string[][]) {
+  return findSetting(candidates, rules, "enabled");
+}
+
+function findDisabledSetting(candidates: Array<{ key: string; value: unknown }>, rules: string[][]) {
+  return findSetting(candidates, rules, "disabled");
+}
+
 function findSetting(
   candidates: Array<{ key: string; value: unknown }>,
-  rules: Array<{ includes: string[]; invert: boolean }>,
+  rules: string[][],
+  expected: "enabled" | "disabled",
 ) {
   for (const rule of rules) {
-    const candidate = candidates.find((item) => rule.includes.every((part) => item.key.includes(normalizeSettingKey(part))));
+    const candidate = candidates.find((item) => rule.every((part) => item.key.includes(normalizeSettingKey(part))));
     if (!candidate) continue;
-    const parsed = parseBooleanSetting(candidate.value);
-    if (parsed !== null) return rule.invert ? !parsed : parsed;
+    if (expected === "enabled") {
+      const parsed = isEnabled(candidate.value);
+      if (parsed !== null) return parsed;
+    } else {
+      const parsed = isDisabled(candidate.value);
+      if (parsed !== null) return parsed;
+    }
   }
   return null;
 }
 
-function parseBooleanSetting(value: unknown): boolean | null {
+function isEnabled(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) {
     if (value === 1) return true;
@@ -2857,6 +2885,11 @@ function parseBooleanSetting(value: unknown): boolean | null {
   if (["1", "true", "yes", "on", "enabled", "enable", "active"].includes(normalized)) return true;
   if (["0", "false", "no", "off", "disabled", "disable", "inactive"].includes(normalized)) return false;
   return null;
+}
+
+function isDisabled(value: unknown): boolean | null {
+  const enabled = isEnabled(value);
+  return enabled === null ? null : !enabled;
 }
 
 function normalizeSettingKey(value: string) {

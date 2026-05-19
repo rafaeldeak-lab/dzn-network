@@ -150,8 +150,9 @@ export async function runLogAccessDiagnostics() {
   return request<{ diagnostics: NitradoLogAccessDiagnostics }>("/api/nitrado/log-access-diagnostics");
 }
 
-export async function getNitradoLogSettings(linkedServerId: string) {
-  return request<NitradoLogSettingsCheckResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings`, {
+export async function getNitradoLogSettings(linkedServerId: string, options: { check?: boolean } = {}) {
+  const query = options.check ? "?check=1" : "";
+  return request<NitradoLogSettingsCheckResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings${query}`, {
     cache: "no-store",
   });
 }

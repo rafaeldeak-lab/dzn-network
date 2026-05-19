@@ -986,10 +986,24 @@ export async function recordNitradoLogSettingsVerification(env: Env, input: {
   await ensureAutomationSchema(env);
   await ensureServerSyncStateRow(env, input.guildId);
   const now = input.checkedAt ?? new Date().toISOString();
-  const canAutoConfirm = input.reduceLogOutputDisabled === true && input.logPlayerlistEnabled === true;
-  const shouldUpdateConfirmation = input.reduceLogOutputDisabled !== null || input.logPlayerlistEnabled !== null;
+  const shouldUpdateReduce = input.reduceLogOutputDisabled !== null;
+  const shouldUpdatePlayerlist = input.logPlayerlistEnabled !== null;
+  const shouldUpdateConfirmation = shouldUpdateReduce || shouldUpdatePlayerlist;
   const current = await getNitradoLogSettingsConfirmation(env, input.guildId);
-  const sourceForRecord = shouldUpdateConfirmation ? input.source : current.nitrado_log_settings_verification_source ?? input.source;
+  const nextReduceConfirmed = shouldUpdateReduce
+    ? input.reduceLogOutputDisabled === true
+    : current.nitrado_reduce_log_output_confirmed;
+  const nextPlayerlistConfirmed = shouldUpdatePlayerlist
+    ? input.logPlayerlistEnabled === true
+    : current.nitrado_log_playerlist_confirmed;
+  const canAutoConfirm = nextReduceConfirmed && nextPlayerlistConfirmed;
+  const sourceForRecord = shouldUpdateConfirmation
+    ? input.source
+    : current.nitrado_log_settings_verification_source === "manual" &&
+        current.nitrado_reduce_log_output_confirmed &&
+        current.nitrado_log_playerlist_confirmed
+      ? "manual"
+      : input.source;
   await requireDb(env)
     .prepare(
       `UPDATE server_sync_state SET
@@ -1005,12 +1019,12 @@ export async function recordNitradoLogSettingsVerification(env: Env, input: {
        WHERE guild_id = ?`,
     )
     .bind(
+      shouldUpdateReduce ? 1 : 0,
+      input.reduceLogOutputDisabled === true ? 1 : 0,
+      shouldUpdatePlayerlist ? 1 : 0,
+      input.logPlayerlistEnabled === true ? 1 : 0,
       shouldUpdateConfirmation ? 1 : 0,
-      canAutoConfirm ? 1 : 0,
-      shouldUpdateConfirmation ? 1 : 0,
-      canAutoConfirm ? 1 : 0,
-      canAutoConfirm ? 1 : 0,
-      now,
+      canAutoConfirm ? now : null,
       sourceForRecord,
       nullableBooleanInt(input.adminLogEnabled),
       nullableBooleanInt(input.serverLogEnabled),

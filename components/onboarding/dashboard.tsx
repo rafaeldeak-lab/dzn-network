@@ -492,7 +492,7 @@ function ServerDashboard({
     setCheckingNitradoLogSettings(true);
     setActionMessage("");
     try {
-      const result = await getNitradoLogSettings(server.id);
+      const result = await getNitradoLogSettings(server.id, { check: true });
       setNitradoLogSettingsCheck(result);
       setNitradoLogSettings(result.saved_settings);
       await refreshSyncData({ warnOnError: false, queueIfBusy: true });
@@ -1245,9 +1245,27 @@ function NitradoLogSettingsChecklist({
   const reduceConfirmed = settings?.nitrado_reduce_log_output_confirmed ?? false;
   const playerlistConfirmed = settings?.nitrado_log_playerlist_confirmed ?? false;
   const fullyConfirmed = reduceConfirmed && playerlistConfirmed;
-  const verificationUnavailable = check?.verified === false;
-  const hasWrongSettings = Boolean(check?.warnings?.length);
-  const verifiedByDzn = fullyConfirmed && settings?.nitrado_log_settings_verification_source === "nitrado_api" && !hasWrongSettings;
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const verificationStatus = getNitradoVerificationStatus(settings, check);
+  const hasWrongSettings = verificationStatus === "verified_wrong" && Boolean(check?.warnings?.length);
+  const verifiedByDzn = verificationStatus === "verified";
+  const manuallyConfirmed = verificationStatus === "manual_confirmed";
+  const verificationUnavailable = verificationStatus === "manual_required";
+  const showManualFallback = verificationUnavailable || manuallyConfirmed || settings?.nitrado_log_settings_verification_source === "manual";
+  const sourceLabel = getNitradoLogSettingsSourceDisplay(settings, check, verificationStatus);
+  const diagnostics = check?.diagnostics ?? {
+    source: check?.source ?? settings?.nitrado_log_settings_verification_source ?? "not_checked",
+    verificationStatus,
+    last_checked_at: settings?.nitrado_log_settings_last_checked_at ?? null,
+    last_error: settings?.nitrado_log_settings_last_error ?? null,
+    discovered_setting_keys: check?.discovered_setting_keys ?? [],
+    parsed_values: check?.settings ?? {
+      admin_log_enabled: settings?.nitrado_admin_log_enabled ?? null,
+      server_log_enabled: settings?.nitrado_server_log_enabled ?? null,
+      reduce_log_output_disabled: verificationStatus === "verified" || verificationStatus === "verified_wrong" ? reduceConfirmed : null,
+      log_playerlist_enabled: verificationStatus === "verified" || verificationStatus === "verified_wrong" ? playerlistConfirmed : null,
+    },
+  };
   const nextSettings = (patch: Partial<NitradoLogSettingsConfirmation>): NitradoLogSettingsConfirmation => ({
     nitrado_reduce_log_output_confirmed: reduceConfirmed,
     nitrado_log_playerlist_confirmed: playerlistConfirmed,
@@ -1286,6 +1304,14 @@ function NitradoLogSettingsChecklist({
         <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm font-bold leading-6 text-emerald-50">
           Nitrado log settings verified automatically{settings?.nitrado_log_settings_confirmed_at ? ` ${formatRelativeTime(settings.nitrado_log_settings_confirmed_at)}` : ""}.
         </p>
+      ) : manuallyConfirmed ? (
+        <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm font-bold leading-6 text-emerald-50">
+          Nitrado log settings were manually confirmed{settings?.nitrado_log_settings_confirmed_at ? ` ${formatRelativeTime(settings.nitrado_log_settings_confirmed_at)}` : ""}.
+        </p>
+      ) : verificationStatus === "not_checked" ? (
+        <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-bold leading-6 text-zinc-300">
+          DZN has not checked these Nitrado log settings yet. Click Check Nitrado Log Settings to verify them from the connected service.
+        </p>
       ) : !fullyConfirmed ? (
         <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-sm font-bold leading-6 text-amber-50">
           {verificationUnavailable
@@ -1299,20 +1325,41 @@ function NitradoLogSettingsChecklist({
       )}
 
       <div className="mt-4 grid gap-2 rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-        <NitradoSettingStatus label="Admin Log" value={check?.settings.admin_log_enabled ?? settings?.nitrado_admin_log_enabled ?? null} expectedLabel="Enabled" />
-        <NitradoSettingStatus label="Server Log" value={check?.settings.server_log_enabled ?? settings?.nitrado_server_log_enabled ?? null} expectedLabel="Enabled" />
-        <NitradoSettingStatus label="Reduce Log Output" value={check?.settings.reduce_log_output_disabled ?? reduceConfirmed} expectedLabel="Disabled" />
-        <NitradoSettingStatus label="Log Playerlist" value={check?.settings.log_playerlist_enabled ?? playerlistConfirmed} expectedLabel="Enabled" />
+        <NitradoSettingStatus label="Admin Log" status={getNitradoSettingDisplay("admin_log_enabled", check?.settings.admin_log_enabled ?? settings?.nitrado_admin_log_enabled ?? null, verificationStatus, "Enabled", false)} />
+        <NitradoSettingStatus label="Server Log" status={getNitradoSettingDisplay("server_log_enabled", check?.settings.server_log_enabled ?? settings?.nitrado_server_log_enabled ?? null, verificationStatus, "Enabled", false)} />
+        <NitradoSettingStatus label="Reduce Log Output" status={getNitradoSettingDisplay("reduce_log_output_disabled", check?.settings.reduce_log_output_disabled ?? (verificationStatus === "verified" || verificationStatus === "verified_wrong" || manuallyConfirmed ? reduceConfirmed : null), verificationStatus, "Disabled", reduceConfirmed)} />
+        <NitradoSettingStatus label="Log Playerlist" status={getNitradoSettingDisplay("log_playerlist_enabled", check?.settings.log_playerlist_enabled ?? (verificationStatus === "verified" || verificationStatus === "verified_wrong" || manuallyConfirmed ? playerlistConfirmed : null), verificationStatus, "Enabled", playerlistConfirmed)} />
         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase text-zinc-500">
-          <span>Source: {getNitradoLogSettingsSourceLabel(settings) || (check?.source === "manual_required" ? "Manual required" : "Not checked")}</span>
+          <span>Source: {sourceLabel}</span>
           {settings?.nitrado_log_settings_last_checked_at ? <span>Last checked: {formatRelativeTime(settings.nitrado_log_settings_last_checked_at)}</span> : null}
         </div>
         {settings?.nitrado_log_settings_last_error && !verifiedByDzn ? (
           <p className="text-xs font-bold text-amber-100">{settings.nitrado_log_settings_last_error}</p>
         ) : null}
+        <button
+          type="button"
+          onClick={() => setDiagnosticsOpen((open) => !open)}
+          className="mt-2 text-left text-[11px] font-black uppercase text-cyan-100 transition hover:text-cyan-50"
+        >
+          {diagnosticsOpen ? "Hide Nitrado Settings Diagnostics" : "Show Nitrado Settings Diagnostics"}
+        </button>
+        {diagnosticsOpen ? (
+          <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs leading-5 text-zinc-300">
+            <p><span className="font-bold text-zinc-500">source:</span> {diagnostics.source}</p>
+            <p><span className="font-bold text-zinc-500">verificationStatus:</span> {diagnostics.verificationStatus}</p>
+            <p><span className="font-bold text-zinc-500">last checked:</span> {diagnostics.last_checked_at ? formatRelativeTime(diagnostics.last_checked_at) : "not checked yet"}</p>
+            <p><span className="font-bold text-zinc-500">last error:</span> {diagnostics.last_error || "none"}</p>
+            <p><span className="font-bold text-zinc-500">parsed admin_log_enabled:</span> {formatNullableBoolean(diagnostics.parsed_values.admin_log_enabled)}</p>
+            <p><span className="font-bold text-zinc-500">parsed server_log_enabled:</span> {formatNullableBoolean(diagnostics.parsed_values.server_log_enabled)}</p>
+            <p><span className="font-bold text-zinc-500">parsed reduce_log_output_disabled:</span> {formatNullableBoolean(diagnostics.parsed_values.reduce_log_output_disabled)}</p>
+            <p><span className="font-bold text-zinc-500">parsed log_playerlist_enabled:</span> {formatNullableBoolean(diagnostics.parsed_values.log_playerlist_enabled)}</p>
+            <p className="mt-2 font-bold text-zinc-500">discovered Nitrado setting keys</p>
+            <p className="break-words text-zinc-400">{diagnostics.discovered_setting_keys.length ? diagnostics.discovered_setting_keys.join(", ") : "none recorded"}</p>
+          </div>
+        ) : null}
       </div>
 
-      {!verifiedByDzn && !hasWrongSettings ? (
+      {showManualFallback && !verifiedByDzn && !hasWrongSettings ? (
         <>
           <p className="mt-4 text-xs font-bold uppercase text-zinc-500">Manual fallback</p>
           <div className="mt-2 grid gap-2">
@@ -1342,12 +1389,19 @@ function NitradoLogSettingsChecklist({
   );
 }
 
-function NitradoSettingStatus({ label, value, expectedLabel }: { label: string; value: boolean | null; expectedLabel: string }) {
+function NitradoSettingStatus({ label, status }: { label: string; status: { label: string; tone: "good" | "warn" | "bad" | "muted" } }) {
+  const toneClass = status.tone === "good"
+    ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100"
+    : status.tone === "bad"
+      ? "border-red-300/25 bg-red-400/10 text-red-100"
+      : status.tone === "warn"
+        ? "border-amber-300/25 bg-amber-400/10 text-amber-100"
+        : "border-white/10 bg-white/[0.03] text-zinc-500";
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="font-bold text-zinc-300">{label}</span>
-      <span className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase ${value === true ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : value === false ? "border-amber-300/25 bg-amber-400/10 text-amber-100" : "border-white/10 bg-white/[0.03] text-zinc-500"}`}>
-        {value === true ? expectedLabel : value === false ? "Needs change" : "Not verified"}
+      <span className={`rounded-md border px-2 py-1 text-[10px] font-black uppercase ${toneClass}`}>
+        {status.label}
       </span>
     </div>
   );
@@ -3311,6 +3365,69 @@ function getNitradoLogSettingsSourceLabel(settings: NitradoLogSettingsConfirmati
   if (settings.nitrado_log_settings_verification_source === "manual") return "Manually confirmed";
   if (settings.nitrado_log_settings_verification_source === "manual_required") return "Manual required";
   return settings.nitrado_log_settings_verification_source;
+}
+
+function getNitradoVerificationStatus(
+  settings: NitradoLogSettingsConfirmation | null,
+  check: NitradoLogSettingsCheckResponse | null,
+) {
+  if (check?.verificationStatus) return check.verificationStatus;
+  if (!settings?.nitrado_log_settings_verification_source) return "not_checked";
+  if (settings.nitrado_log_settings_verification_source === "nitrado_api") {
+    return settings.nitrado_reduce_log_output_confirmed && settings.nitrado_log_playerlist_confirmed && settings.nitrado_admin_log_enabled !== false && settings.nitrado_server_log_enabled !== false
+      ? "verified"
+      : "verified_wrong";
+  }
+  if (settings.nitrado_log_settings_verification_source === "manual") {
+    return settings.nitrado_reduce_log_output_confirmed && settings.nitrado_log_playerlist_confirmed ? "manual_confirmed" : "manual_required";
+  }
+  if (settings.nitrado_log_settings_verification_source === "manual_required") return "manual_required";
+  return "not_checked";
+}
+
+function getNitradoLogSettingsSourceDisplay(
+  settings: NitradoLogSettingsConfirmation | null,
+  check: NitradoLogSettingsCheckResponse | null,
+  verificationStatus: string,
+) {
+  if (verificationStatus === "not_checked") return "Not checked";
+  if (verificationStatus === "verified" || verificationStatus === "verified_wrong") return "Verified by DZN";
+  if (verificationStatus === "manual_confirmed") return "Manually confirmed";
+  if (verificationStatus === "manual_required") return "Manual required";
+  return getNitradoLogSettingsSourceLabel(settings) || check?.source || "Not checked";
+}
+
+function getNitradoSettingDisplay(
+  key: "admin_log_enabled" | "server_log_enabled" | "reduce_log_output_disabled" | "log_playerlist_enabled",
+  value: boolean | null,
+  verificationStatus: string,
+  expectedLabel: string,
+  manuallyConfirmed: boolean,
+): { label: string; tone: "good" | "warn" | "bad" | "muted" } {
+  const isRequiredManualSetting = key === "reduce_log_output_disabled" || key === "log_playerlist_enabled";
+  if (verificationStatus === "not_checked") return { label: "Not checked yet", tone: "muted" };
+  if (verificationStatus === "manual_confirmed" && isRequiredManualSetting && manuallyConfirmed) {
+    return { label: "Manually confirmed", tone: "good" };
+  }
+  if (verificationStatus === "manual_required") {
+    if (isRequiredManualSetting) {
+      return manuallyConfirmed
+        ? { label: "Manually confirmed", tone: "good" }
+        : { label: "Manual confirmation required", tone: "warn" };
+    }
+    return { label: "Manual check recommended", tone: "warn" };
+  }
+  if (verificationStatus === "manual_confirmed") return { label: "Manual check recommended", tone: "warn" };
+  if (value === true) return { label: expectedLabel, tone: "good" };
+  if (value === false) return { label: "Needs Change", tone: "bad" };
+  if (isRequiredManualSetting) return { label: "Manual confirmation required", tone: "warn" };
+  return { label: "Manual check recommended", tone: "warn" };
+}
+
+function formatNullableBoolean(value: boolean | null) {
+  if (value === true) return "true";
+  if (value === false) return "false";
+  return "unknown";
 }
 
 function isNitradoLogSettingsComplete(settings: NitradoLogSettingsConfirmation | null) {

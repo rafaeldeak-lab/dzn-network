@@ -525,14 +525,29 @@ export type NitradoLogSettingsCheckResponse = {
   verified: boolean;
   valid: boolean | null;
   source: "nitrado_api" | "manual_required" | string;
+  verificationStatus: "not_checked" | "verified" | "verified_wrong" | "manual_required" | "manual_confirmed" | string;
   checked_at: string;
   reason?: string | null;
   warnings?: string[];
+  discovered_setting_keys?: string[];
   settings: {
     admin_log_enabled: boolean | null;
     server_log_enabled: boolean | null;
     reduce_log_output_disabled: boolean | null;
     log_playerlist_enabled: boolean | null;
+  };
+  diagnostics?: {
+    source: string;
+    verificationStatus: string;
+    last_checked_at: string | null;
+    last_error: string | null;
+    discovered_setting_keys: string[];
+    parsed_values: {
+      admin_log_enabled: boolean | null;
+      server_log_enabled: boolean | null;
+      reduce_log_output_disabled: boolean | null;
+      log_playerlist_enabled: boolean | null;
+    };
   };
   saved_settings: NitradoLogSettingsConfirmation;
 };

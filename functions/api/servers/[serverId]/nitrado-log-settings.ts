@@ -1,6 +1,7 @@
 import { getSessionUser, requireDb } from "../../../_lib/db";
 import { decryptToken } from "../../../_lib/crypto";
 import {
+  getNitradoLogSettingsConfirmation,
   recordNitradoLogSettingsVerification,
   updateNitradoLogSettingsConfirmation,
 } from "../../../_lib/automation";
@@ -12,6 +13,13 @@ import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 type SaveNitradoLogSettingsBody = {
   nitrado_reduce_log_output_confirmed?: boolean;
   nitrado_log_playerlist_confirmed?: boolean;
+};
+
+type NitradoLogSettingsValues = {
+  admin_log_enabled: boolean | null;
+  server_log_enabled: boolean | null;
+  reduce_log_output_disabled: boolean | null;
+  log_playerlist_enabled: boolean | null;
 };
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -26,11 +34,18 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (!server.guild_id) return json({ error: "Selected server has no Discord guild id." }, { status: 409 });
 
   if (request.method === "GET") {
+    const shouldCheck = new URL(request.url).searchParams.get("check") === "1";
+    if (!shouldCheck) {
+      const savedSettings = await getNitradoLogSettingsConfirmation(env, server.guild_id);
+      return json(buildSavedNitradoLogSettingsResponse(savedSettings));
+    }
+
     const checkedAt = new Date().toISOString();
     try {
       const token = await getNitradoTokenForLinkedServer(env, server);
       const verification = await fetchNitradoLogSettingsVerification(token, server.nitrado_service_id ?? "");
       const warnings = buildNitradoLogSettingsWarnings(verification.settings);
+      const verificationStatus = getLiveVerificationStatus(verification.verified, warnings);
       const savedSettings = await recordNitradoLogSettingsVerification(env, {
         guildId: server.guild_id,
         reduceLogOutputDisabled: verification.settings.reduce_log_output_disabled,
@@ -39,17 +54,27 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         serverLogEnabled: verification.settings.server_log_enabled,
         source: verification.source,
         checkedAt: verification.checkedAt,
-        error: verification.reason,
+        error: warnings.join(" ") || verification.reason,
       });
       return json({
         ok: true,
         verified: verification.verified,
         valid: verification.verified ? warnings.length === 0 : null,
+        verificationStatus,
         settings: verification.settings,
         source: verification.source,
         checked_at: verification.checkedAt,
         reason: verification.reason,
         warnings,
+        discovered_setting_keys: verification.discoveredSettingKeys,
+        diagnostics: buildNitradoLogSettingsDiagnostics({
+          source: verification.source,
+          verificationStatus,
+          checkedAt: verification.checkedAt,
+          lastError: warnings.join(" ") || verification.reason,
+          discoveredSettingKeys: verification.discoveredSettingKeys,
+          settings: verification.settings,
+        }),
         saved_settings: savedSettings,
       });
     } catch (error) {
@@ -64,10 +89,14 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         checkedAt,
         error: reason,
       });
+      const verificationStatus = savedSettings.nitrado_reduce_log_output_confirmed && savedSettings.nitrado_log_playerlist_confirmed
+        ? "manual_confirmed"
+        : "manual_required";
       return json({
         ok: true,
         verified: false,
         valid: null,
+        verificationStatus,
         settings: {
           admin_log_enabled: null,
           server_log_enabled: null,
@@ -78,6 +107,15 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         checked_at: checkedAt,
         reason,
         warnings: [],
+        discovered_setting_keys: [],
+        diagnostics: buildNitradoLogSettingsDiagnostics({
+          source: "manual_required",
+          verificationStatus,
+          checkedAt,
+          lastError: reason,
+          discoveredSettingKeys: [],
+          settings: UNKNOWN_NITRADO_LOG_SETTINGS,
+        }),
         saved_settings: savedSettings,
       });
     }
@@ -93,6 +131,98 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   });
   return json({ ok: true, settings });
 };
+
+const UNKNOWN_NITRADO_LOG_SETTINGS: NitradoLogSettingsValues = {
+  admin_log_enabled: null,
+  server_log_enabled: null,
+  reduce_log_output_disabled: null,
+  log_playerlist_enabled: null,
+};
+
+type SavedNitradoLogSettings = Awaited<ReturnType<typeof getNitradoLogSettingsConfirmation>>;
+
+function buildSavedNitradoLogSettingsResponse(savedSettings: SavedNitradoLogSettings) {
+  const source = savedSettings.nitrado_log_settings_verification_source ?? "not_checked";
+  const verificationStatus = getSavedVerificationStatus(savedSettings);
+  const settings = getSavedNitradoLogSettingsValues(savedSettings, verificationStatus);
+  const warnings = verificationStatus === "verified_wrong" ? buildNitradoLogSettingsWarnings(settings) : [];
+  return {
+    ok: true,
+    verified: verificationStatus === "verified" || verificationStatus === "verified_wrong",
+    valid: verificationStatus === "verified" ? true : verificationStatus === "verified_wrong" ? false : null,
+    verificationStatus,
+    settings,
+    source,
+    checked_at: savedSettings.nitrado_log_settings_last_checked_at ?? "",
+    reason: savedSettings.nitrado_log_settings_last_error,
+    warnings,
+    discovered_setting_keys: [],
+    diagnostics: buildNitradoLogSettingsDiagnostics({
+      source,
+      verificationStatus,
+      checkedAt: savedSettings.nitrado_log_settings_last_checked_at,
+      lastError: savedSettings.nitrado_log_settings_last_error,
+      discoveredSettingKeys: [],
+      settings,
+    }),
+    saved_settings: savedSettings,
+  };
+}
+
+function getSavedVerificationStatus(savedSettings: SavedNitradoLogSettings) {
+  const source = savedSettings.nitrado_log_settings_verification_source;
+  const hasChecked = Boolean(savedSettings.nitrado_log_settings_last_checked_at);
+  const requiredConfirmed = savedSettings.nitrado_reduce_log_output_confirmed && savedSettings.nitrado_log_playerlist_confirmed;
+
+  if (source === "nitrado_api") return requiredConfirmed ? "verified" : "verified_wrong";
+  if (source === "manual") return requiredConfirmed ? "manual_confirmed" : "manual_required";
+  if (source === "manual_required") return requiredConfirmed ? "manual_confirmed" : "manual_required";
+  if (hasChecked && savedSettings.nitrado_log_settings_last_error) return "manual_required";
+  return "not_checked";
+}
+
+function getSavedNitradoLogSettingsValues(
+  savedSettings: SavedNitradoLogSettings,
+  verificationStatus: string,
+) {
+  if (verificationStatus === "not_checked" || verificationStatus === "manual_required") {
+    return {
+      admin_log_enabled: savedSettings.nitrado_admin_log_enabled ?? null,
+      server_log_enabled: savedSettings.nitrado_server_log_enabled ?? null,
+      reduce_log_output_disabled: null,
+      log_playerlist_enabled: null,
+    };
+  }
+  return {
+    admin_log_enabled: savedSettings.nitrado_admin_log_enabled ?? null,
+    server_log_enabled: savedSettings.nitrado_server_log_enabled ?? null,
+    reduce_log_output_disabled: savedSettings.nitrado_reduce_log_output_confirmed,
+    log_playerlist_enabled: savedSettings.nitrado_log_playerlist_confirmed,
+  };
+}
+
+function getLiveVerificationStatus(verified: boolean, warnings: string[]) {
+  if (!verified) return "manual_required";
+  return warnings.length > 0 ? "verified_wrong" : "verified";
+}
+
+function buildNitradoLogSettingsDiagnostics(input: {
+  source: string;
+  verificationStatus: string;
+  checkedAt: string | null;
+  lastError: string | null;
+  discoveredSettingKeys: string[];
+  settings: NitradoLogSettingsValues;
+}) {
+  return {
+    source: input.source,
+    verificationStatus: input.verificationStatus,
+    last_checked_at: input.checkedAt,
+    last_error: input.lastError,
+    discovered_setting_keys: input.discoveredSettingKeys,
+    parsed_values: input.settings,
+  };
+}
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
   const user = await getSessionUser(env, request);
