@@ -445,6 +445,28 @@ export type PostingTestPostResult = {
   missing_permissions?: string[];
 };
 
+export type AutoPostDispatchNowResult = {
+  ok: boolean;
+  processed: number;
+  edited: number;
+  sent: number;
+  posted?: number;
+  skipped: number;
+  failed: number;
+  results: Array<{
+    guild_id?: string;
+    post_type: string;
+    channel_id: string | null;
+    status: string;
+    message_id: string | null;
+    reason: string | null;
+    old_payload_hash?: string | null;
+    new_payload_hash?: string | null;
+    last_edited_at?: string | null;
+    message_state_found?: boolean;
+  }>;
+};
+
 export type AutomationHealth = {
   ok: boolean;
   checked_at: string;

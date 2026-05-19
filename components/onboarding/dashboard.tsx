@@ -32,7 +32,7 @@ import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getPostingDestinations, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -1586,9 +1586,11 @@ function DiscordAutoPostsPanel({
   const [saving, setSaving] = useState(false);
   const [recheckingChannel, setRecheckingChannel] = useState(false);
   const [dispatchingNow, setDispatchingNow] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState<AutoPostDispatchNowResult | null>(null);
   const [busyChannel, setBusyChannel] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [testTypeByChannel, setTestTypeByChannel] = useState<Record<string, string>>({});
+  const [dispatchDiagnosticsOpenByChannel, setDispatchDiagnosticsOpenByChannel] = useState<Record<string, boolean>>({});
 
   const effectiveOptions = options.length ? options : fallbackPostingOptions();
   const groupedOptions = useMemo(() => groupPostingOptions(effectiveOptions), [effectiveOptions]);
@@ -1752,11 +1754,13 @@ function DiscordAutoPostsPanel({
   async function runDispatcherNow() {
     setDispatchingNow(true);
     setMessage("");
+    setDispatchResult(null);
     try {
       const result = await runAutoPostDispatcherNow(serverId);
+      setDispatchResult(result);
       const refreshed = await getPostingDestinations(serverId).catch(() => null);
       if (refreshed) onSaved(refreshed);
-      setMessage(`Auto post dispatcher run complete. Processed ${result.processed}, edited ${result.edited}, skipped ${result.skipped}, failed ${result.failed}.`);
+      setMessage(`Auto post dispatcher run complete. Processed ${result.processed}, edited ${result.edited}, sent ${result.sent}, skipped ${result.skipped}, failed ${result.failed}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not run the auto post dispatcher.");
     } finally {
@@ -1994,6 +1998,39 @@ function DiscordAutoPostsPanel({
           </button>
         </div>
       </div>
+      {dispatchResult ? (
+        <div className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-400/10 p-3">
+          <p className="text-[10px] font-black uppercase text-emerald-100">Run Now Result</p>
+          <div className="mt-2 grid gap-2 text-xs font-bold text-emerald-50 sm:grid-cols-5">
+            <MiniInfo label="Processed" value={String(dispatchResult.processed)} />
+            <MiniInfo label="Edited" value={String(dispatchResult.edited)} />
+            <MiniInfo label="Sent" value={String(dispatchResult.sent)} />
+            <MiniInfo label="Skipped" value={String(dispatchResult.skipped)} />
+            <MiniInfo label="Failed" value={String(dispatchResult.failed)} />
+          </div>
+          <div className="mt-3 grid gap-2">
+            {dispatchResult.results.map((result, index) => {
+              const channelLabel = resolveDispatchChannelLabel(result.channel_id, setups, channelById);
+              return (
+                <div key={`${result.post_type}-${result.channel_id ?? "none"}-${index}`} className="rounded-lg border border-white/10 bg-black/24 p-2 text-[11px] font-bold leading-5 text-zinc-300">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-black uppercase text-white">{channelLabel} - {formatPostType(result.post_type)}</p>
+                    <span className={`rounded-full border px-2 py-1 text-[9px] font-black uppercase ${dispatchStatusClass(result.status)}`}>{result.status}</span>
+                  </div>
+                  <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                    <p>message ID: <span className="text-zinc-100">{result.message_id ?? "none"}</span></p>
+                    <p>old hash: <span className="text-zinc-100">{shortHash(result.old_payload_hash)}</span></p>
+                    <p>new hash: <span className="text-zinc-100">{shortHash(result.new_payload_hash)}</span></p>
+                    <p>last edited: <span className="text-zinc-100">{result.last_edited_at ? formatDashboardDate(result.last_edited_at) : "none"}</span></p>
+                    <p>state found: <span className="text-zinc-100">{result.message_state_found === undefined ? "unknown" : String(result.message_state_found)}</span></p>
+                    <p>reason: <span className="text-zinc-100">{result.reason ?? "none"}</span></p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-3 grid gap-3">
         {setups.length ? setups.map((setup) => {
           const testType = testTypeByChannel[setup.channel_id] ?? setup.post_types.find((postType) => postType.enabled)?.key ?? setup.post_types[0]?.key ?? "";
@@ -2020,27 +2057,43 @@ function DiscordAutoPostsPanel({
                       </span>
                     ))}
                   </div>
-                  <div className="mt-3 grid gap-2 rounded-lg border border-white/10 bg-black/24 p-2 text-[10px] font-bold leading-5 text-zinc-400 sm:grid-cols-2">
-                    {setup.post_types.map((postType) => (
-                      <div key={`${postType.key}-debug`} className="min-w-0 rounded-md border border-white/10 bg-white/[0.03] p-2">
-                        <p className="font-black uppercase text-zinc-300">{postType.label}</p>
-                        <p>guild_id: <span className="text-zinc-200">{postType.guild_id ?? "unknown"}</span></p>
-                        <p>post_type: <span className="text-zinc-200">{postType.key}</span></p>
-                        <p>discord_channel_id: <span className="text-zinc-200">{postType.discord_channel_id ?? setup.channel_id}</span></p>
-                        <p>discord_message_id: <span className="text-zinc-200">{postType.discord_message_id ?? "none"}</span></p>
-                        <p>posting mode: <span className="text-zinc-200">{postType.posting_mode ?? setup.posting_mode}</span></p>
-                        <p>enabled: <span className="text-zinc-200">{String(postType.enabled)}</span></p>
-                        <p>plan allowed: <span className={postType.allowed_by_plan ? "text-emerald-200" : "text-amber-200"}>{String(postType.allowed_by_plan)}</span></p>
-                        <p>last_payload_hash: <span className="text-zinc-200">{postType.last_payload_hash ? `${postType.last_payload_hash.slice(0, 10)}...` : "none"}</span></p>
-                        <p>last_posted_at: <span className="text-zinc-200">{postType.last_posted_at ? formatDashboardDate(postType.last_posted_at) : "none"}</span></p>
-                        <p>last_edited_at: <span className="text-zinc-200">{postType.last_edited_at ? formatDashboardDate(postType.last_edited_at) : "none"}</span></p>
-                        <p>last_dispatch_attempt_at: <span className="text-zinc-200">{postType.last_dispatch_attempt_at ? formatDashboardDate(postType.last_dispatch_attempt_at) : "none"}</span></p>
-                        <p>last_dispatch_status: <span className="text-zinc-200">{postType.last_dispatch_status ?? "none"}</span></p>
-                        <p>last_dispatch_error: <span className="text-zinc-200">{postType.last_dispatch_error ?? "none"}</span></p>
-                        <p>queued job count: <span className="text-zinc-200">{postType.queued_job_count ?? 0}</span></p>
-                        <p>latest automation job id: <span className="text-zinc-200">{postType.latest_automation_job_id ?? "none"}</span></p>
+                  <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-2 text-[10px] font-bold leading-5 text-zinc-400">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <p>Last dispatch: <span className="text-zinc-200">{formatLatestDispatchAt(setup)}</span></p>
+                      <p>Last dispatch status: <span className="text-zinc-200">{formatLatestDispatchStatus(setup)}</span></p>
+                      <p>Last error: <span className="text-zinc-200">{formatLatestDispatchError(setup)}</span></p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDispatchDiagnosticsOpenByChannel((current) => ({ ...current, [setup.channel_id]: !current[setup.channel_id] }))}
+                      className="mt-2 text-[10px] font-black uppercase text-cyan-200"
+                    >
+                      {dispatchDiagnosticsOpenByChannel[setup.channel_id] ? "Hide" : "Show"} dispatch diagnostics
+                    </button>
+                    {dispatchDiagnosticsOpenByChannel[setup.channel_id] ? (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {setup.post_types.map((postType) => (
+                          <div key={`${postType.key}-debug`} className="min-w-0 rounded-md border border-white/10 bg-white/[0.03] p-2">
+                            <p className="font-black uppercase text-zinc-300">{postType.label}</p>
+                            <p>guild_id: <span className="text-zinc-200">{postType.guild_id ?? "unknown"}</span></p>
+                            <p>post_type: <span className="text-zinc-200">{postType.key}</span></p>
+                            <p>discord_channel_id: <span className="text-zinc-200">{postType.discord_channel_id ?? setup.channel_id}</span></p>
+                            <p>discord_message_id: <span className="text-zinc-200">{postType.discord_message_id ?? "none"}</span></p>
+                            <p>posting mode: <span className="text-zinc-200">{postType.posting_mode ?? setup.posting_mode}</span></p>
+                            <p>enabled: <span className="text-zinc-200">{String(postType.enabled)}</span></p>
+                            <p>plan allowed: <span className={postType.allowed_by_plan ? "text-emerald-200" : "text-amber-200"}>{String(postType.allowed_by_plan)}</span></p>
+                            <p>last_payload_hash: <span className="text-zinc-200">{shortHash(postType.last_payload_hash)}</span></p>
+                            <p>last_posted_at: <span className="text-zinc-200">{postType.last_posted_at ? formatDashboardDate(postType.last_posted_at) : "none"}</span></p>
+                            <p>last_edited_at: <span className="text-zinc-200">{postType.last_edited_at ? formatDashboardDate(postType.last_edited_at) : "none"}</span></p>
+                            <p>last_dispatch_attempt_at: <span className="text-zinc-200">{postType.last_dispatch_attempt_at ? formatDashboardDate(postType.last_dispatch_attempt_at) : "none"}</span></p>
+                            <p>last_dispatch_status: <span className="text-zinc-200">{postType.last_dispatch_status ?? "none"}</span></p>
+                            <p>last_dispatch_error: <span className="text-zinc-200">{postType.last_dispatch_error ?? "none"}</span></p>
+                            <p>queued job count: <span className="text-zinc-200">{postType.queued_job_count ?? 0}</span></p>
+                            <p>latest automation job id: <span className="text-zinc-200">{postType.latest_automation_job_id ?? "none"}</span></p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    ) : null}
                   </div>
                 </div>
                 <div className="grid gap-2">
@@ -2268,6 +2321,55 @@ function setupStatusClass(status: string | null | undefined) {
   if (status === "disabled") return "border-zinc-300/20 bg-zinc-400/10 text-zinc-200";
   if (status === "locked_by_plan" || status === "missing_permissions") return "border-amber-300/30 bg-amber-400/10 text-amber-100";
   return "border-red-300/30 bg-red-400/10 text-red-100";
+}
+
+function dispatchStatusClass(status: string | null | undefined) {
+  if (status === "edited" || status === "sent" || status === "success") return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
+  if (status?.startsWith("skipped")) return "border-amber-300/30 bg-amber-400/10 text-amber-100";
+  if (status === "failed" || status === "no_message_id") return "border-red-300/30 bg-red-400/10 text-red-100";
+  return "border-zinc-300/20 bg-zinc-400/10 text-zinc-200";
+}
+
+function resolveDispatchChannelLabel(
+  channelId: string | null,
+  setups: PostingChannelSetup[],
+  channelById: Map<string, DiscordPostingChannel>,
+) {
+  if (!channelId) return "No channel";
+  const setup = setups.find((item) => item.channel_id === channelId);
+  if (setup) return resolveSetupChannelLabel(setup, channelById);
+  const channel = channelById.get(channelId);
+  if (channel) return formatChannelLabel(channel);
+  return `Unknown channel (${channelId})`;
+}
+
+function shortHash(value: string | null | undefined) {
+  return value ? `${value.slice(0, 10)}...` : "none";
+}
+
+function formatLatestDispatchAt(setup: PostingChannelSetup) {
+  const latest = getLatestPostTypeValue(setup, "last_dispatch_attempt_at") ?? getLatestPostTypeValue(setup, "last_edited_at");
+  return latest ? formatDashboardDate(latest) : "none";
+}
+
+function formatLatestDispatchStatus(setup: PostingChannelSetup) {
+  return getLatestPostTypeValue(setup, "last_dispatch_status") ?? "none";
+}
+
+function formatLatestDispatchError(setup: PostingChannelSetup) {
+  return getLatestPostTypeValue(setup, "last_dispatch_error") ?? "none";
+}
+
+function getLatestPostTypeValue(
+  setup: PostingChannelSetup,
+  key: "last_dispatch_attempt_at" | "last_edited_at" | "last_dispatch_status" | "last_dispatch_error",
+) {
+  const values = setup.post_types
+    .map((postType) => postType[key])
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  if (!values.length) return null;
+  if (key === "last_dispatch_status" || key === "last_dispatch_error") return values[0];
+  return values.sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? values[0];
 }
 
 function groupPostingOptions(options: PostingOptionSummary[]) {

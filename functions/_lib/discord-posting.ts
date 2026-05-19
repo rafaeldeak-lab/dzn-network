@@ -51,10 +51,14 @@ export type PostingPermissionCheck = {
   warning: string | null;
   checked_at: string | null;
 };
-export type DiscordDeliveryResult = { mode: DeliveryMode; messageId: string | null };
+export type DiscordDeliveryOperation = "edited" | "sent" | "none";
+export type DiscordDeliveryResult = { mode: DeliveryMode; messageId: string | null; operation: DiscordDeliveryOperation };
 export type DiscordPostDispatchStatus =
   | "success"
+  | "sent"
+  | "edited"
   | "skipped_unchanged"
+  | "skipped_not_due"
   | "skipped_plan_locked"
   | "skipped_disabled"
   | "failed"
@@ -64,9 +68,13 @@ export type DiscordPostDispatchDetail = {
   guild_id: string;
   post_type: AutoPostType;
   channel_id: string | null;
-  status: DiscordPostDispatchStatus | "edited" | "posted" | "skipped";
+  status: DiscordPostDispatchStatus | "skipped";
   message_id: string | null;
   reason: string | null;
+  old_payload_hash?: string | null;
+  new_payload_hash?: string | null;
+  last_edited_at?: string | null;
+  message_state_found?: boolean;
 };
 export type DiscordPostingChannel = {
   channel_id: string;
@@ -165,7 +173,8 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
     .all<QueuedPostJob>();
 
   let processed = 0;
-  let posted = 0;
+  let edited = 0;
+  let sent = 0;
   let skipped = 0;
   let failed = 0;
   const results: DiscordPostDispatchDetail[] = [];
@@ -176,7 +185,8 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
     try {
       const result = await processPostJob(env, job);
       results.push(result);
-      if (result.status === "edited" || result.status === "posted" || result.status === "success") posted += 1;
+      if (result.status === "edited") edited += 1;
+      else if (result.status === "sent" || result.status === "success") sent += 1;
       else skipped += 1;
       await db.prepare("UPDATE automation_jobs SET status = 'completed', updated_at = ? WHERE id = ?").bind(new Date().toISOString(), job.id).run();
     } catch (error) {
@@ -203,13 +213,15 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
     maxJobs: Math.max(1, maxJobs - processed),
   });
   processed += due.processed;
-  posted += due.posted;
+  edited += due.edited;
+  sent += due.sent;
   skipped += due.skipped;
   failed += due.failed;
   results.push(...due.results);
 
-  console.log("DZN DISCORD AUTO POST DISPATCH READY", { processed, posted, skipped, failed });
-  return { ok: true, processed, posted, skipped, failed, edited: posted, results };
+  const posted = edited + sent;
+  console.log("DZN DISCORD AUTO POST DISPATCH READY", { processed, edited, sent, posted, skipped, failed });
+  return { ok: true, processed, edited, sent, posted, skipped, failed, results };
 }
 
 async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPostDispatchDetail> {
@@ -286,9 +298,10 @@ async function processConfiguredPostingDestination(
   const payload = renderDiscordPostPayload(destination.post_type, cache, planKey);
   const payloadHash = await hashPayload(payload);
   const state = await db
-    .prepare("SELECT discord_message_id, last_payload_hash FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
+    .prepare("SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
     .bind(destination.guild_id, destination.post_type, destination.discord_channel_id)
     .first<PostingState>();
+  const oldPayloadHash = state?.last_payload_hash ?? null;
   if (!options.force && state?.last_payload_hash === payloadHash) {
     await recordPostingDispatchStatus(env, destination, "skipped_unchanged", null);
     return {
@@ -298,6 +311,10 @@ async function processConfiguredPostingDestination(
       status: "skipped_unchanged",
       message_id: state.discord_message_id ?? null,
       reason: "Payload unchanged.",
+      old_payload_hash: oldPayloadHash,
+      new_payload_hash: payloadHash,
+      last_edited_at: state.last_edited_at ?? null,
+      message_state_found: true,
     };
   }
 
@@ -312,17 +329,26 @@ async function processConfiguredPostingDestination(
         status: "no_message_id",
         message_id: state?.discord_message_id ?? null,
         reason: "Configure the DZN bot token/channel permission or add a webhook URL.",
+        old_payload_hash: oldPayloadHash,
+        new_payload_hash: payloadHash,
+        last_edited_at: state?.last_edited_at ?? null,
+        message_state_found: Boolean(state),
       };
     }
 
-    await recordDiscordPostingDeliveryState(env, destination, delivery, payloadHash, "success");
+    const lastEditedAt = new Date().toISOString();
+    await recordDiscordPostingDeliveryState(env, destination, delivery, payloadHash, delivery.operation === "edited" ? "edited" : "sent", lastEditedAt);
     return {
       guild_id: destination.guild_id,
       post_type: destination.post_type,
       channel_id: destination.discord_channel_id,
-      status: state?.discord_message_id ? "edited" : "posted",
+      status: delivery.operation === "edited" ? "edited" : "sent",
       message_id: delivery.messageId,
-      reason: null,
+      reason: state ? null : "no_message_state_found_for_destination",
+      old_payload_hash: oldPayloadHash,
+      new_payload_hash: payloadHash,
+      last_edited_at: lastEditedAt,
+      message_state_found: Boolean(state),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Discord post update failed";
@@ -355,7 +381,8 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
     .all<PostingDestination & { plan_key: string | null; subscription_status: string | null; last_edited_at: string | null }>();
 
   let processed = 0;
-  let posted = 0;
+  let edited = 0;
+  let sent = 0;
   let skipped = 0;
   let failed = 0;
   const results: DiscordPostDispatchDetail[] = [];
@@ -368,7 +395,8 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
     try {
       const result = await processConfiguredPostingDestination(env, row, planKey, { force: options.force });
       results.push(result);
-      if (result.status === "edited" || result.status === "posted" || result.status === "success") posted += 1;
+      if (result.status === "edited") edited += 1;
+      else if (result.status === "sent" || result.status === "success") sent += 1;
       else skipped += 1;
     } catch (error) {
       failed += 1;
@@ -383,7 +411,7 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
     }
   }
 
-  return { processed, posted, skipped, failed, results };
+  return { processed, edited, sent, posted: edited + sent, skipped, failed, results };
 }
 
 export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, options: { maxJobs?: number; force?: boolean } = {}) {
@@ -393,7 +421,8 @@ export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, op
   return {
     ok: result.failed === 0,
     processed: result.processed,
-    edited: result.posted,
+    edited: result.edited,
+    sent: result.sent,
     posted: result.posted,
     skipped: result.skipped,
     failed: result.failed,
@@ -434,9 +463,9 @@ export async function recordDiscordPostingDeliveryState(env: Env, destination: {
   guild_id: string;
   post_type: AutoPostType;
   discord_channel_id: string;
-}, delivery: DiscordDeliveryResult, payloadHash: string | null = null, dispatchStatus: DiscordPostDispatchStatus = "success") {
+}, delivery: DiscordDeliveryResult, payloadHash: string | null = null, dispatchStatus: DiscordPostDispatchStatus = "success", checkedAt?: string) {
   if (delivery.mode === "not_configured") return;
-  const now = new Date().toISOString();
+  const now = checkedAt ?? new Date().toISOString();
   await requireDb(env)
     .prepare(
       `INSERT INTO server_posting_state (
@@ -722,8 +751,8 @@ async function deliverDiscordPayload(
   const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (botToken && destination.discord_channel_id) {
     try {
-      const messageId = await sendOrEditWithBot(botToken, destination.discord_channel_id, payload, existingMessageId);
-      return { mode: "bot", messageId };
+      const delivery = await sendOrEditWithBot(botToken, destination.discord_channel_id, payload, existingMessageId);
+      return { mode: "bot", ...delivery };
     } catch (error) {
       if (!destination.discord_webhook_url) throw error;
       console.warn("DZN DISCORD BOT POST FAILED, WEBHOOK FALLBACK", {
@@ -735,11 +764,11 @@ async function deliverDiscordPayload(
   }
 
   if (destination.discord_webhook_url) {
-    const messageId = await sendOrEditWithWebhook(destination.discord_webhook_url, payload, existingMessageId);
-    return { mode: "webhook", messageId };
+    const delivery = await sendOrEditWithWebhook(destination.discord_webhook_url, payload, existingMessageId);
+    return { mode: "webhook", ...delivery };
   }
 
-  return { mode: "not_configured", messageId: null };
+  return { mode: "not_configured", messageId: null, operation: "none" };
 }
 
 async function sendOrEditWithBot(
@@ -759,7 +788,7 @@ async function sendOrEditWithBot(
       headers,
       body: JSON.stringify(stripWebhookOnlyFields(payload)),
     });
-    if (editResponse.ok) return messageId;
+    if (editResponse.ok) return { messageId, operation: "edited" as const };
     if (![403, 404].includes(editResponse.status)) {
       throw new DiscordDeliveryError(`Discord bot edit failed with ${editResponse.status}`, editResponse.status, "edit", "bot");
     }
@@ -775,7 +804,7 @@ async function sendOrEditWithBot(
     throw new DiscordDeliveryError(`Discord bot post failed with ${sendResponse.status}`, sendResponse.status, "post", "bot");
   }
   const message = await sendResponse.json().catch(() => null) as { id?: string } | null;
-  return typeof message?.id === "string" ? message.id : null;
+  return { messageId: typeof message?.id === "string" ? message.id : null, operation: "sent" as const };
 }
 
 async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload, existingMessageId: string | null) {
@@ -786,7 +815,7 @@ async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (editResponse.ok) return messageId;
+    if (editResponse.ok) return { messageId, operation: "edited" as const };
     if (editResponse.status !== 404) {
       throw new DiscordDeliveryError(`Discord webhook edit failed with ${editResponse.status}`, editResponse.status, "edit", "webhook");
     }
@@ -801,7 +830,7 @@ async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload
     throw new DiscordDeliveryError(`Discord webhook post failed with ${sendResponse.status}`, sendResponse.status, "post", "webhook");
   }
   const message = await sendResponse.json().catch(() => null) as { id?: string } | null;
-  return typeof message?.id === "string" ? message.id : null;
+  return { messageId: typeof message?.id === "string" ? message.id : null, operation: "sent" as const };
 }
 
 function stripWebhookOnlyFields(payload: DiscordPayload) {
@@ -1145,6 +1174,72 @@ function parsePermissionBits(value: unknown): bigint | null {
 }
 
 function renderDiscordPostPayload(postType: AutoPostType, cache: PublicCache | null, planKey: string) {
+  const now = new Date().toISOString();
+  const serverName = cache?.public_server_name ?? "DZN Server";
+  const current = numberOrUnknown(cache?.current_player_count);
+  const max = numberOrUnknown(cache?.max_player_count);
+  const status = cache?.server_status ?? (cache?.server_online ? "online" : "unknown");
+  const lastStatusChecked = cache?.last_status_update_at ?? "waiting for status check";
+  const planInterval = getServerStatusInterval(planKey);
+  const admInterval = getAdmPullInterval(planKey);
+  const title = postTitle(postType);
+  const statusPost = postType === "basic_status_embed" || postType === "priority_status_embed";
+  let embedTitle = statusPost ? `DZN Server Status - ${serverName}` : `${title} - ${serverName}`;
+  let footerText = statusPost
+    ? "DZN Network - Auto-updated from server status sync"
+    : `DZN ${planKey.toUpperCase()} automation. Nitrado controls fresh log availability.`;
+  let description: string;
+
+  if (statusPost) {
+    description = [
+      `Server: ${serverName}`,
+      `Status: ${status}`,
+      `Players: ${current} / ${max}`,
+      `Last checked: ${lastStatusChecked}`,
+      `Data freshness: ${cache?.last_status_update_at ? "Fresh" : "Waiting for fresh server data"}`,
+      `Plan: ${planKey.toUpperCase()}`,
+      `Refresh interval: Every ${planInterval} minute${planInterval === 1 ? "" : "s"}`,
+      `Updated at: ${now}`,
+    ].join("\n");
+  } else if (postType === "admin_logs_embed" || postType === "admin_alerts_embed") {
+    const isLogs = postType === "admin_logs_embed";
+    embedTitle = isLogs ? "DZN Admin Logs" : "DZN Admin Alerts";
+    description = [
+      isLogs ? "No new admin log events yet." : "No new admin alerts yet.",
+      `Server: ${serverName}`,
+      `Last checked: ${cache?.last_adm_update_at ?? now}`,
+      `Plan: ${planKey.toUpperCase()}`,
+      `ADM check interval: Every ${admInterval} minute${admInterval === 1 ? "" : "s"}`,
+      "Auto-updated by DZN",
+    ].join("\n");
+    footerText = "DZN Network - Auto-updated from ADM automation";
+  } else {
+    description = [
+      `Server: ${serverName}`,
+      `Latest ADM update: ${cache?.last_adm_update_at ?? "waiting for ADM check"}`,
+      `Network rank: ${cache?.network_rank ?? "pending"}`,
+      `Plan: ${planKey.toUpperCase()}`,
+      `Updated at: ${now}`,
+    ].join("\n");
+  }
+
+  return {
+    username: "DZN Network",
+    embeds: [
+      {
+        title: embedTitle,
+        description,
+        color: postType === "priority_status_embed" ? 0xfacc15 : 0x8b5cf6,
+        footer: { text: footerText },
+        timestamp: now,
+      },
+    ],
+  };
+}
+
+// Kept temporarily so older deployed payload snapshots can be compared during incident debugging.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function renderDiscordPostPayloadLegacy(postType: AutoPostType, cache: PublicCache | null, planKey: string) {
   const serverName = cache?.public_server_name ?? "DZN Server";
   const current = numberOrUnknown(cache?.current_player_count);
   const max = numberOrUnknown(cache?.max_player_count);
