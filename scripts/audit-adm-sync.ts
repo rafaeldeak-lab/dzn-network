@@ -144,6 +144,7 @@ function auditDueServerSelection() {
   checkIncludes("functions/_lib/automation.ts", "next_adm_pull_due_at", "ADM due-state controls checks");
   checkIncludes("functions/_lib/automation.ts", "next_adm_discovery_due_at", "ADM discovery due-state controls checks");
   checkIncludes("functions/_lib/automation.ts", "currently_syncing_adm", "Already-syncing servers are skipped");
+  checkIncludes("functions/_lib/automation.ts", "adm_sync_started_at", "ADM lock age uses a dedicated start timestamp");
   checkIncludes("functions/_lib/automation.ts", "minSyncIntervalMs", "Minimum ADM sync interval is enforced");
   checkIncludes("functions/_lib/adm-sync.ts", "Math.max(clampPositiveInteger(options.minSyncIntervalMs ?? 10 * 60 * 1000", "Scheduled ADM runner enforces 10-minute floor");
   checkIncludes("functions/_lib/adm-sync.ts", "runAdmDiscoveryForLinkedServer", "Scheduled ADM runner has lightweight discovery phase");

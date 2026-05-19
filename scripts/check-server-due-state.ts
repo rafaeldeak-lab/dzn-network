@@ -16,6 +16,9 @@ type ServerDueRow = {
   next_adm_pull_due_at: string | null;
   currently_checking_status: number | null;
   currently_syncing_adm: number | null;
+  status_sync_started_at: string | null;
+  adm_sync_started_at: string | null;
+  last_adm_pull_at: string | null;
   updated_at: string | null;
 };
 
@@ -39,6 +42,12 @@ function ageMinutes(value: string | null | undefined) {
   if (!value) return null;
   const age = Date.now() - Date.parse(value);
   return Number.isFinite(age) ? Math.max(0, Math.round(age / 60000)) : null;
+}
+
+function lockAge(row: ServerDueRow, type: "status" | "adm") {
+  return ageMinutes(type === "status"
+    ? row.status_sync_started_at ?? row.updated_at
+    : row.adm_sync_started_at ?? row.last_adm_pull_at ?? row.updated_at);
 }
 
 function isDue(value: string | null | undefined) {
@@ -67,6 +76,9 @@ const rows = runWranglerQuery<ServerDueRow>(
           server_sync_state.next_adm_pull_due_at,
           server_sync_state.currently_checking_status,
           server_sync_state.currently_syncing_adm,
+          server_sync_state.status_sync_started_at,
+          server_sync_state.adm_sync_started_at,
+          server_sync_state.last_adm_pull_at,
           server_sync_state.updated_at
    FROM linked_servers
    LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
@@ -100,7 +112,9 @@ if (!rows.length) {
     console.log(`next ADM processing due: ${row.next_adm_pull_due_at ?? "now"} (${isDue(row.next_adm_pull_due_at) ? "due" : "not due"})`);
     console.log(`currently checking status: ${Number(row.currently_checking_status ?? 0) === 1}`);
     console.log(`currently syncing ADM: ${Number(row.currently_syncing_adm ?? 0) === 1}`);
-    console.log(`lock/update age: ${ageMinutes(row.updated_at) ?? "unknown"} minutes`);
+    console.log(`status lock age: ${lockAge(row, "status") ?? "unknown"} minutes`);
+    console.log(`ADM lock age: ${lockAge(row, "adm") ?? "unknown"} minutes`);
+    console.log(`row update age: ${ageMinutes(row.updated_at) ?? "unknown"} minutes`);
     console.log(`planner reason: ${skippedReason(row)}`);
   }
 }

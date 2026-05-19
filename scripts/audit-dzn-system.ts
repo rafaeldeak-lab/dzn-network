@@ -251,6 +251,7 @@ function auditDatabaseMigrations() {
   checkFile("migrations/0022_adm_import_report.sql", "Migration 0022 ADM import report");
   checkFile("migrations/0023_adm_cursor_hash_validation.sql", "Migration 0023 ADM cursor hash validation");
   checkFile("migrations/0024_cron_run_metrics.sql", "Migration 0024 cron run metrics");
+  checkFile("migrations/0025_sync_lock_started_at.sql", "Migration 0025 sync lock started timestamps");
   checkIncludes("migrations/0017_discord_post_dispatch_state.sql", "last_dispatch_status", "Discord dispatch state migration columns");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_available_adm_filename", "ADM reset state migration columns");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "ADM discovery due migration columns");
@@ -260,6 +261,7 @@ function auditDatabaseMigrations() {
   checkIncludes("migrations/0022_adm_import_report.sql", "last_import_report_json", "ADM import report migration columns");
   checkIncludes("migrations/0023_adm_cursor_hash_validation.sql", "last_processed_adm_line_hash", "ADM cursor hash migration columns");
   checkIncludes("migrations/0024_cron_run_metrics.sql", "processed_count", "Cron metrics migration columns");
+  checkIncludes("migrations/0025_sync_lock_started_at.sql", "adm_sync_started_at", "Sync lock started timestamp migration columns");
   checkIncludes("functions/_lib/automation.ts", "last_seen_adm_timestamp", "ADM timestamp tracking columns");
   checkIncludes("functions/_lib/automation.ts", "last_adm_discovery_check_at", "ADM discovery check tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_available_adm_filename", "Newest available ADM tracking");

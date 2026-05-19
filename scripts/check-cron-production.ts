@@ -144,6 +144,9 @@ async function main() {
   const latestMetadata = rows.find((row) => row.job_type === "metadata") ?? null;
   const latestAdm = rows.find((row) => row.job_type === "adm") ?? null;
   const latestDiscord = rows.find((row) => row.job_type === "discord-posts") ?? null;
+  const latestCloudflareMetadata = rows.find((row) => row.source === "cloudflare" && row.job_type === "metadata") ?? null;
+  const latestCloudflareAdm = rows.find((row) => row.source === "cloudflare" && row.job_type === "adm") ?? null;
+  const latestCloudflareDiscord = rows.find((row) => row.source === "cloudflare" && row.job_type === "discord-posts") ?? null;
 
   const cloudflareAge = ageMinutes(latestCloudflare?.created_at);
   if (cloudflareAge !== null && cloudflareAge <= 5) pass("Cloudflare cron check-in", formatRow(latestCloudflare));
@@ -160,6 +163,16 @@ async function main() {
   ] as const) {
     if (row) pass(`Latest ${label} cron row`, formatRow(row));
     else fail(`Latest ${label} cron row`, "No row found.");
+  }
+
+  for (const [label, row] of [
+    ["metadata", latestCloudflareMetadata],
+    ["adm", latestCloudflareAdm],
+    ["discord-posts", latestCloudflareDiscord],
+  ] as const) {
+    const rowAge = ageMinutes(row?.created_at);
+    if (rowAge !== null && rowAge <= 5) pass(`Cloudflare ${label} cron row`, formatRow(row));
+    else fail(`Cloudflare ${label} cron row`, `No cloudflare ${label} row in the last 5 minutes. Latest: ${formatRow(row)}`);
   }
 
   for (const endpoint of ["/api/sync/metadata/run", "/api/sync/adm/run", "/api/sync/discord-posts/run"]) {

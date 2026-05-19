@@ -531,6 +531,10 @@ export type AutomationHealth = {
     next_adm_pull_due_at: string | null;
     currently_checking_status: boolean;
     currently_syncing_adm: boolean;
+    status_sync_started_at?: string | null;
+    adm_sync_started_at?: string | null;
+    status_lock_age_minutes?: number | null;
+    adm_lock_age_minutes?: number | null;
     skipped_reason: string;
   }>;
   automation_cron_runs_table_exists: boolean;
@@ -573,7 +577,12 @@ export type SyncLockSnapshot = {
   currently_checking_status: boolean;
   currently_syncing_adm: boolean;
   updated_at: string | null;
+  status_sync_started_at?: string | null;
+  adm_sync_started_at?: string | null;
+  last_adm_pull_at?: string | null;
   lock_age_minutes: number | null;
+  status_lock_age_minutes?: number | null;
+  adm_lock_age_minutes?: number | null;
   last_status_error: string | null;
   last_adm_error: string | null;
 };

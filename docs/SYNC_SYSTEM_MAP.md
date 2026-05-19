@@ -464,8 +464,8 @@ The debug endpoint compares public cache with linked server metadata, sync state
 | `skipped_not_due` | Destination was not due yet by plan interval. | No | Wait for interval or use Run Now. |
 | `skipped_plan_locked` | Current plan does not allow that post type. | Expected after downgrade | Upgrade plan or remove locked post type. |
 | `no_message_state_found_for_destination` | Dispatcher had a destination but no saved message state. | Not fatal | Dispatcher sends a new message and saves its ID. |
-| Stuck status lock | Status sync crashed while lock was set. | Recoverable | Automation releases status locks older than 10 minutes. |
-| Stuck ADM lock | ADM sync crashed while lock was set. | Recoverable | Automation releases ADM locks older than 30 minutes. |
+| Stuck status lock | Status sync crashed while lock was set. | Recoverable | Automation releases status locks older than 10 minutes using `status_sync_started_at`, so unrelated metadata updates do not hide an old lock. |
+| Stuck ADM lock | ADM sync crashed while lock was set. | Recoverable | Automation releases ADM locks older than 30 minutes using `adm_sync_started_at` / `last_adm_pull_at`, so fresh status checks do not make a stale ADM lock look fresh. |
 
 ## Current Health Checks
 

@@ -108,6 +108,9 @@ const lockRecoverySource = automationSource.slice(
 );
 assert.equal(lockRecoverySource.includes("currently_checking_status = 0"), true);
 assert.equal(lockRecoverySource.includes("currently_syncing_adm = 0"), true);
+assert.equal(lockRecoverySource.includes("status_sync_started_at = NULL"), true);
+assert.equal(lockRecoverySource.includes("adm_sync_started_at = NULL"), true);
+assert.equal(lockRecoverySource.includes("COALESCE(adm_sync_started_at, last_adm_pull_at, updated_at)"), true);
 assert.equal(lockRecoverySource.includes("Recovered stale status sync lock after 10 minutes."), true);
 assert.equal(lockRecoverySource.includes("Recovered stale ADM sync lock after 30 minutes."), true);
 assert.equal(lockRecoverySource.includes("current_player_count = NULL"), false);

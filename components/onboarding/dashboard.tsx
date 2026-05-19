@@ -2761,6 +2761,8 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
                   <p>Plan: {planLabel(row.plan_key)} / {row.subscription_status ?? "unknown"}</p>
                   <p>Intervals: status {row.status_interval_minutes ?? "?"}m / discovery {row.adm_discovery_interval_minutes ?? "?"}m / processing {row.adm_processing_interval_minutes ?? "?"}m</p>
                   <p>Reason: {formatStatusLabel(row.skipped_reason)}</p>
+                  {row.currently_checking_status ? <p>Status lock age: {row.status_lock_age_minutes !== null && row.status_lock_age_minutes !== undefined ? `${row.status_lock_age_minutes} min` : "Unknown"}</p> : null}
+                  {row.currently_syncing_adm ? <p>ADM lock age: {row.adm_lock_age_minutes !== null && row.adm_lock_age_minutes !== undefined ? `${row.adm_lock_age_minutes} min` : "Unknown"}</p> : null}
                   <p>Status due: {row.next_status_check_due_at ? formatDashboardDate(row.next_status_check_due_at) : "Now"}</p>
                   <p>ADM discovery due: {row.next_adm_discovery_due_at ? formatDashboardDate(row.next_adm_discovery_due_at) : "Now"}</p>
                   <p>ADM processing due: {row.next_adm_pull_due_at ? formatDashboardDate(row.next_adm_pull_due_at) : "Now"}</p>
@@ -2878,7 +2880,8 @@ function SyncLockRecoveryPanel({
           <MiniInfo label="Recovered" value={result.recovered ? "Yes" : "No stale locks"} />
           <MiniInfo label="Status Lock" value={`${result.before.currently_checking_status ? "Locked" : "Clear"} -> ${result.after.currently_checking_status ? "Locked" : "Clear"}`} />
           <MiniInfo label="ADM Lock" value={`${result.before.currently_syncing_adm ? "Locked" : "Clear"} -> ${result.after.currently_syncing_adm ? "Locked" : "Clear"}`} />
-          <MiniInfo label="Lock Age" value={result.before.lock_age_minutes !== null ? `${result.before.lock_age_minutes} min` : "Unknown"} />
+          <MiniInfo label="Status Lock Age" value={result.before.status_lock_age_minutes !== null && result.before.status_lock_age_minutes !== undefined ? `${result.before.status_lock_age_minutes} min` : "Unknown"} />
+          <MiniInfo label="ADM Lock Age" value={result.before.adm_lock_age_minutes !== null && result.before.adm_lock_age_minutes !== undefined ? `${result.before.adm_lock_age_minutes} min` : "Unknown"} />
         </div>
       ) : null}
     </div>

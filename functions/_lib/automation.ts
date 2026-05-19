@@ -385,9 +385,10 @@ export async function getAutomationContextForLinkedServer(env: Env, linkedServer
 }
 
 export async function markStatusCheckStarted(env: Env, guildId: string) {
+  const now = new Date().toISOString();
   await requireDb(env)
-    .prepare("UPDATE server_sync_state SET currently_checking_status = 1, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?")
-    .bind(guildId)
+    .prepare("UPDATE server_sync_state SET currently_checking_status = 1, status_sync_started_at = ?, updated_at = ? WHERE guild_id = ?")
+    .bind(now, now, guildId)
     .run();
 }
 
@@ -424,6 +425,7 @@ export async function recordStatusCheckResult(env: Env, values: {
         last_restart_detected_source = CASE WHEN ? THEN 'metadata_status' ELSE last_restart_detected_source END,
         last_restart_detected_at = CASE WHEN ? THEN ? ELSE last_restart_detected_at END,
         currently_checking_status = 0,
+        status_sync_started_at = NULL,
         updated_at = ?
        WHERE guild_id = ?`,
     )
@@ -528,9 +530,10 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
 }
 
 export async function markAdmPullStarted(env: Env, guildId: string) {
+  const now = new Date().toISOString();
   await requireDb(env)
-    .prepare("UPDATE server_sync_state SET currently_syncing_adm = 1, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?")
-    .bind(guildId)
+    .prepare("UPDATE server_sync_state SET currently_syncing_adm = 1, adm_sync_started_at = ?, updated_at = ? WHERE guild_id = ?")
+    .bind(now, now, guildId)
     .run();
 }
 
@@ -788,6 +791,7 @@ export async function recordAdmPullResult(env: Env, values: {
         last_restart_detected_at = CASE WHEN ? THEN ? ELSE last_restart_detected_at END,
         adm_status = ?,
         currently_syncing_adm = 0,
+        adm_sync_started_at = NULL,
         manual_refresh_locked_until = ?,
         updated_at = ?
        WHERE guild_id = ?`,
@@ -899,10 +903,18 @@ export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string,
           last_error = ?,
           run_after = ?,
           updated_at = ?
-         WHERE guild_id = ?
-           AND job_type = 'discord-post-update'
-           AND post_type = ?
-           AND status != 'running'`,
+         WHERE id = (
+           SELECT id FROM automation_jobs
+           WHERE guild_id = ?
+             AND job_type = 'discord-post-update'
+             AND post_type = ?
+             AND status != 'running'
+           ORDER BY
+             CASE WHEN status = 'queued' THEN 0 ELSE 1 END,
+             updated_at DESC,
+             created_at DESC
+           LIMIT 1
+         )`,
       )
       .bind(reason, now, now, guildId, postType)
       .run();
@@ -1093,12 +1105,13 @@ export async function recoverStuckAutomationLocks(env: Env) {
     .prepare(
       `UPDATE server_sync_state SET
         currently_checking_status = 0,
+        status_sync_started_at = NULL,
         last_failed_status_check_at = COALESCE(last_failed_status_check_at, ?),
         last_status_error = ?,
         status_data_freshness = CASE WHEN status_data_freshness = 'fresh' THEN status_data_freshness ELSE 'failed' END,
         updated_at = ?
        WHERE COALESCE(currently_checking_status, 0) = 1
-         AND updated_at < ?`,
+         AND COALESCE(status_sync_started_at, updated_at) < ?`,
     )
     .bind(now, statusMessage, now, statusCutoff)
     .run();
@@ -1107,6 +1120,7 @@ export async function recoverStuckAutomationLocks(env: Env) {
     .prepare(
       `UPDATE server_sync_state SET
         currently_syncing_adm = 0,
+        adm_sync_started_at = NULL,
         last_failed_adm_pull_at = COALESCE(last_failed_adm_pull_at, ?),
         last_adm_error = ?,
         adm_status = CASE
@@ -1115,7 +1129,7 @@ export async function recoverStuckAutomationLocks(env: Env) {
         END,
         updated_at = ?
        WHERE COALESCE(currently_syncing_adm, 0) = 1
-         AND updated_at < ?`,
+         AND COALESCE(adm_sync_started_at, last_adm_pull_at, updated_at) < ?`,
     )
     .bind(now, admMessage, now, admCutoff)
     .run();
@@ -1152,14 +1166,15 @@ export async function recoverStuckSyncLocksForServer(env: Env, linkedServerId: s
   await ensureServerSyncStateRow(env, server.guild_id);
   const before = await getSyncLockSnapshot(db, server.guild_id);
   const now = new Date().toISOString();
-  const statusStale = Boolean(before.currently_checking_status && isOlderThanMinutes(before.updated_at, 10));
-  const admStale = Boolean(before.currently_syncing_adm && isOlderThanMinutes(before.updated_at, 30));
+  const statusStale = Boolean(before.currently_checking_status && isOlderThanMinutes(before.status_sync_started_at ?? before.updated_at, 10));
+  const admStale = Boolean(before.currently_syncing_adm && isOlderThanMinutes(before.adm_sync_started_at ?? before.last_adm_pull_at ?? before.updated_at, 30));
 
   if (statusStale) {
     await db
       .prepare(
         `UPDATE server_sync_state SET
           currently_checking_status = 0,
+          status_sync_started_at = NULL,
           last_failed_status_check_at = COALESCE(last_failed_status_check_at, ?),
           last_status_error = ?,
           status_data_freshness = CASE WHEN status_data_freshness = 'fresh' THEN status_data_freshness ELSE 'failed' END,
@@ -1176,6 +1191,7 @@ export async function recoverStuckSyncLocksForServer(env: Env, linkedServerId: s
       .prepare(
         `UPDATE server_sync_state SET
           currently_syncing_adm = 0,
+          adm_sync_started_at = NULL,
           last_failed_adm_pull_at = COALESCE(last_failed_adm_pull_at, ?),
           last_adm_error = ?,
           adm_status = CASE
@@ -1331,12 +1347,12 @@ export async function getAutomationHealth(env: Env) {
     countFirst(db,
       `SELECT COUNT(*) AS count FROM server_sync_state
        WHERE COALESCE(currently_checking_status, 0) = 1
-         AND updated_at < ?`,
+         AND COALESCE(status_sync_started_at, updated_at) < ?`,
       statusLockCutoff),
     countFirst(db,
       `SELECT COUNT(*) AS count FROM server_sync_state
        WHERE COALESCE(currently_syncing_adm, 0) = 1
-         AND updated_at < ?`,
+         AND COALESCE(adm_sync_started_at, last_adm_pull_at, updated_at) < ?`,
       admLockCutoff),
     db
       .prepare("SELECT plan_key, COUNT(*) AS count FROM server_subscriptions GROUP BY plan_key")
@@ -1359,6 +1375,8 @@ export async function getAutomationHealth(env: Env) {
           server_sync_state.next_adm_pull_due_at,
           server_sync_state.currently_checking_status,
           server_sync_state.currently_syncing_adm,
+          server_sync_state.status_sync_started_at,
+          server_sync_state.adm_sync_started_at,
           CASE
             WHEN lower(COALESCE(linked_servers.status, 'pending')) != 'live' THEN 'not_live'
             WHEN linked_servers.nitrado_service_id IS NULL OR linked_servers.nitrado_service_id = '' THEN 'missing_nitrado_token'
@@ -1394,6 +1412,8 @@ export async function getAutomationHealth(env: Env) {
         next_adm_pull_due_at: string | null;
         currently_checking_status: number | null;
         currently_syncing_adm: number | null;
+        status_sync_started_at: string | null;
+        adm_sync_started_at: string | null;
         skipped_reason: string | null;
       }>(),
   ]);
@@ -1461,6 +1481,10 @@ export async function getAutomationHealth(env: Env) {
       next_adm_pull_due_at: row.next_adm_pull_due_at,
       currently_checking_status: Number(row.currently_checking_status ?? 0) === 1,
       currently_syncing_adm: Number(row.currently_syncing_adm ?? 0) === 1,
+      status_sync_started_at: row.status_sync_started_at,
+      adm_sync_started_at: row.adm_sync_started_at,
+      status_lock_age_minutes: row.status_sync_started_at ? minutesSince(row.status_sync_started_at, now) : null,
+      adm_lock_age_minutes: row.adm_sync_started_at ? minutesSince(row.adm_sync_started_at, now) : null,
       skipped_reason: row.skipped_reason ?? "unknown",
     })),
     automation_cron_runs_table_exists: migrationState.tableExists,
@@ -1643,6 +1667,7 @@ async function getSyncLockSnapshot(db: D1Database, guildId: string) {
   const row = await db
     .prepare(
       `SELECT currently_checking_status, currently_syncing_adm, updated_at,
+              status_sync_started_at, adm_sync_started_at, last_adm_pull_at,
               last_status_error, last_adm_error
        FROM server_sync_state
        WHERE guild_id = ?
@@ -1653,15 +1678,28 @@ async function getSyncLockSnapshot(db: D1Database, guildId: string) {
       currently_checking_status: number | null;
       currently_syncing_adm: number | null;
       updated_at: string | null;
+      status_sync_started_at: string | null;
+      adm_sync_started_at: string | null;
+      last_adm_pull_at: string | null;
       last_status_error: string | null;
       last_adm_error: string | null;
     }>();
   const updatedAt = row?.updated_at ?? null;
+  const statusStartedAt = row?.status_sync_started_at ?? null;
+  const admStartedAt = row?.adm_sync_started_at ?? null;
+  const admLockStartedAt = admStartedAt ?? row?.last_adm_pull_at ?? updatedAt;
+  const statusLockStartedAt = statusStartedAt ?? updatedAt;
+  const now = new Date().toISOString();
   return {
     currently_checking_status: Number(row?.currently_checking_status ?? 0) === 1,
     currently_syncing_adm: Number(row?.currently_syncing_adm ?? 0) === 1,
     updated_at: updatedAt,
-    lock_age_minutes: updatedAt ? minutesSince(updatedAt, new Date().toISOString()) : null,
+    status_sync_started_at: statusStartedAt,
+    adm_sync_started_at: admStartedAt,
+    last_adm_pull_at: row?.last_adm_pull_at ?? null,
+    lock_age_minutes: updatedAt ? minutesSince(updatedAt, now) : null,
+    status_lock_age_minutes: statusLockStartedAt ? minutesSince(statusLockStartedAt, now) : null,
+    adm_lock_age_minutes: admLockStartedAt ? minutesSince(admLockStartedAt, now) : null,
     last_status_error: row?.last_status_error ?? null,
     last_adm_error: row?.last_adm_error ?? null,
   };
@@ -1735,6 +1773,8 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
     last_failed_adm_discovery_at: "ALTER TABLE server_sync_state ADD COLUMN last_failed_adm_discovery_at TEXT",
     last_adm_discovery_error: "ALTER TABLE server_sync_state ADD COLUMN last_adm_discovery_error TEXT",
     adm_discovery_status: "ALTER TABLE server_sync_state ADD COLUMN adm_discovery_status TEXT",
+    status_sync_started_at: "ALTER TABLE server_sync_state ADD COLUMN status_sync_started_at TEXT",
+    adm_sync_started_at: "ALTER TABLE server_sync_state ADD COLUMN adm_sync_started_at TEXT",
     last_seen_adm_timestamp: "ALTER TABLE server_sync_state ADD COLUMN last_seen_adm_timestamp TEXT",
     newest_available_adm_filename: "ALTER TABLE server_sync_state ADD COLUMN newest_available_adm_filename TEXT",
     newest_available_adm_timestamp: "ALTER TABLE server_sync_state ADD COLUMN newest_available_adm_timestamp TEXT",
@@ -1766,8 +1806,12 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
       await db.prepare(statement).run();
     }
   }
+  await db.prepare("UPDATE server_sync_state SET status_sync_started_at = COALESCE(status_sync_started_at, last_status_check_at, updated_at) WHERE COALESCE(currently_checking_status, 0) = 1 AND status_sync_started_at IS NULL").run();
+  await db.prepare("UPDATE server_sync_state SET adm_sync_started_at = COALESCE(adm_sync_started_at, last_adm_pull_at, updated_at) WHERE COALESCE(currently_syncing_adm, 0) = 1 AND adm_sync_started_at IS NULL").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_discovery_due ON server_sync_state(next_adm_discovery_due_at)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_last_useful_adm_event ON server_sync_state(last_useful_adm_event_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_started ON server_sync_state(status_sync_started_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_started ON server_sync_state(adm_sync_started_at)").run();
 }
 
 async function ensureServerPostingStateDispatchColumns(db: D1Database) {
@@ -1858,6 +1902,7 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     server_status TEXT,
     status_data_freshness TEXT,
     currently_checking_status INTEGER NOT NULL DEFAULT 0,
+    status_sync_started_at TEXT,
     last_adm_discovery_check_at TEXT,
     next_adm_discovery_due_at TEXT,
     last_successful_adm_discovery_at TEXT,
@@ -1901,6 +1946,7 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     nitrado_log_settings_last_checked_at TEXT,
     nitrado_log_settings_last_error TEXT,
     currently_syncing_adm INTEGER NOT NULL DEFAULT 0,
+    adm_sync_started_at TEXT,
     manual_refresh_locked_until TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -1911,6 +1957,8 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_last_useful_adm_event ON server_sync_state(last_useful_adm_event_at)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_lock ON server_sync_state(currently_checking_status)",
   "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_lock ON server_sync_state(currently_syncing_adm)",
+  "CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_started ON server_sync_state(status_sync_started_at)",
+  "CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_started ON server_sync_state(adm_sync_started_at)",
   `CREATE TABLE IF NOT EXISTS server_posting_destinations (
     id TEXT PRIMARY KEY,
     guild_id TEXT NOT NULL,
