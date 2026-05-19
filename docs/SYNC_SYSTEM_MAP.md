@@ -137,7 +137,7 @@ Important behavior:
 - Discovery checks files but does not spam Discord.
 - Processing creates stats, events, public cache updates, and Discord post queues.
 - Processing also records observed ADM cadence from real ADM lines, especially PlayerList snapshots.
-- Sync Health includes a collapsed Last ADM Import Report with raw killed-by lines, parsed PvP kills, written kills, duplicate skips, failed writes, cursor before/after, public cache status, and Discord queue count.
+- Sync Health includes a collapsed Last ADM Import Report with raw killed-by lines, parsed PvP kills, written kills, duplicate skips, failed writes, cursor before/after, cursor hash validation, public cache status, and Discord queue count.
 - Parser/write failures keep the previous cursor so the next run can retry the same ADM lines safely.
 - Duplicate protection includes server/service, ADM source evidence, timestamp, players, weapon, and distance, so repeated separate kills between the same players with the same weapon are not collapsed.
 - No new ADM log is recorded as a normal state, not a fatal failure.
@@ -146,6 +146,16 @@ Important behavior:
 - DZN must not wipe stats because Nitrado has not published a new file yet.
 - Parser/write failures do not advance the cursor.
 - Old failed sync rows can be cleared after a later successful sync.
+
+ADM Cursor Hash Validation:
+
+- DZN stores the processed line count plus a SHA-1 hash of the exact last processed ADM line (`line_count:sha1(last_line)`), based on the older Pandora/DayZQuest bot safety pattern.
+- On the next processing run, if the same ADM filename is still active, DZN verifies that the saved line still exists and that the line hash matches before trusting the cursor.
+- If the hash matches, DZN resumes from the next line.
+- If the saved cursor predates this feature and has no hash, DZN allows one legacy cursor pass and upgrades the cursor with a hash after the next successful import.
+- If the saved line is out of range, DZN treats it as truncation or rollover, safely reprocesses a recent tail window, and preserves existing stats.
+- If the hash mismatches, DZN searches for the old hash elsewhere in the current file. If found, it repositions safely after that line. If not found, it reprocesses a safe tail window and relies on event dedupe.
+- Cursor validation warnings are non-fatal unless the actual parser/write path fails. DZN never wipes stats because cursor validation had to recover.
 
 Observed cadence fields:
 

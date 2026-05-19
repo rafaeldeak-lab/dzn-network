@@ -1,7 +1,7 @@
 import { runAdmSync, runScheduledAdmSync } from "../../../_lib/adm-sync";
 import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
 import { DZN_CRON_SECRET_HEADER, isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
-import { ensureMockUser, getSessionUser } from "../../../_lib/db";
+import { ensureMockUser, getSessionUser, SESSION_COOKIE } from "../../../_lib/db";
 import { json, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import type { Env, PagesContext, PagesFunction, SessionUser } from "../../../_lib/types";
@@ -84,6 +84,10 @@ export async function handleAdmSyncRun(
     if (unauthorized) return unauthorized;
   }
 
+  if (!requestHasSessionCookie(request) && handlers.resolveUser === DEFAULT_HANDLERS.resolveUser) {
+    return json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const user = await handlers.resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
@@ -101,6 +105,10 @@ export async function handleAdmSyncRun(
 
 export function isCronAuthorized(request: Request, env: Env) {
   return isCronSecretAuthorized(request, env);
+}
+
+function requestHasSessionCookie(request: Request) {
+  return request.headers.get("cookie")?.split(";").some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`)) ?? false;
 }
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {

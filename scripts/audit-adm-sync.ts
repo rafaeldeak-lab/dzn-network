@@ -119,6 +119,9 @@ function auditRestartStateMachine() {
   checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_server_log_enabled", "Migration stores Server Log verification");
   checkFile("migrations/0022_adm_import_report.sql", "ADM import report migration");
   checkIncludes("migrations/0022_adm_import_report.sql", "last_import_report_json", "Migration stores latest ADM import report");
+  checkFile("migrations/0023_adm_cursor_hash_validation.sql", "ADM cursor hash validation migration");
+  checkIncludes("migrations/0023_adm_cursor_hash_validation.sql", "last_processed_adm_line_hash", "Migration stores last processed ADM line hash");
+  checkIncludes("migrations/0023_adm_cursor_hash_validation.sql", "last_cursor_validation_status", "Migration stores cursor validation status");
   checkFile("migrations/0020_adm_observed_cadence.sql", "ADM observed cadence migration");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "first_adm_after_restart_delay_minutes", "Migration stores first ADM after restart delay");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_playerlist_interval_minutes", "Migration stores observed PlayerList interval");
@@ -149,6 +152,9 @@ function auditDueServerSelection() {
   checkIncludes("functions/_lib/adm-sync.ts", "importReadableAdmLinesIntoDatabase", "Fixture import uses production database write helpers");
   checkIncludes("functions/_lib/adm-sync.ts", "last_import_report_json", "Last ADM import report is saved");
   checkIncludes("functions/_lib/adm-sync.ts", "cursorAdvanced", "Import report tracks cursor advancement");
+  checkIncludes("functions/_lib/adm-sync.ts", "last_processed_adm_line_hash", "ADM cursor stores SHA-1 hash of the last processed line");
+  checkIncludes("functions/_lib/adm-sync.ts", "validateAdmCursorForLines", "ADM cursor hash is validated before trusting saved line number");
+  checkIncludes("functions/_lib/adm-sync.ts", "safe_tail_reprocess", "ADM cursor mismatch can recover by reprocessing a safe tail window");
 }
 
 function auditDiscordQueues() {
@@ -175,6 +181,8 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "Last PlayerList", "Dashboard shows last PlayerList time");
   checkIncludes("components/onboarding/dashboard.tsx", "Next Expected ADM Update", "Dashboard shows next expected ADM update");
   checkIncludes("components/onboarding/dashboard.tsx", "Last ADM Import Report", "Dashboard shows last ADM import report diagnostics");
+  checkIncludes("components/onboarding/dashboard.tsx", "ADM cursor verified.", "Dashboard shows cursor hash validation wording");
+  checkIncludes("components/onboarding/dashboard.tsx", "DZN detected ADM cursor mismatch", "Dashboard explains safe cursor recovery");
 }
 
 function auditPackageCommand() {

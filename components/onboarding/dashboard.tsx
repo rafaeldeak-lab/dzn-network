@@ -3139,6 +3139,9 @@ function LastSyncDetails({
           {syncStatus?.last_adm_import_report ? (
             <div className="rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-3">
               <p className="text-[10px] font-black uppercase text-cyan-100">Last ADM Import Report</p>
+              <p className="mt-1 text-xs text-cyan-100/75">
+                {getAdmCursorValidationMessage(syncStatus.last_adm_import_report.cursorValidationStatus)}
+              </p>
               <div className="mt-3 grid gap-2 md:grid-cols-2">
                 <MiniInfo label="Parsed Kills" value={String(syncStatus.last_adm_import_report.parsedPvpKills)} />
                 <MiniInfo label="Written Kills" value={String(syncStatus.last_adm_import_report.writtenKills)} />
@@ -3146,9 +3149,20 @@ function LastSyncDetails({
                 <MiniInfo label="Failed Writes" value={String(syncStatus.last_adm_import_report.failedWrites)} />
                 <MiniInfo label="Cursor Advanced" value={syncStatus.last_adm_import_report.cursorAdvanced ? "Yes" : "No"} />
                 <MiniInfo label="Cursor Before / After" value={`${syncStatus.last_adm_import_report.cursorBefore} -> ${syncStatus.last_adm_import_report.cursorAfter}`} />
+                <MiniInfo label="Cursor Validation" value={formatStatusLabel(syncStatus.last_adm_import_report.cursorValidationStatus)} />
+                <MiniInfo label="Cursor Hash Matched" value={syncStatus.last_adm_import_report.cursorHashMatched === null ? "Not checked" : syncStatus.last_adm_import_report.cursorHashMatched ? "Yes" : "No"} />
+                <MiniInfo label="Cursor Line Checked" value={syncStatus.last_adm_import_report.cursorLineChecked === null ? "Not checked" : String(syncStatus.last_adm_import_report.cursorLineChecked)} />
+                <MiniInfo label="Recovery Strategy" value={syncStatus.last_adm_import_report.cursorRecoveryStrategy ? formatStatusLabel(syncStatus.last_adm_import_report.cursorRecoveryStrategy) : "None"} />
                 <MiniInfo label="Public Cache Updated" value={syncStatus.last_adm_import_report.publicCacheUpdated ? "Yes" : syncStatus.last_adm_import_report.cacheRefreshStatus} />
                 <MiniInfo label="Discord Queues Created" value={String(syncStatus.last_adm_import_report.discordQueuesCreated)} />
+                <MiniInfo label="Previous Line Hash" value={syncStatus.last_adm_import_report.previousLineHash ? `${syncStatus.last_adm_import_report.previousLineHash.slice(0, 12)}...` : "None"} />
+                <MiniInfo label="Current Line Hash" value={syncStatus.last_adm_import_report.currentLineHash ? `${syncStatus.last_adm_import_report.currentLineHash.slice(0, 12)}...` : "None"} />
               </div>
+              {syncStatus.last_adm_import_report.cursorValidationError ? (
+                <p className="mt-3 rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+                  {syncStatus.last_adm_import_report.cursorValidationError}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -4083,6 +4097,23 @@ function formatPostType(value: string) {
     .replace(/_embed$/, "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatStatusLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getAdmCursorValidationMessage(status: string | null | undefined) {
+  if (status === "valid") return "ADM cursor verified.";
+  if (status === "legacy_no_hash") return "ADM cursor will be upgraded with hash validation after the next successful import.";
+  if (status === "line_out_of_range") return "DZN detected the ADM file was shorter than the saved cursor. This can happen after restart or file rollover. DZN recovered safely.";
+  if (status === "hash_mismatch" || status === "hash_found_repositioned" || status === "safe_tail_reprocess") {
+    return "DZN detected ADM cursor mismatch and safely reprocessed a recent tail window. Existing stats were preserved.";
+  }
+  if (status === "new_file") return "New ADM file detected. DZN will store a cursor hash after this import.";
+  return "ADM cursor validation status is being tracked.";
 }
 
 function looksLikeIpAddress(value: string) {

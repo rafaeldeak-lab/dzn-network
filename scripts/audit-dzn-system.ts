@@ -240,6 +240,7 @@ function auditDatabaseMigrations() {
   checkFile("migrations/0020_adm_observed_cadence.sql", "Migration 0020 ADM observed cadence");
   checkFile("migrations/0021_nitrado_log_settings_verification.sql", "Migration 0021 Nitrado log settings verification");
   checkFile("migrations/0022_adm_import_report.sql", "Migration 0022 ADM import report");
+  checkFile("migrations/0023_adm_cursor_hash_validation.sql", "Migration 0023 ADM cursor hash validation");
   checkIncludes("migrations/0017_discord_post_dispatch_state.sql", "last_dispatch_status", "Discord dispatch state migration columns");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_available_adm_filename", "ADM reset state migration columns");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "ADM discovery due migration columns");
@@ -247,6 +248,7 @@ function auditDatabaseMigrations() {
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_adm_cadence_minutes", "ADM observed cadence migration columns");
   checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_log_settings_verification_source", "Nitrado settings verification migration columns");
   checkIncludes("migrations/0022_adm_import_report.sql", "last_import_report_json", "ADM import report migration columns");
+  checkIncludes("migrations/0023_adm_cursor_hash_validation.sql", "last_processed_adm_line_hash", "ADM cursor hash migration columns");
   checkIncludes("functions/_lib/automation.ts", "last_seen_adm_timestamp", "ADM timestamp tracking columns");
   checkIncludes("functions/_lib/automation.ts", "last_adm_discovery_check_at", "ADM discovery check tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_available_adm_filename", "Newest available ADM tracking");
@@ -281,6 +283,8 @@ function auditDashboardStructure() {
   checkIncludes(dashboard, "Checks for new ADM files every", "ADM discovery timing is visible");
   checkIncludes(dashboard, "Processes readable ADM data every", "ADM processing timing is visible");
   checkIncludes(dashboard, "Last ADM Import Report", "ADM import report diagnostics are visible when expanded");
+  checkIncludes(dashboard, "Cursor Validation", "ADM import report shows cursor validation status");
+  checkIncludes(dashboard, "ADM cursor verified.", "ADM cursor hash validation wording is present");
 }
 
 function auditDiscordAutoPosts() {
@@ -318,6 +322,7 @@ function auditAdmSyncWiring() {
   checkIncludes("functions/_lib/adm-sync.ts", "queueDiscordPostUpdatesForGuild", "ADM data changes queue Discord post updates");
   checkIncludes("functions/_lib/adm-sync.ts", "importReadableAdmLinesIntoDatabase", "ADM fixture import uses database write path");
   checkIncludes("functions/_lib/adm-sync.ts", "last_import_report_json", "ADM import report is stored with sync state");
+  checkIncludes("functions/_lib/adm-sync.ts", "validateAdmCursorForLines", "ADM cursor hash validation is implemented");
 }
 
 function printReport() {

@@ -64,6 +64,13 @@ type AdmSyncState = {
   last_processed_file: string | null;
   last_processed_line: number | null;
   last_processed_offset: number | null;
+  last_processed_adm_line_hash: string | null;
+  last_processed_adm_line_text_preview: string | null;
+  last_cursor_validation_status: string | null;
+  last_cursor_validation_error: string | null;
+  last_cursor_validation_at: string | null;
+  cursor_recovery_strategy: string | null;
+  cursor_recovery_reason: string | null;
   last_sync_status: string | null;
   last_sync_message: string | null;
   last_sync_at: string | null;
@@ -137,6 +144,26 @@ export type AdmImportDebugReport = {
   pvpKillLineNumbers: number[];
 };
 
+type AdmCursorValidationStatus =
+  | "valid"
+  | "legacy_no_hash"
+  | "hash_mismatch"
+  | "line_out_of_range"
+  | "hash_found_repositioned"
+  | "safe_tail_reprocess"
+  | "new_file";
+
+type AdmCursorValidationReport = {
+  cursorValidationStatus: AdmCursorValidationStatus;
+  cursorValidationError: string | null;
+  cursorRecoveryStrategy: string | null;
+  cursorRecoveryReason: string | null;
+  previousLineHash: string | null;
+  currentLineHash: string | null;
+  cursorLineChecked: number | null;
+  cursorHashMatched: boolean | null;
+};
+
 export type AdmDatabaseImportReport = AdmImportDebugReport & {
   attemptedDbWrites: number;
   successfulDbWrites: number;
@@ -149,7 +176,7 @@ export type AdmDatabaseImportReport = AdmImportDebugReport & {
   discordQueuesCreated: number;
   cacheRefreshStatus: "updated" | "skipped" | "failed";
   discordQueueStatus: "queued" | "skipped" | "failed";
-};
+} & AdmCursorValidationReport;
 
 export type AdmFixtureImportResult = {
   status: AdmSyncStatusCode;
@@ -725,6 +752,9 @@ export async function runAdmSync(
   let cursorOffset = Number(existingState?.last_processed_offset ?? 0);
   let readableRouteUsed = readable.readableRouteUsed;
   let lastProcessedLineForError = cursorLine;
+  let cursorValidationReport: AdmCursorValidationReport = defaultCursorValidationReport(cursorFile ? "legacy_no_hash" : "new_file");
+  let lastProcessedAdmLineHash = existingState?.last_processed_adm_line_hash ?? null;
+  let lastProcessedAdmLineTextPreview = existingState?.last_processed_adm_line_text_preview ?? null;
   const filesToProcess = processableFilesBeforeUnreadable.length
     ? processableFilesBeforeUnreadable
     : selectAdmFilesForCursor(readableFiles, existingState?.last_processed_file ?? null);
@@ -735,7 +765,23 @@ export async function runAdmSync(
       const fileLines = file.lines;
       const parsedLines = parseAdmLines(fileLines, { admDate: extractAdmDateFromFile(file.name) ?? undefined });
       const isSameAdmFile = Boolean(file.name && existingState?.last_processed_file === file.name);
-      const fileStartLine = isSameAdmFile ? Number(existingState?.last_processed_line ?? 0) : 0;
+      const cursorValidation = await validateAdmCursorForLines({
+        lines: fileLines,
+        sameFile: isSameAdmFile,
+        savedLine: Number(existingState?.last_processed_line ?? 0),
+        savedHash: existingState?.last_processed_adm_line_hash ?? null,
+      });
+      cursorValidationReport = {
+        cursorValidationStatus: cursorValidation.cursorValidationStatus,
+        cursorValidationError: cursorValidation.cursorValidationError,
+        cursorRecoveryStrategy: cursorValidation.cursorRecoveryStrategy,
+        cursorRecoveryReason: cursorValidation.cursorRecoveryReason,
+        previousLineHash: cursorValidation.previousLineHash,
+        currentLineHash: cursorValidation.currentLineHash,
+        cursorLineChecked: cursorValidation.cursorLineChecked,
+        cursorHashMatched: cursorValidation.cursorHashMatched,
+      };
+      const fileStartLine = cursorValidation.startLine;
       const remainingBudget = Math.max(0, maxLinesPerRun - totalLinesProcessed);
       const pendingParsedEvents = remainingBudget > 0
         ? parsedLines.slice(fileStartLine, fileStartLine + remainingBudget)
@@ -752,7 +798,9 @@ export async function runAdmSync(
       parsedKillLinesFound += parsedKillLinesThisFile;
       parserSkippedLines += parserSkippedThisFile;
       readableRouteUsed = file.readableRouteUsed ?? readableRouteUsed;
-      processedOffset = isSameAdmFile ? Number(existingState?.last_processed_offset ?? 0) : 0;
+      processedOffset = isSameAdmFile && fileStartLine === Number(existingState?.last_processed_line ?? 0)
+        ? Number(existingState?.last_processed_offset ?? 0)
+        : calculateAdmLineOffset(fileLines, fileStartLine);
       const killsBeforeFile = killsCreated;
 
       if (rawKillLinesThisFile > 0 && parsedKillLinesThisFile <= 0) {
@@ -830,6 +878,9 @@ export async function runAdmSync(
       cursorLine = fileStartLine + pendingParsedEvents.length;
       cursorOffset = processedOffset;
       lastProcessedLineForError = cursorLine;
+      const cursorSnapshot = await buildProcessedCursorSnapshot(fileLines, cursorLine);
+      lastProcessedAdmLineHash = cursorSnapshot.hash;
+      lastProcessedAdmLineTextPreview = cursorSnapshot.preview;
       await recordAdmFileAttempt(env, fileScope, {
         name: file.name,
         path: file.path,
@@ -899,7 +950,15 @@ export async function runAdmSync(
         discordQueuesCreated: 0,
         cacheRefreshStatus: "skipped",
         discordQueueStatus: "skipped",
+        ...cursorValidationReport,
       } satisfies AdmDatabaseImportReport),
+      lastProcessedAdmLineHash: existingState?.last_processed_adm_line_hash ?? null,
+      lastProcessedAdmLineTextPreview: existingState?.last_processed_adm_line_text_preview ?? null,
+      lastCursorValidationStatus: cursorValidationReport.cursorValidationStatus,
+      lastCursorValidationError: cursorValidationReport.cursorValidationError,
+      lastCursorValidationAt: now,
+      cursorRecoveryStrategy: cursorValidationReport.cursorRecoveryStrategy,
+      cursorRecoveryReason: cursorValidationReport.cursorRecoveryReason,
     });
     await recordSyncRun(env, {
       id: syncRunId,
@@ -985,6 +1044,7 @@ export async function runAdmSync(
     discordQueuesCreated: 0,
     cacheRefreshStatus: "skipped",
     discordQueueStatus: "skipped",
+    ...cursorValidationReport,
   };
   if (buildEventsStored > 0) console.log("DZN ADM BUILD EVENTS SYNCED", { linkedServerId: initialScope.linkedServerId, buildEventsStored });
   await upsertSyncState(env, initialScope.linkedServerId, {
@@ -1014,6 +1074,13 @@ export async function runAdmSync(
     unreadableFilesQueued: await countQueuedUnreadableAdmFiles(env, initialScope.linkedServerId),
     newestUnprocessedAdmFile: unreadableBeforeProcessing?.name ?? null,
     importReportJson: JSON.stringify(importReport),
+    lastProcessedAdmLineHash,
+    lastProcessedAdmLineTextPreview,
+    lastCursorValidationStatus: cursorValidationReport.cursorValidationStatus,
+    lastCursorValidationError: cursorValidationReport.cursorValidationError,
+    lastCursorValidationAt: now,
+    cursorRecoveryStrategy: cursorValidationReport.cursorRecoveryStrategy,
+    cursorRecoveryReason: cursorValidationReport.cursorRecoveryReason,
   });
   await recordSyncRun(env, {
     id: syncRunId,
@@ -1280,6 +1347,143 @@ function hasRawPlayerKillLine(line: string) {
   return /\bkilled by\s+Player\s+"/i.test(line);
 }
 
+const ADM_CURSOR_RECOVERY_TAIL_LINES = 500;
+
+type AdmCursorValidationResult = AdmCursorValidationReport & {
+  startLine: number;
+};
+
+async function sha1Text(value: string) {
+  const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function safeAdmLinePreview(value: string | null | undefined) {
+  if (!value) return null;
+  return value.replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+function defaultCursorValidationReport(status: AdmCursorValidationStatus = "new_file"): AdmCursorValidationReport {
+  return {
+    cursorValidationStatus: status,
+    cursorValidationError: null,
+    cursorRecoveryStrategy: null,
+    cursorRecoveryReason: null,
+    previousLineHash: null,
+    currentLineHash: null,
+    cursorLineChecked: null,
+    cursorHashMatched: null,
+  };
+}
+
+async function validateAdmCursorForLines(values: {
+  lines: string[];
+  sameFile: boolean;
+  savedLine: number;
+  savedHash: string | null | undefined;
+  tailWindow?: number;
+}): Promise<AdmCursorValidationResult> {
+  const lineCount = values.lines.length;
+  const savedLine = Math.max(0, Math.trunc(Number(values.savedLine) || 0));
+  const savedHash = typeof values.savedHash === "string" && values.savedHash.trim() ? values.savedHash.trim() : null;
+  const tailWindow = Math.max(1, Math.trunc(values.tailWindow ?? ADM_CURSOR_RECOVERY_TAIL_LINES));
+  const safeTailStart = Math.max(0, lineCount - tailWindow);
+
+  if (!values.sameFile) {
+    return { ...defaultCursorValidationReport("new_file"), startLine: 0 };
+  }
+
+  if (savedLine <= 0) {
+    return {
+      ...defaultCursorValidationReport(savedHash ? "valid" : "legacy_no_hash"),
+      cursorLineChecked: 0,
+      cursorHashMatched: savedHash ? true : null,
+      startLine: 0,
+    };
+  }
+
+  if (savedLine > lineCount) {
+    return {
+      cursorValidationStatus: "line_out_of_range",
+      cursorValidationError: `Saved cursor line ${savedLine} is beyond current ADM length ${lineCount}.`,
+      cursorRecoveryStrategy: "safe_tail_reprocess",
+      cursorRecoveryReason: "file_truncated_or_rollover",
+      previousLineHash: savedHash,
+      currentLineHash: null,
+      cursorLineChecked: savedLine,
+      cursorHashMatched: false,
+      startLine: safeTailStart,
+    };
+  }
+
+  if (!savedHash) {
+    return {
+      ...defaultCursorValidationReport("legacy_no_hash"),
+      cursorLineChecked: savedLine,
+      cursorHashMatched: null,
+      startLine: savedLine,
+    };
+  }
+
+  const currentLine = values.lines[savedLine - 1] ?? "";
+  const currentHash = await sha1Text(currentLine);
+  if (currentHash === savedHash) {
+    return {
+      cursorValidationStatus: "valid",
+      cursorValidationError: null,
+      cursorRecoveryStrategy: null,
+      cursorRecoveryReason: null,
+      previousLineHash: savedHash,
+      currentLineHash: currentHash,
+      cursorLineChecked: savedLine,
+      cursorHashMatched: true,
+      startLine: savedLine,
+    };
+  }
+
+  for (let index = 0; index < values.lines.length; index += 1) {
+    if (await sha1Text(values.lines[index]) === savedHash) {
+      return {
+        cursorValidationStatus: "hash_found_repositioned",
+        cursorValidationError: `Saved cursor hash did not match line ${savedLine}, but was found at line ${index + 1}.`,
+        cursorRecoveryStrategy: "hash_found_repositioned",
+        cursorRecoveryReason: "saved_line_moved",
+        previousLineHash: savedHash,
+        currentLineHash: currentHash,
+        cursorLineChecked: savedLine,
+        cursorHashMatched: false,
+        startLine: index + 1,
+      };
+    }
+  }
+
+  return {
+    cursorValidationStatus: "safe_tail_reprocess",
+    cursorValidationError: `Saved cursor hash did not match line ${savedLine} and was not found in the current ADM file.`,
+    cursorRecoveryStrategy: "safe_tail_reprocess",
+    cursorRecoveryReason: "hash_mismatch",
+    previousLineHash: savedHash,
+    currentLineHash: currentHash,
+    cursorLineChecked: savedLine,
+    cursorHashMatched: false,
+    startLine: safeTailStart,
+  };
+}
+
+async function buildProcessedCursorSnapshot(lines: string[], cursorLine: number) {
+  const safeCursorLine = clampCursorLine(cursorLine, lines.length);
+  if (safeCursorLine <= 0) {
+    return { hash: null, preview: null };
+  }
+  const line = lines[safeCursorLine - 1] ?? "";
+  return {
+    hash: await sha1Text(line),
+    preview: safeAdmLinePreview(line),
+  };
+}
+
 export function buildAdmImportDebugReport(
   lines: string[],
   options: { admFileName?: string | null; cursorStart?: number; cursorEnd?: number } = {},
@@ -1338,8 +1542,23 @@ export async function importReadableAdmLinesIntoDatabase(
   const maxLinesPerRun = clampPositiveInteger(input.maxLinesPerRun ?? 50000, 50000);
   const existingState = await getSyncState(env, input.context.linkedServerId);
   const cursorBefore = Number(existingState?.last_processed_line ?? 0);
-  const fileStartLine = existingState?.last_processed_file === input.context.admFileName ? cursorBefore : 0;
-  const pendingLines = input.lines.slice(fileStartLine, fileStartLine + maxLinesPerRun);
+  const cursorValidation = await validateAdmCursorForLines({
+    lines: input.lines,
+    sameFile: existingState?.last_processed_file === input.context.admFileName,
+    savedLine: cursorBefore,
+    savedHash: existingState?.last_processed_adm_line_hash ?? null,
+  });
+  const cursorValidationReport: AdmCursorValidationReport = {
+    cursorValidationStatus: cursorValidation.cursorValidationStatus,
+    cursorValidationError: cursorValidation.cursorValidationError,
+    cursorRecoveryStrategy: cursorValidation.cursorRecoveryStrategy,
+    cursorRecoveryReason: cursorValidation.cursorRecoveryReason,
+    previousLineHash: cursorValidation.previousLineHash,
+    currentLineHash: cursorValidation.currentLineHash,
+    cursorLineChecked: cursorValidation.cursorLineChecked,
+    cursorHashMatched: cursorValidation.cursorHashMatched,
+  };
+  const fileStartLine = cursorValidation.startLine;
   const parsedLines = parseAdmLines(input.lines, { admDate: extractAdmDateFromFile(input.context.admFileName) ?? undefined });
   const pendingParsedEvents = parsedLines.slice(fileStartLine, fileStartLine + maxLinesPerRun);
   const baseReport = buildAdmImportDebugReport(input.lines, {
@@ -1384,6 +1603,7 @@ export async function importReadableAdmLinesIntoDatabase(
     discordQueuesCreated,
     cacheRefreshStatus,
     discordQueueStatus,
+    ...cursorValidationReport,
   });
 
   try {
@@ -1477,13 +1697,14 @@ export async function importReadableAdmLinesIntoDatabase(
     }
 
     const report = buildReport({ cursorLine: cursorAfter });
+    const cursorSnapshot = await buildProcessedCursorSnapshot(input.lines, cursorAfter);
     await upsertSyncState(env, context.linkedServerId, {
       latestAdmFile: context.admFileName,
       latestAdmPath: input.admPath ?? context.admFileName,
       sourceServiceId: context.nitradoServiceId,
       lastProcessedFile: context.admFileName,
       lastProcessedLine: cursorAfter,
-      lastProcessedOffset: pendingLines.reduce((total, line) => total + line.length + 1, 0),
+      lastProcessedOffset: calculateAdmLineOffset(input.lines, cursorAfter),
       status: "completed",
       message: `Fixture ADM import completed. Kill events inserted this check: ${killsCreated}.`,
       lastSyncAt: now,
@@ -1504,6 +1725,13 @@ export async function importReadableAdmLinesIntoDatabase(
       unreadableFilesQueued: 0,
       newestUnprocessedAdmFile: null,
       importReportJson: JSON.stringify(report),
+      lastProcessedAdmLineHash: cursorSnapshot.hash,
+      lastProcessedAdmLineTextPreview: cursorSnapshot.preview,
+      lastCursorValidationStatus: cursorValidationReport.cursorValidationStatus,
+      lastCursorValidationError: cursorValidationReport.cursorValidationError,
+      lastCursorValidationAt: now,
+      cursorRecoveryStrategy: cursorValidationReport.cursorRecoveryStrategy,
+      cursorRecoveryReason: cursorValidationReport.cursorRecoveryReason,
     });
     await recordSyncRun(env, {
       id: syncRunId,
@@ -1560,6 +1788,13 @@ export async function importReadableAdmLinesIntoDatabase(
       unreadableFilesQueued: 0,
       newestUnprocessedAdmFile: context.admFileName,
       importReportJson: JSON.stringify(report),
+      lastProcessedAdmLineHash: existingState?.last_processed_adm_line_hash ?? null,
+      lastProcessedAdmLineTextPreview: existingState?.last_processed_adm_line_text_preview ?? null,
+      lastCursorValidationStatus: cursorValidationReport.cursorValidationStatus,
+      lastCursorValidationError: cursorValidationReport.cursorValidationError,
+      lastCursorValidationAt: now,
+      cursorRecoveryStrategy: cursorValidationReport.cursorRecoveryStrategy,
+      cursorRecoveryReason: cursorValidationReport.cursorRecoveryReason,
     });
     return {
       status: "dzn_write_error",
@@ -1578,6 +1813,11 @@ function clampCursorLine(value: number, lineCount: number) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.min(Math.trunc(numeric), lineCount));
+}
+
+function calculateAdmLineOffset(lines: string[], cursorLine: number) {
+  const safeCursorLine = clampCursorLine(cursorLine, lines.length);
+  return lines.slice(0, safeCursorLine).reduce((total, line) => total + line.length + 1, 0);
 }
 
 function isDeadHitNonKillEvent(event: ParsedAdmEvent) {
@@ -2505,6 +2745,13 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["last_unreadable_files_queued", "INTEGER DEFAULT 0"],
     ["last_newest_unprocessed_adm_file", "TEXT"],
     ["last_import_report_json", "TEXT"],
+    ["last_processed_adm_line_hash", "TEXT"],
+    ["last_processed_adm_line_text_preview", "TEXT"],
+    ["last_cursor_validation_status", "TEXT"],
+    ["last_cursor_validation_error", "TEXT"],
+    ["last_cursor_validation_at", "TEXT"],
+    ["cursor_recovery_strategy", "TEXT"],
+    ["cursor_recovery_reason", "TEXT"],
   ]);
   await ensureMissingColumns(db, "adm_raw_events", [
     ["source_service_id", "TEXT"],
@@ -2580,6 +2827,13 @@ async function upsertSyncState(
     unreadableFilesQueued?: number;
     newestUnprocessedAdmFile?: string | null;
     importReportJson?: string | null;
+    lastProcessedAdmLineHash?: string | null;
+    lastProcessedAdmLineTextPreview?: string | null;
+    lastCursorValidationStatus?: string | null;
+    lastCursorValidationError?: string | null;
+    lastCursorValidationAt?: string | null;
+    cursorRecoveryStrategy?: string | null;
+    cursorRecoveryReason?: string | null;
   },
 ) {
   const db = requireDb(env);
@@ -2593,9 +2847,11 @@ async function upsertSyncState(
         last_kills_created, last_unknown_lines, last_duplicate_lines, last_sync_duration_ms,
         last_readable_route, last_raw_kill_lines_found, last_parsed_kill_lines_found,
         last_parser_skipped_lines, last_unreadable_files_queued, last_newest_unprocessed_adm_file,
-        last_import_report_json,
+        last_import_report_json, last_processed_adm_line_hash, last_processed_adm_line_text_preview,
+        last_cursor_validation_status, last_cursor_validation_error, last_cursor_validation_at,
+        cursor_recovery_strategy, cursor_recovery_reason,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(linked_server_id) DO UPDATE SET
         source_service_id = COALESCE(excluded.source_service_id, adm_sync_state.source_service_id),
         latest_adm_file = excluded.latest_adm_file,
@@ -2623,6 +2879,13 @@ async function upsertSyncState(
         last_unreadable_files_queued = excluded.last_unreadable_files_queued,
         last_newest_unprocessed_adm_file = excluded.last_newest_unprocessed_adm_file,
         last_import_report_json = COALESCE(excluded.last_import_report_json, adm_sync_state.last_import_report_json),
+        last_processed_adm_line_hash = COALESCE(excluded.last_processed_adm_line_hash, adm_sync_state.last_processed_adm_line_hash),
+        last_processed_adm_line_text_preview = COALESCE(excluded.last_processed_adm_line_text_preview, adm_sync_state.last_processed_adm_line_text_preview),
+        last_cursor_validation_status = COALESCE(excluded.last_cursor_validation_status, adm_sync_state.last_cursor_validation_status),
+        last_cursor_validation_error = excluded.last_cursor_validation_error,
+        last_cursor_validation_at = COALESCE(excluded.last_cursor_validation_at, adm_sync_state.last_cursor_validation_at),
+        cursor_recovery_strategy = excluded.cursor_recovery_strategy,
+        cursor_recovery_reason = excluded.cursor_recovery_reason,
         updated_at = CURRENT_TIMESTAMP`,
     )
     .bind(
@@ -2654,6 +2917,13 @@ async function upsertSyncState(
       values.unreadableFilesQueued ?? 0,
       values.newestUnprocessedAdmFile ?? null,
       values.importReportJson ?? null,
+      values.lastProcessedAdmLineHash ?? null,
+      values.lastProcessedAdmLineTextPreview ?? null,
+      values.lastCursorValidationStatus ?? null,
+      values.lastCursorValidationError ?? null,
+      values.lastCursorValidationAt ?? null,
+      values.cursorRecoveryStrategy ?? null,
+      values.cursorRecoveryReason ?? null,
     )
     .run();
 }
@@ -3869,10 +4139,30 @@ function parseAdmDatabaseImportReport(value: unknown): AdmDatabaseImportReport |
       discordQueuesCreated: numberOrZero(parsed.discordQueuesCreated),
       cacheRefreshStatus: parsed.cacheRefreshStatus === "updated" || parsed.cacheRefreshStatus === "failed" ? parsed.cacheRefreshStatus : "skipped",
       discordQueueStatus: parsed.discordQueueStatus === "queued" || parsed.discordQueueStatus === "failed" ? parsed.discordQueueStatus : "skipped",
+      cursorValidationStatus: isAdmCursorValidationStatus(parsed.cursorValidationStatus) ? parsed.cursorValidationStatus : "legacy_no_hash",
+      cursorValidationError: typeof parsed.cursorValidationError === "string" ? parsed.cursorValidationError : null,
+      cursorRecoveryStrategy: typeof parsed.cursorRecoveryStrategy === "string" ? parsed.cursorRecoveryStrategy : null,
+      cursorRecoveryReason: typeof parsed.cursorRecoveryReason === "string" ? parsed.cursorRecoveryReason : null,
+      previousLineHash: typeof parsed.previousLineHash === "string" ? parsed.previousLineHash : null,
+      currentLineHash: typeof parsed.currentLineHash === "string" ? parsed.currentLineHash : null,
+      cursorLineChecked: parsed.cursorLineChecked === null || parsed.cursorLineChecked === undefined ? null : numberOrZero(parsed.cursorLineChecked),
+      cursorHashMatched: typeof parsed.cursorHashMatched === "boolean" ? parsed.cursorHashMatched : null,
     };
   } catch {
     return null;
   }
+}
+
+function isAdmCursorValidationStatus(value: unknown): value is AdmCursorValidationStatus {
+  return (
+    value === "valid" ||
+    value === "legacy_no_hash" ||
+    value === "hash_mismatch" ||
+    value === "line_out_of_range" ||
+    value === "hash_found_repositioned" ||
+    value === "safe_tail_reprocess" ||
+    value === "new_file"
+  );
 }
 
 function nullableBoolean(value: unknown) {
@@ -3949,6 +4239,13 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_unreadable_files_queued INTEGER DEFAULT 0,
     last_newest_unprocessed_adm_file TEXT,
     last_import_report_json TEXT,
+    last_processed_adm_line_hash TEXT,
+    last_processed_adm_line_text_preview TEXT,
+    last_cursor_validation_status TEXT,
+    last_cursor_validation_error TEXT,
+    last_cursor_validation_at TEXT,
+    cursor_recovery_strategy TEXT,
+    cursor_recovery_reason TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,

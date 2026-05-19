@@ -42,6 +42,7 @@
     "worker:adm-sync:deploy": "wrangler deploy --config wrangler.adm-sync.toml",
     "audit:system": "tsx scripts/audit-dzn-system.ts",
     "audit:adm-sync": "tsx scripts/audit-adm-sync.ts",
+    "compare:pandora-tracking": "tsx scripts/compare-pandora-dzn-tracking.ts",
     "check:automation-live": "tsx scripts/check-automation-live.ts",
     "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run check:automation-live"
   },

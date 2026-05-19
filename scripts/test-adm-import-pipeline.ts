@@ -57,6 +57,9 @@ async function main() {
   assert.equal(successResult.cursorBefore, 0);
   assert.equal(successResult.cursorAfter, 25);
   assert.equal(successDb.admSyncState.get(linkedServerId)?.last_processed_line, 25);
+  assert.match(String(successDb.admSyncState.get(linkedServerId)?.last_processed_adm_line_hash ?? ""), /^[a-f0-9]{40}$/);
+  assert.equal(successDb.admSyncState.get(linkedServerId)?.last_processed_adm_line_text_preview, fixtureLines[24].slice(0, 160));
+  assert.equal(successResult.report.cursorValidationStatus, "new_file");
   assert.equal(successResult.report.rawKilledByLinesFound, 10);
   assert.equal(successResult.report.parsedPvpKills, 10);
   assert.equal(successResult.report.writtenKills, 10);
@@ -94,6 +97,97 @@ async function main() {
   assert.equal(retryResult.report.parsedPvpKills, 0);
   assert.equal(retryResult.report.cursorBefore, 25);
   assert.equal(retryResult.report.cursorAfter, 25);
+  assert.equal(retryResult.report.cursorValidationStatus, "valid");
+  assert.equal(retryResult.report.cursorHashMatched, true);
+
+  const appendedKillLine = `16:40:00 | Player "lateVictim" (DEAD) (id=LATE_V pos=<0, 0, 0>) killed by Player "lateKiller" (id=LATE_K pos=<1, 1, 1>) with M4-A1 from 15.5 meters`;
+  const appendedLines = [...fixtureLines, appendedKillLine];
+  const resumeDb = new MemoryD1();
+  await importReadableAdmLinesIntoDatabase(makeEnv(resumeDb), {
+    context: { ...context, linkedServerId: "resume-server", syncRunId: "resume-initial" },
+    lines: fixtureLines,
+  });
+  const resumeResult = await importReadableAdmLinesIntoDatabase(makeEnv(resumeDb), {
+    context: { ...context, linkedServerId: "resume-server", syncRunId: "resume-appended" },
+    lines: appendedLines,
+  });
+  assert.equal(resumeResult.report.cursorValidationStatus, "valid");
+  assert.equal(resumeResult.report.cursorBefore, 25);
+  assert.equal(resumeResult.report.cursorAfter, 26);
+  assert.equal(resumeResult.report.parsedPvpKills, 1);
+  assert.equal(resumeDb.killEvents.filter((event) => event.linked_server_id === "resume-server").length, 11);
+
+  const legacyDb = new MemoryD1();
+  await importReadableAdmLinesIntoDatabase(makeEnv(legacyDb), {
+    context: { ...context, linkedServerId: "legacy-server", syncRunId: "legacy-initial" },
+    lines: fixtureLines,
+  });
+  const legacyState = legacyDb.admSyncState.get("legacy-server");
+  if (legacyState) legacyState.last_processed_adm_line_hash = null;
+  const legacyResult = await importReadableAdmLinesIntoDatabase(makeEnv(legacyDb), {
+    context: { ...context, linkedServerId: "legacy-server", syncRunId: "legacy-appended" },
+    lines: appendedLines,
+  });
+  assert.equal(legacyResult.report.cursorValidationStatus, "legacy_no_hash");
+  assert.equal(legacyResult.report.cursorBefore, 25);
+  assert.equal(legacyResult.report.cursorAfter, 26);
+  assert.match(String(legacyDb.admSyncState.get("legacy-server")?.last_processed_adm_line_hash ?? ""), /^[a-f0-9]{40}$/);
+
+  const mismatchDb = new MemoryD1();
+  await importReadableAdmLinesIntoDatabase(makeEnv(mismatchDb), {
+    context: { ...context, linkedServerId: "mismatch-server", syncRunId: "mismatch-initial" },
+    lines: fixtureLines,
+  });
+  const mismatchState = mismatchDb.admSyncState.get("mismatch-server");
+  if (mismatchState) {
+    mismatchState.last_processed_line = 20;
+    mismatchState.last_processed_adm_line_hash = "0000000000000000000000000000000000000000";
+  }
+  const mismatchResult = await importReadableAdmLinesIntoDatabase(makeEnv(mismatchDb), {
+    context: { ...context, linkedServerId: "mismatch-server", syncRunId: "mismatch-recovery" },
+    lines: fixtureLines,
+  });
+  assert.equal(mismatchResult.report.cursorValidationStatus, "safe_tail_reprocess");
+  assert.equal(mismatchResult.report.cursorRecoveryStrategy, "safe_tail_reprocess");
+  assert.equal(mismatchDb.killEvents.filter((event) => event.linked_server_id === "mismatch-server").length, 10);
+  assert.equal(mismatchDb.admSyncState.get("mismatch-server")?.last_processed_line, 25);
+
+  const repositionDb = new MemoryD1();
+  await importReadableAdmLinesIntoDatabase(makeEnv(repositionDb), {
+    context: { ...context, linkedServerId: "reposition-server", syncRunId: "reposition-initial" },
+    lines: fixtureLines,
+  });
+  const savedLineFiveHash = await sha1(fixtureLines[4]);
+  const repositionState = repositionDb.admSyncState.get("reposition-server");
+  if (repositionState) {
+    repositionState.last_processed_line = 10;
+    repositionState.last_processed_adm_line_hash = savedLineFiveHash;
+  }
+  const repositionResult = await importReadableAdmLinesIntoDatabase(makeEnv(repositionDb), {
+    context: { ...context, linkedServerId: "reposition-server", syncRunId: "reposition-recovery" },
+    lines: fixtureLines,
+  });
+  assert.equal(repositionResult.report.cursorValidationStatus, "hash_found_repositioned");
+  assert.equal(repositionResult.report.cursorRecoveryStrategy, "hash_found_repositioned");
+  assert.equal(repositionDb.killEvents.filter((event) => event.linked_server_id === "reposition-server").length, 10);
+
+  const outOfRangeDb = new MemoryD1();
+  await importReadableAdmLinesIntoDatabase(makeEnv(outOfRangeDb), {
+    context: { ...context, linkedServerId: "out-of-range-server", syncRunId: "out-of-range-initial" },
+    lines: fixtureLines,
+  });
+  const outOfRangeState = outOfRangeDb.admSyncState.get("out-of-range-server");
+  if (outOfRangeState) {
+    outOfRangeState.last_processed_line = 999;
+    outOfRangeState.last_processed_adm_line_hash = await sha1("missing line");
+  }
+  const outOfRangeResult = await importReadableAdmLinesIntoDatabase(makeEnv(outOfRangeDb), {
+    context: { ...context, linkedServerId: "out-of-range-server", syncRunId: "out-of-range-recovery" },
+    lines: fixtureLines,
+  });
+  assert.equal(outOfRangeResult.report.cursorValidationStatus, "line_out_of_range");
+  assert.equal(outOfRangeResult.report.cursorRecoveryStrategy, "safe_tail_reprocess");
+  assert.equal(outOfRangeDb.killEvents.filter((event) => event.linked_server_id === "out-of-range-server").length, 10);
 
   const failingDb = new MemoryD1({ failKillInsertAfter: 5 });
   const failingResult = await importReadableAdmLinesIntoDatabase(makeEnv(failingDb), {
@@ -110,6 +204,7 @@ async function main() {
   assert.equal(failingResult.report.cursorAfter, 0);
   assert.equal(failingResult.report.cursorAdvanced, false);
   assert.equal(failingDb.admSyncState.get(linkedServerId)?.last_processed_line, 0);
+  assert.equal(failingDb.admSyncState.get(linkedServerId)?.last_processed_adm_line_hash ?? null, null);
 
   failingDb.failKillInsertAfter = null;
   const recoveredResult = await importReadableAdmLinesIntoDatabase(makeEnv(failingDb), {
@@ -133,6 +228,8 @@ async function main() {
     fixtureUncreditedDeaths: successDb.playerEvents.filter((event) => event.event_type === "player_died_stats").length,
     cursorFailurePreserved: failingResult.report.cursorAdvanced === false,
     repeatedPairKillsStored: clusteredMustardKills.length,
+    cursorHashStored: Boolean(successDb.admSyncState.get(linkedServerId)?.last_processed_adm_line_hash),
+    cursorMismatchRecovered: mismatchResult.report.cursorValidationStatus,
     dashboardStatsKills: successDb.serverStats.get(linkedServerId)?.total_kills,
     publicCacheUpdated: successResult.report.publicCacheUpdated,
     discordQueuesCreated: successResult.report.discordQueuesCreated,
@@ -149,6 +246,13 @@ function countBy(rows: Array<Record<string, unknown>>, key: string) {
     acc[value] = (acc[value] ?? 0) + 1;
     return acc;
   }, {});
+}
+
+async function sha1(value: string) {
+  const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 type RunResult = { meta: { changes: number } };
@@ -346,6 +450,13 @@ class MemoryStatement {
         last_unknown_lines: Number(this.values[18] ?? 0),
         last_duplicate_lines: Number(this.values[19] ?? 0),
         last_import_report_json: this.values[27],
+        last_processed_adm_line_hash: this.values[28],
+        last_processed_adm_line_text_preview: this.values[29],
+        last_cursor_validation_status: this.values[30],
+        last_cursor_validation_error: this.values[31],
+        last_cursor_validation_at: this.values[32],
+        cursor_recovery_strategy: this.values[33],
+        cursor_recovery_reason: this.values[34],
       });
       return changed(1);
     }

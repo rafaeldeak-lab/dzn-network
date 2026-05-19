@@ -646,6 +646,21 @@ export type AdmSyncStatus = {
     discordQueuesCreated: number;
     cacheRefreshStatus: string;
     discordQueueStatus: string;
+    cursorValidationStatus:
+      | "valid"
+      | "legacy_no_hash"
+      | "hash_mismatch"
+      | "line_out_of_range"
+      | "hash_found_repositioned"
+      | "safe_tail_reprocess"
+      | "new_file";
+    cursorValidationError: string | null;
+    cursorRecoveryStrategy: string | null;
+    cursorRecoveryReason: string | null;
+    previousLineHash: string | null;
+    currentLineHash: string | null;
+    cursorLineChecked: number | null;
+    cursorHashMatched: boolean | null;
   } | null;
   current_recovery_action: string;
   recent_sync_runs: SyncRunSummary[];
