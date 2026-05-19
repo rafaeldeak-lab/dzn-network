@@ -340,6 +340,14 @@ Security:
 
 - Header: `x-dzn-cron-secret`
 - Env var: `DZN_CRON_SECRET`
+- `DZN_CRON_SECRET` must be set in both Cloudflare Pages and this Worker. If it is missing from the Worker, scheduled ticks exit before calling the Pages endpoints and no `cloudflare` rows appear in `automation_cron_runs`.
+
+Cron heartbeat:
+
+- Each protected sync endpoint records an `automation_cron_runs` row after auth succeeds.
+- Rows include `source`, `job_type`, `started_at`, `finished_at`, `duration_ms`, `processed_count`, `skipped_count`, `failed_count`, `status`, and `error_message`.
+- Sync Health shows the latest Cloudflare check-in, GitHub backup check-in, metadata run, ADM run, and Discord dispatcher run.
+- `npm run check:cron-production` checks production rows and fails when no Cloudflare row exists in the last 5 minutes.
 
 Important:
 
@@ -373,6 +381,8 @@ Security:
 
 - Header: `x-dzn-cron-secret`
 - Secret: GitHub `DZN_CRON_SECRET`
+
+GitHub backup should create `github-backup` source rows in `automation_cron_runs`. If no rows appear for more than 15 minutes, the dashboard warns but Cloudflare remains the primary automation path.
 
 ## H. Stripe / Billing Plan Effects
 

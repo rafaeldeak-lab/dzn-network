@@ -196,6 +196,7 @@ function auditCronConfig() {
     checkIncludes("workers/adm-sync-worker.ts", endpoint, `Worker calls ${endpoint}`);
   }
   checkIncludes("workers/adm-sync-worker.ts", "x-dzn-cron-secret", "Worker sends cron secret header");
+  checkIncludes("workers/adm-sync-worker.ts", "DZN_CRON_SECRET", "Worker reads DZN_CRON_SECRET");
   checkIncludes(".github/workflows/dzn-adm-sync.yml", "Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only.", "GitHub backup comment");
   checkIncludes(".github/workflows/dzn-adm-sync.yml", "- cron: \"*/5 * * * *\"", "GitHub backup cadence");
   checkIncludes(".github/workflows/dzn-adm-sync.yml", "x-dzn-cron-secret", "GitHub sends cron secret header");
@@ -219,6 +220,8 @@ function auditSyncEndpoints() {
   checkFile("functions/api/servers/[serverId]/auto-posts/run-now.ts", "Server Run Now endpoint");
   checkFile("functions/api/servers/[serverId]/public-cache/debug.ts", "Public cache debug endpoint");
   checkFile("functions/api/servers/[serverId]/public-cache/rebuild.ts", "Public cache rebuild endpoint");
+  checkFile("functions/api/servers/[serverId]/sync/recover-locks.ts", "Stuck sync lock recovery endpoint");
+  checkIncludes("functions/api/servers/[serverId]/sync/recover-locks.ts", "requireServerOwnerOrDznAdmin", "Stuck sync lock recovery is Owner/Admin only");
   checkIncludes("functions/_lib/public-cache.ts", "metadata_newer_than_public_cache", "Public cache debug flags metadata/cache mismatch");
   checkIncludes("functions/_lib/public-cache.ts", "adm_newer_than_public_cache", "Public cache debug flags ADM/cache mismatch");
   checkIncludes("functions/api/public/servers.ts", "latestPublicTimestamp", "Public profile last sync uses freshest timestamp");
@@ -247,6 +250,7 @@ function auditDatabaseMigrations() {
   checkFile("migrations/0021_nitrado_log_settings_verification.sql", "Migration 0021 Nitrado log settings verification");
   checkFile("migrations/0022_adm_import_report.sql", "Migration 0022 ADM import report");
   checkFile("migrations/0023_adm_cursor_hash_validation.sql", "Migration 0023 ADM cursor hash validation");
+  checkFile("migrations/0024_cron_run_metrics.sql", "Migration 0024 cron run metrics");
   checkIncludes("migrations/0017_discord_post_dispatch_state.sql", "last_dispatch_status", "Discord dispatch state migration columns");
   checkIncludes("migrations/0018_adm_reset_state_tracking.sql", "newest_available_adm_filename", "ADM reset state migration columns");
   checkIncludes("migrations/0019_adm_discovery_and_nitrado_settings.sql", "next_adm_discovery_due_at", "ADM discovery due migration columns");
@@ -255,6 +259,7 @@ function auditDatabaseMigrations() {
   checkIncludes("migrations/0021_nitrado_log_settings_verification.sql", "nitrado_log_settings_verification_source", "Nitrado settings verification migration columns");
   checkIncludes("migrations/0022_adm_import_report.sql", "last_import_report_json", "ADM import report migration columns");
   checkIncludes("migrations/0023_adm_cursor_hash_validation.sql", "last_processed_adm_line_hash", "ADM cursor hash migration columns");
+  checkIncludes("migrations/0024_cron_run_metrics.sql", "processed_count", "Cron metrics migration columns");
   checkIncludes("functions/_lib/automation.ts", "last_seen_adm_timestamp", "ADM timestamp tracking columns");
   checkIncludes("functions/_lib/automation.ts", "last_adm_discovery_check_at", "ADM discovery check tracking");
   checkIncludes("functions/_lib/automation.ts", "newest_available_adm_filename", "Newest available ADM tracking");
@@ -293,6 +298,8 @@ function auditDashboardStructure() {
   checkIncludes(dashboard, "ADM cursor verified.", "ADM cursor hash validation wording is present");
   checkIncludes(dashboard, "Rebuild Public Cache Now", "Public profile cache can be rebuilt from Sync Health");
   checkIncludes(dashboard, "Public profile cache is stale. Rebuild recommended.", "Stale public profile cache warning is visible");
+  checkIncludes(dashboard, "Recover Stuck Sync Locks", "Stale sync locks can be recovered from Sync Health");
+  checkIncludes(dashboard, "Cron Status", "Automation health shows cron status summary");
 }
 
 function auditDiscordAutoPosts() {
@@ -310,7 +317,7 @@ function auditDiscordAutoPosts() {
 
 function auditPackageCommands() {
   const packageJson = JSON.parse(readSource("package.json")) as { scripts?: Record<string, string> };
-  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "test:adm-import-pipeline", "test:public-profile-sync", "test:full-system"]) {
+  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "check:cron-production", "check:server-due-state", "test:adm-import-pipeline", "test:public-profile-sync", "test:full-system"]) {
     if (packageJson.scripts?.[command]) pass(`Package command ${command}`, packageJson.scripts[command]);
     else fail(`Package command ${command}`, "Package command is missing.");
   }

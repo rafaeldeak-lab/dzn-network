@@ -22,6 +22,7 @@ import type {
   AutoPostDispatchNowResult,
   PublicCacheDebug,
   PublicCacheRebuildResult,
+  SyncLockRecoveryResult,
 } from "./types";
 
 export async function getMe() {
@@ -252,6 +253,12 @@ export async function getPublicCacheDebug(linkedServerId: string) {
 
 export async function rebuildPublicCache(linkedServerId: string) {
   return request<PublicCacheRebuildResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/public-cache/rebuild`, {
+    method: "POST",
+  });
+}
+
+export async function recoverStuckSyncLocks(linkedServerId: string) {
+  return request<SyncLockRecoveryResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/sync/recover-locks`, {
     method: "POST",
   });
 }

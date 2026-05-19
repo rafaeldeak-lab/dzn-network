@@ -15,12 +15,27 @@ import type { AutoPostType } from "../../lib/billing/plans";
 export const ACTIVE_BILLING_STATUSES = ["active", "trialing"] as const;
 export const AUTOMATION_CRON_SOURCES = ["cloudflare", "github-backup", "manual"] as const;
 export const AUTOMATION_CRON_MIGRATION_NAME = "0016_automation_cron_runs.sql";
+export const AUTOMATION_CRON_METRICS_MIGRATION_NAME = "0024_cron_run_metrics.sql";
 export const AUTOMATION_MIGRATION_WARNING =
   "Automation is running, but D1 migration history needs attention. Rerun npm run db:migrate:remote once Cloudflare account permissions are fixed.";
 
 export type AutomationCronSource = typeof AUTOMATION_CRON_SOURCES[number];
 export type AutomationCronJobType = "metadata" | "adm" | "discord-posts";
-export type AutomationCronStatus = "success" | "failed" | "partial";
+export type AutomationCronStatus = "started" | "success" | "failed" | "partial";
+
+type AutomationCronRunRow = {
+  source: string | null;
+  job_type: string | null;
+  status: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  error_message: string | null;
+  duration_ms: number | null;
+  processed_count: number | null;
+  skipped_count: number | null;
+  failed_count: number | null;
+};
 
 export type AutomationSyncServer = {
   id: string;
@@ -151,16 +166,22 @@ export async function recordAutomationCronRun(env: Env, input: {
   startedAt?: string | null;
   finishedAt?: string | null;
   errorMessage?: string | null;
+  durationMs?: number | null;
+  processedCount?: number | null;
+  skippedCount?: number | null;
+  failedCount?: number | null;
 }) {
   await ensureAutomationSchema(env);
   const now = new Date().toISOString();
   const startedAt = input.startedAt ?? now;
   const finishedAt = input.finishedAt ?? now;
+  const durationMs = input.durationMs ?? durationBetween(startedAt, finishedAt);
   await requireDb(env)
     .prepare(
       `INSERT INTO automation_cron_runs (
-        id, source, endpoint, job_type, started_at, finished_at, status, error_message, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, source, endpoint, job_type, started_at, finished_at, status, error_message,
+        duration_ms, processed_count, skipped_count, failed_count, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       crypto.randomUUID(),
@@ -171,6 +192,10 @@ export async function recordAutomationCronRun(env: Env, input: {
       finishedAt,
       input.status,
       input.errorMessage ?? null,
+      durationMs,
+      nullableInteger(input.processedCount),
+      nullableInteger(input.skippedCount),
+      nullableInteger(input.failedCount),
       now,
     )
     .run();
@@ -1106,6 +1131,80 @@ export async function recoverStuckAutomationLocks(env: Env) {
   return { statusRecovered, admRecovered };
 }
 
+export async function recoverStuckSyncLocksForServer(env: Env, linkedServerId: string) {
+  await ensureAutomationSchema(env);
+  const db = requireDb(env);
+  const server = await db
+    .prepare(
+      `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.public_slug,
+              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name
+       FROM linked_servers
+       WHERE linked_servers.id = ?
+         AND linked_servers.guild_id IS NOT NULL
+         AND linked_servers.guild_id != ''
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+       LIMIT 1`,
+    )
+    .bind(linkedServerId)
+    .first<{ id: string; guild_id: string; public_slug: string | null; server_name: string | null }>();
+  if (!server?.guild_id) throw new Error("Server not found");
+
+  await ensureServerSyncStateRow(env, server.guild_id);
+  const before = await getSyncLockSnapshot(db, server.guild_id);
+  const now = new Date().toISOString();
+  const statusStale = Boolean(before.currently_checking_status && isOlderThanMinutes(before.updated_at, 10));
+  const admStale = Boolean(before.currently_syncing_adm && isOlderThanMinutes(before.updated_at, 30));
+
+  if (statusStale) {
+    await db
+      .prepare(
+        `UPDATE server_sync_state SET
+          currently_checking_status = 0,
+          last_failed_status_check_at = COALESCE(last_failed_status_check_at, ?),
+          last_status_error = ?,
+          status_data_freshness = CASE WHEN status_data_freshness = 'fresh' THEN status_data_freshness ELSE 'failed' END,
+          updated_at = ?
+         WHERE guild_id = ?
+           AND COALESCE(currently_checking_status, 0) = 1`,
+      )
+      .bind(now, "Recovered stale status sync lock after 10 minutes.", now, server.guild_id)
+      .run();
+  }
+
+  if (admStale) {
+    await db
+      .prepare(
+        `UPDATE server_sync_state SET
+          currently_syncing_adm = 0,
+          last_failed_adm_pull_at = COALESCE(last_failed_adm_pull_at, ?),
+          last_adm_error = ?,
+          adm_status = CASE
+            WHEN adm_status IN ('new_data_found', 'no_new_log_available', 'waiting_after_restart', 'latest_adm_unreadable', 'delayed_after_restart') THEN adm_status
+            ELSE 'failed'
+          END,
+          updated_at = ?
+         WHERE guild_id = ?
+           AND COALESCE(currently_syncing_adm, 0) = 1`,
+      )
+      .bind(now, "Recovered stale ADM sync lock after 30 minutes.", now, server.guild_id)
+      .run();
+  }
+
+  const after = await getSyncLockSnapshot(db, server.guild_id);
+  return {
+    ok: true,
+    server_id: server.id,
+    guild_id: server.guild_id,
+    public_slug: server.public_slug,
+    server_name: server.server_name,
+    recovered_status_lock: statusStale,
+    recovered_adm_lock: admStale,
+    recovered: statusStale || admStale,
+    before,
+    after,
+  };
+}
+
 export async function getAutomationHealth(env: Env) {
   await ensureAutomationRowsForLinkedServers(env);
   await recoverStuckAutomationLocks(env);
@@ -1119,6 +1218,9 @@ export async function getAutomationHealth(env: Env) {
     latestCronRun,
     latestCloudflareCronRun,
     latestGithubCronRun,
+    latestMetadataCronRun,
+    latestAdmCronRun,
+    latestDiscordPostsCronRun,
     migrationState,
     dueMetadata,
     dueAdmDiscovery,
@@ -1147,14 +1249,58 @@ export async function getAutomationHealth(env: Env) {
         last_discord_dispatcher_run: string | null;
       }>(),
     db
-      .prepare("SELECT source, job_type, status, started_at, finished_at, created_at FROM automation_cron_runs ORDER BY created_at DESC LIMIT 1")
-      .first<{ source: string | null; job_type: string | null; status: string | null; started_at: string | null; finished_at: string | null; created_at: string | null }>(),
+      .prepare(
+        `SELECT source, job_type, status, started_at, finished_at, created_at, error_message,
+                duration_ms, processed_count, skipped_count, failed_count
+         FROM automation_cron_runs
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .first<AutomationCronRunRow>(),
     db
-      .prepare("SELECT MAX(created_at) AS created_at FROM automation_cron_runs WHERE source = 'cloudflare'")
-      .first<{ created_at: string | null }>(),
+      .prepare(
+        `SELECT source, job_type, status, started_at, finished_at, created_at, error_message,
+                duration_ms, processed_count, skipped_count, failed_count
+         FROM automation_cron_runs
+         WHERE source = 'cloudflare'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .first<AutomationCronRunRow>(),
     db
-      .prepare("SELECT MAX(created_at) AS created_at FROM automation_cron_runs WHERE source = 'github-backup'")
-      .first<{ created_at: string | null }>(),
+      .prepare(
+        `SELECT source, job_type, status, started_at, finished_at, created_at, error_message,
+                duration_ms, processed_count, skipped_count, failed_count
+         FROM automation_cron_runs
+         WHERE source = 'github-backup'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .first<AutomationCronRunRow>(),
+    db
+      .prepare(
+        `SELECT source, job_type, status, started_at, finished_at, created_at, error_message,
+                duration_ms, processed_count, skipped_count, failed_count
+         FROM automation_cron_runs
+         WHERE job_type = 'metadata'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .first<AutomationCronRunRow>(),
+    db
+      .prepare(
+        `SELECT source, job_type, status, started_at, finished_at, created_at, error_message,
+                duration_ms, processed_count, skipped_count, failed_count
+         FROM automation_cron_runs
+         WHERE job_type = 'adm'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .first<AutomationCronRunRow>(),
+    db
+      .prepare(
+        `SELECT source, job_type, status, started_at, finished_at, created_at, error_message,
+                duration_ms, processed_count, skipped_count, failed_count
+         FROM automation_cron_runs
+         WHERE job_type = 'discord-posts'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .first<AutomationCronRunRow>(),
     getAutomationCronMigrationState(db),
     countFirst(db,
       `SELECT COUNT(*) AS count
@@ -1252,6 +1398,16 @@ export async function getAutomationHealth(env: Env) {
       }>(),
   ]);
 
+  const cronHealth = buildAutomationCronHealth({
+    now,
+    latestCronRun,
+    latestCloudflareCronRun,
+    latestGithubCronRun,
+    latestMetadataCronRun,
+    latestAdmCronRun,
+    latestDiscordPostsCronRun,
+  });
+
   return {
     ok: true,
     checked_at: now,
@@ -1267,6 +1423,19 @@ export async function getAutomationHealth(env: Env) {
     last_cron_trigger_at: latestCronRun?.created_at ?? null,
     latest_cloudflare_cron_run_at: latestCloudflareCronRun?.created_at ?? null,
     latest_github_backup_cron_run_at: latestGithubCronRun?.created_at ?? null,
+    cron_health: cronHealth,
+    last_metadata_cron_run_at: latestMetadataCronRun?.created_at ?? null,
+    last_metadata_cron_status: latestMetadataCronRun?.status ?? null,
+    last_metadata_cron_source: latestMetadataCronRun?.source ?? null,
+    last_metadata_cron_error: latestMetadataCronRun?.error_message ?? null,
+    last_adm_cron_run_at: latestAdmCronRun?.created_at ?? null,
+    last_adm_cron_status: latestAdmCronRun?.status ?? null,
+    last_adm_cron_source: latestAdmCronRun?.source ?? null,
+    last_adm_cron_error: latestAdmCronRun?.error_message ?? null,
+    last_discord_posts_cron_run_at: latestDiscordPostsCronRun?.created_at ?? null,
+    last_discord_posts_cron_status: latestDiscordPostsCronRun?.status ?? null,
+    last_discord_posts_cron_source: latestDiscordPostsCronRun?.source ?? null,
+    last_discord_posts_cron_error: latestDiscordPostsCronRun?.error_message ?? null,
     due_metadata_jobs: dueMetadata,
     due_adm_discovery_jobs: dueAdmDiscovery,
     due_adm_jobs: dueAdm,
@@ -1284,6 +1453,9 @@ export async function getAutomationHealth(env: Env) {
       nitrado_service_id: row.nitrado_service_id,
       plan_key: normalizePlanKey(row.plan_key),
       subscription_status: row.subscription_status,
+      status_interval_minutes: getServerStatusInterval(normalizePlanKey(row.plan_key)),
+      adm_discovery_interval_minutes: getAdmDiscoveryIntervalMinutes(normalizePlanKey(row.plan_key)),
+      adm_processing_interval_minutes: getAdmPullInterval(normalizePlanKey(row.plan_key)),
       next_status_check_due_at: row.next_status_check_due_at,
       next_adm_discovery_due_at: row.next_adm_discovery_due_at,
       next_adm_pull_due_at: row.next_adm_pull_due_at,
@@ -1294,6 +1466,7 @@ export async function getAutomationHealth(env: Env) {
     automation_cron_runs_table_exists: migrationState.tableExists,
     automation_cron_runs_runtime_created: migrationState.runtimeCreated,
     automation_cron_runs_migration_applied: migrationState.migrationApplied,
+    automation_cron_metrics_migration_applied: migrationState.metricsMigrationApplied,
     migrationWarning: migrationState.warning,
     migrationWarningMessage: migrationState.warning ? AUTOMATION_MIGRATION_WARNING : null,
   };
@@ -1388,6 +1561,118 @@ function rowsToCountMap<T extends Record<string, unknown> & { count?: unknown }>
   };
 }
 
+function buildAutomationCronHealth(input: {
+  now: string;
+  latestCronRun: AutomationCronRunRow | null;
+  latestCloudflareCronRun: AutomationCronRunRow | null;
+  latestGithubCronRun: AutomationCronRunRow | null;
+  latestMetadataCronRun: AutomationCronRunRow | null;
+  latestAdmCronRun: AutomationCronRunRow | null;
+  latestDiscordPostsCronRun: AutomationCronRunRow | null;
+}) {
+  const cloudflare = summarizeCronRun(input.latestCloudflareCronRun, input.now);
+  const github = summarizeCronRun(input.latestGithubCronRun, input.now);
+  const latest = summarizeCronRun(input.latestCronRun, input.now);
+  const metadata = summarizeCronRun(input.latestMetadataCronRun, input.now);
+  const adm = summarizeCronRun(input.latestAdmCronRun, input.now);
+  const discordPosts = summarizeCronRun(input.latestDiscordPostsCronRun, input.now);
+  const hasSecretMismatch = [latest, cloudflare, github, metadata, adm, discordPosts].some((run) => {
+    const error = `${run?.status ?? ""} ${run?.error_message ?? ""}`.toLowerCase();
+    return error.includes("cron secret") || error.includes("unauthorized") || error.includes("401");
+  });
+
+  let status: "healthy" | "cloudflare_missing" | "github_backup_missing" | "cron_secret_mismatch" | "no_recent_automation";
+  let message: string;
+  if (hasSecretMismatch) {
+    status = "cron_secret_mismatch";
+    message = "A cron endpoint recently failed authorization. Check that DZN_CRON_SECRET matches in Pages, Worker, and GitHub.";
+  } else if (!latest || latest.age_minutes === null || latest.age_minutes > 10) {
+    status = "no_recent_automation";
+    message = "No recent automation cron check-in detected.";
+  } else if (!cloudflare || cloudflare.age_minutes === null || cloudflare.age_minutes > 5) {
+    status = "cloudflare_missing";
+    message = "Cloudflare Worker cron has not checked in recently. Automatic updates may not run.";
+  } else if (!github || github.age_minutes === null || github.age_minutes > 15) {
+    status = "github_backup_missing";
+    message = "Cloudflare Worker cron is running, but the GitHub backup cron has not checked in recently.";
+  } else {
+    status = "healthy";
+    message = "Cloudflare Worker Cron and GitHub backup cron are checking in.";
+  }
+
+  return {
+    status,
+    message,
+    cloudflare,
+    github_backup: github,
+    latest,
+    metadata,
+    adm,
+    discord_posts: discordPosts,
+  };
+}
+
+function summarizeCronRun(row: AutomationCronRunRow | null, now: string) {
+  if (!row?.created_at) return null;
+  const age = minutesSince(row.created_at, now);
+  return {
+    source: row.source,
+    job_type: row.job_type,
+    status: row.status,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    created_at: row.created_at,
+    error_message: row.error_message,
+    duration_ms: nullableInteger(row.duration_ms),
+    processed_count: nullableInteger(row.processed_count),
+    skipped_count: nullableInteger(row.skipped_count),
+    failed_count: nullableInteger(row.failed_count),
+    age_minutes: age,
+  };
+}
+
+function minutesSince(value: string | null | undefined, now: string) {
+  if (!value) return null;
+  const valueMs = Date.parse(value);
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(valueMs) || !Number.isFinite(nowMs)) return null;
+  return Math.max(0, Math.round((nowMs - valueMs) / 60000));
+}
+
+async function getSyncLockSnapshot(db: D1Database, guildId: string) {
+  const row = await db
+    .prepare(
+      `SELECT currently_checking_status, currently_syncing_adm, updated_at,
+              last_status_error, last_adm_error
+       FROM server_sync_state
+       WHERE guild_id = ?
+       LIMIT 1`,
+    )
+    .bind(guildId)
+    .first<{
+      currently_checking_status: number | null;
+      currently_syncing_adm: number | null;
+      updated_at: string | null;
+      last_status_error: string | null;
+      last_adm_error: string | null;
+    }>();
+  const updatedAt = row?.updated_at ?? null;
+  return {
+    currently_checking_status: Number(row?.currently_checking_status ?? 0) === 1,
+    currently_syncing_adm: Number(row?.currently_syncing_adm ?? 0) === 1,
+    updated_at: updatedAt,
+    lock_age_minutes: updatedAt ? minutesSince(updatedAt, new Date().toISOString()) : null,
+    last_status_error: row?.last_status_error ?? null,
+    last_adm_error: row?.last_adm_error ?? null,
+  };
+}
+
+function isOlderThanMinutes(value: string | null | undefined, minutes: number) {
+  if (!value) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && Date.now() - timestamp > minutes * 60 * 1000;
+}
+
 function nullableBoolean(value: number | null | undefined) {
   if (value === null || value === undefined) return null;
   return Number(value) === 1;
@@ -1398,6 +1683,19 @@ function nullableBooleanInt(value: boolean | null | undefined) {
   return value ? 1 : 0;
 }
 
+function nullableInteger(value: number | null | undefined) {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : null;
+}
+
+function durationBetween(startedAt: string, finishedAt: string) {
+  const startedMs = Date.parse(startedAt);
+  const finishedMs = Date.parse(finishedAt);
+  if (!Number.isFinite(startedMs) || !Number.isFinite(finishedMs)) return null;
+  return Math.max(0, finishedMs - startedMs);
+}
+
 async function ensureAutomationCronRunsColumns(db: D1Database) {
   const columns = await getTableColumns(db, "automation_cron_runs");
   const requiredColumns: Record<string, string> = {
@@ -1406,6 +1704,10 @@ async function ensureAutomationCronRunsColumns(db: D1Database) {
     started_at: "ALTER TABLE automation_cron_runs ADD COLUMN started_at TEXT",
     finished_at: "ALTER TABLE automation_cron_runs ADD COLUMN finished_at TEXT",
     error_message: "ALTER TABLE automation_cron_runs ADD COLUMN error_message TEXT",
+    duration_ms: "ALTER TABLE automation_cron_runs ADD COLUMN duration_ms INTEGER",
+    processed_count: "ALTER TABLE automation_cron_runs ADD COLUMN processed_count INTEGER",
+    skipped_count: "ALTER TABLE automation_cron_runs ADD COLUMN skipped_count INTEGER",
+    failed_count: "ALTER TABLE automation_cron_runs ADD COLUMN failed_count INTEGER",
   };
 
   for (const [column, statement] of Object.entries(requiredColumns)) {
@@ -1486,12 +1788,14 @@ async function ensureServerPostingStateDispatchColumns(db: D1Database) {
 async function getAutomationCronMigrationState(db: D1Database) {
   const cronTableExists = await tableExists(db, "automation_cron_runs");
   const migrationApplied = await isD1MigrationApplied(db, AUTOMATION_CRON_MIGRATION_NAME);
-  const runtimeCreated = cronTableExists && migrationApplied !== true;
+  const metricsMigrationApplied = await isD1MigrationApplied(db, AUTOMATION_CRON_METRICS_MIGRATION_NAME);
+  const runtimeCreated = cronTableExists && (migrationApplied !== true || metricsMigrationApplied !== true);
   return {
     tableExists: cronTableExists,
     migrationApplied,
+    metricsMigrationApplied,
     runtimeCreated,
-    warning: !cronTableExists || migrationApplied !== true || runtimeCreated,
+    warning: !cronTableExists || migrationApplied !== true || metricsMigrationApplied !== true || runtimeCreated,
   };
 }
 
@@ -1682,6 +1986,10 @@ const AUTOMATION_SCHEMA_STATEMENTS = [
     finished_at TEXT,
     status TEXT NOT NULL,
     error_message TEXT,
+    duration_ms INTEGER,
+    processed_count INTEGER,
+    skipped_count INTEGER,
+    failed_count INTEGER,
     created_at TEXT NOT NULL
   )`,
   "CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_created_at ON automation_cron_runs(created_at)",

@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, rebuildPublicCache, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -208,6 +208,8 @@ function ServerDashboard({
   const [publicCacheDebug, setPublicCacheDebug] = useState<PublicCacheDebug | null>(null);
   const [publicCacheRebuildResult, setPublicCacheRebuildResult] = useState<PublicCacheRebuildResult | null>(null);
   const [rebuildingPublicCache, setRebuildingPublicCache] = useState(false);
+  const [recoveringSyncLocks, setRecoveringSyncLocks] = useState(false);
+  const [syncLockRecoveryResult, setSyncLockRecoveryResult] = useState<SyncLockRecoveryResult | null>(null);
   const [nitradoLogSettings, setNitradoLogSettings] = useState<NitradoLogSettingsConfirmation | null>(null);
   const [nitradoLogSettingsCheck, setNitradoLogSettingsCheck] = useState<NitradoLogSettingsCheckResponse | null>(null);
   const [savingNitradoLogSettings, setSavingNitradoLogSettings] = useState(false);
@@ -322,6 +324,30 @@ function ServerDashboard({
       setActionMessage(error instanceof Error ? error.message : "Could not rebuild public profile cache.");
     } finally {
       setRebuildingPublicCache(false);
+    }
+  }, [server.id]);
+
+  const recoverSyncLocks = useCallback(async () => {
+    setRecoveringSyncLocks(true);
+    setActionMessage("");
+    try {
+      const result = await recoverStuckSyncLocks(server.id);
+      setSyncLockRecoveryResult(result);
+      const [health, status, cacheDebug] = await Promise.all([
+        getAutomationHealth().catch(() => null),
+        getSyncStatus(server.id).catch(() => null),
+        getPublicCacheDebug(server.id).catch(() => null),
+      ]);
+      if (health) setAutomationHealth(health);
+      if (status?.status) setSyncStatus(status.status);
+      if (cacheDebug) setPublicCacheDebug(cacheDebug);
+      setActionMessage(result.recovered
+        ? "Recovered stale sync locks for this server."
+        : "No stale sync locks needed recovery.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Could not recover sync locks.");
+    } finally {
+      setRecoveringSyncLocks(false);
     }
   }, [server.id]);
 
@@ -1082,6 +1108,11 @@ function ServerDashboard({
                   onRebuild={rebuildPublicProfileCache}
                 />
               ) : null}
+              <SyncLockRecoveryPanel
+                result={syncLockRecoveryResult}
+                recovering={recoveringSyncLocks}
+                onRecover={recoverSyncLocks}
+              />
               <LastSyncDetails open={syncDetailsOpen} onToggle={() => setSyncDetailsOpen((value) => !value)} latestAdmFile={latestAdmFile} syncStatus={syncStatus} lastSyncResult={lastSyncResult} />
             </DashboardPanel>
           </div>
@@ -2668,6 +2699,7 @@ function DiscordAutoPostsPanel({
 
 function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
   const summary = getAutomationHealthSummary(health);
+  const cron = health.cron_health;
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   return (
     <DashboardPanel className="p-4">
@@ -2684,6 +2716,14 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
         </p>
       ) : null}
       <div className="mt-4 grid grid-cols-2 gap-3">
+        {cron ? (
+          <>
+            <MiniInfo label="Cron Status" value={formatStatusLabel(cron.status)} />
+            <MiniInfo label="Cloudflare Check-in" value={formatCronRunSummary(cron.cloudflare)} />
+            <MiniInfo label="GitHub Backup Check-in" value={formatCronRunSummary(cron.github_backup)} />
+            <MiniInfo label="Discord Cron" value={formatCronRunSummary(cron.discord_posts)} />
+          </>
+        ) : null}
         <MiniInfo label="Last Metadata Run" value={health.last_metadata_sync_run ? formatDashboardDate(health.last_metadata_sync_run) : "Waiting"} />
         <MiniInfo label="Last ADM Discovery" value={health.last_adm_discovery_run ? formatDashboardDate(health.last_adm_discovery_run) : "Waiting"} />
         <MiniInfo label="Last ADM Run" value={health.last_adm_sync_run ? formatDashboardDate(health.last_adm_sync_run) : "Waiting"} />
@@ -2692,7 +2732,7 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
         <MiniInfo label="Last Cron Trigger" value={health.last_cron_trigger_at ? formatDashboardDate(health.last_cron_trigger_at) : "Waiting"} />
         <MiniInfo label="Cloudflare Cron" value={health.latest_cloudflare_cron_run_at ? formatDashboardDate(health.latest_cloudflare_cron_run_at) : "Waiting"} />
         <MiniInfo label="GitHub Backup" value={health.latest_github_backup_cron_run_at ? formatDashboardDate(health.latest_github_backup_cron_run_at) : "Waiting"} />
-        <MiniInfo label="Cron Table" value={health.automation_cron_runs_table_exists ? health.automation_cron_runs_migration_applied ? "Migration applied" : "Runtime-created" : "Missing"} />
+        <MiniInfo label="Cron Table" value={health.automation_cron_runs_table_exists ? health.automation_cron_runs_migration_applied && health.automation_cron_metrics_migration_applied !== false ? "Migration applied" : "Runtime-created" : "Missing"} />
         <MiniInfo label="Due Metadata Jobs" value={String(health.due_metadata_jobs)} />
         <MiniInfo label="Due ADM Discovery" value={String(health.due_adm_discovery_jobs ?? 0)} />
         <MiniInfo label="Due ADM Jobs" value={String(health.due_adm_jobs)} />
@@ -2719,6 +2759,7 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
                 <div key={row.linked_server_id} className="rounded-lg border border-white/10 bg-black/24 p-3 text-xs leading-5 text-zinc-300">
                   <p className="font-black text-white">{row.server_name ?? row.public_slug ?? row.linked_server_id}</p>
                   <p>Plan: {planLabel(row.plan_key)} / {row.subscription_status ?? "unknown"}</p>
+                  <p>Intervals: status {row.status_interval_minutes ?? "?"}m / discovery {row.adm_discovery_interval_minutes ?? "?"}m / processing {row.adm_processing_interval_minutes ?? "?"}m</p>
                   <p>Reason: {formatStatusLabel(row.skipped_reason)}</p>
                   <p>Status due: {row.next_status_check_due_at ? formatDashboardDate(row.next_status_check_due_at) : "Now"}</p>
                   <p>ADM discovery due: {row.next_adm_discovery_due_at ? formatDashboardDate(row.next_adm_discovery_due_at) : "Now"}</p>
@@ -2798,6 +2839,46 @@ function PublicCacheHealthPanel({
           <MiniInfo label="Last Cloudflare Cron" value={debug.cron.last_cloudflare_cron_at ? formatDashboardDate(debug.cron.last_cloudflare_cron_at) : "No check-in"} />
           <MiniInfo label="Last Metadata Cron" value={debug.cron.last_metadata_cron_at ? formatDashboardDate(debug.cron.last_metadata_cron_at) : "No check-in"} />
           <MiniInfo label="Last ADM Cron" value={debug.cron.last_adm_cron_at ? formatDashboardDate(debug.cron.last_adm_cron_at) : "No check-in"} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SyncLockRecoveryPanel({
+  result,
+  recovering,
+  onRecover,
+}: {
+  result: SyncLockRecoveryResult | null;
+  recovering: boolean;
+  onRecover: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-zinc-200">Sync Lock Recovery</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-zinc-300">
+            Releases stale status locks older than 10 minutes and stale ADM locks older than 30 minutes. Fresh active locks are left alone.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={recovering}
+          onClick={onRecover}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-xs font-black uppercase text-amber-50 transition hover:border-amber-300/45 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${recovering ? "animate-spin" : ""}`} />
+          {recovering ? "Recovering..." : "Recover Stuck Sync Locks"}
+        </button>
+      </div>
+      {result ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <MiniInfo label="Recovered" value={result.recovered ? "Yes" : "No stale locks"} />
+          <MiniInfo label="Status Lock" value={`${result.before.currently_checking_status ? "Locked" : "Clear"} -> ${result.after.currently_checking_status ? "Locked" : "Clear"}`} />
+          <MiniInfo label="ADM Lock" value={`${result.before.currently_syncing_adm ? "Locked" : "Clear"} -> ${result.after.currently_syncing_adm ? "Locked" : "Clear"}`} />
+          <MiniInfo label="Lock Age" value={result.before.lock_age_minutes !== null ? `${result.before.lock_age_minutes} min` : "Unknown"} />
         </div>
       ) : null}
     </div>
@@ -3013,7 +3094,26 @@ function formatCronSource(value: string | null | undefined) {
   return "Waiting";
 }
 
+function formatCronRunSummary(run: AutomationCronRunSummary | null | undefined) {
+  if (!run) return "No check-in";
+  const createdAt = run.created_at;
+  const status = run.status ?? "unknown";
+  const age = typeof run.age_minutes === "number" ? `${run.age_minutes}m ago` : createdAt ? formatDashboardDate(createdAt) : "unknown";
+  const failed = typeof run.failed_count === "number" && run.failed_count > 0 ? `, ${run.failed_count} failed` : "";
+  return `${formatStatusLabel(status)} (${age}${failed})`;
+}
+
 function getAutomationHealthSummary(health: AutomationHealth) {
+  if (health.cron_health?.message) {
+    return {
+      message: health.cron_health.message,
+      className: health.cron_health.status === "healthy"
+        ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-50"
+        : health.cron_health.status === "cron_secret_mismatch" || health.cron_health.status === "no_recent_automation"
+          ? "border-orange-300/20 bg-orange-400/10 text-orange-50"
+          : "border-amber-300/20 bg-amber-400/10 text-amber-50",
+    };
+  }
   const latestCronAgeMs = health.last_cron_trigger_at ? Date.now() - Date.parse(health.last_cron_trigger_at) : Number.POSITIVE_INFINITY;
   const cloudflareAgeMs = health.latest_cloudflare_cron_run_at ? Date.now() - Date.parse(health.latest_cloudflare_cron_run_at) : Number.POSITIVE_INFINITY;
   const githubAgeMs = health.latest_github_backup_cron_run_at ? Date.now() - Date.parse(health.latest_github_backup_cron_run_at) : Number.POSITIVE_INFINITY;

@@ -45,6 +45,8 @@
     "audit:adm-sync": "tsx scripts/audit-adm-sync.ts",
     "compare:pandora-tracking": "tsx scripts/compare-pandora-dzn-tracking.ts",
     "check:automation-live": "tsx scripts/check-automation-live.ts",
+    "check:cron-production": "tsx scripts/check-cron-production.ts",
+    "check:server-due-state": "tsx scripts/check-server-due-state.ts",
     "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live"
   },
   "dependencies": {

@@ -63,7 +63,11 @@ export async function handleAdmSyncRun(
         maxLinesPerServer: sanitizePositiveInteger(body.max_lines_per_server, 50000),
         minSyncIntervalMs: 0,
       });
-      await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt);
+      await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
+        processedCount: result.processing_processed_count,
+        skippedCount: result.skipped + result.skipped_not_due + result.skipped_locked + result.skipped_unreadable,
+        failedCount: result.failed,
+      });
     } catch (error) {
       await safeRecordCronRun(env, source, "failed", startedAt, error);
       throw error;
@@ -139,15 +143,19 @@ async function safeRecordCronRun(
   status: "success" | "failed" | "partial",
   startedAt: string,
   error?: unknown,
+  metrics: { processedCount?: number; skippedCount?: number; failedCount?: number } = {},
 ) {
+  const finishedAt = new Date().toISOString();
   try {
     await recordAutomationCronRun(env, {
       source,
       jobType: "adm",
       status,
       startedAt,
-      finishedAt: new Date().toISOString(),
+      finishedAt,
       errorMessage: error instanceof Error ? error.message : null,
+      durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+      ...metrics,
     });
   } catch (error) {
     console.warn("DZN AUTOMATION CRON RUN RECORD SKIPPED", {

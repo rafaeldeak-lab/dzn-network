@@ -68,6 +68,12 @@ assert.equal(automationSource.includes("server_public_cache"), true);
 assert.equal(automationSource.includes("automation_cron_runs"), true);
 assert.equal(automationSource.includes("recordAutomationCronRun"), true);
 assert.equal(automationSource.includes("last_cron_trigger_source"), true);
+assert.equal(automationSource.includes("duration_ms"), true);
+assert.equal(automationSource.includes("processed_count"), true);
+assert.equal(automationSource.includes("skipped_count"), true);
+assert.equal(automationSource.includes("failed_count"), true);
+assert.equal(automationSource.includes("cron_health"), true);
+assert.equal(automationSource.includes("recoverStuckSyncLocksForServer"), true);
 assert.equal(automationSource.includes("queueDiscordPostUpdatesForGuild"), true);
 assert.equal(automationSource.includes("getDueStatusAutomationServers"), true);
 assert.equal(automationSource.includes("getDueAdmDiscoveryAutomationServers"), true);
@@ -165,6 +171,9 @@ assert.equal(cronMigrationSource.includes("CREATE TABLE IF NOT EXISTS automation
 assert.equal(cronMigrationSource.includes("job_type TEXT NOT NULL"), true);
 assert.equal(cronMigrationSource.includes("started_at TEXT"), true);
 assert.equal(cronMigrationSource.includes("finished_at TEXT"), true);
+const cronMetricsMigrationSource = readFileSync("migrations/0024_cron_run_metrics.sql", "utf8");
+assert.equal(cronMetricsMigrationSource.includes("duration_ms"), true);
+assert.equal(cronMetricsMigrationSource.includes("processed_count"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 assert.equal(workflowSource.includes("Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only."), true);
@@ -195,6 +204,8 @@ const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { script
 assert.equal(packageJson.scripts["audit:system"], "tsx scripts/audit-dzn-system.ts");
 assert.equal(packageJson.scripts["audit:adm-sync"], "tsx scripts/audit-adm-sync.ts");
 assert.equal(packageJson.scripts["check:automation-live"], "tsx scripts/check-automation-live.ts");
+assert.equal(packageJson.scripts["check:cron-production"], "tsx scripts/check-cron-production.ts");
+assert.equal(packageJson.scripts["check:server-due-state"], "tsx scripts/check-server-due-state.ts");
 assert.equal(packageJson.scripts["test:public-profile-sync"], "tsx scripts/test-public-profile-sync.ts");
 assert.equal(packageJson.scripts["test:full-system"], "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live");
 
@@ -233,6 +244,14 @@ assert.equal(liveCheckSource.includes("/api/sync/adm/run"), true);
 assert.equal(liveCheckSource.includes("/api/sync/discord-posts/run"), true);
 assert.equal(liveCheckSource.includes("/api/automation/health"), true);
 assert.equal(liveCheckSource.includes("Skipped because DZN_CRON_SECRET is not set"), true);
+const cronProductionCheckSource = readFileSync("scripts/check-cron-production.ts", "utf8");
+assert.equal(cronProductionCheckSource.includes("automation_cron_runs"), true);
+assert.equal(cronProductionCheckSource.includes("No cloudflare row in the last 5 minutes"), true);
+assert.equal(cronProductionCheckSource.includes("x-dzn-cron-secret"), true);
+const serverDueStateSource = readFileSync("scripts/check-server-due-state.ts", "utf8");
+assert.equal(serverDueStateSource.includes("getAdmDiscoveryIntervalMinutes"), true);
+assert.equal(serverDueStateSource.includes("pandora-dayz"), true);
+assert.equal(serverDueStateSource.includes("currently_syncing_adm"), true);
 
 const buttonMapDoc = readFileSync("docs/DASHBOARD_BUTTON_MAP.md", "utf8");
 assert.equal(buttonMapDoc.includes("View Public Page"), true);
@@ -288,6 +307,8 @@ assert.equal(dashboardSource.includes("Processes readable ADM data every"), true
 assert.equal(dashboardSource.includes("Observed ADM Cadence"), true);
 assert.equal(dashboardSource.includes("Next Expected ADM Update"), true);
 assert.equal(dashboardSource.includes("Last Cron Source"), true);
+assert.equal(dashboardSource.includes("Cron Status"), true);
+assert.equal(dashboardSource.includes("Recover Stuck Sync Locks"), true);
 assert.equal(dashboardSource.includes("Missing permissions"), true);
 assert.equal(dashboardSource.includes("ADM logs can appear 5-45 minutes after a restart"), true);
 assert.equal(postingEndpointSource.includes("DZN will auto-post and edit this embed using the bot in the selected channel."), true);
@@ -311,5 +332,8 @@ assert.equal(nitradoSource.includes("function isDisabled"), true);
 const healthEndpointSource = readFileSync("functions/api/automation/health.ts", "utf8");
 assert.equal(healthEndpointSource.includes("requireDznAdmin"), true);
 assert.equal(healthEndpointSource.includes("getAutomationHealth"), true);
+const recoverLocksEndpointSource = readFileSync("functions/api/servers/[serverId]/sync/recover-locks.ts", "utf8");
+assert.equal(recoverLocksEndpointSource.includes("recoverStuckSyncLocksForServer"), true);
+assert.equal(recoverLocksEndpointSource.includes("requireServerOwnerOrDznAdmin"), true);
 
 console.log("Automation plan and pipeline tests passed.");

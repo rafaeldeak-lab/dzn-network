@@ -53,7 +53,11 @@ export async function handleMetadataSyncRun(
       maxServers: sanitizePositiveInteger(body.max_servers, 25),
       includeResults: true,
     });
-    await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt);
+    await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
+      processedCount: result.processed,
+      skippedCount: result.skipped,
+      failedCount: result.failed,
+    });
   } catch (error) {
     await safeRecordCronRun(env, source, "failed", startedAt, error);
     throw error;
@@ -96,15 +100,19 @@ async function safeRecordCronRun(
   status: "success" | "failed" | "partial",
   startedAt: string,
   error?: unknown,
+  metrics: { processedCount?: number; skippedCount?: number; failedCount?: number } = {},
 ) {
+  const finishedAt = new Date().toISOString();
   try {
     await recordAutomationCronRun(env, {
       source,
       jobType: "metadata",
       status,
       startedAt,
-      finishedAt: new Date().toISOString(),
+      finishedAt,
       errorMessage: error instanceof Error ? error.message : null,
+      durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+      ...metrics,
     });
   } catch (error) {
     console.warn("DZN AUTOMATION CRON RUN RECORD SKIPPED", {

@@ -15,7 +15,7 @@ type CronEndpoint = {
   body: Record<string, unknown>;
 };
 
-const WORKER_NAME = "dzn-automation-cron-worker";
+const WORKER_NAME = "dzn-adm-sync-worker";
 const DZN_CRON_SECRET_HEADER = "x-dzn-cron-secret";
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 

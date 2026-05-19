@@ -96,6 +96,11 @@ assert.equal(automationSource.includes("migrationWarning"), true);
 assert.equal(automationSource.includes("D1 migration history needs attention"), true);
 assert.equal(automationSource.includes("latest_cloudflare_cron_run_at"), true);
 assert.equal(automationSource.includes("latest_github_backup_cron_run_at"), true);
+assert.equal(automationSource.includes("duration_ms"), true);
+assert.equal(automationSource.includes("processed_count"), true);
+assert.equal(automationSource.includes("buildAutomationCronHealth"), true);
+assert.equal(automationSource.includes("cron_secret_mismatch"), true);
+assert.equal(automationSource.includes("recoverStuckSyncLocksForServer"), true);
 
 const lockRecoverySource = automationSource.slice(
   automationSource.indexOf("export async function recoverStuckAutomationLocks"),
@@ -109,6 +114,17 @@ assert.equal(lockRecoverySource.includes("current_player_count = NULL"), false);
 assert.equal(lockRecoverySource.includes("max_player_count = NULL"), false);
 assert.equal(lockRecoverySource.includes("DELETE"), false);
 assert.equal(lockRecoverySource.includes("server_public_cache"), false);
+
+const serverLockRecoverySource = automationSource.slice(
+  automationSource.indexOf("export async function recoverStuckSyncLocksForServer"),
+  automationSource.indexOf("export async function getAutomationHealth"),
+);
+assert.equal(serverLockRecoverySource.includes("currently_checking_status = 0"), true);
+assert.equal(serverLockRecoverySource.includes("currently_syncing_adm = 0"), true);
+assert.equal(serverLockRecoverySource.includes("10 minutes"), true);
+assert.equal(serverLockRecoverySource.includes("30 minutes"), true);
+assert.equal(serverLockRecoverySource.includes("current_player_count = NULL"), false);
+assert.equal(serverLockRecoverySource.includes("server_public_cache"), false);
 
 const postingSource = readFileSync("functions/_lib/discord-posting.ts", "utf8");
 assert.equal(postingSource.indexOf("sendOrEditWithBot") < postingSource.indexOf("sendOrEditWithWebhook"), true);
@@ -124,6 +140,9 @@ const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf
 assert.equal(dashboardSource.includes("Automation is running."), true);
 assert.equal(dashboardSource.includes("Cloudflare Worker Cron is active."), true);
 assert.equal(dashboardSource.includes("No recent automation cron check-in detected."), true);
+assert.equal(automationSource.includes("Cloudflare Worker cron has not checked in recently. Automatic updates may not run."), true);
+assert.equal(dashboardSource.includes("Recover Stuck Sync Locks"), true);
+assert.equal(dashboardSource.includes("Cron Status"), true);
 assert.equal(dashboardSource.includes("Server Status Sync:"), true);
 assert.equal(dashboardSource.includes("ADM Discovery:"), true);
 assert.equal(dashboardSource.includes("ADM Processing:"), true);
@@ -131,5 +150,16 @@ assert.equal(dashboardSource.includes("Check Nitrado Log Settings"), true);
 assert.equal(dashboardSource.includes("Manual fallback"), true);
 assert.equal(dashboardSource.includes("real-time logs"), false);
 assert.equal(dashboardSource.includes("instant stats"), false);
+
+const recoverLocksEndpointSource = readFileSync("functions/api/servers/[serverId]/sync/recover-locks.ts", "utf8");
+assert.equal(recoverLocksEndpointSource.includes("recoverStuckSyncLocksForServer"), true);
+assert.equal(recoverLocksEndpointSource.includes("requireServerOwnerOrDznAdmin"), true);
+
+const cronProductionCheckSource = readFileSync("scripts/check-cron-production.ts", "utf8");
+assert.equal(cronProductionCheckSource.includes("No cloudflare row in the last 5 minutes"), true);
+assert.equal(cronProductionCheckSource.includes("/api/sync/metadata/run"), true);
+const dueStateCheckSource = readFileSync("scripts/check-server-due-state.ts", "utf8");
+assert.equal(dueStateCheckSource.includes("getServerStatusInterval(plan)"), true);
+assert.equal(dueStateCheckSource.includes("ADM discovery"), true);
 
 console.log("Automation health hardening tests passed.");

@@ -484,6 +484,28 @@ export type AutomationHealth = {
   last_cron_trigger_at: string | null;
   latest_cloudflare_cron_run_at: string | null;
   latest_github_backup_cron_run_at: string | null;
+  cron_health?: {
+    status: "healthy" | "cloudflare_missing" | "github_backup_missing" | "cron_secret_mismatch" | "no_recent_automation" | string;
+    message: string;
+    cloudflare: AutomationCronRunSummary | null;
+    github_backup: AutomationCronRunSummary | null;
+    latest: AutomationCronRunSummary | null;
+    metadata: AutomationCronRunSummary | null;
+    adm: AutomationCronRunSummary | null;
+    discord_posts: AutomationCronRunSummary | null;
+  };
+  last_metadata_cron_run_at?: string | null;
+  last_metadata_cron_status?: string | null;
+  last_metadata_cron_source?: string | null;
+  last_metadata_cron_error?: string | null;
+  last_adm_cron_run_at?: string | null;
+  last_adm_cron_status?: string | null;
+  last_adm_cron_source?: string | null;
+  last_adm_cron_error?: string | null;
+  last_discord_posts_cron_run_at?: string | null;
+  last_discord_posts_cron_status?: string | null;
+  last_discord_posts_cron_source?: string | null;
+  last_discord_posts_cron_error?: string | null;
   due_metadata_jobs: number;
   due_adm_discovery_jobs: number;
   due_adm_jobs: number;
@@ -501,6 +523,9 @@ export type AutomationHealth = {
     nitrado_service_id: string | null;
     plan_key: string;
     subscription_status: string | null;
+    status_interval_minutes?: number;
+    adm_discovery_interval_minutes?: number;
+    adm_processing_interval_minutes?: number;
     next_status_check_due_at: string | null;
     next_adm_discovery_due_at: string | null;
     next_adm_pull_due_at: string | null;
@@ -511,8 +536,46 @@ export type AutomationHealth = {
   automation_cron_runs_table_exists: boolean;
   automation_cron_runs_runtime_created: boolean;
   automation_cron_runs_migration_applied: boolean | null;
+  automation_cron_metrics_migration_applied?: boolean | null;
   migrationWarning: boolean;
   migrationWarningMessage: string | null;
+};
+
+export type AutomationCronRunSummary = {
+  source: string | null;
+  job_type: string | null;
+  status: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  error_message: string | null;
+  duration_ms: number | null;
+  processed_count: number | null;
+  skipped_count: number | null;
+  failed_count: number | null;
+  age_minutes: number | null;
+};
+
+export type SyncLockRecoveryResult = {
+  ok: boolean;
+  server_id: string;
+  guild_id: string;
+  public_slug: string | null;
+  server_name: string | null;
+  recovered_status_lock: boolean;
+  recovered_adm_lock: boolean;
+  recovered: boolean;
+  before: SyncLockSnapshot;
+  after: SyncLockSnapshot;
+};
+
+export type SyncLockSnapshot = {
+  currently_checking_status: boolean;
+  currently_syncing_adm: boolean;
+  updated_at: string | null;
+  lock_age_minutes: number | null;
+  last_status_error: string | null;
+  last_adm_error: string | null;
 };
 
 export type PublicCacheDebug = {
