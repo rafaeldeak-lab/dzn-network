@@ -58,6 +58,7 @@ async function main() {
   const bulkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/bulk-import.ts", "utf8");
   const forceLatestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/force-latest.ts", "utf8");
   const backfillEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/backfill.ts", "utf8");
+  const automationStatusEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/automation-status.ts", "utf8");
   const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
   const chunkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "utf8");
   const statusEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/status.ts", "utf8");
@@ -65,6 +66,7 @@ async function main() {
   const continueEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/continue.ts", "utf8");
   const cancelEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/cancel.ts", "utf8");
   const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+  const admAutomationCheckSource = readFileSync("scripts/check-adm-automation.ts", "utf8");
   assert.match(manualEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(manualEndpointSource, /getSessionUser/);
   assert.match(manualEndpointSource, /ADM text is required/);
@@ -135,13 +137,26 @@ async function main() {
   assert.match(dashboardSource, /Processing latest ADM in chunks/);
   assert.match(dashboardSource, /ADM Backfill Status/);
   assert.match(dashboardSource, /Backfill Missing ADM Now/);
+  assert.match(dashboardSource, /Verify ADM Automation/);
+  assert.match(dashboardSource, /Dashboard Data Health/);
+  assert.match(dashboardSource, /lastGoodSyncStatus/);
+  assert.match(dashboardSource, /lastGoodBilling/);
+  assert.match(dashboardSource, /Promise\.allSettled/);
   assert.match(dashboardSource, /adm_backfill_status/);
   const packageSource = readFileSync("package.json", "utf8");
   assert.match(packageSource, /"check:adm-backfill": "tsx scripts\/check-adm-backfill\.ts"/);
+  assert.match(packageSource, /"check:adm-automation": "tsx scripts\/check-adm-automation\.ts"/);
   assert.match(admSyncSource, /SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 5/);
+  assert.match(admSyncSource, /processAdmImportJobsUntilBudget/);
   assert.match(admSyncSource, /already_processed/);
   assert.match(admSyncSource, /chunk_count_mismatch/);
   assert.match(admSyncSource, /cancelAdmImportLineJobForServer/);
+  assert.match(automationStatusEndpointSource, /requireServerOwnerOrDznAdmin/);
+  assert.match(automationStatusEndpointSource, /problem_flags/);
+  assert.match(automationStatusEndpointSource, /cron_healthy/);
+  assert.match(automationStatusEndpointSource, /missing_files/);
+  assert.match(admAutomationCheckSource, /DZN ADM Automation Check/);
+  assert.match(admAutomationCheckSource, /problem flags/);
 
   const backfillFixtureNames = [
     "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",

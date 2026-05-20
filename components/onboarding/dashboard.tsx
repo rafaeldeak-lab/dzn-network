@@ -32,8 +32,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
@@ -116,13 +116,34 @@ export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
+  const lastGoodAuthRef = useRef<AuthResponse | null>(null);
 
   useEffect(() => {
     getMe()
-      .then(setAuth)
-      .catch(() => setAuth({ authenticated: false }))
+      .then((nextAuth) => {
+        setAuth(nextAuth);
+        if (nextAuth.authenticated) lastGoodAuthRef.current = nextAuth;
+      })
+      .catch(() => {
+        if (lastGoodAuthRef.current?.authenticated) setAuth(lastGoodAuthRef.current);
+        else setAuth({ authenticated: false });
+      })
       .finally(() => setLoading(false));
   }, []);
+
+  async function refreshAuthPreservingLastGood() {
+    try {
+      const nextAuth = await getMe();
+      if (nextAuth.authenticated) {
+        lastGoodAuthRef.current = nextAuth;
+        setAuth(nextAuth);
+      } else if (!lastGoodAuthRef.current?.authenticated) {
+        setAuth(nextAuth);
+      }
+    } catch {
+      if (lastGoodAuthRef.current?.authenticated) setAuth(lastGoodAuthRef.current);
+    }
+  }
 
   useEffect(() => {
     if (!loading && auth && !auth.authenticated) {
@@ -178,7 +199,7 @@ export function Dashboard() {
           selectedServerId={server.id}
           onSelectServer={setSelectedServerId}
           onLogout={signOut}
-          onRefresh={async () => setAuth(await getMe())}
+          onRefresh={refreshAuthPreservingLastGood}
         />
       ) : <EmptyDashboard />}
     </DashboardFrame>
@@ -236,8 +257,10 @@ function ServerDashboard({
   const [checkingLogs, setCheckingLogs] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
+  const [lastGoodSyncStatus, setLastGoodSyncStatus] = useState<AdmSyncStatus | null>(null);
   const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
   const [recentEvents, setRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
+  const [lastGoodRecentEvents, setLastGoodRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [logDiagnostics, setLogDiagnostics] = useState<NitradoLogAccessDiagnostics | null>(null);
   const [admFileDiscoveryDebug, setAdmFileDiscoveryDebug] = useState<AdmFileDiscoveryDebug | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
@@ -254,6 +277,7 @@ function ServerDashboard({
   const [refreshingServerInfo, setRefreshingServerInfo] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
+  const [lastGoodBilling, setLastGoodBilling] = useState<BillingStatus | null>(null);
   const [billingPlans, setBillingPlans] = useState<BillingPlanSummary[]>([]);
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
   const [postingSetups, setPostingSetups] = useState<PostingChannelSetup[]>([]);
@@ -265,7 +289,9 @@ function ServerDashboard({
   const [discordChannelsWarning, setDiscordChannelsWarning] = useState("");
   const [discordChannelFetchFailure, setDiscordChannelFetchFailure] = useState<DiscordChannelFetchFailure | null>(null);
   const [automationHealth, setAutomationHealth] = useState<AutomationHealth | null>(null);
+  const [lastGoodAutomationHealth, setLastGoodAutomationHealth] = useState<AutomationHealth | null>(null);
   const [publicCacheDebug, setPublicCacheDebug] = useState<PublicCacheDebug | null>(null);
+  const [lastGoodPublicCache, setLastGoodPublicCache] = useState<PublicCacheDebug | null>(null);
   const [publicCacheRebuildResult, setPublicCacheRebuildResult] = useState<PublicCacheRebuildResult | null>(null);
   const [rebuildingPublicCache, setRebuildingPublicCache] = useState(false);
   const [recoveringSyncLocks, setRecoveringSyncLocks] = useState(false);
@@ -288,14 +314,24 @@ function ServerDashboard({
   const [bulkAdmImportProgress, setBulkAdmImportProgress] = useState<AdmBulkProgress | null>(null);
   const [admChunkRunnerPaused, setAdmChunkRunnerPaused] = useState(false);
   const [admChunkRunnerJob, setAdmChunkRunnerJob] = useState<{ jobId: string; filename: string } | null>(null);
+  const [lastGoodAdmJob, setLastGoodAdmJob] = useState<AdmImportJobProgressResult | null>(null);
   const [admImportTotalsDelta, setAdmImportTotalsDelta] = useState<DashboardTotalsDelta | null>(null);
   const [forceLatestAdmRunning, setForceLatestAdmRunning] = useState(false);
   const [forceLatestAdmResult, setForceLatestAdmResult] = useState<AdmSyncRunResult | null>(null);
   const [admBackfillRunning, setAdmBackfillRunning] = useState(false);
   const [admBackfillResult, setAdmBackfillResult] = useState<AdmBackfillPlanResult | null>(null);
+  const [admAutomationStatus, setAdmAutomationStatus] = useState<AdmAutomationStatusResult | null>(null);
+  const [verifyingAdmAutomation, setVerifyingAdmAutomation] = useState(false);
   const [manualAdmRefreshFailed, setManualAdmRefreshFailed] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
+  const [liveRefreshStatus, setLiveRefreshStatus] = useState<"ok" | "retrying" | "failed" | "stale">("ok");
+  const [lastRefreshError, setLastRefreshError] = useState<string | null>(null);
+  const [failedEndpoint, setFailedEndpoint] = useState<string | null>(null);
+  const [failedRefreshCount, setFailedRefreshCount] = useState(0);
+  const [lastSyncStatusRefreshAt, setLastSyncStatusRefreshAt] = useState<string | null>(null);
+  const [lastRecentEventsRefreshAt, setLastRecentEventsRefreshAt] = useState<string | null>(null);
+  const [lastBillingRefreshAt, setLastBillingRefreshAt] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const syncRefreshInFlightRef = useRef(false);
@@ -367,6 +403,8 @@ function ServerDashboard({
         getServerAdvertisingStatus(server.id).catch(() => null),
       ]);
       setBillingStatus(billing);
+      setLastGoodBilling(billing);
+      setLastBillingRefreshAt(new Date().toISOString());
       if (advertising?.advertising) setAdvertisingStatus(advertising.advertising);
       const plans = await getBillingPlans().catch(() => null);
       if (plans?.plans?.length) setBillingPlans(plans.plans);
@@ -380,9 +418,15 @@ function ServerDashboard({
         setNitradoLogSettingsCheck(logSettings);
       }
       const health = await getAutomationHealth().catch(() => null);
-      setAutomationHealth(health);
+      if (health) {
+        setAutomationHealth(health);
+        setLastGoodAutomationHealth(health);
+      }
       const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
-      setPublicCacheDebug(cacheDebug);
+      if (cacheDebug) {
+        setPublicCacheDebug(cacheDebug);
+        setLastGoodPublicCache(cacheDebug);
+      }
     } catch (error) {
       setDiscordChannelsLoading(false);
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
@@ -497,9 +541,16 @@ function ServerDashboard({
     server.player_count_last_checked_at,
     server.player_count_status,
   );
-  const admDiscoveryInterval = billingStatus?.entitlements.adm_discovery_interval_minutes ?? null;
-  const admProcessingInterval = billingStatus?.entitlements.adm_pull_interval_minutes ?? null;
-  const publicCacheFlags = publicCacheDebug?.problem_flags ?? [];
+  const effectiveBillingStatus = billingStatus ?? lastGoodBilling;
+  const effectiveAutomationHealth = automationHealth ?? lastGoodAutomationHealth;
+  const effectivePublicCacheDebug = publicCacheDebug ?? lastGoodPublicCache;
+  const showingCachedDashboardData = Boolean(
+    liveRefreshStatus !== "ok" &&
+    (lastGoodSyncStatus || lastGoodRecentEvents.length || lastGoodBilling || lastGoodAutomationHealth || lastGoodPublicCache || lastGoodAdmJob),
+  );
+  const admDiscoveryInterval = effectiveBillingStatus?.entitlements.adm_discovery_interval_minutes ?? null;
+  const admProcessingInterval = effectiveBillingStatus?.entitlements.adm_pull_interval_minutes ?? null;
+  const publicCacheFlags = effectivePublicCacheDebug?.problem_flags ?? [];
   const publicCacheStale = publicCacheFlags.some((flag) => [
     "public_cache_missing",
     "public_cache_stale",
@@ -523,28 +574,56 @@ function ServerDashboard({
     if (options.manual) setManualRefreshing(true);
     setRefreshingSyncData(true);
 
-    const refreshPromise = Promise.all([
+    const refreshPromise = Promise.allSettled([
       getSyncStatus(server.id),
       getRecentSyncEvents(server.id),
-      getNitradoLogSettings(server.id).catch(() => null),
-    ])
-      .then(([statusResult, eventsResult, logSettings]) => {
-        setSyncStatus(statusResult.status);
-        setRecentEvents(eventsResult.events);
-        if (logSettings?.saved_settings) {
-          setNitradoLogSettings(logSettings.saved_settings);
-          setNitradoLogSettingsCheck(logSettings);
-        }
-        setLastRefreshedAt(new Date().toISOString());
-        setLiveRefreshWarning("");
-        return true;
-      })
-      .catch(() => {
+      getNitradoLogSettings(server.id),
+    ]).then(([statusResult, eventsResult, logSettingsResult]) => {
+      const now = new Date().toISOString();
+      const failed: string[] = [];
+
+      if (statusResult.status === "fulfilled") {
+        setSyncStatus(statusResult.value.status);
+        setLastGoodSyncStatus(statusResult.value.status);
+        if (statusResult.value.status.active_adm_import_job) setLastGoodAdmJob(statusResult.value.status.active_adm_import_job);
+        setLastSyncStatusRefreshAt(now);
+      } else {
+        failed.push("sync-status");
+      }
+
+      if (eventsResult.status === "fulfilled") {
+        setRecentEvents(eventsResult.value.events);
+        setLastGoodRecentEvents(eventsResult.value.events);
+        setLastRecentEventsRefreshAt(now);
+      } else {
+        failed.push("recent-events");
+      }
+
+      if (logSettingsResult.status === "fulfilled" && logSettingsResult.value?.saved_settings) {
+        setNitradoLogSettings(logSettingsResult.value.saved_settings);
+        setNitradoLogSettingsCheck(logSettingsResult.value);
+      } else if (logSettingsResult.status === "rejected") {
+        failed.push("nitrado-log-settings");
+      }
+
+      if (failed.length) {
+        setFailedEndpoint(failed.join(", "));
+        setLastRefreshError(firstRejectedMessage(statusResult, eventsResult, logSettingsResult));
+        setFailedRefreshCount((count) => count + 1);
+        setLiveRefreshStatus(statusResult.status === "fulfilled" || eventsResult.status === "fulfilled" ? "stale" : "retrying");
         if (options.warnOnError !== false) {
-          setLiveRefreshWarning("Live refresh temporarily failed. Retrying...");
+          setLiveRefreshWarning(`Live refresh failed. Showing last successful data from ${lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "the previous refresh"}. Retrying...`);
         }
-        return false;
-      });
+        return statusResult.status === "fulfilled" || eventsResult.status === "fulfilled";
+      }
+
+      setLastRefreshedAt(now);
+      setLiveRefreshWarning("");
+      setLiveRefreshStatus("ok");
+      setLastRefreshError(null);
+      setFailedEndpoint(null);
+      return true;
+    });
 
     syncRefreshPromiseRef.current = refreshPromise;
 
@@ -556,7 +635,7 @@ function ServerDashboard({
       setRefreshingSyncData(false);
       if (options.manual) setManualRefreshing(false);
     }
-  }, [server.id]);
+  }, [lastRefreshedAt, server.id]);
 
   const activeBulkAdmImportJob = findActiveAdmImportJobFromResult(bulkAdmImportResult);
   const activeAdmImportJobForPolling = syncStatusActiveAdmImportJob ?? activeBulkAdmImportJob ?? null;
@@ -594,6 +673,7 @@ function ServerDashboard({
         const response = await getAdmImportJobStatus(server.id, jobId);
         if (cancelled) return;
         if (!response.ok) return;
+        setLastGoodAdmJob(response.job);
         const fileResult = makeProcessingBulkAdmFileResultFromJob(response.job, response.job.source);
         setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
           current,
@@ -608,6 +688,9 @@ function ServerDashboard({
       } catch {
         if (!cancelled) {
           setLiveRefreshWarning("Dashboard refresh failed, but ADM import job is still processing.");
+          setLiveRefreshStatus("stale");
+          setFailedEndpoint("adm-import-job-status");
+          setFailedRefreshCount((count) => count + 1);
         }
       }
     };
@@ -1427,6 +1510,24 @@ function ServerDashboard({
     }
   }
 
+  async function verifyAdmAutomationNow() {
+    setVerifyingAdmAutomation(true);
+    setActionMessage("");
+    try {
+      const response = await getAdmAutomationStatus(server.id);
+      if (!response.ok) {
+        setActionMessage(`Verify ADM Automation failed: ${response.message}`);
+        return;
+      }
+      setAdmAutomationStatus(response);
+      setActionMessage(response.next_action);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to verify ADM automation.");
+    } finally {
+      setVerifyingAdmAutomation(false);
+    }
+  }
+
   async function previewPastedAdmNow() {
     const filename = manualAdmFilename.trim();
     const admText = manualAdmText.trim();
@@ -1686,7 +1787,7 @@ function ServerDashboard({
     { key: "settings-danger", label: "Settings & Danger", icon: <Settings className="h-4 w-4" /> },
   ];
   const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
-  const currentPlanName = planLabel(billingStatus?.plan_key ?? "free");
+  const currentPlanName = effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : "Loading";
   const nitradoLogSettingsComplete = isNitradoLogSettingsComplete(nitradoLogSettings);
   const logSettingsSourceLabel = getNitradoLogSettingsSourceLabel(nitradoLogSettings);
   const setupChecks = [
@@ -1900,13 +2001,13 @@ function ServerDashboard({
           <DashboardPanel className="p-4">
             <div className="flex items-start justify-between gap-3">
               <PanelHeader icon={<Gauge className="h-5 w-5" />} title="Current Plan" />
-              <button type="button" disabled={!billingStatus?.stripe_customer_exists} onClick={openBillingPortal} className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50 disabled:opacity-55">Manage Billing</button>
+              <button type="button" disabled={!effectiveBillingStatus?.stripe_customer_exists} onClick={openBillingPortal} className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50 disabled:opacity-55">Manage Billing</button>
             </div>
             <p className="mt-4 text-2xl font-black uppercase text-violet-100">{currentPlanName}</p>
             <div className="mt-4 grid grid-cols-3 gap-3">
-              <MiniInfo label="Servers Used" value={billingStatus ? `${billingStatus.linked_server_count} / ${billingStatus.entitlements.max_linked_servers}` : "Loading"} />
-              <MiniInfo label="Bumps This Month" value={advertisingStatus ? `${advertisingStatus.bump_count_current_period} / ${advertisingStatus.included_bumps_per_month}` : String(billingStatus?.entitlements.included_bumps_per_month ?? 0)} />
-              <MiniInfo label="Renews" value={billingRenewalLabel(billingStatus)} />
+              <MiniInfo label="Servers Used" value={effectiveBillingStatus ? `${effectiveBillingStatus.linked_server_count} / ${effectiveBillingStatus.entitlements.max_linked_servers}` : "Loading"} />
+              <MiniInfo label="Bumps This Month" value={advertisingStatus ? `${advertisingStatus.bump_count_current_period} / ${advertisingStatus.included_bumps_per_month}` : String(effectiveBillingStatus?.entitlements.included_bumps_per_month ?? "Loading")} />
+              <MiniInfo label="Renews" value={billingRenewalLabel(effectiveBillingStatus)} />
             </div>
           </DashboardPanel>
           <DashboardPanel className="p-4">
@@ -2002,6 +2103,15 @@ function ServerDashboard({
                   </button>
                   <button
                     type="button"
+                    disabled={verifyingAdmAutomation}
+                    onClick={verifyAdmAutomationNow}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <ShieldCheck className={`h-3.5 w-3.5 ${verifyingAdmAutomation ? "animate-pulse" : ""}`} />
+                    {verifyingAdmAutomation ? "Verifying..." : "Verify ADM Automation"}
+                  </button>
+                  <button
+                    type="button"
                     disabled={forceLatestAdmRunning}
                     onClick={forceProcessLatestAdmNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55"
@@ -2057,6 +2167,19 @@ function ServerDashboard({
               </div>
               <AutomaticAdmImportJobPanel syncStatus={syncStatus} />
               <AdmBackfillStatusPanel syncStatus={syncStatus} result={admBackfillResult} running={admBackfillRunning} onBackfill={backfillMissingAdmNow} />
+              <VerifyAdmAutomationPanel status={admAutomationStatus} verifying={verifyingAdmAutomation} onVerify={verifyAdmAutomationNow} />
+              <DashboardDataHealthPanel
+                liveRefreshStatus={liveRefreshStatus}
+                lastSuccessfulFullRefresh={lastRefreshedAt}
+                lastSuccessfulSyncStatusRefresh={lastSyncStatusRefreshAt}
+                lastSuccessfulRecentEventsRefresh={lastRecentEventsRefreshAt}
+                lastSuccessfulBillingRefresh={lastBillingRefreshAt}
+                failedRefreshCount={failedRefreshCount}
+                failedEndpoint={failedEndpoint}
+                lastRefreshError={lastRefreshError}
+                showingCachedData={showingCachedDashboardData}
+                lastGoodAdmJob={lastGoodAdmJob}
+              />
               <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
                 <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">Show ADM Technical Diagnostics</summary>
                 <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -2117,9 +2240,9 @@ function ServerDashboard({
                   </div>
                 </div>
               ) : null}
-              {publicCacheDebug ? (
+              {effectivePublicCacheDebug ? (
                 <PublicCacheHealthPanel
-                  debug={publicCacheDebug}
+                  debug={effectivePublicCacheDebug}
                   rebuildResult={publicCacheRebuildResult}
                   stale={publicCacheStale}
                   rebuilding={rebuildingPublicCache}
@@ -2204,7 +2327,7 @@ function ServerDashboard({
             channelsLoading={discordChannelsLoading}
             channelsWarning={discordChannelsWarning}
             connectedServerName={server.guild_name ?? serverDisplayName}
-            planName={planLabel(billingStatus?.plan_key ?? "free")}
+            planName={effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : "Loading"}
             onChannelsRefresh={refreshDiscordChannels}
             onSaved={(result) => {
               setPostingSetups(result.setups ?? []);
@@ -2245,12 +2368,12 @@ function ServerDashboard({
 
         <aside className={activeTab === "discord-posts" ? "hidden" : "grid content-start gap-5"}>
           {activeTab === "billing" ? (
-          <BillingPlanPanel billing={billingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBilling} />
+          <BillingPlanPanel billing={effectiveBillingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBilling} />
           ) : null}
           {activeTab === "billing" ? (
           <AdvertisingBoostPanel
             serverId={server.id}
-            billing={billingStatus}
+            billing={effectiveBillingStatus}
             advertising={advertisingStatus}
             onBumped={(next) => {
               setAdvertisingStatus(next);
@@ -2259,7 +2382,7 @@ function ServerDashboard({
             }}
           />
           ) : null}
-          {activeTab === "sync-health" && automationHealth ? <AutomationHealthPanel health={automationHealth} /> : null}
+          {activeTab === "sync-health" && effectiveAutomationHealth ? <AutomationHealthPanel health={effectiveAutomationHealth} /> : null}
           {activeTab === "settings-danger" ? (
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions & Setup" />
@@ -3952,6 +4075,107 @@ function AdmBackfillStatusPanel({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function VerifyAdmAutomationPanel({
+  status,
+  verifying,
+  onVerify,
+}: {
+  status: AdmAutomationStatusResult | null;
+  verifying: boolean;
+  onVerify: () => void;
+}) {
+  const activeJob = status?.active_job ?? null;
+  const completed = status?.latest_completed_job ?? null;
+  return (
+    <div className="mt-4 rounded-lg border border-emerald-300/15 bg-emerald-400/8 p-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-emerald-100">Verify ADM Automation</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-zinc-100">
+            {status ? status.next_action : "Run a direct DB-backed automation check for this server."}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={verifying}
+          onClick={onVerify}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/45 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <ShieldCheck className={`h-4 w-4 ${verifying ? "animate-pulse" : ""}`} />
+          {verifying ? "Verifying..." : "Verify ADM Automation"}
+        </button>
+      </div>
+      {status ? (
+        <>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <MiniInfo label="Cron Healthy" value={status.cron.cron_healthy ? "Yes" : "Needs attention"} />
+            <MiniInfo label="Plan" value={`${planLabel(status.plan.plan_key)} / ${status.plan.subscription_status ?? "unknown"}`} />
+            <MiniInfo label="Latest ADM" value={status.adm.newest_available_adm_filename ?? "Waiting"} />
+            <MiniInfo label="Readable ADM" value={status.adm.newest_readable_adm_filename ?? "Waiting"} />
+            <MiniInfo label="Active Job" value={activeJob ? `${activeJob.filename} ${activeJob.current_chunk}/${activeJob.total_chunks}` : "None"} />
+            <MiniInfo label="Latest Completed" value={completed ? `${completed.filename} (${formatStatusLabel(completed.status)})` : "None"} />
+            <MiniInfo label="Recent Events" value={String(status.latest_events.recent_events_count)} />
+            <MiniInfo label="Latest Event" value={status.latest_events.latest_event_at ? formatDashboardDate(status.latest_events.latest_event_at) : "None"} />
+            <MiniInfo label="Kills" value={String(status.stats.kills)} />
+            <MiniInfo label="Deaths" value={String(status.stats.deaths)} />
+            <MiniInfo label="Joins" value={String(status.stats.joins)} />
+            <MiniInfo label="Score" value={String(status.stats.score)} />
+          </div>
+          <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-300">
+            Warnings: {status.problem_flags.length ? status.problem_flags.map(formatStatusLabel).join(", ") : "None"}
+          </p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function DashboardDataHealthPanel({
+  liveRefreshStatus,
+  lastSuccessfulFullRefresh,
+  lastSuccessfulSyncStatusRefresh,
+  lastSuccessfulRecentEventsRefresh,
+  lastSuccessfulBillingRefresh,
+  failedRefreshCount,
+  failedEndpoint,
+  lastRefreshError,
+  showingCachedData,
+  lastGoodAdmJob,
+}: {
+  liveRefreshStatus: "ok" | "retrying" | "failed" | "stale";
+  lastSuccessfulFullRefresh: string | null;
+  lastSuccessfulSyncStatusRefresh: string | null;
+  lastSuccessfulRecentEventsRefresh: string | null;
+  lastSuccessfulBillingRefresh: string | null;
+  failedRefreshCount: number;
+  failedEndpoint: string | null;
+  lastRefreshError: string | null;
+  showingCachedData: boolean;
+  lastGoodAdmJob: AdmImportJobProgressResult | null;
+}) {
+  return (
+    <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+      <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">Dashboard Data Health</summary>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="Retry State" value={formatStatusLabel(liveRefreshStatus)} />
+        <MiniInfo label="Cached Last-Good Data" value={showingCachedData ? "Yes" : "No"} />
+        <MiniInfo label="Failed Refresh Count" value={String(failedRefreshCount)} />
+        <MiniInfo label="Last Failed Endpoint" value={failedEndpoint ?? "None"} />
+        <MiniInfo label="Full Refresh" value={lastSuccessfulFullRefresh ? formatDashboardDate(lastSuccessfulFullRefresh) : "Waiting"} />
+        <MiniInfo label="Sync Status Refresh" value={lastSuccessfulSyncStatusRefresh ? formatDashboardDate(lastSuccessfulSyncStatusRefresh) : "Waiting"} />
+        <MiniInfo label="Recent Events Refresh" value={lastSuccessfulRecentEventsRefresh ? formatDashboardDate(lastSuccessfulRecentEventsRefresh) : "Waiting"} />
+        <MiniInfo label="Billing Refresh" value={lastSuccessfulBillingRefresh ? formatDashboardDate(lastSuccessfulBillingRefresh) : "Waiting"} />
+        <MiniInfo label="Last ADM Job" value={lastGoodAdmJob ? `${lastGoodAdmJob.filename} ${lastGoodAdmJob.display_current_chunk ?? lastGoodAdmJob.chunks_processed}/${lastGoodAdmJob.total_chunks}` : "None"} />
+      </div>
+      {lastRefreshError ? (
+        <p className="mt-3 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-2 text-xs font-bold leading-5 text-orange-50">
+          {lastRefreshError}
+        </p>
+      ) : null}
+    </details>
   );
 }
 
@@ -6260,6 +6484,12 @@ function makeDashboardTotalsSnapshot(server: LinkedServer, status: AdmSyncStatus
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function firstRejectedMessage(...results: Array<PromiseSettledResult<unknown>>) {
+  const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (!rejected) return null;
+  return rejected.reason instanceof Error ? rejected.reason.message : String(rejected.reason);
 }
 
 function isAdmRateLimitedFailure(result: ManualAdmImportErrorResult) {

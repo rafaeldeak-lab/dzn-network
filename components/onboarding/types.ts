@@ -1107,6 +1107,107 @@ export type AdmBackfillPlanResult = {
 
 export type AdmBackfillApiResult = AdmBackfillPlanResult | ManualAdmImportErrorResult;
 
+export type AdmAutomationStatusJob = {
+  id: string;
+  job_id: string;
+  filename: string;
+  source: string;
+  status: string;
+  current_line: number;
+  total_lines: number;
+  current_chunk: number;
+  total_chunks: number;
+  chunks_processed: number;
+  parsed_kills: number;
+  written_kills: number;
+  duplicate_skips: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  updated_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  chunk_count_normalized?: boolean;
+};
+
+export type AdmAutomationStatusResult = {
+  ok: true;
+  checked_at: string;
+  server_id: string;
+  service_id: string | null;
+  server: {
+    id: string;
+    guild_id: string | null;
+    public_slug: string | null;
+    name: string | null;
+    status: string | null;
+  };
+  plan: {
+    plan_key: string;
+    configured_plan_key: string;
+    subscription_status: string | null;
+    status_interval_minutes: number;
+    adm_discovery_interval_minutes: number;
+    adm_processing_interval_minutes: number;
+  };
+  cron: {
+    cloudflare_last_metadata: AutomationCronRunSummary | null;
+    cloudflare_last_adm: AutomationCronRunSummary | null;
+    cloudflare_last_discord_posts: AutomationCronRunSummary | null;
+    latest_cloudflare: AutomationCronRunSummary | null;
+    cron_healthy: boolean;
+  };
+  nitrado: {
+    service_id: string | null;
+    newest_available_adm_filename: string | null;
+    newest_readable_adm_filename: string | null;
+    newest_readable: boolean;
+    last_read_error: string | null;
+  };
+  adm: {
+    newest_available_adm_filename: string | null;
+    newest_available_adm_timestamp: string | null;
+    newest_readable_adm_filename: string | null;
+    newest_readable_adm_timestamp: string | null;
+    last_processed_adm_filename: string | null;
+    last_successful_adm_sync_at: string | null;
+    last_adm_discovery_check_at: string | null;
+    next_adm_discovery_due_at: string | null;
+    next_adm_processing_due_at: string | null;
+    last_adm_error: string | null;
+    discovery_status: string | null;
+    last_sync_status: string | null;
+  };
+  active_job: AdmAutomationStatusJob | null;
+  queued_jobs: AdmAutomationStatusJob[];
+  latest_completed_job: AdmAutomationStatusJob | null;
+  completed_jobs: AdmAutomationStatusJob[];
+  recent_imports: AdmAutomationStatusJob[];
+  missing_files: string[];
+  unreadable_files: Array<{ filename: string; status: string; last_error: string | null; updated_at: string | null }>;
+  latest_events: {
+    recent_events_count: number;
+    latest_event_at: string | null;
+  };
+  recent_events_count: number;
+  latest_event_at: string | null;
+  stats: {
+    kills: number;
+    deaths: number;
+    joins: number;
+    disconnects: number;
+    unique_players: number;
+    score: number;
+  };
+  discord: {
+    queued_post_jobs: number;
+  };
+  problem_flags: string[];
+  next_action: string;
+};
+
+export type AdmAutomationStatusApiResult = AdmAutomationStatusResult | ManualAdmImportErrorResult;
+
 export type AdmFileDiscoveryCandidateDebug = {
   name: string;
   path: string;

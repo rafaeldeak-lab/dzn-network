@@ -14,6 +14,7 @@ import {
   getAdmLogStoragePath,
   mockAdmLogDetection,
   mockNitradoLogAccessDiagnostics,
+  readAdmFileTextWithFallback,
   type NitradoDiscoveredAdmFile,
   type NitradoReadableAdmFile,
   type NitradoLogAccessDiagnostics,
@@ -1665,8 +1666,9 @@ export function buildAdmBackfillPlan(input: {
   maxJobsToCreate?: number;
 }): AdmBackfillCandidatePlan {
   const nowMs = Number.isFinite(input.nowMs) ? Number(input.nowMs) : Date.now();
-  const windowHours = Math.max(1, Math.min(72, Math.trunc(Number(input.windowHours ?? 24))));
-  const maxWindowFiles = Math.max(1, Math.min(24, Math.trunc(Number(input.maxWindowFiles ?? 10))));
+  const plan = normalizePlanKey(input.planKey);
+  const windowHours = Math.max(1, Math.min(168, Math.trunc(Number(input.windowHours ?? (plan === "partner" ? 168 : 24)))));
+  const maxWindowFiles = Math.max(1, Math.min(48, Math.trunc(Number(input.maxWindowFiles ?? (plan === "partner" ? 24 : 10)))));
   const maxJobsToCreate = Math.max(0, Math.min(3, Math.trunc(Number(input.maxJobsToCreate ?? getAdmBackfillQueueLimit(input.planKey)))));
   const handled = new Set((input.handledFilenames ?? []).map(normalizeAdmFilenameKey).filter(Boolean));
   const existingJobs = input.existingJobs ?? [];
@@ -2574,6 +2576,7 @@ const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 5;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
+let admSchemaEnsureSkipDepth = 0;
 
 type AdmImportJobRow = {
   id: string;
@@ -3002,12 +3005,15 @@ export async function processPendingAdmImportJobs(
   options: {
     maxJobs?: number;
     maxChunksPerJob?: number;
+    maxRuntimeMs?: number;
     source?: string;
   } = {},
 ): Promise<PendingAdmImportJobsResult> {
   await ensureAdmSyncSchema(env);
   const maxJobs = clampPositiveInteger(options.maxJobs ?? 5, 5);
   const maxChunksPerJob = clampPositiveInteger(options.maxChunksPerJob ?? SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
+  const maxRuntimeMs = clampPositiveInteger(options.maxRuntimeMs ?? 20_000, 20_000);
+  const deadline = Date.now() + Math.max(1000, maxRuntimeMs - 1000);
   const source = options.source ?? SCHEDULED_ADM_IMPORT_SOURCE;
   await recoverStaleAdmImportJobs(env, source);
   const rows = await requireDb(env)
@@ -3027,11 +3033,12 @@ export async function processPendingAdmImportJobs(
   let completedJobs = 0;
   let failedJobs = 0;
   for (const row of rows.results ?? []) {
+    if (Date.now() >= deadline) break;
     if (processedServerIds.has(row.server_id) || processedServerIds.size >= maxJobs) continue;
     processedServerIds.add(row.server_id);
     try {
       const previousChunksProcessed = Number(row.chunks_processed ?? 0);
-      const result = await processAdmImportJobChunksById(env, row.server_id, row.id, maxChunksPerJob);
+      const result = await processAdmImportJobChunksById(env, row.server_id, row.id, maxChunksPerJob, deadline);
       chunksProcessed += Math.max(0, result.chunks_processed - previousChunksProcessed);
       if (result.status === "completed" || result.status === "completed_with_warnings") completedJobs += 1;
       results.push(result);
@@ -3052,6 +3059,18 @@ export async function processPendingAdmImportJobs(
   };
 }
 
+export async function processAdmImportJobsUntilBudget(
+  env: Env,
+  options: {
+    maxJobs?: number;
+    maxChunksPerJob?: number;
+    maxRuntimeMs?: number;
+    source?: string;
+  } = {},
+): Promise<PendingAdmImportJobsResult> {
+  return processPendingAdmImportJobs(env, options);
+}
+
 export async function planAdmBackfillJobsForServer(
   env: Env,
   userId: string,
@@ -3061,6 +3080,8 @@ export async function planAdmBackfillJobsForServer(
     triggerType?: string;
     processImmediately?: boolean;
     chunksToProcess?: number;
+    scheduledBudgeted?: boolean;
+    skipMetadataRefresh?: boolean;
   } = {},
 ): Promise<AdmBackfillPlanResult> {
   await ensureAdmSyncSchema(env);
@@ -3069,23 +3090,26 @@ export async function planAdmBackfillJobsForServer(
   const linkedServer = await getLinkedServerForAdmImport(env, linkedServerId);
   if (!linkedServer || linkedServer.user_id !== userId) throw new Error("No linked server found");
   const scope = verifyAdmServerScope(linkedServer, crypto.randomUUID());
-  await refreshNitradoServerMetadata(env, {
-    linkedServerId: scope.linkedServerId,
-    userId: linkedServer.user_id,
-    force: true,
-    softFail: true,
-  }).catch(() => null);
+  const scheduledBudgeted = options.scheduledBudgeted === true;
+  if (!options.skipMetadataRefresh) {
+    await refreshNitradoServerMetadata(env, {
+      linkedServerId: scope.linkedServerId,
+      userId: linkedServer.user_id,
+      force: true,
+      softFail: true,
+    }).catch(() => null);
+  }
 
   const existingState = await getSyncState(env, scope.linkedServerId);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const preferredAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
   const batch = await getReadableAdmFilesForLinkedServer(env, linkedServer, {
     isMock,
-    readMode: "full",
+    readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: getAdmBackfillReadLimit(linkedServer.plan_key),
-    lookbackFiles: 12,
+    maxFiles: scheduledBudgeted ? 1 : getAdmBackfillReadLimit(linkedServer.plan_key),
+    lookbackFiles: scheduledBudgeted ? 1 : 12,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
 
@@ -3097,23 +3121,69 @@ export async function planAdmBackfillJobsForServer(
 
   const existingJobs = await getAdmImportJobsForServer(env, scope.linkedServerId);
   const handledFilenames = await getHandledAdmFilenames(env, scope.linkedServerId, scope.nitradoServiceId);
-  const readableByName = new Map(batch.files.map((file) => [normalizeAdmFilenameKey(file.name), file]));
-  const plannerFiles: AdmBackfillPlannerFile[] = batch.candidates.map((file) => {
+  const readableFiles = [...batch.files];
+  const readErrorByName = new Map<string, string | null>();
+  for (const error of batch.readErrors) {
+    const [filename, ...rest] = error.split(":");
+    const key = normalizeAdmFilenameKey(filename);
+    if (key) readErrorByName.set(key, rest.join(":").trim() || error);
+  }
+  const readableByName = new Map(readableFiles.map((file) => [normalizeAdmFilenameKey(file.name), file]));
+  let plannerFiles: AdmBackfillPlannerFile[] = batch.candidates.map((file) => {
     const key = normalizeAdmFilenameKey(file.name);
     return {
       name: file.name,
       path: file.path,
       timestamp: file.timestamp,
       readable: readableByName.has(key),
-      readError: findReadErrorForAdmFile(batch.readErrors, file.name) ?? batch.readError,
+      readError: readErrorByName.get(key) ?? findReadErrorForAdmFile(batch.readErrors, file.name) ?? batch.readError,
     };
   });
+  const maxJobsToCreate = options.maxJobsToCreate ?? getAdmBackfillQueueLimit(linkedServer.plan_key);
+
+  if (scheduledBudgeted && !isMock) {
+    const preliminaryPlan = buildAdmBackfillPlan({
+      files: plannerFiles,
+      handledFilenames,
+      existingJobs: existingJobs.map((job) => ({ filename: job.filename, status: job.status, source: job.source })),
+      planKey: linkedServer.plan_key,
+      maxJobsToCreate,
+    });
+    const exactReadLimit = Math.max(1, Math.min(3, Math.trunc(Number(maxJobsToCreate))));
+    const exactReadNames = preliminaryPlan.activeJobFilename
+      ? []
+      : preliminaryPlan.missingFiles
+        .filter((filename) => !readableByName.has(normalizeAdmFilenameKey(filename)))
+        .slice(0, exactReadLimit);
+    for (const filename of exactReadNames) {
+      const candidate = batch.candidates.find((file) => normalizeAdmFilenameKey(file.name) === normalizeAdmFilenameKey(filename));
+      if (!candidate) continue;
+      const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate);
+      if (read.file) {
+        readableFiles.push(read.file);
+        readableByName.set(normalizeAdmFilenameKey(read.file.name), read.file);
+      } else {
+        readErrorByName.set(normalizeAdmFilenameKey(filename), read.error);
+      }
+    }
+    plannerFiles = batch.candidates.map((file) => {
+      const key = normalizeAdmFilenameKey(file.name);
+      return {
+        name: file.name,
+        path: file.path,
+        timestamp: file.timestamp,
+        readable: readableByName.has(key),
+        readError: readErrorByName.get(key) ?? findReadErrorForAdmFile(batch.readErrors, file.name) ?? batch.readError,
+      };
+    });
+  }
+
   const plan = buildAdmBackfillPlan({
     files: plannerFiles,
     handledFilenames,
     existingJobs: existingJobs.map((job) => ({ filename: job.filename, status: job.status, source: job.source })),
     planKey: linkedServer.plan_key,
-    maxJobsToCreate: options.maxJobsToCreate ?? getAdmBackfillQueueLimit(linkedServer.plan_key),
+    maxJobsToCreate,
   });
 
   const unreadableByName = new Map(plan.unreadableFiles.map((file) => [normalizeAdmFilenameKey(file.filename), file]));
@@ -3575,11 +3645,12 @@ export async function processNextAdmImportJobChunk(
   }
 }
 
-async function processAdmImportJobChunksById(env: Env, linkedServerId: string, jobId: string, maxChunks: number) {
+async function processAdmImportJobChunksById(env: Env, linkedServerId: string, jobId: string, maxChunks: number, deadlineMs = Number.POSITIVE_INFINITY) {
   const safeMaxChunks = clampPositiveInteger(maxChunks, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
   let progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
   await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), isCompletedAdmImportJobStatus(progress.status) ? "completed" : "processing_in_chunks");
   for (let index = 1; index < safeMaxChunks && !isCompletedAdmImportJobStatus(progress.status); index += 1) {
+    if (Date.now() >= deadlineMs) break;
     progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
     await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), isCompletedAdmImportJobStatus(progress.status) ? "completed" : "processing_in_chunks");
   }
@@ -5264,8 +5335,12 @@ export async function runScheduledAdmSync(
     maxLinesPerServer?: number;
     minSyncIntervalMs?: number;
     refreshMetadata?: boolean;
+    assumeSchemaReady?: boolean;
   } = {},
 ): Promise<ScheduledAdmSyncResult> {
+  const skipSchemaEnsures = options.assumeSchemaReady === true && !isMockNitrado(env.MOCK_NITRADO);
+  if (skipSchemaEnsures) admSchemaEnsureSkipDepth += 1;
+  try {
   await ensureAdmSyncSchema(env);
   const maxServers = clampPositiveInteger(options.maxServers ?? 10, 10);
   const maxLinesPerServer = clampPositiveInteger(options.maxLinesPerServer ?? 50000, 50000);
@@ -5276,11 +5351,13 @@ export async function runScheduledAdmSync(
       maxServers,
       skipFreshWithinMs: 5 * 60 * 1000,
     });
-  const pendingJobs = await processPendingAdmImportJobs(env, {
+  const pendingJobs = await processAdmImportJobsUntilBudget(env, {
     maxJobs: maxServers,
     maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
+    maxRuntimeMs: 20_000,
   });
-  const discoveryServers = await getDueAdmDiscoveryAutomationServers(env, maxServers);
+  const processedActiveImportWork = pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0;
+  const discoveryServers = processedActiveImportWork ? [] : await getDueAdmDiscoveryAutomationServers(env, maxServers);
   const discoveryResults = new Map<string, AdmDiscoveryResult>();
   let discoveryProcessed = 0;
   let skippedUnreadable = 0;
@@ -5318,7 +5395,7 @@ export async function runScheduledAdmSync(
     }
   }
 
-  const eligibleServers = await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs);
+  const eligibleServers = processedActiveImportWork ? [] : await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs);
   let succeeded = 0;
   let failed = 0;
   let unavailable = 0;
@@ -5333,6 +5410,9 @@ export async function runScheduledAdmSync(
         triggerType: "scheduled",
         chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
         processImmediately: false,
+        maxJobsToCreate: normalizePlanKey(server.plan_key) === "partner" ? 2 : 1,
+        scheduledBudgeted: true,
+        skipMetadataRefresh: true,
       });
       const ok = !isAdmSyncErrorStatus(result.status);
       if (!ok) failed += 1;
@@ -5420,6 +5500,9 @@ export async function runScheduledAdmSync(
     maxLinesPerServer,
     metadata,
   };
+  } finally {
+    if (skipSchemaEnsures) admSchemaEnsureSkipDepth = Math.max(0, admSchemaEnsureSkipDepth - 1);
+  }
 }
 
 function emptyScheduledMetadataSyncResult(): ScheduledMetadataSyncResult {
@@ -5434,6 +5517,7 @@ function emptyScheduledMetadataSyncResult(): ScheduledMetadataSyncResult {
 }
 
 export async function ensureAdmSyncSchema(env: Env) {
+  if (admSchemaEnsureSkipDepth > 0) return;
   const db = requireDb(env);
   for (const statement of ADM_SYNC_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();
@@ -6840,6 +6924,53 @@ async function getReadableAdmFilesForLinkedServer(
     readErrors: batch.readErrors,
     readError: batch.readError,
   };
+}
+
+async function readSpecificAdmFileForBackfill(
+  env: Env,
+  linkedServer: SyncLinkedServer,
+  candidate: DiscoveredAdmFileForSync,
+): Promise<{ file: ReadableAdmFileForSync | null; error: string | null }> {
+  if (!linkedServer.nitrado_service_id) {
+    return { file: null, error: "No Nitrado service ID is available for ADM backfill reading." };
+  }
+
+  try {
+    const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+    const read = await readAdmFileTextWithFallback({
+      token,
+      serviceId: linkedServer.nitrado_service_id,
+      fileName: candidate.name,
+      originalPath: candidate.path,
+      options: {
+        mode: "full",
+        fullDownloadFallback: true,
+      },
+    });
+    const lines = splitAdmText(read.text ?? "");
+    if (!read.ok || !looksLikeAdmText(lines)) {
+      return {
+        file: null,
+        error: read.downloadError ?? read.seekError ?? "ADM file exists on Nitrado but could not be read as admin log text.",
+      };
+    }
+
+    return {
+      file: {
+        name: candidate.name,
+        path: read.selectedPath ?? candidate.path,
+        lines,
+        readableRouteUsed: read.readMethod === "seek" ? "file_server_seek" : "file_server_download_fallback",
+      },
+      error: null,
+    };
+  } catch (error) {
+    return { file: null, error: safeSyncErrorMessage(error) };
+  }
+}
+
+function looksLikeAdmText(lines: string[]) {
+  return lines.some((line) => /^\d{1,2}:\d{2}(?::\d{2})?\s*\|/.test(line) || /AdminLog|PlayerList|killed by Player|is connected|is connecting|disconnected/i.test(line));
 }
 
 function mapReadableAdmFileForSync(file: NitradoReadableAdmFile): ReadableAdmFileForSync {
