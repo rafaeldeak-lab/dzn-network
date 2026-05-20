@@ -221,6 +221,8 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "makeWarningBulkAdmFileResultFromProgress", "Dashboard preserves chunk counters when finish returns a warning/error");
   checkIncludes("components/onboarding/dashboard.tsx", "Completed with warnings", "Dashboard distinguishes finish warnings from core import failures");
   checkIncludes("components/onboarding/dashboard.tsx", "getAdmImportJobStatus", "Dashboard polls active ADM import jobs");
+  checkIncludes("components/onboarding/dashboard.tsx", "mergeActiveAdmImportJobIntoBulkResult", "Dashboard reattaches active backend ADM jobs to the import result panel");
+  checkIncludes("components/onboarding/dashboard.tsx", "syncStatusActiveAdmImportJob", "Dashboard prefers active backend ADM jobs over stale failed import attempts");
   checkIncludes("components/onboarding/dashboard.tsx", "Files Processing", "Dashboard counts active ADM import jobs separately from failures");
   checkIncludes("components/onboarding/dashboard.tsx", "Continue Import", "Dashboard can continue an existing ADM import job");
   checkIncludes("components/onboarding/dashboard.tsx", "ADM cursor verified.", "Dashboard shows cursor hash validation wording");

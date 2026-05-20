@@ -32,11 +32,11 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
-const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 4000;
+const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
 let hasLoggedMultiServerReady = false;
 
 type DiscordChannelCache = {
@@ -539,8 +539,11 @@ function ServerDashboard({
     }
   }, [server.id]);
 
+  const syncStatusActiveAdmImportJob = syncStatus?.active_adm_import_job && isActiveAdmImportJobStatus(syncStatus.active_adm_import_job.status)
+    ? syncStatus.active_adm_import_job
+    : null;
   const activeBulkAdmImportJob = findActiveAdmImportJobFromResult(bulkAdmImportResult);
-  const activeAdmImportJobForPolling = activeBulkAdmImportJob ?? syncStatus?.active_adm_import_job ?? null;
+  const activeAdmImportJobForPolling = syncStatusActiveAdmImportJob ?? activeBulkAdmImportJob ?? null;
   const activeAdmImportJobPollId = activeAdmImportJobForPolling?.job_id ?? null;
   const activeAdmImportJobPollStatus = activeAdmImportJobForPolling?.status ?? null;
 
@@ -910,13 +913,39 @@ function ServerDashboard({
           selectedCount,
         ));
       } else {
-        setBulkAdmImportError({
-          ok: false,
-          error_code: "adm_import_job_unavailable",
-          message: "No selected file or import job id is available. Reselect the ADM file to continue.",
-          details: { filename },
-        });
-        return;
+        const latest = await getLatestAdmImportJob(server.id, filename);
+        if (latest.ok && (isActiveAdmImportJobStatus(latest.job.status) || latest.job.status === "failed_retryable")) {
+          setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+            current,
+            makeProcessingBulkAdmFileResultFromJob(latest.job, latest.job.source),
+            latest.job.source,
+            selectedCount,
+          ));
+          if (isActiveAdmImportJobStatus(latest.job.status)) {
+            setActionMessage(`${filename} is already processing. DZN reattached to the existing ADM import job.`);
+            return;
+          }
+          const continued = await continueAdmImportJob(server.id, latest.job.job_id);
+          if (!continued.ok) {
+            setBulkAdmImportError(continued);
+            setActionMessage(`${filename} could not continue from the latest server-side job. Reselect the file if this was a manual upload.`);
+            return;
+          }
+          setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+            current,
+            makeProcessingBulkAdmFileResultFromJob(continued, continued.source),
+            continued.source,
+            selectedCount,
+          ));
+        } else {
+          setBulkAdmImportError({
+            ok: false,
+            error_code: "adm_import_job_unavailable",
+            message: "No selected file or active import job is available. Reselect the ADM file to continue.",
+            details: { filename },
+          });
+          return;
+        }
       }
       const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
       setActionMessage(refreshed
@@ -1468,6 +1497,10 @@ function ServerDashboard({
     [`Nitrado Log Settings${logSettingsSourceLabel ? ` (${logSettingsSourceLabel})` : ""}`, nitradoLogSettingsComplete],
     ["Stats Sync Active", statsSyncActive],
   ] as const;
+  const displayedBulkAdmImportResult = mergeActiveAdmImportJobIntoBulkResult(
+    bulkAdmImportResult,
+    syncStatus?.active_adm_import_job ?? null,
+  );
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[250px_minmax(0,1fr)]">
@@ -1894,7 +1927,7 @@ function ServerDashboard({
                 result={manualAdmImportResult}
                 failure={manualAdmImportError}
                 preview={manualAdmParsePreview}
-                bulkResult={bulkAdmImportResult}
+                bulkResult={displayedBulkAdmImportResult}
                 bulkFailure={bulkAdmImportError}
                 bulkProgress={bulkAdmImportProgress}
                 totalsDelta={admImportTotalsDelta}
@@ -3926,7 +3959,7 @@ function ManualAdmImportPanel({
           </div>
         ) : null}
       </div>
-      {bulkFailure ? (
+      {bulkFailure && !(bulkResult?.files.some(isProcessingBulkAdmFile) ?? false) ? (
         <ManualAdmFailurePanel failure={bulkFailure} title="Bulk ADM Import Failed" />
       ) : null}
       {bulkResult ? (
@@ -5833,11 +5866,11 @@ function isCompletedBulkAdmFile(file: BulkAdmFileResult) {
 }
 
 function isProcessingBulkAdmFile(file: BulkAdmFileResult) {
-  return file.ok && (["processing", "queued", "writing", "rebuilding"].includes(String(file.status)) || (file.status === "failed_retryable" && hasActiveAdmImportProgress(file)));
+  return file.ok && (["processing", "queued", "parsing", "writing", "rebuilding"].includes(String(file.status)) || (file.status === "failed_retryable" && hasActiveAdmImportProgress(file)));
 }
 
 function isActiveAdmImportJobStatus(status: string | null | undefined) {
-  return status === "queued" || status === "parsing" || status === "writing" || status === "rebuilding";
+  return status === "queued" || status === "processing" || status === "parsing" || status === "writing" || status === "rebuilding";
 }
 
 function isCompletedAdmImportJobStatus(status: string | null | undefined) {
@@ -5849,7 +5882,7 @@ function hasActiveAdmImportProgress(file: BulkAdmFileResult) {
 }
 
 function findActiveAdmImportJobFromResult(result: BulkAdmImportResult | null) {
-  const file = result?.files.find((candidate) => candidate.job_id && (isProcessingBulkAdmFile(candidate) || candidate.status === "failed_retryable"));
+  const file = result?.files.find((candidate) => candidate.job_id && (isProcessingBulkAdmFile(candidate) || (candidate.status === "failed_retryable" && hasActiveAdmImportProgress(candidate))));
   if (!file?.job_id) return null;
   return {
     job_id: file.job_id,
@@ -5936,6 +5969,15 @@ function replaceBulkAdmFileResult(
     ? existing.map((file) => (file.filename === nextFile.filename ? nextFile : file))
     : [...existing, nextFile];
   return summarizeClientBulkAdmResults(files, source, Math.max(selectedFileCount, current?.files_uploaded ?? 0, files.length));
+}
+
+function mergeActiveAdmImportJobIntoBulkResult(
+  current: BulkAdmImportResult | null,
+  job: AdmImportJobProgressResult | null,
+) {
+  if (!job || (!isActiveAdmImportJobStatus(job.status) && job.status !== "failed_retryable")) return current;
+  const activeFile = makeProcessingBulkAdmFileResultFromJob(job, job.source);
+  return replaceBulkAdmFileResult(current, activeFile, job.source, Math.max(current?.files_uploaded ?? 0, 1));
 }
 
 function normalizeDashboardSyncStatus(status: string, latestAdmFile: string) {

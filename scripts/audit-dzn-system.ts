@@ -364,6 +364,8 @@ function auditAdmSyncWiring() {
   checkIncludes("components/onboarding/dashboard.tsx", "ADM_IMPORT_RETRY_CHUNK_SIZES = [5, 1]", "Dashboard retries failed ADM chunks at 5-line and 1-line sizes");
   checkIncludes("components/onboarding/dashboard.tsx", "sendAdmImportChunkWithFallback", "Dashboard import UI avoids failing the whole file on one failed chunk");
   checkIncludes("components/onboarding/dashboard.tsx", "makeWarningBulkAdmFileResultFromProgress", "Dashboard preserves ADM import counters if finish returns a warning");
+  checkIncludes("components/onboarding/dashboard.tsx", "mergeActiveAdmImportJobIntoBulkResult", "Dashboard reattaches active backend ADM jobs to the import result panel");
+  checkIncludes("components/onboarding/dashboard.tsx", "syncStatusActiveAdmImportJob", "Dashboard prefers active backend ADM jobs over stale failed import attempts");
   checkIncludes("components/onboarding/dashboard.tsx", "Files Processing", "Dashboard separates processing ADM jobs from failed imports");
   checkIncludes("components/onboarding/dashboard.tsx", "Continue Import", "Dashboard can resume existing ADM import jobs");
   checkIncludes("functions/_lib/adm-sync.ts", "validateAdmCursorForLines", "ADM cursor hash validation is implemented");

@@ -86,10 +86,13 @@ async function main() {
   assert.match(dashboardSource, /completed_with_warnings/);
   assert.match(dashboardSource, /makeWarningBulkAdmFileResultFromProgress/);
   assert.match(dashboardSource, /makeProcessingBulkAdmFileResultFromJob/);
-  assert.match(dashboardSource, /ADM_IMPORT_JOB_POLL_INTERVAL_MS = 4000/);
+  assert.match(dashboardSource, /mergeActiveAdmImportJobIntoBulkResult/);
+  assert.match(dashboardSource, /syncStatusActiveAdmImportJob/);
+  assert.match(dashboardSource, /ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000/);
   assert.match(dashboardSource, /Files Processing/);
   assert.match(dashboardSource, /Continue Import/);
   assert.match(dashboardSource, /getAdmImportJobStatus/);
+  assert.match(dashboardSource, /getLatestAdmImportJob/);
   assert.match(dashboardSource, /Job Status/);
   assert.match(dashboardSource, /Finish Status/);
   assert.match(dashboardSource, /refreshDashboardAfterManualAdmImport\(\)/);
@@ -1276,7 +1279,7 @@ class MemoryStatement {
       }
       if (q.includes("status in")) {
         const rows = Array.from(this.db.admImportJobs.values())
-          .filter((row) => row.server_id === this.values[0] && ["queued", "writing", "rebuilding", "failed_retryable"].includes(String(row.status)))
+          .filter((row) => row.server_id === this.values[0] && ["queued", "processing", "parsing", "writing", "rebuilding", "failed_retryable"].includes(String(row.status)))
           .sort((a, b) => String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? "")));
         return (rows[0] ?? null) as T | null;
       }
@@ -1343,7 +1346,7 @@ class MemoryStatement {
       const source = String(this.values[0] ?? "");
       const limit = Number(this.values[1] ?? 5);
       const rows = Array.from(this.db.admImportJobs.values())
-        .filter((row) => row.source === source && ["queued", "failed_retryable", "rebuilding"].includes(String(row.status)))
+        .filter((row) => row.source === source && ["queued", "processing", "parsing", "writing", "failed_retryable", "rebuilding"].includes(String(row.status)))
         .sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")))
         .slice(0, limit);
       return { results: rows as T[] };

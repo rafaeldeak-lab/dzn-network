@@ -318,7 +318,7 @@ export type AdmImportJobProgressResult = {
   job_id: string;
   filename: string;
   source: string;
-  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "completed_with_warnings" | "failed" | "failed_retryable";
+  status: "queued" | "processing" | "parsing" | "writing" | "rebuilding" | "completed" | "completed_with_warnings" | "failed" | "failed_retryable";
   total_lines: number;
   current_line: number;
   chunk_size: number;
@@ -2497,7 +2497,7 @@ export async function startAdmImportLineJobForServer(
   const source = input.source ?? "manual_file_upload";
   const db = requireDb(env);
   const existingJob = await getAdmImportJobForFilename(env, input.linkedServerId, filename);
-  if (existingJob && ["queued", "writing", "rebuilding", "failed_retryable"].includes(String(existingJob.status))) {
+  if (existingJob && ["queued", "processing", "parsing", "writing", "rebuilding", "failed_retryable"].includes(String(existingJob.status))) {
     return toAdmImportJobProgress(existingJob);
   }
 
@@ -2757,7 +2757,7 @@ export async function processPendingAdmImportJobs(
     .prepare(
       `SELECT * FROM adm_import_jobs
        WHERE source = ?
-         AND status IN ('queued', 'failed_retryable', 'rebuilding')
+         AND status IN ('queued', 'processing', 'parsing', 'writing', 'failed_retryable', 'rebuilding')
        ORDER BY created_at ASC
        LIMIT ?`,
     )
@@ -3494,7 +3494,7 @@ async function getAdmImportJobForFilename(env: Env, linkedServerId: string, file
       `SELECT * FROM adm_import_jobs
        WHERE server_id = ? AND filename = ?
        ORDER BY
-         CASE WHEN status IN ('queued', 'writing', 'rebuilding', 'failed_retryable') THEN 0 WHEN status IN ('completed', 'completed_with_warnings') THEN 1 ELSE 2 END,
+         CASE WHEN status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable') THEN 0 WHEN status IN ('completed', 'completed_with_warnings') THEN 1 ELSE 2 END,
          updated_at DESC,
          created_at DESC
        LIMIT 1`,
@@ -3508,7 +3508,7 @@ async function getActiveAdmImportJob(env: Env, linkedServerId: string) {
     .prepare(
       `SELECT * FROM adm_import_jobs
        WHERE server_id = ?
-         AND status IN ('queued', 'writing', 'rebuilding', 'failed_retryable')
+         AND status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable')
        ORDER BY updated_at DESC, created_at DESC
        LIMIT 1`,
     )
@@ -3683,7 +3683,7 @@ function parseJobFileResult(value: string | null): ManualAdmBulkFileResult | nul
 }
 
 function normalizeImportJobStatus(value: string): AdmImportJobProgressResult["status"] {
-  if (value === "queued" || value === "parsing" || value === "writing" || value === "rebuilding" || value === "completed" || value === "completed_with_warnings" || value === "failed" || value === "failed_retryable") return value;
+  if (value === "queued" || value === "processing" || value === "parsing" || value === "writing" || value === "rebuilding" || value === "completed" || value === "completed_with_warnings" || value === "failed" || value === "failed_retryable") return value;
   return "queued";
 }
 
