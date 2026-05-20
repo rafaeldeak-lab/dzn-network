@@ -2350,24 +2350,34 @@ async function parseJsonPayload(response: Response) {
 
 function buildRequestUrlPathOnly(serviceId: string, method: "download" | "seek" | "stat", path: string) {
   const base = `/services/${encodeURIComponent(serviceId)}/gameservers/file_server/${method}`;
+  const encodedPath = encodeNitradoFileQueryPath(path);
   if (method === "download") {
-    return `${base}?file=${encodeURIComponent(path)}`;
+    return `${base}?file=${encodedPath}`;
   }
   if (method === "seek") {
-    return `${base}?file=${encodeURIComponent(path)}&offset=0&length=${ADM_SAMPLE_BYTES}&mode=raw`;
+    return `${base}?file=${encodedPath}&offset=0&length=${ADM_SAMPLE_BYTES}&mode=raw`;
   }
-  return `${base}?files[]=${encodeURIComponent(path)}`;
+  return `${base}?files[]=${encodedPath}`;
 }
 
 function buildSafeRequestUrlPathOnly(method: "download" | "seek" | "stat", redactedPath: string) {
   const base = `/services/{serviceId}/gameservers/file_server/${method}`;
+  const encodedPath = encodeNitradoFileQueryPath(redactedPath);
   if (method === "download") {
-    return `${base}?file=${encodeURIComponent(redactedPath)}`;
+    return `${base}?file=${encodedPath}`;
   }
   if (method === "seek") {
-    return `${base}?file=${encodeURIComponent(redactedPath)}&offset=0&length=${ADM_SAMPLE_BYTES}&mode=raw`;
+    return `${base}?file=${encodedPath}&offset=0&length=${ADM_SAMPLE_BYTES}&mode=raw`;
   }
-  return `${base}?files[]=${encodeURIComponent(redactedPath)}`;
+  return `${base}?files[]=${encodedPath}`;
+}
+
+function encodeNitradoFileQueryPath(path: string) {
+  return path
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
 }
 
 function extractDownloadToken(payload: unknown): DownloadTokenDescriptor | null {

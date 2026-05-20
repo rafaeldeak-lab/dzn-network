@@ -407,6 +407,8 @@ async function runNitradoReadFallbackTests() {
     assert.equal(directRead.downloadOk, true);
     assert.equal(directRead.selectedPath, `dayzps/config/${latestAdm}`);
     assert.equal(directRead.text?.includes("AdminLog started on 2026-05-20 at 08:02:52"), true);
+    assert.equal(directRead.readAttempts.some((attempt) => attempt.requestUrlPathOnly.includes(`file=dayzps/config/${latestAdm}`)), true);
+    assert.equal(directRead.readAttempts.some((attempt) => attempt.requestUrlPathOnly.includes("dayzps%2Fconfig")), false);
 
     const debug = await debugNitradoAdmFileDiscovery("unit-token", "17428528", {
       knownLatestFileName: latestAdm,
