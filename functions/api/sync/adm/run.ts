@@ -49,10 +49,10 @@ export async function handleAdmSyncRun(
   { request, env }: PagesContext,
   handlers: AdmSyncRunHandlers = DEFAULT_HANDLERS,
 ) {
-  const body = await readJson<AdmSyncRunBody>(request);
   if (isCronAuthorized(request, env)) {
     const unauthorized = requireCronSecret(request, env);
     if (unauthorized) return unauthorized;
+    const body = await readJson<AdmSyncRunBody>(request);
     const source = normalizeAutomationCronSource(body.source, body.cron);
     const startedAt = new Date().toISOString();
     await safeRecordCronRun(env, source, "started", startedAt);
@@ -104,6 +104,7 @@ export async function handleAdmSyncRun(
   const user = await handlers.resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
+  const body = await readJson<AdmSyncRunBody>(request);
   try {
     const result = await handlers.runManual(env, user.id, sanitizeLinkedServerId(body.linked_server_id), {
       triggerType: "manual",

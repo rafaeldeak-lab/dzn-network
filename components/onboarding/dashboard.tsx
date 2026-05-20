@@ -90,6 +90,51 @@ type AdmBulkProgress = {
   runnerState?: "running" | "paused" | "finishing";
 };
 
+type DashboardActionStatus = "queued" | "running" | "polling" | "completed" | "failed" | "cancelled" | "warning";
+
+type DashboardActionProgress = {
+  actionKey: string;
+  title: string;
+  status: DashboardActionStatus;
+  progress: number | null;
+  currentStepIndex: number;
+  totalSteps: number;
+  currentStep: string;
+  detail: string | null;
+  startedAt: string;
+  lastUpdatedAt: string;
+  errorMessage?: string | null;
+  successSummary?: string | null;
+  warningMessage?: string | null;
+  indeterminate?: boolean;
+  stats?: Record<string, string | number | null | undefined>;
+  major?: boolean;
+};
+
+type DashboardActionRefreshScope = "full" | "sync" | "billing" | "public-cache" | "discord" | "dashboard-health" | "none";
+
+type DashboardActionHelpers = {
+  setStep: (stepIndex: number, detail?: string, progress?: number | null) => void;
+  setDetail: (detail: string, progress?: number | null) => void;
+  setProgress: (progress: number | null, detail?: string) => void;
+  setStats: (stats: DashboardActionProgress["stats"]) => void;
+  setPolling: (detail?: string, progress?: number | null) => void;
+  setWarning: (message: string, detail?: string) => void;
+};
+
+type RunDashboardActionInput<T> = {
+  actionKey: string;
+  title: string;
+  steps: string[];
+  run: (helpers: DashboardActionHelpers) => Promise<T>;
+  onSuccess?: (result: T) => Promise<void> | void;
+  onError?: (error: unknown) => Promise<void> | void;
+  refreshAfterSuccess?: DashboardActionRefreshScope | DashboardActionRefreshScope[] | boolean;
+  successSummary?: (result: T) => string;
+  major?: boolean;
+  autoHardRefreshOnComplete?: boolean;
+};
+
 type DashboardTotalsSnapshot = {
   kills: number;
   deaths: number;
@@ -111,6 +156,59 @@ const ADM_IMPORT_PREVIOUS_LINE_CONTEXT = 5;
 const ADM_CHUNK_RUNNER_DELAY_MS = 300;
 const ADM_CHUNK_RUNNER_RATE_LIMIT_DELAY_MS = 1500;
 const ADM_CHUNK_RUNNER_MAX_BROWSER_CHUNKS = 1200;
+const DASHBOARD_ACTION_STORAGE_PREFIX = "dzn:activeDashboardAction:";
+const autoHardRefreshOnComplete = false;
+const ADM_PROGRESS_ACTION_KEYS = new Set([
+  "import-adm-files",
+  "continue-import",
+  "resume-import",
+  "force-process-latest-adm",
+  "backfill-missing-adm",
+  "run-manual-sync",
+]);
+
+function dashboardActionStorageKey(serverId: string) {
+  return `${DASHBOARD_ACTION_STORAGE_PREFIX}${serverId}`;
+}
+
+function loadDashboardActionState(serverId: string): DashboardActionProgress | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(dashboardActionStorageKey(serverId)) ?? window.sessionStorage.getItem(dashboardActionStorageKey(serverId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DashboardActionProgress;
+    if (!parsed?.actionKey || !parsed.title || !parsed.status) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDashboardActionState(serverId: string, action: DashboardActionProgress | null) {
+  if (typeof window === "undefined") return;
+  const key = dashboardActionStorageKey(serverId);
+  try {
+    if (!action) {
+      window.localStorage.removeItem(key);
+      window.sessionStorage.removeItem(key);
+      return;
+    }
+    const payload = JSON.stringify(action);
+    window.localStorage.setItem(key, payload);
+    window.sessionStorage.setItem(key, payload);
+  } catch {
+    // Storage is best-effort only; visible in-memory progress still works.
+  }
+}
+
+function isActiveDashboardActionStatus(status?: DashboardActionStatus | null) {
+  return status === "queued" || status === "running" || status === "polling";
+}
+
+function clampActionProgress(progress: number | null | undefined) {
+  if (progress === null || progress === undefined || Number.isNaN(progress)) return null;
+  return Math.max(0, Math.min(100, Math.round(progress)));
+}
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -335,12 +433,14 @@ function ServerDashboard({
   const [lastRecentEventsRefreshAt, setLastRecentEventsRefreshAt] = useState<string | null>(null);
   const [lastBillingRefreshAt, setLastBillingRefreshAt] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
+  const [dashboardAction, setDashboardAction] = useState<DashboardActionProgress | null>(() => loadDashboardActionState(serverProp.id));
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const dashboardHealthRequestIdRef = useRef(0);
   const lastGoodDashboardHealthRef = useRef(lastGoodDashboardHealth);
   const onRefreshRef = useRef(onRefresh);
+  const dashboardActionRef = useRef<DashboardActionProgress | null>(dashboardAction);
   const admChunkRunnerControlRef = useRef({ paused: false, cancelled: false, runId: 0 });
   const server = useMemo(
     () => ({
@@ -350,6 +450,28 @@ function ServerDashboard({
     [serverInfoOverride, serverProp],
   );
 
+  function updateDashboardAction(patch: Partial<DashboardActionProgress>) {
+    setDashboardAction((current) => {
+      if (!current) return current;
+      const next: DashboardActionProgress = {
+        ...current,
+        ...patch,
+        progress: patch.progress === undefined ? current.progress : clampActionProgress(patch.progress),
+        stats: patch.stats === undefined ? current.stats : patch.stats,
+        lastUpdatedAt: new Date().toISOString(),
+      };
+      dashboardActionRef.current = next;
+      saveDashboardActionState(server.id, next);
+      return next;
+    });
+  }
+
+  function clearDashboardAction() {
+    dashboardActionRef.current = null;
+    setDashboardAction(null);
+    saveDashboardActionState(server.id, null);
+  }
+
   useEffect(() => {
     onRefreshRef.current = onRefresh;
   }, [onRefresh]);
@@ -357,6 +479,13 @@ function ServerDashboard({
   useEffect(() => {
     lastGoodDashboardHealthRef.current = lastGoodDashboardHealth;
   }, [lastGoodDashboardHealth]);
+
+  useEffect(() => {
+    dashboardActionRef.current = dashboardAction;
+    if (dashboardAction && isActiveDashboardActionStatus(dashboardAction.status)) {
+      saveDashboardActionState(server.id, dashboardAction);
+    }
+  }, [dashboardAction, server.id]);
 
   const tags = useMemo(() => {
     try {
@@ -480,44 +609,55 @@ function ServerDashboard({
     void Promise.resolve().then(refreshDashboardHealth);
   }, [refreshDashboardHealth]);
 
-  const rebuildPublicProfileCache = useCallback(async () => {
-    setRebuildingPublicCache(true);
-    setActionMessage("");
-    try {
-      const result = await rebuildPublicCache(server.id);
-      setPublicCacheRebuildResult(result);
-      setPublicCacheDebug(result.after);
-      setActionMessage("Public profile cache rebuilt from current server, stats, and sync data.");
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Could not rebuild public profile cache.");
-    } finally {
-      setRebuildingPublicCache(false);
-    }
-  }, [server.id]);
+  async function rebuildPublicProfileCache() {
+    await runDashboardAction({
+      actionKey: "rebuild-public-cache",
+      title: "Rebuilding Public Cache",
+      steps: ["Requesting public cache rebuild", "Saving public snapshot", "Refreshing dashboard"],
+      refreshAfterSuccess: ["public-cache", "dashboard-health"],
+      run: async (action) => {
+        setRebuildingPublicCache(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Rebuilding the public profile cache from current stats.");
+          const result = await rebuildPublicCache(server.id);
+          setPublicCacheRebuildResult(result);
+          setPublicCacheDebug(result.after);
+          setLastGoodPublicCache(result.after);
+          action.setStep(2, "Public cache snapshot saved.", 72);
+          return result;
+        } finally {
+          setRebuildingPublicCache(false);
+        }
+      },
+      successSummary: () => "Public profile cache rebuilt from current server, stats, and sync data.",
+    });
+  }
 
-  const recoverSyncLocks = useCallback(async () => {
-    setRecoveringSyncLocks(true);
-    setActionMessage("");
-    try {
-      const result = await recoverStuckSyncLocks(server.id);
-      setSyncLockRecoveryResult(result);
-      const [health, status, cacheDebug] = await Promise.all([
-        getAutomationHealth().catch(() => null),
-        getSyncStatus(server.id).catch(() => null),
-        getPublicCacheDebug(server.id).catch(() => null),
-      ]);
-      if (health) setAutomationHealth(health);
-      if (status?.status) setSyncStatus(status.status);
-      if (cacheDebug) setPublicCacheDebug(cacheDebug);
-      setActionMessage(result.recovered
+  async function recoverSyncLocks() {
+    await runDashboardAction({
+      actionKey: "recover-stuck-sync-jobs",
+      title: "Recovering Stuck Sync Jobs",
+      steps: ["Finding stale locks/jobs", "Releasing or retrying jobs", "Refreshing automation state"],
+      refreshAfterSuccess: ["sync", "public-cache", "dashboard-health"],
+      run: async (action) => {
+        setRecoveringSyncLocks(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Finding stale locks and chunk jobs.");
+          const result = await recoverStuckSyncLocks(server.id);
+          setSyncLockRecoveryResult(result);
+          action.setStep(2, result.recovered ? "Recovered stale sync locks." : "No stale sync locks needed recovery.", 70);
+          return result;
+        } finally {
+          setRecoveringSyncLocks(false);
+        }
+      },
+      successSummary: (result) => result.recovered
         ? "Recovered stale sync locks for this server."
-        : "No stale sync locks needed recovery.");
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Could not recover sync locks.");
-    } finally {
-      setRecoveringSyncLocks(false);
-    }
-  }, [server.id]);
+        : "No stale sync locks needed recovery.",
+    });
+  }
 
   const serverDisplayName = server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name;
   const effectiveServerMode = server.server_mode ?? server.server_type;
@@ -623,6 +763,9 @@ function ServerDashboard({
     "status_sync_newer_than_public_cache",
     "adm_newer_than_public_cache",
   ].includes(flag));
+  const activeDashboardAction = isActiveDashboardActionStatus(dashboardAction?.status) ? dashboardAction : null;
+  const isDashboardActionActive = Boolean(activeDashboardAction);
+  const dashboardActionKey = activeDashboardAction?.actionKey ?? null;
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -702,6 +845,193 @@ function ServerDashboard({
     }
   }, [lastRefreshedAt, server.id]);
 
+  async function refreshDashboardDataAfterAction(scope: RunDashboardActionInput<unknown>["refreshAfterSuccess"] = "full") {
+    if (scope === false || scope === "none") return true;
+    const scopes = scope === true || scope === undefined
+      ? new Set<DashboardActionRefreshScope>(["full"])
+      : new Set(Array.isArray(scope) ? scope : [scope]);
+    const includeFull = scopes.has("full");
+    const tasks: Array<Promise<unknown>> = [];
+
+    if (includeFull || scopes.has("dashboard-health")) tasks.push(refreshDashboardHealth());
+    if (includeFull || scopes.has("sync")) tasks.push(refreshSyncData({ warnOnError: false, queueIfBusy: true }));
+    if (includeFull) tasks.push(onRefreshRef.current());
+    if (includeFull || scopes.has("billing")) tasks.push(refreshBilling());
+    if (includeFull || scopes.has("discord")) tasks.push(refreshDiscordChannels());
+    if (includeFull || scopes.has("public-cache")) {
+      tasks.push(getPublicCacheDebug(server.id).then((cacheDebug) => {
+        setPublicCacheDebug(cacheDebug);
+        setLastGoodPublicCache(cacheDebug);
+      }));
+    }
+    if (includeFull || scopes.has("sync")) {
+      tasks.push(getAutomationHealth().then((health) => {
+        setAutomationHealth(health);
+        setLastGoodAutomationHealth(health);
+      }));
+    }
+
+    const results = await Promise.allSettled(tasks);
+    const ok = results.every((result) => result.status === "fulfilled");
+    if (!ok) {
+      setFailedEndpoint("action-refresh");
+      setLastRefreshError(firstRejectedMessage(...results));
+      setFailedRefreshCount((count) => count + 1);
+      setLiveRefreshStatus("stale");
+      setLiveRefreshWarning(`Action completed, but dashboard refresh failed. Showing last successful data from ${lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "the previous refresh"}.`);
+    }
+    return ok;
+  }
+
+  async function runDashboardAction<T>({
+    actionKey,
+    title,
+    steps,
+    run,
+    onSuccess,
+    onError,
+    refreshAfterSuccess = "full",
+    successSummary,
+    major = false,
+    autoHardRefreshOnComplete: hardRefresh = autoHardRefreshOnComplete,
+  }: RunDashboardActionInput<T>): Promise<T | null> {
+    const existing = dashboardActionRef.current;
+    const allowInterrupt = actionKey === "cancel-import";
+    if (existing && isActiveDashboardActionStatus(existing.status) && !allowInterrupt) {
+      setActionMessage(existing.actionKey === actionKey
+        ? `${existing.title} is already running.`
+        : `${existing.title} is running. Wait for it to finish before starting another dashboard action.`);
+      return null;
+    }
+
+    const startedAt = new Date().toISOString();
+    const initialAction: DashboardActionProgress = {
+      actionKey,
+      title,
+      status: "queued",
+      progress: steps.length ? 0 : null,
+      currentStepIndex: steps.length ? 1 : 0,
+      totalSteps: steps.length,
+      currentStep: steps[0] ?? "Starting action",
+      detail: "Queued",
+      startedAt,
+      lastUpdatedAt: startedAt,
+      indeterminate: !steps.length,
+      major,
+    };
+    dashboardActionRef.current = initialAction;
+    setDashboardAction(initialAction);
+    saveDashboardActionState(server.id, initialAction);
+    setActionMessage(`${title} started.`);
+
+    const helpers: DashboardActionHelpers = {
+      setStep: (stepIndex, detail, progress) => {
+        const clampedStep = Math.max(1, Math.min(Math.max(steps.length, 1), stepIndex));
+        updateDashboardAction({
+          status: "running",
+          currentStepIndex: clampedStep,
+          currentStep: steps[clampedStep - 1] ?? `Step ${clampedStep}`,
+          detail: detail ?? null,
+          progress: progress ?? (steps.length ? ((clampedStep - 1) / steps.length) * 100 : null),
+          indeterminate: progress === null,
+          errorMessage: null,
+          warningMessage: null,
+        });
+      },
+      setDetail: (detail, progress) => updateDashboardAction({
+        status: "running",
+        detail,
+        progress: progress ?? undefined,
+        indeterminate: progress === null ? true : undefined,
+      }),
+      setProgress: (progress, detail) => updateDashboardAction({
+        status: "running",
+        progress,
+        detail: detail ?? undefined,
+        indeterminate: progress === null,
+      }),
+      setStats: (stats) => updateDashboardAction({ stats }),
+      setPolling: (detail, progress) => updateDashboardAction({
+        status: "polling",
+        detail: detail ?? "Polling for updated status",
+        progress: progress ?? undefined,
+        indeterminate: progress === null,
+      }),
+      setWarning: (message, detail) => updateDashboardAction({
+        status: "warning",
+        warningMessage: message,
+        detail: detail ?? null,
+      }),
+    };
+
+    try {
+      helpers.setStep(1, "Running");
+      const result = await run(helpers);
+      if (refreshAfterSuccess !== false && refreshAfterSuccess !== "none") {
+        helpers.setStep(steps.length || 1, "Action completed. Refreshing dashboard data...", 96);
+        await refreshDashboardDataAfterAction(refreshAfterSuccess);
+      }
+      await onSuccess?.(result);
+      const completedAt = new Date().toISOString();
+      const finalAction: DashboardActionProgress = {
+        ...(dashboardActionRef.current ?? initialAction),
+        status: "completed",
+        progress: 100,
+        currentStepIndex: Math.max(steps.length, 1),
+        currentStep: steps[steps.length - 1] ?? "Completed",
+        detail: "Dashboard data refreshed",
+        successSummary: successSummary?.(result) ?? "Action completed.",
+        errorMessage: null,
+        lastUpdatedAt: completedAt,
+      };
+      dashboardActionRef.current = finalAction;
+      setDashboardAction(finalAction);
+      saveDashboardActionState(server.id, null);
+      setActionMessage(finalAction.successSummary ?? "Action completed.");
+      if (hardRefresh) {
+        window.setTimeout(() => window.location.reload(), 1500);
+      }
+      return result;
+    } catch (error) {
+      await onError?.(error);
+      const message = error instanceof Error ? error.message : "Dashboard action failed.";
+      updateDashboardAction({
+        status: "failed",
+        errorMessage: message,
+        detail: "Last-known dashboard data is still visible.",
+      });
+      setActionMessage(message);
+      return null;
+    }
+  }
+
+  function updateAdmChunkDashboardActionProgress(
+    filename: string,
+    progress: AdmImportJobProgressResult,
+    metrics?: { chunksPerMinute: number | null; estimatedRemainingSeconds: number | null },
+  ) {
+    const action = dashboardActionRef.current;
+    if (!action || !ADM_PROGRESS_ACTION_KEYS.has(action.actionKey) || !isActiveDashboardActionStatus(action.status)) return;
+    const display = normalizeChunkProgress(progress);
+    const percent = display.totalChunks > 0 ? Math.round((display.chunksProcessed / display.totalChunks) * 100) : null;
+    updateDashboardAction({
+      status: isCompletedAdmImportJobStatus(progress.status) ? "polling" : "running",
+      progress: percent,
+      currentStep: "Processing ADM chunks",
+      detail: `${filename} chunk ${display.displayCurrentChunk}/${display.totalChunks}`,
+      stats: {
+        "Parsed kills": progress.parsed_kills,
+        "Written kills": progress.written_kills,
+        Joins: progress.joins,
+        Disconnects: progress.disconnects,
+        PlayerList: progress.playerlist_snapshots,
+        Duplicates: progress.duplicate_skips,
+        "Chunks/min": metrics?.chunksPerMinute ? Math.round(metrics.chunksPerMinute) : null,
+        "ETA": metrics?.estimatedRemainingSeconds ? formatDuration(metrics.estimatedRemainingSeconds * 1000) : null,
+      },
+    });
+  }
+
   const activeBulkAdmImportJob = findActiveAdmImportJobFromResult(bulkAdmImportResult);
   const activeAdmImportJobForPolling = syncStatusActiveAdmImportJob ?? activeBulkAdmImportJob ?? null;
   const activeAdmImportJobPollId = activeAdmImportJobForPolling?.job_id ?? null;
@@ -768,76 +1098,123 @@ function ServerDashboard({
   }, [activeAdmImportJobPollId, activeAdmImportJobPollStatus, refreshSyncData, server.id]);
 
   async function refreshNow() {
-    setActionMessage("");
-    if (shouldRefreshServerInfo(server.metadata_last_checked_at)) {
-      await refreshServerMetadata(server.id).catch(() => null);
-      await onRefresh();
-    }
-    const refreshed = await refreshSyncData({ manual: true, warnOnError: true });
-    if (refreshed) setActionMessage("Dashboard sync status refreshed. Use Run Manual Sync to process ADM log lines now.");
+    await runDashboardAction({
+      actionKey: "refresh-status",
+      title: "Refreshing Dashboard Status",
+      steps: ["Checking server metadata", "Refreshing sync status", "Refreshing dashboard"],
+      refreshAfterSuccess: "dashboard-health",
+      run: async (action) => {
+        setActionMessage("");
+        if (shouldRefreshServerInfo(server.metadata_last_checked_at)) {
+          action.setStep(1, "Requesting fresh Nitrado metadata.");
+          await refreshServerMetadata(server.id).catch(() => null);
+          await onRefresh();
+        }
+        action.setStep(2, "Refreshing sync status and recent events.", 45);
+        const refreshed = await refreshSyncData({ manual: true, warnOnError: true });
+        if (!refreshed) action.setWarning("Refresh partially failed. Last-known data remains visible.");
+        return refreshed;
+      },
+      successSummary: () => "Dashboard sync status refreshed. Use Run Manual Sync to process ADM log lines now.",
+    });
   }
 
   async function refreshServerInfo() {
-    setRefreshingServerInfo(true);
-    setActionMessage("");
-    try {
-      const result = await refreshServerMetadata(server.id);
-      setServerInfoOverride((current) => ({
-        serverId: server.id,
-        patch: {
-          ...(current?.serverId === server.id ? current.patch : {}),
-          ...metadataPatchFromRefreshResult(result),
-        },
-      }));
-      await onRefresh();
-      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
-      if (cacheDebug) setPublicCacheDebug(cacheDebug);
-      setActionMessage("Server info checked from Nitrado just now.");
-    } catch {
-      setActionMessage("Could not refresh server info. Try again.");
-    } finally {
-      setRefreshingServerInfo(false);
-    }
+    await runDashboardAction({
+      actionKey: "refresh-server-info",
+      title: "Refreshing Server Info",
+      steps: ["Requesting Nitrado status", "Updating metadata", "Refreshing dashboard"],
+      refreshAfterSuccess: ["dashboard-health", "public-cache"],
+      run: async (action) => {
+        setRefreshingServerInfo(true);
+        setActionMessage("");
+        try {
+          const beforePlayers = formatDashboardPlayerSlots(server.current_players, server.max_players ?? server.player_slots, server.player_count_last_checked_at, server.player_count_status);
+          action.setStep(1, `Current player count before refresh: ${beforePlayers}.`);
+          const result = await refreshServerMetadata(server.id);
+          const patch = metadataPatchFromRefreshResult(result);
+          setServerInfoOverride((current) => ({
+            serverId: server.id,
+            patch: {
+              ...(current?.serverId === server.id ? current.patch : {}),
+              ...patch,
+            },
+          }));
+          action.setStep(2, "Metadata updated from Nitrado.", 70);
+          action.setStats({
+            "Players before": beforePlayers,
+            "Players after": formatDashboardPlayerSlots(patch.current_players, patch.max_players ?? server.max_players ?? server.player_slots, patch.player_count_last_checked_at, patch.player_count_status),
+          });
+          await onRefresh();
+          const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
+          if (cacheDebug) {
+            setPublicCacheDebug(cacheDebug);
+            setLastGoodPublicCache(cacheDebug);
+          }
+          return result;
+        } finally {
+          setRefreshingServerInfo(false);
+        }
+      },
+      successSummary: () => "Server info checked from Nitrado just now.",
+    });
   }
 
   async function saveNitradoChecklist(next: NitradoLogSettingsConfirmation) {
-    setSavingNitradoLogSettings(true);
-    setActionMessage("");
-    try {
-      const result = await saveNitradoLogSettings(server.id, next);
-      setNitradoLogSettings(result.settings);
-      setNitradoLogSettingsCheck(null);
-      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
-      setActionMessage(result.settings.nitrado_reduce_log_output_confirmed && result.settings.nitrado_log_playerlist_confirmed
+    await runDashboardAction({
+      actionKey: "save-nitrado-log-settings",
+      title: "Saving Nitrado Log Settings",
+      steps: ["Saving settings", "Refreshing sync state"],
+      refreshAfterSuccess: "sync",
+      run: async (action) => {
+        setSavingNitradoLogSettings(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Saving owner-confirmed Nitrado log settings.");
+          const result = await saveNitradoLogSettings(server.id, next);
+          setNitradoLogSettings(result.settings);
+          setNitradoLogSettingsCheck(null);
+          action.setStep(2, "Refreshing sync state.", 80);
+          await refreshSyncData({ warnOnError: false, queueIfBusy: true });
+          return result;
+        } finally {
+          setSavingNitradoLogSettings(false);
+        }
+      },
+      successSummary: (result) => result.settings.nitrado_reduce_log_output_confirmed && result.settings.nitrado_log_playerlist_confirmed
         ? "Nitrado log settings confirmed for ADM tracking."
-        : "Nitrado log settings checklist updated.");
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to save Nitrado log settings.");
-    } finally {
-      setSavingNitradoLogSettings(false);
-    }
+        : "Nitrado log settings checklist updated.",
+    });
   }
 
   async function checkNitradoLogSettingsNow() {
-    setCheckingNitradoLogSettings(true);
-    setActionMessage("");
-    try {
-      const result = await getNitradoLogSettings(server.id, { check: true });
-      setNitradoLogSettingsCheck(result);
-      setNitradoLogSettings(result.saved_settings);
-      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
-      if (result.verified && result.valid) {
-        setActionMessage("Nitrado log settings verified automatically by DZN.");
-      } else if (result.verified && result.warnings?.length) {
-        setActionMessage(result.warnings.join(" "));
-      } else {
-        setActionMessage(result.reason ?? "DZN could not verify these Nitrado settings automatically.");
-      }
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to check Nitrado log settings.");
-    } finally {
-      setCheckingNitradoLogSettings(false);
-    }
+    await runDashboardAction({
+      actionKey: "check-nitrado-log-settings",
+      title: "Checking Nitrado Log Settings",
+      steps: ["Reading Nitrado settings", "Saving verification state", "Refreshing sync state"],
+      refreshAfterSuccess: "sync",
+      run: async (action) => {
+        setCheckingNitradoLogSettings(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Checking Nitrado log settings.");
+          const result = await getNitradoLogSettings(server.id, { check: true });
+          setNitradoLogSettingsCheck(result);
+          setNitradoLogSettings(result.saved_settings);
+          action.setStep(2, result.verified ? "Verification state saved." : "Automatic verification was inconclusive.", 66);
+          if (!result.valid && result.warnings?.length) action.setStats({ Warnings: result.warnings.length });
+          await refreshSyncData({ warnOnError: false, queueIfBusy: true });
+          return result;
+        } finally {
+          setCheckingNitradoLogSettings(false);
+        }
+      },
+      successSummary: (result) => result.verified && result.valid
+        ? "Nitrado log settings verified automatically by DZN."
+        : result.verified && result.warnings?.length
+          ? result.warnings.join(" ")
+          : result.reason ?? "DZN could not verify these Nitrado settings automatically.",
+    });
   }
 
   async function rerunLogCheck() {
@@ -856,21 +1233,32 @@ function ServerDashboard({
   }
 
   async function runSync() {
-    setSyncing(true);
-    setActionMessage("");
-    try {
-      const result = await runManualSync(server.id);
-      setLastSyncResult(result);
-      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
-      await onRefresh();
-      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
-      if (cacheDebug) setPublicCacheDebug(cacheDebug);
-      setActionMessage(getManualSyncMessage(result));
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to run manual sync.");
-    } finally {
-      setSyncing(false);
-    }
+    await runDashboardAction({
+      actionKey: "run-manual-sync",
+      title: "Running Manual Sync",
+      steps: ["Checking ADM availability", "Continuing or creating import job", "Refreshing stats and events"],
+      refreshAfterSuccess: ["sync", "dashboard-health", "public-cache"],
+      run: async (action) => {
+        setSyncing(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Checking ADM availability.");
+          const result = await runManualSync(server.id);
+          setLastSyncResult(result);
+          action.setStep(2, result.job ? `Active ADM job: ${result.job.filename}` : result.latestAdmFile ? `Latest ADM: ${result.latestAdmFile}` : "No active ADM job returned.", 70);
+          action.setStats({
+            "Lines read": result.linesRead ?? 0,
+            "Lines processed": result.linesProcessed ?? 0,
+            "Events": result.eventsCreated ?? 0,
+            "Kills": result.killsCreated ?? 0,
+          });
+          return result;
+        } finally {
+          setSyncing(false);
+        }
+      },
+      successSummary: getManualSyncMessage,
+    });
   }
 
   async function importPastedAdmNow() {
@@ -885,40 +1273,55 @@ function ServerDashboard({
       return;
     }
 
-    setManualAdmImporting(true);
-    setActionMessage("");
-    setManualAdmImportError(null);
-    setAdmImportTotalsDelta(null);
-    const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
-    try {
-      const response = await importManualAdmText(server.id, {
-        filename,
-        admText: manualAdmText,
-        source: "manual_paste",
-      });
-      if (!response.ok) {
-        setManualAdmImportError(response);
-        setActionMessage(`Manual ADM import failed: ${response.message}`);
-        return;
-      }
+    await runDashboardAction({
+      actionKey: "import-adm-paste",
+      title: "Importing Pasted ADM",
+      steps: ["Reading pasted ADM", "Importing events", "Refreshing stats and events"],
+      refreshAfterSuccess: ["sync", "dashboard-health", "public-cache"],
+      major: true,
+      run: async (action) => {
+        setManualAdmImporting(true);
+        setActionMessage("");
+        setManualAdmImportError(null);
+        setAdmImportTotalsDelta(null);
+        const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
+        try {
+          action.setStep(1, `Reading ${filename}.`);
+          const response = await importManualAdmText(server.id, {
+            filename,
+            admText: manualAdmText,
+            source: "manual_paste",
+          });
+          if (!response.ok) {
+            setManualAdmImportError(response);
+            throw new Error(response.message);
+          }
 
-      setManualAdmImportResult(response);
-      const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
-      setActionMessage(refreshed
-        ? "ADM import completed. Stats and feeds updated."
-        : "Manual ADM import succeeded, but dashboard refresh failed. Hard refresh or retry refresh.");
-    } catch (error) {
-      const failure: ManualAdmImportErrorResult = {
-        ok: false,
-        error_code: "client_exception",
-        message: error instanceof Error ? error.message : "Manual ADM import failed before a response was received.",
-        details: error instanceof Error ? error.stack ?? error.message : String(error),
-      };
-      setManualAdmImportError(failure);
-      setActionMessage(`Manual ADM import failed: ${failure.message}`);
-    } finally {
-      setManualAdmImporting(false);
-    }
+          setManualAdmImportResult(response);
+          action.setStep(2, `${response.parsed_kills} kills parsed, ${response.written_kills} kills written.`, 82);
+          action.setStats({
+            "Parsed kills": response.parsed_kills,
+            "Written kills": response.written_kills,
+            Joins: response.joins,
+            Disconnects: response.disconnects,
+          });
+          await refreshDashboardAfterManualAdmImport(beforeTotals);
+          return response;
+        } catch (error) {
+          const failure: ManualAdmImportErrorResult = {
+            ok: false,
+            error_code: "client_exception",
+            message: error instanceof Error ? error.message : "Manual ADM import failed before a response was received.",
+            details: error instanceof Error ? error.stack ?? error.message : String(error),
+          };
+          setManualAdmImportError(failure);
+          throw new Error(failure.message);
+        } finally {
+          setManualAdmImporting(false);
+        }
+      },
+      successSummary: () => "ADM import completed. Stats and feeds updated.",
+    });
   }
 
   function buildAdmBulkFiles() {
@@ -947,6 +1350,12 @@ function ServerDashboard({
   function pauseAdmChunkRunner() {
     admChunkRunnerControlRef.current.paused = true;
     setAdmChunkRunnerPaused(true);
+    updateDashboardAction({
+      status: "warning",
+      currentStep: "ADM import paused",
+      detail: "Resume Import will continue from the saved chunk. Cron may continue in the background.",
+      warningMessage: "ADM import paused by the dashboard user.",
+    });
     setActionMessage("ADM import paused. Already written events remain saved; Resume Import will continue from the next chunk.");
   }
 
@@ -960,31 +1369,38 @@ function ServerDashboard({
     }
     const confirmed = window.confirm("Cancel this ADM import job? Already imported events and stats will remain saved.");
     if (!confirmed) return;
-    admChunkRunnerControlRef.current.cancelled = true;
-    setAdmChunkRunnerPaused(false);
-    try {
-      const cancelled = await cancelAdmImportJob(server.id, active.jobId);
-      if (!cancelled.ok) {
-        setBulkAdmImportError(cancelled);
-        setActionMessage(`ADM import cancel failed: ${cancelled.message}`);
-        return;
-      }
-      setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
-        current,
-        makeProcessingBulkAdmFileResultFromJob(cancelled, cancelled.source),
-        cancelled.source,
-        Math.max(current?.files_uploaded ?? 1, 1),
-      ));
-      setActionMessage(`${active.filename} was cancelled. Already imported events remain saved.`);
-    } catch (error) {
-      const failure = makeClientAdmFailure(error, "adm_import_cancel_exception", "ADM import cancel failed before a response was received.");
-      setBulkAdmImportError(failure);
-      setActionMessage(`ADM import cancel failed: ${failure.message}`);
-    } finally {
-      setManualAdmImporting(false);
-      setAdmChunkRunnerJob(null);
-      setBulkAdmImportProgress(null);
-    }
+    await runDashboardAction({
+      actionKey: "cancel-import",
+      title: "Cancelling ADM Import",
+      steps: ["Stopping browser runner", "Marking job cancelled", "Refreshing import status"],
+      refreshAfterSuccess: "sync",
+      run: async (action) => {
+        admChunkRunnerControlRef.current.cancelled = true;
+        setAdmChunkRunnerPaused(false);
+        action.setStep(1, "Stopping the active browser chunk runner.");
+        setManualAdmImporting(true);
+        try {
+          action.setStep(2, `Cancelling ${active.filename}.`, 55);
+          const cancelled = await cancelAdmImportJob(server.id, active.jobId);
+          if (!cancelled.ok) {
+            setBulkAdmImportError(cancelled);
+            throw new Error(cancelled.message);
+          }
+          setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+            current,
+            makeProcessingBulkAdmFileResultFromJob(cancelled, cancelled.source),
+            cancelled.source,
+            Math.max(current?.files_uploaded ?? 1, 1),
+          ));
+          return cancelled;
+        } finally {
+          setManualAdmImporting(false);
+          setAdmChunkRunnerJob(null);
+          setBulkAdmImportProgress(null);
+        }
+      },
+      successSummary: () => `${active.filename} was cancelled. Already imported events remain saved.`,
+    });
   }
 
   async function previewAdmFilesNow() {
@@ -994,31 +1410,45 @@ function ServerDashboard({
       return;
     }
 
-    setManualAdmPreviewing(true);
-    setManualAdmImportError(null);
-    setBulkAdmImportError(null);
-    setAdmImportTotalsDelta(null);
-    setActionMessage("");
-    try {
-      const response = await bulkImportAdmFiles(server.id, {
-        files,
-        source: "manual_file_upload",
-        preview: true,
-      });
-      if (!response.ok) {
-        setBulkAdmImportError(response);
-        setActionMessage(`ADM file preview failed: ${response.message}`);
-        return;
-      }
-      setBulkAdmImportResult(response);
-      setActionMessage(`ADM file preview found ${response.parsed_kills} PvP kills across ${response.files_uploaded} file${response.files_uploaded === 1 ? "" : "s"}.`);
-    } catch (error) {
-      const failure = makeClientAdmFailure(error, "bulk_preview_exception", "ADM file preview failed before a response was received.");
-      setBulkAdmImportError(failure);
-      setActionMessage(`ADM file preview failed: ${failure.message}`);
-    } finally {
-      setManualAdmPreviewing(false);
-    }
+    await runDashboardAction({
+      actionKey: "preview-adm-files",
+      title: "Previewing ADM Files",
+      steps: ["Reading selected files", "Parsing preview", "Showing results"],
+      refreshAfterSuccess: false,
+      run: async (action) => {
+        setManualAdmPreviewing(true);
+        setManualAdmImportError(null);
+        setBulkAdmImportError(null);
+        setAdmImportTotalsDelta(null);
+        setActionMessage("");
+        try {
+          action.setStep(1, `Reading ${files.length} selected ADM file${files.length === 1 ? "" : "s"}.`);
+          const response = await bulkImportAdmFiles(server.id, {
+            files,
+            source: "manual_file_upload",
+            preview: true,
+          });
+          if (!response.ok) {
+            setBulkAdmImportError(response);
+            throw new Error(response.message);
+          }
+          setBulkAdmImportResult(response);
+          action.setStep(2, `${response.parsed_kills} PvP kills found in preview.`, 82);
+          action.setStats({
+            Files: response.files_uploaded,
+            "Parsed kills": response.parsed_kills,
+          });
+          return response;
+        } catch (error) {
+          const failure = makeClientAdmFailure(error, "bulk_preview_exception", "ADM file preview failed before a response was received.");
+          setBulkAdmImportError(failure);
+          throw new Error(failure.message);
+        } finally {
+          setManualAdmPreviewing(false);
+        }
+      },
+      successSummary: (response) => `ADM file preview found ${response.parsed_kills} PvP kills across ${response.files_uploaded} file${response.files_uploaded === 1 ? "" : "s"}.`,
+    });
   }
 
   async function importAdmFilesNow() {
@@ -1028,45 +1458,60 @@ function ServerDashboard({
       return;
     }
 
-    setManualAdmImporting(true);
-    setBulkAdmImportProgress({ current: 0, total: files.length, filename: null });
-    setActionMessage("");
-    setManualAdmImportError(null);
-    setBulkAdmImportError(null);
-    setAdmImportTotalsDelta(null);
-    setBulkAdmImportResult(summarizeClientBulkAdmResults([], manualAdmFiles.length ? "manual_file_upload" : "manual_paste", files.length));
-    const source = manualAdmFiles.length ? "manual_file_upload" : "manual_paste";
-    const fileResults: BulkAdmFileResult[] = [];
-    const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
-    try {
-      for (const [index, file] of files.entries()) {
-        setBulkAdmImportProgress({ current: index + 1, total: files.length, filename: file.filename });
-        const fileResult = await importSingleAdmFileInChunks(file, source, index + 1, files.length);
-        fileResults.push(fileResult);
-        setBulkAdmImportResult(summarizeClientBulkAdmResults([...fileResults], source, files.length));
-        if (isProcessingBulkAdmFile(fileResult)) {
-          setActionMessage(admChunkRunnerControlRef.current.paused
-            ? "ADM import paused. Resume Import will continue from the saved chunk."
-            : "ADM import is still processing. Use Continue Import to keep the browser runner attached.");
-          return;
-        }
-      }
+    await runDashboardAction({
+      actionKey: "import-adm-files",
+      title: "Importing ADM Files",
+      steps: ["Reading selected files", "Creating chunk jobs", "Processing chunks", "Finishing imports", "Refreshing stats and events"],
+      refreshAfterSuccess: ["sync", "dashboard-health", "public-cache"],
+      major: true,
+      run: async (action) => {
+        setManualAdmImporting(true);
+        setBulkAdmImportProgress({ current: 0, total: files.length, filename: null });
+        setActionMessage("");
+        setManualAdmImportError(null);
+        setBulkAdmImportError(null);
+        setAdmImportTotalsDelta(null);
+        setBulkAdmImportResult(summarizeClientBulkAdmResults([], manualAdmFiles.length ? "manual_file_upload" : "manual_paste", files.length));
+        const source = manualAdmFiles.length ? "manual_file_upload" : "manual_paste";
+        const fileResults: BulkAdmFileResult[] = [];
+        const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
+        try {
+          action.setStep(1, `Preparing ${files.length} ADM file${files.length === 1 ? "" : "s"}.`);
+          for (const [index, file] of files.entries()) {
+            const filePercent = Math.round((index / Math.max(files.length, 1)) * 100);
+            action.setStep(2, `Creating or attaching chunk job for ${file.filename}.`, filePercent);
+            setBulkAdmImportProgress({ current: index + 1, total: files.length, filename: file.filename });
+            const fileResult = await importSingleAdmFileInChunks(file, source, index + 1, files.length);
+            fileResults.push(fileResult);
+            setBulkAdmImportResult(summarizeClientBulkAdmResults([...fileResults], source, files.length));
+            if (isProcessingBulkAdmFile(fileResult)) {
+              action.setWarning(
+                admChunkRunnerControlRef.current.paused ? "ADM import paused." : "ADM import is still processing.",
+                admChunkRunnerControlRef.current.paused
+                  ? "Resume Import will continue from the saved chunk."
+                  : "Continue Import can keep the browser runner attached; cron remains the backup.",
+              );
+              return summarizeClientBulkAdmResults(fileResults, source, files.length);
+            }
+          }
 
-      const response = summarizeClientBulkAdmResults(fileResults, source, files.length);
-      setBulkAdmImportResult(response);
-      const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
-      setActionMessage(refreshed
-        ? "ADM import completed. Stats and feeds updated."
-        : "Bulk ADM import succeeded, but dashboard refresh failed. Hard refresh or retry refresh.");
-    } catch (error) {
-      const failure = makeClientAdmFailure(error, "bulk_import_exception", "Bulk ADM import failed before a response was received.");
-      setBulkAdmImportError(failure);
-      setActionMessage(`Bulk ADM import failed: ${failure.message}`);
-    } finally {
-      setManualAdmImporting(false);
-      if (!admChunkRunnerControlRef.current.paused) setAdmChunkRunnerJob(null);
-      setBulkAdmImportProgress(null);
-    }
+          const response = summarizeClientBulkAdmResults(fileResults, source, files.length);
+          setBulkAdmImportResult(response);
+          action.setStep(4, "Finishing imports and rebuilding stats.", 92);
+          await refreshDashboardAfterManualAdmImport(beforeTotals);
+          return response;
+        } catch (error) {
+          const failure = makeClientAdmFailure(error, "bulk_import_exception", "Bulk ADM import failed before a response was received.");
+          setBulkAdmImportError(failure);
+          throw new Error(failure.message);
+        } finally {
+          setManualAdmImporting(false);
+          if (!admChunkRunnerControlRef.current.paused) setAdmChunkRunnerJob(null);
+          setBulkAdmImportProgress(null);
+        }
+      },
+      successSummary: () => "ADM import completed. Stats and feeds updated.",
+    });
   }
 
   async function retryBulkAdmFile(filename: string) {
@@ -1118,54 +1563,67 @@ function ServerDashboard({
     const selectedFile = buildAdmBulkFiles().find((candidate) => candidate.filename === filename);
     const source = selectedFile ? (manualAdmFiles.length ? "manual_file_upload" : "manual_paste") : bulkAdmImportResult?.source ?? "manual_file_upload";
     const selectedCount = Math.max(buildAdmBulkFiles().length, bulkAdmImportResult?.files_uploaded ?? 1);
-    setManualAdmImporting(true);
-    setBulkAdmImportProgress({ current: 1, total: 1, filename });
-    setActionMessage("");
-    setBulkAdmImportError(null);
-    const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
-    try {
-      if (selectedFile) {
-        const fileResult = await importSingleAdmFileInChunks(selectedFile, source, 1, 1);
-        setBulkAdmImportResult((current) => replaceBulkAdmFileResult(current, fileResult, source, selectedCount));
-      } else if (jobId) {
-        await runServerSideAdmImportJobToCompletion(filename, jobId, source, selectedCount);
-      } else {
-        const latest = await getLatestAdmImportJob(server.id, filename);
-        if (latest.ok && (isActiveAdmImportJobStatus(latest.job.status) || latest.job.status === "failed_retryable")) {
-          setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
-            current,
-            makeProcessingBulkAdmFileResultFromJob(latest.job, latest.job.source),
-            latest.job.source,
-            selectedCount,
-          ));
-          await runServerSideAdmImportJobToCompletion(filename, latest.job.job_id, latest.job.source, selectedCount);
-        } else {
-          setBulkAdmImportError({
-            ok: false,
-            error_code: "adm_import_job_unavailable",
-            message: "No selected file or active import job is available. Reselect the ADM file to continue.",
-            details: { filename },
-          });
-          return;
+    await runDashboardAction({
+      actionKey: admChunkRunnerPaused ? "resume-import" : "continue-import",
+      title: admChunkRunnerPaused ? "Resuming ADM Import" : "Continuing ADM Import",
+      steps: ["Attaching to chunk job", "Processing ADM chunks", "Finishing import", "Refreshing stats and events"],
+      refreshAfterSuccess: ["sync", "dashboard-health", "public-cache"],
+      major: true,
+      run: async (action) => {
+        setManualAdmImporting(true);
+        setBulkAdmImportProgress({ current: 1, total: 1, filename });
+        setActionMessage("");
+        setBulkAdmImportError(null);
+        const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
+        try {
+          action.setStep(1, `Attaching to ${filename}.`);
+          if (selectedFile) {
+            const fileResult = await importSingleAdmFileInChunks(selectedFile, source, 1, 1);
+            setBulkAdmImportResult((current) => replaceBulkAdmFileResult(current, fileResult, source, selectedCount));
+          } else if (jobId) {
+            await runServerSideAdmImportJobToCompletion(filename, jobId, source, selectedCount);
+          } else {
+            const latest = await getLatestAdmImportJob(server.id, filename);
+            if (latest.ok && (isActiveAdmImportJobStatus(latest.job.status) || latest.job.status === "failed_retryable")) {
+              setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+                current,
+                makeProcessingBulkAdmFileResultFromJob(latest.job, latest.job.source),
+                latest.job.source,
+                selectedCount,
+              ));
+              await runServerSideAdmImportJobToCompletion(filename, latest.job.job_id, latest.job.source, selectedCount);
+            } else {
+              const failure = {
+                ok: false,
+                error_code: "adm_import_job_unavailable",
+                message: "No selected file or active import job is available. Reselect the ADM file to continue.",
+                details: { filename },
+              } satisfies ManualAdmImportErrorResult;
+              setBulkAdmImportError(failure);
+              throw new Error(failure.message);
+            }
+          }
+          if (admChunkRunnerControlRef.current.paused) {
+            action.setWarning("ADM import paused.", "Resume Import will continue from the saved chunk.");
+            return null;
+          }
+          action.setStep(3, "Finishing import and refreshing totals.", 94);
+          await refreshDashboardAfterManualAdmImport(beforeTotals);
+          return null;
+        } catch (error) {
+          const failure = makeClientAdmFailure(error, "adm_import_continue_exception", "ADM import continue failed before a response was received.");
+          setBulkAdmImportError(failure);
+          throw new Error(failure.message);
+        } finally {
+          setManualAdmImporting(false);
+          if (!admChunkRunnerControlRef.current.paused) setAdmChunkRunnerJob(null);
+          setBulkAdmImportProgress(null);
         }
-      }
-      if (admChunkRunnerControlRef.current.paused) {
-        setActionMessage("ADM import paused. Resume Import will continue from the saved chunk.");
-        return;
-      }
-      const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
-      setActionMessage(refreshed
-        ? "ADM import job continued. Stats and feeds updated from the latest available progress."
-        : "ADM import job continued. Dashboard refresh failed, but the job state is still visible.");
-    } catch (error) {
-      const failure = makeClientAdmFailure(error, "adm_import_continue_exception", "ADM import continue failed before a response was received.");
-      setBulkAdmImportError(failure);
-      setActionMessage(`ADM import continue failed: ${failure.message}`);
-    } finally {
-      setManualAdmImporting(false);
-      if (!admChunkRunnerControlRef.current.paused) setAdmChunkRunnerJob(null);
-      setBulkAdmImportProgress(null);
-    }
+      },
+      successSummary: () => admChunkRunnerPaused
+        ? "ADM import resumed. Stats and feeds updated from the latest available progress."
+        : "ADM import job continued. Stats and feeds updated from the latest available progress.",
+    });
   }
 
   async function runServerSideAdmImportJobToCompletion(
@@ -1221,6 +1679,7 @@ function ServerDashboard({
         activeInBrowser: true,
         runnerState: isCompletedAdmImportJobStatus(nextProgress.status) ? "finishing" : "running",
       });
+      updateAdmChunkDashboardActionProgress(filename, nextProgress, metrics);
       if (isCompletedAdmImportJobStatus(nextProgress.status) || nextProgress.status === "failed" || nextProgress.status === "failed_retryable" || nextProgress.status === "cancelled") {
         return;
       }
@@ -1289,6 +1748,7 @@ function ServerDashboard({
       activeInBrowser: true,
       runnerState: "running",
     });
+    updateAdmChunkDashboardActionProgress(file.filename, progress);
 
     let browserChunksProcessed = 0;
     while (progress.current_line < lines.length && !isCompletedAdmImportJobStatus(progress.status)) {
@@ -1326,6 +1786,7 @@ function ServerDashboard({
         activeInBrowser: true,
         runnerState: "running",
       });
+      updateAdmChunkDashboardActionProgress(file.filename, progress, metrics);
       let next = await sendAdmImportChunkWithFallback({
         file,
         source,
@@ -1380,6 +1841,7 @@ function ServerDashboard({
         activeInBrowser: true,
         runnerState: isCompletedAdmImportJobStatus(progress.status) ? "finishing" : "running",
       });
+      updateAdmChunkDashboardActionProgress(file.filename, progress, nextMetrics);
       if (progress.current_line < lines.length && !isCompletedAdmImportJobStatus(progress.status)) {
         await sleep(ADM_CHUNK_RUNNER_DELAY_MS);
       }
@@ -1401,6 +1863,7 @@ function ServerDashboard({
       activeInBrowser: true,
       runnerState: "finishing",
     });
+    updateAdmChunkDashboardActionProgress(file.filename, progress);
     const finished = await finishAdmImportJob(server.id, progress.job_id);
     if (!finished.ok) {
       if (progress.current_line >= lines.length) {
@@ -1424,6 +1887,7 @@ function ServerDashboard({
       }, source);
     }
     progress = finished;
+    updateAdmChunkDashboardActionProgress(file.filename, progress);
 
     return progress.file_result ?? makeWarningBulkAdmFileResultFromProgress(file, progress, {
       ok: false,
@@ -1537,60 +2001,94 @@ function ServerDashboard({
   }
 
   async function forceProcessLatestAdmNow() {
-    setForceLatestAdmRunning(true);
-    setActionMessage("");
-    try {
-      const response = await forceProcessLatestAdm(server.id);
-      if ("ok" in response && response.ok === false) {
-        setActionMessage(`Force latest ADM failed: ${response.message}`);
-        return;
-      }
-      setLastSyncResult(response);
-      setForceLatestAdmResult(response);
-      await refreshDashboardAfterManualAdmImport();
-      setActionMessage(getManualSyncMessage(response));
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to force process latest ADM.");
-    } finally {
-      setForceLatestAdmRunning(false);
-    }
+    await runDashboardAction({
+      actionKey: "force-process-latest-adm",
+      title: "Force Processing Latest ADM",
+      steps: ["Discovering latest ADM", "Creating or attaching import job", "Processing first chunks", "Continuing in background", "Refreshing dashboard"],
+      refreshAfterSuccess: ["sync", "dashboard-health", "public-cache"],
+      major: true,
+      run: async (action) => {
+        setForceLatestAdmRunning(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Discovering latest readable ADM.");
+          const response = await forceProcessLatestAdm(server.id);
+          if ("ok" in response && response.ok === false) {
+            throw new Error(response.message);
+          }
+          setLastSyncResult(response);
+          setForceLatestAdmResult(response);
+          action.setStep(3, response.job ? `${response.job.filename} chunk ${normalizeChunkProgress(response.job).displayCurrentChunk}/${normalizeChunkProgress(response.job).totalChunks}` : "Latest ADM processed.", 72);
+          if (response.job) updateAdmChunkDashboardActionProgress(response.job.filename, response.job);
+          await refreshDashboardAfterManualAdmImport();
+          return response;
+        } finally {
+          setForceLatestAdmRunning(false);
+        }
+      },
+      successSummary: getManualSyncMessage,
+    });
   }
 
   async function backfillMissingAdmNow() {
-    setAdmBackfillRunning(true);
-    setActionMessage("");
-    try {
-      const response = await backfillMissingAdm(server.id);
-      if ("ok" in response && response.ok === false && "message" in response) {
-        setActionMessage(`ADM backfill failed: ${response.message}`);
-        return;
-      }
-      setAdmBackfillResult(response);
-      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
-      setActionMessage(response.message);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to queue missing ADM backfill.");
-    } finally {
-      setAdmBackfillRunning(false);
-    }
+    await runDashboardAction({
+      actionKey: "backfill-missing-adm",
+      title: "Running ADM Backfill",
+      steps: ["Discovering missing ADM files", "Queueing missing jobs", "Starting active job", "Refreshing dashboard"],
+      refreshAfterSuccess: ["sync", "dashboard-health", "public-cache"],
+      major: true,
+      run: async (action) => {
+        setAdmBackfillRunning(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Discovering missing ADM files from Nitrado.");
+          const response = await backfillMissingAdm(server.id);
+          if ("ok" in response && response.ok === false && "message" in response) {
+            throw new Error(response.message);
+          }
+          setAdmBackfillResult(response);
+          action.setStep(2, response.message, 70);
+          action.setStats(makeBackfillActionStats(response));
+          return response;
+        } finally {
+          setAdmBackfillRunning(false);
+        }
+      },
+      successSummary: (response) => response.message,
+    });
   }
 
   async function verifyAdmAutomationNow() {
-    setVerifyingAdmAutomation(true);
-    setActionMessage("");
-    try {
-      const response = await getAdmAutomationStatus(server.id);
-      if (!response.ok) {
-        setActionMessage(`Verify ADM Automation failed: ${response.message}`);
-        return;
-      }
-      setAdmAutomationStatus(response);
-      setActionMessage(response.next_action);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to verify ADM automation.");
-    } finally {
-      setVerifyingAdmAutomation(false);
-    }
+    await runDashboardAction({
+      actionKey: "verify-adm-automation",
+      title: "Verifying ADM Automation",
+      steps: ["Checking cron", "Checking active jobs", "Checking backfill", "Checking stats and events"],
+      refreshAfterSuccess: "dashboard-health",
+      run: async (action) => {
+        setVerifyingAdmAutomation(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Checking cron and automation status.");
+          const response = await getAdmAutomationStatus(server.id);
+          if (!response.ok) {
+            throw new Error(response.message);
+          }
+          setAdmAutomationStatus(response);
+          action.setStep(2, response.active_job ? `Active job: ${response.active_job.filename}` : "No active job.", 54);
+          action.setStats({
+            "Cron healthy": response.cron?.cron_healthy ? "Yes" : "No",
+            "Latest ADM": response.adm?.newest_available_adm_filename ?? "Waiting",
+            "Active jobs": response.active_job ? 1 : 0,
+            "Recent events": response.recent_events_count ?? 0,
+            Warnings: response.problem_flags?.length ?? 0,
+          });
+          return response;
+        } finally {
+          setVerifyingAdmAutomation(false);
+        }
+      },
+      successSummary: (response) => response.next_action,
+    });
   }
 
   async function previewPastedAdmNow() {
@@ -1605,30 +2103,44 @@ function ServerDashboard({
       return;
     }
 
-    setManualAdmPreviewing(true);
-    setManualAdmImportError(null);
-    setActionMessage("");
-    try {
-      const response = await previewManualAdmText(server.id, { filename, admText: manualAdmText });
-      if (!response.ok) {
-        setManualAdmImportError(response);
-        setActionMessage(`ADM parse preview failed: ${response.message}`);
-        return;
-      }
-      setManualAdmParsePreview(response);
-      setActionMessage(`ADM preview found ${response.parsed_kills} PvP kill${response.parsed_kills === 1 ? "" : "s"}.`);
-    } catch (error) {
-      const failure: ManualAdmImportErrorResult = {
-        ok: false,
-        error_code: "client_exception",
-        message: error instanceof Error ? error.message : "ADM parse preview failed before a response was received.",
-        details: error instanceof Error ? error.stack ?? error.message : String(error),
-      };
-      setManualAdmImportError(failure);
-      setActionMessage(`ADM parse preview failed: ${failure.message}`);
-    } finally {
-      setManualAdmPreviewing(false);
-    }
+    await runDashboardAction({
+      actionKey: "preview-adm-paste",
+      title: "Previewing Pasted ADM",
+      steps: ["Reading pasted ADM", "Parsing preview", "Showing results"],
+      refreshAfterSuccess: false,
+      run: async (action) => {
+        setManualAdmPreviewing(true);
+        setManualAdmImportError(null);
+        setActionMessage("");
+        try {
+          action.setStep(1, `Reading ${filename}.`);
+          const response = await previewManualAdmText(server.id, { filename, admText: manualAdmText });
+          if (!response.ok) {
+            setManualAdmImportError(response);
+            throw new Error(response.message);
+          }
+          setManualAdmParsePreview(response);
+          action.setStep(2, `${response.parsed_kills} PvP kills found.`, 82);
+          action.setStats({
+            "Parsed kills": response.parsed_kills,
+            "Raw lines": response.raw_lines,
+          });
+          return response;
+        } catch (error) {
+          const failure: ManualAdmImportErrorResult = {
+            ok: false,
+            error_code: "client_exception",
+            message: error instanceof Error ? error.message : "ADM parse preview failed before a response was received.",
+            details: error instanceof Error ? error.stack ?? error.message : String(error),
+          };
+          setManualAdmImportError(failure);
+          throw new Error(failure.message);
+        } finally {
+          setManualAdmPreviewing(false);
+        }
+      },
+      successSummary: (response) => `ADM preview found ${response.parsed_kills} PvP kill${response.parsed_kills === 1 ? "" : "s"}.`,
+    });
   }
 
   async function loadManualAdmFile(file: File | null) {
@@ -1722,22 +2234,39 @@ function ServerDashboard({
   }
 
   async function checkAdmFileDiscoveryNow() {
-    setCheckingAdmFileDiscovery(true);
-    setActionMessage("");
-    try {
-      const result = await getAdmFileDiscoveryDebug(server.id, {
-        knownLatestFile: "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",
-      });
-      setAdmFileDiscoveryDebug(result);
-      setAdmFileDiscoveryOpen(true);
-      const selected = result.selected_newest_available?.name ?? "no ADM file";
-      const readable = result.selected_newest_readable?.name ?? "no readable ADM file";
-      setActionMessage(`ADM discovery checked. Newest candidate: ${selected}; newest readable: ${readable}.`);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to check ADM file discovery.");
-    } finally {
-      setCheckingAdmFileDiscovery(false);
-    }
+    await runDashboardAction({
+      actionKey: "check-adm-files",
+      title: "Checking ADM Files",
+      steps: ["Discovering Nitrado files", "Testing newest ADM readability", "Saving discovery state"],
+      refreshAfterSuccess: "dashboard-health",
+      run: async (action) => {
+        setCheckingAdmFileDiscovery(true);
+        setActionMessage("");
+        try {
+          action.setStep(1, "Discovering ADM files from Nitrado.");
+          const result = await getAdmFileDiscoveryDebug(server.id, {
+            knownLatestFile: "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",
+          });
+          setAdmFileDiscoveryDebug(result);
+          setAdmFileDiscoveryOpen(true);
+          const selected = result.selected_newest_available?.name ?? "no ADM file";
+          const readable = result.selected_newest_readable?.name ?? "no readable ADM file";
+          action.setStep(2, `Newest candidate: ${selected}; newest readable: ${readable}.`, 72);
+          action.setStats({
+            "Newest file": selected,
+            Readable: readable === "no readable ADM file" ? "No" : "Yes",
+          });
+          return result;
+        } finally {
+          setCheckingAdmFileDiscovery(false);
+        }
+      },
+      successSummary: (result) => {
+        const selected = result.selected_newest_available?.name ?? "no ADM file";
+        const readable = result.selected_newest_readable?.name ?? "no readable ADM file";
+        return `ADM discovery checked. Newest candidate: ${selected}; newest readable: ${readable}.`;
+      },
+    });
   }
 
   async function clearTestData() {
@@ -1834,13 +2363,42 @@ function ServerDashboard({
   }
 
   async function openBillingPortal() {
-    try {
-      const session = await createPortalSession();
-      window.location.assign(session.url);
-    } catch (error) {
-      setBillingMessage(error instanceof Error ? error.message : "Could not open billing portal.");
-      setActiveTab("billing");
-    }
+    await runDashboardAction({
+      actionKey: "manage-billing",
+      title: "Opening Billing Portal",
+      steps: ["Creating billing portal session", "Redirecting to Stripe"],
+      refreshAfterSuccess: false,
+      run: async (action) => {
+        try {
+          action.setStep(1, "Creating billing portal session.");
+          const session = await createPortalSession();
+          action.setStep(2, "Redirecting to Stripe billing.", 90);
+          window.location.assign(session.url);
+          return session;
+        } catch (error) {
+          setBillingMessage(error instanceof Error ? error.message : "Could not open billing portal.");
+          setActiveTab("billing");
+          throw error;
+        }
+      },
+      successSummary: () => "Billing portal opened.",
+    });
+  }
+
+  async function refreshBillingWithAction() {
+    await runDashboardAction({
+      actionKey: "refresh-plan",
+      title: "Refreshing Plan",
+      steps: ["Requesting billing status", "Refreshing plan limits", "Refreshing dashboard"],
+      refreshAfterSuccess: false,
+      run: async (action) => {
+        action.setStep(1, "Requesting current plan and package limits.");
+        await refreshBilling();
+        action.setStep(2, "Plan and billing state refreshed.", 80);
+        return null;
+      },
+      successSummary: () => "Current plan refreshed.",
+    });
   }
 
   const tabItems: Array<{ key: DashboardTabKey; label: string; icon: React.ReactNode }> = [
@@ -1939,6 +2497,7 @@ function ServerDashboard({
           </div>
         </header>
         <div className="space-y-5 px-4 py-5 sm:px-5 xl:px-6">
+      <ActionProgressPanel action={dashboardAction} onDismiss={clearDashboardAction} />
       {activeTab === "overview" ? (
       <>
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
@@ -2080,8 +2639,8 @@ function ServerDashboard({
             <div className="mt-3 grid gap-2">
               <ActionLink href="/leaderboards" icon={<Crosshair className="h-4 w-4" />} label="View Kill Feed" />
               <button type="button" onClick={() => setActiveTab("public-listing")} className="inline-flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm font-bold text-zinc-100">Edit Server <ArrowRight className="h-4 w-4" /></button>
-              <button type="button" disabled={refreshingServerInfo} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 disabled:opacity-55">Refresh Server Info <RefreshCw className={`h-4 w-4 ${refreshingServerInfo ? "animate-spin" : ""}`} /></button>
-              <button type="button" disabled={syncing} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 disabled:opacity-55">Run Manual Sync <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} /></button>
+              <button type="button" disabled={refreshingServerInfo || isDashboardActionActive} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 disabled:opacity-55">{dashboardActionKey === "refresh-server-info" ? "Running..." : "Refresh Server Info"} <RefreshCw className={`h-4 w-4 ${refreshingServerInfo || dashboardActionKey === "refresh-server-info" ? "animate-spin" : ""}`} /></button>
+              <button type="button" disabled={syncing || isDashboardActionActive} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 disabled:opacity-55">{dashboardActionKey === "run-manual-sync" ? "Running..." : "Run Manual Sync"} <RefreshCw className={`h-4 w-4 ${syncing || dashboardActionKey === "run-manual-sync" ? "animate-spin" : ""}`} /></button>
             </div>
           </DashboardPanel>
           <DashboardPanel className="p-4">
@@ -2131,12 +2690,12 @@ function ServerDashboard({
                 </div>
                 <button
                   type="button"
-                  disabled={refreshingServerInfo}
+                  disabled={refreshingServerInfo || isDashboardActionActive}
                   onClick={refreshServerInfo}
                   className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${refreshingServerInfo ? "animate-spin" : ""}`} />
-                  {refreshingServerInfo ? "Refreshing..." : "Refresh Server Info"}
+                  {dashboardActionKey === "refresh-server-info" || refreshingServerInfo ? "Running..." : "Refresh Server Info"}
                 </button>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -2159,48 +2718,48 @@ function ServerDashboard({
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
-                    disabled={checkingAdmFileDiscovery}
+                    disabled={checkingAdmFileDiscovery || isDashboardActionActive}
                     onClick={checkAdmFileDiscoveryNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-purple-300/20 bg-purple-400/10 px-3 py-2 text-xs font-black uppercase text-purple-50 transition hover:border-purple-300/45 hover:bg-purple-400/18 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <DatabaseZap className={`h-3.5 w-3.5 ${checkingAdmFileDiscovery ? "animate-pulse" : ""}`} />
-                    {checkingAdmFileDiscovery ? "Checking..." : "Check ADM Files"}
+                    {dashboardActionKey === "check-adm-files" || checkingAdmFileDiscovery ? "Running..." : "Check ADM Files"}
                   </button>
                   <button
                     type="button"
-                    disabled={verifyingAdmAutomation}
+                    disabled={verifyingAdmAutomation || isDashboardActionActive}
                     onClick={verifyAdmAutomationNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <ShieldCheck className={`h-3.5 w-3.5 ${verifyingAdmAutomation ? "animate-pulse" : ""}`} />
-                    {verifyingAdmAutomation ? "Verifying..." : "Verify ADM Automation"}
+                    {dashboardActionKey === "verify-adm-automation" || verifyingAdmAutomation ? "Running..." : "Verify ADM Automation"}
                   </button>
                   <button
                     type="button"
-                    disabled={forceLatestAdmRunning}
+                    disabled={forceLatestAdmRunning || isDashboardActionActive}
                     onClick={forceProcessLatestAdmNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${forceLatestAdmRunning ? "animate-spin" : ""}`} />
-                    {forceLatestAdmRunning ? "Processing..." : "Force Process Latest ADM Now"}
+                    {dashboardActionKey === "force-process-latest-adm" || forceLatestAdmRunning ? "Running..." : "Force Process Latest ADM Now"}
                   </button>
                   <button
                     type="button"
-                    disabled={admBackfillRunning}
+                    disabled={admBackfillRunning || isDashboardActionActive}
                     onClick={backfillMissingAdmNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-black uppercase text-amber-50 transition hover:border-amber-300/45 hover:bg-amber-400/18 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <ListChecks className={`h-3.5 w-3.5 ${admBackfillRunning ? "animate-pulse" : ""}`} />
-                    {admBackfillRunning ? "Backfilling..." : "Backfill Missing ADM Now"}
+                    {dashboardActionKey === "backfill-missing-adm" || admBackfillRunning ? "Running..." : "Backfill Missing ADM Now"}
                   </button>
                   <button
                     type="button"
-                    disabled={refreshingSyncData}
+                    disabled={refreshingSyncData || isDashboardActionActive}
                     onClick={refreshNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
-                    {manualRefreshing ? "Refreshing..." : "Refresh Status"}
+                    {dashboardActionKey === "refresh-status" || manualRefreshing ? "Running..." : "Refresh Status"}
                   </button>
                 </div>
               </div>
@@ -2395,6 +2954,7 @@ function ServerDashboard({
             connectedServerName={server.guild_name ?? serverDisplayName}
             planName={effectivePlanLabel}
             onChannelsRefresh={refreshDiscordChannels}
+            runDashboardAction={runDashboardAction}
             onSaved={(result) => {
               setPostingSetups(result.setups ?? []);
               if (result.post_type_options) setPostingOptions(result.post_type_options);
@@ -2434,7 +2994,7 @@ function ServerDashboard({
 
         <aside className={activeTab === "discord-posts" ? "hidden" : "grid content-start gap-5"}>
           {activeTab === "billing" ? (
-          <BillingPlanPanel billing={effectiveBillingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBilling} />
+          <BillingPlanPanel billing={effectiveBillingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBillingWithAction} />
           ) : null}
           {activeTab === "billing" ? (
           <AdvertisingBoostPanel
@@ -2457,12 +3017,12 @@ function ServerDashboard({
               <ActionLink href="/setup" icon={<Settings className="h-4 w-4" />} label="Edit Server" />
               <ActionLink href="/setup" icon={<Gauge className="h-4 w-4" />} label="Server Settings" />
               <ActionLink href="/setup#review-test" icon={<LifeBuoy className="h-4 w-4" />} label="Setup Guide" />
-              <button type="button" disabled={syncing} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55">
-                <span>{syncing ? "Syncing..." : "Run Manual Sync"}</span>
+              <button type="button" disabled={syncing || isDashboardActionActive} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55">
+                <span>{dashboardActionKey === "run-manual-sync" || syncing ? "Running..." : "Run Manual Sync"}</span>
                 <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               </button>
-              <button type="button" disabled={refreshingServerInfo} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55">
-                <span>{refreshingServerInfo ? "Refreshing..." : "Refresh Server Info"}</span>
+              <button type="button" disabled={refreshingServerInfo || isDashboardActionActive} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55">
+                <span>{dashboardActionKey === "refresh-server-info" || refreshingServerInfo ? "Running..." : "Refresh Server Info"}</span>
                 <RefreshCw className={`h-4 w-4 ${refreshingServerInfo ? "animate-spin" : ""}`} />
               </button>
               <button type="button" disabled={checkingLogs} onClick={rerunLogCheck} className="inline-flex items-center justify-between rounded-lg border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-left text-sm font-bold text-violet-50 transition hover:border-violet-300/45 hover:bg-violet-400/18 disabled:cursor-not-allowed disabled:opacity-55">
@@ -2532,6 +3092,7 @@ function ServerDashboard({
           onConfirm={confirmDangerAction}
         />
       ) : null}
+      <ActionProgressToast action={dashboardAction} />
         </div>
       </div>
     </div>
@@ -2543,6 +3104,102 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
     <section className={`glass-surface animated-border rounded-lg ${className}`}>
       <div className="relative z-10">{children}</div>
     </section>
+  );
+}
+
+function ActionProgressPanel({ action, onDismiss }: { action: DashboardActionProgress | null; onDismiss: () => void }) {
+  if (!action) return null;
+  const percent = clampActionProgress(action.progress);
+  const active = isActiveDashboardActionStatus(action.status);
+  const tone = action.status === "failed"
+    ? "border-red-300/25 bg-red-400/10 text-red-50"
+    : action.status === "completed"
+      ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-50"
+      : action.status === "warning"
+        ? "border-amber-300/25 bg-amber-400/10 text-amber-50"
+        : "border-cyan-300/25 bg-cyan-400/10 text-cyan-50";
+  const bar = action.status === "failed"
+    ? "from-red-400 via-red-300 to-orange-300"
+    : action.status === "completed"
+      ? "from-emerald-400 via-cyan-300 to-emerald-200"
+      : action.status === "warning"
+        ? "from-amber-400 via-orange-300 to-cyan-300"
+        : "from-violet-400 via-cyan-300 to-emerald-300";
+  return (
+    <div className={`rounded-xl border p-4 shadow-[0_0_36px_rgba(34,211,238,0.10)] backdrop-blur-xl ${tone}`}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-black/24 ${active ? "animate-pulse" : ""}`}>
+              {action.status === "completed" ? <CircleCheck className="h-4 w-4" /> : action.status === "failed" ? <AlertTriangle className="h-4 w-4" /> : <RefreshCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} />}
+            </span>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] opacity-75">{formatStatusLabel(action.status)}</p>
+              <h3 className="text-sm font-black uppercase text-white">{action.title}</h3>
+            </div>
+          </div>
+          <p className="mt-3 text-sm font-bold leading-6 text-zinc-100">
+            {action.currentStepIndex > 0 ? `Step ${action.currentStepIndex}/${Math.max(action.totalSteps, action.currentStepIndex)}: ` : ""}
+            {action.currentStep}
+          </p>
+          {action.detail ? <p className="mt-1 text-xs font-bold leading-5 text-zinc-300">{action.detail}</p> : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase text-zinc-300">
+          <span>Elapsed {formatElapsedActionTime(action.startedAt)}</span>
+          <span className="text-zinc-600">/</span>
+          <span>Updated {formatClockTime(action.lastUpdatedAt)}</span>
+          {!active ? (
+            <button type="button" onClick={onDismiss} className="ml-1 grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-black/24 text-zinc-200">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-4">
+        <div className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-300">
+          <span>{percent === null || action.indeterminate ? "Working" : `${percent}%`}</span>
+          <span>{action.status === "polling" ? "Polling" : active ? "Running" : "Done"}</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-sm bg-black/35">
+          <div
+            className={`h-full bg-gradient-to-r ${bar} ${percent === null || action.indeterminate ? "w-1/2 animate-pulse" : ""}`}
+            style={percent === null || action.indeterminate ? undefined : { width: `${percent}%` }}
+          />
+        </div>
+      </div>
+      {action.stats && Object.values(action.stats).some((value) => value !== null && value !== undefined && value !== "") ? (
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {Object.entries(action.stats).map(([label, value]) => (
+            <MiniInfo key={label} label={label} value={value === null || value === undefined || value === "" ? "Waiting" : String(value)} />
+          ))}
+        </div>
+      ) : null}
+      {action.warningMessage ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-50">{action.warningMessage}</p> : null}
+      {action.errorMessage ? <p className="mt-3 rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-2 text-xs font-bold text-red-50">{action.errorMessage}</p> : null}
+      {action.successSummary ? <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-50">{action.successSummary}</p> : null}
+    </div>
+  );
+}
+
+function ActionProgressToast({ action }: { action: DashboardActionProgress | null }) {
+  if (!action) return null;
+  const percent = clampActionProgress(action.progress);
+  const active = isActiveDashboardActionStatus(action.status);
+  return (
+    <div className="fixed bottom-4 right-4 z-50 w-[min(360px,calc(100vw-2rem))] rounded-xl border border-cyan-300/20 bg-[#050913]/94 p-3 shadow-[0_0_42px_rgba(34,211,238,0.18)] backdrop-blur-xl">
+      <div className="flex items-start gap-3">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-cyan-100">
+          {active ? <RefreshCw className="h-4 w-4 animate-spin" /> : action.status === "completed" ? <CircleCheck className="h-4 w-4 text-emerald-200" /> : <AlertTriangle className="h-4 w-4 text-amber-200" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-black uppercase text-white">{action.title}</p>
+          <p className="mt-1 truncate text-[11px] font-bold text-zinc-300">{action.detail ?? action.currentStep}</p>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-white/10">
+            <div className={`h-full bg-cyan-300 ${percent === null || action.indeterminate ? "w-1/2 animate-pulse" : ""}`} style={percent === null || action.indeterminate ? undefined : { width: `${percent}%` }} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3331,6 +3988,7 @@ function DiscordAutoPostsPanel({
   connectedServerName,
   planName,
   onChannelsRefresh,
+  runDashboardAction,
   onSaved,
 }: {
   serverId: string;
@@ -3345,6 +4003,7 @@ function DiscordAutoPostsPanel({
   connectedServerName: string;
   planName: string;
   onChannelsRefresh: () => Promise<DiscordChannelsResponse | null>;
+  runDashboardAction: <T>(input: RunDashboardActionInput<T>) => Promise<T | null>;
   onSaved: (result: PostingDestinationsResponse) => void;
 }) {
   const [selectedChannelId, setSelectedChannelId] = useState("");
@@ -3444,98 +4103,147 @@ function DiscordAutoPostsPanel({
 
   async function recheckSelectedChannel() {
     if (!selectedChannelId) return;
-    setRecheckingChannel(true);
-    setMessage("");
-    try {
-      const response = await onChannelsRefresh();
-      const refreshedChannel = response?.channels.find((channel) => channel.channel_id === selectedChannelId);
-      if (!refreshedChannel) {
-        setMessage("Selected channel was not returned by Discord during recheck. Choose another channel or check bot access.");
-      } else if (refreshedChannel.permission_diagnostics?.bot_has_administrator === true || refreshedChannel.permission_source === "administrator") {
-        setMessage("Selected channel rechecked. DZN Bot has Administrator and can post in this channel.");
-      } else if (refreshedChannel.can_post) {
-        setMessage("Selected channel rechecked. DZN Bot can post in this channel.");
-      } else {
-        setMessage(`Selected channel rechecked. Missing: ${refreshedChannel.missing_permissions.join(", ") || "channel permissions"}.`);
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not recheck the selected Discord channel.");
-    } finally {
-      setRecheckingChannel(false);
-    }
+    await runDashboardAction({
+      actionKey: "check-discord-channel",
+      title: "Checking Discord Channel",
+      steps: ["Refreshing channel list", "Checking bot permissions", "Saving diagnostics"],
+      refreshAfterSuccess: "discord",
+      run: async (action) => {
+        setRecheckingChannel(true);
+        setMessage("");
+        try {
+          action.setStep(1, "Refreshing Discord channels.");
+          const response = await onChannelsRefresh();
+          const refreshedChannel = response?.channels.find((channel) => channel.channel_id === selectedChannelId);
+          if (!refreshedChannel) {
+            throw new Error("Selected channel was not returned by Discord during recheck. Choose another channel or check bot access.");
+          }
+          const summary = refreshedChannel.permission_diagnostics?.bot_has_administrator === true || refreshedChannel.permission_source === "administrator"
+            ? "DZN Bot has Administrator and can post in this channel."
+            : refreshedChannel.can_post
+              ? "DZN Bot can post in this channel."
+              : `Missing: ${refreshedChannel.missing_permissions.join(", ") || "channel permissions"}.`;
+          action.setStep(2, summary, 82);
+          setMessage(`Selected channel rechecked. ${summary}`);
+          return refreshedChannel;
+        } finally {
+          setRecheckingChannel(false);
+        }
+      },
+      successSummary: () => "Selected Discord channel rechecked.",
+    });
   }
 
   async function saveSetup() {
     if (!canSave) return;
-    setSaving(true);
-    setMessage("");
-    try {
-      const result = await savePostingDestination(serverId, {
-        action: "save",
-        channel_id: channelForSave,
-        post_types: selectedPostTypes,
-        discord_webhook_url: webhookUrl || null,
-        enabled: true,
-      });
-      onSaved(result);
-      setMessage("Discord auto-post setup saved.");
-      setSelectedChannelId("");
-      setManualChannelId("");
-      setSelectedPostTypes([]);
-      setWebhookUrl("");
-      setAdvancedOpen(false);
-      setDiagnosticsOpen(false);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save Discord auto-post setup.");
-    } finally {
-      setSaving(false);
-    }
+    await runDashboardAction({
+      actionKey: "save-auto-post-setup",
+      title: "Saving Auto Post Setup",
+      steps: ["Rendering setup payload", "Saving Discord destination", "Refreshing diagnostics"],
+      refreshAfterSuccess: "discord",
+      run: async (action) => {
+        setSaving(true);
+        setMessage("");
+        try {
+          action.setStep(1, "Rendering Discord auto-post setup payload.");
+          const result = await savePostingDestination(serverId, {
+            action: "save",
+            channel_id: channelForSave,
+            post_types: selectedPostTypes,
+            discord_webhook_url: webhookUrl || null,
+            enabled: true,
+          });
+          onSaved(result);
+          action.setStep(2, "Discord destination saved.", 76);
+          setMessage("Discord auto-post setup saved.");
+          setSelectedChannelId("");
+          setManualChannelId("");
+          setSelectedPostTypes([]);
+          setWebhookUrl("");
+          setAdvancedOpen(false);
+          setDiagnosticsOpen(false);
+          return result;
+        } finally {
+          setSaving(false);
+        }
+      },
+      successSummary: () => "Discord auto-post setup saved.",
+    });
   }
 
   async function runSetupAction(setup: PostingChannelSetup, action: "test" | "disable" | "delete") {
-    setBusyChannel(`${setup.channel_id}:${action}`);
-    setMessage("");
-    try {
-      const selectedTestType = testTypeByChannel[setup.channel_id] ?? setup.post_types.find((postType) => postType.enabled)?.key ?? setup.post_types[0]?.key;
-      const result = await savePostingDestination(serverId, {
-        action,
-        channel_id: setup.channel_id,
-        post_types: setup.post_types.map((postType) => postType.key),
-        test_post_type: selectedTestType,
-        enabled: action !== "disable",
-      });
-      onSaved(result);
-      if (action === "test") {
-        setMessage(result.test_post?.ok
-          ? `${formatPostType(selectedTestType)} test posted. Future updates will edit the saved message when possible.`
-          : formatPostingError(result.test_post?.error ?? "Discord test post failed.", result.test_post?.missing_permissions));
-      } else if (action === "delete") {
-        setMessage("Discord auto-post setup deleted.");
-      } else {
-        setMessage("Discord auto-post setup disabled.");
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : `Could not ${action} Discord auto-post setup.`);
-    } finally {
-      setBusyChannel(null);
-    }
+    await runDashboardAction({
+      actionKey: action === "test" ? "test-discord-post" : `${action}-discord-post`,
+      title: action === "test" ? "Testing Discord Post" : `${formatStatusLabel(action)} Discord Setup`,
+      steps: ["Rendering payload", "Sending or saving Discord state", "Refreshing diagnostics"],
+      refreshAfterSuccess: "discord",
+      run: async (actionProgress) => {
+        setBusyChannel(`${setup.channel_id}:${action}`);
+        setMessage("");
+        try {
+          const selectedTestType = testTypeByChannel[setup.channel_id] ?? setup.post_types.find((postType) => postType.enabled)?.key ?? setup.post_types[0]?.key;
+          actionProgress.setStep(1, `${formatPostType(selectedTestType)} payload ready.`);
+          const result = await savePostingDestination(serverId, {
+            action,
+            channel_id: setup.channel_id,
+            post_types: setup.post_types.map((postType) => postType.key),
+            test_post_type: selectedTestType,
+            enabled: action !== "disable",
+          });
+          onSaved(result);
+          actionProgress.setStep(2, action === "test" ? "Discord test post response received." : "Discord setup state saved.", 78);
+          if (action === "test") {
+            const message = result.test_post?.ok
+              ? `${formatPostType(selectedTestType)} test posted. Future updates will edit the saved message when possible.`
+              : formatPostingError(result.test_post?.error ?? "Discord test post failed.", result.test_post?.missing_permissions);
+            setMessage(message);
+            if (!result.test_post?.ok) throw new Error(message);
+          } else if (action === "delete") {
+            setMessage("Discord auto-post setup deleted.");
+          } else {
+            setMessage("Discord auto-post setup disabled.");
+          }
+          return result;
+        } finally {
+          setBusyChannel(null);
+        }
+      },
+      successSummary: () => action === "test" ? "Discord test post completed." : `Discord auto-post setup ${action === "delete" ? "deleted" : "updated"}.`,
+    });
   }
 
   async function runDispatcherNow() {
-    setDispatchingNow(true);
-    setMessage("");
-    setDispatchResult(null);
-    try {
-      const result = await runAutoPostDispatcherNow(serverId);
-      setDispatchResult(result);
-      const refreshed = await getPostingDestinations(serverId).catch(() => null);
-      if (refreshed) onSaved(refreshed);
-      setMessage(`Auto post dispatcher run complete. Processed ${result.processed}, edited ${result.edited}, sent ${result.sent}, skipped ${result.skipped}, failed ${result.failed}.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not run the auto post dispatcher.");
-    } finally {
-      setDispatchingNow(false);
-    }
+    await runDashboardAction({
+      actionKey: "run-auto-post-dispatcher",
+      title: "Running Auto Post Dispatcher",
+      steps: ["Rendering Discord payloads", "Sending or editing Discord messages", "Saving message state", "Refreshing diagnostics"],
+      refreshAfterSuccess: "discord",
+      run: async (action) => {
+        setDispatchingNow(true);
+        setMessage("");
+        setDispatchResult(null);
+        try {
+          action.setStep(1, "Rendering queued Discord payloads.");
+          const result = await runAutoPostDispatcherNow(serverId);
+          setDispatchResult(result);
+          action.setStep(2, `Processed ${result.processed}, edited ${result.edited}, sent ${result.sent}.`, 72);
+          action.setStats({
+            Processed: result.processed,
+            Edited: result.edited,
+            Sent: result.sent,
+            Skipped: result.skipped,
+            Failed: result.failed,
+          });
+          const refreshed = await getPostingDestinations(serverId).catch(() => null);
+          if (refreshed) onSaved(refreshed);
+          setMessage(`Auto post dispatcher run complete. Processed ${result.processed}, edited ${result.edited}, sent ${result.sent}, skipped ${result.skipped}, failed ${result.failed}.`);
+          return result;
+        } finally {
+          setDispatchingNow(false);
+        }
+      },
+      successSummary: (result) => `Auto post dispatcher run complete. Processed ${result.processed}, edited ${result.edited}, sent ${result.sent}, skipped ${result.skipped}, failed ${result.failed}.`,
+    });
   }
 
   function editSetup(setup: PostingChannelSetup) {
@@ -4039,6 +4747,7 @@ function AutomaticAdmImportJobPanel({ syncStatus, dashboardHealth }: { syncStatu
   const report = syncStatus?.last_adm_import_report ?? null;
   const readFailed = ["adm_file_unreadable", "latest_adm_unreadable"].includes(String(syncStatus?.last_sync_status ?? dashboardHealth?.sync.status ?? "").toLowerCase());
   const backfillActive = Boolean(syncStatus?.adm_backfill_status?.active_job || syncStatus?.adm_backfill_status?.queued_files?.length || dashboardHealth?.sync.backfill_status.active_file || dashboardHealth?.sync.backfill_status.queued_jobs_count);
+  const jobProgress = job ? getSafeAdmChunkProgressPercent(job) : null;
   const nextAction = job
     ? job.status === "failed_retryable"
       ? "Cron will retry the stalled chunk job automatically, or an owner can use Continue Import to resume it now."
@@ -4069,6 +4778,11 @@ function AutomaticAdmImportJobPanel({ syncStatus, dashboardHealth }: { syncStatu
         <MiniInfo label="Duplicate Skips" value={String(job?.duplicate_skips ?? report?.duplicateSkips ?? 0)} />
         <MiniInfo label="Chunk Count" value={job?.chunk_count_mismatch ? "Corrected for display" : "OK"} />
       </div>
+      {job ? (
+        <div className="mt-3">
+          <ProgressLine label="ADM Job Progress" value={`${job.display_current_chunk ?? Math.min(job.total_chunks, job.chunks_processed + 1)}/${job.total_chunks} chunks`} percent={jobProgress ?? 0} />
+        </div>
+      ) : null}
       <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-300">
         {readFailed && !backfillActive ? syncStatus?.last_adm_discovery_error ?? syncStatus?.last_sync_message ?? nextAction : nextAction}
       </p>
@@ -4102,6 +4816,9 @@ function AdmBackfillStatusPanel({
   const missingCount = result?.missing_files.length ?? status?.missing_files_detected ?? healthBackfill?.missing_files_count ?? 0;
   const skippedCount = result?.skipped_already_imported.length ?? status?.skipped_already_imported ?? 0;
   const unreadableFiles = result?.unreadable_files.map((file) => file.filename) ?? status?.unreadable_files ?? [];
+  const backfillTotal = Math.max(1, missingCount + queuedFiles.length + skippedCount + (result?.completed_files.length ?? status?.completed_files_today ?? 0));
+  const backfillDone = Math.min(backfillTotal, skippedCount + (result?.completed_files.length ?? status?.completed_files_today ?? 0));
+  const backfillProgress = activeJob ? getSafeAdmChunkProgressPercent(activeJob) : Math.round((backfillDone / backfillTotal) * 100);
   const summary = activeJob
     ? `Processing ${activeJob.filename} chunk ${Math.min(activeJob.total_chunks, activeJob.chunks_processed + 1)}/${activeJob.total_chunks}`
     : missingCount > 0
@@ -4134,6 +4851,13 @@ function AdmBackfillStatusPanel({
         <MiniInfo label="Oldest Missing" value={result?.oldest_missing_file ?? status?.oldest_missing_file ?? healthBackfill?.oldest_missing_file ?? "None"} />
         <MiniInfo label="Newest Missing" value={result?.newest_missing_file ?? status?.newest_missing_file ?? healthBackfill?.newest_missing_file ?? "None"} />
         <MiniInfo label="Unreadable Missing" value={unreadableFiles.length ? unreadableFiles.slice(0, 2).join(", ") : healthBackfill?.unreadable_files_count ? String(healthBackfill.unreadable_files_count) : "None"} />
+      </div>
+      <div className="mt-3">
+        <ProgressLine
+          label={activeJob ? "Active File Progress" : "Backfill Queue Progress"}
+          value={activeJob ? `${activeJob.display_current_chunk ?? Math.min(activeJob.total_chunks, activeJob.chunks_processed + 1)}/${activeJob.total_chunks} chunks` : `${backfillDone}/${backfillTotal} handled`}
+          percent={backfillProgress}
+        />
       </div>
       {activeJob ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
@@ -6627,10 +7351,31 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function formatElapsedActionTime(startedAt: string) {
+  const started = new Date(startedAt).getTime();
+  if (!Number.isFinite(started)) return "0s";
+  const seconds = Math.max(0, Math.round((Date.now() - started) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}m ${remainder}s`;
+}
+
 function firstRejectedMessage(...results: Array<PromiseSettledResult<unknown>>) {
   const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
   if (!rejected) return null;
   return rejected.reason instanceof Error ? rejected.reason.message : String(rejected.reason);
+}
+
+function makeBackfillActionStats(result: AdmBackfillPlanResult): DashboardActionProgress["stats"] {
+  return {
+    "Missing files": result.missing_files.length,
+    "Queued files": result.queued_files.length,
+    "Created jobs": result.created_jobs.length,
+    "Completed files": result.completed_files.length,
+    "Skipped imported": result.skipped_already_imported.length,
+    "Unreadable files": result.unreadable_files.length,
+  };
 }
 
 function isAdmRateLimitedFailure(result: ManualAdmImportErrorResult) {
@@ -6697,10 +7442,10 @@ function hasActiveAdmImportProgress(file: BulkAdmFileResult) {
   return (file.chunks_processed ?? 0) > 0 && (file.total_chunks ?? 0) > (file.chunks_processed ?? 0);
 }
 
-function getSafeAdmChunkProgressPercent(file: Pick<BulkAdmFileResult, "chunks_processed" | "total_chunks" | "raw_lines">) {
+function getSafeAdmChunkProgressPercent(file: Pick<BulkAdmFileResult, "chunks_processed" | "total_chunks"> & { raw_lines?: number | null }) {
   const totalChunks = Math.max(1, numberFromUnknown(file.total_chunks) ?? 1);
   const chunksProcessed = Math.max(0, Math.min(totalChunks, numberFromUnknown(file.chunks_processed) ?? 0));
-  if (totalChunks <= 0 || (numberFromUnknown(file.raw_lines) ?? 0) <= 0) return 2;
+  if (totalChunks <= 0 || (file.raw_lines !== undefined && (numberFromUnknown(file.raw_lines) ?? 0) <= 0)) return 2;
   return Math.max(2, Math.min(100, Math.round((chunksProcessed / totalChunks) * 100)));
 }
 
