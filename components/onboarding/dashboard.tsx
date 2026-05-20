@@ -32,10 +32,11 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
+const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 4000;
 let hasLoggedMultiServerReady = false;
 
 type DiscordChannelCache = {
@@ -538,6 +539,11 @@ function ServerDashboard({
     }
   }, [server.id]);
 
+  const activeBulkAdmImportJob = findActiveAdmImportJobFromResult(bulkAdmImportResult);
+  const activeAdmImportJobForPolling = activeBulkAdmImportJob ?? syncStatus?.active_adm_import_job ?? null;
+  const activeAdmImportJobPollId = activeAdmImportJobForPolling?.job_id ?? null;
+  const activeAdmImportJobPollStatus = activeAdmImportJobForPolling?.status ?? null;
+
   useEffect(() => {
     let active = true;
     const initialRefresh = window.setTimeout(() => {
@@ -559,6 +565,40 @@ function ServerDashboard({
       window.clearInterval(interval);
     };
   }, [refreshSyncData]);
+
+  useEffect(() => {
+    const jobId = activeAdmImportJobPollId;
+    if (!jobId || !isActiveAdmImportJobStatus(activeAdmImportJobPollStatus)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await getAdmImportJobStatus(server.id, jobId);
+        if (cancelled) return;
+        if (!response.ok) return;
+        const fileResult = makeProcessingBulkAdmFileResultFromJob(response.job, response.job.source);
+        setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+          current,
+          fileResult,
+          response.job.source,
+          Math.max(current?.files_uploaded ?? 0, 1),
+        ));
+        if (isCompletedAdmImportJobStatus(response.job.status)) {
+          void refreshSyncData({ warnOnError: false, queueIfBusy: true });
+          void onRefreshRef.current().catch(() => null);
+        }
+      } catch {
+        if (!cancelled) {
+          setLiveRefreshWarning("Dashboard refresh failed, but ADM import job is still processing.");
+        }
+      }
+    };
+    void poll();
+    const interval = window.setInterval(() => void poll(), ADM_IMPORT_JOB_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeAdmImportJobPollId, activeAdmImportJobPollStatus, refreshSyncData, server.id]);
 
   async function refreshNow() {
     setActionMessage("");
@@ -843,6 +883,55 @@ function ServerDashboard({
     }
   }
 
+  async function continueBulkAdmFile(filename: string, jobId?: string | null) {
+    const selectedFile = buildAdmBulkFiles().find((candidate) => candidate.filename === filename);
+    const source = selectedFile ? (manualAdmFiles.length ? "manual_file_upload" : "manual_paste") : bulkAdmImportResult?.source ?? "manual_file_upload";
+    const selectedCount = Math.max(buildAdmBulkFiles().length, bulkAdmImportResult?.files_uploaded ?? 1);
+    setManualAdmImporting(true);
+    setBulkAdmImportProgress({ current: 1, total: 1, filename });
+    setActionMessage("");
+    setBulkAdmImportError(null);
+    const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
+    try {
+      if (selectedFile) {
+        const fileResult = await importSingleAdmFileInChunks(selectedFile, source, 1, 1);
+        setBulkAdmImportResult((current) => replaceBulkAdmFileResult(current, fileResult, source, selectedCount));
+      } else if (jobId) {
+        const continued = await continueAdmImportJob(server.id, jobId);
+        if (!continued.ok) {
+          setBulkAdmImportError(continued);
+          setActionMessage(`${filename} could not continue from the server-side job. Reselect the file if this was a manual upload.`);
+          return;
+        }
+        setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+          current,
+          makeProcessingBulkAdmFileResultFromJob(continued, continued.source),
+          continued.source,
+          selectedCount,
+        ));
+      } else {
+        setBulkAdmImportError({
+          ok: false,
+          error_code: "adm_import_job_unavailable",
+          message: "No selected file or import job id is available. Reselect the ADM file to continue.",
+          details: { filename },
+        });
+        return;
+      }
+      const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
+      setActionMessage(refreshed
+        ? "ADM import job continued. Stats and feeds updated from the latest available progress."
+        : "ADM import job continued. Dashboard refresh failed, but the job state is still visible.");
+    } catch (error) {
+      const failure = makeClientAdmFailure(error, "adm_import_continue_exception", "ADM import continue failed before a response was received.");
+      setBulkAdmImportError(failure);
+      setActionMessage(`ADM import continue failed: ${failure.message}`);
+    } finally {
+      setManualAdmImporting(false);
+      setBulkAdmImportProgress(null);
+    }
+  }
+
   async function importSingleAdmFileInChunks(
     file: { filename: string; admText: string },
     source: string,
@@ -892,7 +981,13 @@ function ServerDashboard({
       duplicateSkips: progress.duplicate_skips,
     });
 
-    for (const chunk of chunks) {
+    while (progress.current_line < lines.length) {
+      const chunkIndex = Math.max(0, Math.floor(progress.current_line / ADM_IMPORT_UPLOAD_CHUNK_SIZE));
+      const chunk = {
+        index: chunkIndex,
+        startLine: progress.current_line,
+        lines: lines.slice(progress.current_line, Math.min(lines.length, progress.current_line + ADM_IMPORT_UPLOAD_CHUNK_SIZE)),
+      };
       setBulkAdmImportProgress({
         current: fileIndex,
         total: fileTotal,
@@ -918,6 +1013,12 @@ function ServerDashboard({
         return makeFailedBulkAdmFileResult(file, next, source);
       }
       progress = next;
+      setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+        current,
+        makeProcessingBulkAdmFileResultFromJob(progress, source),
+        source,
+        fileTotal,
+      ));
       setBulkAdmImportProgress({
         current: fileIndex,
         total: fileTotal,
@@ -1810,6 +1911,7 @@ function ServerDashboard({
                 onBulkImport={importAdmFilesNow}
                 onBulkPreview={previewAdmFilesNow}
                 onRetryBulkFile={retryBulkAdmFile}
+                onContinueBulkFile={continueBulkAdmFile}
                 onRetryRefresh={refreshDashboardAfterManualAdmImport}
               />
               {admFileDiscoveryDebug ? (
@@ -3620,6 +3722,7 @@ function ManualAdmImportPanel({
   onBulkImport,
   onBulkPreview,
   onRetryBulkFile,
+  onContinueBulkFile,
   onRetryRefresh,
 }: {
   filename: string;
@@ -3647,6 +3750,7 @@ function ManualAdmImportPanel({
   onBulkImport: () => void;
   onBulkPreview: () => void;
   onRetryBulkFile: (filename: string) => void;
+  onContinueBulkFile: (filename: string, jobId?: string | null) => void;
   onRetryRefresh: () => Promise<boolean>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -3826,7 +3930,7 @@ function ManualAdmImportPanel({
         <ManualAdmFailurePanel failure={bulkFailure} title="Bulk ADM Import Failed" />
       ) : null}
       {bulkResult ? (
-        <BulkAdmImportResultPanel result={bulkResult} totalsDelta={totalsDelta} importing={importing} onRetryFile={onRetryBulkFile} />
+        <BulkAdmImportResultPanel result={bulkResult} totalsDelta={totalsDelta} importing={importing} onRetryFile={onRetryBulkFile} onContinueFile={onContinueBulkFile} />
       ) : null}
       {preview ? (
         <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-3">
@@ -3991,18 +4095,23 @@ function BulkAdmImportResultPanel({
   totalsDelta,
   importing,
   onRetryFile,
+  onContinueFile,
 }: {
   result: BulkAdmImportResult;
   totalsDelta: DashboardTotalsDelta | null;
   importing: boolean;
   onRetryFile: (filename: string) => void;
+  onContinueFile: (filename: string, jobId?: string | null) => void;
 }) {
   const failedFiles = result.files.filter(isFailedBulkAdmFile);
-  const completedFiles = result.files.filter((file) => !isFailedBulkAdmFile(file));
-  const statusTone = failedFiles.length > 0 || result.errors.length ? "orange" : result.mode === "preview" ? "cyan" : "emerald";
+  const processingFiles = result.files.filter(isProcessingBulkAdmFile);
+  const completedFiles = result.files.filter((file) => isCompletedBulkAdmFile(file) && !isProcessingBulkAdmFile(file));
+  const statusTone = failedFiles.length > 0 || result.errors.length ? "orange" : processingFiles.length > 0 || result.mode === "preview" ? "cyan" : "emerald";
   const statusMessage = result.mode === "preview"
     ? `Previewed ${result.files_uploaded} ADM file${result.files_uploaded === 1 ? "" : "s"}.`
-    : failedFiles.length > 0
+    : processingFiles.length > 0
+      ? `Processing ${processingFiles.length} ADM file${processingFiles.length === 1 ? "" : "s"}.`
+      : failedFiles.length > 0
       ? `Imported ${completedFiles.length} of ${result.files_uploaded} ADM file${result.files_uploaded === 1 ? "" : "s"}.`
       : "ADM import completed. Stats and feeds updated.";
   return (
@@ -4014,11 +4123,12 @@ function BulkAdmImportResultPanel({
             {statusMessage}
           </p>
         </div>
-        <SmallBadge tone={statusTone}>{failedFiles.length > 0 ? `${failedFiles.length} Need Retry` : result.mode === "preview" ? "Preview Ready" : "Succeeded"}</SmallBadge>
+        <SmallBadge tone={statusTone}>{failedFiles.length > 0 ? `${failedFiles.length} Need Retry` : processingFiles.length > 0 ? "Processing" : result.mode === "preview" ? "Preview Ready" : "Succeeded"}</SmallBadge>
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <MiniInfo label="Files Selected" value={String(result.files_uploaded)} />
         <MiniInfo label="Files Completed" value={String(completedFiles.length)} />
+        <MiniInfo label="Files Processing" value={String(processingFiles.length)} />
         <MiniInfo label="Files Failed" value={String(failedFiles.length)} />
         <MiniInfo label="Parsed PvP Kills" value={String(result.parsed_kills)} />
         <MiniInfo label="Written PvP Kills" value={String(result.written_kills)} />
@@ -4031,6 +4141,44 @@ function BulkAdmImportResultPanel({
         <MiniInfo label="Discord Jobs Queued" value={String(result.discord_jobs_queued)} />
       </div>
       {totalsDelta?.changed ? <DashboardTotalsDeltaPanel delta={totalsDelta} /> : null}
+      {processingFiles.length ? (
+        <div className="mt-4 grid gap-2">
+          {processingFiles.map((file) => (
+            <div key={`${file.filename}-${file.job_id ?? file.status}-processing`} className="rounded-lg border border-cyan-300/18 bg-cyan-400/8 px-3 py-3">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="break-all text-sm font-black text-cyan-50">{file.filename}</p>
+                  <p className="mt-1 text-xs font-bold text-cyan-100">
+                    Import in progress{file.chunks_processed !== undefined && file.total_chunks ? ` - chunk ${file.chunks_processed}/${file.total_chunks}` : ""}
+                  </p>
+                </div>
+                {result.mode === "import" ? (
+                  <button
+                    type="button"
+                    disabled={importing}
+                    onClick={() => onContinueFile(file.filename, file.job_id)}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${importing ? "animate-spin" : ""}`} />
+                    Continue Import
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                <MiniInfo label="Parsed Kills So Far" value={String(file.parsed_kills)} />
+                <MiniInfo label="Written Kills So Far" value={String(file.written_kills)} />
+                <MiniInfo label="Duplicates" value={String(file.duplicate_skips)} />
+                <MiniInfo label="Joins" value={String(file.joins)} />
+                <MiniInfo label="Disconnects" value={String(file.disconnects)} />
+                <MiniInfo label="PlayerList" value={String(file.playerlist_snapshots)} />
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/40">
+                <div className="h-full rounded-full bg-cyan-300" style={{ width: `${Math.max(2, Math.min(100, file.total_chunks ? ((file.chunks_processed ?? 0) / file.total_chunks) * 100 : 2))}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {completedFiles.length ? (
         <div className="mt-4 grid gap-2">
           {completedFiles.map((file) => (
@@ -5542,6 +5690,70 @@ function makeWarningBulkAdmFileResultFromProgress(
   };
 }
 
+function makeProcessingBulkAdmFileResultFromJob(
+  job: AdmImportJobProgressResult,
+  source: string,
+): BulkAdmFileResult {
+  const completed = isCompletedAdmImportJobStatus(job.status);
+  const fileResult = job.file_result;
+  if (completed && fileResult) {
+    return {
+      ...fileResult,
+      job_id: job.job_id,
+      job_status: job.status,
+      chunks_processed: job.chunks_processed,
+      total_chunks: job.total_chunks,
+    };
+  }
+  return {
+    ok: true,
+    filename: job.filename,
+    source,
+    status: completed ? "completed_with_warnings" : job.status === "failed_retryable" ? "failed_retryable" : "processing",
+    failed_endpoint: null,
+    failed_chunk_index: job.failed_chunk_index ?? null,
+    first_failed_line_number: null,
+    first_failed_line_preview: null,
+    client_file_read_ok: undefined,
+    client_total_lines: job.total_lines,
+    client_total_chunks: job.total_chunks,
+    job_status: job.status,
+    job_id: job.job_id,
+    chunks_processed: job.chunks_processed,
+    total_chunks: job.total_chunks,
+    raw_lines: job.total_lines,
+    raw_kill_lines_found: job.parsed_kills,
+    parsed_kills: job.parsed_kills,
+    written_kills: job.written_kills,
+    deaths: job.written_kills,
+    joins: job.joins,
+    disconnects: job.disconnects,
+    playerlist_snapshots: job.playerlist_snapshots,
+    suicides: 0,
+    uncredited_deaths: 0,
+    hit_lines: job.hit_lines,
+    raw_events_stored: job.raw_events_stored,
+    player_events_stored: job.player_events_stored,
+    duplicate_skips: job.duplicate_skips,
+    failed_writes: 0,
+    public_cache_updated: job.public_cache_updated,
+    discord_jobs_queued: job.discord_jobs_queued,
+    parser_warnings: job.warnings,
+    kill_previews: [],
+    import_report_id: null,
+    imported_at: job.completed_at ?? null,
+    error_code: job.status === "failed_retryable" ? "failed_retryable" : undefined,
+    message: job.error_message ?? (completed ? "ADM import job completed." : "ADM import job is processing."),
+    details: {
+      job_id: job.job_id,
+      status: job.status,
+      current_line: job.current_line,
+      total_lines: job.total_lines,
+      updated_at: job.updated_at,
+    },
+  };
+}
+
 function splitAdmTextForUpload(text: string) {
   return text.split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
 }
@@ -5613,11 +5825,38 @@ function makeDashboardTotalsDelta(before: DashboardTotalsSnapshot, after: Dashbo
 }
 
 function isFailedBulkAdmFile(file: BulkAdmFileResult) {
-  return !file.ok || file.status === "failed" || file.status === "failed_retryable";
+  return !file.ok || file.status === "failed" || (file.status === "failed_retryable" && !hasActiveAdmImportProgress(file));
 }
 
 function isCompletedBulkAdmFile(file: BulkAdmFileResult) {
-  return file.ok && !isFailedBulkAdmFile(file);
+  return file.ok && !isFailedBulkAdmFile(file) && !isProcessingBulkAdmFile(file);
+}
+
+function isProcessingBulkAdmFile(file: BulkAdmFileResult) {
+  return file.ok && (["processing", "queued", "writing", "rebuilding"].includes(String(file.status)) || (file.status === "failed_retryable" && hasActiveAdmImportProgress(file)));
+}
+
+function isActiveAdmImportJobStatus(status: string | null | undefined) {
+  return status === "queued" || status === "parsing" || status === "writing" || status === "rebuilding";
+}
+
+function isCompletedAdmImportJobStatus(status: string | null | undefined) {
+  return status === "completed" || status === "completed_with_warnings";
+}
+
+function hasActiveAdmImportProgress(file: BulkAdmFileResult) {
+  return (file.chunks_processed ?? 0) > 0 && (file.total_chunks ?? 0) > (file.chunks_processed ?? 0);
+}
+
+function findActiveAdmImportJobFromResult(result: BulkAdmImportResult | null) {
+  const file = result?.files.find((candidate) => candidate.job_id && (isProcessingBulkAdmFile(candidate) || candidate.status === "failed_retryable"));
+  if (!file?.job_id) return null;
+  return {
+    job_id: file.job_id,
+    filename: file.filename,
+    source: file.source,
+    status: file.job_status ?? file.status,
+  };
 }
 
 function isDedupeOnlyBulkAdmFile(file: BulkAdmFileResult) {
@@ -5631,6 +5870,7 @@ function isDedupeOnlyBulkAdmFile(file: BulkAdmFileResult) {
 
 function getBulkAdmFileOutcomeLabel(file: BulkAdmFileResult, mode: BulkAdmImportResult["mode"]) {
   if (mode === "preview") return "Previewed";
+  if (isProcessingBulkAdmFile(file)) return "Import in progress";
   if (isFailedBulkAdmFile(file)) return "Needs retry";
   if (isDedupeOnlyBulkAdmFile(file)) return "Already imported - skipped by dedupe";
   if (file.status === "completed_with_warnings") return "Completed with warnings";
@@ -5639,6 +5879,7 @@ function getBulkAdmFileOutcomeLabel(file: BulkAdmFileResult, mode: BulkAdmImport
 
 function getBulkAdmFileOutcomeTone(file: BulkAdmFileResult, mode: BulkAdmImportResult["mode"]): "emerald" | "orange" | "cyan" | "zinc" {
   if (mode === "preview") return "cyan";
+  if (isProcessingBulkAdmFile(file)) return "cyan";
   if (isFailedBulkAdmFile(file)) return "orange";
   if (isDedupeOnlyBulkAdmFile(file)) return "zinc";
   if (file.status === "completed_with_warnings") return "orange";
@@ -5660,6 +5901,7 @@ function summarizeClientBulkAdmResults(
     source,
     files_uploaded: selectedFileCount,
     files_imported: files.filter(isCompletedBulkAdmFile).length,
+    processing_files: files.filter(isProcessingBulkAdmFile).length,
     failed_files: files.filter(isFailedBulkAdmFile).length,
     total_raw_lines: files.reduce((total, file) => total + file.raw_lines, 0),
     raw_kill_lines_found: files.reduce((total, file) => total + file.raw_kill_lines_found, 0),

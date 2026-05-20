@@ -4,12 +4,15 @@ import { readFileSync } from "node:fs";
 import {
   createAdmImportJobForServer,
   finishAdmImportLineJobForServer,
+  getAdmImportJobProgressForServer,
+  getLatestAdmImportJobProgressForFilename,
   getRecentAdmSyncEvents,
   importAdmFilesForServer,
   importAdmTextForServer,
   importReadableAdmLinesIntoDatabase,
   processPendingAdmImportJobs,
   processAdmImportJobLineChunk,
+  processNextAdmImportJobChunk,
   previewManualAdmText,
   startAdmImportLineJobForServer,
   type AdmSyncContext,
@@ -51,6 +54,9 @@ async function main() {
   const bulkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/bulk-import.ts", "utf8");
   const forceLatestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/force-latest.ts", "utf8");
   const chunkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "utf8");
+  const statusEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/status.ts", "utf8");
+  const latestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/latest.ts", "utf8");
+  const continueEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/continue.ts", "utf8");
   const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
   assert.match(manualEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(manualEndpointSource, /getSessionUser/);
@@ -79,6 +85,11 @@ async function main() {
   assert.match(dashboardSource, /First Failed Line/);
   assert.match(dashboardSource, /completed_with_warnings/);
   assert.match(dashboardSource, /makeWarningBulkAdmFileResultFromProgress/);
+  assert.match(dashboardSource, /makeProcessingBulkAdmFileResultFromJob/);
+  assert.match(dashboardSource, /ADM_IMPORT_JOB_POLL_INTERVAL_MS = 4000/);
+  assert.match(dashboardSource, /Files Processing/);
+  assert.match(dashboardSource, /Continue Import/);
+  assert.match(dashboardSource, /getAdmImportJobStatus/);
   assert.match(dashboardSource, /Job Status/);
   assert.match(dashboardSource, /Finish Status/);
   assert.match(dashboardSource, /refreshDashboardAfterManualAdmImport\(\)/);
@@ -94,6 +105,9 @@ async function main() {
   assert.match(forceLatestEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(chunkEndpointSource, /requestDetails/);
   assert.match(chunkEndpointSource, /firstLinePreview/);
+  assert.match(statusEndpointSource, /getAdmImportJobProgressForServer/);
+  assert.match(latestEndpointSource, /getLatestAdmImportJobProgressForFilename/);
+  assert.match(continueEndpointSource, /processNextAdmImportJobChunk/);
   assert.match(dashboardSource, /Chunk Import Job/);
   assert.match(dashboardSource, /Processing latest ADM in chunks/);
 
@@ -423,6 +437,61 @@ async function main() {
   assert.equal(largeBrowserDb.killEvents.length, 216);
   assert.equal(largeBrowserDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
 
+  const activeBrowserJobDb = new MemoryD1();
+  let activeBrowserProgress = await startAdmImportLineJobForServer(makeEnv(activeBrowserJobDb), {
+    linkedServerId,
+    filename: largeFixtureName,
+    totalLines: largeFixtureLines.length,
+    totalChunks: Math.ceil(largeFixtureLines.length / 10),
+    source: "manual_file_upload",
+    chunkSize: 10,
+  });
+  const activeBrowserChunks = chunkAdmLines(largeFixtureLines, 10);
+  for (let index = 0; index < 21; index += 1) {
+    const chunk = activeBrowserChunks[index];
+    activeBrowserProgress = await processAdmImportJobLineChunk(makeEnv(activeBrowserJobDb), {
+      linkedServerId,
+      jobId: activeBrowserProgress.job_id,
+      filename: largeFixtureName,
+      chunkIndex: index,
+      startLine: chunk.startLine,
+      lines: chunk.lines,
+      previousLines: largeFixtureLines.slice(Math.max(0, chunk.startLine - 5), chunk.startLine),
+    });
+  }
+  assert.equal(activeBrowserProgress.status, "queued");
+  assert.equal(activeBrowserProgress.chunks_processed, 21);
+  assert.equal(activeBrowserProgress.current_line, 210);
+  assert.equal(activeBrowserProgress.total_chunks, 339);
+  const simulatedProductionActiveJob = activeBrowserJobDb.admImportJobs.get(activeBrowserProgress.job_id);
+  if (simulatedProductionActiveJob) {
+    simulatedProductionActiveJob.parsed_kills = 19;
+    simulatedProductionActiveJob.written_kills = 6;
+  }
+  const activeById = await getAdmImportJobProgressForServer(makeEnv(activeBrowserJobDb), {
+    linkedServerId,
+    jobId: activeBrowserProgress.job_id,
+  });
+  assert.equal(activeById?.job_id, activeBrowserProgress.job_id);
+  assert.equal(activeById?.chunks_processed, 21);
+  assert.equal(activeById?.parsed_kills, 19);
+  assert.equal(activeById?.written_kills, 6);
+  const activeByFilename = await getLatestAdmImportJobProgressForFilename(makeEnv(activeBrowserJobDb), {
+    linkedServerId,
+    filename: largeFixtureName,
+  });
+  assert.equal(activeByFilename?.job_id, activeBrowserProgress.job_id);
+  const reattachedStart = await startAdmImportLineJobForServer(makeEnv(activeBrowserJobDb), {
+    linkedServerId,
+    filename: largeFixtureName,
+    totalLines: largeFixtureLines.length,
+    totalChunks: Math.ceil(largeFixtureLines.length / 10),
+    source: "manual_file_upload",
+    chunkSize: 10,
+  });
+  assert.equal(reattachedStart.job_id, activeBrowserProgress.job_id);
+  assert.equal(reattachedStart.chunks_processed, 21);
+
   const finishWarningDb = new MemoryD1({ failAutomationJobInsert: true });
   const finishWarningImport = await importChunkedAdmText(makeEnv(finishWarningDb), linkedServerId, largeFixtureName, largeFixtureText, { chunkSize: 10 });
   assert.equal(finishWarningImport.status, "completed_with_warnings");
@@ -448,13 +517,18 @@ async function main() {
   assert.equal(scheduledJob.source, "scheduled_nitrado");
   assert.equal(scheduledJob.total_lines, 3385);
   assert.equal(scheduledJob.total_chunks, Math.ceil(3385 / 10));
+  const continuedScheduled = await processNextAdmImportJobChunk(makeEnv(scheduledJobDb), {
+    linkedServerId,
+    jobId: scheduledJob.job_id,
+  });
+  assert.equal(continuedScheduled.current_line, 10);
   const firstScheduledTick = await processPendingAdmImportJobs(makeEnv(scheduledJobDb), { maxJobs: 1, maxChunksPerJob: 2 });
   assert.equal(firstScheduledTick.processedJobs, 1);
   assert.equal(firstScheduledTick.chunksProcessed, 2);
   assert.equal(firstScheduledTick.completedJobs, 0);
   const firstProgress = firstScheduledTick.results[0];
   assert.equal(firstProgress?.status, "queued");
-  assert.equal(firstProgress?.current_line, 20);
+  assert.equal(firstProgress?.current_line, 30);
   assert.notEqual(firstProgress?.current_line, largeFixtureLines.length);
   let scheduledLoops = 0;
   let scheduledPending = firstScheduledTick;

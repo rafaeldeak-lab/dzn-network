@@ -917,7 +917,7 @@ export type BulkAdmFileResult = {
   ok: boolean;
   filename: string;
   source: string;
-  status: "previewed" | "imported" | "completed_with_warnings" | "duplicate_only" | "failed" | string;
+  status: "previewed" | "imported" | "processing" | "completed_with_warnings" | "duplicate_only" | "failed" | string;
   failed_endpoint?: string | null;
   failed_chunk_index?: number | null;
   first_failed_line_number?: number | null;
@@ -965,6 +965,7 @@ export type BulkAdmImportResult = {
   source: string;
   files_uploaded: number;
   files_imported: number;
+  processing_files?: number;
   failed_files: number;
   total_raw_lines: number;
   raw_kill_lines_found: number;
@@ -1020,9 +1021,15 @@ export type AdmImportJobProgressResult = {
   discord_jobs_queued: number;
   warnings: string[];
   file_result: BulkAdmFileResult | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
 };
 
 export type AdmImportJobApiResult = AdmImportJobProgressResult | ManualAdmImportErrorResult;
+
+export type AdmImportJobStatusApiResult = { ok: true; job: AdmImportJobProgressResult } | ManualAdmImportErrorResult;
 
 export type AdmFileDiscoveryCandidateDebug = {
   name: string;

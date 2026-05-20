@@ -341,6 +341,10 @@ export type AdmImportJobProgressResult = {
   discord_jobs_queued: number;
   warnings: string[];
   file_result: ManualAdmBulkFileResult | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
 };
 
 export type ScheduledAdmImportJobResult = {
@@ -2490,9 +2494,14 @@ export async function startAdmImportLineJobForServer(
   const chunkSize = Math.max(1, Math.min(25, Math.trunc(input.chunkSize ?? MANUAL_ADM_UPLOAD_CHUNK_SIZE)));
   const totalChunks = Math.max(1, Math.trunc(Number(input.totalChunks ?? Math.ceil(totalLines / chunkSize))));
   const now = new Date().toISOString();
-  const id = crypto.randomUUID();
   const source = input.source ?? "manual_file_upload";
   const db = requireDb(env);
+  const existingJob = await getAdmImportJobForFilename(env, input.linkedServerId, filename);
+  if (existingJob && ["queued", "writing", "rebuilding", "failed_retryable"].includes(String(existingJob.status))) {
+    return toAdmImportJobProgress(existingJob);
+  }
+
+  const id = crypto.randomUUID();
   await db
     .prepare(
       `INSERT INTO adm_import_jobs (
@@ -2721,7 +2730,7 @@ export async function retryAdmImportLineJobForServer(
   await ensureAdmSyncSchema(env);
   const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
   if (!row) throw new Error("ADM import job not found.");
-  if (row.status === "completed") return toAdmImportJobProgress(row);
+  if (row.status === "completed" || row.status === "completed_with_warnings") return toAdmImportJobProgress(row);
   const db = requireDb(env);
   await db
     .prepare("UPDATE adm_import_jobs SET status = 'queued', error_message = NULL, failed_chunk_index = NULL, updated_at = ? WHERE id = ? AND server_id = ?")
@@ -2875,14 +2884,15 @@ export async function createScheduledAdmImportJobForServer(
   const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, selected.name);
   if (existingJob) {
     const progress = toAdmImportJobProgress(existingJob);
-    if (progress.status === "completed" || existingJob.source !== SCHEDULED_ADM_IMPORT_SOURCE || !existingJob.adm_text) {
-      await recordAdmImportJobProgressInSyncState(env, existingJob, progress.status === "completed" ? "no_new_lines" : "processing_in_chunks", progress.status === "completed"
+    const completed = isCompletedAdmImportJobStatus(progress.status);
+    if (completed || existingJob.source !== SCHEDULED_ADM_IMPORT_SOURCE || !existingJob.adm_text) {
+      await recordAdmImportJobProgressInSyncState(env, existingJob, completed ? "no_new_lines" : "processing_in_chunks", completed
         ? `ADM file ${selected.name} is already imported. DZN skipped duplicate scheduled processing.`
         : `ADM file ${selected.name} already has an import job from ${existingJob.source}.`);
       return {
         ok: true,
-        status: progress.status === "completed" ? "no_new_lines" : "processing_in_chunks",
-        message: progress.status === "completed"
+        status: completed ? "no_new_lines" : "processing_in_chunks",
+        message: completed
           ? `ADM file ${selected.name} is already imported.`
           : `ADM file ${selected.name} already has an active import job.`,
         job: progress,
@@ -2961,12 +2971,15 @@ export async function processNextAdmImportJobChunk(
   await ensureAdmSyncSchema(env);
   const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
   if (!row) throw new Error("ADM import job not found.");
-  if (row.status === "completed") return toAdmImportJobProgress(row);
+  if (row.status === "completed" || row.status === "completed_with_warnings") return toAdmImportJobProgress(row);
 
   const server = await getLinkedServerForAdmImport(env, input.linkedServerId);
   if (!server) throw new Error("Server not found.");
 
   const lines = splitAdmText(row.adm_text);
+  if (!lines.length) {
+    throw new Error("ADM import job has no server-side ADM text. Reselect the file in the dashboard to continue this manual upload.");
+  }
   const startLine = Math.max(0, Math.min(Number(row.current_line ?? 0), lines.length));
   const chunkSize = Math.max(1, Number(row.chunk_size ?? MANUAL_ADM_IMPORT_CHUNK_SIZE));
   const endLine = Math.min(lines.length, startLine + chunkSize);
@@ -3064,10 +3077,10 @@ export async function processNextAdmImportJobChunk(
 async function processAdmImportJobChunksById(env: Env, linkedServerId: string, jobId: string, maxChunks: number) {
   const safeMaxChunks = clampPositiveInteger(maxChunks, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
   let progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
-  await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), progress.status === "completed" ? "completed" : "processing_in_chunks");
-  for (let index = 1; index < safeMaxChunks && progress.status !== "completed"; index += 1) {
+  await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), isCompletedAdmImportJobStatus(progress.status) ? "completed" : "processing_in_chunks");
+  for (let index = 1; index < safeMaxChunks && !isCompletedAdmImportJobStatus(progress.status); index += 1) {
     progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
-    await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), progress.status === "completed" ? "completed" : "processing_in_chunks");
+    await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), isCompletedAdmImportJobStatus(progress.status) ? "completed" : "processing_in_chunks");
   }
   return progress;
 }
@@ -3192,7 +3205,7 @@ async function finalizeAdmImportJob(
   lines: string[] | null,
 ): Promise<AdmImportJobProgressResult> {
   const existing = await getAdmImportJob(env, row.server_id, row.id);
-  if (existing?.status === "completed") return toAdmImportJobProgress(existing);
+  if (existing && isCompletedAdmImportJobStatus(existing.status)) return toAdmImportJobProgress(existing);
 
   const now = new Date().toISOString();
   const db = requireDb(env);
@@ -3449,13 +3462,39 @@ async function getAdmImportJob(env: Env, linkedServerId: string, jobId: string) 
     .first<AdmImportJobRow>();
 }
 
+export async function getAdmImportJobProgressForServer(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    jobId: string;
+  },
+): Promise<AdmImportJobProgressResult | null> {
+  await ensureAdmSyncSchema(env);
+  const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+  return row ? toAdmImportJobProgress(row) : null;
+}
+
+export async function getLatestAdmImportJobProgressForFilename(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    filename: string;
+  },
+): Promise<AdmImportJobProgressResult | null> {
+  await ensureAdmSyncSchema(env);
+  const filename = sanitizeManualAdmFilename(input.filename);
+  if (!filename) return null;
+  const row = await getAdmImportJobForFilename(env, input.linkedServerId, filename);
+  return row ? toAdmImportJobProgress(row) : null;
+}
+
 async function getAdmImportJobForFilename(env: Env, linkedServerId: string, filename: string) {
   return await requireDb(env)
     .prepare(
       `SELECT * FROM adm_import_jobs
        WHERE server_id = ? AND filename = ?
        ORDER BY
-         CASE WHEN status IN ('completed', 'completed_with_warnings') THEN 0 WHEN status IN ('queued', 'writing', 'rebuilding', 'failed_retryable') THEN 1 ELSE 2 END,
+         CASE WHEN status IN ('queued', 'writing', 'rebuilding', 'failed_retryable') THEN 0 WHEN status IN ('completed', 'completed_with_warnings') THEN 1 ELSE 2 END,
          updated_at DESC,
          created_at DESC
        LIMIT 1`,
@@ -3556,7 +3595,7 @@ function progressToImportJobRow(progress: AdmImportJobProgressResult, linkedServ
     result_json: progress.file_result ? JSON.stringify(progress.file_result) : null,
     created_at: null,
     updated_at: null,
-    completed_at: progress.status === "completed" ? new Date().toISOString() : null,
+    completed_at: isCompletedAdmImportJobStatus(progress.status) ? new Date().toISOString() : null,
   };
 }
 
@@ -3566,11 +3605,12 @@ function scheduledJobResultFromProgress(
   latestAdmFile: string,
   newestAvailable: DiscoveredAdmFileForSync | null,
 ): ScheduledAdmImportJobResult {
-  const status = progress.status === "completed" ? "completed" : "processing_in_chunks";
+  const completed = isCompletedAdmImportJobStatus(progress.status);
+  const status = completed ? "completed" : "processing_in_chunks";
   return {
     ok: true,
     status,
-    message: progress.status === "completed"
+    message: completed
       ? `Scheduled ADM chunk import completed for ${latestAdmFile}.`
       : `Processing latest ADM in chunks: ${progress.chunks_processed}/${progress.total_chunks}.`,
     job: progress,
@@ -3625,6 +3665,10 @@ function toAdmImportJobProgress(row: AdmImportJobRow): AdmImportJobProgressResul
     discord_jobs_queued: Number(row.discord_jobs_queued ?? 0),
     warnings: parseJobWarnings(row),
     file_result: fileResult,
+    error_message: row.error_message ?? null,
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
+    completed_at: row.completed_at ?? null,
   };
 }
 
@@ -3641,6 +3685,10 @@ function parseJobFileResult(value: string | null): ManualAdmBulkFileResult | nul
 function normalizeImportJobStatus(value: string): AdmImportJobProgressResult["status"] {
   if (value === "queued" || value === "parsing" || value === "writing" || value === "rebuilding" || value === "completed" || value === "completed_with_warnings" || value === "failed" || value === "failed_retryable") return value;
   return "queued";
+}
+
+function isCompletedAdmImportJobStatus(status: string) {
+  return status === "completed" || status === "completed_with_warnings";
 }
 
 export function previewManualAdmText(input: {

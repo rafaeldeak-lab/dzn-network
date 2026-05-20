@@ -27,6 +27,7 @@ import type {
   ManualAdmImportApiResult,
   BulkAdmImportApiResult,
   AdmImportJobApiResult,
+  AdmImportJobStatusApiResult,
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
@@ -238,6 +239,22 @@ export async function finishAdmImportJob(linkedServerId: string, jobId: string) 
 
 export async function retryAdmImportJob(linkedServerId: string, jobId: string) {
   return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/retry`, { jobId });
+}
+
+export async function continueAdmImportJob(linkedServerId: string, jobId: string) {
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/continue`, { jobId });
+}
+
+export async function getAdmImportJobStatus(linkedServerId: string, jobId: string) {
+  return request<AdmImportJobStatusApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/status?job_id=${encodeURIComponent(jobId)}`, {
+    cache: "no-store",
+  });
+}
+
+export async function getLatestAdmImportJob(linkedServerId: string, filename: string) {
+  return request<AdmImportJobStatusApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/latest?filename=${encodeURIComponent(filename)}`, {
+    cache: "no-store",
+  });
 }
 
 export async function forceProcessLatestAdm(linkedServerId: string) {

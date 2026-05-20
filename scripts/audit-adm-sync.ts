@@ -178,6 +178,9 @@ function auditDueServerSelection() {
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "requestDetails", "ADM chunk endpoint returns structured failure diagnostics");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "firstLinePreview", "ADM chunk endpoint reports first failed line preview");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/finish.ts", "finishAdmImportLineJobForServer", "Owner/admin ADM import finish endpoint exists");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job/status.ts", "getAdmImportJobProgressForServer", "Owner/admin ADM import job status endpoint exists");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job/latest.ts", "getLatestAdmImportJobProgressForFilename", "Owner/admin latest ADM import job endpoint exists");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job/continue.ts", "processNextAdmImportJobChunk", "Owner/admin ADM import job continue endpoint exists");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job.ts", "chunked_import_required", "Legacy full-file ADM import route is disabled");
   checkIncludes("functions/_lib/adm-sync.ts", "cursorAdvanced", "Import report tracks cursor advancement");
   checkIncludes("functions/_lib/adm-sync.ts", "last_processed_adm_line_hash", "ADM cursor stores SHA-1 hash of the last processed line");
@@ -217,6 +220,9 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "First Failed Line", "Dashboard shows failed chunk line diagnostics");
   checkIncludes("components/onboarding/dashboard.tsx", "makeWarningBulkAdmFileResultFromProgress", "Dashboard preserves chunk counters when finish returns a warning/error");
   checkIncludes("components/onboarding/dashboard.tsx", "Completed with warnings", "Dashboard distinguishes finish warnings from core import failures");
+  checkIncludes("components/onboarding/dashboard.tsx", "getAdmImportJobStatus", "Dashboard polls active ADM import jobs");
+  checkIncludes("components/onboarding/dashboard.tsx", "Files Processing", "Dashboard counts active ADM import jobs separately from failures");
+  checkIncludes("components/onboarding/dashboard.tsx", "Continue Import", "Dashboard can continue an existing ADM import job");
   checkIncludes("components/onboarding/dashboard.tsx", "ADM cursor verified.", "Dashboard shows cursor hash validation wording");
   checkIncludes("components/onboarding/dashboard.tsx", "DZN detected ADM cursor mismatch", "Dashboard explains safe cursor recovery");
 }
