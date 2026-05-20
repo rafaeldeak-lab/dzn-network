@@ -73,6 +73,21 @@ type AdmBulkProgress = {
   duplicateSkips?: number;
 };
 
+type DashboardTotalsSnapshot = {
+  kills: number;
+  deaths: number;
+  joins: number;
+  disconnects: number;
+  uniquePlayers: number;
+  serverScore: string;
+};
+
+type DashboardTotalsDelta = {
+  before: DashboardTotalsSnapshot;
+  after: DashboardTotalsSnapshot;
+  changed: boolean;
+};
+
 const ADM_IMPORT_UPLOAD_CHUNK_SIZE = 10;
 const ADM_IMPORT_PREVIOUS_LINE_CONTEXT = 5;
 
@@ -250,6 +265,7 @@ function ServerDashboard({
   const [bulkAdmImportResult, setBulkAdmImportResult] = useState<BulkAdmImportResult | null>(null);
   const [bulkAdmImportError, setBulkAdmImportError] = useState<ManualAdmImportErrorResult | null>(null);
   const [bulkAdmImportProgress, setBulkAdmImportProgress] = useState<AdmBulkProgress | null>(null);
+  const [admImportTotalsDelta, setAdmImportTotalsDelta] = useState<DashboardTotalsDelta | null>(null);
   const [forceLatestAdmRunning, setForceLatestAdmRunning] = useState(false);
   const [forceLatestAdmResult, setForceLatestAdmResult] = useState<AdmSyncRunResult | null>(null);
   const [manualAdmRefreshFailed, setManualAdmRefreshFailed] = useState(false);
@@ -653,6 +669,8 @@ function ServerDashboard({
     setManualAdmImporting(true);
     setActionMessage("");
     setManualAdmImportError(null);
+    setAdmImportTotalsDelta(null);
+    const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
     try {
       const response = await importManualAdmText(server.id, {
         filename,
@@ -666,9 +684,9 @@ function ServerDashboard({
       }
 
       setManualAdmImportResult(response);
-      const refreshed = await refreshDashboardAfterManualAdmImport();
+      const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
       setActionMessage(refreshed
-        ? `Manual ADM import complete. Parsed ${response.parsed_kills} PvP kills and wrote ${response.written_kills}.`
+        ? "ADM import completed. Stats and feeds updated."
         : "Manual ADM import succeeded, but dashboard refresh failed. Hard refresh or retry refresh.");
     } catch (error) {
       const failure: ManualAdmImportErrorResult = {
@@ -704,6 +722,7 @@ function ServerDashboard({
     setManualAdmPreviewing(true);
     setManualAdmImportError(null);
     setBulkAdmImportError(null);
+    setAdmImportTotalsDelta(null);
     setActionMessage("");
     try {
       const response = await bulkImportAdmFiles(server.id, {
@@ -739,9 +758,11 @@ function ServerDashboard({
     setActionMessage("");
     setManualAdmImportError(null);
     setBulkAdmImportError(null);
+    setAdmImportTotalsDelta(null);
     setBulkAdmImportResult(summarizeClientBulkAdmResults([], manualAdmFiles.length ? "manual_file_upload" : "manual_paste", files.length));
     const source = manualAdmFiles.length ? "manual_file_upload" : "manual_paste";
     const fileResults: BulkAdmFileResult[] = [];
+    const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
     try {
       for (const [index, file] of files.entries()) {
         setBulkAdmImportProgress({ current: index + 1, total: files.length, filename: file.filename });
@@ -752,9 +773,9 @@ function ServerDashboard({
 
       const response = summarizeClientBulkAdmResults(fileResults, source, files.length);
       setBulkAdmImportResult(response);
-      const refreshed = await refreshDashboardAfterManualAdmImport();
+      const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
       setActionMessage(refreshed
-        ? `Bulk ADM import complete. Parsed ${response.parsed_kills} PvP kills and wrote ${response.written_kills}.`
+        ? "ADM import completed. Stats and feeds updated."
         : "Bulk ADM import succeeded, but dashboard refresh failed. Hard refresh or retry refresh.");
     } catch (error) {
       const failure = makeClientAdmFailure(error, "bulk_import_exception", "Bulk ADM import failed before a response was received.");
@@ -784,13 +805,15 @@ function ServerDashboard({
     setBulkAdmImportProgress({ current: 1, total: 1, filename: file.filename });
     setActionMessage("");
     setBulkAdmImportError(null);
+    setAdmImportTotalsDelta(null);
+    const beforeTotals = makeDashboardTotalsSnapshot(server, syncStatus);
     try {
       const fileResult = await importSingleAdmFileInChunks(file, source, 1, 1);
       const merged = replaceBulkAdmFileResult(bulkAdmImportResult, fileResult, source, selectedCount);
       setBulkAdmImportResult(merged);
-      const refreshed = await refreshDashboardAfterManualAdmImport();
+      const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
       setActionMessage(refreshed
-        ? `Retry complete for ${file.filename}. Wrote ${fileResult.written_kills} PvP kills.`
+        ? "ADM import completed. Stats and feeds updated."
         : `Retry complete for ${file.filename}, but dashboard refresh failed. Hard refresh or retry refresh.`);
     } catch (error) {
       const failure = makeClientAdmFailure(error, "bulk_retry_exception", "ADM file retry failed before a response was received.");
@@ -1007,27 +1030,46 @@ function ServerDashboard({
     }
     setBulkAdmImportResult(null);
     setBulkAdmImportError(null);
+    setAdmImportTotalsDelta(null);
     setManualAdmImportResult(null);
     setManualAdmImportError(null);
     setManualAdmParsePreview(null);
   }
 
-  async function refreshDashboardAfterManualAdmImport() {
+  async function refreshDashboardAfterManualAdmImport(beforeTotals?: DashboardTotalsSnapshot) {
     setManualAdmRefreshFailed(false);
     setRefreshingSyncData(true);
-    const [serverRefresh, statusResult, eventsResult, publicCacheResult, automationResult] = await Promise.allSettled([
-      onRefresh(),
+    const [authRefresh, statusResult, eventsResult, publicCacheResult, automationResult] = await Promise.allSettled([
+      getMe(),
       getSyncStatus(server.id),
       getRecentSyncEvents(server.id),
       getPublicCacheDebug(server.id),
       getAutomationHealth(),
     ]);
 
+    let refreshedServer: LinkedServer | null = null;
+    if (authRefresh.status === "fulfilled" && authRefresh.value.authenticated) {
+      refreshedServer = findLinkedServerInAuthResponse(authRefresh.value, server.id);
+      if (refreshedServer) {
+        setServerInfoOverride({ serverId: server.id, patch: refreshedServer });
+      }
+      void onRefreshRef.current().catch(() => null);
+    }
+
     if (statusResult.status === "fulfilled") setSyncStatus(statusResult.value.status);
     if (eventsResult.status === "fulfilled") setRecentEvents(eventsResult.value.events);
     if (publicCacheResult.status === "fulfilled") setPublicCacheDebug(publicCacheResult.value);
     if (automationResult.status === "fulfilled") setAutomationHealth(automationResult.value);
-    const ok = [serverRefresh, statusResult, eventsResult, publicCacheResult].every((result) => result.status === "fulfilled");
+
+    if (beforeTotals) {
+      const afterStatus = statusResult.status === "fulfilled" ? statusResult.value.status : syncStatus;
+      const afterServer = refreshedServer ? { ...server, ...refreshedServer } : server;
+      if (afterStatus) {
+        setAdmImportTotalsDelta(makeDashboardTotalsDelta(beforeTotals, makeDashboardTotalsSnapshot(afterServer, afterStatus)));
+      }
+    }
+
+    const ok = [authRefresh, statusResult, eventsResult, publicCacheResult].every((result) => result.status === "fulfilled");
     if (ok) {
       setLastRefreshedAt(new Date().toISOString());
       setLiveRefreshWarning("");
@@ -1626,6 +1668,7 @@ function ServerDashboard({
                 bulkResult={bulkAdmImportResult}
                 bulkFailure={bulkAdmImportError}
                 bulkProgress={bulkAdmImportProgress}
+                totalsDelta={admImportTotalsDelta}
                 importHitLines={manualAdmImportHitLines}
                 refreshFailed={manualAdmRefreshFailed}
                 history={syncStatus?.manual_import_history ?? []}
@@ -3435,6 +3478,7 @@ function ManualAdmImportPanel({
   bulkResult,
   bulkFailure,
   bulkProgress,
+  totalsDelta,
   importHitLines,
   refreshFailed,
   history,
@@ -3461,6 +3505,7 @@ function ManualAdmImportPanel({
   bulkResult: BulkAdmImportResult | null;
   bulkFailure: ManualAdmImportErrorResult | null;
   bulkProgress: AdmBulkProgress | null;
+  totalsDelta: DashboardTotalsDelta | null;
   importHitLines: boolean;
   refreshFailed: boolean;
   history: AdmSyncStatus["manual_import_history"];
@@ -3638,7 +3683,7 @@ function ManualAdmImportPanel({
         <ManualAdmFailurePanel failure={bulkFailure} title="Bulk ADM Import Failed" />
       ) : null}
       {bulkResult ? (
-        <BulkAdmImportResultPanel result={bulkResult} importing={importing} onRetryFile={onRetryBulkFile} />
+        <BulkAdmImportResultPanel result={bulkResult} totalsDelta={totalsDelta} importing={importing} onRetryFile={onRetryBulkFile} />
       ) : null}
       {preview ? (
         <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-3">
@@ -3800,101 +3845,156 @@ function ManualAdmImportPanel({
 
 function BulkAdmImportResultPanel({
   result,
+  totalsDelta,
   importing,
   onRetryFile,
 }: {
   result: BulkAdmImportResult;
+  totalsDelta: DashboardTotalsDelta | null;
   importing: boolean;
   onRetryFile: (filename: string) => void;
 }) {
-  const statusTone = result.failed_files > 0 || result.errors.length ? "orange" : "emerald";
+  const failedFiles = result.files.filter(isFailedBulkAdmFile);
+  const completedFiles = result.files.filter((file) => !isFailedBulkAdmFile(file));
+  const statusTone = failedFiles.length > 0 || result.errors.length ? "orange" : result.mode === "preview" ? "cyan" : "emerald";
+  const statusMessage = result.mode === "preview"
+    ? `Previewed ${result.files_uploaded} ADM file${result.files_uploaded === 1 ? "" : "s"}.`
+    : failedFiles.length > 0
+      ? `Imported ${completedFiles.length} of ${result.files_uploaded} ADM file${result.files_uploaded === 1 ? "" : "s"}.`
+      : "ADM import completed. Stats and feeds updated.";
   return (
-    <div className={`mt-4 rounded-lg border p-3 ${statusTone === "emerald" ? "border-emerald-300/18 bg-emerald-400/8" : "border-amber-300/20 bg-amber-400/10"}`}>
+    <div className={`mt-4 rounded-lg border p-3 ${statusTone === "emerald" ? "border-emerald-300/18 bg-emerald-400/8" : statusTone === "cyan" ? "border-cyan-300/18 bg-cyan-400/8" : "border-amber-300/20 bg-amber-400/10"}`}>
       <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className={`text-xs font-black uppercase ${statusTone === "emerald" ? "text-emerald-100" : "text-amber-100"}`}>Bulk ADM Import Result</p>
-          <p className={`mt-1 text-sm font-bold ${statusTone === "emerald" ? "text-emerald-50" : "text-amber-50"}`}>
-            {result.mode === "preview" ? "Previewed" : "Imported"} {result.files_uploaded} ADM file{result.files_uploaded === 1 ? "" : "s"}.
+          <p className={`text-xs font-black uppercase ${statusTone === "emerald" ? "text-emerald-100" : statusTone === "cyan" ? "text-cyan-100" : "text-amber-100"}`}>Bulk ADM Import Summary</p>
+          <p className={`mt-1 text-sm font-bold ${statusTone === "emerald" ? "text-emerald-50" : statusTone === "cyan" ? "text-cyan-50" : "text-amber-50"}`}>
+            {statusMessage}
           </p>
         </div>
-        <SmallBadge tone={statusTone}>{result.failed_files > 0 ? `${result.failed_files} Failed` : result.mode === "preview" ? "Preview Ready" : "Succeeded"}</SmallBadge>
+        <SmallBadge tone={statusTone}>{failedFiles.length > 0 ? `${failedFiles.length} Need Retry` : result.mode === "preview" ? "Preview Ready" : "Succeeded"}</SmallBadge>
       </div>
-      {result.mode === "import" ? (
-        <p className={`mt-2 rounded-md border px-3 py-2 text-xs font-bold ${statusTone === "emerald" ? "border-emerald-300/15 bg-emerald-400/8 text-emerald-50" : "border-amber-300/20 bg-amber-400/10 text-amber-50"}`}>
-          Imported {result.files_imported} file{result.files_imported === 1 ? "" : "s"}, added {result.written_kills} PvP kill{result.written_kills === 1 ? "" : "s"}, skipped {result.duplicate_kills_skipped} duplicate{result.duplicate_kills_skipped === 1 ? "" : "s"}, and failed {result.failed_files} file{result.failed_files === 1 ? "" : "s"}.
-        </p>
-      ) : null}
       <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        <MiniInfo label="HTTP Status" value={result.http_status ? String(result.http_status) : "Not recorded"} />
-        <MiniInfo label="Files Uploaded" value={String(result.files_uploaded)} />
-        <MiniInfo label="Files Imported" value={String(result.files_imported)} />
-        <MiniInfo label="Failed Files" value={String(result.failed_files)} />
-        <MiniInfo label="Raw Lines" value={String(result.total_raw_lines)} />
+        <MiniInfo label="Files Selected" value={String(result.files_uploaded)} />
+        <MiniInfo label="Files Completed" value={String(completedFiles.length)} />
+        <MiniInfo label="Files Failed" value={String(failedFiles.length)} />
         <MiniInfo label="Parsed PvP Kills" value={String(result.parsed_kills)} />
         <MiniInfo label="Written PvP Kills" value={String(result.written_kills)} />
-        <MiniInfo label="Duplicate Kills Skipped" value={String(result.duplicate_kills_skipped)} />
+        <MiniInfo label="Duplicate Skips" value={String(result.duplicate_kills_skipped)} />
+        <MiniInfo label="Deaths" value={String(result.deaths)} />
         <MiniInfo label="Joins" value={String(result.joins)} />
         <MiniInfo label="Disconnects" value={String(result.disconnects)} />
         <MiniInfo label="PlayerList Snapshots" value={String(result.playerlist_snapshots)} />
-        <MiniInfo label="Deaths" value={String(result.deaths)} />
-        <MiniInfo label="Suicides" value={String(result.suicides)} />
-        <MiniInfo label="Hit Lines" value={String(result.hit_lines)} />
-        <MiniInfo label="Raw Events Stored" value={String(result.raw_events_stored)} />
-        <MiniInfo label="Player Events Stored" value={String(result.player_events_stored)} />
         <MiniInfo label="Public Cache" value={result.public_cache_updated ? "Updated" : result.mode === "preview" ? "Preview only" : "Not updated"} />
         <MiniInfo label="Discord Jobs Queued" value={String(result.discord_jobs_queued)} />
       </div>
-      {result.warnings.length || result.errors.length ? (
-        <div className="mt-3 grid gap-2">
-          {[...result.errors, ...result.warnings].map((message) => (
-            <p key={message} className="rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{message}</p>
+      {totalsDelta?.changed ? <DashboardTotalsDeltaPanel delta={totalsDelta} /> : null}
+      {completedFiles.length ? (
+        <div className="mt-4 grid gap-2">
+          {completedFiles.map((file) => (
+            <div key={`${file.filename}-${file.status}-complete`} className="rounded-lg border border-white/10 bg-black/24 px-3 py-3">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="break-all text-sm font-black text-white">{file.filename}</p>
+                  <p className="mt-1 text-xs font-bold text-zinc-400">{getBulkAdmFileOutcomeLabel(file, result.mode)}</p>
+                </div>
+                <SmallBadge tone={getBulkAdmFileOutcomeTone(file, result.mode)}>{getBulkAdmFileOutcomeLabel(file, result.mode)}</SmallBadge>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                <MiniInfo label="Parsed Kills" value={String(file.parsed_kills)} />
+                <MiniInfo label="Written Kills" value={String(file.written_kills)} />
+                <MiniInfo label="Duplicates" value={String(file.duplicate_skips)} />
+                <MiniInfo label="Joins" value={String(file.joins)} />
+                <MiniInfo label="Disconnects" value={String(file.disconnects)} />
+                <MiniInfo label="PlayerList" value={String(file.playerlist_snapshots)} />
+              </div>
+            </div>
           ))}
         </div>
       ) : null}
-      <div className="mt-4 grid gap-3">
-        {result.files.map((file) => (
-          <details key={`${file.filename}-${file.status}`} open={result.files.length <= 3} className="rounded-lg border border-white/10 bg-black/24 p-3">
-            <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">
-              {file.filename} - {formatStatusLabel(file.status)}
-            </summary>
-            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-              <MiniInfo label="Parsed Kills" value={String(file.parsed_kills)} />
-              <MiniInfo label="Written Kills" value={String(file.written_kills)} />
-              <MiniInfo label="Joins" value={String(file.joins)} />
-              <MiniInfo label="Disconnects" value={String(file.disconnects)} />
-              <MiniInfo label="PlayerList" value={String(file.playerlist_snapshots)} />
-              <MiniInfo label="Duplicates" value={String(file.duplicate_skips)} />
-              <MiniInfo label="Failed Writes" value={String(file.failed_writes)} />
-              <MiniInfo label="Hit Lines" value={String(file.hit_lines)} />
-              <MiniInfo label="Raw Events" value={String(file.raw_events_stored)} />
-              <MiniInfo label="Player Events" value={String(file.player_events_stored)} />
-              <MiniInfo label="Chunks" value={file.total_chunks ? `${file.chunks_processed ?? 0}/${file.total_chunks}` : "Chunked"} />
+      {failedFiles.length || result.errors.length || result.warnings.length ? (
+        <details className="mt-4 rounded-lg border border-amber-300/20 bg-black/24 p-3">
+          <summary className="cursor-pointer text-xs font-black uppercase text-amber-100">Previous Import Attempts</summary>
+          <div className="mt-3 grid gap-2">
+            {[...result.errors, ...result.warnings].map((message) => (
+              <p key={message} className="rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{message}</p>
+            ))}
+            {failedFiles.map((file) => (
+              <div key={`${file.filename}-${file.status}-failed`} className="rounded-lg border border-rose-300/20 bg-rose-400/10 p-3">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="break-all text-sm font-black text-rose-50">{file.filename}</p>
+                    <p className="mt-1 text-xs font-bold text-rose-100">{file.message ?? file.error_code ?? "Import failed."}</p>
+                  </div>
+                  {result.mode === "import" ? (
+                    <button
+                      type="button"
+                      disabled={importing}
+                      onClick={() => onRetryFile(file.filename)}
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-[10px] font-black uppercase text-amber-50 transition hover:border-amber-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${importing ? "animate-spin" : ""}`} />
+                      Retry this file
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+      <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+        <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">Import Diagnostics</summary>
+        <div className="mt-3 grid gap-3">
+          {result.files.map((file) => (
+            <div key={`${file.filename}-${file.status}-diagnostics`} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+              <p className="break-all text-xs font-black uppercase text-zinc-200">{file.filename}</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                <MiniInfo label="HTTP Status" value={result.http_status ? String(result.http_status) : "Not recorded"} />
+                <MiniInfo label="Raw Lines" value={String(file.raw_lines)} />
+                <MiniInfo label="Raw Kill Lines" value={String(file.raw_kill_lines_found)} />
+                <MiniInfo label="Failed Writes" value={String(file.failed_writes)} />
+                <MiniInfo label="Hit Lines" value={String(file.hit_lines)} />
+                <MiniInfo label="Raw Events" value={String(file.raw_events_stored)} />
+                <MiniInfo label="Player Events" value={String(file.player_events_stored)} />
+                <MiniInfo label="Chunks" value={file.total_chunks ? `${file.chunks_processed ?? 0}/${file.total_chunks}` : "Chunked"} />
+                <MiniInfo label="Discord Jobs" value={String(file.discord_jobs_queued)} />
+                <MiniInfo label="Import Report" value={file.import_report_id ? file.import_report_id.slice(0, 8) : "None"} />
+              </div>
+              {file.parser_warnings.length ? (
+                <div className="mt-3 grid gap-2">
+                  {file.parser_warnings.map((warning) => (
+                    <p key={`${file.filename}-${warning}`} className="rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{warning}</p>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-3 grid gap-2">
+                {file.kill_previews.length ? file.kill_previews.slice(0, 5).map((kill) => (
+                  <p key={`${file.filename}-${kill.line_number}-${kill.killer_name}-${kill.victim_name}`} className="rounded-md border border-cyan-300/15 bg-black/20 px-3 py-2 text-xs font-bold text-cyan-50">
+                    Line {kill.line_number}: {kill.victim_name ?? "Unknown victim"} -&gt; {kill.killer_name ?? "Unknown killer"}{kill.weapon ? ` / ${kill.weapon}` : ""}{kill.distance !== null ? ` / ${kill.distance}m` : ""}
+                  </p>
+                )) : (
+                  <p className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-bold text-zinc-400">No PvP kill previews for this file.</p>
+                )}
+              </div>
             </div>
-            {file.message ? (
-              <p className="mt-3 rounded-md border border-rose-300/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100">{file.message}</p>
-            ) : null}
-            {result.mode === "import" && (!file.ok || file.status === "failed") ? (
-              <button
-                type="button"
-                disabled={importing}
-                onClick={() => onRetryFile(file.filename)}
-                className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-[10px] font-black uppercase text-amber-50 transition hover:border-amber-300/45 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${importing ? "animate-spin" : ""}`} />
-                Retry this file
-              </button>
-            ) : null}
-            <div className="mt-3 grid gap-2">
-              {file.kill_previews.length ? file.kill_previews.slice(0, 5).map((kill) => (
-                <p key={`${file.filename}-${kill.line_number}-${kill.killer_name}-${kill.victim_name}`} className="rounded-md border border-cyan-300/15 bg-black/20 px-3 py-2 text-xs font-bold text-cyan-50">
-                  Line {kill.line_number}: {kill.victim_name ?? "Unknown victim"} -&gt; {kill.killer_name ?? "Unknown killer"}{kill.weapon ? ` / ${kill.weapon}` : ""}{kill.distance !== null ? ` / ${kill.distance}m` : ""}
-                </p>
-              )) : (
-                <p className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-bold text-zinc-400">No PvP kill previews for this file.</p>
-              )}
-            </div>
-          </details>
-        ))}
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function DashboardTotalsDeltaPanel({ delta }: { delta: DashboardTotalsDelta }) {
+  return (
+    <div className="mt-4 rounded-lg border border-emerald-300/18 bg-emerald-400/8 p-3">
+      <p className="text-xs font-black uppercase text-emerald-100">Dashboard totals updated</p>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-6">
+        <MiniInfo label="Kills" value={`${delta.before.kills} -> ${delta.after.kills}`} />
+        <MiniInfo label="Deaths" value={`${delta.before.deaths} -> ${delta.after.deaths}`} />
+        <MiniInfo label="Joins" value={`${delta.before.joins} -> ${delta.after.joins}`} />
+        <MiniInfo label="Disconnects" value={`${delta.before.disconnects} -> ${delta.after.disconnects}`} />
+        <MiniInfo label="Unique Players" value={`${delta.before.uniquePlayers} -> ${delta.after.uniquePlayers}`} />
+        <MiniInfo label="Server Score" value={`${delta.before.serverScore} -> ${delta.after.serverScore}`} />
       </div>
     </div>
   );
@@ -5222,6 +5322,64 @@ function chunkAdmLinesForUpload(lines: string[], chunkSize: number) {
 function numberFromUnknown(value: unknown) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : undefined;
+}
+
+function findLinkedServerInAuthResponse(auth: AuthResponse, serverId: string): LinkedServer | null {
+  if (!auth.authenticated) return null;
+  return auth.linkedServers?.find((server) => server.id === serverId)
+    ?? (auth.linkedServer?.id === serverId ? auth.linkedServer : null)
+    ?? null;
+}
+
+function makeDashboardTotalsSnapshot(server: LinkedServer, status: AdmSyncStatus | null): DashboardTotalsSnapshot {
+  return {
+    kills: status?.total_kills ?? 0,
+    deaths: status?.total_deaths ?? 0,
+    joins: status?.total_joins ?? 0,
+    disconnects: status?.total_disconnects ?? 0,
+    uniquePlayers: status?.unique_players ?? 0,
+    serverScore: server.score_label ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : "Pending"),
+  };
+}
+
+function makeDashboardTotalsDelta(before: DashboardTotalsSnapshot, after: DashboardTotalsSnapshot): DashboardTotalsDelta {
+  return {
+    before,
+    after,
+    changed: before.kills !== after.kills
+      || before.deaths !== after.deaths
+      || before.joins !== after.joins
+      || before.disconnects !== after.disconnects
+      || before.uniquePlayers !== after.uniquePlayers
+      || before.serverScore !== after.serverScore,
+  };
+}
+
+function isFailedBulkAdmFile(file: BulkAdmFileResult) {
+  return !file.ok || file.status === "failed";
+}
+
+function isDedupeOnlyBulkAdmFile(file: BulkAdmFileResult) {
+  return file.ok
+    && file.status === "imported"
+    && file.parsed_kills > 0
+    && file.written_kills === 0
+    && file.duplicate_skips > 0
+    && file.failed_writes === 0;
+}
+
+function getBulkAdmFileOutcomeLabel(file: BulkAdmFileResult, mode: BulkAdmImportResult["mode"]) {
+  if (mode === "preview") return "Previewed";
+  if (isFailedBulkAdmFile(file)) return "Needs retry";
+  if (isDedupeOnlyBulkAdmFile(file)) return "Already imported - skipped by dedupe";
+  return "Imported";
+}
+
+function getBulkAdmFileOutcomeTone(file: BulkAdmFileResult, mode: BulkAdmImportResult["mode"]): "emerald" | "orange" | "cyan" | "zinc" {
+  if (mode === "preview") return "cyan";
+  if (isFailedBulkAdmFile(file)) return "orange";
+  if (isDedupeOnlyBulkAdmFile(file)) return "zinc";
+  return "emerald";
 }
 
 function summarizeClientBulkAdmResults(

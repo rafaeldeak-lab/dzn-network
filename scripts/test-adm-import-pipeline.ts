@@ -66,6 +66,14 @@ async function main() {
   assert.match(dashboardSource, /for \(const \[index, file\] of files\.entries\(\)\)/);
   assert.match(dashboardSource, /Retry this file/);
   assert.match(dashboardSource, /refreshDashboardAfterManualAdmImport\(\)/);
+  assert.match(dashboardSource, /Bulk ADM Import Summary/);
+  assert.match(dashboardSource, /Previous Import Attempts/);
+  assert.match(dashboardSource, /Import Diagnostics/);
+  assert.match(dashboardSource, /Dashboard totals updated/);
+  assert.match(dashboardSource, /Already imported - skipped by dedupe/);
+  assert.match(dashboardSource, /ADM import completed\. Stats and feeds updated\./);
+  assert.match(dashboardSource, /makeDashboardTotalsSnapshot/);
+  assert.doesNotMatch(dashboardSource, /open=\{result\.files\.length <= 3\}/);
   assert.match(forceLatestEndpointSource, /runAdmSync/);
   assert.match(forceLatestEndpointSource, /requireServerOwnerOrDznAdmin/);
 
@@ -378,6 +386,7 @@ async function main() {
   }
   assert.equal(duplicateChunkedResults.reduce((total, file) => total + Number(file?.written_kills ?? 0), 0), 0);
   assert.equal(duplicateChunkedResults.reduce((total, file) => total + Number(file?.duplicate_skips ?? 0), 0) >= 55, true);
+  assert.equal(duplicateChunkedResults.every((file) => file?.ok === true && file?.status === "imported"), true);
   assert.equal(chunkedDb.killEvents.length, 55);
 
   const chunkRetryDb = new MemoryD1({ failKillInsertAfter: 0 });
