@@ -32,8 +32,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
@@ -259,6 +259,8 @@ function ServerDashboard({
   const [syncStatus, setSyncStatus] = useState<AdmSyncStatus | null>(null);
   const [lastGoodSyncStatus, setLastGoodSyncStatus] = useState<AdmSyncStatus | null>(null);
   const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
+  const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
+  const [lastGoodDashboardHealth, setLastGoodDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
   const [recentEvents, setRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [lastGoodRecentEvents, setLastGoodRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [logDiagnostics, setLogDiagnostics] = useState<NitradoLogAccessDiagnostics | null>(null);
@@ -336,6 +338,8 @@ function ServerDashboard({
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
+  const dashboardHealthRequestIdRef = useRef(0);
+  const lastGoodDashboardHealthRef = useRef(lastGoodDashboardHealth);
   const onRefreshRef = useRef(onRefresh);
   const admChunkRunnerControlRef = useRef({ paused: false, cancelled: false, runId: 0 });
   const server = useMemo(
@@ -349,6 +353,10 @@ function ServerDashboard({
   useEffect(() => {
     onRefreshRef.current = onRefresh;
   }, [onRefresh]);
+
+  useEffect(() => {
+    lastGoodDashboardHealthRef.current = lastGoodDashboardHealth;
+  }, [lastGoodDashboardHealth]);
 
   const tags = useMemo(() => {
     try {
@@ -437,6 +445,41 @@ function ServerDashboard({
     void Promise.resolve().then(refreshBilling);
   }, [refreshBilling]);
 
+  const refreshDashboardHealth = useCallback(async () => {
+    const requestId = dashboardHealthRequestIdRef.current + 1;
+    dashboardHealthRequestIdRef.current = requestId;
+    try {
+      const response = await getDashboardHealth(server.id);
+      if (!response.ok || dashboardHealthRequestIdRef.current !== requestId) return false;
+      setDashboardHealth(response);
+      setLastGoodDashboardHealth(response);
+      saveDashboardHealthCache(server.id, response);
+      if (response.latest_events.length && !recentEvents.length) {
+        setRecentEvents(response.latest_events);
+        setLastGoodRecentEvents(response.latest_events);
+      }
+      if (response.sync.active_job && !lastGoodAdmJob) {
+        setLastGoodAdmJob(dashboardHealthJobToAdmJob(response.sync.active_job));
+      }
+      setLastRefreshedAt(response.generated_at);
+      return true;
+    } catch (error) {
+      setFailedEndpoint("dashboard-health");
+      setLastRefreshError(error instanceof Error ? error.message : "Dashboard health snapshot failed.");
+      setFailedRefreshCount((count) => count + 1);
+      const cached = lastGoodDashboardHealthRef.current;
+      if (cached) {
+        setLiveRefreshStatus("stale");
+        setLiveRefreshWarning(`Live refresh failed. Showing last successful data from ${formatClockTime(cached.generated_at)}. Retrying...`);
+      }
+      return false;
+    }
+  }, [lastGoodAdmJob, recentEvents.length, server.id]);
+
+  useEffect(() => {
+    void Promise.resolve().then(refreshDashboardHealth);
+  }, [refreshDashboardHealth]);
+
   const rebuildPublicProfileCache = useCallback(async () => {
     setRebuildingPublicCache(true);
     setActionMessage("");
@@ -488,22 +531,34 @@ function ServerDashboard({
   const progress = coreSetupComplete ? 100 : normalizedStatus === "error" ? 72 : normalizedStatus === "live" ? 92 : 84;
   const networkAddress = server.ip_address ?? server.region ?? "Unknown";
   const networkAddressLabel = looksLikeIpAddress(networkAddress) ? "IP Address" : "Region";
-  const syncHasProcessedLines = (syncStatus?.last_processed_line ?? 0) > 0 && syncStatus?.last_sync_status !== "read_pending";
-  const statsSyncActive = syncHasProcessedLines || admState.kind === "connected";
+  const effectiveDashboardHealth = dashboardHealth ?? lastGoodDashboardHealth;
+  const effectiveSyncData = syncStatus ?? lastGoodSyncStatus;
+  const healthAdmJob = effectiveDashboardHealth?.sync.active_job ? dashboardHealthJobToAdmJob(effectiveDashboardHealth.sync.active_job) : null;
+  const effectiveRecentEvents = lastRecentEventsRefreshAt
+    ? recentEvents
+    : recentEvents.length
+      ? recentEvents
+      : lastGoodRecentEvents.length
+        ? lastGoodRecentEvents
+        : effectiveDashboardHealth?.latest_events ?? [];
+  const syncHasProcessedLines = (effectiveSyncData?.last_processed_line ?? 0) > 0 && effectiveSyncData?.last_sync_status !== "read_pending";
+  const statsSyncActive = syncHasProcessedLines || admState.kind === "connected" || Boolean(effectiveDashboardHealth && (effectiveDashboardHealth.stats.kills > 0 || effectiveDashboardHealth.stats.joins > 0 || effectiveDashboardHealth.stats.unique_players > 0));
   const statsSyncPending = !statsSyncActive && admState.kind === "discovered_read_pending";
-  const latestAdmFile = syncStatus?.latest_adm_file ?? server.adm_latest_file ?? "Not detected";
-  const syncStatusActiveAdmImportJob = syncStatus?.active_adm_import_job && isActiveAdmImportJobStatus(syncStatus.active_adm_import_job.status)
-    ? syncStatus.active_adm_import_job
+  const latestAdmFile = effectiveSyncData?.latest_adm_file ?? effectiveDashboardHealth?.sync.last_processed_adm_filename ?? server.adm_latest_file ?? "Not detected";
+  const syncStatusActiveAdmImportJob = effectiveSyncData?.active_adm_import_job && isActiveAdmImportJobStatus(effectiveSyncData.active_adm_import_job.status)
+    ? effectiveSyncData.active_adm_import_job
+    : healthAdmJob && isActiveAdmImportJobStatus(healthAdmJob.status)
+      ? healthAdmJob
     : null;
   const effectiveSyncStatus = syncStatusActiveAdmImportJob
     ? "processing_in_chunks"
     : normalizeDashboardSyncStatus(
-      syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started"),
+      effectiveSyncData?.last_sync_status ?? effectiveDashboardHealth?.sync.status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started"),
       latestAdmFile,
     );
   const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
-  const activityCount = (syncStatus?.total_joins ?? 0) + (syncStatus?.total_disconnects ?? 0) + (syncStatus?.total_deaths ?? 0);
-  const noPvpKillsYet = statsSyncActive && (syncStatus?.total_kills ?? 0) === 0;
+  const activityCount = (effectiveSyncData?.total_joins ?? effectiveDashboardHealth?.stats.joins ?? 0) + (effectiveSyncData?.total_disconnects ?? effectiveDashboardHealth?.stats.disconnects ?? 0) + (effectiveSyncData?.total_deaths ?? effectiveDashboardHealth?.stats.deaths ?? 0);
+  const noPvpKillsYet = statsSyncActive && (effectiveSyncData?.total_kills ?? effectiveDashboardHealth?.stats.kills ?? 0) === 0;
   const globalRankLabel = formatGlobalRank(server.global_rank ?? server.rank ?? null);
   const scoreLabel = server.score_label ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : "Pending");
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown ?? null);
@@ -513,17 +568,17 @@ function ServerDashboard({
     noPvpKillsYet,
     hasActivity: activityCount > 0,
   });
-  const recentEventsAreMock = recentEvents.some((event) => event.is_mock || [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
-  const syncRuns = getPrioritizedSyncRuns(syncStatus?.recent_sync_runs ?? []);
-  const syncHealth = getSyncHealth(syncStatus?.recent_sync_runs ?? [], effectiveSyncStatus, syncStatus?.last_sync_message ?? null);
+  const recentEventsAreMock = effectiveRecentEvents.some((event) => event.is_mock || [event.player_name, event.killer_name, event.victim_name].some((name) => /^Mock(Survivor|Bandit|Runner)/.test(name ?? "")));
+  const syncRuns = getPrioritizedSyncRuns(effectiveSyncData?.recent_sync_runs ?? []);
+  const syncHealth = getSyncHealth(effectiveSyncData?.recent_sync_runs ?? [], effectiveSyncStatus, effectiveSyncData?.last_sync_message ?? effectiveDashboardHealth?.sync.last_error ?? null);
   const dashboardSyncBanner = getDashboardSyncStatusBanner(syncBanner, syncHealth, effectiveSyncStatus);
   const latestAdmReadable = getLatestAdmReadableLabel(effectiveSyncStatus);
-  const recentFeedStatus = getRecentFeedStatus(syncStatus, effectiveSyncStatus, recentEvents.length);
+  const recentFeedStatus = getRecentFeedStatus(effectiveSyncData, effectiveSyncStatus, effectiveRecentEvents.length);
   const recentFeedBadge = getRecentFeedBadge(recentEventsAreMock, effectiveSyncStatus);
   const overviewAdmSyncStatus = getOverviewAdmSyncStatus(effectiveSyncStatus, Boolean(syncStatusActiveAdmImportJob), statsSyncActive);
   const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
-  const processedPercent = getProcessedPercent(syncStatus);
-  const nextScheduledSync = getNextScheduledSync(syncStatus?.last_scheduled_sync_at ?? null);
+  const processedPercent = getProcessedPercent(effectiveSyncData);
+  const nextScheduledSync = getNextScheduledSync(effectiveSyncData?.last_scheduled_sync_at ?? null);
   const isOriginalOwner = server.original_owner_is_current_user !== false;
   const metadataCheckedLabel = server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "not checked yet";
   const metadataChangedLabel = server.metadata_last_changed_at ? formatRelativeTime(server.metadata_last_changed_at) : null;
@@ -542,6 +597,7 @@ function ServerDashboard({
     server.player_count_status,
   );
   const effectiveBillingStatus = billingStatus ?? lastGoodBilling;
+  const effectivePlanLabel = effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : effectiveDashboardHealth?.current_plan ? planLabel(effectiveDashboardHealth.current_plan) : "Loading";
   const effectiveAutomationHealth = automationHealth ?? lastGoodAutomationHealth;
   const effectivePublicCacheDebug = publicCacheDebug ?? lastGoodPublicCache;
   const showingCachedDashboardData = Boolean(
@@ -550,6 +606,15 @@ function ServerDashboard({
   );
   const admDiscoveryInterval = effectiveBillingStatus?.entitlements.adm_discovery_interval_minutes ?? null;
   const admProcessingInterval = effectiveBillingStatus?.entitlements.adm_pull_interval_minutes ?? null;
+  const dashboardStatValues = {
+    kills: effectiveSyncData?.total_kills ?? effectiveDashboardHealth?.stats.kills ?? null,
+    deaths: effectiveSyncData?.total_deaths ?? effectiveDashboardHealth?.stats.deaths ?? null,
+    joins: effectiveSyncData?.total_joins ?? effectiveDashboardHealth?.stats.joins ?? null,
+    disconnects: effectiveSyncData?.total_disconnects ?? effectiveDashboardHealth?.stats.disconnects ?? null,
+    uniquePlayers: effectiveSyncData?.unique_players ?? effectiveDashboardHealth?.stats.unique_players ?? null,
+    score: server.score_label
+      ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : effectiveDashboardHealth?.stats.score ? String(effectiveDashboardHealth.stats.score) : "Pending"),
+  };
   const publicCacheFlags = effectivePublicCacheDebug?.problem_flags ?? [];
   const publicCacheStale = publicCacheFlags.some((flag) => [
     "public_cache_missing",
@@ -1787,7 +1852,7 @@ function ServerDashboard({
     { key: "settings-danger", label: "Settings & Danger", icon: <Settings className="h-4 w-4" /> },
   ];
   const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
-  const currentPlanName = effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : "Loading";
+  const currentPlanName = effectivePlanLabel;
   const nitradoLogSettingsComplete = isNitradoLogSettingsComplete(nitradoLogSettings);
   const logSettingsSourceLabel = getNitradoLogSettingsSourceLabel(nitradoLogSettings);
   const setupChecks = [
@@ -1956,11 +2021,11 @@ function ServerDashboard({
       </section>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
         <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Players Online" value={playerSlotsLabel} detail={playerCountFreshnessDetail} tone="cyan" />
-        <DashboardStatTile icon={<Crosshair className="h-5 w-5" />} label="Kills" value={String(syncStatus?.total_kills ?? 0)} detail="Total" tone="red" />
-        <DashboardStatTile icon={<AlertTriangle className="h-5 w-5" />} label="Deaths" value={String(syncStatus?.total_deaths ?? 0)} detail="Total" tone="orange" />
-        <DashboardStatTile icon={<ArrowRight className="h-5 w-5" />} label="Joins" value={String(syncStatus?.total_joins ?? 0)} detail="Total" tone="emerald" />
-        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Disconnects" value={String(syncStatus?.total_disconnects ?? 0)} detail="Total" tone="zinc" />
-        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Unique Players" value={String(syncStatus?.unique_players ?? 0)} detail="Total" tone="violet" />
+        <DashboardStatTile icon={<Crosshair className="h-5 w-5" />} label="Kills" value={formatNullableDashboardNumber(dashboardStatValues.kills)} detail={dashboardStatValues.kills === null ? "Loading" : "Total"} tone="red" />
+        <DashboardStatTile icon={<AlertTriangle className="h-5 w-5" />} label="Deaths" value={formatNullableDashboardNumber(dashboardStatValues.deaths)} detail={dashboardStatValues.deaths === null ? "Loading" : "Total"} tone="orange" />
+        <DashboardStatTile icon={<ArrowRight className="h-5 w-5" />} label="Joins" value={formatNullableDashboardNumber(dashboardStatValues.joins)} detail={dashboardStatValues.joins === null ? "Loading" : "Total"} tone="emerald" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Disconnects" value={formatNullableDashboardNumber(dashboardStatValues.disconnects)} detail={dashboardStatValues.disconnects === null ? "Loading" : "Total"} tone="zinc" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Unique Players" value={formatNullableDashboardNumber(dashboardStatValues.uniquePlayers)} detail={dashboardStatValues.uniquePlayers === null ? "Loading" : "Total"} tone="violet" />
         <DashboardStatTile icon={<Gauge className="h-5 w-5" />} label="Server Score" value={scoreLabel} detail="Score" tone="violet" />
         <DashboardStatTile icon={<BarChart3 className="h-5 w-5" />} label="Global Rank" value={globalRankLabel} detail="Rank" tone="orange" />
       </section>
@@ -1971,7 +2036,7 @@ function ServerDashboard({
             <button type="button" onClick={() => setActiveTab("sync-health")} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">View All</button>
           </div>
           <div className="mt-4 grid max-h-[340px] gap-2 overflow-auto pr-1">
-            {recentEvents.length ? recentEvents.slice(0, 5).map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />) : (
+            {effectiveRecentEvents.length ? effectiveRecentEvents.slice(0, 5).map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />) : (
               <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">No recent events yet. Activity will appear after synced ADM events.</div>
             )}
           </div>
@@ -2165,8 +2230,8 @@ function ServerDashboard({
                 <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
                 <MiniInfo label="Next Action" value={syncHealth.status === "error" ? syncHealth.nextAction : "Continue syncing after fresh ADM activity"} />
               </div>
-              <AutomaticAdmImportJobPanel syncStatus={syncStatus} />
-              <AdmBackfillStatusPanel syncStatus={syncStatus} result={admBackfillResult} running={admBackfillRunning} onBackfill={backfillMissingAdmNow} />
+              <AutomaticAdmImportJobPanel syncStatus={effectiveSyncData} dashboardHealth={effectiveDashboardHealth} />
+              <AdmBackfillStatusPanel syncStatus={effectiveSyncData} dashboardHealth={effectiveDashboardHealth} result={admBackfillResult} running={admBackfillRunning} onBackfill={backfillMissingAdmNow} />
               <VerifyAdmAutomationPanel status={admAutomationStatus} verifying={verifyingAdmAutomation} onVerify={verifyAdmAutomationNow} />
               <DashboardDataHealthPanel
                 liveRefreshStatus={liveRefreshStatus}
@@ -2179,6 +2244,7 @@ function ServerDashboard({
                 lastRefreshError={lastRefreshError}
                 showingCachedData={showingCachedDashboardData}
                 lastGoodAdmJob={lastGoodAdmJob}
+                dashboardHealth={effectiveDashboardHealth}
               />
               <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
                 <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">Show ADM Technical Diagnostics</summary>
@@ -2210,11 +2276,11 @@ function ServerDashboard({
                   <ProgressLine label="Sync Health" value={`${syncHealthPercent}%`} percent={syncHealthPercent} />
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:grid-cols-1">
-                  <MetricTile label="Kills" value={syncStatus?.total_kills ?? 0} />
-                  <MetricTile label="Deaths" value={syncStatus?.total_deaths ?? 0} />
-                  <MetricTile label="Joins" value={syncStatus?.total_joins ?? 0} />
-                  <MetricTile label="Disconnects" value={syncStatus?.total_disconnects ?? 0} />
-                  <MetricTile label="Unique Players" value={syncStatus?.unique_players ?? 0} />
+                  <MetricTile label="Kills" value={dashboardStatValues.kills} />
+                  <MetricTile label="Deaths" value={dashboardStatValues.deaths} />
+                  <MetricTile label="Joins" value={dashboardStatValues.joins} />
+                  <MetricTile label="Disconnects" value={dashboardStatValues.disconnects} />
+                  <MetricTile label="Unique Players" value={dashboardStatValues.uniquePlayers} />
                 </div>
               </div>
               {liveRefreshWarning ? (
@@ -2271,7 +2337,7 @@ function ServerDashboard({
                 totalsDelta={admImportTotalsDelta}
                 importHitLines={manualAdmImportHitLines}
                 refreshFailed={manualAdmRefreshFailed}
-                history={syncStatus?.manual_import_history ?? []}
+                history={effectiveSyncData?.manual_import_history ?? []}
                 onFilenameChange={setManualAdmFilename}
                 onTextChange={setManualAdmText}
                 onImportHitLinesChange={setManualAdmImportHitLines}
@@ -2294,7 +2360,7 @@ function ServerDashboard({
                   onToggle={() => setAdmFileDiscoveryOpen((value) => !value)}
                 />
               ) : null}
-              <LastSyncDetails open={syncDetailsOpen} onToggle={() => setSyncDetailsOpen((value) => !value)} latestAdmFile={latestAdmFile} syncStatus={syncStatus} lastSyncResult={lastSyncResult} />
+              <LastSyncDetails open={syncDetailsOpen} onToggle={() => setSyncDetailsOpen((value) => !value)} latestAdmFile={latestAdmFile} syncStatus={effectiveSyncData} lastSyncResult={lastSyncResult} />
             </DashboardPanel>
           </div>
           ) : null}
@@ -2327,7 +2393,7 @@ function ServerDashboard({
             channelsLoading={discordChannelsLoading}
             channelsWarning={discordChannelsWarning}
             connectedServerName={server.guild_name ?? serverDisplayName}
-            planName={effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : "Loading"}
+            planName={effectivePlanLabel}
             onChannelsRefresh={refreshDiscordChannels}
             onSaved={(result) => {
               setPostingSetups(result.setups ?? []);
@@ -2349,8 +2415,8 @@ function ServerDashboard({
                 </p>
               ) : null}
               <div className="mt-4 grid max-h-[430px] gap-2 overflow-auto pr-1">
-                {recentEvents.length ? (
-                  recentEvents.map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)
+                {effectiveRecentEvents.length ? (
+                  effectiveRecentEvents.map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)
                 ) : (
                   <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">
                     No synced events yet. Activity will appear after players join or events happen in-game.
@@ -2988,11 +3054,11 @@ function ProgressLine({ label, value, percent }: { label: string; value: string;
   );
 }
 
-function MetricTile({ label, value }: { label: string; value: number }) {
+function MetricTile({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2">
       <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
-      <p className="mt-1 text-lg font-black text-white">{value.toLocaleString()}</p>
+      <p className="mt-1 text-lg font-black text-white">{value === null ? "Loading" : value.toLocaleString()}</p>
     </div>
   );
 }
@@ -3968,11 +4034,11 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
   );
 }
 
-function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus | null }) {
-  const job = syncStatus?.active_adm_import_job ?? null;
+function AutomaticAdmImportJobPanel({ syncStatus, dashboardHealth }: { syncStatus: AdmSyncStatus | null; dashboardHealth: DashboardHealthResult | null }) {
+  const job = syncStatus?.active_adm_import_job ?? (dashboardHealth?.sync.active_job ? dashboardHealthJobToAdmJob(dashboardHealth.sync.active_job) : null);
   const report = syncStatus?.last_adm_import_report ?? null;
-  const readFailed = ["adm_file_unreadable", "latest_adm_unreadable"].includes(String(syncStatus?.last_sync_status ?? "").toLowerCase());
-  const backfillActive = Boolean(syncStatus?.adm_backfill_status?.active_job || syncStatus?.adm_backfill_status?.queued_files?.length);
+  const readFailed = ["adm_file_unreadable", "latest_adm_unreadable"].includes(String(syncStatus?.last_sync_status ?? dashboardHealth?.sync.status ?? "").toLowerCase());
+  const backfillActive = Boolean(syncStatus?.adm_backfill_status?.active_job || syncStatus?.adm_backfill_status?.queued_files?.length || dashboardHealth?.sync.backfill_status.active_file || dashboardHealth?.sync.backfill_status.queued_jobs_count);
   const nextAction = job
     ? job.status === "failed_retryable"
       ? "Cron will retry the stalled chunk job automatically, or an owner can use Continue Import to resume it now."
@@ -4018,19 +4084,22 @@ function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus 
 
 function AdmBackfillStatusPanel({
   syncStatus,
+  dashboardHealth,
   result,
   running,
   onBackfill,
 }: {
   syncStatus: AdmSyncStatus | null;
+  dashboardHealth: DashboardHealthResult | null;
   result: AdmBackfillPlanResult | null;
   running: boolean;
   onBackfill: () => void;
 }) {
   const status = syncStatus?.adm_backfill_status ?? null;
-  const activeJob = result?.active_job ?? status?.active_job ?? syncStatus?.active_adm_import_job ?? null;
+  const healthBackfill = dashboardHealth?.sync.backfill_status ?? null;
+  const activeJob = result?.active_job ?? status?.active_job ?? syncStatus?.active_adm_import_job ?? (dashboardHealth?.sync.active_job ? dashboardHealthJobToAdmJob(dashboardHealth.sync.active_job) : null);
   const queuedFiles = result?.queued_files ?? status?.queued_files ?? [];
-  const missingCount = result?.missing_files.length ?? status?.missing_files_detected ?? 0;
+  const missingCount = result?.missing_files.length ?? status?.missing_files_detected ?? healthBackfill?.missing_files_count ?? 0;
   const skippedCount = result?.skipped_already_imported.length ?? status?.skipped_already_imported ?? 0;
   const unreadableFiles = result?.unreadable_files.map((file) => file.filename) ?? status?.unreadable_files ?? [];
   const summary = activeJob
@@ -4044,7 +4113,7 @@ function AdmBackfillStatusPanel({
         <div>
           <p className="text-xs font-black uppercase text-amber-100">ADM Backfill Status</p>
           <p className="mt-1 text-sm font-bold leading-6 text-zinc-100">{summary}</p>
-          <p className="mt-1 text-xs leading-5 text-zinc-400">{result?.message ?? status?.next_action ?? "DZN will queue old missing ADM files oldest-to-newest."}</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-400">{result?.message ?? status?.next_action ?? healthBackfill?.next_action ?? "DZN will queue old missing ADM files oldest-to-newest."}</p>
         </div>
         <button
           type="button"
@@ -4059,12 +4128,12 @@ function AdmBackfillStatusPanel({
       <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <MiniInfo label="Missing ADM Files" value={String(missingCount)} />
         <MiniInfo label="Queued ADM Files" value={queuedFiles.length ? queuedFiles.slice(0, 2).join(", ") : "None"} />
-        <MiniInfo label="Active File" value={activeJob?.filename ?? status?.active_file ?? "None"} />
-        <MiniInfo label="Completed Today" value={String(status?.completed_files_today ?? result?.completed_files.length ?? 0)} />
+        <MiniInfo label="Active File" value={activeJob?.filename ?? status?.active_file ?? healthBackfill?.active_file ?? "None"} />
+        <MiniInfo label="Completed Today" value={String(status?.completed_files_today ?? result?.completed_files.length ?? healthBackfill?.completed_today ?? 0)} />
         <MiniInfo label="Skipped Imported" value={String(skippedCount)} />
-        <MiniInfo label="Oldest Missing" value={result?.oldest_missing_file ?? status?.oldest_missing_file ?? "None"} />
-        <MiniInfo label="Newest Missing" value={result?.newest_missing_file ?? status?.newest_missing_file ?? "None"} />
-        <MiniInfo label="Unreadable Missing" value={unreadableFiles.length ? unreadableFiles.slice(0, 2).join(", ") : "None"} />
+        <MiniInfo label="Oldest Missing" value={result?.oldest_missing_file ?? status?.oldest_missing_file ?? healthBackfill?.oldest_missing_file ?? "None"} />
+        <MiniInfo label="Newest Missing" value={result?.newest_missing_file ?? status?.newest_missing_file ?? healthBackfill?.newest_missing_file ?? "None"} />
+        <MiniInfo label="Unreadable Missing" value={unreadableFiles.length ? unreadableFiles.slice(0, 2).join(", ") : healthBackfill?.unreadable_files_count ? String(healthBackfill.unreadable_files_count) : "None"} />
       </div>
       {activeJob ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
@@ -4144,6 +4213,7 @@ function DashboardDataHealthPanel({
   lastRefreshError,
   showingCachedData,
   lastGoodAdmJob,
+  dashboardHealth,
 }: {
   liveRefreshStatus: "ok" | "retrying" | "failed" | "stale";
   lastSuccessfulFullRefresh: string | null;
@@ -4155,6 +4225,7 @@ function DashboardDataHealthPanel({
   lastRefreshError: string | null;
   showingCachedData: boolean;
   lastGoodAdmJob: AdmImportJobProgressResult | null;
+  dashboardHealth: DashboardHealthResult | null;
 }) {
   return (
     <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
@@ -4168,6 +4239,9 @@ function DashboardDataHealthPanel({
         <MiniInfo label="Sync Status Refresh" value={lastSuccessfulSyncStatusRefresh ? formatDashboardDate(lastSuccessfulSyncStatusRefresh) : "Waiting"} />
         <MiniInfo label="Recent Events Refresh" value={lastSuccessfulRecentEventsRefresh ? formatDashboardDate(lastSuccessfulRecentEventsRefresh) : "Waiting"} />
         <MiniInfo label="Billing Refresh" value={lastSuccessfulBillingRefresh ? formatDashboardDate(lastSuccessfulBillingRefresh) : "Waiting"} />
+        <MiniInfo label="Dashboard Health Refresh" value={dashboardHealth?.generated_at ? formatDashboardDate(dashboardHealth.generated_at) : "Waiting"} />
+        <MiniInfo label="Last-Good Source" value={dashboardHealth?.source ? formatStatusLabel(dashboardHealth.source) : "None"} />
+        <MiniInfo label="Snapshot Stale" value={dashboardHealth?.stale ? "Yes" : "No"} />
         <MiniInfo label="Last ADM Job" value={lastGoodAdmJob ? `${lastGoodAdmJob.filename} ${lastGoodAdmJob.display_current_chunk ?? lastGoodAdmJob.chunks_processed}/${lastGoodAdmJob.total_chunks}` : "None"} />
       </div>
       {lastRefreshError ? (
@@ -5848,6 +5922,73 @@ function LogDiagnosticsPanel({
 function formatDashboardDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatNullableDashboardNumber(value: number | null) {
+  return value === null ? "Loading" : value.toLocaleString();
+}
+
+function loadDashboardHealthCache(serverId: string): DashboardHealthResult | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(`dzn:lastGoodDashboard:${serverId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DashboardHealthResult;
+    return parsed?.ok && parsed.server_id === serverId ? { ...parsed, stale: true, source: "local_fallback" } : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDashboardHealthCache(serverId: string, value: DashboardHealthResult) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(`dzn:lastGoodDashboard:${serverId}`, JSON.stringify(value));
+    window.localStorage.setItem(`dzn:lastGoodSyncHealth:${serverId}`, JSON.stringify({
+      generated_at: value.generated_at,
+      sync: value.sync,
+      stats: value.stats,
+      latest_events: value.latest_events,
+    }));
+  } catch {
+    // Storage can be blocked in hardened browser contexts.
+  }
+}
+
+function dashboardHealthJobToAdmJob(job: DashboardHealthResult["sync"]["active_job"]): AdmImportJobProgressResult | null {
+  if (!job) return null;
+  const totalChunks = Math.max(1, job.total_chunks);
+  const chunksProcessed = Math.max(0, Math.min(totalChunks, job.chunks_processed));
+  return {
+    ok: true,
+    job_id: job.job_id ?? job.id,
+    filename: job.filename,
+    source: job.source,
+    status: job.status as AdmImportJobProgressResult["status"],
+    total_lines: job.total_lines,
+    current_line: job.current_line,
+    chunk_size: Math.max(1, Math.ceil(Math.max(1, job.total_lines) / totalChunks)),
+    total_chunks: totalChunks,
+    chunks_processed: chunksProcessed,
+    display_current_chunk: Math.max(1, Math.min(totalChunks, chunksProcessed + 1)),
+    progress: Math.max(0, Math.min(100, Math.round((chunksProcessed / totalChunks) * 100))),
+    parsed_kills: job.parsed_kills,
+    written_kills: job.written_kills,
+    duplicate_skips: job.duplicate_skips,
+    joins: job.joins,
+    disconnects: job.disconnects,
+    playerlist_snapshots: job.playerlist_snapshots,
+    hit_lines: 0,
+    raw_events_stored: 0,
+    player_events_stored: 0,
+    public_cache_updated: false,
+    discord_jobs_queued: 0,
+    warnings: [],
+    file_result: null,
+    error_message: job.error_message,
+    updated_at: job.updated_at,
+    completed_at: job.completed_at,
+  };
 }
 
 function formatDebugValue(value: unknown) {

@@ -30,6 +30,7 @@ import type {
   AdmImportJobStatusApiResult,
   AdmBackfillApiResult,
   AdmAutomationStatusApiResult,
+  DashboardHealthApiResult,
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
@@ -279,6 +280,12 @@ export async function backfillMissingAdm(linkedServerId: string) {
 
 export async function getAdmAutomationStatus(linkedServerId: string) {
   return request<AdmAutomationStatusApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/automation-status`, {
+    cache: "no-store",
+  });
+}
+
+export async function getDashboardHealth(linkedServerId: string) {
+  return request<DashboardHealthApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/health`, {
     cache: "no-store",
   });
 }

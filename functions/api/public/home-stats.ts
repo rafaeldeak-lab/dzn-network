@@ -5,6 +5,7 @@ import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
+import { readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
 import { getRankedPublicServers } from "../../_lib/public-leaderboards";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -123,30 +124,107 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
   const headers = publicAccessCacheHeaders(viewerLoggedIn);
+  const cacheKey = homeStatsCacheKey(viewerLoggedIn);
 
   if (!env.DB) {
-    return json(applyHomeStatsAccess(emptyHomeStats(), viewerLoggedIn), { headers });
+    return json({
+      ok: false,
+      error_code: "db_binding_missing",
+      message: "Home stats are unavailable because the database binding is missing.",
+      generated_at: new Date().toISOString(),
+      source: "empty_no_db",
+      stale: true,
+      fallback_reason: "db_binding_missing",
+    }, { headers, status: 503 });
   }
 
   if (!viewerLoggedIn) {
-    const data = await buildPreviewHomeStats(env).catch((error) => {
-      console.warn("DZN HOME STATS PREVIEW FALLBACK", safeErrorMessage(error));
-      return emptyHomeStats();
-    });
-    return json(applyHomeStatsAccess(data, false), { headers });
+    const generatedAt = new Date().toISOString();
+    try {
+      const data = await buildPreviewHomeStats(env).catch(async (error) => {
+        console.warn("DZN HOME STATS PREVIEW FALLBACK", safeErrorMessage(error));
+        const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
+        if (cached) {
+          return withPublicApiMetadata(cached.payload, {
+            generated_at: cached.generated_at,
+            source: "snapshot",
+            stale: true,
+            error: safePublicCacheError(error),
+            fallback_reason: "live_query_failed_using_snapshot",
+          });
+        }
+        throw error;
+      });
+      if (!("stale" in data)) {
+        await writePublicApiCache(env, cacheKey, data, generatedAt).catch((error) => {
+          console.warn("DZN HOME STATS PREVIEW CACHE WRITE FAILED", safeErrorMessage(error));
+        });
+      }
+      return json(withPublicApiMetadata(applyHomeStatsAccess(data, false), {
+        generated_at: "generated_at" in data && typeof data.generated_at === "string" ? data.generated_at : generatedAt,
+        source: "source" in data && (data.source === "snapshot" || data.source === "empty_no_cache")
+          ? data.source
+          : "live",
+        stale: "stale" in data ? Boolean(data.stale) : false,
+        error: "error" in data && typeof data.error === "string" ? data.error : undefined,
+        fallback_reason: "fallback_reason" in data && typeof data.fallback_reason === "string" ? data.fallback_reason : undefined,
+      }), { headers });
+    } catch (error) {
+      return json({
+        ok: false,
+        error_code: "live_query_failed_no_snapshot",
+        message: "Home stats are still refreshing and no last-known snapshot is available.",
+        generated_at: generatedAt,
+        source: "empty_no_cache",
+        stale: true,
+        error: safePublicCacheError(error),
+        fallback_reason: "live_query_failed_no_snapshot",
+      }, { headers, status: 503 });
+    }
   }
 
   try {
     await ensureLinkedServerMetadataColumns(env);
     await ensureAdmSyncSchema(env);
     await ensureBuildEventSchema(env);
+    const generatedAt = new Date().toISOString();
     const data = await buildHomeStats(env);
-    return json(applyHomeStatsAccess(data, true), { headers });
+    await writePublicApiCache(env, cacheKey, data, generatedAt).catch((error) => {
+      console.warn("DZN HOME STATS FULL CACHE WRITE FAILED", safeErrorMessage(error));
+    });
+    return json(withPublicApiMetadata(applyHomeStatsAccess(data, true), {
+      generated_at: generatedAt,
+      source: "live",
+      stale: false,
+    }), { headers });
   } catch (error) {
     console.warn("DZN HOME STATS FULL FALLBACK", safeErrorMessage(error));
-    return json(applyHomeStatsAccess(emptyHomeStats(), true), { headers });
+    const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
+    if (cached) {
+      return json(withPublicApiMetadata(applyHomeStatsAccess(cached.payload, true), {
+        generated_at: cached.generated_at,
+        source: "snapshot",
+        stale: true,
+        error: safePublicCacheError(error),
+        fallback_reason: "live_query_failed_using_snapshot",
+      }), { headers });
+    }
+    return json({
+      ok: false,
+      error_code: "live_query_failed_no_snapshot",
+      message: "Home stats are still refreshing and no last-known snapshot is available.",
+      generated_at: new Date().toISOString(),
+      source: "empty_no_cache",
+      stale: true,
+      error: safePublicCacheError(error),
+      fallback_reason: "live_query_failed_no_snapshot",
+    }, { headers, status: 503 });
   }
 };
+
+function homeStatsCacheKey(viewerLoggedIn: boolean) {
+  return viewerLoggedIn ? "home-stats:full" : "home-stats:preview";
+}
 
 async function buildPreviewHomeStats(env: Env) {
   const db = requireDb(env);

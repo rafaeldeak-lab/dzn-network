@@ -1208,6 +1208,93 @@ export type AdmAutomationStatusResult = {
 
 export type AdmAutomationStatusApiResult = AdmAutomationStatusResult | ManualAdmImportErrorResult;
 
+export type DashboardHealthJob = AdmAutomationStatusJob;
+
+export type DashboardHealthCronRun = {
+  job_type: string | null;
+  status: string | null;
+  source: string | null;
+  created_at: string | null;
+};
+
+export type DashboardHealthResult = {
+  ok: true;
+  generated_at: string;
+  stale: boolean;
+  source: "live" | "snapshot" | "local_fallback" | string;
+  server_id: string;
+  server_name: string;
+  server: {
+    id: string;
+    guild_id: string | null;
+    public_slug: string | null;
+    service_id: string | null;
+    status: string | null;
+    current_players: number | null;
+    max_players: number | null;
+    player_count_last_checked_at: string | null;
+    player_count_status: string | null;
+  };
+  current_plan: "free" | "starter" | "pro" | "network" | "partner" | string;
+  configured_plan: string;
+  subscription_status: string | null;
+  plan_limits: {
+    status_interval_minutes: number;
+    adm_discovery_interval_minutes: number;
+    adm_processing_interval_minutes: number;
+  };
+  stats: {
+    players: number;
+    kills: number;
+    deaths: number;
+    joins: number;
+    disconnects: number;
+    unique_players: number;
+    score: number;
+  };
+  recent_events_count: number;
+  latest_event_at: string | null;
+  latest_events: AdmRecentSyncEvent[];
+  sync: {
+    status: string;
+    adm_status: "ADM Sync Active" | "Importing ADM" | "Waiting for Nitrado" | "Needs Attention" | string;
+    active_job: DashboardHealthJob | null;
+    backfill_status: {
+      missing_files_count: number;
+      queued_jobs_count: number;
+      active_file: string | null;
+      completed_today: number;
+      oldest_missing_file: string | null;
+      newest_missing_file: string | null;
+      unreadable_files_count: number;
+      next_action: string;
+    };
+    newest_available_adm_filename: string | null;
+    newest_readable_adm_filename: string | null;
+    last_processed_adm_filename: string | null;
+    last_successful_sync: string | null;
+    next_adm_discovery_due_at: string | null;
+    next_adm_processing_due_at: string | null;
+    last_error: string | null;
+    next_action: string;
+  };
+  cron: {
+    metadata_recent: boolean;
+    adm_recent: boolean;
+    discord_recent: boolean;
+    metadata: DashboardHealthCronRun | null;
+    adm: DashboardHealthCronRun | null;
+    discord: DashboardHealthCronRun | null;
+  };
+  setup_progress: {
+    percent: number;
+    checks: Array<{ label: string; done: boolean }>;
+  };
+  warnings: string[];
+};
+
+export type DashboardHealthApiResult = DashboardHealthResult | ManualAdmImportErrorResult;
+
 export type AdmFileDiscoveryCandidateDebug = {
   name: string;
   path: string;

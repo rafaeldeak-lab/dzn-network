@@ -6,6 +6,7 @@ import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { uniquePublicSlug } from "../../_lib/onboarding";
 import { ensureBillingSchema } from "../../_lib/plans";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
+import { readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -182,7 +183,41 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const url = new URL(request.url);
   const slug = sanitizeSlug(url.searchParams.get("slug"));
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
-  return json(await getPublicServersPayload(env, slug, viewerLoggedIn), { headers: publicAccessCacheHeaders(viewerLoggedIn) });
+  const headers = publicAccessCacheHeaders(viewerLoggedIn);
+  const cacheKey = `public-servers:${viewerLoggedIn ? "full" : "preview"}:${slug ?? "listing"}`;
+
+  try {
+    const generatedAt = new Date().toISOString();
+    const payload = await getPublicServersPayload(env, slug, viewerLoggedIn);
+    await writePublicApiCache(env, cacheKey, payload, generatedAt).catch((error) => {
+      console.warn("DZN PUBLIC SERVERS CACHE WRITE FAILED", safePublicCacheError(error));
+    });
+    return json(withPublicApiMetadata(payload, {
+      generated_at: generatedAt,
+      source: "live",
+      stale: false,
+    }), { headers });
+  } catch (error) {
+    console.warn("DZN PUBLIC SERVERS CACHE FALLBACK", safePublicCacheError(error));
+    const cached = await readPublicApiCache<Record<string, unknown>>(env, cacheKey).catch(() => null);
+    if (cached) {
+      return json(withPublicApiMetadata(cached.payload, {
+        generated_at: cached.generated_at,
+        source: "snapshot",
+        stale: true,
+        error: safePublicCacheError(error),
+        fallback_reason: "live_query_failed_using_snapshot",
+      }), { headers });
+    }
+    return json({
+      ok: false,
+      error: slug ? "Public server profile is temporarily unavailable." : "Public server listing is temporarily unavailable.",
+      generated_at: new Date().toISOString(),
+      source: "empty_no_cache",
+      stale: true,
+      fallback_reason: "live_query_failed_no_snapshot",
+    }, { headers, status: 503 });
+  }
 };
 
 export async function getPublicServersPayload(env: Env, slug: string | null, viewerLoggedIn = true) {

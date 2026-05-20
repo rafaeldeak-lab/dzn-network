@@ -136,6 +136,10 @@ type HomeStats = {
     active: number;
     pending: number;
   };
+  generated_at?: string | null;
+  stale?: boolean;
+  source?: string | null;
+  fallback_reason?: string | null;
   access_level: "full" | "preview";
   is_locked: boolean;
   locked_reason: string | null;
@@ -196,6 +200,7 @@ type PublicEventLeaderboard = {
 type HomeStatsResponse = Partial<HomeStats> & {
   ok?: boolean;
   error?: string;
+  data?: Partial<HomeStats>;
 };
 
 type HomepageAuthStatus = "loading" | "logged_out" | "logged_in";
@@ -278,6 +283,10 @@ const emptyHomeStats: HomeStats = {
     active: 0,
     pending: 0,
   },
+  generated_at: null,
+  stale: false,
+  source: "initial",
+  fallback_reason: null,
   access_level: "preview",
   is_locked: true,
   locked_reason: "Log in with Discord to unlock full network stats.",
@@ -287,6 +296,7 @@ const emptyHomeStats: HomeStats = {
 };
 
 const HOME_STATS_REFRESH_MS = 30000;
+const HOME_STATS_LAST_GOOD_KEY = "dzn:lastGoodHomeStats";
 const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
 const DZN_DISCORD_INVITE_URL =
   process.env.NEXT_PUBLIC_DZN_DISCORD_INVITE_URL ||
@@ -396,9 +406,13 @@ const featureCards = [
 }>;
 
 function useHomeStats() {
-  const [data, setData] = useState<HomeStats>(emptyHomeStats);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [data, setData] = useState<HomeStats>(() => loadLastGoodHomeStats() ?? emptyHomeStats);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(() => {
+    const cached = loadLastGoodHomeStats();
+    return cached?.generated_at ? new Date(cached.generated_at) : null;
+  });
   const [error, setError] = useState("");
+  const latestRequestId = useRef(0);
   const inFlight = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -408,6 +422,8 @@ function useHomeStats() {
     async function load() {
       if (inFlight.current) return;
       inFlight.current = true;
+      const requestId = latestRequestId.current + 1;
+      latestRequestId.current = requestId;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -420,13 +436,24 @@ function useHomeStats() {
         });
         const payload = (await response.json().catch(() => ({}))) as HomeStatsResponse;
         if (!response.ok) throw new Error(payload.error || "Network stats syncing");
-        if (!active) return;
-        setData(normalizeHomeStats(payload));
-        setLastUpdated(new Date());
-        setError("");
+        if (!active || latestRequestId.current !== requestId) return;
+        const normalized = normalizeHomeStats(payload.data && !payload.totals ? payload.data : payload);
+        setData(normalized);
+        setLastUpdated(normalized.generated_at ? new Date(normalized.generated_at) : new Date());
+        if (hasMeaningfulHomeStats(normalized)) saveLastGoodHomeStats(normalized);
+        setError(normalized.stale ? "Network stats refreshing. Showing last known values." : "");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        if (active) setError("Network stats syncing. Latest server data is being refreshed.");
+        if (active) {
+          const cached = loadLastGoodHomeStats();
+          if (cached) {
+            setData(cached);
+            setLastUpdated((current) => (cached.generated_at ? new Date(cached.generated_at) : current));
+            setError("Network stats refreshing. Showing last known values.");
+          } else {
+            setError("Network stats syncing. Latest server data is being refreshed.");
+          }
+        }
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
         inFlight.current = false;
@@ -443,6 +470,38 @@ function useHomeStats() {
   }, []);
 
   return { data, lastUpdated, error };
+}
+
+function loadLastGoodHomeStats(): HomeStats | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(HOME_STATS_LAST_GOOD_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as HomeStatsResponse;
+    const normalized = normalizeHomeStats(parsed.data && !parsed.totals ? parsed.data : parsed);
+    return hasMeaningfulHomeStats(normalized)
+      ? { ...normalized, stale: true, source: "local_fallback" }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastGoodHomeStats(value: HomeStats) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(HOME_STATS_LAST_GOOD_KEY, JSON.stringify(value));
+  } catch {
+    // Storage can be unavailable in private/hardened contexts.
+  }
+}
+
+function hasMeaningfulHomeStats(value: HomeStats) {
+  return value.totals.serversLinked > 0
+    || value.totals.killsTracked > 0
+    || value.totals.recentEventsCount > 0
+    || value.topServers.length > 0
+    || value.recentActivity.length > 0;
 }
 
 function useHomepageAuth(): HomepageAuthState {
@@ -1879,6 +1938,10 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       active: numberOrZero(payload.syncHealth?.active),
       pending: numberOrZero(payload.syncHealth?.pending),
     },
+    generated_at: typeof payload.generated_at === "string" ? payload.generated_at : null,
+    stale: Boolean(payload.stale),
+    source: typeof payload.source === "string" ? payload.source : null,
+    fallback_reason: typeof payload.fallback_reason === "string" ? payload.fallback_reason : null,
     access_level: payload.access_level === "preview" ? "preview" : "full",
     is_locked: Boolean(payload.is_locked),
     locked_reason: typeof payload.locked_reason === "string" ? payload.locked_reason : null,

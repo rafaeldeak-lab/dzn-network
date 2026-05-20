@@ -155,12 +155,23 @@ type PublicStats = {
 
 type PublicServersResponse = {
   ok?: boolean;
+  data?: PublicServersResponse;
   server?: PublicServer | null;
   servers?: PublicServer[];
   stats?: PublicStats;
   access_level?: "full" | "preview";
   is_locked?: boolean;
+  generated_at?: string;
+  stale?: boolean;
+  source?: string;
+  fallback_reason?: string;
   error?: string;
+};
+
+type PublicNetworkCachePayload = {
+  server?: PublicServer | null;
+  servers?: PublicServer[];
+  stats?: PublicStats | null;
 };
 
 type PublicReview = {
@@ -194,15 +205,17 @@ type ReviewsResponse = {
 };
 
 const filters = ["All", "PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
+const PUBLIC_NETWORK_LAST_GOOD_PREFIX = "dzn:lastGoodPublicNetwork:";
 let hasLoggedBoostedServerDisplayPolished = false;
 
 export function PublicNetwork() {
   const slug = useSyncExternalStore(subscribeToPath, getCurrentSlug, getServerSlugSnapshot);
-  const [servers, setServers] = useState<PublicServer[]>([]);
-  const [server, setServer] = useState<PublicServer | null>(null);
-  const [stats, setStats] = useState<PublicStats | null>(null);
+  const initialCache = loadPublicNetworkCache(slug);
+  const [servers, setServers] = useState<PublicServer[]>(() => slug ? [] : initialCache?.servers ?? []);
+  const [server, setServer] = useState<PublicServer | null>(() => slug ? initialCache?.server ?? null : null);
+  const [stats, setStats] = useState<PublicStats | null>(() => slug ? null : initialCache?.stats ?? null);
   const [filter, setFilter] = useState("All");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -215,37 +228,54 @@ export function PublicNetwork() {
   useEffect(() => {
     const controller = new AbortController();
     const requestedSlug = slug;
+    const cached = loadPublicNetworkCache(requestedSlug);
 
     async function load() {
-      setLoading(true);
+      setLoading(!cached);
       setError("");
-      setServer(null);
-      setServers([]);
-      setStats(null);
+      if (cached) {
+        setServer(requestedSlug ? cached.server ?? null : null);
+        setServers(requestedSlug ? [] : cached.servers ?? []);
+        setStats(requestedSlug ? null : cached.stats ?? null);
+      }
       try {
         const endpoint = requestedSlug ? `/api/public/servers?slug=${encodeURIComponent(requestedSlug)}` : "/api/public/servers";
         const response = await fetch(endpoint, { cache: "no-store", credentials: "include", headers: { accept: "application/json" }, signal: controller.signal });
         const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
         if (!response.ok) throw new Error(data.error || "Unable to load public servers");
         if (controller.signal.aborted || requestedSlug !== slug) return;
+        const payload = data.data && !data.servers && !data.server ? data.data : data;
 
         if (requestedSlug) {
-          const matchedServer = data.server ?? (await fetchPublicServerFallback(requestedSlug, controller.signal));
+          const matchedServer = payload.server ?? (await fetchPublicServerFallback(requestedSlug, controller.signal));
           if (controller.signal.aborted || requestedSlug !== slug) return;
           setServer(matchedServer);
           setServers([]);
           setStats(null);
+          if (matchedServer) savePublicNetworkCache(requestedSlug, { server: matchedServer });
           if (matchedServer) console.log("DZN SERVER PROFILE SCOPED DATA LOADED");
         } else {
-          setServers(Array.isArray(data.servers) ? data.servers : []);
-          setStats(data.stats ?? null);
+          const nextServers = Array.isArray(payload.servers) ? payload.servers : [];
+          const nextStats = payload.stats ?? null;
+          setServers(nextServers);
+          setStats(nextStats);
           setServer(null);
+          if (nextServers.length || nextStats) savePublicNetworkCache(null, { servers: nextServers, stats: nextStats });
           console.log("DZN PUBLIC SERVERS FRESH DATA LOADED");
           console.log("DZN SERVER LIST RATINGS READY");
         }
+        setError(data.stale ? "Live data refreshing. Showing last known public data." : "");
       } catch (loadError) {
         if (controller.signal.aborted) return;
-        setError(loadError instanceof Error ? loadError.message : "Unable to load public servers");
+        const fallback = loadPublicNetworkCache(requestedSlug);
+        if (fallback) {
+          setServer(requestedSlug ? fallback.server ?? null : null);
+          setServers(requestedSlug ? [] : fallback.servers ?? []);
+          setStats(requestedSlug ? null : fallback.stats ?? null);
+          setError("Live data refreshing. Showing last known public data.");
+        } else {
+          setError(loadError instanceof Error ? loadError.message : "Unable to load public servers");
+        }
       } finally {
         if (controller.signal.aborted) return;
         setLoading(false);
@@ -1605,11 +1635,38 @@ function publicServerProfileHref(slug: string) {
   return `/servers/profile?slug=${encodeURIComponent(slug)}`;
 }
 
+function publicNetworkCacheKey(slug: string | null) {
+  return `${PUBLIC_NETWORK_LAST_GOOD_PREFIX}${slug ? `profile:${slug}` : "listing"}`;
+}
+
+function loadPublicNetworkCache(slug: string | null): PublicNetworkCachePayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(publicNetworkCacheKey(slug));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PublicNetworkCachePayload;
+    if (slug) return parsed.server ? { server: parsed.server } : null;
+    return Array.isArray(parsed.servers) || parsed.stats ? { servers: parsed.servers ?? [], stats: parsed.stats ?? null } : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePublicNetworkCache(slug: string | null, payload: PublicNetworkCachePayload) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify(payload));
+  } catch {
+    // Storage can be unavailable in private/hardened contexts.
+  }
+}
+
 async function fetchPublicServerFallback(slug: string, signal?: AbortSignal) {
   const response = await fetch("/api/public/servers", { cache: "no-store", credentials: "include", headers: { accept: "application/json" }, signal });
   const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
-  if (!response.ok || !Array.isArray(data.servers)) return null;
-  return data.servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;
+  const payload = data.data && !data.servers ? data.data : data;
+  if (!response.ok || !Array.isArray(payload.servers)) return null;
+  return payload.servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;
 }
 
 function publicServerMatchesSlug(server: PublicServer, slug: string) {
