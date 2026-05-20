@@ -917,7 +917,7 @@ export type BulkAdmFileResult = {
   ok: boolean;
   filename: string;
   source: string;
-  status: "previewed" | "imported" | "failed" | string;
+  status: "previewed" | "imported" | "completed_with_warnings" | "duplicate_only" | "failed" | string;
   failed_endpoint?: string | null;
   failed_chunk_index?: number | null;
   first_failed_line_number?: number | null;
@@ -997,7 +997,7 @@ export type AdmImportJobProgressResult = {
   job_id: string;
   filename: string;
   source: string;
-  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "failed" | "failed_retryable";
+  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "completed_with_warnings" | "failed" | "failed_retryable";
   total_lines: number;
   current_line: number;
   chunk_size: number;

@@ -942,6 +942,9 @@ function ServerDashboard({
     });
     const finished = await finishAdmImportJob(server.id, progress.job_id);
     if (!finished.ok) {
+      if (progress.current_line >= lines.length) {
+        return makeWarningBulkAdmFileResultFromProgress(file, progress, finished, source, lines.length, chunks.length);
+      }
       return makeFailedBulkAdmFileResult(file, {
         ...finished,
         details: {
@@ -961,12 +964,14 @@ function ServerDashboard({
     }
     progress = finished;
 
-    return progress.file_result ?? makeFailedBulkAdmFileResult(file, {
+    return progress.file_result ?? makeWarningBulkAdmFileResultFromProgress(file, progress, {
       ok: false,
       error_code: "missing_file_result",
-      message: "ADM import job completed without a file result.",
+      message: "ADM import job completed without a file result. DZN preserved the accumulated job counters.",
       details: progress,
-    }, source);
+      http_status: progress.http_status,
+      response_body: progress.response_body,
+    }, source, lines.length, chunks.length);
   }
 
   async function sendAdmImportChunkWithFallback(input: {
@@ -4111,6 +4116,9 @@ function BulkAdmImportResultPanel({
               <p className="break-all text-xs font-black uppercase text-zinc-200">{file.filename}</p>
               <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
                 <MiniInfo label="HTTP Status" value={result.http_status ? String(result.http_status) : "Not recorded"} />
+                <MiniInfo label="Job ID" value={file.job_id ? file.job_id.slice(0, 8) : "None"} />
+                <MiniInfo label="Job Status" value={file.job_status ?? file.status ?? "Not recorded"} />
+                <MiniInfo label="Finish Status" value={file.status ?? "Not recorded"} />
                 <MiniInfo label="Raw Lines" value={String(file.raw_lines)} />
                 <MiniInfo label="Raw Kill Lines" value={String(file.raw_kill_lines_found)} />
                 <MiniInfo label="Failed Writes" value={String(file.failed_writes)} />
@@ -4120,6 +4128,7 @@ function BulkAdmImportResultPanel({
                 <MiniInfo label="Chunks" value={file.total_chunks ? `${file.chunks_processed ?? 0}/${file.total_chunks}` : "Chunked"} />
                 <MiniInfo label="Discord Jobs" value={String(file.discord_jobs_queued)} />
                 <MiniInfo label="Import Report" value={file.import_report_id ? file.import_report_id.slice(0, 8) : "None"} />
+                <MiniInfo label="Last Error" value={file.message ?? file.error_code ?? "None"} />
               </div>
               {file.parser_warnings.length ? (
                 <div className="mt-3 grid gap-2">
@@ -5479,6 +5488,60 @@ function makeFailedBulkAdmFileResult(
   };
 }
 
+function makeWarningBulkAdmFileResultFromProgress(
+  file: { filename: string; admText: string },
+  progress: AdmImportJobProgressResult,
+  failure: ManualAdmImportErrorResult,
+  source: string,
+  clientTotalLines: number,
+  clientTotalChunks: number,
+): BulkAdmFileResult {
+  const warning = `${failure.error_code}: ${failure.message}`;
+  return {
+    ok: true,
+    filename: file.filename,
+    source,
+    status: "completed_with_warnings",
+    failed_endpoint: "/adm/import-job/finish",
+    failed_chunk_index: progress.failed_chunk_index ?? null,
+    first_failed_line_number: null,
+    first_failed_line_preview: null,
+    client_file_read_ok: file.admText.length > 0,
+    client_total_lines: clientTotalLines,
+    client_total_chunks: clientTotalChunks,
+    job_status: progress.status,
+    job_id: progress.job_id,
+    raw_lines: progress.total_lines || clientTotalLines,
+    raw_kill_lines_found: progress.parsed_kills,
+    parsed_kills: progress.parsed_kills,
+    written_kills: progress.written_kills,
+    deaths: progress.written_kills,
+    joins: progress.joins,
+    disconnects: progress.disconnects,
+    playerlist_snapshots: progress.playerlist_snapshots,
+    suicides: 0,
+    uncredited_deaths: 0,
+    hit_lines: progress.hit_lines,
+    raw_events_stored: progress.raw_events_stored,
+    player_events_stored: progress.player_events_stored,
+    duplicate_skips: progress.duplicate_skips,
+    failed_writes: 0,
+    public_cache_updated: progress.public_cache_updated,
+    discord_jobs_queued: progress.discord_jobs_queued,
+    parser_warnings: [...progress.warnings, `Finish completed with warning: ${warning}`],
+    kill_previews: [],
+    import_report_id: null,
+    imported_at: null,
+    error_code: failure.error_code,
+    message: `Core ADM chunks completed, but finish reported a warning: ${failure.message}`,
+    details: failure.details,
+    http_status: failure.http_status,
+    response_body: failure.response_body,
+    chunks_processed: progress.chunks_processed,
+    total_chunks: progress.total_chunks,
+  };
+}
+
 function splitAdmTextForUpload(text: string) {
   return text.split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
 }
@@ -5550,12 +5613,16 @@ function makeDashboardTotalsDelta(before: DashboardTotalsSnapshot, after: Dashbo
 }
 
 function isFailedBulkAdmFile(file: BulkAdmFileResult) {
-  return !file.ok || file.status === "failed";
+  return !file.ok || file.status === "failed" || file.status === "failed_retryable";
+}
+
+function isCompletedBulkAdmFile(file: BulkAdmFileResult) {
+  return file.ok && !isFailedBulkAdmFile(file);
 }
 
 function isDedupeOnlyBulkAdmFile(file: BulkAdmFileResult) {
   return file.ok
-    && file.status === "imported"
+    && (file.status === "duplicate_only" || file.status === "imported" || file.status === "completed_with_warnings")
     && file.parsed_kills > 0
     && file.written_kills === 0
     && file.duplicate_skips > 0
@@ -5566,6 +5633,7 @@ function getBulkAdmFileOutcomeLabel(file: BulkAdmFileResult, mode: BulkAdmImport
   if (mode === "preview") return "Previewed";
   if (isFailedBulkAdmFile(file)) return "Needs retry";
   if (isDedupeOnlyBulkAdmFile(file)) return "Already imported - skipped by dedupe";
+  if (file.status === "completed_with_warnings") return "Completed with warnings";
   return "Imported";
 }
 
@@ -5573,6 +5641,7 @@ function getBulkAdmFileOutcomeTone(file: BulkAdmFileResult, mode: BulkAdmImportR
   if (mode === "preview") return "cyan";
   if (isFailedBulkAdmFile(file)) return "orange";
   if (isDedupeOnlyBulkAdmFile(file)) return "zinc";
+  if (file.status === "completed_with_warnings") return "orange";
   return "emerald";
 }
 
@@ -5582,7 +5651,7 @@ function summarizeClientBulkAdmResults(
   selectedFileCount = files.length,
 ): BulkAdmImportResult {
   const errors = files
-    .filter((file) => !file.ok || file.status === "failed")
+    .filter(isFailedBulkAdmFile)
     .map((file) => `${file.filename}: ${file.message ?? file.error_code ?? "failed"}`);
   const warnings = files.flatMap((file) => file.parser_warnings.map((warning) => `${file.filename}: ${warning}`));
   return {
@@ -5590,8 +5659,8 @@ function summarizeClientBulkAdmResults(
     mode: "import",
     source,
     files_uploaded: selectedFileCount,
-    files_imported: files.filter((file) => file.ok && file.status === "imported").length,
-    failed_files: files.filter((file) => !file.ok || file.status === "failed").length,
+    files_imported: files.filter(isCompletedBulkAdmFile).length,
+    failed_files: files.filter(isFailedBulkAdmFile).length,
     total_raw_lines: files.reduce((total, file) => total + file.raw_lines, 0),
     raw_kill_lines_found: files.reduce((total, file) => total + file.raw_kill_lines_found, 0),
     parsed_kills: files.reduce((total, file) => total + file.parsed_kills, 0),

@@ -172,6 +172,7 @@ function auditDueServerSelection() {
   checkIncludes("functions/_lib/adm-sync.ts", "createScheduledAdmImportJobForServer", "Scheduled ADM processing creates chunked import jobs");
   checkIncludes("functions/_lib/adm-sync.ts", "scheduled_nitrado", "Scheduled Nitrado imports use a dedicated job source");
   checkIncludes("functions/_lib/adm-sync.ts", "skipFailedAdmImportLine", "Single bad ADM import lines are skipped without failing the full file");
+  checkIncludes("functions/_lib/adm-sync.ts", "completed_with_warnings", "ADM finish warnings preserve completed job counters instead of failing the file");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/start.ts", "startAdmImportLineJobForServer", "Owner/admin ADM import start endpoint exists");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "processAdmImportJobLineChunk", "Owner/admin ADM import chunk endpoint exists");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "requestDetails", "ADM chunk endpoint returns structured failure diagnostics");
@@ -214,6 +215,8 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "sendAdmImportChunkWithFallback", "Dashboard import UI uses chunk fallback before failing a file");
   checkIncludes("components/onboarding/dashboard.tsx", "Lines Detected", "Dashboard shows client-side ADM file line counts before import");
   checkIncludes("components/onboarding/dashboard.tsx", "First Failed Line", "Dashboard shows failed chunk line diagnostics");
+  checkIncludes("components/onboarding/dashboard.tsx", "makeWarningBulkAdmFileResultFromProgress", "Dashboard preserves chunk counters when finish returns a warning/error");
+  checkIncludes("components/onboarding/dashboard.tsx", "Completed with warnings", "Dashboard distinguishes finish warnings from core import failures");
   checkIncludes("components/onboarding/dashboard.tsx", "ADM cursor verified.", "Dashboard shows cursor hash validation wording");
   checkIncludes("components/onboarding/dashboard.tsx", "DZN detected ADM cursor mismatch", "Dashboard explains safe cursor recovery");
 }

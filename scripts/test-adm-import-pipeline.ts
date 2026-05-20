@@ -77,6 +77,10 @@ async function main() {
   assert.match(dashboardSource, /Preview Kills/);
   assert.match(dashboardSource, /Failed Endpoint/);
   assert.match(dashboardSource, /First Failed Line/);
+  assert.match(dashboardSource, /completed_with_warnings/);
+  assert.match(dashboardSource, /makeWarningBulkAdmFileResultFromProgress/);
+  assert.match(dashboardSource, /Job Status/);
+  assert.match(dashboardSource, /Finish Status/);
   assert.match(dashboardSource, /refreshDashboardAfterManualAdmImport\(\)/);
   assert.match(dashboardSource, /Bulk ADM Import Summary/);
   assert.match(dashboardSource, /Previous Import Attempts/);
@@ -419,6 +423,20 @@ async function main() {
   assert.equal(largeBrowserDb.killEvents.length, 216);
   assert.equal(largeBrowserDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
 
+  const finishWarningDb = new MemoryD1({ failAutomationJobInsert: true });
+  const finishWarningImport = await importChunkedAdmText(makeEnv(finishWarningDb), linkedServerId, largeFixtureName, largeFixtureText, { chunkSize: 10 });
+  assert.equal(finishWarningImport.status, "completed_with_warnings");
+  assert.equal(finishWarningImport.file_result?.status, "completed_with_warnings");
+  assert.equal(finishWarningImport.file_result?.parsed_kills, 216);
+  assert.equal(finishWarningImport.file_result?.written_kills, 216);
+  assert.equal(finishWarningImport.file_result?.joins, 378);
+  assert.equal(finishWarningImport.file_result?.disconnects, 15);
+  assert.equal(finishWarningImport.file_result?.playerlist_snapshots, 10);
+  assert.equal(finishWarningImport.file_result?.discord_jobs_queued, 0);
+  assert.equal(finishWarningImport.file_result?.parser_warnings.some((warning) => warning.includes("Discord auto-post queueing failed")), true);
+  assert.equal(finishWarningDb.killEvents.length, 216);
+  assert.equal(finishWarningDb.serverStats.get(linkedServerId)?.total_kills, 216);
+
   const scheduledJobDb = new MemoryD1();
   const scheduledJob = await createAdmImportJobForServer(makeEnv(scheduledJobDb), {
     linkedServerId,
@@ -469,7 +487,7 @@ async function main() {
   }
   assert.equal(duplicateChunkedResults.reduce((total, file) => total + Number(file?.written_kills ?? 0), 0), 0);
   assert.equal(duplicateChunkedResults.reduce((total, file) => total + Number(file?.duplicate_skips ?? 0), 0) >= 55, true);
-  assert.equal(duplicateChunkedResults.every((file) => file?.ok === true && file?.status === "imported"), true);
+  assert.equal(duplicateChunkedResults.every((file) => file?.ok === true && (file?.status === "imported" || file?.status === "duplicate_only")), true);
   assert.equal(chunkedDb.killEvents.length, 55);
 
   const chunkRetryDb = new MemoryD1({ failKillInsertAfter: 0 });
@@ -534,7 +552,8 @@ async function main() {
   assert.equal(badSingleLineProgress.warnings.some((warning) => warning.includes("skipped line 1")), true);
   badSingleLineDb.failKillInsertAfter = null;
   badSingleLineProgress = await finishAdmImportLineJobForServer(makeEnv(badSingleLineDb), { linkedServerId, jobId: badSingleLineProgress.job_id });
-  assert.equal(badSingleLineProgress.status, "completed");
+  assert.equal(badSingleLineProgress.status, "completed_with_warnings");
+  assert.equal(badSingleLineProgress.file_result?.status, "completed_with_warnings");
   assert.equal(badSingleLineProgress.file_result?.failed_writes, 1);
   assert.equal(badSingleLineDb.killEvents.length, 0);
 
@@ -1111,18 +1130,20 @@ class MemoryStatement {
       row.updated_at = this.values[offset + 14];
       return changed(1);
     }
-    if (q.includes("update adm_import_jobs set") && q.includes("status = 'completed'")) {
-      const row = this.db.admImportJobs.get(String(this.values[6]));
+    if (q.includes("update adm_import_jobs set") && q.includes("current_line = total_lines") && q.includes("result_json = ?")) {
+      const usesDynamicStatus = q.includes("status = ?");
+      const row = this.db.admImportJobs.get(String(this.values[usesDynamicStatus ? 7 : 6]));
       if (!row) return changed(0);
-      row.status = "completed";
+      row.status = usesDynamicStatus ? this.values[0] : "completed";
       row.current_line = row.total_lines;
       row.chunks_processed = row.total_chunks;
-      row.public_cache_updated = this.values[0];
-      row.discord_jobs_queued = this.values[1];
-      row.warnings_json = this.values[2];
-      row.result_json = this.values[3];
-      row.completed_at = this.values[4];
-      row.updated_at = this.values[5];
+      const offset = usesDynamicStatus ? 1 : 0;
+      row.public_cache_updated = this.values[offset];
+      row.discord_jobs_queued = this.values[offset + 1];
+      row.warnings_json = this.values[offset + 2];
+      row.result_json = this.values[offset + 3];
+      row.completed_at = this.values[offset + 4];
+      row.updated_at = this.values[offset + 5];
       return changed(1);
     }
     if (q.includes("update adm_sync_state set last_import_report_json")) {
