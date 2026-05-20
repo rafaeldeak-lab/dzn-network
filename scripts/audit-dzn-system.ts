@@ -333,6 +333,8 @@ function auditAdmSyncWiring() {
   checkIncludes("functions/_lib/nitrado.ts", "pickNewestAdmFile", "Nitrado newest ADM file selection helper exists");
   checkIncludes("functions/_lib/nitrado.ts", "debugNitradoAdmFileDiscovery", "Detailed ADM discovery diagnostics helper exists");
   checkIncludes("functions/_lib/nitrado.ts", "nitrado_api_log_files_stale_or_missing", "Nitrado stale log_files diagnosis exists");
+  checkIncludes("functions/_lib/nitrado.ts", "fullDownloadFallback", "Nitrado seek/sample read falls back to full download");
+  checkIncludes("functions/_lib/nitrado.ts", "download_fallback_attempted", "ADM discovery diagnostics expose download fallback status");
   checkIncludes("functions/_lib/adm-sync.ts", "compareAdmCandidatesChronological", "ADM candidate sorting uses parsed timestamp fallback");
   checkIncludes("functions/_lib/adm-sync.ts", "selectNewestDiscoveredAdmFile", "Newest discovered ADM evidence is tracked");
   checkIncludes("functions/_lib/adm-sync.ts", "latest_adm_unreadable", "Latest unreadable ADM state exists");

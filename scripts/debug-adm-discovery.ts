@@ -31,7 +31,7 @@ type SavedStateRow = {
 };
 
 const target = process.argv[2] ?? process.env.DZN_SERVER_SLUG ?? "pandora-dayz";
-const knownLatest = process.env.DZN_EXPECTED_ADM_FILE ?? "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM";
+const knownLatest = process.env.DZN_EXPECTED_ADM_FILE ?? "DayZServer_PS4_x64_2026-05-20_08-02-52.ADM";
 
 main().catch((error) => {
   console.error("ADM discovery debug failed.");
@@ -72,8 +72,11 @@ async function main() {
   console.log(`username: ${debug.username ?? "not found"}`);
   console.log(`server name: ${debug.server_name ?? "unknown"}`);
   console.log(`raw game_specific.log_files count: ${debug.log_files_raw_count}`);
-  console.log(`file browser ADM count: ${debug.listed_adm_count}`);
-  console.log(`total ADM candidates: ${debug.total_adm_candidates}`);
+  console.log(`game_specific ADM candidates: ${debug.game_specific_adm_count}`);
+  console.log(`file browser ADM candidates: ${debug.file_browser_adm_count}`);
+  console.log(`merged ADM candidates: ${debug.merged_adm_count}`);
+  console.log(`readable ADM candidates: ${debug.readable_adm_count}`);
+  console.log(`unreadable ADM candidates: ${debug.unreadable_adm_count}`);
   console.log(`newest by filename: ${debug.newest_by_filename?.name ?? "none"}`);
   console.log(`newest by modified time: ${debug.newest_by_modified?.name ?? "none"}`);
   console.log(`selected newest available: ${debug.selected_newest_available?.name ?? "none"}`);
@@ -91,7 +94,9 @@ async function main() {
       candidate.name,
       `parsed=${candidate.parsed_timestamp ?? "unknown"}`,
       `modified=${candidate.modified_at ?? "unknown"}`,
-      `read=${candidate.sample_read_attempted ? candidate.sample_read_success ? "ok" : `fail:${candidate.sample_read_error ?? candidate.readable_sample_status}` : "not_sampled"}`,
+      `read=${candidate.sample_read_attempted ? candidate.sample_read_success ? `ok:${candidate.selected_read_method}` : `fail:${candidate.sample_read_error ?? candidate.readable_sample_status}` : "not_sampled"}`,
+      `seek=${candidate.seek_sample_attempted ? candidate.seek_sample_error ?? candidate.seek_sample_status : "not_attempted"}`,
+      `download=${candidate.download_fallback_attempted ? candidate.download_fallback_error ?? candidate.download_fallback_status : "not_attempted"}`,
       `sources=${candidate.sources.join("+") || "unknown"}`,
       `path=${candidate.path}`,
     ].join(" "));

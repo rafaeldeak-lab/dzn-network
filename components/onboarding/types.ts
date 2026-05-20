@@ -823,6 +823,13 @@ export type AdmFileDiscoveryCandidateDebug = {
   sample_read_success: boolean;
   sample_read_error: string | null;
   readable_sample_status: string;
+  seek_sample_attempted: boolean;
+  seek_sample_status: string;
+  seek_sample_error: string | null;
+  download_fallback_attempted: boolean;
+  download_fallback_status: string;
+  download_fallback_error: string | null;
+  selected_read_method: "seek" | "download_fallback" | "none";
   first_lines_preview: string[];
   read_attempts: Array<{
     method: "seek" | "download";
@@ -849,8 +856,12 @@ export type AdmFileDiscoveryDebug = {
   log_files_raw_count: number;
   game_specific_adm_count: number;
   listed_adm_count: number;
+  file_browser_adm_count?: number;
   preferred_adm_count: number;
   total_adm_candidates: number;
+  merged_adm_count?: number;
+  readable_adm_count?: number;
+  unreadable_adm_count?: number;
   list_attempts: Array<{
     dir: string;
     search: string | null;

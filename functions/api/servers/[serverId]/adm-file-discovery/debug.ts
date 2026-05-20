@@ -2,6 +2,8 @@ import { decryptToken } from "../../../../_lib/crypto";
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { debugNitradoAdmFileDiscovery } from "../../../../_lib/nitrado";
+import { recordAdmDiscoveryResult } from "../../../../_lib/automation";
+import { normalizePlanKey } from "../../../../_lib/plans";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import type { Env, PagesFunction } from "../../../../_lib/types";
 
@@ -15,6 +17,7 @@ type LinkedServerDebugRow = {
   server_name: string | null;
   nitrado_service_name: string | null;
   adm_path: string | null;
+  plan_key: string | null;
 };
 
 type SavedAdmDiscoveryState = {
@@ -47,7 +50,13 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     .prepare(
       `SELECT id, user_id, guild_id, nitrado_service_id, display_name, hostname,
               server_name, nitrado_service_name,
-              (SELECT adm_path FROM server_log_config WHERE linked_server_id = linked_servers.id LIMIT 1) AS adm_path
+              (SELECT adm_path FROM server_log_config WHERE linked_server_id = linked_servers.id LIMIT 1) AS adm_path,
+              (SELECT plan_key
+                 FROM server_subscriptions
+                WHERE server_subscriptions.guild_id = linked_servers.guild_id
+                  AND lower(server_subscriptions.status) IN ('active', 'trialing')
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1) AS plan_key
        FROM linked_servers
        WHERE id = ?
        LIMIT 1`,
@@ -64,7 +73,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   ]);
 
   const url = new URL(request.url);
-  const knownLatestFile = url.searchParams.get("known_latest_file") || "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM";
+  const knownLatestFile = url.searchParams.get("known_latest_file") || "DayZServer_PS4_x64_2026-05-20_08-02-52.ADM";
   const debug = await debugNitradoAdmFileDiscovery(token, server.nitrado_service_id, {
     preferredAdmFileName: state?.newest_available_adm_filename ?? state?.last_processed_adm_filename ?? undefined,
     preferredAdmPath: server.adm_path,
@@ -72,12 +81,26 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     knownLatestFileName: knownLatestFile,
     sampleLimit: 12,
   });
+  if (server.guild_id && debug.selected_newest_available?.name) {
+    await recordAdmDiscoveryResult(env, {
+      guildId: server.guild_id,
+      planKey: normalizePlanKey(server.plan_key),
+      ok: true,
+      status: debug.selected_newest_readable?.name ? "new_adm_readable" : "latest_adm_unreadable",
+      error: null,
+      newestAvailableAdmFile: debug.selected_newest_available.name,
+      newestAvailableAdmTimestamp: debug.selected_newest_available.parsed_timestamp,
+      newestReadableAdmFile: debug.selected_newest_readable?.name ?? null,
+      newestReadableAdmTimestamp: debug.selected_newest_readable?.parsed_timestamp ?? null,
+    }).catch(() => null);
+  }
+  const refreshedState = await getSavedAdmDiscoveryState(env, server);
 
   return json({
     ...debug,
     linked_server_id: server.id,
     server_name: debug.server_name ?? server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name,
-    current_saved_state: state,
+    current_saved_state: refreshedState,
   }, {
     headers: {
       "cache-control": "private, no-store, no-cache, must-revalidate",

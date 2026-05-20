@@ -80,7 +80,9 @@ DZN splits ADM work into two phases:
 
 Discovery is intentionally lighter than processing. It can run more often without parsing the full ADM file or posting to Discord.
 
-Sync Health includes **Check ADM Files**, which calls `GET /api/servers/[serverId]/adm-file-discovery/debug`. This owner/admin diagnostic shows the Nitrado service id, username/base paths used, raw `game_specific.log_files` count, file-server fallback list attempts, every ADM candidate DZN saw, parsed filename timestamp, modified time, sort score, sample read result, and why a newer file was skipped. Tokens and tokenized download URLs are not exposed.
+Sync Health includes **Check ADM Files**, which calls `GET /api/servers/[serverId]/adm-file-discovery/debug`. This owner/admin diagnostic shows the Nitrado service id, username/base paths used, raw `game_specific.log_files` count, file-server fallback list attempts, every ADM candidate DZN saw, parsed filename timestamp, modified time, sort score, seek sample result, full download fallback result, selected read method, and why a newer file was skipped. Tokens and tokenized download URLs are not exposed.
+
+When Nitrado's seek/sample route fails but the normal file download route works, DZN falls back to a full file download for the newest candidate and marks that ADM as readable. Discovery always persists the newest available ADM filename by timestamp even if the file is not readable yet; processing still waits until readable content is available.
 
 If Nitrado `game_specific.log_files` is stale or missing a newer ADM file that is visible through the file browser fallback, DZN reports `nitrado_api_log_files_stale_or_missing` and prefers the newer readable fallback candidate.
 

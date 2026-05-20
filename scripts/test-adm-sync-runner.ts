@@ -12,7 +12,11 @@ import {
   normalizeAdmSyncStateMachineStatus,
 } from "../functions/_lib/adm-sync";
 import { parseAdmLines } from "../functions/_lib/adm-parser";
-import { parseNitradoAdmFilenameTimestamp } from "../functions/_lib/nitrado";
+import {
+  debugNitradoAdmFileDiscovery,
+  fetchReadableNitradoAdmFiles,
+  parseNitradoAdmFilenameTimestamp,
+} from "../functions/_lib/nitrado";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
@@ -99,6 +103,13 @@ assert.equal(
   parseNitradoAdmFilenameTimestamp("dayzps/config/DayZServer_PS4_x64_2026-05-20_06-02-03.ADM"),
   Date.UTC(2026, 4, 20, 6, 2, 3),
 );
+assert.equal(
+  compareAdmFileNamesChronological(
+    "DayZServer_PS4_x64_2026-05-20_08-02-52.ADM",
+    "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",
+  ) > 0,
+  true,
+);
 
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
 const endpointSource = readFileSync("functions/api/sync/adm/run.ts", "utf8");
@@ -120,6 +131,9 @@ assert.equal(nitradoSource.includes("fetchReadableNitradoAdmFiles"), true);
 assert.equal(nitradoSource.includes("debugNitradoAdmFileDiscovery"), true);
 assert.equal(nitradoSource.includes("candidates: allEntries.map"), true);
 assert.equal(nitradoSource.includes("nitrado_api_log_files_stale_or_missing"), true);
+assert.equal(nitradoSource.includes("fullDownloadFallback"), true);
+assert.equal(nitradoSource.includes("download_fallback_attempted"), true);
+assert.equal(nitradoSource.includes("selected_read_method"), true);
 assert.equal(nitradoSource.includes("findFirstArrayByKeys"), true);
 assert.equal(nitradoSource.includes("fetchNitradoLogSettingsVerification"), true);
 assert.equal(nitradoSource.includes("admin_log_enabled"), true);
@@ -183,7 +197,10 @@ assert.equal(dashboardUi.includes("Nitrado log settings verified automatically")
 assert.equal(dashboardUi.includes("Feed last updated"), true);
 assert.equal(dashboardUi.includes("getDashboardSyncStatusBanner"), true);
 
-runEndpointTests()
+Promise.all([
+  runEndpointTests(),
+  runNitradoReadFallbackTests(),
+])
   .then(() => {
     console.log("ADM sync runner tests passed.");
   })
@@ -347,6 +364,124 @@ function makeContext(request: Request, testEnv: Env): PagesContext {
     next: async () => new Response(null, { status: 404 }),
     data: {},
   };
+}
+
+async function runNitradoReadFallbackTests() {
+  const latestAdm = "DayZServer_PS4_x64_2026-05-20_08-02-52.ADM";
+  const oldAdm = "DayZServer_PS4_x64_2026-05-19_21-01-43.ADM";
+  const admPath = `dayzps/config/${latestAdm}`;
+  const admText = [
+    "AdminLog started on 2026-05-20 at 08:02:52",
+    "08:03:01 | Player \"TempoGreens\" is connected",
+  ].join("\n");
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: [`dayzps/config/${oldAdm}`, admPath],
+      seekFails: true,
+      downloadSucceeds: true,
+      admText,
+    });
+    const batch = await fetchReadableNitradoAdmFiles("unit-token", "17428528", {
+      mode: "sample",
+      maxFiles: 2,
+      previousLatestAdmFileName: oldAdm,
+    });
+    assert.equal(batch.newestAdmFileName, latestAdm);
+    assert.equal(batch.candidates.at(-1)?.name, latestAdm);
+    assert.equal(batch.files.some((file) => file.name === latestAdm), true);
+
+    const debug = await debugNitradoAdmFileDiscovery("unit-token", "17428528", {
+      knownLatestFileName: latestAdm,
+      sampleLimit: 2,
+    });
+    const selected = debug.selected_newest_available;
+    assert.equal(selected?.name, latestAdm);
+    assert.equal(debug.selected_newest_readable?.name, latestAdm);
+    assert.equal(selected?.seek_sample_attempted, true);
+    assert.equal(selected?.seek_sample_error, "Nitrado seek request failed");
+    assert.equal(selected?.download_fallback_attempted, true);
+    assert.equal(selected?.download_fallback_error, null);
+    assert.equal(selected?.selected_read_method, "download_fallback");
+    assert.equal(selected?.first_lines_preview[0], "AdminLog started on 2026-05-20 at 08:02:52");
+    const debugJson = JSON.stringify(debug);
+    assert.equal(debugJson.includes("files.dzn.test"), false);
+    assert.equal(debugJson.includes("secret-download-token"), false);
+
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: [admPath],
+      seekFails: true,
+      downloadSucceeds: false,
+      admText,
+    });
+    const unreadableBatch = await fetchReadableNitradoAdmFiles("unit-token", "17428528", {
+      mode: "sample",
+      maxFiles: 1,
+    });
+    assert.equal(unreadableBatch.newestAdmFileName, latestAdm);
+    assert.equal(unreadableBatch.files.length, 0);
+    const unreadableDebug = await debugNitradoAdmFileDiscovery("unit-token", "17428528", {
+      knownLatestFileName: latestAdm,
+      sampleLimit: 1,
+    });
+    assert.equal(unreadableDebug.selected_newest_available?.name, latestAdm);
+    assert.equal(unreadableDebug.selected_newest_readable, null);
+    assert.equal(unreadableDebug.selected_newest_available?.download_fallback_attempted, true);
+    assert.equal(unreadableDebug.problem_flags.includes("newest_available_not_readable"), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function mockNitradoFetch(options: {
+  logFiles: string[];
+  seekFails: boolean;
+  downloadSucceeds: boolean;
+  admText: string;
+}): typeof fetch {
+  return (async (input: RequestInfo | URL) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+    if (url.hostname === "api.nitrado.net" && url.pathname.endsWith("/gameservers") && !url.pathname.includes("file_server")) {
+      return jsonResponse({
+        data: {
+          gameserver: {
+            username: "gameserver-unit",
+            game: "dayzps",
+            name: "Pandora Test",
+            game_specific: {
+              log_files: options.logFiles,
+            },
+          },
+        },
+      });
+    }
+    if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/list")) {
+      return jsonResponse({ data: { entries: [] } });
+    }
+    if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/seek")) {
+      if (options.seekFails) throw new Error("seek unavailable");
+      return jsonResponse({ data: { url: "https://files.dzn.test/adm-download", token: "secret-download-token" } });
+    }
+    if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/download")) {
+      if (!options.downloadSucceeds) return jsonResponse({ error: "download failed" }, 403);
+      return jsonResponse({ data: { url: "https://files.dzn.test/adm-download", token: "secret-download-token" } });
+    }
+    if (url.hostname === "files.dzn.test") {
+      if (!options.downloadSucceeds) return new Response("forbidden", { status: 403 });
+      return new Response(options.admText, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+    }
+    return jsonResponse({ data: {} }, 404);
+  }) as typeof fetch;
+}
+
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function admSyncResult(message: string) {

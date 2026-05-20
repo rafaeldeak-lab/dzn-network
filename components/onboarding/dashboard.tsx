@@ -3480,8 +3480,11 @@ function AdmFileDiscoveryDebugPanel({
             <MiniInfo label="Nitrado Service ID" value={debug.service_id} />
             <MiniInfo label="Nitrado Username" value={debug.username ?? "Not found"} />
             <MiniInfo label="Raw log_files Count" value={String(debug.log_files_raw_count)} />
-            <MiniInfo label="Total ADM Candidates" value={String(debug.total_adm_candidates)} />
-            <MiniInfo label="Listed ADM Candidates" value={String(debug.listed_adm_count)} />
+            <MiniInfo label="game_specific ADM Candidates" value={String(debug.game_specific_adm_count)} />
+            <MiniInfo label="File Browser ADM Candidates" value={String(debug.file_browser_adm_count ?? debug.listed_adm_count)} />
+            <MiniInfo label="Merged ADM Candidates" value={String(debug.merged_adm_count ?? debug.total_adm_candidates)} />
+            <MiniInfo label="Readable Candidates" value={String(debug.readable_adm_count ?? debug.adm_candidates.filter((candidate) => candidate.sample_read_success).length)} />
+            <MiniInfo label="Unreadable Candidates" value={String(debug.unreadable_adm_count ?? debug.adm_candidates.filter((candidate) => candidate.sample_read_attempted && !candidate.sample_read_success).length)} />
             <MiniInfo label="Newest Selected" value={debug.selected_newest_available?.name ?? "None"} />
             <MiniInfo label="Expected By Filename" value={debug.newest_by_filename?.name ?? "None"} />
             <MiniInfo label="Newest Readable" value={debug.selected_newest_readable?.name ?? "None"} />
@@ -3521,7 +3524,30 @@ function AdmFileDiscoveryDebugPanel({
                   <MiniInfo label="Modified" value={candidate.modified_at ? String(candidate.modified_at) : "Not provided"} />
                   <MiniInfo label="Sort Score" value={candidate.sort_key === null ? "None" : String(candidate.sort_key)} />
                   <MiniInfo label="Sources" value={candidate.sources.join(", ") || "Unknown"} />
+                  <MiniInfo label="Seek Sample" value={candidate.seek_sample_attempted ? candidate.seek_sample_status : "Not attempted"} />
+                  <MiniInfo label="Download Fallback" value={candidate.download_fallback_attempted ? candidate.download_fallback_status : "Not attempted"} />
+                  <MiniInfo label="Read Method" value={candidate.selected_read_method === "download_fallback" ? "Download fallback" : candidate.selected_read_method === "seek" ? "Seek" : "None"} />
                 </div>
+                {candidate.seek_sample_error ? (
+                  <p className="mt-2 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-2 font-bold text-amber-100">
+                    Seek sample error: {candidate.seek_sample_error}
+                  </p>
+                ) : null}
+                {candidate.download_fallback_attempted ? (
+                  candidate.download_fallback_error ? (
+                    <p className="mt-2 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-2 font-bold text-amber-100">
+                      Download fallback error: {candidate.download_fallback_error}
+                    </p>
+                  ) : candidate.sample_read_success ? (
+                    <p className="mt-2 rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-2 font-bold text-emerald-100">
+                      Nitrado seek failed or was unavailable; download fallback succeeded.
+                    </p>
+                  ) : (
+                    <p className="mt-2 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-2 font-bold text-amber-100">
+                      Download fallback returned data, but DZN did not find ADM log markers in the sample.
+                    </p>
+                  )
+                ) : null}
                 {candidate.sample_read_error ? (
                   <p className="mt-2 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-2 font-bold text-amber-100">
                     Sample error: {candidate.sample_read_error}

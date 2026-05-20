@@ -40,6 +40,7 @@ type AdmReadOptions = {
   previousLatestAdmFileName?: string | null;
   maxFiles?: number;
   lookbackFiles?: number;
+  fullDownloadFallback?: boolean;
 };
 
 type NitradoRawService = {
@@ -316,6 +317,13 @@ export type NitradoAdmDiscoveryCandidateDebug = {
   sample_read_success: boolean;
   sample_read_error: string | null;
   readable_sample_status: SampleFetchStatus | SafeApiStatus | "not_attempted";
+  seek_sample_attempted: boolean;
+  seek_sample_status: SampleFetchStatus | SafeApiStatus | "not_attempted";
+  seek_sample_error: string | null;
+  download_fallback_attempted: boolean;
+  download_fallback_status: SampleFetchStatus | SafeApiStatus | "not_attempted";
+  download_fallback_error: string | null;
+  selected_read_method: "seek" | "download_fallback" | "none";
   first_lines_preview: string[];
   read_attempts: Array<{
     method: "seek" | "download";
@@ -341,8 +349,12 @@ export type NitradoAdmFileDiscoveryDebug = {
   log_files_raw_count: number;
   game_specific_adm_count: number;
   listed_adm_count: number;
+  file_browser_adm_count: number;
   preferred_adm_count: number;
   total_adm_candidates: number;
+  merged_adm_count: number;
+  readable_adm_count: number;
+  unreadable_adm_count: number;
   list_attempts: AdmListAttempt[];
   adm_candidates: NitradoAdmDiscoveryCandidateDebug[];
   selected_newest_available: NitradoAdmDiscoveryCandidateDebug | null;
@@ -511,7 +523,10 @@ export async function fetchReadableNitradoAdmFiles(
 
   const files: NitradoReadableAdmFile[] = [];
   for (const candidate of readCandidates) {
-    const readable = await readNitradoAdmCandidate(token, serviceId, candidate, gameSpecificLogs, options);
+    const readable = await readNitradoAdmCandidate(token, serviceId, candidate, gameSpecificLogs, {
+      ...options,
+      fullDownloadFallback: options.mode === "full" || sameAdmEntry(candidate, newest),
+    });
     if (readable) files.push(readable);
   }
 
@@ -589,6 +604,7 @@ export async function debugNitradoAdmFileDiscovery(
         const result = await readNitradoFileSample(token, serviceId, variant.path, readAttempts, labels, {
           ...options,
           mode: "sample",
+          fullDownloadFallback: true,
         });
         sampleStatus = result.status;
         sampleError = result.errorMessageSafe;
@@ -599,6 +615,11 @@ export async function debugNitradoAdmFileDiscovery(
         }
       }
     }
+    const seekAttempts = readAttempts.filter((attempt) => attempt.method === "seek");
+    const downloadAttempts = readAttempts.filter((attempt) => attempt.method === "download");
+    const successfulReadAttempt = readAttempts.find((attempt) => attempt.sampleReadSucceeded);
+    const lastSeekAttempt = seekAttempts.at(-1);
+    const lastDownloadAttempt = downloadAttempts.at(-1);
 
     debugCandidates.push({
       name: entry.name,
@@ -615,6 +636,19 @@ export async function debugNitradoAdmFileDiscovery(
       sample_read_success: sample !== null,
       sample_read_error: sample ? null : sampleError,
       readable_sample_status: sample ? "OK" : sampleStatus,
+      seek_sample_attempted: seekAttempts.length > 0,
+      seek_sample_status: lastSeekAttempt?.sampleFetchStatus ?? lastSeekAttempt?.status ?? "not_attempted",
+      seek_sample_error: lastSeekAttempt?.sampleReadSucceeded ? null : lastSeekAttempt?.errorMessageSafe ?? null,
+      download_fallback_attempted: downloadAttempts.length > 0,
+      download_fallback_status: lastDownloadAttempt?.sampleFetchStatus ?? lastDownloadAttempt?.status ?? "not_attempted",
+      download_fallback_error: lastDownloadAttempt?.sampleReadSucceeded ? null : lastDownloadAttempt?.errorMessageSafe ?? null,
+      selected_read_method: !sample
+        ? "none"
+        : successfulReadAttempt?.method === "seek"
+        ? "seek"
+        : successfulReadAttempt?.method === "download"
+          ? "download_fallback"
+          : "none",
       first_lines_preview: splitAdmLines(sample).slice(0, 5).map((line) => line.slice(0, 220)),
       read_attempts: readAttempts.map((attempt) => ({
         method: attempt.method,
@@ -653,6 +687,8 @@ export async function debugNitradoAdmFileDiscovery(
   }
   if (selectedNewestAvailable && !selectedNewestAvailable.sample_read_attempted) problemFlags.push("newest_available_not_sampled");
   if (selectedNewestAvailable && !selectedNewestReadable) problemFlags.push("newest_available_not_readable");
+  const readableAdmCount = debugCandidates.filter((candidate) => candidate.sample_read_success).length;
+  const unreadableAdmCount = debugCandidates.filter((candidate) => candidate.sample_read_attempted && !candidate.sample_read_success).length;
 
   return {
     ok: true,
@@ -665,8 +701,12 @@ export async function debugNitradoAdmFileDiscovery(
     log_files_raw_count: gameSpecificLogs.logFilesReturned,
     game_specific_adm_count: gameSpecificLogs.admLogFiles.length,
     listed_adm_count: listedEntries.length,
+    file_browser_adm_count: listedEntries.length,
     preferred_adm_count: preferredEntries.length,
     total_adm_candidates: allEntries.length,
+    merged_adm_count: allEntries.length,
+    readable_adm_count: readableAdmCount,
+    unreadable_adm_count: unreadableAdmCount,
     list_attempts: listAttempts,
     adm_candidates: debugCandidates,
     selected_newest_available: selectedNewestAvailable,
@@ -1499,9 +1539,31 @@ async function readNitradoFileSample(
   pathVariantLabels?: Map<string, string>,
   options: AdmReadOptions = {},
 ) {
-  const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels, options);
+  if (options.mode === "full") {
+    const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels, {
+      ...options,
+      mode: "full",
+    });
+    if (download.sample !== null) return download;
+    return readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels, {
+      ...options,
+      mode: "sample",
+    });
+  }
+
+  const seek = await readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels, {
+    ...options,
+    mode: "sample",
+  });
+  if (seek.sample !== null) return seek;
+  if (options.fullDownloadFallback === false) return seek;
+
+  const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels, {
+    ...options,
+    mode: "full",
+  });
   if (download.sample !== null) return download;
-  return readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels, options);
+  return download.errorMessageSafe ? download : seek;
 }
 
 async function readNitradoAdmCandidate(
