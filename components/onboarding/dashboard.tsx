@@ -32,8 +32,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
@@ -281,6 +281,8 @@ function ServerDashboard({
   const [admImportTotalsDelta, setAdmImportTotalsDelta] = useState<DashboardTotalsDelta | null>(null);
   const [forceLatestAdmRunning, setForceLatestAdmRunning] = useState(false);
   const [forceLatestAdmResult, setForceLatestAdmResult] = useState<AdmSyncRunResult | null>(null);
+  const [admBackfillRunning, setAdmBackfillRunning] = useState(false);
+  const [admBackfillResult, setAdmBackfillResult] = useState<AdmBackfillPlanResult | null>(null);
   const [manualAdmRefreshFailed, setManualAdmRefreshFailed] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
@@ -1228,6 +1230,25 @@ function ServerDashboard({
     }
   }
 
+  async function backfillMissingAdmNow() {
+    setAdmBackfillRunning(true);
+    setActionMessage("");
+    try {
+      const response = await backfillMissingAdm(server.id);
+      if ("ok" in response && response.ok === false && "message" in response) {
+        setActionMessage(`ADM backfill failed: ${response.message}`);
+        return;
+      }
+      setAdmBackfillResult(response);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
+      setActionMessage(response.message);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to queue missing ADM backfill.");
+    } finally {
+      setAdmBackfillRunning(false);
+    }
+  }
+
   async function previewPastedAdmNow() {
     const filename = manualAdmFilename.trim();
     const admText = manualAdmText.trim();
@@ -1812,6 +1833,15 @@ function ServerDashboard({
                   </button>
                   <button
                     type="button"
+                    disabled={admBackfillRunning}
+                    onClick={backfillMissingAdmNow}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-black uppercase text-amber-50 transition hover:border-amber-300/45 hover:bg-amber-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <ListChecks className={`h-3.5 w-3.5 ${admBackfillRunning ? "animate-pulse" : ""}`} />
+                    {admBackfillRunning ? "Backfilling..." : "Backfill Missing ADM Now"}
+                  </button>
+                  <button
+                    type="button"
                     disabled={refreshingSyncData}
                     onClick={refreshNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
@@ -1848,6 +1878,7 @@ function ServerDashboard({
                 <MiniInfo label="Next Action" value={syncHealth.status === "error" ? syncHealth.nextAction : "Continue syncing after fresh ADM activity"} />
               </div>
               <AutomaticAdmImportJobPanel syncStatus={syncStatus} />
+              <AdmBackfillStatusPanel syncStatus={syncStatus} result={admBackfillResult} running={admBackfillRunning} onBackfill={backfillMissingAdmNow} />
               <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
                 <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">Show ADM Technical Diagnostics</summary>
                 <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -3636,11 +3667,12 @@ function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus 
   const job = syncStatus?.active_adm_import_job ?? null;
   const report = syncStatus?.last_adm_import_report ?? null;
   const readFailed = ["adm_file_unreadable", "latest_adm_unreadable"].includes(String(syncStatus?.last_sync_status ?? "").toLowerCase());
+  const backfillActive = Boolean(syncStatus?.adm_backfill_status?.active_job || syncStatus?.adm_backfill_status?.queued_files?.length);
   const nextAction = job
     ? job.status === "failed_retryable"
       ? "Cron will retry the stalled chunk job automatically."
       : "Cron will process the next chunk on the next ADM run."
-    : readFailed
+    : readFailed && !backfillActive
       ? "Retry Nitrado ADM download on the next discovery or processing run."
       : "Wait for the next Nitrado ADM file after reset.";
   return (
@@ -3652,7 +3684,7 @@ function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus 
             {job ? job.filename : report?.admFileName ? `Latest completed ADM: ${report.admFileName}` : "No active scheduled ADM job"}
           </p>
         </div>
-        <SmallBadge tone={job ? "emerald" : readFailed ? "orange" : "zinc"}>{job ? formatStatusLabel(job.status) : readFailed ? "Nitrado Read Failed" : "Idle"}</SmallBadge>
+        <SmallBadge tone={job ? "emerald" : readFailed && !backfillActive ? "orange" : "zinc"}>{job ? formatStatusLabel(job.status) : readFailed && !backfillActive ? "Nitrado Read Failed" : "Idle"}</SmallBadge>
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <MiniInfo label="Source" value={job?.source ?? report?.importSource ?? "scheduled_nitrado"} />
@@ -3665,12 +3697,74 @@ function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus 
         <MiniInfo label="Last Updated" value={job?.updated_at ? formatDashboardDate(job.updated_at) : report?.importedAt ? formatDashboardDate(report.importedAt) : "Waiting"} />
       </div>
       <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-300">
-        {readFailed ? syncStatus?.last_adm_discovery_error ?? syncStatus?.last_sync_message ?? nextAction : nextAction}
+        {readFailed && !backfillActive ? syncStatus?.last_adm_discovery_error ?? syncStatus?.last_sync_message ?? nextAction : nextAction}
       </p>
       {!job ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2">
           <MiniInfo label="Next Discovery" value={syncStatus?.next_adm_discovery_due_at ? formatDashboardDate(syncStatus.next_adm_discovery_due_at) : "Waiting"} />
           <MiniInfo label="Next Processing" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(syncStatus.next_adm_pull_due_at) : "Waiting"} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AdmBackfillStatusPanel({
+  syncStatus,
+  result,
+  running,
+  onBackfill,
+}: {
+  syncStatus: AdmSyncStatus | null;
+  result: AdmBackfillPlanResult | null;
+  running: boolean;
+  onBackfill: () => void;
+}) {
+  const status = syncStatus?.adm_backfill_status ?? null;
+  const activeJob = result?.active_job ?? status?.active_job ?? syncStatus?.active_adm_import_job ?? null;
+  const queuedFiles = result?.queued_files ?? status?.queued_files ?? [];
+  const missingCount = result?.missing_files.length ?? status?.missing_files_detected ?? 0;
+  const skippedCount = result?.skipped_already_imported.length ?? status?.skipped_already_imported ?? 0;
+  const unreadableFiles = result?.unreadable_files.map((file) => file.filename) ?? status?.unreadable_files ?? [];
+  const summary = activeJob
+    ? `Processing ${activeJob.filename} chunk ${Math.min(activeJob.total_chunks, activeJob.chunks_processed + 1)}/${activeJob.total_chunks}`
+    : missingCount > 0
+      ? `Backfilling ${missingCount} missing ADM file${missingCount === 1 ? "" : "s"}`
+      : "No missing ADM files detected";
+  return (
+    <div className="mt-4 rounded-lg border border-amber-300/15 bg-amber-400/8 p-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-amber-100">ADM Backfill Status</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-zinc-100">{summary}</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-400">{result?.message ?? status?.next_action ?? "DZN will queue old missing ADM files oldest-to-newest."}</p>
+        </div>
+        <button
+          type="button"
+          disabled={running}
+          onClick={onBackfill}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-xs font-black uppercase text-amber-50 transition hover:border-amber-300/45 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <ListChecks className={`h-4 w-4 ${running ? "animate-pulse" : ""}`} />
+          {running ? "Backfilling..." : "Backfill Missing ADM Now"}
+        </button>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="Missing ADM Files" value={String(missingCount)} />
+        <MiniInfo label="Queued ADM Files" value={queuedFiles.length ? queuedFiles.slice(0, 2).join(", ") : "None"} />
+        <MiniInfo label="Active File" value={activeJob?.filename ?? status?.active_file ?? "None"} />
+        <MiniInfo label="Completed Today" value={String(status?.completed_files_today ?? result?.completed_files.length ?? 0)} />
+        <MiniInfo label="Skipped Imported" value={String(skippedCount)} />
+        <MiniInfo label="Oldest Missing" value={result?.oldest_missing_file ?? status?.oldest_missing_file ?? "None"} />
+        <MiniInfo label="Newest Missing" value={result?.newest_missing_file ?? status?.newest_missing_file ?? "None"} />
+        <MiniInfo label="Unreadable Missing" value={unreadableFiles.length ? unreadableFiles.slice(0, 2).join(", ") : "None"} />
+      </div>
+      {activeJob ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <MiniInfo label="Chunk" value={`${Math.min(activeJob.total_chunks, activeJob.chunks_processed + 1)}/${activeJob.total_chunks}`} />
+          <MiniInfo label="Parsed Kills" value={String(activeJob.parsed_kills)} />
+          <MiniInfo label="Joins" value={String(activeJob.joins)} />
+          <MiniInfo label="PlayerList" value={String(activeJob.playerlist_snapshots)} />
         </div>
       ) : null}
     </div>

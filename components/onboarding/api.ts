@@ -28,6 +28,7 @@ import type {
   BulkAdmImportApiResult,
   AdmImportJobApiResult,
   AdmImportJobStatusApiResult,
+  AdmBackfillApiResult,
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
@@ -259,6 +260,13 @@ export async function getLatestAdmImportJob(linkedServerId: string, filename: st
 
 export async function forceProcessLatestAdm(linkedServerId: string) {
   return request<(AdmSyncRunResult & { ok?: true }) | { ok: false; error_code: string; message: string; details?: unknown }>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/force-latest`, {
+    method: "POST",
+    cache: "no-store",
+  });
+}
+
+export async function backfillMissingAdm(linkedServerId: string) {
+  return request<AdmBackfillApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/backfill`, {
     method: "POST",
     cache: "no-store",
   });

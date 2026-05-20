@@ -800,6 +800,7 @@ export type AdmSyncStatus = {
   parsed_kill_lines_found: number;
   parser_skipped_lines: number;
   active_adm_import_job: AdmImportJobProgressResult | null;
+  adm_backfill_status: AdmBackfillStatus;
   last_adm_import_report: {
     admFileName: string | null;
     cursorStart: number;
@@ -849,6 +850,20 @@ export type AdmSyncStatus = {
   manual_import_history: ManualAdmImportHistoryItem[];
   current_recovery_action: string;
   recent_sync_runs: SyncRunSummary[];
+};
+
+export type AdmBackfillStatus = {
+  missing_files_detected: number;
+  queued_files: string[];
+  active_file: string | null;
+  active_job: AdmImportJobProgressResult | null;
+  completed_files_today: number;
+  skipped_already_imported: number;
+  oldest_missing_file: string | null;
+  newest_missing_file: string | null;
+  unreadable_files: string[];
+  next_action: string;
+  last_planned_at: string | null;
 };
 
 export type ManualAdmImportHistoryItem = {
@@ -1063,6 +1078,31 @@ export type AdmImportJobProgressResult = {
 export type AdmImportJobApiResult = AdmImportJobProgressResult | ManualAdmImportErrorResult;
 
 export type AdmImportJobStatusApiResult = { ok: true; job: AdmImportJobProgressResult } | ManualAdmImportErrorResult;
+
+export type AdmBackfillPlanResult = {
+  ok: boolean;
+  status: string;
+  message: string;
+  plan_key: string;
+  files_found: number;
+  window_files: string[];
+  missing_files: string[];
+  queued_files: string[];
+  created_jobs: AdmImportJobProgressResult[];
+  active_job: AdmImportJobProgressResult | null;
+  completed_files: string[];
+  skipped_already_imported: string[];
+  unreadable_files: Array<{ filename: string; error: string | null }>;
+  oldest_missing_file: string | null;
+  newest_missing_file: string | null;
+  newest_available_adm_file: string | null;
+  newest_available_adm_timestamp: string | null;
+  newest_readable_adm_file: string | null;
+  newest_readable_adm_timestamp: string | null;
+  next_action: string;
+};
+
+export type AdmBackfillApiResult = AdmBackfillPlanResult | ManualAdmImportErrorResult;
 
 export type AdmFileDiscoveryCandidateDebug = {
   name: string;

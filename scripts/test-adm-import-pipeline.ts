@@ -18,6 +18,7 @@ import {
   previewManualAdmText,
   startAdmImportLineJobForServer,
   type AdmSyncContext,
+  buildAdmBackfillPlan,
 } from "../functions/_lib/adm-sync";
 import type { Env } from "../functions/_lib/types";
 
@@ -55,6 +56,7 @@ async function main() {
   const previewEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/parse-preview.ts", "utf8");
   const bulkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/bulk-import.ts", "utf8");
   const forceLatestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/force-latest.ts", "utf8");
+  const backfillEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/backfill.ts", "utf8");
   const chunkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "utf8");
   const statusEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/status.ts", "utf8");
   const latestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/latest.ts", "utf8");
@@ -108,6 +110,8 @@ async function main() {
   assert.doesNotMatch(dashboardSource, /open=\{result\.files\.length <= 3\}/);
   assert.match(forceLatestEndpointSource, /createScheduledAdmImportJobForServer/);
   assert.match(forceLatestEndpointSource, /requireServerOwnerOrDznAdmin/);
+  assert.match(backfillEndpointSource, /planAdmBackfillJobsForServer/);
+  assert.match(backfillEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(chunkEndpointSource, /requestDetails/);
   assert.match(chunkEndpointSource, /firstLinePreview/);
   assert.match(statusEndpointSource, /getAdmImportJobProgressForServer/);
@@ -115,6 +119,66 @@ async function main() {
   assert.match(continueEndpointSource, /processNextAdmImportJobChunk/);
   assert.match(dashboardSource, /Chunk Import Job/);
   assert.match(dashboardSource, /Processing latest ADM in chunks/);
+  assert.match(dashboardSource, /ADM Backfill Status/);
+  assert.match(dashboardSource, /Backfill Missing ADM Now/);
+  assert.match(dashboardSource, /adm_backfill_status/);
+  const packageSource = readFileSync("package.json", "utf8");
+  assert.match(packageSource, /"check:adm-backfill": "tsx scripts\/check-adm-backfill\.ts"/);
+
+  const backfillFixtureNames = [
+    "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",
+    "DayZServer_PS4_x64_2026-05-20_09-01-27.ADM",
+    "DayZServer_PS4_x64_2026-05-20_10-02-17.ADM",
+    "DayZServer_PS4_x64_2026-05-20_12-02-31.ADM",
+  ];
+  const backfillPlan = buildAdmBackfillPlan({
+    files: backfillFixtureNames.map((name) => ({ name, readable: true })),
+    handledFilenames: [],
+    existingJobs: [],
+    planKey: "partner",
+    nowMs: Date.UTC(2026, 4, 20, 13, 0, 0),
+    maxJobsToCreate: 3,
+  });
+  assert.deepEqual(backfillPlan.missingFiles, backfillFixtureNames);
+  assert.deepEqual(backfillPlan.createFiles, backfillFixtureNames.slice(0, 3));
+  assert.equal(backfillPlan.oldestMissingFile, "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM");
+  assert.equal(backfillPlan.newestMissingFile, "DayZServer_PS4_x64_2026-05-20_12-02-31.ADM");
+
+  const manualDedupeBackfillPlan = buildAdmBackfillPlan({
+    files: backfillFixtureNames.map((name) => ({ name, readable: true })),
+    handledFilenames: [backfillFixtureNames[0]],
+    existingJobs: [],
+    planKey: "starter",
+    nowMs: Date.UTC(2026, 4, 20, 13, 0, 0),
+  });
+  assert.equal(manualDedupeBackfillPlan.skippedAlreadyImported.includes(backfillFixtureNames[0]), true);
+  assert.deepEqual(manualDedupeBackfillPlan.createFiles, [backfillFixtureNames[1]]);
+
+  const activeBackfillPlan = buildAdmBackfillPlan({
+    files: backfillFixtureNames.map((name) => ({ name, readable: true })),
+    handledFilenames: [],
+    existingJobs: [{ filename: backfillFixtureNames[0], status: "queued", source: "scheduled_nitrado" }],
+    planKey: "partner",
+    nowMs: Date.UTC(2026, 4, 20, 13, 0, 0),
+    maxJobsToCreate: 3,
+  });
+  assert.deepEqual(activeBackfillPlan.createFiles, []);
+  assert.equal(activeBackfillPlan.queuedFiles.includes(backfillFixtureNames[0]), true);
+
+  const unreadableBackfillPlan = buildAdmBackfillPlan({
+    files: [
+      { name: backfillFixtureNames[0], readable: false, readError: "Nitrado download failed" },
+      { name: backfillFixtureNames[1], readable: true },
+      { name: backfillFixtureNames[2], readable: true },
+    ],
+    handledFilenames: [],
+    existingJobs: [],
+    planKey: "partner",
+    nowMs: Date.UTC(2026, 4, 20, 13, 0, 0),
+    maxJobsToCreate: 3,
+  });
+  assert.equal(unreadableBackfillPlan.unreadableFiles[0]?.filename, backfillFixtureNames[0]);
+  assert.deepEqual(unreadableBackfillPlan.createFiles, [backfillFixtureNames[1], backfillFixtureNames[2]]);
 
   const successDb = new MemoryD1();
   const successResult = await importReadableAdmLinesIntoDatabase(makeEnv(successDb), {
@@ -522,6 +586,7 @@ async function main() {
   assert.equal(scheduledJob.source, "scheduled_nitrado");
   assert.equal(scheduledJob.total_lines, 3385);
   assert.equal(scheduledJob.total_chunks, Math.ceil(3385 / 10));
+  assert.equal(scheduledJob.import_hit_lines, false);
   const continuedScheduled = await processNextAdmImportJobChunk(makeEnv(scheduledJobDb), {
     linkedServerId,
     jobId: scheduledJob.job_id,
@@ -548,6 +613,7 @@ async function main() {
   assert.equal(scheduledCompleted?.file_result?.joins, 378);
   assert.equal(scheduledCompleted?.file_result?.disconnects, 15);
   assert.equal(scheduledCompleted?.file_result?.playerlist_snapshots, 10);
+  assert.equal(scheduledCompleted?.file_result?.hit_lines, 0);
   assert.equal(scheduledJobDb.killEvents.length, 216);
   assert.equal(scheduledJobDb.serverStats.get(linkedServerId)?.total_kills, 216);
   assert.equal(scheduledJobDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
