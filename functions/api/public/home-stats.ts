@@ -228,27 +228,38 @@ function homeStatsCacheKey(viewerLoggedIn: boolean) {
 
 async function buildPreviewHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, topServers] = await Promise.all([
-    getPreviewTotals(db),
+  const [totals, recentEventsCount, topServers] = await Promise.all([
+    getTotals(db),
+    getRecentEventsCount(db),
     getPreviewTopServers(db),
   ]);
+  const syncActive = numberOrZero(totals.statsActiveServers);
+  const serversLinked = numberOrZero(totals.serversLinked);
   const data = emptyHomeStats();
   return {
     ...data,
     totals: {
       ...data.totals,
-      serversLinked: numberOrZero(totals.serversLinked),
-      statsActiveServers: numberOrZero(totals.statsActiveServers),
+      serversLinked,
+      statsActiveServers: syncActive,
+      killsTracked: numberOrZero(totals.killsTracked),
+      deathsTracked: numberOrZero(totals.deathsTracked),
+      joinsTracked: numberOrZero(totals.joinsTracked),
+      longestKill: numberOrZero(totals.longestKill),
+      recentEventsCount,
+      structuresBuilt: numberOrZero(totals.structuresBuilt),
+      buildScore: numberOrZero(totals.buildScore),
     },
     network_pulse: {
       ...data.network_pulse,
-      active_servers: numberOrZero(totals.statsActiveServers),
+      active_servers: syncActive,
+      events: recentEventsCount,
       top_server: topServers[0] ?? null,
     },
     topServers,
     syncHealth: {
-      active: numberOrZero(totals.statsActiveServers),
-      pending: Math.max(numberOrZero(totals.serversLinked) - numberOrZero(totals.statsActiveServers), 0),
+      active: syncActive,
+      pending: Math.max(serversLinked - syncActive, 0),
     },
   };
 }
@@ -404,32 +415,6 @@ async function getTotals(db: D1Database) {
     structuresBuilt: 0,
     buildScore: 0,
   };
-}
-
-async function getPreviewTotals(db: D1Database) {
-  const row = await db
-    .prepare(
-      `SELECT
-        COUNT(linked_servers.id) AS serversLinked,
-        SUM(
-          CASE
-            WHEN COALESCE(server_stats.total_joins, 0) > 0
-              OR COALESCE(server_stats.total_disconnects, 0) > 0
-              OR COALESCE(server_stats.total_deaths, 0) > 0
-              OR COALESCE(server_stats.total_kills, 0) > 0
-              OR COALESCE(server_stats.unique_players, 0) > 0
-              OR COALESCE(server_public_cache.updated_at, server_public_cache.last_status_update_at, server_public_cache.last_adm_update_at) IS NOT NULL
-            THEN 1 ELSE 0
-          END
-        ) AS statsActiveServers
-       FROM linked_servers
-       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
-       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
-    )
-    .first<Pick<TotalsRow, "serversLinked" | "statsActiveServers">>();
-  return row ?? { serversLinked: 0, statsActiveServers: 0 };
 }
 
 async function getPreviewTopServers(db: D1Database) {
