@@ -77,8 +77,7 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
   }
 
   const baseUrl = appBaseUrl(env);
-  const results = [];
-  for (const endpoint of CRON_ENDPOINTS) {
+  const results = await Promise.all(CRON_ENDPOINTS.map(async (endpoint) => {
     const response = await globalThis.fetch(new URL(endpoint.path, baseUrl).toString(), {
       method: "POST",
       headers: {
@@ -93,19 +92,20 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
       }),
     });
     const body = await response.json().catch(() => null);
-    results.push({
+    const result = {
       label: endpoint.label,
       status: response.status,
       ok: response.ok,
       body,
-    });
+    };
     if (!response.ok) {
       console.warn("DZN AUTOMATION CRON ENDPOINT FAILED", {
         endpoint: endpoint.label,
         status: response.status,
       });
     }
-  }
+    return result;
+  }));
 
   console.log("DZN CLOUDFLARE WORKER CRON TICK COMPLETE", {
     ok: results.every((result) => result.ok),
