@@ -1205,20 +1205,11 @@ export function applyHomeStatsAccess<T extends {
           playerCountFreshServers: 0,
           playerCountStaleServers: 0,
           playersSeen: 0,
-          killsTracked: 0,
-          deathsTracked: 0,
-          joinsTracked: 0,
-          longestKill: 0,
-          recentEventsCount: 0,
-          structuresBuilt: 0,
-          buildScore: 0,
         }
       : data.totals,
     network_pulse: data.network_pulse
       ? {
           ...data.network_pulse,
-          active_servers: 0,
-          events: 0,
           top_server: null,
           best_kd: null,
           current_event: null,
