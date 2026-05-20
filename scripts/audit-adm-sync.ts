@@ -168,6 +168,9 @@ function auditDueServerSelection() {
   checkIncludes("functions/_lib/adm-sync.ts", "last_import_report_json", "Last ADM import report is saved");
   checkIncludes("functions/_lib/adm-sync.ts", "startAdmImportLineJobForServer", "Chunked manual ADM import job creation exists");
   checkIncludes("functions/_lib/adm-sync.ts", "processAdmImportJobLineChunk", "Chunked manual ADM line chunk processing exists");
+  checkIncludes("functions/_lib/adm-sync.ts", "processPendingAdmImportJobs", "Scheduled ADM chunk import jobs continue on cron");
+  checkIncludes("functions/_lib/adm-sync.ts", "createScheduledAdmImportJobForServer", "Scheduled ADM processing creates chunked import jobs");
+  checkIncludes("functions/_lib/adm-sync.ts", "scheduled_nitrado", "Scheduled Nitrado imports use a dedicated job source");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/start.ts", "startAdmImportLineJobForServer", "Owner/admin ADM import start endpoint exists");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "processAdmImportJobLineChunk", "Owner/admin ADM import chunk endpoint exists");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/finish.ts", "finishAdmImportLineJobForServer", "Owner/admin ADM import finish endpoint exists");
@@ -202,6 +205,8 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "Last PlayerList", "Dashboard shows last PlayerList time");
   checkIncludes("components/onboarding/dashboard.tsx", "Next Expected ADM Update", "Dashboard shows next expected ADM update");
   checkIncludes("components/onboarding/dashboard.tsx", "Last ADM Import Report", "Dashboard shows last ADM import report diagnostics");
+  checkIncludes("components/onboarding/dashboard.tsx", "Chunk Import Job", "Dashboard shows active ADM chunk import progress");
+  checkIncludes("components/onboarding/dashboard.tsx", "Processing latest ADM in chunks", "Dashboard explains scheduled chunk processing");
   checkIncludes("components/onboarding/dashboard.tsx", "ADM cursor verified.", "Dashboard shows cursor hash validation wording");
   checkIncludes("components/onboarding/dashboard.tsx", "DZN detected ADM cursor mismatch", "Dashboard explains safe cursor recovery");
 }

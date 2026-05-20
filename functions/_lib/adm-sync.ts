@@ -317,7 +317,7 @@ export type AdmImportJobProgressResult = {
   job_id: string;
   filename: string;
   source: string;
-  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "failed";
+  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "failed" | "failed_retryable";
   total_lines: number;
   current_line: number;
   chunk_size: number;
@@ -340,6 +340,28 @@ export type AdmImportJobProgressResult = {
   discord_jobs_queued: number;
   warnings: string[];
   file_result: ManualAdmBulkFileResult | null;
+};
+
+export type ScheduledAdmImportJobResult = {
+  ok: boolean;
+  status: string;
+  message: string;
+  job: AdmImportJobProgressResult | null;
+  duplicateExistingJob: boolean;
+  latestAdmFile: string | null;
+  latestAdmTimestamp?: string | null;
+  newestAvailableAdmFile?: string | null;
+  newestAvailableAdmTimestamp?: string | null;
+  newestReadableAdmFile?: string | null;
+  newestReadableAdmTimestamp?: string | null;
+};
+
+export type PendingAdmImportJobsResult = {
+  processedJobs: number;
+  completedJobs: number;
+  chunksProcessed: number;
+  failedJobs: number;
+  results: AdmImportJobProgressResult[];
 };
 
 export type ManualAdmBulkImportResult = {
@@ -394,6 +416,8 @@ export type AdmSyncStatusCode =
   | "new_adm_detected"
   | "new_adm_readable"
   | "new_data_found"
+  | "processing_in_chunks"
+  | "adm_import_job_queued"
   | "no_new_log_available"
   | "latest_adm_unreadable"
   | "delayed_after_restart"
@@ -493,6 +517,7 @@ export type AdmSyncStatus = {
   raw_kill_lines_found: number;
   parsed_kill_lines_found: number;
   parser_skipped_lines: number;
+  active_adm_import_job: AdmImportJobProgressResult | null;
   last_adm_import_report: AdmDatabaseImportReport | null;
   current_recovery_action: string;
   recent_sync_runs: AdmSyncRunSummary[];
@@ -1440,6 +1465,7 @@ function getUnavailableAdmMessage(status: AdmSyncStatusCode) {
 
 function getAdmHealthLabel(status: string | null | undefined) {
   const normalized = String(status ?? "").toLowerCase();
+  if (["processing_in_chunks", "adm_import_job_queued"].includes(normalized)) return "ADM Sync Active";
   if (["completed", "no_new_lines", "no_supported_events", "new_data_found", "no_new_log_available", "active", "idle"].includes(normalized)) return "Healthy";
   if (["adm_not_generated_yet", "no_adm_file", "waiting_after_restart"].includes(normalized)) return "Waiting for ADM";
   if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable"].includes(normalized)) return "ADM temporarily unreadable";
@@ -1453,6 +1479,7 @@ function getAdmHealthLabel(status: string | null | undefined) {
 
 function getAdmRecoveryAction(status: string | null | undefined, unreadableQueued: number) {
   const normalized = String(status ?? "").toLowerCase();
+  if (["processing_in_chunks", "adm_import_job_queued"].includes(normalized)) return "Processing latest ADM in chunks. DZN will continue on the next cron tick.";
   if (normalized === "nitrado_auth_invalid") return "Reconnect or refresh the server owner's Nitrado token/service permission.";
   if (normalized === "nitrado_down") return "Nitrado is unavailable. DZN will retry automatically.";
   if (normalized === "nitrado_rate_limited") return "Nitrado throttled requests. DZN will retry on the next scheduled run.";
@@ -1486,6 +1513,8 @@ export function normalizeAdmSyncStateMachineStatus(status: string | null | undef
     "new_adm_detected",
     "new_adm_readable",
     "new_data_found",
+    "processing_in_chunks",
+    "adm_import_job_queued",
     "no_new_log_available",
     "latest_adm_unreadable",
     "delayed_after_restart",
@@ -2317,6 +2346,9 @@ export async function importAdmFilesForServer(
 
 const MANUAL_ADM_IMPORT_CHUNK_SIZE = 25;
 const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
+const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 10;
+const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 3;
+const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
 
 type AdmImportJobRow = {
   id: string;
@@ -2649,6 +2681,225 @@ export async function retryAdmImportLineJobForServer(
   return toAdmImportJobProgress(updated);
 }
 
+export async function processPendingAdmImportJobs(
+  env: Env,
+  options: {
+    maxJobs?: number;
+    maxChunksPerJob?: number;
+    source?: string;
+  } = {},
+): Promise<PendingAdmImportJobsResult> {
+  await ensureAdmSyncSchema(env);
+  const maxJobs = clampPositiveInteger(options.maxJobs ?? 5, 5);
+  const maxChunksPerJob = clampPositiveInteger(options.maxChunksPerJob ?? SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
+  const source = options.source ?? SCHEDULED_ADM_IMPORT_SOURCE;
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT * FROM adm_import_jobs
+       WHERE source = ?
+         AND status IN ('queued', 'failed_retryable', 'rebuilding')
+       ORDER BY created_at ASC
+       LIMIT ?`,
+    )
+    .bind(source, maxJobs)
+    .all<AdmImportJobRow>();
+
+  const results: AdmImportJobProgressResult[] = [];
+  let chunksProcessed = 0;
+  let completedJobs = 0;
+  let failedJobs = 0;
+  for (const row of rows.results ?? []) {
+    try {
+      const previousChunksProcessed = Number(row.chunks_processed ?? 0);
+      const result = await processAdmImportJobChunksById(env, row.server_id, row.id, maxChunksPerJob);
+      chunksProcessed += Math.max(0, result.chunks_processed - previousChunksProcessed);
+      if (result.status === "completed") completedJobs += 1;
+      results.push(result);
+    } catch (error) {
+      failedJobs += 1;
+      const latest = await getAdmImportJob(env, row.server_id, row.id);
+      if (latest) results.push(toAdmImportJobProgress(latest));
+      await recordAdmImportJobProgressInSyncState(env, latest ?? row, "failed_retryable", `ADM chunk import paused for retry. ${safeSyncErrorMessage(error)}`).catch(() => null);
+    }
+  }
+
+  return {
+    processedJobs: results.length,
+    completedJobs,
+    chunksProcessed,
+    failedJobs,
+    results,
+  };
+}
+
+export async function createScheduledAdmImportJobForServer(
+  env: Env,
+  userId: string,
+  linkedServerId: string,
+  options: {
+    chunksToProcess?: number;
+    triggerType?: string;
+  } = {},
+): Promise<ScheduledAdmImportJobResult> {
+  await ensureAdmSyncSchema(env);
+  const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
+  if (!linkedServer) throw new Error("No linked server found");
+  const scope = verifyAdmServerScope(linkedServer, crypto.randomUUID());
+  await refreshNitradoServerMetadata(env, {
+    linkedServerId: scope.linkedServerId,
+    userId: linkedServer.user_id,
+    force: true,
+    softFail: true,
+  }).catch(() => null);
+
+  const existingState = await getSyncState(env, scope.linkedServerId);
+  const isMock = isMockNitrado(env.MOCK_NITRADO);
+  const preferredAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
+  const preferredAdmFileName = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
+  const batch = await getReadableAdmFilesForLinkedServer(env, linkedServer, {
+    isMock,
+    readMode: "full",
+    preferredAdmPath,
+    previousLatestAdmFileName: preferredAdmFileName,
+    maxFiles: 12,
+  });
+  await recordDiscoveredAdmFiles(env, scope, batch.candidates);
+  const newestAvailable = selectNewestDiscoveredAdmFile(batch.candidates);
+  const newestReadable = selectNewestReadableAdmFile(batch.files);
+  const selected = newestReadable ?? batch.files.at(-1) ?? null;
+  const now = new Date().toISOString();
+
+  if (newestAvailable?.path) {
+    await saveServerAdmPath(env, scope.linkedServerId, newestAvailable.path.replace(/^\/+/, ""));
+  }
+
+  if (!selected?.lines.length) {
+    const latestAdmFile = newestAvailable?.name ?? batch.newestAdmFileName ?? existingState?.latest_adm_file ?? null;
+    const status = latestAdmFile ? "latest_adm_unreadable" : "no_adm_file";
+    const message = latestAdmFile
+      ? "Latest ADM file found, but DZN could not download readable text yet. It will retry automatically."
+      : "No ADM file is available for scheduled chunk import yet.";
+    await upsertSyncState(env, scope.linkedServerId, {
+      latestAdmFile,
+      latestAdmPath: newestAvailable?.path ?? preferredAdmPath,
+      sourceServiceId: scope.nitradoServiceId,
+      lastProcessedFile: existingState?.last_processed_file ?? null,
+      lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
+      lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
+      status,
+      message,
+      lastSyncAt: now,
+      linesRead: 0,
+      linesProcessed: 0,
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      unknownLines: 0,
+      duplicateLines: 0,
+      syncDurationMs: 0,
+      readableRoute: null,
+      rawKillLinesFound: 0,
+      parsedKillLinesFound: 0,
+      parserSkippedLines: 0,
+      unreadableFilesQueued: latestAdmFile ? 1 : 0,
+      newestUnprocessedAdmFile: latestAdmFile,
+    });
+    return {
+      ok: false,
+      status,
+      message,
+      job: null,
+      duplicateExistingJob: false,
+      latestAdmFile,
+      latestAdmTimestamp: timestampIso(extractAdmTimestampScore(latestAdmFile)),
+      newestAvailableAdmFile: newestAvailable?.name ?? latestAdmFile,
+      newestAvailableAdmTimestamp: timestampIso(newestAvailable?.timestamp ?? extractAdmTimestampScore(latestAdmFile)),
+      newestReadableAdmFile: null,
+      newestReadableAdmTimestamp: null,
+    };
+  }
+
+  const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, selected.name);
+  if (existingJob) {
+    const progress = toAdmImportJobProgress(existingJob);
+    if (progress.status === "completed" || existingJob.source !== SCHEDULED_ADM_IMPORT_SOURCE || !existingJob.adm_text) {
+      await recordAdmImportJobProgressInSyncState(env, existingJob, progress.status === "completed" ? "no_new_lines" : "processing_in_chunks", progress.status === "completed"
+        ? `ADM file ${selected.name} is already imported. DZN skipped duplicate scheduled processing.`
+        : `ADM file ${selected.name} already has an import job from ${existingJob.source}.`);
+      return {
+        ok: true,
+        status: progress.status === "completed" ? "no_new_lines" : "processing_in_chunks",
+        message: progress.status === "completed"
+          ? `ADM file ${selected.name} is already imported.`
+          : `ADM file ${selected.name} already has an active import job.`,
+        job: progress,
+        duplicateExistingJob: true,
+        latestAdmFile: selected.name,
+        latestAdmTimestamp: timestampIso(extractAdmTimestampScore(selected.name)),
+        newestAvailableAdmFile: newestAvailable?.name ?? selected.name,
+        newestAvailableAdmTimestamp: timestampIso(newestAvailable?.timestamp ?? extractAdmTimestampScore(selected.name)),
+        newestReadableAdmFile: selected.name,
+        newestReadableAdmTimestamp: timestampIso(extractAdmTimestampScore(selected.name)),
+      };
+    }
+
+    const continued = await processAdmImportJobChunksById(env, scope.linkedServerId, existingJob.id, options.chunksToProcess ?? SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
+    return scheduledJobResultFromProgress(continued, true, selected.name, newestAvailable);
+  }
+
+  const created = await createAdmImportJobForServer(env, {
+    linkedServerId: scope.linkedServerId,
+    filename: selected.name,
+    admText: selected.lines.join("\n"),
+    source: SCHEDULED_ADM_IMPORT_SOURCE,
+    chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+  });
+  await recordAdmImportJobProgressInSyncState(env, {
+    id: created.job_id,
+    server_id: scope.linkedServerId,
+    source_service_id: scope.nitradoServiceId,
+    filename: selected.name,
+    source: SCHEDULED_ADM_IMPORT_SOURCE,
+    status: created.status,
+    adm_text: selected.lines.join("\n"),
+    total_lines: created.total_lines,
+    current_line: created.current_line,
+    chunk_size: created.chunk_size,
+    total_chunks: created.total_chunks,
+    chunks_processed: created.chunks_processed,
+    import_hit_lines: created.import_hit_lines ? 1 : 0,
+    raw_kill_lines_found: 0,
+    last_chunk_index: -1,
+    failed_chunk_index: null,
+    parsed_kills: 0,
+    written_kills: 0,
+    duplicate_skips: 0,
+    joins: 0,
+    disconnects: 0,
+    playerlist_snapshots: 0,
+    deaths: 0,
+    suicides: 0,
+    uncredited_deaths: 0,
+    hit_lines: 0,
+    raw_events: 0,
+    player_events: 0,
+    failed_writes: 0,
+    public_cache_updated: 0,
+    discord_jobs_queued: 0,
+    warnings_json: "[]",
+    error_message: null,
+    result_json: null,
+    created_at: now,
+    updated_at: now,
+    completed_at: null,
+  }, "adm_import_job_queued", `Queued scheduled ADM chunk import for ${selected.name}.`);
+
+  const processed = await processAdmImportJobChunksById(env, scope.linkedServerId, created.job_id, options.chunksToProcess ?? SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
+  return scheduledJobResultFromProgress(processed, false, selected.name, newestAvailable);
+}
+
 export async function processNextAdmImportJobChunk(
   env: Env,
   input: {
@@ -2687,6 +2938,7 @@ export async function processNextAdmImportJobChunk(
       allLines: lines,
       startLine,
       endLine,
+      includeHitLines: Number(row.import_hit_lines ?? 0) === 1,
       triggerType: row.source,
     });
     const warnings = [...parseJobWarnings(row), ...chunkResult.parserWarnings.map((warning) => `${row.filename}: ${warning}`)];
@@ -2699,6 +2951,9 @@ export async function processNextAdmImportJobChunk(
           status = ?,
           current_line = ?,
           chunks_processed = ?,
+          raw_kill_lines_found = raw_kill_lines_found + ?,
+          last_chunk_index = ?,
+          failed_chunk_index = NULL,
           parsed_kills = parsed_kills + ?,
           written_kills = written_kills + ?,
           duplicate_skips = duplicate_skips + ?,
@@ -2720,6 +2975,8 @@ export async function processNextAdmImportJobChunk(
         status,
         nextCurrentLine,
         chunksProcessed,
+        chunkResult.rawKilledByLinesFound,
+        Number(row.chunks_processed ?? 0),
         chunkResult.parsedKills,
         chunkResult.writtenKills,
         chunkResult.duplicateSkips,
@@ -2746,11 +3003,22 @@ export async function processNextAdmImportJobChunk(
     return toAdmImportJobProgress(updated);
   } catch (error) {
     await db
-      .prepare("UPDATE adm_import_jobs SET status = 'failed', error_message = ?, failed_writes = failed_writes + 1, updated_at = ? WHERE id = ? AND server_id = ?")
-      .bind(safeSyncErrorMessage(error), new Date().toISOString(), row.id, input.linkedServerId)
+      .prepare("UPDATE adm_import_jobs SET status = 'failed_retryable', error_message = ?, failed_chunk_index = ?, failed_writes = failed_writes + 1, updated_at = ? WHERE id = ? AND server_id = ?")
+      .bind(safeSyncErrorMessage(error), Number(row.chunks_processed ?? 0), new Date().toISOString(), row.id, input.linkedServerId)
       .run();
     throw error;
   }
+}
+
+async function processAdmImportJobChunksById(env: Env, linkedServerId: string, jobId: string, maxChunks: number) {
+  const safeMaxChunks = clampPositiveInteger(maxChunks, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
+  let progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
+  await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), progress.status === "completed" ? "completed" : "processing_in_chunks");
+  for (let index = 1; index < safeMaxChunks && progress.status !== "completed"; index += 1) {
+    progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
+    await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), progress.status === "completed" ? "completed" : "processing_in_chunks");
+  }
+  return progress;
 }
 
 async function writeAdmImportChunk(
@@ -3108,6 +3376,140 @@ async function getAdmImportJob(env: Env, linkedServerId: string, jobId: string) 
     .first<AdmImportJobRow>();
 }
 
+async function getAdmImportJobForFilename(env: Env, linkedServerId: string, filename: string) {
+  return await requireDb(env)
+    .prepare(
+      `SELECT * FROM adm_import_jobs
+       WHERE server_id = ? AND filename = ?
+       ORDER BY
+         CASE WHEN status = 'completed' THEN 0 WHEN status IN ('queued', 'writing', 'rebuilding', 'failed_retryable') THEN 1 ELSE 2 END,
+         updated_at DESC,
+         created_at DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServerId, filename)
+    .first<AdmImportJobRow>();
+}
+
+async function getActiveAdmImportJob(env: Env, linkedServerId: string) {
+  return await requireDb(env)
+    .prepare(
+      `SELECT * FROM adm_import_jobs
+       WHERE server_id = ?
+         AND status IN ('queued', 'writing', 'rebuilding', 'failed_retryable')
+       ORDER BY updated_at DESC, created_at DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServerId)
+    .first<AdmImportJobRow>();
+}
+
+async function recordAdmImportJobProgressInSyncState(
+  env: Env,
+  row: AdmImportJobRow,
+  status: AdmSyncStatusCode | "failed_retryable" = "processing_in_chunks",
+  message?: string,
+) {
+  const now = new Date().toISOString();
+  const progressStatus = status === "failed_retryable" ? "processing_in_chunks" : status;
+  const progressMessage = message ?? (row.status === "completed"
+    ? `ADM chunk import completed for ${row.filename}.`
+    : `Processing latest ADM in chunks. File: ${row.filename}. Progress: chunk ${Math.min(Number(row.chunks_processed ?? 0) + 1, Number(row.total_chunks ?? 1))}/${Number(row.total_chunks ?? 1)}. Parsed kills so far: ${Number(row.parsed_kills ?? 0)}. Written kills so far: ${Number(row.written_kills ?? 0)}. Duplicates skipped: ${Number(row.duplicate_skips ?? 0)}. Next chunk on next cron tick.`);
+  await upsertSyncState(env, row.server_id, {
+    latestAdmFile: row.filename,
+    latestAdmPath: row.filename,
+    sourceServiceId: row.source_service_id ?? "scheduled-nitrado",
+    lastProcessedFile: row.filename,
+    lastProcessedLine: Number(row.current_line ?? 0),
+    lastProcessedOffset: Number(row.current_line ?? 0),
+    status: progressStatus,
+    message: progressMessage,
+    lastSyncAt: now,
+    linesRead: Number(row.total_lines ?? 0),
+    linesProcessed: Number(row.current_line ?? 0),
+    rawEventsStored: Number(row.raw_events ?? 0),
+    playerEventsStored: Number(row.player_events ?? 0),
+    killEventsStored: Number(row.written_kills ?? 0),
+    eventsCreated: Number(row.player_events ?? 0) + Number(row.written_kills ?? 0),
+    killsCreated: Number(row.written_kills ?? 0),
+    unknownLines: 0,
+    duplicateLines: Number(row.duplicate_skips ?? 0),
+    syncDurationMs: 0,
+    readableRoute: row.source === SCHEDULED_ADM_IMPORT_SOURCE ? "scheduled_chunked_import" : "manual_chunked_import",
+    rawKillLinesFound: Number(row.raw_kill_lines_found ?? 0),
+    parsedKillLinesFound: Number(row.parsed_kills ?? 0),
+    parserSkippedLines: 0,
+    unreadableFilesQueued: 0,
+    newestUnprocessedAdmFile: row.status === "completed" ? null : row.filename,
+  });
+}
+
+function progressToImportJobRow(progress: AdmImportJobProgressResult, linkedServerId: string): AdmImportJobRow {
+  return {
+    id: progress.job_id,
+    server_id: linkedServerId,
+    source_service_id: null,
+    filename: progress.filename,
+    source: progress.source,
+    status: progress.status,
+    adm_text: "",
+    total_lines: progress.total_lines,
+    current_line: progress.current_line,
+    chunk_size: progress.chunk_size,
+    total_chunks: progress.total_chunks,
+    chunks_processed: progress.chunks_processed,
+    import_hit_lines: progress.import_hit_lines ? 1 : 0,
+    raw_kill_lines_found: 0,
+    last_chunk_index: progress.last_chunk_index ?? null,
+    failed_chunk_index: progress.failed_chunk_index ?? null,
+    parsed_kills: progress.parsed_kills,
+    written_kills: progress.written_kills,
+    duplicate_skips: progress.duplicate_skips,
+    joins: progress.joins,
+    disconnects: progress.disconnects,
+    playerlist_snapshots: progress.playerlist_snapshots,
+    deaths: 0,
+    suicides: 0,
+    uncredited_deaths: 0,
+    hit_lines: progress.hit_lines,
+    raw_events: progress.raw_events_stored,
+    player_events: progress.player_events_stored,
+    failed_writes: 0,
+    public_cache_updated: progress.public_cache_updated ? 1 : 0,
+    discord_jobs_queued: progress.discord_jobs_queued,
+    warnings_json: JSON.stringify(progress.warnings),
+    error_message: null,
+    result_json: progress.file_result ? JSON.stringify(progress.file_result) : null,
+    created_at: null,
+    updated_at: null,
+    completed_at: progress.status === "completed" ? new Date().toISOString() : null,
+  };
+}
+
+function scheduledJobResultFromProgress(
+  progress: AdmImportJobProgressResult,
+  duplicateExistingJob: boolean,
+  latestAdmFile: string,
+  newestAvailable: DiscoveredAdmFileForSync | null,
+): ScheduledAdmImportJobResult {
+  const status = progress.status === "completed" ? "completed" : "processing_in_chunks";
+  return {
+    ok: true,
+    status,
+    message: progress.status === "completed"
+      ? `Scheduled ADM chunk import completed for ${latestAdmFile}.`
+      : `Processing latest ADM in chunks: ${progress.chunks_processed}/${progress.total_chunks}.`,
+    job: progress,
+    duplicateExistingJob,
+    latestAdmFile,
+    latestAdmTimestamp: timestampIso(extractAdmTimestampScore(latestAdmFile)),
+    newestAvailableAdmFile: newestAvailable?.name ?? latestAdmFile,
+    newestAvailableAdmTimestamp: timestampIso(newestAvailable?.timestamp ?? extractAdmTimestampScore(latestAdmFile)),
+    newestReadableAdmFile: latestAdmFile,
+    newestReadableAdmTimestamp: timestampIso(extractAdmTimestampScore(latestAdmFile)),
+  };
+}
+
 function parseJobWarnings(row: Pick<AdmImportJobRow, "warnings_json">) {
   try {
     const parsed = row.warnings_json ? JSON.parse(row.warnings_json) : [];
@@ -3163,7 +3565,7 @@ function parseJobFileResult(value: string | null): ManualAdmBulkFileResult | nul
 }
 
 function normalizeImportJobStatus(value: string): AdmImportJobProgressResult["status"] {
-  if (value === "queued" || value === "parsing" || value === "writing" || value === "rebuilding" || value === "completed" || value === "failed") return value;
+  if (value === "queued" || value === "parsing" || value === "writing" || value === "rebuilding" || value === "completed" || value === "failed" || value === "failed_retryable") return value;
   return "queued";
 }
 
@@ -3441,13 +3843,14 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     )
     .bind(linkedServer.id, userId)
     .first<Record<string, unknown>>();
-  const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun, unreadableQueued, newestUnprocessed] = await Promise.all([
+  const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun, unreadableQueued, newestUnprocessed, activeImportJobRow] = await Promise.all([
     getRecentSyncRuns(env, linkedServer.id, 5),
     getLatestSyncRunByTrigger(env, linkedServer.id, "manual"),
     getLatestSyncRunByTrigger(env, linkedServer.id, "scheduled"),
     getLatestSuccessfulSyncRun(env, linkedServer.id),
     countQueuedUnreadableAdmFiles(env, linkedServer.id),
     getNewestUnprocessedAdmFile(env, linkedServer.id),
+    getActiveAdmImportJob(env, linkedServer.id),
   ]);
   const manualImportHistory = await getManualAdmImportHistory(env, linkedServer.id, 5);
   const currentStatus = stringOrDefault(row?.last_sync_status, "not_started");
@@ -3521,6 +3924,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     raw_kill_lines_found: numberOrZero(row?.last_raw_kill_lines_found),
     parsed_kill_lines_found: numberOrZero(row?.last_parsed_kill_lines_found),
     parser_skipped_lines: numberOrZero(row?.last_parser_skipped_lines),
+    active_adm_import_job: activeImportJobRow ? toAdmImportJobProgress(activeImportJobRow) : null,
     last_adm_import_report: parseAdmDatabaseImportReport(row?.last_import_report_json),
     current_recovery_action: getAdmRecoveryAction(currentStatus, unreadableQueued),
     recent_sync_runs: recentRuns,
@@ -3973,6 +4377,9 @@ export type ScheduledAdmSyncResult = {
   latest_adm_unreadable_count: number;
   new_adm_readable_count: number;
   new_data_found_count: number;
+  pending_import_jobs_processed: number;
+  pending_import_chunks_processed: number;
+  pending_import_jobs_completed: number;
   cron: string | null;
   maxServers: number;
   maxLinesPerServer: number;
@@ -3999,6 +4406,10 @@ export async function runScheduledAdmSync(
       maxServers,
       skipFreshWithinMs: 5 * 60 * 1000,
     });
+  const pendingJobs = await processPendingAdmImportJobs(env, {
+    maxJobs: maxServers,
+    maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
+  });
   const discoveryServers = await getDueAdmDiscoveryAutomationServers(env, maxServers);
   const discoveryResults = new Map<string, AdmDiscoveryResult>();
   let discoveryProcessed = 0;
@@ -4053,9 +4464,9 @@ export async function runScheduledAdmSync(
     try {
       await markAdmPullStarted(env, server.guild_id);
       processingProcessed += 1;
-      const result = await runAdmSync(env, server.user_id, server.id, {
+      const result = await createScheduledAdmImportJobForServer(env, server.user_id, server.id, {
         triggerType: "scheduled",
-        maxLinesPerRun: maxLinesPerServer,
+        chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
       });
       const ok = !isAdmSyncErrorStatus(result.status);
       if (!ok) failed += 1;
@@ -4063,6 +4474,9 @@ export async function runScheduledAdmSync(
         if (isAdmSyncTemporarilyUnavailableStatus(result.status)) unavailable += 1;
         succeeded += 1;
       }
+      const job = result.job;
+      const fileResult = job?.file_result ?? null;
+      const newDataFound = Boolean(fileResult && (fileResult.written_kills > 0 || fileResult.player_events_stored > 0 || fileResult.raw_events_stored > 0));
       await recordAdmPullResult(env, {
         guildId: server.guild_id,
         planKey: server.plan_key,
@@ -4075,52 +4489,15 @@ export async function runScheduledAdmSync(
         newestAvailableAdmTimestamp: result.newestAvailableAdmTimestamp ?? result.latestAdmTimestamp ?? null,
         newestReadableAdmFile: result.newestReadableAdmFile ?? null,
         newestReadableAdmTimestamp: result.newestReadableAdmTimestamp ?? null,
-        firstUsefulAdmLineAt: result.firstUsefulAdmLineAt ?? null,
-        lastUsefulAdmEventAt: result.lastUsefulAdmEventAt ?? null,
-        lastPlayerlistAt: result.lastPlayerlistAt ?? null,
+        firstUsefulAdmLineAt: null,
+        lastUsefulAdmEventAt: null,
+        lastPlayerlistAt: null,
         processedAdmFile: result.latestAdmFile,
-        processedOffset: result.lastProcessedLine,
-        processedLine: result.lastProcessedLine,
-        newDataFound: result.eventsCreated > 0 || result.killsCreated > 0 || result.buildEventsStored > 0,
+        processedOffset: job?.current_line ?? 0,
+        processedLine: job?.current_line ?? 0,
+        newDataFound,
       });
-      if (result.eventsCreated > 0 || result.killsCreated > 0 || result.buildEventsStored > 0) newDataFoundCount += 1;
-      if (ok) {
-        let publicCacheUpdated = false;
-        let discordQueuesCreated = 0;
-        let cacheRefreshStatus: AdmDatabaseImportReport["cacheRefreshStatus"] = "skipped";
-        let discordQueueStatus: AdmDatabaseImportReport["discordQueueStatus"] = "skipped";
-        await upsertServerPublicCache(env, {
-          guildId: server.guild_id,
-          planKey: server.plan_key,
-          publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
-          lastAdmUpdateAt: result.lastSyncAt,
-        });
-        publicCacheUpdated = true;
-        cacheRefreshStatus = "updated";
-        if (result.eventsCreated > 0 || result.killsCreated > 0) {
-          discordQueuesCreated = await queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
-            "leaderboard_embed",
-            "daily_summary_embed",
-            "event_leaderboard_embed",
-            "network_ranking_embed",
-            "server_vs_server_embed",
-            "killfeed_embed",
-            "pve_feed_embed",
-            "hit_feed_embed",
-            "connection_feed_embed",
-            "build_feed_embed",
-            "admin_alerts_embed",
-            "admin_logs_embed",
-          ], "adm-data-change");
-          discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
-        }
-        await updateLastAdmImportReport(env, server.id, {
-          publicCacheUpdated,
-          discordQueuesCreated,
-          cacheRefreshStatus,
-          discordQueueStatus,
-        });
-      }
+      if (newDataFound) newDataFoundCount += 1;
     } catch (error) {
       failed += 1;
       await recordAdmPullResult(env, {
@@ -4149,22 +4526,28 @@ export async function runScheduledAdmSync(
 
   return {
     ok: true,
-    processed: processingProcessed,
-    succeeded,
-    failed,
+    processed: processingProcessed + pendingJobs.processedJobs,
+    succeeded: succeeded + pendingJobs.completedJobs,
+    failed: failed + pendingJobs.failedJobs,
     unavailable,
     skipped: Math.max(0, maxServers - processingProcessed),
     discovery_due_count: discoveryServers.length,
     discovery_processed_count: discoveryProcessed,
     processing_due_count: eligibleServers.length,
-    processing_processed_count: processingProcessed,
+    processing_processed_count: processingProcessed + pendingJobs.processedJobs,
     skipped_not_due: Math.max(0, maxServers - Math.max(discoveryServers.length, eligibleServers.length)),
     skipped_locked: 0,
     skipped_unreadable: skippedUnreadable,
     waiting_after_restart_count: waitingAfterRestartCount,
     latest_adm_unreadable_count: latestAdmUnreadableCount,
     new_adm_readable_count: newAdmReadableCount,
-    new_data_found_count: newDataFoundCount,
+    new_data_found_count: newDataFoundCount + pendingJobs.results.filter((job) => {
+      const file = job.file_result;
+      return file ? file.written_kills > 0 || file.player_events_stored > 0 || file.raw_events_stored > 0 : false;
+    }).length,
+    pending_import_jobs_processed: pendingJobs.processedJobs,
+    pending_import_chunks_processed: pendingJobs.chunksProcessed,
+    pending_import_jobs_completed: pendingJobs.completedJobs,
     cron: options.cron ?? null,
     maxServers,
     maxLinesPerServer,

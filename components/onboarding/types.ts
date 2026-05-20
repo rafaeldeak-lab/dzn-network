@@ -766,6 +766,7 @@ export type AdmSyncStatus = {
   raw_kill_lines_found: number;
   parsed_kill_lines_found: number;
   parser_skipped_lines: number;
+  active_adm_import_job: AdmImportJobProgressResult | null;
   last_adm_import_report: {
     admFileName: string | null;
     cursorStart: number;
@@ -986,7 +987,7 @@ export type AdmImportJobProgressResult = {
   job_id: string;
   filename: string;
   source: string;
-  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "failed";
+  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "failed" | "failed_retryable";
   total_lines: number;
   current_line: number;
   chunk_size: number;
@@ -1175,6 +1176,8 @@ export type NitradoLogAccessDiagnostics = {
 export type AdmSyncRunResult = {
   status: string;
   message: string;
+  job?: AdmImportJobProgressResult | null;
+  duplicateExistingJob?: boolean;
   linesSeen: number;
   linesProcessed: number;
   eventsCreated: number;

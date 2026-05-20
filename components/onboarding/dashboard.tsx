@@ -1575,6 +1575,7 @@ function ServerDashboard({
                 <MiniInfo label="Next Processing Check" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(syncStatus.next_adm_pull_due_at) : "Not scheduled"} />
                 <MiniInfo label="Latest File Readable" value={latestAdmReadable} />
                 <MiniInfo label="ADM Health" value={syncStatus?.adm_health_label ?? "Delayed"} />
+                <MiniInfo label="Chunk Import Job" value={formatActiveAdmImportJob(syncStatus?.active_adm_import_job ?? null)} />
                 <MiniInfo label="Last Checked" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not checked"} />
                 <MiniInfo label="Last Successful Feed Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
@@ -5224,6 +5225,9 @@ function listingFormFromPartial(listing: Partial<LinkedServer>): Partial<PublicL
 }
 
 function getManualSyncMessage(result: AdmSyncRunResult) {
+  if (["processing_in_chunks", "adm_import_job_queued"].includes(result.status)) {
+    return result.message || "Processing latest ADM in chunks. DZN will continue on the next cron tick.";
+  }
   if (result.status === "no_new_lines") {
     return "Latest ADM checked just now. No new ADM lines since last sync.";
   }
@@ -5515,6 +5519,7 @@ function getDashboardSyncStatusBanner(
 
 function getLatestAdmReadableLabel(currentStatus: string) {
   const normalizedStatus = currentStatus.toLowerCase();
+  if (["processing_in_chunks", "adm_import_job_queued"].includes(normalizedStatus)) return "Processing latest ADM in chunks";
   if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable"].includes(normalizedStatus)) return "Latest ADM file found but not readable yet";
   if (["adm_not_generated_yet", "no_adm_file", "waiting_after_restart"].includes(normalizedStatus)) return "Waiting for Nitrado log";
   if (normalizedStatus === "delayed_after_restart") return "Delayed after restart";
@@ -5526,6 +5531,9 @@ function getLatestAdmReadableLabel(currentStatus: string) {
 function getRecentFeedBadge(recentEventsAreMock: boolean, currentStatus: string): { label: string; tone: "emerald" | "orange" | "zinc" } {
   if (recentEventsAreMock) return { label: "Mock Sync Data", tone: "orange" };
   const normalizedStatus = currentStatus.toLowerCase();
+  if (["processing_in_chunks", "adm_import_job_queued"].includes(normalizedStatus)) {
+    return { label: "Chunk Import Active", tone: "emerald" };
+  }
   if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable", "adm_not_generated_yet", "waiting_after_restart", "delayed_after_restart", "no_adm_file"].includes(normalizedStatus)) {
     return { label: "Waiting For Nitrado Log", tone: "orange" };
   }
@@ -5540,6 +5548,16 @@ function getRecentFeedStatus(syncStatus: AdmSyncStatus | null, currentStatus: st
   const normalizedStatus = currentStatus.toLowerCase();
   const lastChecked = syncStatus?.last_sync_at ? formatRelativeTime(syncStatus.last_sync_at) : "not checked yet";
   const lastSuccessful = syncStatus?.last_successful_sync_at ? formatRelativeTime(syncStatus.last_successful_sync_at) : null;
+
+  if (["processing_in_chunks", "adm_import_job_queued"].includes(normalizedStatus)) {
+    const job = syncStatus?.active_adm_import_job;
+    return {
+      message: job
+        ? `Processing ${job.filename} in chunks (${job.chunks_processed}/${job.total_chunks}). Next chunk runs on the next cron tick.`
+        : "Processing latest ADM in chunks. Next chunk runs on the next cron tick.",
+      className: "border-emerald-300/15 bg-emerald-400/8 text-emerald-50",
+    };
+  }
 
   if (normalizedStatus === "no_new_lines" || normalizedStatus === "no_new_log_available") {
     return {
@@ -5791,6 +5809,14 @@ function formatAdmCadence(value: number | null | undefined) {
   return `around ${Math.round(value)} minutes`;
 }
 
+function formatActiveAdmImportJob(job: AdmSyncStatus["active_adm_import_job"]) {
+  if (!job) return "No active chunk job";
+  if (job.status === "completed") return "Completed";
+  const totalChunks = Math.max(1, job.total_chunks);
+  const nextChunk = Math.min(totalChunks, Math.max(1, job.chunks_processed + 1));
+  return `${formatStatusLabel(job.status)} - ${job.filename} - chunk ${nextChunk}/${totalChunks}, ${job.parsed_kills} parsed kills, ${job.written_kills} written`;
+}
+
 function formatMinutesAgo(value: number | null | undefined, fallback: string) {
   if (value === null || value === undefined || !Number.isFinite(value)) return fallback;
   if (value <= 0) return "just now";
@@ -5856,6 +5882,8 @@ function formatServerStatus(status: LinkedServer["status"]) {
 function formatSyncStatus(value: string) {
   if (value === "read_pending") return "Read Pending";
   if (value === "completed") return "Completed";
+  if (value === "processing_in_chunks") return "Processing In Chunks";
+  if (value === "adm_import_job_queued") return "Chunk Import Queued";
   if (value === "new_data_found") return "New ADM Data Processed";
   if (value === "idle") return "Idle";
   if (value === "no_new_lines") return "No New Lines";

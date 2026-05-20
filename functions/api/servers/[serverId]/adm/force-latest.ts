@@ -1,4 +1,4 @@
-import { runAdmSync } from "../../../../_lib/adm-sync";
+import { createScheduledAdmImportJobForServer } from "../../../../_lib/adm-sync";
 import { getSessionUser } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
@@ -19,14 +19,34 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
       );
     }
 
-    const result = await runAdmSync(env, user.id, linkedServerId, {
+    const result = await createScheduledAdmImportJobForServer(env, user.id, linkedServerId, {
       triggerType: "manual",
-      maxLinesPerRun: 50000,
+      chunksToProcess: 3,
     });
+    const job = result.job;
 
     return json({
-      ok: true,
       ...result,
+      linesSeen: job?.total_lines ?? 0,
+      linesProcessed: job?.current_line ?? 0,
+      eventsCreated: (job?.player_events_stored ?? 0) + (job?.written_kills ?? 0),
+      killsCreated: job?.written_kills ?? 0,
+      killsFound: job?.parsed_kills ?? 0,
+      newKillsCreated: job?.written_kills ?? 0,
+      duplicateKillsSkipped: job?.duplicate_skips ?? 0,
+      playersUpdated: job?.player_events_stored ?? 0,
+      lastProcessedLine: job?.current_line ?? 0,
+      lastSyncAt: new Date().toISOString(),
+      readableRouteUsed: job ? "chunked_import_job" : null,
+      linesRead: job?.total_lines ?? 0,
+      syncStatus: result.status,
+      rawEventsStored: job?.raw_events_stored ?? 0,
+      playerEventsStored: job?.player_events_stored ?? 0,
+      killEventsStored: job?.written_kills ?? 0,
+      buildEventsStored: 0,
+      unknownLines: 0,
+      skippedDuplicateLines: job?.duplicate_skips ?? 0,
+      syncDurationMs: 0,
     }, {
       headers: {
         "cache-control": "private, no-store, no-cache, must-revalidate",

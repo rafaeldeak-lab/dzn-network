@@ -1,0 +1,3385 @@
+AdminLog started on 2026-05-20 at 12:02:31
+12:03:00 | Player "ConnPlayer000" (id=CONN0000 pos=<6400.0, 8100.0, 330.0>) is connected
+12:03:01 | Player "ConnPlayer001" (id=CONN0001 pos=<6401.0, 8101.0, 331.0>) is connected
+12:03:02 | Player "ConnPlayer002" (id=CONN0002 pos=<6402.0, 8102.0, 332.0>) is connected
+12:03:03 | Player "ConnPlayer003" (id=CONN0003 pos=<6403.0, 8103.0, 333.0>) is connected
+12:03:04 | Player "ConnPlayer004" (id=CONN0004 pos=<6404.0, 8104.0, 334.0>) is connected
+12:03:05 | Player "ConnPlayer005" (id=CONN0005 pos=<6405.0, 8105.0, 335.0>) is connected
+12:03:06 | Player "ConnPlayer006" (id=CONN0006 pos=<6406.0, 8106.0, 336.0>) is connected
+12:03:07 | Player "ConnPlayer007" (id=CONN0007 pos=<6407.0, 8107.0, 337.0>) is connected
+12:03:08 | Player "ConnPlayer008" (id=CONN0008 pos=<6408.0, 8108.0, 330.0>) is connected
+12:03:09 | Player "ConnPlayer009" (id=CONN0009 pos=<6409.0, 8109.0, 331.0>) is connected
+12:03:10 | Player "ConnPlayer010" (id=CONN0010 pos=<6410.0, 8110.0, 332.0>) is connected
+12:03:11 | Player "ConnPlayer011" (id=CONN0011 pos=<6411.0, 8111.0, 333.0>) is connected
+12:03:12 | Player "ConnPlayer012" (id=CONN0012 pos=<6412.0, 8112.0, 334.0>) is connected
+12:03:13 | Player "ConnPlayer013" (id=CONN0013 pos=<6413.0, 8113.0, 335.0>) is connected
+12:03:14 | Player "ConnPlayer014" (id=CONN0014 pos=<6414.0, 8114.0, 336.0>) is connected
+12:03:15 | Player "ConnPlayer015" (id=CONN0015 pos=<6415.0, 8115.0, 337.0>) is connected
+12:03:16 | Player "ConnPlayer016" (id=CONN0016 pos=<6416.0, 8116.0, 330.0>) is connected
+12:03:17 | Player "ConnPlayer017" (id=CONN0017 pos=<6417.0, 8117.0, 331.0>) is connected
+12:03:18 | Player "ConnPlayer018" (id=CONN0018 pos=<6418.0, 8118.0, 332.0>) is connected
+12:03:19 | Player "ConnPlayer019" (id=CONN0019 pos=<6419.0, 8119.0, 333.0>) is connected
+12:03:20 | Player "ConnPlayer020" (id=CONN0020 pos=<6420.0, 8120.0, 334.0>) is connected
+12:03:21 | Player "ConnPlayer021" (id=CONN0021 pos=<6421.0, 8121.0, 335.0>) is connected
+12:03:22 | Player "ConnPlayer022" (id=CONN0022 pos=<6422.0, 8122.0, 336.0>) is connected
+12:03:23 | Player "ConnPlayer023" (id=CONN0023 pos=<6423.0, 8123.0, 337.0>) is connected
+12:03:24 | Player "ConnPlayer024" (id=CONN0024 pos=<6424.0, 8124.0, 330.0>) is connected
+12:03:25 | Player "ConnPlayer025" (id=CONN0025 pos=<6425.0, 8125.0, 331.0>) is connected
+12:03:26 | Player "ConnPlayer026" (id=CONN0026 pos=<6426.0, 8126.0, 332.0>) is connected
+12:03:27 | Player "ConnPlayer027" (id=CONN0027 pos=<6427.0, 8127.0, 333.0>) is connected
+12:03:28 | Player "ConnPlayer028" (id=CONN0028 pos=<6428.0, 8128.0, 334.0>) is connected
+12:03:29 | Player "ConnPlayer029" (id=CONN0029 pos=<6429.0, 8129.0, 335.0>) is connected
+12:03:30 | Player "ConnPlayer030" (id=CONN0030 pos=<6430.0, 8130.0, 336.0>) is connected
+12:03:31 | Player "ConnPlayer031" (id=CONN0031 pos=<6431.0, 8131.0, 337.0>) is connected
+12:03:32 | Player "ConnPlayer032" (id=CONN0032 pos=<6432.0, 8132.0, 330.0>) is connected
+12:03:33 | Player "ConnPlayer033" (id=CONN0033 pos=<6433.0, 8133.0, 331.0>) is connected
+12:03:34 | Player "ConnPlayer034" (id=CONN0034 pos=<6434.0, 8134.0, 332.0>) is connected
+12:03:35 | Player "ConnPlayer035" (id=CONN0035 pos=<6435.0, 8135.0, 333.0>) is connected
+12:03:36 | Player "ConnPlayer036" (id=CONN0036 pos=<6436.0, 8136.0, 334.0>) is connected
+12:03:37 | Player "ConnPlayer037" (id=CONN0037 pos=<6437.0, 8137.0, 335.0>) is connected
+12:03:38 | Player "ConnPlayer038" (id=CONN0038 pos=<6438.0, 8138.0, 336.0>) is connected
+12:03:39 | Player "ConnPlayer039" (id=CONN0039 pos=<6439.0, 8139.0, 337.0>) is connected
+12:03:40 | Player "ConnPlayer040" (id=CONN0040 pos=<6440.0, 8140.0, 330.0>) is connected
+12:03:41 | Player "ConnPlayer041" (id=CONN0041 pos=<6441.0, 8141.0, 331.0>) is connected
+12:03:42 | Player "ConnPlayer042" (id=CONN0042 pos=<6442.0, 8142.0, 332.0>) is connected
+12:03:43 | Player "ConnPlayer043" (id=CONN0043 pos=<6443.0, 8143.0, 333.0>) is connected
+12:03:44 | Player "ConnPlayer044" (id=CONN0044 pos=<6444.0, 8144.0, 334.0>) is connected
+12:03:45 | Player "ConnPlayer045" (id=CONN0045 pos=<6445.0, 8145.0, 335.0>) is connected
+12:03:46 | Player "ConnPlayer046" (id=CONN0046 pos=<6446.0, 8146.0, 336.0>) is connected
+12:03:47 | Player "ConnPlayer047" (id=CONN0047 pos=<6447.0, 8147.0, 337.0>) is connected
+12:03:48 | Player "ConnPlayer048" (id=CONN0048 pos=<6448.0, 8148.0, 330.0>) is connected
+12:03:49 | Player "ConnPlayer049" (id=CONN0049 pos=<6449.0, 8149.0, 331.0>) is connected
+12:03:50 | Player "ConnPlayer050" (id=CONN0050 pos=<6450.0, 8150.0, 332.0>) is connected
+12:03:51 | Player "ConnPlayer051" (id=CONN0051 pos=<6451.0, 8151.0, 333.0>) is connected
+12:03:52 | Player "ConnPlayer052" (id=CONN0052 pos=<6452.0, 8152.0, 334.0>) is connected
+12:03:53 | Player "ConnPlayer053" (id=CONN0053 pos=<6453.0, 8153.0, 335.0>) is connected
+12:03:54 | Player "ConnPlayer054" (id=CONN0054 pos=<6454.0, 8154.0, 336.0>) is connected
+12:03:55 | Player "ConnPlayer055" (id=CONN0055 pos=<6455.0, 8155.0, 337.0>) is connected
+12:03:56 | Player "ConnPlayer056" (id=CONN0056 pos=<6456.0, 8156.0, 330.0>) is connected
+12:03:57 | Player "ConnPlayer057" (id=CONN0057 pos=<6457.0, 8157.0, 331.0>) is connected
+12:03:58 | Player "ConnPlayer058" (id=CONN0058 pos=<6458.0, 8158.0, 332.0>) is connected
+12:03:59 | Player "ConnPlayer059" (id=CONN0059 pos=<6459.0, 8159.0, 333.0>) is connected
+12:04:00 | Player "ConnPlayer060" (id=CONN0060 pos=<6460.0, 8160.0, 334.0>) is connected
+12:04:01 | Player "ConnPlayer061" (id=CONN0061 pos=<6461.0, 8161.0, 335.0>) is connected
+12:04:02 | Player "ConnPlayer062" (id=CONN0062 pos=<6462.0, 8162.0, 336.0>) is connected
+12:04:03 | Player "ConnPlayer063" (id=CONN0063 pos=<6463.0, 8163.0, 337.0>) is connected
+12:04:04 | Player "ConnPlayer064" (id=CONN0064 pos=<6464.0, 8164.0, 330.0>) is connected
+12:04:05 | Player "ConnPlayer065" (id=CONN0065 pos=<6465.0, 8165.0, 331.0>) is connected
+12:04:06 | Player "ConnPlayer066" (id=CONN0066 pos=<6466.0, 8166.0, 332.0>) is connected
+12:04:07 | Player "ConnPlayer067" (id=CONN0067 pos=<6467.0, 8167.0, 333.0>) is connected
+12:04:08 | Player "ConnPlayer068" (id=CONN0068 pos=<6468.0, 8168.0, 334.0>) is connected
+12:04:09 | Player "ConnPlayer069" (id=CONN0069 pos=<6469.0, 8169.0, 335.0>) is connected
+12:04:10 | Player "ConnPlayer070" (id=CONN0070 pos=<6470.0, 8100.0, 336.0>) is connected
+12:04:11 | Player "ConnPlayer071" (id=CONN0071 pos=<6471.0, 8101.0, 337.0>) is connected
+12:04:12 | Player "ConnPlayer072" (id=CONN0072 pos=<6472.0, 8102.0, 330.0>) is connected
+12:04:13 | Player "ConnPlayer073" (id=CONN0073 pos=<6473.0, 8103.0, 331.0>) is connected
+12:04:14 | Player "ConnPlayer074" (id=CONN0074 pos=<6474.0, 8104.0, 332.0>) is connected
+12:04:15 | Player "ConnPlayer075" (id=CONN0075 pos=<6475.0, 8105.0, 333.0>) is connected
+12:04:16 | Player "ConnPlayer076" (id=CONN0076 pos=<6476.0, 8106.0, 334.0>) is connected
+12:04:17 | Player "ConnPlayer077" (id=CONN0077 pos=<6477.0, 8107.0, 335.0>) is connected
+12:04:18 | Player "ConnPlayer078" (id=CONN0078 pos=<6478.0, 8108.0, 336.0>) is connected
+12:04:19 | Player "ConnPlayer079" (id=CONN0079 pos=<6479.0, 8109.0, 337.0>) is connected
+12:04:20 | Player "ConnPlayer080" (id=CONN0080 pos=<6400.0, 8110.0, 330.0>) is connected
+12:04:21 | Player "ConnPlayer081" (id=CONN0081 pos=<6401.0, 8111.0, 331.0>) is connected
+12:04:22 | Player "ConnPlayer082" (id=CONN0082 pos=<6402.0, 8112.0, 332.0>) is connected
+12:04:23 | Player "ConnPlayer083" (id=CONN0083 pos=<6403.0, 8113.0, 333.0>) is connected
+12:04:24 | Player "ConnPlayer084" (id=CONN0084 pos=<6404.0, 8114.0, 334.0>) is connected
+12:04:25 | Player "ConnPlayer085" (id=CONN0085 pos=<6405.0, 8115.0, 335.0>) is connected
+12:04:26 | Player "ConnPlayer086" (id=CONN0086 pos=<6406.0, 8116.0, 336.0>) is connected
+12:04:27 | Player "ConnPlayer087" (id=CONN0087 pos=<6407.0, 8117.0, 337.0>) is connected
+12:04:28 | Player "ConnPlayer088" (id=CONN0088 pos=<6408.0, 8118.0, 330.0>) is connected
+12:04:29 | Player "ConnPlayer089" (id=CONN0089 pos=<6409.0, 8119.0, 331.0>) is connected
+12:04:30 | Player "ConnPlayer090" (id=CONN0090 pos=<6410.0, 8120.0, 332.0>) is connected
+12:04:31 | Player "ConnPlayer091" (id=CONN0091 pos=<6411.0, 8121.0, 333.0>) is connected
+12:04:32 | Player "ConnPlayer092" (id=CONN0092 pos=<6412.0, 8122.0, 334.0>) is connected
+12:04:33 | Player "ConnPlayer093" (id=CONN0093 pos=<6413.0, 8123.0, 335.0>) is connected
+12:04:34 | Player "ConnPlayer094" (id=CONN0094 pos=<6414.0, 8124.0, 336.0>) is connected
+12:04:35 | Player "ConnPlayer095" (id=CONN0095 pos=<6415.0, 8125.0, 337.0>) is connected
+12:04:36 | Player "ConnPlayer096" (id=CONN0096 pos=<6416.0, 8126.0, 330.0>) is connected
+12:04:37 | Player "ConnPlayer097" (id=CONN0097 pos=<6417.0, 8127.0, 331.0>) is connected
+12:04:38 | Player "ConnPlayer098" (id=CONN0098 pos=<6418.0, 8128.0, 332.0>) is connected
+12:04:39 | Player "ConnPlayer099" (id=CONN0099 pos=<6419.0, 8129.0, 333.0>) is connected
+12:04:40 | Player "ConnPlayer100" (id=CONN0100 pos=<6420.0, 8130.0, 334.0>) is connected
+12:04:41 | Player "ConnPlayer101" (id=CONN0101 pos=<6421.0, 8131.0, 335.0>) is connected
+12:04:42 | Player "ConnPlayer102" (id=CONN0102 pos=<6422.0, 8132.0, 336.0>) is connected
+12:04:43 | Player "ConnPlayer103" (id=CONN0103 pos=<6423.0, 8133.0, 337.0>) is connected
+12:04:44 | Player "ConnPlayer104" (id=CONN0104 pos=<6424.0, 8134.0, 330.0>) is connected
+12:04:45 | Player "ConnPlayer105" (id=CONN0105 pos=<6425.0, 8135.0, 331.0>) is connected
+12:04:46 | Player "ConnPlayer106" (id=CONN0106 pos=<6426.0, 8136.0, 332.0>) is connected
+12:04:47 | Player "ConnPlayer107" (id=CONN0107 pos=<6427.0, 8137.0, 333.0>) is connected
+12:04:48 | Player "ConnPlayer108" (id=CONN0108 pos=<6428.0, 8138.0, 334.0>) is connected
+12:04:49 | Player "ConnPlayer109" (id=CONN0109 pos=<6429.0, 8139.0, 335.0>) is connected
+12:04:50 | Player "ConnPlayer110" (id=CONN0110 pos=<6430.0, 8140.0, 336.0>) is connected
+12:04:51 | Player "ConnPlayer111" (id=CONN0111 pos=<6431.0, 8141.0, 337.0>) is connected
+12:04:52 | Player "ConnPlayer112" (id=CONN0112 pos=<6432.0, 8142.0, 330.0>) is connected
+12:04:53 | Player "ConnPlayer113" (id=CONN0113 pos=<6433.0, 8143.0, 331.0>) is connected
+12:04:54 | Player "ConnPlayer114" (id=CONN0114 pos=<6434.0, 8144.0, 332.0>) is connected
+12:04:55 | Player "ConnPlayer115" (id=CONN0115 pos=<6435.0, 8145.0, 333.0>) is connected
+12:04:56 | Player "ConnPlayer116" (id=CONN0116 pos=<6436.0, 8146.0, 334.0>) is connected
+12:04:57 | Player "ConnPlayer117" (id=CONN0117 pos=<6437.0, 8147.0, 335.0>) is connected
+12:04:58 | Player "ConnPlayer118" (id=CONN0118 pos=<6438.0, 8148.0, 336.0>) is connected
+12:04:59 | Player "ConnPlayer119" (id=CONN0119 pos=<6439.0, 8149.0, 337.0>) is connected
+12:05:00 | Player "ConnPlayer120" (id=CONN0120 pos=<6440.0, 8150.0, 330.0>) is connected
+12:05:01 | Player "ConnPlayer121" (id=CONN0121 pos=<6441.0, 8151.0, 331.0>) is connected
+12:05:02 | Player "ConnPlayer122" (id=CONN0122 pos=<6442.0, 8152.0, 332.0>) is connected
+12:05:03 | Player "ConnPlayer123" (id=CONN0123 pos=<6443.0, 8153.0, 333.0>) is connected
+12:05:04 | Player "ConnPlayer124" (id=CONN0124 pos=<6444.0, 8154.0, 334.0>) is connected
+12:05:05 | Player "ConnPlayer125" (id=CONN0125 pos=<6445.0, 8155.0, 335.0>) is connected
+12:05:06 | Player "ConnPlayer126" (id=CONN0126 pos=<6446.0, 8156.0, 336.0>) is connected
+12:05:07 | Player "ConnPlayer127" (id=CONN0127 pos=<6447.0, 8157.0, 337.0>) is connected
+12:05:08 | Player "ConnPlayer128" (id=CONN0128 pos=<6448.0, 8158.0, 330.0>) is connected
+12:05:09 | Player "ConnPlayer129" (id=CONN0129 pos=<6449.0, 8159.0, 331.0>) is connected
+12:05:10 | Player "ConnPlayer130" (id=CONN0130 pos=<6450.0, 8160.0, 332.0>) is connected
+12:05:11 | Player "ConnPlayer131" (id=CONN0131 pos=<6451.0, 8161.0, 333.0>) is connected
+12:05:12 | Player "ConnPlayer132" (id=CONN0132 pos=<6452.0, 8162.0, 334.0>) is connected
+12:05:13 | Player "ConnPlayer133" (id=CONN0133 pos=<6453.0, 8163.0, 335.0>) is connected
+12:05:14 | Player "ConnPlayer134" (id=CONN0134 pos=<6454.0, 8164.0, 336.0>) is connected
+12:05:15 | Player "ConnPlayer135" (id=CONN0135 pos=<6455.0, 8165.0, 337.0>) is connected
+12:05:16 | Player "ConnPlayer136" (id=CONN0136 pos=<6456.0, 8166.0, 330.0>) is connected
+12:05:17 | Player "ConnPlayer137" (id=CONN0137 pos=<6457.0, 8167.0, 331.0>) is connected
+12:05:18 | Player "ConnPlayer138" (id=CONN0138 pos=<6458.0, 8168.0, 332.0>) is connected
+12:05:19 | Player "ConnPlayer139" (id=CONN0139 pos=<6459.0, 8169.0, 333.0>) is connected
+12:05:20 | Player "ConnPlayer140" (id=CONN0140 pos=<6460.0, 8100.0, 334.0>) is connected
+12:05:21 | Player "ConnPlayer141" (id=CONN0141 pos=<6461.0, 8101.0, 335.0>) is connected
+12:05:22 | Player "ConnPlayer142" (id=CONN0142 pos=<6462.0, 8102.0, 336.0>) is connected
+12:05:23 | Player "ConnPlayer143" (id=CONN0143 pos=<6463.0, 8103.0, 337.0>) is connected
+12:05:24 | Player "ConnPlayer144" (id=CONN0144 pos=<6464.0, 8104.0, 330.0>) is connected
+12:05:25 | Player "ConnPlayer145" (id=CONN0145 pos=<6465.0, 8105.0, 331.0>) is connected
+12:05:26 | Player "ConnPlayer146" (id=CONN0146 pos=<6466.0, 8106.0, 332.0>) is connected
+12:05:27 | Player "ConnPlayer147" (id=CONN0147 pos=<6467.0, 8107.0, 333.0>) is connected
+12:05:28 | Player "ConnPlayer148" (id=CONN0148 pos=<6468.0, 8108.0, 334.0>) is connected
+12:05:29 | Player "ConnPlayer149" (id=CONN0149 pos=<6469.0, 8109.0, 335.0>) is connected
+12:05:30 | Player "ConnPlayer150" (id=CONN0150 pos=<6470.0, 8110.0, 336.0>) is connected
+12:05:31 | Player "ConnPlayer151" (id=CONN0151 pos=<6471.0, 8111.0, 337.0>) is connected
+12:05:32 | Player "ConnPlayer152" (id=CONN0152 pos=<6472.0, 8112.0, 330.0>) is connected
+12:05:33 | Player "ConnPlayer153" (id=CONN0153 pos=<6473.0, 8113.0, 331.0>) is connected
+12:05:34 | Player "ConnPlayer154" (id=CONN0154 pos=<6474.0, 8114.0, 332.0>) is connected
+12:05:35 | Player "ConnPlayer155" (id=CONN0155 pos=<6475.0, 8115.0, 333.0>) is connected
+12:05:36 | Player "ConnPlayer156" (id=CONN0156 pos=<6476.0, 8116.0, 334.0>) is connected
+12:05:37 | Player "ConnPlayer157" (id=CONN0157 pos=<6477.0, 8117.0, 335.0>) is connected
+12:05:38 | Player "ConnPlayer158" (id=CONN0158 pos=<6478.0, 8118.0, 336.0>) is connected
+12:05:39 | Player "ConnPlayer159" (id=CONN0159 pos=<6479.0, 8119.0, 337.0>) is connected
+12:05:40 | Player "ConnPlayer160" (id=CONN0160 pos=<6400.0, 8120.0, 330.0>) is connected
+12:05:41 | Player "ConnPlayer161" (id=CONN0161 pos=<6401.0, 8121.0, 331.0>) is connected
+12:05:42 | Player "ConnPlayer162" (id=CONN0162 pos=<6402.0, 8122.0, 332.0>) is connected
+12:05:43 | Player "ConnPlayer163" (id=CONN0163 pos=<6403.0, 8123.0, 333.0>) is connected
+12:05:44 | Player "ConnPlayer164" (id=CONN0164 pos=<6404.0, 8124.0, 334.0>) is connected
+12:05:45 | Player "ConnPlayer165" (id=CONN0165 pos=<6405.0, 8125.0, 335.0>) is connected
+12:05:46 | Player "ConnPlayer166" (id=CONN0166 pos=<6406.0, 8126.0, 336.0>) is connected
+12:05:47 | Player "ConnPlayer167" (id=CONN0167 pos=<6407.0, 8127.0, 337.0>) is connected
+12:05:48 | Player "ConnPlayer168" (id=CONN0168 pos=<6408.0, 8128.0, 330.0>) is connected
+12:05:49 | Player "ConnPlayer169" (id=CONN0169 pos=<6409.0, 8129.0, 331.0>) is connected
+12:05:50 | Player "ConnPlayer170" (id=CONN0170 pos=<6410.0, 8130.0, 332.0>) is connected
+12:05:51 | Player "ConnPlayer171" (id=CONN0171 pos=<6411.0, 8131.0, 333.0>) is connected
+12:05:52 | Player "ConnPlayer172" (id=CONN0172 pos=<6412.0, 8132.0, 334.0>) is connected
+12:05:53 | Player "ConnPlayer173" (id=CONN0173 pos=<6413.0, 8133.0, 335.0>) is connected
+12:05:54 | Player "ConnPlayer174" (id=CONN0174 pos=<6414.0, 8134.0, 336.0>) is connected
+12:05:55 | Player "ConnPlayer175" (id=CONN0175 pos=<6415.0, 8135.0, 337.0>) is connected
+12:05:56 | Player "ConnPlayer176" (id=CONN0176 pos=<6416.0, 8136.0, 330.0>) is connected
+12:05:57 | Player "ConnPlayer177" (id=CONN0177 pos=<6417.0, 8137.0, 331.0>) is connected
+12:05:58 | Player "ConnPlayer178" (id=CONN0178 pos=<6418.0, 8138.0, 332.0>) is connected
+12:05:59 | Player "ConnPlayer179" (id=CONN0179 pos=<6419.0, 8139.0, 333.0>) is connected
+12:06:00 | Player "ConnPlayer180" (id=CONN0180 pos=<6420.0, 8140.0, 334.0>) is connected
+12:06:01 | Player "ConnPlayer181" (id=CONN0181 pos=<6421.0, 8141.0, 335.0>) is connected
+12:06:02 | Player "ConnPlayer182" (id=CONN0182 pos=<6422.0, 8142.0, 336.0>) is connected
+12:06:03 | Player "ConnPlayer183" (id=CONN0183 pos=<6423.0, 8143.0, 337.0>) is connected
+12:06:04 | Player "ConnPlayer184" (id=CONN0184 pos=<6424.0, 8144.0, 330.0>) is connected
+12:06:05 | Player "ConnPlayer185" (id=CONN0185 pos=<6425.0, 8145.0, 331.0>) is connected
+12:06:06 | Player "ConnPlayer186" (id=CONN0186 pos=<6426.0, 8146.0, 332.0>) is connected
+12:06:07 | Player "ConnPlayer187" (id=CONN0187 pos=<6427.0, 8147.0, 333.0>) is connected
+12:06:08 | Player "ConnPlayer188" (id=CONN0188 pos=<6428.0, 8148.0, 334.0>) is connected
+12:06:09 | Player "ConnPlayer189" (id=CONN0189 pos=<6429.0, 8149.0, 335.0>) is connected
+12:06:10 | Player "ConnPlayer190" (id=CONN0190 pos=<6430.0, 8150.0, 336.0>) is connected
+12:06:11 | Player "ConnPlayer191" (id=CONN0191 pos=<6431.0, 8151.0, 337.0>) is connected
+12:06:12 | Player "ConnPlayer192" (id=CONN0192 pos=<6432.0, 8152.0, 330.0>) is connected
+12:06:13 | Player "ConnPlayer193" (id=CONN0193 pos=<6433.0, 8153.0, 331.0>) is connected
+12:06:14 | Player "ConnPlayer194" (id=CONN0194 pos=<6434.0, 8154.0, 332.0>) is connected
+12:06:15 | Player "ConnPlayer195" (id=CONN0195 pos=<6435.0, 8155.0, 333.0>) is connected
+12:06:16 | Player "ConnPlayer196" (id=CONN0196 pos=<6436.0, 8156.0, 334.0>) is connected
+12:06:17 | Player "ConnPlayer197" (id=CONN0197 pos=<6437.0, 8157.0, 335.0>) is connected
+12:06:18 | Player "ConnPlayer198" (id=CONN0198 pos=<6438.0, 8158.0, 336.0>) is connected
+12:06:19 | Player "ConnPlayer199" (id=CONN0199 pos=<6439.0, 8159.0, 337.0>) is connected
+12:06:20 | Player "ConnPlayer200" (id=CONN0200 pos=<6440.0, 8160.0, 330.0>) is connected
+12:06:21 | Player "ConnPlayer201" (id=CONN0201 pos=<6441.0, 8161.0, 331.0>) is connected
+12:06:22 | Player "ConnPlayer202" (id=CONN0202 pos=<6442.0, 8162.0, 332.0>) is connected
+12:06:23 | Player "ConnPlayer203" (id=CONN0203 pos=<6443.0, 8163.0, 333.0>) is connected
+12:06:24 | Player "ConnPlayer204" (id=CONN0204 pos=<6444.0, 8164.0, 334.0>) is connected
+12:06:25 | Player "ConnPlayer205" (id=CONN0205 pos=<6445.0, 8165.0, 335.0>) is connected
+12:06:26 | Player "ConnPlayer206" (id=CONN0206 pos=<6446.0, 8166.0, 336.0>) is connected
+12:06:27 | Player "ConnPlayer207" (id=CONN0207 pos=<6447.0, 8167.0, 337.0>) is connected
+12:06:28 | Player "ConnPlayer208" (id=CONN0208 pos=<6448.0, 8168.0, 330.0>) is connected
+12:06:29 | Player "ConnPlayer209" (id=CONN0209 pos=<6449.0, 8169.0, 331.0>) is connected
+12:06:30 | Player "ConnPlayer210" (id=CONN0210 pos=<6450.0, 8100.0, 332.0>) is connected
+12:06:31 | Player "ConnPlayer211" (id=CONN0211 pos=<6451.0, 8101.0, 333.0>) is connected
+12:06:32 | Player "ConnPlayer212" (id=CONN0212 pos=<6452.0, 8102.0, 334.0>) is connected
+12:06:33 | Player "ConnPlayer213" (id=CONN0213 pos=<6453.0, 8103.0, 335.0>) is connected
+12:06:34 | Player "ConnPlayer214" (id=CONN0214 pos=<6454.0, 8104.0, 336.0>) is connected
+12:06:35 | Player "ConnPlayer215" (id=CONN0215 pos=<6455.0, 8105.0, 337.0>) is connected
+12:06:36 | Player "ConnPlayer216" (id=CONN0216 pos=<6456.0, 8106.0, 330.0>) is connected
+12:06:37 | Player "ConnPlayer217" (id=CONN0217 pos=<6457.0, 8107.0, 331.0>) is connected
+12:06:38 | Player "ConnPlayer218" (id=CONN0218 pos=<6458.0, 8108.0, 332.0>) is connected
+12:06:39 | Player "ConnPlayer219" (id=CONN0219 pos=<6459.0, 8109.0, 333.0>) is connected
+12:06:40 | Player "ConnPlayer220" (id=CONN0220 pos=<6460.0, 8110.0, 334.0>) is connected
+12:06:41 | Player "ConnPlayer221" (id=CONN0221 pos=<6461.0, 8111.0, 335.0>) is connected
+12:06:42 | Player "ConnPlayer222" (id=CONN0222 pos=<6462.0, 8112.0, 336.0>) is connected
+12:06:43 | Player "ConnPlayer223" (id=CONN0223 pos=<6463.0, 8113.0, 337.0>) is connected
+12:06:44 | Player "ConnPlayer224" (id=CONN0224 pos=<6464.0, 8114.0, 330.0>) is connected
+12:06:45 | Player "ConnPlayer225" (id=CONN0225 pos=<6465.0, 8115.0, 331.0>) is connected
+12:06:46 | Player "ConnPlayer226" (id=CONN0226 pos=<6466.0, 8116.0, 332.0>) is connected
+12:06:47 | Player "ConnPlayer227" (id=CONN0227 pos=<6467.0, 8117.0, 333.0>) is connected
+12:06:48 | Player "ConnPlayer228" (id=CONN0228 pos=<6468.0, 8118.0, 334.0>) is connected
+12:06:49 | Player "ConnPlayer229" (id=CONN0229 pos=<6469.0, 8119.0, 335.0>) is connected
+12:06:50 | Player "ConnPlayer230" (id=CONN0230 pos=<6470.0, 8120.0, 336.0>) is connected
+12:06:51 | Player "ConnPlayer231" (id=CONN0231 pos=<6471.0, 8121.0, 337.0>) is connected
+12:06:52 | Player "ConnPlayer232" (id=CONN0232 pos=<6472.0, 8122.0, 330.0>) is connected
+12:06:53 | Player "ConnPlayer233" (id=CONN0233 pos=<6473.0, 8123.0, 331.0>) is connected
+12:06:54 | Player "ConnPlayer234" (id=CONN0234 pos=<6474.0, 8124.0, 332.0>) is connected
+12:06:55 | Player "ConnPlayer235" (id=CONN0235 pos=<6475.0, 8125.0, 333.0>) is connected
+12:06:56 | Player "ConnPlayer236" (id=CONN0236 pos=<6476.0, 8126.0, 334.0>) is connected
+12:06:57 | Player "ConnPlayer237" (id=CONN0237 pos=<6477.0, 8127.0, 335.0>) is connected
+12:06:58 | Player "ConnPlayer238" (id=CONN0238 pos=<6478.0, 8128.0, 336.0>) is connected
+12:06:59 | Player "ConnPlayer239" (id=CONN0239 pos=<6479.0, 8129.0, 337.0>) is connected
+12:07:00 | Player "ConnPlayer240" (id=CONN0240 pos=<6400.0, 8130.0, 330.0>) is connected
+12:07:01 | Player "ConnPlayer241" (id=CONN0241 pos=<6401.0, 8131.0, 331.0>) is connected
+12:07:02 | Player "ConnPlayer242" (id=CONN0242 pos=<6402.0, 8132.0, 332.0>) is connected
+12:07:03 | Player "ConnPlayer243" (id=CONN0243 pos=<6403.0, 8133.0, 333.0>) is connected
+12:07:04 | Player "ConnPlayer244" (id=CONN0244 pos=<6404.0, 8134.0, 334.0>) is connected
+12:07:05 | Player "ConnPlayer245" (id=CONN0245 pos=<6405.0, 8135.0, 335.0>) is connected
+12:07:06 | Player "ConnPlayer246" (id=CONN0246 pos=<6406.0, 8136.0, 336.0>) is connected
+12:07:07 | Player "ConnPlayer247" (id=CONN0247 pos=<6407.0, 8137.0, 337.0>) is connected
+12:07:08 | Player "ConnPlayer248" (id=CONN0248 pos=<6408.0, 8138.0, 330.0>) is connected
+12:07:09 | Player "ConnPlayer249" (id=CONN0249 pos=<6409.0, 8139.0, 331.0>) is connected
+12:07:10 | Player "ConnPlayer250" (id=CONN0250 pos=<6410.0, 8140.0, 332.0>) is connected
+12:07:11 | Player "ConnPlayer251" (id=CONN0251 pos=<6411.0, 8141.0, 333.0>) is connected
+12:07:12 | Player "ConnPlayer252" (id=CONN0252 pos=<6412.0, 8142.0, 334.0>) is connected
+12:07:13 | Player "ConnPlayer253" (id=CONN0253 pos=<6413.0, 8143.0, 335.0>) is connected
+12:07:14 | Player "ConnPlayer254" (id=CONN0254 pos=<6414.0, 8144.0, 336.0>) is connected
+12:07:15 | Player "ConnPlayer255" (id=CONN0255 pos=<6415.0, 8145.0, 337.0>) is connected
+12:07:16 | Player "ConnPlayer256" (id=CONN0256 pos=<6416.0, 8146.0, 330.0>) is connected
+12:07:17 | Player "ConnPlayer257" (id=CONN0257 pos=<6417.0, 8147.0, 331.0>) is connected
+12:07:18 | Player "ConnPlayer258" (id=CONN0258 pos=<6418.0, 8148.0, 332.0>) is connected
+12:07:19 | Player "ConnPlayer259" (id=CONN0259 pos=<6419.0, 8149.0, 333.0>) is connected
+12:07:20 | Player "ConnPlayer260" (id=CONN0260 pos=<6420.0, 8150.0, 334.0>) is connected
+12:07:21 | Player "ConnPlayer261" (id=CONN0261 pos=<6421.0, 8151.0, 335.0>) is connected
+12:07:22 | Player "ConnPlayer262" (id=CONN0262 pos=<6422.0, 8152.0, 336.0>) is connected
+12:07:23 | Player "ConnPlayer263" (id=CONN0263 pos=<6423.0, 8153.0, 337.0>) is connected
+12:07:24 | Player "ConnPlayer264" (id=CONN0264 pos=<6424.0, 8154.0, 330.0>) is connected
+12:07:25 | Player "ConnPlayer265" (id=CONN0265 pos=<6425.0, 8155.0, 331.0>) is connected
+12:07:26 | Player "ConnPlayer266" (id=CONN0266 pos=<6426.0, 8156.0, 332.0>) is connected
+12:07:27 | Player "ConnPlayer267" (id=CONN0267 pos=<6427.0, 8157.0, 333.0>) is connected
+12:07:28 | Player "ConnPlayer268" (id=CONN0268 pos=<6428.0, 8158.0, 334.0>) is connected
+12:07:29 | Player "ConnPlayer269" (id=CONN0269 pos=<6429.0, 8159.0, 335.0>) is connected
+12:07:30 | Player "ConnPlayer270" (id=CONN0270 pos=<6430.0, 8160.0, 336.0>) is connected
+12:07:31 | Player "ConnPlayer271" (id=CONN0271 pos=<6431.0, 8161.0, 337.0>) is connected
+12:07:32 | Player "ConnPlayer272" (id=CONN0272 pos=<6432.0, 8162.0, 330.0>) is connected
+12:07:33 | Player "ConnPlayer273" (id=CONN0273 pos=<6433.0, 8163.0, 331.0>) is connected
+12:07:34 | Player "ConnPlayer274" (id=CONN0274 pos=<6434.0, 8164.0, 332.0>) is connected
+12:07:35 | Player "ConnPlayer275" (id=CONN0275 pos=<6435.0, 8165.0, 333.0>) is connected
+12:07:36 | Player "ConnPlayer276" (id=CONN0276 pos=<6436.0, 8166.0, 334.0>) is connected
+12:07:37 | Player "ConnPlayer277" (id=CONN0277 pos=<6437.0, 8167.0, 335.0>) is connected
+12:07:38 | Player "ConnPlayer278" (id=CONN0278 pos=<6438.0, 8168.0, 336.0>) is connected
+12:07:39 | Player "ConnPlayer279" (id=CONN0279 pos=<6439.0, 8169.0, 337.0>) is connected
+12:07:40 | Player "ConnPlayer280" (id=CONN0280 pos=<6440.0, 8100.0, 330.0>) is connected
+12:07:41 | Player "ConnPlayer281" (id=CONN0281 pos=<6441.0, 8101.0, 331.0>) is connected
+12:07:42 | Player "ConnPlayer282" (id=CONN0282 pos=<6442.0, 8102.0, 332.0>) is connected
+12:07:43 | Player "ConnPlayer283" (id=CONN0283 pos=<6443.0, 8103.0, 333.0>) is connected
+12:07:44 | Player "ConnPlayer284" (id=CONN0284 pos=<6444.0, 8104.0, 334.0>) is connected
+12:07:45 | Player "ConnPlayer285" (id=CONN0285 pos=<6445.0, 8105.0, 335.0>) is connected
+12:07:46 | Player "ConnPlayer286" (id=CONN0286 pos=<6446.0, 8106.0, 336.0>) is connected
+12:07:47 | Player "ConnPlayer287" (id=CONN0287 pos=<6447.0, 8107.0, 337.0>) is connected
+12:07:48 | Player "ConnPlayer288" (id=CONN0288 pos=<6448.0, 8108.0, 330.0>) is connected
+12:07:49 | Player "ConnPlayer289" (id=CONN0289 pos=<6449.0, 8109.0, 331.0>) is connected
+12:07:50 | Player "ConnPlayer290" (id=CONN0290 pos=<6450.0, 8110.0, 332.0>) is connected
+12:07:51 | Player "ConnPlayer291" (id=CONN0291 pos=<6451.0, 8111.0, 333.0>) is connected
+12:07:52 | Player "ConnPlayer292" (id=CONN0292 pos=<6452.0, 8112.0, 334.0>) is connected
+12:07:53 | Player "ConnPlayer293" (id=CONN0293 pos=<6453.0, 8113.0, 335.0>) is connected
+12:07:54 | Player "ConnPlayer294" (id=CONN0294 pos=<6454.0, 8114.0, 336.0>) is connected
+12:07:55 | Player "ConnPlayer295" (id=CONN0295 pos=<6455.0, 8115.0, 337.0>) is connected
+12:07:56 | Player "ConnPlayer296" (id=CONN0296 pos=<6456.0, 8116.0, 330.0>) is connected
+12:07:57 | Player "ConnPlayer297" (id=CONN0297 pos=<6457.0, 8117.0, 331.0>) is connected
+12:07:58 | Player "ConnPlayer298" (id=CONN0298 pos=<6458.0, 8118.0, 332.0>) is connected
+12:07:59 | Player "ConnPlayer299" (id=CONN0299 pos=<6459.0, 8119.0, 333.0>) is connected
+12:08:00 | Player "ConnPlayer300" (id=CONN0300 pos=<6460.0, 8120.0, 334.0>) is connected
+12:08:01 | Player "ConnPlayer301" (id=CONN0301 pos=<6461.0, 8121.0, 335.0>) is connected
+12:08:02 | Player "ConnPlayer302" (id=CONN0302 pos=<6462.0, 8122.0, 336.0>) is connected
+12:08:03 | Player "ConnPlayer303" (id=CONN0303 pos=<6463.0, 8123.0, 337.0>) is connected
+12:08:04 | Player "ConnPlayer304" (id=CONN0304 pos=<6464.0, 8124.0, 330.0>) is connected
+12:08:05 | Player "ConnPlayer305" (id=CONN0305 pos=<6465.0, 8125.0, 331.0>) is connected
+12:08:06 | Player "ConnPlayer306" (id=CONN0306 pos=<6466.0, 8126.0, 332.0>) is connected
+12:08:07 | Player "ConnPlayer307" (id=CONN0307 pos=<6467.0, 8127.0, 333.0>) is connected
+12:08:08 | Player "ConnPlayer308" (id=CONN0308 pos=<6468.0, 8128.0, 334.0>) is connected
+12:08:09 | Player "ConnPlayer309" (id=CONN0309 pos=<6469.0, 8129.0, 335.0>) is connected
+12:08:10 | Player "ConnPlayer310" (id=CONN0310 pos=<6470.0, 8130.0, 336.0>) is connected
+12:08:11 | Player "ConnPlayer311" (id=CONN0311 pos=<6471.0, 8131.0, 337.0>) is connected
+12:08:12 | Player "ConnPlayer312" (id=CONN0312 pos=<6472.0, 8132.0, 330.0>) is connected
+12:08:13 | Player "ConnPlayer313" (id=CONN0313 pos=<6473.0, 8133.0, 331.0>) is connected
+12:08:14 | Player "ConnPlayer314" (id=CONN0314 pos=<6474.0, 8134.0, 332.0>) is connected
+12:08:15 | Player "ConnPlayer315" (id=CONN0315 pos=<6475.0, 8135.0, 333.0>) is connected
+12:08:16 | Player "ConnPlayer316" (id=CONN0316 pos=<6476.0, 8136.0, 334.0>) is connected
+12:08:17 | Player "ConnPlayer317" (id=CONN0317 pos=<6477.0, 8137.0, 335.0>) is connected
+12:08:18 | Player "ConnPlayer318" (id=CONN0318 pos=<6478.0, 8138.0, 336.0>) is connected
+12:08:19 | Player "ConnPlayer319" (id=CONN0319 pos=<6479.0, 8139.0, 337.0>) is connected
+12:08:20 | Player "ConnPlayer320" (id=CONN0320 pos=<6400.0, 8140.0, 330.0>) is connected
+12:08:21 | Player "ConnPlayer321" (id=CONN0321 pos=<6401.0, 8141.0, 331.0>) is connected
+12:08:22 | Player "ConnPlayer322" (id=CONN0322 pos=<6402.0, 8142.0, 332.0>) is connected
+12:08:23 | Player "ConnPlayer323" (id=CONN0323 pos=<6403.0, 8143.0, 333.0>) is connected
+12:08:24 | Player "ConnPlayer324" (id=CONN0324 pos=<6404.0, 8144.0, 334.0>) is connected
+12:08:25 | Player "ConnPlayer325" (id=CONN0325 pos=<6405.0, 8145.0, 335.0>) is connected
+12:08:26 | Player "ConnPlayer326" (id=CONN0326 pos=<6406.0, 8146.0, 336.0>) is connected
+12:08:27 | Player "ConnPlayer327" (id=CONN0327 pos=<6407.0, 8147.0, 337.0>) is connected
+12:08:28 | Player "ConnPlayer328" (id=CONN0328 pos=<6408.0, 8148.0, 330.0>) is connected
+12:08:29 | Player "ConnPlayer329" (id=CONN0329 pos=<6409.0, 8149.0, 331.0>) is connected
+12:08:30 | Player "ConnPlayer330" (id=CONN0330 pos=<6410.0, 8150.0, 332.0>) is connected
+12:08:31 | Player "ConnPlayer331" (id=CONN0331 pos=<6411.0, 8151.0, 333.0>) is connected
+12:08:32 | Player "ConnPlayer332" (id=CONN0332 pos=<6412.0, 8152.0, 334.0>) is connected
+12:08:33 | Player "ConnPlayer333" (id=CONN0333 pos=<6413.0, 8153.0, 335.0>) is connected
+12:08:34 | Player "ConnPlayer334" (id=CONN0334 pos=<6414.0, 8154.0, 336.0>) is connected
+12:08:35 | Player "ConnPlayer335" (id=CONN0335 pos=<6415.0, 8155.0, 337.0>) is connected
+12:08:36 | Player "ConnPlayer336" (id=CONN0336 pos=<6416.0, 8156.0, 330.0>) is connected
+12:08:37 | Player "ConnPlayer337" (id=CONN0337 pos=<6417.0, 8157.0, 331.0>) is connected
+12:08:38 | Player "ConnPlayer338" (id=CONN0338 pos=<6418.0, 8158.0, 332.0>) is connected
+12:08:39 | Player "ConnPlayer339" (id=CONN0339 pos=<6419.0, 8159.0, 333.0>) is connected
+12:08:40 | Player "ConnPlayer340" (id=CONN0340 pos=<6420.0, 8160.0, 334.0>) is connected
+12:08:41 | Player "ConnPlayer341" (id=CONN0341 pos=<6421.0, 8161.0, 335.0>) is connected
+12:08:42 | Player "ConnPlayer342" (id=CONN0342 pos=<6422.0, 8162.0, 336.0>) is connected
+12:08:43 | Player "ConnPlayer343" (id=CONN0343 pos=<6423.0, 8163.0, 337.0>) is connected
+12:08:44 | Player "ConnPlayer344" (id=CONN0344 pos=<6424.0, 8164.0, 330.0>) is connected
+12:08:45 | Player "ConnPlayer345" (id=CONN0345 pos=<6425.0, 8165.0, 331.0>) is connected
+12:08:46 | Player "ConnPlayer346" (id=CONN0346 pos=<6426.0, 8166.0, 332.0>) is connected
+12:08:47 | Player "ConnPlayer347" (id=CONN0347 pos=<6427.0, 8167.0, 333.0>) is connected
+12:08:48 | Player "ConnPlayer348" (id=CONN0348 pos=<6428.0, 8168.0, 334.0>) is connected
+12:08:49 | Player "ConnPlayer349" (id=CONN0349 pos=<6429.0, 8169.0, 335.0>) is connected
+12:08:50 | Player "ConnPlayer350" (id=CONN0350 pos=<6430.0, 8100.0, 336.0>) is connected
+12:08:51 | Player "ConnPlayer351" (id=CONN0351 pos=<6431.0, 8101.0, 337.0>) is connected
+12:08:52 | Player "ConnPlayer352" (id=CONN0352 pos=<6432.0, 8102.0, 330.0>) is connected
+12:08:53 | Player "ConnPlayer353" (id=CONN0353 pos=<6433.0, 8103.0, 331.0>) is connected
+12:08:54 | Player "ConnPlayer354" (id=CONN0354 pos=<6434.0, 8104.0, 332.0>) is connected
+12:08:55 | Player "ConnPlayer355" (id=CONN0355 pos=<6435.0, 8105.0, 333.0>) is connected
+12:08:56 | Player "ConnPlayer356" (id=CONN0356 pos=<6436.0, 8106.0, 334.0>) is connected
+12:08:57 | Player "ConnPlayer357" (id=CONN0357 pos=<6437.0, 8107.0, 335.0>) is connected
+12:08:58 | Player "ConnPlayer358" (id=CONN0358 pos=<6438.0, 8108.0, 336.0>) is connected
+12:08:59 | Player "ConnPlayer359" (id=CONN0359 pos=<6439.0, 8109.0, 337.0>) is connected
+12:09:00 | Player "ConnPlayer360" (id=CONN0360 pos=<6440.0, 8110.0, 330.0>) is connected
+12:09:01 | Player "ConnPlayer361" (id=CONN0361 pos=<6441.0, 8111.0, 331.0>) is connected
+12:09:02 | Player "ConnPlayer362" (id=CONN0362 pos=<6442.0, 8112.0, 332.0>) is connected
+12:09:03 | Player "ConnPlayer363" (id=CONN0363 pos=<6443.0, 8113.0, 333.0>) is connected
+12:09:04 | Player "ConnPlayer364" (id=CONN0364 pos=<6444.0, 8114.0, 334.0>) is connected
+12:09:05 | Player "ConnPlayer365" (id=CONN0365 pos=<6445.0, 8115.0, 335.0>) is connected
+12:09:06 | Player "ConnPlayer366" (id=CONN0366 pos=<6446.0, 8116.0, 336.0>) is connected
+12:09:07 | Player "ConnPlayer367" (id=CONN0367 pos=<6447.0, 8117.0, 337.0>) is connected
+12:09:08 | Player "ConnPlayer368" (id=CONN0368 pos=<6448.0, 8118.0, 330.0>) is connected
+12:09:09 | Player "ConnPlayer369" (id=CONN0369 pos=<6449.0, 8119.0, 331.0>) is connected
+12:09:10 | Player "ConnPlayer370" (id=CONN0370 pos=<6450.0, 8120.0, 332.0>) is connected
+12:09:11 | Player "ConnPlayer371" (id=CONN0371 pos=<6451.0, 8121.0, 333.0>) is connected
+12:09:12 | Player "ConnPlayer372" (id=CONN0372 pos=<6452.0, 8122.0, 334.0>) is connected
+12:09:13 | Player "ConnPlayer373" (id=CONN0373 pos=<6453.0, 8123.0, 335.0>) is connected
+12:09:14 | Player "ConnPlayer374" (id=CONN0374 pos=<6454.0, 8124.0, 336.0>) is connected
+12:09:15 | Player "ConnPlayer375" (id=CONN0375 pos=<6455.0, 8125.0, 337.0>) is connected
+12:09:16 | Player "ConnPlayer376" (id=CONN0376 pos=<6456.0, 8126.0, 330.0>) is connected
+12:09:17 | Player "ConnPlayer377" (id=CONN0377 pos=<6457.0, 8127.0, 331.0>) is connected
+12:40:00 | Player "ConnPlayer000" (id=CONN0000 pos=<6420.0, 8120.0, 333.0>) has been disconnected
+12:41:01 | Player "ConnPlayer001" (id=CONN0001 pos=<6421.0, 8121.0, 333.0>) has been disconnected
+12:42:02 | Player "ConnPlayer002" (id=CONN0002 pos=<6422.0, 8122.0, 333.0>) has been disconnected
+12:43:03 | Player "ConnPlayer003" (id=CONN0003 pos=<6423.0, 8123.0, 333.0>) has been disconnected
+12:44:04 | Player "ConnPlayer004" (id=CONN0004 pos=<6424.0, 8124.0, 333.0>) has been disconnected
+12:45:05 | Player "ConnPlayer005" (id=CONN0005 pos=<6425.0, 8125.0, 333.0>) has been disconnected
+12:46:06 | Player "ConnPlayer006" (id=CONN0006 pos=<6426.0, 8126.0, 333.0>) has been disconnected
+12:47:07 | Player "ConnPlayer007" (id=CONN0007 pos=<6427.0, 8127.0, 333.0>) has been disconnected
+12:48:08 | Player "ConnPlayer008" (id=CONN0008 pos=<6428.0, 8128.0, 333.0>) has been disconnected
+12:49:09 | Player "ConnPlayer009" (id=CONN0009 pos=<6429.0, 8129.0, 333.0>) has been disconnected
+12:50:10 | Player "ConnPlayer010" (id=CONN0010 pos=<6430.0, 8130.0, 333.0>) has been disconnected
+12:51:11 | Player "ConnPlayer011" (id=CONN0011 pos=<6431.0, 8131.0, 333.0>) has been disconnected
+12:52:12 | Player "ConnPlayer012" (id=CONN0012 pos=<6432.0, 8132.0, 333.0>) has been disconnected
+12:53:13 | Player "ConnPlayer013" (id=CONN0013 pos=<6433.0, 8133.0, 333.0>) has been disconnected
+12:54:14 | Player "ConnPlayer014" (id=CONN0014 pos=<6434.0, 8134.0, 333.0>) has been disconnected
+12:10:30 | ##### PlayerList log: 2 players
+12:10:30 | Player "ConnPlayer000" (id=CONN0000 pos=<6400.0, 8100.0, 333.0>)
+12:10:30 | Player "Killer000" (id=KILL0000 pos=<6410.0, 8110.0, 334.0>)
+12:11:30 | ##### PlayerList log: 3 players
+12:11:30 | Player "ConnPlayer001" (id=CONN0001 pos=<6400.0, 8100.0, 333.0>)
+12:11:30 | Player "Killer001" (id=KILL0001 pos=<6410.0, 8110.0, 334.0>)
+12:12:30 | ##### PlayerList log: 4 players
+12:12:30 | Player "ConnPlayer002" (id=CONN0002 pos=<6400.0, 8100.0, 333.0>)
+12:12:30 | Player "Killer002" (id=KILL0002 pos=<6410.0, 8110.0, 334.0>)
+12:13:30 | ##### PlayerList log: 5 players
+12:13:30 | Player "ConnPlayer003" (id=CONN0003 pos=<6400.0, 8100.0, 333.0>)
+12:13:30 | Player "Killer003" (id=KILL0003 pos=<6410.0, 8110.0, 334.0>)
+12:14:30 | ##### PlayerList log: 2 players
+12:14:30 | Player "ConnPlayer004" (id=CONN0004 pos=<6400.0, 8100.0, 333.0>)
+12:14:30 | Player "Killer004" (id=KILL0004 pos=<6410.0, 8110.0, 334.0>)
+12:15:30 | ##### PlayerList log: 3 players
+12:15:30 | Player "ConnPlayer005" (id=CONN0005 pos=<6400.0, 8100.0, 333.0>)
+12:15:30 | Player "Killer005" (id=KILL0005 pos=<6410.0, 8110.0, 334.0>)
+12:16:30 | ##### PlayerList log: 4 players
+12:16:30 | Player "ConnPlayer006" (id=CONN0006 pos=<6400.0, 8100.0, 333.0>)
+12:16:30 | Player "Killer006" (id=KILL0006 pos=<6410.0, 8110.0, 334.0>)
+12:17:30 | ##### PlayerList log: 5 players
+12:17:30 | Player "ConnPlayer007" (id=CONN0007 pos=<6400.0, 8100.0, 333.0>)
+12:17:30 | Player "Killer007" (id=KILL0007 pos=<6410.0, 8110.0, 334.0>)
+12:18:30 | ##### PlayerList log: 2 players
+12:18:30 | Player "ConnPlayer008" (id=CONN0008 pos=<6400.0, 8100.0, 333.0>)
+12:18:30 | Player "Killer008" (id=KILL0008 pos=<6410.0, 8110.0, 334.0>)
+12:19:30 | ##### PlayerList log: 3 players
+12:19:30 | Player "ConnPlayer009" (id=CONN0009 pos=<6400.0, 8100.0, 333.0>)
+12:19:30 | Player "Killer009" (id=KILL0009 pos=<6410.0, 8110.0, 334.0>)
+12:20:00 | Player "Victim000" (DEAD) (id=VICT0000 pos=<6420.0, 8140.0, 333.0>) killed by Player "Killer000" (id=KILL0000 pos=<6410.0, 8120.0, 335.0>) with M4-A1 from 5.00 meters
+12:20:01 | Player "Victim001" (DEAD) (id=VICT0001 pos=<6421.0, 8141.0, 334.0>) killed by Player "Killer001" (id=KILL0001 pos=<6411.0, 8121.0, 336.0>) with M4-A1 from 6.10 meters
+12:20:02 | Player "Victim002" (DEAD) (id=VICT0002 pos=<6422.0, 8142.0, 335.0>) killed by Player "Killer002" (id=KILL0002 pos=<6412.0, 8122.0, 337.0>) with M4-A1 from 7.20 meters
+12:20:03 | Player "Victim003" (DEAD) (id=VICT0003 pos=<6423.0, 8143.0, 336.0>) killed by Player "Killer003" (id=KILL0003 pos=<6413.0, 8123.0, 338.0>) with M4-A1 from 8.30 meters
+12:20:04 | Player "Victim004" (DEAD) (id=VICT0004 pos=<6424.0, 8144.0, 337.0>) killed by Player "Killer004" (id=KILL0004 pos=<6414.0, 8124.0, 339.0>) with M4-A1 from 9.40 meters
+12:20:05 | Player "Victim005" (DEAD) (id=VICT0005 pos=<6425.0, 8145.0, 338.0>) killed by Player "Killer005" (id=KILL0005 pos=<6415.0, 8125.0, 335.0>) with M4-A1 from 10.50 meters
+12:20:06 | Player "Victim006" (DEAD) (id=VICT0006 pos=<6426.0, 8146.0, 333.0>) killed by Player "Killer006" (id=KILL0006 pos=<6416.0, 8126.0, 336.0>) with M4-A1 from 11.60 meters
+12:20:07 | Player "Victim007" (DEAD) (id=VICT0007 pos=<6427.0, 8147.0, 334.0>) killed by Player "Killer007" (id=KILL0007 pos=<6417.0, 8127.0, 337.0>) with M4-A1 from 12.70 meters
+12:20:08 | Player "Victim008" (DEAD) (id=VICT0008 pos=<6428.0, 8148.0, 335.0>) killed by Player "Killer008" (id=KILL0008 pos=<6418.0, 8128.0, 338.0>) with M4-A1 from 13.80 meters
+12:20:09 | Player "Victim009" (DEAD) (id=VICT0009 pos=<6429.0, 8149.0, 336.0>) killed by Player "Killer009" (id=KILL0009 pos=<6419.0, 8129.0, 339.0>) with M4-A1 from 14.90 meters
+12:20:10 | Player "Victim010" (DEAD) (id=VICT0010 pos=<6430.0, 8150.0, 337.0>) killed by Player "Killer010" (id=KILL0010 pos=<6420.0, 8130.0, 335.0>) with M4-A1 from 15.00 meters
+12:20:11 | Player "Victim011" (DEAD) (id=VICT0011 pos=<6431.0, 8151.0, 338.0>) killed by Player "Killer011" (id=KILL0011 pos=<6421.0, 8131.0, 336.0>) with M4-A1 from 16.10 meters
+12:20:12 | Player "Victim012" (DEAD) (id=VICT0012 pos=<6432.0, 8152.0, 333.0>) killed by Player "Killer012" (id=KILL0012 pos=<6422.0, 8132.0, 337.0>) with M4-A1 from 17.20 meters
+12:20:13 | Player "Victim013" (DEAD) (id=VICT0013 pos=<6433.0, 8153.0, 334.0>) killed by Player "Killer013" (id=KILL0013 pos=<6423.0, 8133.0, 338.0>) with M4-A1 from 18.30 meters
+12:20:14 | Player "Victim014" (DEAD) (id=VICT0014 pos=<6434.0, 8154.0, 335.0>) killed by Player "Killer014" (id=KILL0014 pos=<6424.0, 8134.0, 339.0>) with M4-A1 from 19.40 meters
+12:20:15 | Player "Victim015" (DEAD) (id=VICT0015 pos=<6435.0, 8155.0, 336.0>) killed by Player "Killer015" (id=KILL0015 pos=<6425.0, 8135.0, 335.0>) with M4-A1 from 20.50 meters
+12:20:16 | Player "Victim016" (DEAD) (id=VICT0016 pos=<6436.0, 8156.0, 337.0>) killed by Player "Killer016" (id=KILL0016 pos=<6426.0, 8136.0, 336.0>) with M4-A1 from 21.60 meters
+12:20:17 | Player "Victim017" (DEAD) (id=VICT0017 pos=<6437.0, 8157.0, 338.0>) killed by Player "Killer017" (id=KILL0017 pos=<6427.0, 8137.0, 337.0>) with M4-A1 from 22.70 meters
+12:20:18 | Player "Victim018" (DEAD) (id=VICT0018 pos=<6438.0, 8158.0, 333.0>) killed by Player "Killer018" (id=KILL0018 pos=<6428.0, 8138.0, 338.0>) with M4-A1 from 23.80 meters
+12:20:19 | Player "Victim019" (DEAD) (id=VICT0019 pos=<6439.0, 8159.0, 334.0>) killed by Player "Killer019" (id=KILL0019 pos=<6429.0, 8139.0, 339.0>) with M4-A1 from 24.90 meters
+12:20:20 | Player "Victim020" (DEAD) (id=VICT0020 pos=<6440.0, 8160.0, 335.0>) killed by Player "Killer020" (id=KILL0020 pos=<6430.0, 8140.0, 335.0>) with M4-A1 from 25.00 meters
+12:20:21 | Player "Victim021" (DEAD) (id=VICT0021 pos=<6441.0, 8161.0, 336.0>) killed by Player "Killer021" (id=KILL0021 pos=<6431.0, 8141.0, 336.0>) with M4-A1 from 26.10 meters
+12:20:22 | Player "Victim022" (DEAD) (id=VICT0022 pos=<6442.0, 8162.0, 337.0>) killed by Player "Killer022" (id=KILL0022 pos=<6432.0, 8142.0, 337.0>) with M4-A1 from 27.20 meters
+12:20:23 | Player "Victim023" (DEAD) (id=VICT0023 pos=<6443.0, 8163.0, 338.0>) killed by Player "Killer023" (id=KILL0023 pos=<6433.0, 8143.0, 338.0>) with M4-A1 from 28.30 meters
+12:20:24 | Player "Victim024" (DEAD) (id=VICT0024 pos=<6444.0, 8164.0, 333.0>) killed by Player "Killer024" (id=KILL0024 pos=<6434.0, 8144.0, 339.0>) with M4-A1 from 29.40 meters
+12:20:25 | Player "Victim025" (DEAD) (id=VICT0025 pos=<6445.0, 8165.0, 334.0>) killed by Player "Killer025" (id=KILL0025 pos=<6435.0, 8145.0, 335.0>) with M4-A1 from 30.50 meters
+12:20:26 | Player "Victim026" (DEAD) (id=VICT0026 pos=<6446.0, 8166.0, 335.0>) killed by Player "Killer026" (id=KILL0026 pos=<6436.0, 8146.0, 336.0>) with M4-A1 from 31.60 meters
+12:20:27 | Player "Victim027" (DEAD) (id=VICT0027 pos=<6447.0, 8167.0, 336.0>) killed by Player "Killer027" (id=KILL0027 pos=<6437.0, 8147.0, 337.0>) with M4-A1 from 32.70 meters
+12:20:28 | Player "Victim028" (DEAD) (id=VICT0028 pos=<6448.0, 8168.0, 337.0>) killed by Player "Killer028" (id=KILL0028 pos=<6438.0, 8148.0, 338.0>) with M4-A1 from 33.80 meters
+12:20:29 | Player "Victim029" (DEAD) (id=VICT0029 pos=<6449.0, 8169.0, 338.0>) killed by Player "Killer029" (id=KILL0029 pos=<6439.0, 8149.0, 339.0>) with M4-A1 from 34.90 meters
+12:20:30 | Player "Victim030" (DEAD) (id=VICT0030 pos=<6450.0, 8170.0, 333.0>) killed by Player "Killer030" (id=KILL0030 pos=<6440.0, 8150.0, 335.0>) with M4-A1 from 35.00 meters
+12:20:31 | Player "Victim031" (DEAD) (id=VICT0031 pos=<6451.0, 8171.0, 334.0>) killed by Player "Killer031" (id=KILL0031 pos=<6441.0, 8151.0, 336.0>) with M4-A1 from 36.10 meters
+12:20:32 | Player "Victim032" (DEAD) (id=VICT0032 pos=<6452.0, 8172.0, 335.0>) killed by Player "Killer000" (id=KILL0000 pos=<6442.0, 8152.0, 337.0>) with M4-A1 from 37.20 meters
+12:20:33 | Player "Victim033" (DEAD) (id=VICT0033 pos=<6453.0, 8173.0, 336.0>) killed by Player "Killer001" (id=KILL0001 pos=<6443.0, 8153.0, 338.0>) with M4-A1 from 38.30 meters
+12:20:34 | Player "Victim034" (DEAD) (id=VICT0034 pos=<6454.0, 8174.0, 337.0>) killed by Player "Killer002" (id=KILL0002 pos=<6444.0, 8154.0, 339.0>) with M4-A1 from 39.40 meters
+12:20:35 | Player "Victim035" (DEAD) (id=VICT0035 pos=<6455.0, 8175.0, 338.0>) killed by Player "Killer003" (id=KILL0003 pos=<6445.0, 8155.0, 335.0>) with M4-A1 from 40.50 meters
+12:20:36 | Player "Victim036" (DEAD) (id=VICT0036 pos=<6456.0, 8176.0, 333.0>) killed by Player "Killer004" (id=KILL0004 pos=<6446.0, 8156.0, 336.0>) with M4-A1 from 41.60 meters
+12:20:37 | Player "Victim037" (DEAD) (id=VICT0037 pos=<6457.0, 8177.0, 334.0>) killed by Player "Killer005" (id=KILL0005 pos=<6447.0, 8157.0, 337.0>) with M4-A1 from 42.70 meters
+12:20:38 | Player "Victim038" (DEAD) (id=VICT0038 pos=<6458.0, 8178.0, 335.0>) killed by Player "Killer006" (id=KILL0006 pos=<6448.0, 8158.0, 338.0>) with M4-A1 from 43.80 meters
+12:20:39 | Player "Victim039" (DEAD) (id=VICT0039 pos=<6459.0, 8179.0, 336.0>) killed by Player "Killer007" (id=KILL0007 pos=<6449.0, 8159.0, 339.0>) with M4-A1 from 44.90 meters
+12:20:40 | Player "Victim040" (DEAD) (id=VICT0040 pos=<6460.0, 8180.0, 337.0>) killed by Player "Killer008" (id=KILL0008 pos=<6450.0, 8160.0, 335.0>) with M4-A1 from 45.00 meters
+12:20:41 | Player "Victim041" (DEAD) (id=VICT0041 pos=<6461.0, 8181.0, 338.0>) killed by Player "Killer009" (id=KILL0009 pos=<6451.0, 8161.0, 336.0>) with M4-A1 from 46.10 meters
+12:20:42 | Player "Victim042" (DEAD) (id=VICT0042 pos=<6462.0, 8182.0, 333.0>) killed by Player "Killer010" (id=KILL0010 pos=<6452.0, 8162.0, 337.0>) with M4-A1 from 47.20 meters
+12:20:43 | Player "Victim043" (DEAD) (id=VICT0043 pos=<6463.0, 8183.0, 334.0>) killed by Player "Killer011" (id=KILL0011 pos=<6453.0, 8163.0, 338.0>) with M4-A1 from 48.30 meters
+12:20:44 | Player "Victim044" (DEAD) (id=VICT0044 pos=<6464.0, 8184.0, 335.0>) killed by Player "Killer012" (id=KILL0012 pos=<6454.0, 8164.0, 339.0>) with M4-A1 from 49.40 meters
+12:20:45 | Player "Victim045" (DEAD) (id=VICT0045 pos=<6465.0, 8185.0, 336.0>) killed by Player "Killer013" (id=KILL0013 pos=<6455.0, 8165.0, 335.0>) with M4-A1 from 50.50 meters
+12:20:46 | Player "Victim046" (DEAD) (id=VICT0046 pos=<6466.0, 8186.0, 337.0>) killed by Player "Killer014" (id=KILL0014 pos=<6456.0, 8166.0, 336.0>) with M4-A1 from 51.60 meters
+12:20:47 | Player "Victim047" (DEAD) (id=VICT0047 pos=<6467.0, 8187.0, 338.0>) killed by Player "Killer015" (id=KILL0015 pos=<6457.0, 8167.0, 337.0>) with M4-A1 from 52.70 meters
+12:20:48 | Player "Victim048" (DEAD) (id=VICT0048 pos=<6468.0, 8188.0, 333.0>) killed by Player "Killer016" (id=KILL0016 pos=<6458.0, 8168.0, 338.0>) with M4-A1 from 53.80 meters
+12:20:49 | Player "Victim049" (DEAD) (id=VICT0049 pos=<6469.0, 8189.0, 334.0>) killed by Player "Killer017" (id=KILL0017 pos=<6459.0, 8169.0, 339.0>) with M4-A1 from 54.90 meters
+12:20:50 | Player "Victim050" (DEAD) (id=VICT0050 pos=<6470.0, 8190.0, 335.0>) killed by Player "Killer018" (id=KILL0018 pos=<6460.0, 8170.0, 335.0>) with M4-A1 from 55.00 meters
+12:20:51 | Player "Victim051" (DEAD) (id=VICT0051 pos=<6471.0, 8191.0, 336.0>) killed by Player "Killer019" (id=KILL0019 pos=<6461.0, 8171.0, 336.0>) with M4-A1 from 56.10 meters
+12:20:52 | Player "Victim052" (DEAD) (id=VICT0052 pos=<6472.0, 8192.0, 337.0>) killed by Player "Killer020" (id=KILL0020 pos=<6462.0, 8172.0, 337.0>) with M4-A1 from 57.20 meters
+12:20:53 | Player "Victim053" (DEAD) (id=VICT0053 pos=<6473.0, 8193.0, 338.0>) killed by Player "Killer021" (id=KILL0021 pos=<6463.0, 8173.0, 338.0>) with M4-A1 from 58.30 meters
+12:20:54 | Player "Victim054" (DEAD) (id=VICT0054 pos=<6474.0, 8194.0, 333.0>) killed by Player "Killer022" (id=KILL0022 pos=<6464.0, 8174.0, 339.0>) with M4-A1 from 59.40 meters
+12:20:55 | Player "Victim055" (DEAD) (id=VICT0055 pos=<6475.0, 8195.0, 334.0>) killed by Player "Killer023" (id=KILL0023 pos=<6465.0, 8175.0, 335.0>) with M4-A1 from 60.50 meters
+12:20:56 | Player "Victim056" (DEAD) (id=VICT0056 pos=<6476.0, 8196.0, 335.0>) killed by Player "Killer024" (id=KILL0024 pos=<6466.0, 8176.0, 336.0>) with M4-A1 from 61.60 meters
+12:20:57 | Player "Victim057" (DEAD) (id=VICT0057 pos=<6477.0, 8197.0, 336.0>) killed by Player "Killer025" (id=KILL0025 pos=<6467.0, 8177.0, 337.0>) with M4-A1 from 62.70 meters
+12:20:58 | Player "Victim058" (DEAD) (id=VICT0058 pos=<6478.0, 8198.0, 337.0>) killed by Player "Killer026" (id=KILL0026 pos=<6468.0, 8178.0, 338.0>) with M4-A1 from 63.80 meters
+12:20:59 | Player "Victim059" (DEAD) (id=VICT0059 pos=<6479.0, 8199.0, 338.0>) killed by Player "Killer027" (id=KILL0027 pos=<6469.0, 8179.0, 339.0>) with M4-A1 from 64.90 meters
+12:21:00 | Player "Victim060" (DEAD) (id=VICT0060 pos=<6480.0, 8200.0, 333.0>) killed by Player "Killer028" (id=KILL0028 pos=<6470.0, 8120.0, 335.0>) with M4-A1 from 65.00 meters
+12:21:01 | Player "Victim061" (DEAD) (id=VICT0061 pos=<6481.0, 8201.0, 334.0>) killed by Player "Killer029" (id=KILL0029 pos=<6471.0, 8121.0, 336.0>) with M4-A1 from 66.10 meters
+12:21:02 | Player "Victim062" (DEAD) (id=VICT0062 pos=<6482.0, 8202.0, 335.0>) killed by Player "Killer030" (id=KILL0030 pos=<6472.0, 8122.0, 337.0>) with M4-A1 from 67.20 meters
+12:21:03 | Player "Victim063" (DEAD) (id=VICT0063 pos=<6483.0, 8203.0, 336.0>) killed by Player "Killer031" (id=KILL0031 pos=<6473.0, 8123.0, 338.0>) with M4-A1 from 68.30 meters
+12:21:04 | Player "Victim064" (DEAD) (id=VICT0064 pos=<6484.0, 8204.0, 337.0>) killed by Player "Killer000" (id=KILL0000 pos=<6474.0, 8124.0, 339.0>) with M4-A1 from 69.40 meters
+12:21:05 | Player "Victim065" (DEAD) (id=VICT0065 pos=<6485.0, 8205.0, 338.0>) killed by Player "Killer001" (id=KILL0001 pos=<6475.0, 8125.0, 335.0>) with M4-A1 from 70.50 meters
+12:21:06 | Player "Victim066" (DEAD) (id=VICT0066 pos=<6486.0, 8206.0, 333.0>) killed by Player "Killer002" (id=KILL0002 pos=<6476.0, 8126.0, 336.0>) with M4-A1 from 71.60 meters
+12:21:07 | Player "Victim067" (DEAD) (id=VICT0067 pos=<6487.0, 8207.0, 334.0>) killed by Player "Killer003" (id=KILL0003 pos=<6477.0, 8127.0, 337.0>) with M4-A1 from 72.70 meters
+12:21:08 | Player "Victim068" (DEAD) (id=VICT0068 pos=<6488.0, 8208.0, 335.0>) killed by Player "Killer004" (id=KILL0004 pos=<6478.0, 8128.0, 338.0>) with M4-A1 from 73.80 meters
+12:21:09 | Player "Victim069" (DEAD) (id=VICT0069 pos=<6489.0, 8209.0, 336.0>) killed by Player "Killer005" (id=KILL0005 pos=<6479.0, 8129.0, 339.0>) with M4-A1 from 74.90 meters
+12:21:10 | Player "Victim070" (DEAD) (id=VICT0070 pos=<6490.0, 8140.0, 337.0>) killed by Player "Killer006" (id=KILL0006 pos=<6480.0, 8130.0, 335.0>) with M4-A1 from 75.00 meters
+12:21:11 | Player "Victim071" (DEAD) (id=VICT0071 pos=<6491.0, 8141.0, 338.0>) killed by Player "Killer007" (id=KILL0007 pos=<6481.0, 8131.0, 336.0>) with M4-A1 from 76.10 meters
+12:21:12 | Player "Victim072" (DEAD) (id=VICT0072 pos=<6492.0, 8142.0, 333.0>) killed by Player "Killer008" (id=KILL0008 pos=<6482.0, 8132.0, 337.0>) with M4-A1 from 77.20 meters
+12:21:13 | Player "Victim073" (DEAD) (id=VICT0073 pos=<6493.0, 8143.0, 334.0>) killed by Player "Killer009" (id=KILL0009 pos=<6483.0, 8133.0, 338.0>) with M4-A1 from 78.30 meters
+12:21:14 | Player "Victim074" (DEAD) (id=VICT0074 pos=<6494.0, 8144.0, 335.0>) killed by Player "Killer010" (id=KILL0010 pos=<6484.0, 8134.0, 339.0>) with M4-A1 from 79.40 meters
+12:21:15 | Player "Victim075" (DEAD) (id=VICT0075 pos=<6495.0, 8145.0, 336.0>) killed by Player "Killer011" (id=KILL0011 pos=<6485.0, 8135.0, 335.0>) with M4-A1 from 80.50 meters
+12:21:16 | Player "Victim076" (DEAD) (id=VICT0076 pos=<6496.0, 8146.0, 337.0>) killed by Player "Killer012" (id=KILL0012 pos=<6486.0, 8136.0, 336.0>) with M4-A1 from 81.60 meters
+12:21:17 | Player "Victim077" (DEAD) (id=VICT0077 pos=<6497.0, 8147.0, 338.0>) killed by Player "Killer013" (id=KILL0013 pos=<6487.0, 8137.0, 337.0>) with M4-A1 from 82.70 meters
+12:21:18 | Player "Victim078" (DEAD) (id=VICT0078 pos=<6498.0, 8148.0, 333.0>) killed by Player "Killer014" (id=KILL0014 pos=<6488.0, 8138.0, 338.0>) with M4-A1 from 83.80 meters
+12:21:19 | Player "Victim079" (DEAD) (id=VICT0079 pos=<6499.0, 8149.0, 334.0>) killed by Player "Killer015" (id=KILL0015 pos=<6489.0, 8139.0, 339.0>) with M4-A1 from 84.90 meters
+12:21:20 | Player "Victim080" (DEAD) (id=VICT0080 pos=<6500.0, 8150.0, 335.0>) killed by Player "Killer016" (id=KILL0016 pos=<6410.0, 8140.0, 335.0>) with M4-A1 from 85.00 meters
+12:21:21 | Player "Victim081" (DEAD) (id=VICT0081 pos=<6501.0, 8151.0, 336.0>) killed by Player "Killer017" (id=KILL0017 pos=<6411.0, 8141.0, 336.0>) with M4-A1 from 86.10 meters
+12:21:22 | Player "Victim082" (DEAD) (id=VICT0082 pos=<6502.0, 8152.0, 337.0>) killed by Player "Killer018" (id=KILL0018 pos=<6412.0, 8142.0, 337.0>) with M4-A1 from 87.20 meters
+12:21:23 | Player "Victim083" (DEAD) (id=VICT0083 pos=<6503.0, 8153.0, 338.0>) killed by Player "Killer019" (id=KILL0019 pos=<6413.0, 8143.0, 338.0>) with M4-A1 from 88.30 meters
+12:21:24 | Player "Victim084" (DEAD) (id=VICT0084 pos=<6504.0, 8154.0, 333.0>) killed by Player "Killer020" (id=KILL0020 pos=<6414.0, 8144.0, 339.0>) with M4-A1 from 89.40 meters
+12:21:25 | Player "Victim085" (DEAD) (id=VICT0085 pos=<6505.0, 8155.0, 334.0>) killed by Player "Killer021" (id=KILL0021 pos=<6415.0, 8145.0, 335.0>) with M4-A1 from 90.50 meters
+12:21:26 | Player "Victim086" (DEAD) (id=VICT0086 pos=<6506.0, 8156.0, 335.0>) killed by Player "Killer022" (id=KILL0022 pos=<6416.0, 8146.0, 336.0>) with M4-A1 from 91.60 meters
+12:21:27 | Player "Victim087" (DEAD) (id=VICT0087 pos=<6507.0, 8157.0, 336.0>) killed by Player "Killer023" (id=KILL0023 pos=<6417.0, 8147.0, 337.0>) with M4-A1 from 92.70 meters
+12:21:28 | Player "Victim088" (DEAD) (id=VICT0088 pos=<6508.0, 8158.0, 337.0>) killed by Player "Killer024" (id=KILL0024 pos=<6418.0, 8148.0, 338.0>) with M4-A1 from 93.80 meters
+12:21:29 | Player "Victim089" (DEAD) (id=VICT0089 pos=<6509.0, 8159.0, 338.0>) killed by Player "Killer025" (id=KILL0025 pos=<6419.0, 8149.0, 339.0>) with M4-A1 from 94.90 meters
+12:21:30 | Player "Victim090" (DEAD) (id=VICT0090 pos=<6420.0, 8160.0, 333.0>) killed by Player "Killer026" (id=KILL0026 pos=<6420.0, 8150.0, 335.0>) with M4-A1 from 5.00 meters
+12:21:31 | Player "Victim091" (DEAD) (id=VICT0091 pos=<6421.0, 8161.0, 334.0>) killed by Player "Killer027" (id=KILL0027 pos=<6421.0, 8151.0, 336.0>) with M4-A1 from 6.10 meters
+12:21:32 | Player "Victim092" (DEAD) (id=VICT0092 pos=<6422.0, 8162.0, 335.0>) killed by Player "Killer028" (id=KILL0028 pos=<6422.0, 8152.0, 337.0>) with M4-A1 from 7.20 meters
+12:21:33 | Player "Victim093" (DEAD) (id=VICT0093 pos=<6423.0, 8163.0, 336.0>) killed by Player "Killer029" (id=KILL0029 pos=<6423.0, 8153.0, 338.0>) with M4-A1 from 8.30 meters
+12:21:34 | Player "Victim094" (DEAD) (id=VICT0094 pos=<6424.0, 8164.0, 337.0>) killed by Player "Killer030" (id=KILL0030 pos=<6424.0, 8154.0, 339.0>) with M4-A1 from 9.40 meters
+12:21:35 | Player "Victim095" (DEAD) (id=VICT0095 pos=<6425.0, 8165.0, 338.0>) killed by Player "Killer031" (id=KILL0031 pos=<6425.0, 8155.0, 335.0>) with M4-A1 from 10.50 meters
+12:21:36 | Player "Victim096" (DEAD) (id=VICT0096 pos=<6426.0, 8166.0, 333.0>) killed by Player "Killer000" (id=KILL0000 pos=<6426.0, 8156.0, 336.0>) with M4-A1 from 11.60 meters
+12:21:37 | Player "Victim097" (DEAD) (id=VICT0097 pos=<6427.0, 8167.0, 334.0>) killed by Player "Killer001" (id=KILL0001 pos=<6427.0, 8157.0, 337.0>) with M4-A1 from 12.70 meters
+12:21:38 | Player "Victim098" (DEAD) (id=VICT0098 pos=<6428.0, 8168.0, 335.0>) killed by Player "Killer002" (id=KILL0002 pos=<6428.0, 8158.0, 338.0>) with M4-A1 from 13.80 meters
+12:21:39 | Player "Victim099" (DEAD) (id=VICT0099 pos=<6429.0, 8169.0, 336.0>) killed by Player "Killer003" (id=KILL0003 pos=<6429.0, 8159.0, 339.0>) with M4-A1 from 14.90 meters
+12:21:40 | Player "Victim100" (DEAD) (id=VICT0100 pos=<6430.0, 8170.0, 337.0>) killed by Player "Killer004" (id=KILL0004 pos=<6430.0, 8160.0, 335.0>) with M4-A1 from 15.00 meters
+12:21:41 | Player "Victim101" (DEAD) (id=VICT0101 pos=<6431.0, 8171.0, 338.0>) killed by Player "Killer005" (id=KILL0005 pos=<6431.0, 8161.0, 336.0>) with M4-A1 from 16.10 meters
+12:21:42 | Player "Victim102" (DEAD) (id=VICT0102 pos=<6432.0, 8172.0, 333.0>) killed by Player "Killer006" (id=KILL0006 pos=<6432.0, 8162.0, 337.0>) with M4-A1 from 17.20 meters
+12:21:43 | Player "Victim103" (DEAD) (id=VICT0103 pos=<6433.0, 8173.0, 334.0>) killed by Player "Killer007" (id=KILL0007 pos=<6433.0, 8163.0, 338.0>) with M4-A1 from 18.30 meters
+12:21:44 | Player "Victim104" (DEAD) (id=VICT0104 pos=<6434.0, 8174.0, 335.0>) killed by Player "Killer008" (id=KILL0008 pos=<6434.0, 8164.0, 339.0>) with M4-A1 from 19.40 meters
+12:21:45 | Player "Victim105" (DEAD) (id=VICT0105 pos=<6435.0, 8175.0, 336.0>) killed by Player "Killer009" (id=KILL0009 pos=<6435.0, 8165.0, 335.0>) with M4-A1 from 20.50 meters
+12:21:46 | Player "Victim106" (DEAD) (id=VICT0106 pos=<6436.0, 8176.0, 337.0>) killed by Player "Killer010" (id=KILL0010 pos=<6436.0, 8166.0, 336.0>) with M4-A1 from 21.60 meters
+12:21:47 | Player "Victim107" (DEAD) (id=VICT0107 pos=<6437.0, 8177.0, 338.0>) killed by Player "Killer011" (id=KILL0011 pos=<6437.0, 8167.0, 337.0>) with M4-A1 from 22.70 meters
+12:21:48 | Player "Victim108" (DEAD) (id=VICT0108 pos=<6438.0, 8178.0, 333.0>) killed by Player "Killer012" (id=KILL0012 pos=<6438.0, 8168.0, 338.0>) with M4-A1 from 23.80 meters
+12:21:49 | Player "Victim109" (DEAD) (id=VICT0109 pos=<6439.0, 8179.0, 334.0>) killed by Player "Killer013" (id=KILL0013 pos=<6439.0, 8169.0, 339.0>) with M4-A1 from 24.90 meters
+12:21:50 | Player "Victim110" (DEAD) (id=VICT0110 pos=<6440.0, 8180.0, 335.0>) killed by Player "Killer014" (id=KILL0014 pos=<6440.0, 8170.0, 335.0>) with M4-A1 from 25.00 meters
+12:21:51 | Player "Victim111" (DEAD) (id=VICT0111 pos=<6441.0, 8181.0, 336.0>) killed by Player "Killer015" (id=KILL0015 pos=<6441.0, 8171.0, 336.0>) with M4-A1 from 26.10 meters
+12:21:52 | Player "Victim112" (DEAD) (id=VICT0112 pos=<6442.0, 8182.0, 337.0>) killed by Player "Killer016" (id=KILL0016 pos=<6442.0, 8172.0, 337.0>) with M4-A1 from 27.20 meters
+12:21:53 | Player "Victim113" (DEAD) (id=VICT0113 pos=<6443.0, 8183.0, 338.0>) killed by Player "Killer017" (id=KILL0017 pos=<6443.0, 8173.0, 338.0>) with M4-A1 from 28.30 meters
+12:21:54 | Player "Victim114" (DEAD) (id=VICT0114 pos=<6444.0, 8184.0, 333.0>) killed by Player "Killer018" (id=KILL0018 pos=<6444.0, 8174.0, 339.0>) with M4-A1 from 29.40 meters
+12:21:55 | Player "Victim115" (DEAD) (id=VICT0115 pos=<6445.0, 8185.0, 334.0>) killed by Player "Killer019" (id=KILL0019 pos=<6445.0, 8175.0, 335.0>) with M4-A1 from 30.50 meters
+12:21:56 | Player "Victim116" (DEAD) (id=VICT0116 pos=<6446.0, 8186.0, 335.0>) killed by Player "Killer020" (id=KILL0020 pos=<6446.0, 8176.0, 336.0>) with M4-A1 from 31.60 meters
+12:21:57 | Player "Victim117" (DEAD) (id=VICT0117 pos=<6447.0, 8187.0, 336.0>) killed by Player "Killer021" (id=KILL0021 pos=<6447.0, 8177.0, 337.0>) with M4-A1 from 32.70 meters
+12:21:58 | Player "Victim118" (DEAD) (id=VICT0118 pos=<6448.0, 8188.0, 337.0>) killed by Player "Killer022" (id=KILL0022 pos=<6448.0, 8178.0, 338.0>) with M4-A1 from 33.80 meters
+12:21:59 | Player "Victim119" (DEAD) (id=VICT0119 pos=<6449.0, 8189.0, 338.0>) killed by Player "Killer023" (id=KILL0023 pos=<6449.0, 8179.0, 339.0>) with M4-A1 from 34.90 meters
+12:22:00 | Player "Victim120" (DEAD) (id=VICT0120 pos=<6450.0, 8190.0, 333.0>) killed by Player "Killer024" (id=KILL0024 pos=<6450.0, 8120.0, 335.0>) with M4-A1 from 35.00 meters
+12:22:01 | Player "Victim121" (DEAD) (id=VICT0121 pos=<6451.0, 8191.0, 334.0>) killed by Player "Killer025" (id=KILL0025 pos=<6451.0, 8121.0, 336.0>) with M4-A1 from 36.10 meters
+12:22:02 | Player "Victim122" (DEAD) (id=VICT0122 pos=<6452.0, 8192.0, 335.0>) killed by Player "Killer026" (id=KILL0026 pos=<6452.0, 8122.0, 337.0>) with M4-A1 from 37.20 meters
+12:22:03 | Player "Victim123" (DEAD) (id=VICT0123 pos=<6453.0, 8193.0, 336.0>) killed by Player "Killer027" (id=KILL0027 pos=<6453.0, 8123.0, 338.0>) with M4-A1 from 38.30 meters
+12:22:04 | Player "Victim124" (DEAD) (id=VICT0124 pos=<6454.0, 8194.0, 337.0>) killed by Player "Killer028" (id=KILL0028 pos=<6454.0, 8124.0, 339.0>) with M4-A1 from 39.40 meters
+12:22:05 | Player "Victim125" (DEAD) (id=VICT0125 pos=<6455.0, 8195.0, 338.0>) killed by Player "Killer029" (id=KILL0029 pos=<6455.0, 8125.0, 335.0>) with M4-A1 from 40.50 meters
+12:22:06 | Player "Victim126" (DEAD) (id=VICT0126 pos=<6456.0, 8196.0, 333.0>) killed by Player "Killer030" (id=KILL0030 pos=<6456.0, 8126.0, 336.0>) with M4-A1 from 41.60 meters
+12:22:07 | Player "Victim127" (DEAD) (id=VICT0127 pos=<6457.0, 8197.0, 334.0>) killed by Player "Killer031" (id=KILL0031 pos=<6457.0, 8127.0, 337.0>) with M4-A1 from 42.70 meters
+12:22:08 | Player "Victim128" (DEAD) (id=VICT0128 pos=<6458.0, 8198.0, 335.0>) killed by Player "Killer000" (id=KILL0000 pos=<6458.0, 8128.0, 338.0>) with M4-A1 from 43.80 meters
+12:22:09 | Player "Victim129" (DEAD) (id=VICT0129 pos=<6459.0, 8199.0, 336.0>) killed by Player "Killer001" (id=KILL0001 pos=<6459.0, 8129.0, 339.0>) with M4-A1 from 44.90 meters
+12:22:10 | Player "Victim130" (DEAD) (id=VICT0130 pos=<6460.0, 8200.0, 337.0>) killed by Player "Killer002" (id=KILL0002 pos=<6460.0, 8130.0, 335.0>) with M4-A1 from 45.00 meters
+12:22:11 | Player "Victim131" (DEAD) (id=VICT0131 pos=<6461.0, 8201.0, 338.0>) killed by Player "Killer003" (id=KILL0003 pos=<6461.0, 8131.0, 336.0>) with M4-A1 from 46.10 meters
+12:22:12 | Player "Victim132" (DEAD) (id=VICT0132 pos=<6462.0, 8202.0, 333.0>) killed by Player "Killer004" (id=KILL0004 pos=<6462.0, 8132.0, 337.0>) with M4-A1 from 47.20 meters
+12:22:13 | Player "Victim133" (DEAD) (id=VICT0133 pos=<6463.0, 8203.0, 334.0>) killed by Player "Killer005" (id=KILL0005 pos=<6463.0, 8133.0, 338.0>) with M4-A1 from 48.30 meters
+12:22:14 | Player "Victim134" (DEAD) (id=VICT0134 pos=<6464.0, 8204.0, 335.0>) killed by Player "Killer006" (id=KILL0006 pos=<6464.0, 8134.0, 339.0>) with M4-A1 from 49.40 meters
+12:22:15 | Player "Victim135" (DEAD) (id=VICT0135 pos=<6465.0, 8205.0, 336.0>) killed by Player "Killer007" (id=KILL0007 pos=<6465.0, 8135.0, 335.0>) with M4-A1 from 50.50 meters
+12:22:16 | Player "Victim136" (DEAD) (id=VICT0136 pos=<6466.0, 8206.0, 337.0>) killed by Player "Killer008" (id=KILL0008 pos=<6466.0, 8136.0, 336.0>) with M4-A1 from 51.60 meters
+12:22:17 | Player "Victim137" (DEAD) (id=VICT0137 pos=<6467.0, 8207.0, 338.0>) killed by Player "Killer009" (id=KILL0009 pos=<6467.0, 8137.0, 337.0>) with M4-A1 from 52.70 meters
+12:22:18 | Player "Victim138" (DEAD) (id=VICT0138 pos=<6468.0, 8208.0, 333.0>) killed by Player "Killer010" (id=KILL0010 pos=<6468.0, 8138.0, 338.0>) with M4-A1 from 53.80 meters
+12:22:19 | Player "Victim139" (DEAD) (id=VICT0139 pos=<6469.0, 8209.0, 334.0>) killed by Player "Killer011" (id=KILL0011 pos=<6469.0, 8139.0, 339.0>) with M4-A1 from 54.90 meters
+12:22:20 | Player "Victim140" (DEAD) (id=VICT0140 pos=<6470.0, 8140.0, 335.0>) killed by Player "Killer012" (id=KILL0012 pos=<6470.0, 8140.0, 335.0>) with M4-A1 from 55.00 meters
+12:22:21 | Player "Victim141" (DEAD) (id=VICT0141 pos=<6471.0, 8141.0, 336.0>) killed by Player "Killer013" (id=KILL0013 pos=<6471.0, 8141.0, 336.0>) with M4-A1 from 56.10 meters
+12:22:22 | Player "Victim142" (DEAD) (id=VICT0142 pos=<6472.0, 8142.0, 337.0>) killed by Player "Killer014" (id=KILL0014 pos=<6472.0, 8142.0, 337.0>) with M4-A1 from 57.20 meters
+12:22:23 | Player "Victim143" (DEAD) (id=VICT0143 pos=<6473.0, 8143.0, 338.0>) killed by Player "Killer015" (id=KILL0015 pos=<6473.0, 8143.0, 338.0>) with M4-A1 from 58.30 meters
+12:22:24 | Player "Victim144" (DEAD) (id=VICT0144 pos=<6474.0, 8144.0, 333.0>) killed by Player "Killer016" (id=KILL0016 pos=<6474.0, 8144.0, 339.0>) with M4-A1 from 59.40 meters
+12:22:25 | Player "Victim145" (DEAD) (id=VICT0145 pos=<6475.0, 8145.0, 334.0>) killed by Player "Killer017" (id=KILL0017 pos=<6475.0, 8145.0, 335.0>) with M4-A1 from 60.50 meters
+12:22:26 | Player "Victim146" (DEAD) (id=VICT0146 pos=<6476.0, 8146.0, 335.0>) killed by Player "Killer018" (id=KILL0018 pos=<6476.0, 8146.0, 336.0>) with M4-A1 from 61.60 meters
+12:22:27 | Player "Victim147" (DEAD) (id=VICT0147 pos=<6477.0, 8147.0, 336.0>) killed by Player "Killer019" (id=KILL0019 pos=<6477.0, 8147.0, 337.0>) with M4-A1 from 62.70 meters
+12:22:28 | Player "Victim148" (DEAD) (id=VICT0148 pos=<6478.0, 8148.0, 337.0>) killed by Player "Killer020" (id=KILL0020 pos=<6478.0, 8148.0, 338.0>) with M4-A1 from 63.80 meters
+12:22:29 | Player "Victim149" (DEAD) (id=VICT0149 pos=<6479.0, 8149.0, 338.0>) killed by Player "Killer021" (id=KILL0021 pos=<6479.0, 8149.0, 339.0>) with M4-A1 from 64.90 meters
+12:22:30 | Player "Victim150" (DEAD) (id=VICT0150 pos=<6480.0, 8150.0, 333.0>) killed by Player "Killer022" (id=KILL0022 pos=<6480.0, 8150.0, 335.0>) with M4-A1 from 65.00 meters
+12:22:31 | Player "Victim151" (DEAD) (id=VICT0151 pos=<6481.0, 8151.0, 334.0>) killed by Player "Killer023" (id=KILL0023 pos=<6481.0, 8151.0, 336.0>) with M4-A1 from 66.10 meters
+12:22:32 | Player "Victim152" (DEAD) (id=VICT0152 pos=<6482.0, 8152.0, 335.0>) killed by Player "Killer024" (id=KILL0024 pos=<6482.0, 8152.0, 337.0>) with M4-A1 from 67.20 meters
+12:22:33 | Player "Victim153" (DEAD) (id=VICT0153 pos=<6483.0, 8153.0, 336.0>) killed by Player "Killer025" (id=KILL0025 pos=<6483.0, 8153.0, 338.0>) with M4-A1 from 68.30 meters
+12:22:34 | Player "Victim154" (DEAD) (id=VICT0154 pos=<6484.0, 8154.0, 337.0>) killed by Player "Killer026" (id=KILL0026 pos=<6484.0, 8154.0, 339.0>) with M4-A1 from 69.40 meters
+12:22:35 | Player "Victim155" (DEAD) (id=VICT0155 pos=<6485.0, 8155.0, 338.0>) killed by Player "Killer027" (id=KILL0027 pos=<6485.0, 8155.0, 335.0>) with M4-A1 from 70.50 meters
+12:22:36 | Player "Victim156" (DEAD) (id=VICT0156 pos=<6486.0, 8156.0, 333.0>) killed by Player "Killer028" (id=KILL0028 pos=<6486.0, 8156.0, 336.0>) with M4-A1 from 71.60 meters
+12:22:37 | Player "Victim157" (DEAD) (id=VICT0157 pos=<6487.0, 8157.0, 334.0>) killed by Player "Killer029" (id=KILL0029 pos=<6487.0, 8157.0, 337.0>) with M4-A1 from 72.70 meters
+12:22:38 | Player "Victim158" (DEAD) (id=VICT0158 pos=<6488.0, 8158.0, 335.0>) killed by Player "Killer030" (id=KILL0030 pos=<6488.0, 8158.0, 338.0>) with M4-A1 from 73.80 meters
+12:22:39 | Player "Victim159" (DEAD) (id=VICT0159 pos=<6489.0, 8159.0, 336.0>) killed by Player "Killer031" (id=KILL0031 pos=<6489.0, 8159.0, 339.0>) with M4-A1 from 74.90 meters
+12:22:40 | Player "Victim160" (DEAD) (id=VICT0160 pos=<6490.0, 8160.0, 337.0>) killed by Player "Killer000" (id=KILL0000 pos=<6410.0, 8160.0, 335.0>) with M4-A1 from 75.00 meters
+12:22:41 | Player "Victim161" (DEAD) (id=VICT0161 pos=<6491.0, 8161.0, 338.0>) killed by Player "Killer001" (id=KILL0001 pos=<6411.0, 8161.0, 336.0>) with M4-A1 from 76.10 meters
+12:22:42 | Player "Victim162" (DEAD) (id=VICT0162 pos=<6492.0, 8162.0, 333.0>) killed by Player "Killer002" (id=KILL0002 pos=<6412.0, 8162.0, 337.0>) with M4-A1 from 77.20 meters
+12:22:43 | Player "Victim163" (DEAD) (id=VICT0163 pos=<6493.0, 8163.0, 334.0>) killed by Player "Killer003" (id=KILL0003 pos=<6413.0, 8163.0, 338.0>) with M4-A1 from 78.30 meters
+12:22:44 | Player "Victim164" (DEAD) (id=VICT0164 pos=<6494.0, 8164.0, 335.0>) killed by Player "Killer004" (id=KILL0004 pos=<6414.0, 8164.0, 339.0>) with M4-A1 from 79.40 meters
+12:22:45 | Player "Victim165" (DEAD) (id=VICT0165 pos=<6495.0, 8165.0, 336.0>) killed by Player "Killer005" (id=KILL0005 pos=<6415.0, 8165.0, 335.0>) with M4-A1 from 80.50 meters
+12:22:46 | Player "Victim166" (DEAD) (id=VICT0166 pos=<6496.0, 8166.0, 337.0>) killed by Player "Killer006" (id=KILL0006 pos=<6416.0, 8166.0, 336.0>) with M4-A1 from 81.60 meters
+12:22:47 | Player "Victim167" (DEAD) (id=VICT0167 pos=<6497.0, 8167.0, 338.0>) killed by Player "Killer007" (id=KILL0007 pos=<6417.0, 8167.0, 337.0>) with M4-A1 from 82.70 meters
+12:22:48 | Player "Victim168" (DEAD) (id=VICT0168 pos=<6498.0, 8168.0, 333.0>) killed by Player "Killer008" (id=KILL0008 pos=<6418.0, 8168.0, 338.0>) with M4-A1 from 83.80 meters
+12:22:49 | Player "Victim169" (DEAD) (id=VICT0169 pos=<6499.0, 8169.0, 334.0>) killed by Player "Killer009" (id=KILL0009 pos=<6419.0, 8169.0, 339.0>) with M4-A1 from 84.90 meters
+12:22:50 | Player "Victim170" (DEAD) (id=VICT0170 pos=<6500.0, 8170.0, 335.0>) killed by Player "Killer010" (id=KILL0010 pos=<6420.0, 8170.0, 335.0>) with M4-A1 from 85.00 meters
+12:22:51 | Player "Victim171" (DEAD) (id=VICT0171 pos=<6501.0, 8171.0, 336.0>) killed by Player "Killer011" (id=KILL0011 pos=<6421.0, 8171.0, 336.0>) with M4-A1 from 86.10 meters
+12:22:52 | Player "Victim172" (DEAD) (id=VICT0172 pos=<6502.0, 8172.0, 337.0>) killed by Player "Killer012" (id=KILL0012 pos=<6422.0, 8172.0, 337.0>) with M4-A1 from 87.20 meters
+12:22:53 | Player "Victim173" (DEAD) (id=VICT0173 pos=<6503.0, 8173.0, 338.0>) killed by Player "Killer013" (id=KILL0013 pos=<6423.0, 8173.0, 338.0>) with M4-A1 from 88.30 meters
+12:22:54 | Player "Victim174" (DEAD) (id=VICT0174 pos=<6504.0, 8174.0, 333.0>) killed by Player "Killer014" (id=KILL0014 pos=<6424.0, 8174.0, 339.0>) with M4-A1 from 89.40 meters
+12:22:55 | Player "Victim175" (DEAD) (id=VICT0175 pos=<6505.0, 8175.0, 334.0>) killed by Player "Killer015" (id=KILL0015 pos=<6425.0, 8175.0, 335.0>) with M4-A1 from 90.50 meters
+12:22:56 | Player "Victim176" (DEAD) (id=VICT0176 pos=<6506.0, 8176.0, 335.0>) killed by Player "Killer016" (id=KILL0016 pos=<6426.0, 8176.0, 336.0>) with M4-A1 from 91.60 meters
+12:22:57 | Player "Victim177" (DEAD) (id=VICT0177 pos=<6507.0, 8177.0, 336.0>) killed by Player "Killer017" (id=KILL0017 pos=<6427.0, 8177.0, 337.0>) with M4-A1 from 92.70 meters
+12:22:58 | Player "Victim178" (DEAD) (id=VICT0178 pos=<6508.0, 8178.0, 337.0>) killed by Player "Killer018" (id=KILL0018 pos=<6428.0, 8178.0, 338.0>) with M4-A1 from 93.80 meters
+12:22:59 | Player "Victim179" (DEAD) (id=VICT0179 pos=<6509.0, 8179.0, 338.0>) killed by Player "Killer019" (id=KILL0019 pos=<6429.0, 8179.0, 339.0>) with M4-A1 from 94.90 meters
+12:23:00 | Player "Victim180" (DEAD) (id=VICT0180 pos=<6420.0, 8180.0, 333.0>) killed by Player "Killer020" (id=KILL0020 pos=<6430.0, 8120.0, 335.0>) with M4-A1 from 5.00 meters
+12:23:01 | Player "Victim181" (DEAD) (id=VICT0181 pos=<6421.0, 8181.0, 334.0>) killed by Player "Killer021" (id=KILL0021 pos=<6431.0, 8121.0, 336.0>) with M4-A1 from 6.10 meters
+12:23:02 | Player "Victim182" (DEAD) (id=VICT0182 pos=<6422.0, 8182.0, 335.0>) killed by Player "Killer022" (id=KILL0022 pos=<6432.0, 8122.0, 337.0>) with M4-A1 from 7.20 meters
+12:23:03 | Player "Victim183" (DEAD) (id=VICT0183 pos=<6423.0, 8183.0, 336.0>) killed by Player "Killer023" (id=KILL0023 pos=<6433.0, 8123.0, 338.0>) with M4-A1 from 8.30 meters
+12:23:04 | Player "Victim184" (DEAD) (id=VICT0184 pos=<6424.0, 8184.0, 337.0>) killed by Player "Killer024" (id=KILL0024 pos=<6434.0, 8124.0, 339.0>) with M4-A1 from 9.40 meters
+12:23:05 | Player "Victim185" (DEAD) (id=VICT0185 pos=<6425.0, 8185.0, 338.0>) killed by Player "Killer025" (id=KILL0025 pos=<6435.0, 8125.0, 335.0>) with M4-A1 from 10.50 meters
+12:23:06 | Player "Victim186" (DEAD) (id=VICT0186 pos=<6426.0, 8186.0, 333.0>) killed by Player "Killer026" (id=KILL0026 pos=<6436.0, 8126.0, 336.0>) with M4-A1 from 11.60 meters
+12:23:07 | Player "Victim187" (DEAD) (id=VICT0187 pos=<6427.0, 8187.0, 334.0>) killed by Player "Killer027" (id=KILL0027 pos=<6437.0, 8127.0, 337.0>) with M4-A1 from 12.70 meters
+12:23:08 | Player "Victim188" (DEAD) (id=VICT0188 pos=<6428.0, 8188.0, 335.0>) killed by Player "Killer028" (id=KILL0028 pos=<6438.0, 8128.0, 338.0>) with M4-A1 from 13.80 meters
+12:23:09 | Player "Victim189" (DEAD) (id=VICT0189 pos=<6429.0, 8189.0, 336.0>) killed by Player "Killer029" (id=KILL0029 pos=<6439.0, 8129.0, 339.0>) with M4-A1 from 14.90 meters
+12:23:10 | Player "Victim190" (DEAD) (id=VICT0190 pos=<6430.0, 8190.0, 337.0>) killed by Player "Killer030" (id=KILL0030 pos=<6440.0, 8130.0, 335.0>) with M4-A1 from 15.00 meters
+12:23:11 | Player "Victim191" (DEAD) (id=VICT0191 pos=<6431.0, 8191.0, 338.0>) killed by Player "Killer031" (id=KILL0031 pos=<6441.0, 8131.0, 336.0>) with M4-A1 from 16.10 meters
+12:23:12 | Player "Victim192" (DEAD) (id=VICT0192 pos=<6432.0, 8192.0, 333.0>) killed by Player "Killer000" (id=KILL0000 pos=<6442.0, 8132.0, 337.0>) with M4-A1 from 17.20 meters
+12:23:13 | Player "Victim193" (DEAD) (id=VICT0193 pos=<6433.0, 8193.0, 334.0>) killed by Player "Killer001" (id=KILL0001 pos=<6443.0, 8133.0, 338.0>) with M4-A1 from 18.30 meters
+12:23:14 | Player "Victim194" (DEAD) (id=VICT0194 pos=<6434.0, 8194.0, 335.0>) killed by Player "Killer002" (id=KILL0002 pos=<6444.0, 8134.0, 339.0>) with M4-A1 from 19.40 meters
+12:23:15 | Player "Victim195" (DEAD) (id=VICT0195 pos=<6435.0, 8195.0, 336.0>) killed by Player "Killer003" (id=KILL0003 pos=<6445.0, 8135.0, 335.0>) with M4-A1 from 20.50 meters
+12:23:16 | Player "Victim196" (DEAD) (id=VICT0196 pos=<6436.0, 8196.0, 337.0>) killed by Player "Killer004" (id=KILL0004 pos=<6446.0, 8136.0, 336.0>) with M4-A1 from 21.60 meters
+12:23:17 | Player "Victim197" (DEAD) (id=VICT0197 pos=<6437.0, 8197.0, 338.0>) killed by Player "Killer005" (id=KILL0005 pos=<6447.0, 8137.0, 337.0>) with M4-A1 from 22.70 meters
+12:23:18 | Player "Victim198" (DEAD) (id=VICT0198 pos=<6438.0, 8198.0, 333.0>) killed by Player "Killer006" (id=KILL0006 pos=<6448.0, 8138.0, 338.0>) with M4-A1 from 23.80 meters
+12:23:19 | Player "Victim199" (DEAD) (id=VICT0199 pos=<6439.0, 8199.0, 334.0>) killed by Player "Killer007" (id=KILL0007 pos=<6449.0, 8139.0, 339.0>) with M4-A1 from 24.90 meters
+12:23:20 | Player "Victim200" (DEAD) (id=VICT0200 pos=<6440.0, 8200.0, 335.0>) killed by Player "Killer008" (id=KILL0008 pos=<6450.0, 8140.0, 335.0>) with M4-A1 from 25.00 meters
+12:23:21 | Player "Victim201" (DEAD) (id=VICT0201 pos=<6441.0, 8201.0, 336.0>) killed by Player "Killer009" (id=KILL0009 pos=<6451.0, 8141.0, 336.0>) with M4-A1 from 26.10 meters
+12:23:22 | Player "Victim202" (DEAD) (id=VICT0202 pos=<6442.0, 8202.0, 337.0>) killed by Player "Killer010" (id=KILL0010 pos=<6452.0, 8142.0, 337.0>) with M4-A1 from 27.20 meters
+12:23:23 | Player "Victim203" (DEAD) (id=VICT0203 pos=<6443.0, 8203.0, 338.0>) killed by Player "Killer011" (id=KILL0011 pos=<6453.0, 8143.0, 338.0>) with M4-A1 from 28.30 meters
+12:23:24 | Player "Victim204" (DEAD) (id=VICT0204 pos=<6444.0, 8204.0, 333.0>) killed by Player "Killer012" (id=KILL0012 pos=<6454.0, 8144.0, 339.0>) with M4-A1 from 29.40 meters
+12:23:25 | Player "Victim205" (DEAD) (id=VICT0205 pos=<6445.0, 8205.0, 334.0>) killed by Player "Killer013" (id=KILL0013 pos=<6455.0, 8145.0, 335.0>) with M4-A1 from 30.50 meters
+12:23:26 | Player "Victim206" (DEAD) (id=VICT0206 pos=<6446.0, 8206.0, 335.0>) killed by Player "Killer014" (id=KILL0014 pos=<6456.0, 8146.0, 336.0>) with M4-A1 from 31.60 meters
+12:23:27 | Player "Victim207" (DEAD) (id=VICT0207 pos=<6447.0, 8207.0, 336.0>) killed by Player "Killer015" (id=KILL0015 pos=<6457.0, 8147.0, 337.0>) with M4-A1 from 32.70 meters
+12:23:28 | Player "Victim208" (DEAD) (id=VICT0208 pos=<6448.0, 8208.0, 337.0>) killed by Player "Killer016" (id=KILL0016 pos=<6458.0, 8148.0, 338.0>) with M4-A1 from 33.80 meters
+12:23:29 | Player "Victim209" (DEAD) (id=VICT0209 pos=<6449.0, 8209.0, 338.0>) killed by Player "Killer017" (id=KILL0017 pos=<6459.0, 8149.0, 339.0>) with M4-A1 from 34.90 meters
+12:23:30 | Player "Victim210" (DEAD) (id=VICT0210 pos=<6450.0, 8140.0, 333.0>) killed by Player "Killer018" (id=KILL0018 pos=<6460.0, 8150.0, 335.0>) with M4-A1 from 35.00 meters
+12:23:31 | Player "Victim211" (DEAD) (id=VICT0211 pos=<6451.0, 8141.0, 334.0>) killed by Player "Killer019" (id=KILL0019 pos=<6461.0, 8151.0, 336.0>) with M4-A1 from 36.10 meters
+12:23:32 | Player "Victim212" (DEAD) (id=VICT0212 pos=<6452.0, 8142.0, 335.0>) killed by Player "Killer020" (id=KILL0020 pos=<6462.0, 8152.0, 337.0>) with M4-A1 from 37.20 meters
+12:23:33 | Player "Victim213" (DEAD) (id=VICT0213 pos=<6453.0, 8143.0, 336.0>) killed by Player "Killer021" (id=KILL0021 pos=<6463.0, 8153.0, 338.0>) with M4-A1 from 38.30 meters
+12:23:34 | Player "Victim214" (DEAD) (id=VICT0214 pos=<6454.0, 8144.0, 337.0>) killed by Player "Killer022" (id=KILL0022 pos=<6464.0, 8154.0, 339.0>) with M4-A1 from 39.40 meters
+12:23:35 | Player "Victim215" (DEAD) (id=VICT0215 pos=<6455.0, 8145.0, 338.0>) killed by Player "Killer023" (id=KILL0023 pos=<6465.0, 8155.0, 335.0>) with M4-A1 from 40.50 meters
+12:10:40 | DEBUG server heartbeat line 640
+12:10:41 | DEBUG server heartbeat line 641
+12:10:42 | DEBUG server heartbeat line 642
+12:10:43 | DEBUG server heartbeat line 643
+12:10:44 | DEBUG server heartbeat line 644
+12:10:45 | DEBUG server heartbeat line 645
+12:10:46 | DEBUG server heartbeat line 646
+12:10:47 | DEBUG server heartbeat line 647
+12:10:48 | DEBUG server heartbeat line 648
+12:10:49 | DEBUG server heartbeat line 649
+12:10:50 | DEBUG server heartbeat line 650
+12:10:51 | DEBUG server heartbeat line 651
+12:10:52 | DEBUG server heartbeat line 652
+12:10:53 | DEBUG server heartbeat line 653
+12:10:54 | DEBUG server heartbeat line 654
+12:10:55 | DEBUG server heartbeat line 655
+12:10:56 | DEBUG server heartbeat line 656
+12:10:57 | DEBUG server heartbeat line 657
+12:10:58 | DEBUG server heartbeat line 658
+12:10:59 | DEBUG server heartbeat line 659
+12:11:00 | DEBUG server heartbeat line 660
+12:11:01 | DEBUG server heartbeat line 661
+12:11:02 | DEBUG server heartbeat line 662
+12:11:03 | DEBUG server heartbeat line 663
+12:11:04 | DEBUG server heartbeat line 664
+12:11:05 | DEBUG server heartbeat line 665
+12:11:06 | DEBUG server heartbeat line 666
+12:11:07 | DEBUG server heartbeat line 667
+12:11:08 | DEBUG server heartbeat line 668
+12:11:09 | DEBUG server heartbeat line 669
+12:11:10 | DEBUG server heartbeat line 670
+12:11:11 | DEBUG server heartbeat line 671
+12:11:12 | DEBUG server heartbeat line 672
+12:11:13 | DEBUG server heartbeat line 673
+12:11:14 | DEBUG server heartbeat line 674
+12:11:15 | DEBUG server heartbeat line 675
+12:11:16 | DEBUG server heartbeat line 676
+12:11:17 | DEBUG server heartbeat line 677
+12:11:18 | DEBUG server heartbeat line 678
+12:11:19 | DEBUG server heartbeat line 679
+12:11:20 | DEBUG server heartbeat line 680
+12:11:21 | DEBUG server heartbeat line 681
+12:11:22 | DEBUG server heartbeat line 682
+12:11:23 | DEBUG server heartbeat line 683
+12:11:24 | DEBUG server heartbeat line 684
+12:11:25 | DEBUG server heartbeat line 685
+12:11:26 | DEBUG server heartbeat line 686
+12:11:27 | DEBUG server heartbeat line 687
+12:11:28 | DEBUG server heartbeat line 688
+12:11:29 | DEBUG server heartbeat line 689
+12:11:30 | DEBUG server heartbeat line 690
+12:11:31 | DEBUG server heartbeat line 691
+12:11:32 | DEBUG server heartbeat line 692
+12:11:33 | DEBUG server heartbeat line 693
+12:11:34 | DEBUG server heartbeat line 694
+12:11:35 | DEBUG server heartbeat line 695
+12:11:36 | DEBUG server heartbeat line 696
+12:11:37 | DEBUG server heartbeat line 697
+12:11:38 | DEBUG server heartbeat line 698
+12:11:39 | DEBUG server heartbeat line 699
+12:11:40 | DEBUG server heartbeat line 700
+12:11:41 | DEBUG server heartbeat line 701
+12:11:42 | DEBUG server heartbeat line 702
+12:11:43 | DEBUG server heartbeat line 703
+12:11:44 | DEBUG server heartbeat line 704
+12:11:45 | DEBUG server heartbeat line 705
+12:11:46 | DEBUG server heartbeat line 706
+12:11:47 | DEBUG server heartbeat line 707
+12:11:48 | DEBUG server heartbeat line 708
+12:11:49 | DEBUG server heartbeat line 709
+12:11:50 | DEBUG server heartbeat line 710
+12:11:51 | DEBUG server heartbeat line 711
+12:11:52 | DEBUG server heartbeat line 712
+12:11:53 | DEBUG server heartbeat line 713
+12:11:54 | DEBUG server heartbeat line 714
+12:11:55 | DEBUG server heartbeat line 715
+12:11:56 | DEBUG server heartbeat line 716
+12:11:57 | DEBUG server heartbeat line 717
+12:11:58 | DEBUG server heartbeat line 718
+12:11:59 | DEBUG server heartbeat line 719
+12:12:00 | DEBUG server heartbeat line 720
+12:12:01 | DEBUG server heartbeat line 721
+12:12:02 | DEBUG server heartbeat line 722
+12:12:03 | DEBUG server heartbeat line 723
+12:12:04 | DEBUG server heartbeat line 724
+12:12:05 | DEBUG server heartbeat line 725
+12:12:06 | DEBUG server heartbeat line 726
+12:12:07 | DEBUG server heartbeat line 727
+12:12:08 | DEBUG server heartbeat line 728
+12:12:09 | DEBUG server heartbeat line 729
+12:12:10 | DEBUG server heartbeat line 730
+12:12:11 | DEBUG server heartbeat line 731
+12:12:12 | DEBUG server heartbeat line 732
+12:12:13 | DEBUG server heartbeat line 733
+12:12:14 | DEBUG server heartbeat line 734
+12:12:15 | DEBUG server heartbeat line 735
+12:12:16 | DEBUG server heartbeat line 736
+12:12:17 | DEBUG server heartbeat line 737
+12:12:18 | DEBUG server heartbeat line 738
+12:12:19 | DEBUG server heartbeat line 739
+12:12:20 | DEBUG server heartbeat line 740
+12:12:21 | DEBUG server heartbeat line 741
+12:12:22 | DEBUG server heartbeat line 742
+12:12:23 | DEBUG server heartbeat line 743
+12:12:24 | DEBUG server heartbeat line 744
+12:12:25 | DEBUG server heartbeat line 745
+12:12:26 | DEBUG server heartbeat line 746
+12:12:27 | DEBUG server heartbeat line 747
+12:12:28 | DEBUG server heartbeat line 748
+12:12:29 | DEBUG server heartbeat line 749
+12:12:30 | DEBUG server heartbeat line 750
+12:12:31 | DEBUG server heartbeat line 751
+12:12:32 | DEBUG server heartbeat line 752
+12:12:33 | DEBUG server heartbeat line 753
+12:12:34 | DEBUG server heartbeat line 754
+12:12:35 | DEBUG server heartbeat line 755
+12:12:36 | DEBUG server heartbeat line 756
+12:12:37 | DEBUG server heartbeat line 757
+12:12:38 | DEBUG server heartbeat line 758
+12:12:39 | DEBUG server heartbeat line 759
+12:12:40 | DEBUG server heartbeat line 760
+12:12:41 | DEBUG server heartbeat line 761
+12:12:42 | DEBUG server heartbeat line 762
+12:12:43 | DEBUG server heartbeat line 763
+12:12:44 | DEBUG server heartbeat line 764
+12:12:45 | DEBUG server heartbeat line 765
+12:12:46 | DEBUG server heartbeat line 766
+12:12:47 | DEBUG server heartbeat line 767
+12:12:48 | DEBUG server heartbeat line 768
+12:12:49 | DEBUG server heartbeat line 769
+12:12:50 | DEBUG server heartbeat line 770
+12:12:51 | DEBUG server heartbeat line 771
+12:12:52 | DEBUG server heartbeat line 772
+12:12:53 | DEBUG server heartbeat line 773
+12:12:54 | DEBUG server heartbeat line 774
+12:12:55 | DEBUG server heartbeat line 775
+12:12:56 | DEBUG server heartbeat line 776
+12:12:57 | DEBUG server heartbeat line 777
+12:12:58 | DEBUG server heartbeat line 778
+12:12:59 | DEBUG server heartbeat line 779
+12:13:00 | DEBUG server heartbeat line 780
+12:13:01 | DEBUG server heartbeat line 781
+12:13:02 | DEBUG server heartbeat line 782
+12:13:03 | DEBUG server heartbeat line 783
+12:13:04 | DEBUG server heartbeat line 784
+12:13:05 | DEBUG server heartbeat line 785
+12:13:06 | DEBUG server heartbeat line 786
+12:13:07 | DEBUG server heartbeat line 787
+12:13:08 | DEBUG server heartbeat line 788
+12:13:09 | DEBUG server heartbeat line 789
+12:13:10 | DEBUG server heartbeat line 790
+12:13:11 | DEBUG server heartbeat line 791
+12:13:12 | DEBUG server heartbeat line 792
+12:13:13 | DEBUG server heartbeat line 793
+12:13:14 | DEBUG server heartbeat line 794
+12:13:15 | DEBUG server heartbeat line 795
+12:13:16 | DEBUG server heartbeat line 796
+12:13:17 | DEBUG server heartbeat line 797
+12:13:18 | DEBUG server heartbeat line 798
+12:13:19 | DEBUG server heartbeat line 799
+12:13:20 | DEBUG server heartbeat line 800
+12:13:21 | DEBUG server heartbeat line 801
+12:13:22 | DEBUG server heartbeat line 802
+12:13:23 | DEBUG server heartbeat line 803
+12:13:24 | DEBUG server heartbeat line 804
+12:13:25 | DEBUG server heartbeat line 805
+12:13:26 | DEBUG server heartbeat line 806
+12:13:27 | DEBUG server heartbeat line 807
+12:13:28 | DEBUG server heartbeat line 808
+12:13:29 | DEBUG server heartbeat line 809
+12:13:30 | DEBUG server heartbeat line 810
+12:13:31 | DEBUG server heartbeat line 811
+12:13:32 | DEBUG server heartbeat line 812
+12:13:33 | DEBUG server heartbeat line 813
+12:13:34 | DEBUG server heartbeat line 814
+12:13:35 | DEBUG server heartbeat line 815
+12:13:36 | DEBUG server heartbeat line 816
+12:13:37 | DEBUG server heartbeat line 817
+12:13:38 | DEBUG server heartbeat line 818
+12:13:39 | DEBUG server heartbeat line 819
+12:13:40 | DEBUG server heartbeat line 820
+12:13:41 | DEBUG server heartbeat line 821
+12:13:42 | DEBUG server heartbeat line 822
+12:13:43 | DEBUG server heartbeat line 823
+12:13:44 | DEBUG server heartbeat line 824
+12:13:45 | DEBUG server heartbeat line 825
+12:13:46 | DEBUG server heartbeat line 826
+12:13:47 | DEBUG server heartbeat line 827
+12:13:48 | DEBUG server heartbeat line 828
+12:13:49 | DEBUG server heartbeat line 829
+12:13:50 | DEBUG server heartbeat line 830
+12:13:51 | DEBUG server heartbeat line 831
+12:13:52 | DEBUG server heartbeat line 832
+12:13:53 | DEBUG server heartbeat line 833
+12:13:54 | DEBUG server heartbeat line 834
+12:13:55 | DEBUG server heartbeat line 835
+12:13:56 | DEBUG server heartbeat line 836
+12:13:57 | DEBUG server heartbeat line 837
+12:13:58 | DEBUG server heartbeat line 838
+12:13:59 | DEBUG server heartbeat line 839
+12:14:00 | DEBUG server heartbeat line 840
+12:14:01 | DEBUG server heartbeat line 841
+12:14:02 | DEBUG server heartbeat line 842
+12:14:03 | DEBUG server heartbeat line 843
+12:14:04 | DEBUG server heartbeat line 844
+12:14:05 | DEBUG server heartbeat line 845
+12:14:06 | DEBUG server heartbeat line 846
+12:14:07 | DEBUG server heartbeat line 847
+12:14:08 | DEBUG server heartbeat line 848
+12:14:09 | DEBUG server heartbeat line 849
+12:14:10 | DEBUG server heartbeat line 850
+12:14:11 | DEBUG server heartbeat line 851
+12:14:12 | DEBUG server heartbeat line 852
+12:14:13 | DEBUG server heartbeat line 853
+12:14:14 | DEBUG server heartbeat line 854
+12:14:15 | DEBUG server heartbeat line 855
+12:14:16 | DEBUG server heartbeat line 856
+12:14:17 | DEBUG server heartbeat line 857
+12:14:18 | DEBUG server heartbeat line 858
+12:14:19 | DEBUG server heartbeat line 859
+12:14:20 | DEBUG server heartbeat line 860
+12:14:21 | DEBUG server heartbeat line 861
+12:14:22 | DEBUG server heartbeat line 862
+12:14:23 | DEBUG server heartbeat line 863
+12:14:24 | DEBUG server heartbeat line 864
+12:14:25 | DEBUG server heartbeat line 865
+12:14:26 | DEBUG server heartbeat line 866
+12:14:27 | DEBUG server heartbeat line 867
+12:14:28 | DEBUG server heartbeat line 868
+12:14:29 | DEBUG server heartbeat line 869
+12:14:30 | DEBUG server heartbeat line 870
+12:14:31 | DEBUG server heartbeat line 871
+12:14:32 | DEBUG server heartbeat line 872
+12:14:33 | DEBUG server heartbeat line 873
+12:14:34 | DEBUG server heartbeat line 874
+12:14:35 | DEBUG server heartbeat line 875
+12:14:36 | DEBUG server heartbeat line 876
+12:14:37 | DEBUG server heartbeat line 877
+12:14:38 | DEBUG server heartbeat line 878
+12:14:39 | DEBUG server heartbeat line 879
+12:14:40 | DEBUG server heartbeat line 880
+12:14:41 | DEBUG server heartbeat line 881
+12:14:42 | DEBUG server heartbeat line 882
+12:14:43 | DEBUG server heartbeat line 883
+12:14:44 | DEBUG server heartbeat line 884
+12:14:45 | DEBUG server heartbeat line 885
+12:14:46 | DEBUG server heartbeat line 886
+12:14:47 | DEBUG server heartbeat line 887
+12:14:48 | DEBUG server heartbeat line 888
+12:14:49 | DEBUG server heartbeat line 889
+12:14:50 | DEBUG server heartbeat line 890
+12:14:51 | DEBUG server heartbeat line 891
+12:14:52 | DEBUG server heartbeat line 892
+12:14:53 | DEBUG server heartbeat line 893
+12:14:54 | DEBUG server heartbeat line 894
+12:14:55 | DEBUG server heartbeat line 895
+12:14:56 | DEBUG server heartbeat line 896
+12:14:57 | DEBUG server heartbeat line 897
+12:14:58 | DEBUG server heartbeat line 898
+12:14:59 | DEBUG server heartbeat line 899
+12:15:00 | DEBUG server heartbeat line 900
+12:15:01 | DEBUG server heartbeat line 901
+12:15:02 | DEBUG server heartbeat line 902
+12:15:03 | DEBUG server heartbeat line 903
+12:15:04 | DEBUG server heartbeat line 904
+12:15:05 | DEBUG server heartbeat line 905
+12:15:06 | DEBUG server heartbeat line 906
+12:15:07 | DEBUG server heartbeat line 907
+12:15:08 | DEBUG server heartbeat line 908
+12:15:09 | DEBUG server heartbeat line 909
+12:15:10 | DEBUG server heartbeat line 910
+12:15:11 | DEBUG server heartbeat line 911
+12:15:12 | DEBUG server heartbeat line 912
+12:15:13 | DEBUG server heartbeat line 913
+12:15:14 | DEBUG server heartbeat line 914
+12:15:15 | DEBUG server heartbeat line 915
+12:15:16 | DEBUG server heartbeat line 916
+12:15:17 | DEBUG server heartbeat line 917
+12:15:18 | DEBUG server heartbeat line 918
+12:15:19 | DEBUG server heartbeat line 919
+12:15:20 | DEBUG server heartbeat line 920
+12:15:21 | DEBUG server heartbeat line 921
+12:15:22 | DEBUG server heartbeat line 922
+12:15:23 | DEBUG server heartbeat line 923
+12:15:24 | DEBUG server heartbeat line 924
+12:15:25 | DEBUG server heartbeat line 925
+12:15:26 | DEBUG server heartbeat line 926
+12:15:27 | DEBUG server heartbeat line 927
+12:15:28 | DEBUG server heartbeat line 928
+12:15:29 | DEBUG server heartbeat line 929
+12:15:30 | DEBUG server heartbeat line 930
+12:15:31 | DEBUG server heartbeat line 931
+12:15:32 | DEBUG server heartbeat line 932
+12:15:33 | DEBUG server heartbeat line 933
+12:15:34 | DEBUG server heartbeat line 934
+12:15:35 | DEBUG server heartbeat line 935
+12:15:36 | DEBUG server heartbeat line 936
+12:15:37 | DEBUG server heartbeat line 937
+12:15:38 | DEBUG server heartbeat line 938
+12:15:39 | DEBUG server heartbeat line 939
+12:15:40 | DEBUG server heartbeat line 940
+12:15:41 | DEBUG server heartbeat line 941
+12:15:42 | DEBUG server heartbeat line 942
+12:15:43 | DEBUG server heartbeat line 943
+12:15:44 | DEBUG server heartbeat line 944
+12:15:45 | DEBUG server heartbeat line 945
+12:15:46 | DEBUG server heartbeat line 946
+12:15:47 | DEBUG server heartbeat line 947
+12:15:48 | DEBUG server heartbeat line 948
+12:15:49 | DEBUG server heartbeat line 949
+12:15:50 | DEBUG server heartbeat line 950
+12:15:51 | DEBUG server heartbeat line 951
+12:15:52 | DEBUG server heartbeat line 952
+12:15:53 | DEBUG server heartbeat line 953
+12:15:54 | DEBUG server heartbeat line 954
+12:15:55 | DEBUG server heartbeat line 955
+12:15:56 | DEBUG server heartbeat line 956
+12:15:57 | DEBUG server heartbeat line 957
+12:15:58 | DEBUG server heartbeat line 958
+12:15:59 | DEBUG server heartbeat line 959
+12:16:00 | DEBUG server heartbeat line 960
+12:16:01 | DEBUG server heartbeat line 961
+12:16:02 | DEBUG server heartbeat line 962
+12:16:03 | DEBUG server heartbeat line 963
+12:16:04 | DEBUG server heartbeat line 964
+12:16:05 | DEBUG server heartbeat line 965
+12:16:06 | DEBUG server heartbeat line 966
+12:16:07 | DEBUG server heartbeat line 967
+12:16:08 | DEBUG server heartbeat line 968
+12:16:09 | DEBUG server heartbeat line 969
+12:16:10 | DEBUG server heartbeat line 970
+12:16:11 | DEBUG server heartbeat line 971
+12:16:12 | DEBUG server heartbeat line 972
+12:16:13 | DEBUG server heartbeat line 973
+12:16:14 | DEBUG server heartbeat line 974
+12:16:15 | DEBUG server heartbeat line 975
+12:16:16 | DEBUG server heartbeat line 976
+12:16:17 | DEBUG server heartbeat line 977
+12:16:18 | DEBUG server heartbeat line 978
+12:16:19 | DEBUG server heartbeat line 979
+12:16:20 | DEBUG server heartbeat line 980
+12:16:21 | DEBUG server heartbeat line 981
+12:16:22 | DEBUG server heartbeat line 982
+12:16:23 | DEBUG server heartbeat line 983
+12:16:24 | DEBUG server heartbeat line 984
+12:16:25 | DEBUG server heartbeat line 985
+12:16:26 | DEBUG server heartbeat line 986
+12:16:27 | DEBUG server heartbeat line 987
+12:16:28 | DEBUG server heartbeat line 988
+12:16:29 | DEBUG server heartbeat line 989
+12:16:30 | DEBUG server heartbeat line 990
+12:16:31 | DEBUG server heartbeat line 991
+12:16:32 | DEBUG server heartbeat line 992
+12:16:33 | DEBUG server heartbeat line 993
+12:16:34 | DEBUG server heartbeat line 994
+12:16:35 | DEBUG server heartbeat line 995
+12:16:36 | DEBUG server heartbeat line 996
+12:16:37 | DEBUG server heartbeat line 997
+12:16:38 | DEBUG server heartbeat line 998
+12:16:39 | DEBUG server heartbeat line 999
+12:16:40 | DEBUG server heartbeat line 1000
+12:16:41 | DEBUG server heartbeat line 1001
+12:16:42 | DEBUG server heartbeat line 1002
+12:16:43 | DEBUG server heartbeat line 1003
+12:16:44 | DEBUG server heartbeat line 1004
+12:16:45 | DEBUG server heartbeat line 1005
+12:16:46 | DEBUG server heartbeat line 1006
+12:16:47 | DEBUG server heartbeat line 1007
+12:16:48 | DEBUG server heartbeat line 1008
+12:16:49 | DEBUG server heartbeat line 1009
+12:16:50 | DEBUG server heartbeat line 1010
+12:16:51 | DEBUG server heartbeat line 1011
+12:16:52 | DEBUG server heartbeat line 1012
+12:16:53 | DEBUG server heartbeat line 1013
+12:16:54 | DEBUG server heartbeat line 1014
+12:16:55 | DEBUG server heartbeat line 1015
+12:16:56 | DEBUG server heartbeat line 1016
+12:16:57 | DEBUG server heartbeat line 1017
+12:16:58 | DEBUG server heartbeat line 1018
+12:16:59 | DEBUG server heartbeat line 1019
+12:17:00 | DEBUG server heartbeat line 1020
+12:17:01 | DEBUG server heartbeat line 1021
+12:17:02 | DEBUG server heartbeat line 1022
+12:17:03 | DEBUG server heartbeat line 1023
+12:17:04 | DEBUG server heartbeat line 1024
+12:17:05 | DEBUG server heartbeat line 1025
+12:17:06 | DEBUG server heartbeat line 1026
+12:17:07 | DEBUG server heartbeat line 1027
+12:17:08 | DEBUG server heartbeat line 1028
+12:17:09 | DEBUG server heartbeat line 1029
+12:17:10 | DEBUG server heartbeat line 1030
+12:17:11 | DEBUG server heartbeat line 1031
+12:17:12 | DEBUG server heartbeat line 1032
+12:17:13 | DEBUG server heartbeat line 1033
+12:17:14 | DEBUG server heartbeat line 1034
+12:17:15 | DEBUG server heartbeat line 1035
+12:17:16 | DEBUG server heartbeat line 1036
+12:17:17 | DEBUG server heartbeat line 1037
+12:17:18 | DEBUG server heartbeat line 1038
+12:17:19 | DEBUG server heartbeat line 1039
+12:17:20 | DEBUG server heartbeat line 1040
+12:17:21 | DEBUG server heartbeat line 1041
+12:17:22 | DEBUG server heartbeat line 1042
+12:17:23 | DEBUG server heartbeat line 1043
+12:17:24 | DEBUG server heartbeat line 1044
+12:17:25 | DEBUG server heartbeat line 1045
+12:17:26 | DEBUG server heartbeat line 1046
+12:17:27 | DEBUG server heartbeat line 1047
+12:17:28 | DEBUG server heartbeat line 1048
+12:17:29 | DEBUG server heartbeat line 1049
+12:17:30 | DEBUG server heartbeat line 1050
+12:17:31 | DEBUG server heartbeat line 1051
+12:17:32 | DEBUG server heartbeat line 1052
+12:17:33 | DEBUG server heartbeat line 1053
+12:17:34 | DEBUG server heartbeat line 1054
+12:17:35 | DEBUG server heartbeat line 1055
+12:17:36 | DEBUG server heartbeat line 1056
+12:17:37 | DEBUG server heartbeat line 1057
+12:17:38 | DEBUG server heartbeat line 1058
+12:17:39 | DEBUG server heartbeat line 1059
+12:17:40 | DEBUG server heartbeat line 1060
+12:17:41 | DEBUG server heartbeat line 1061
+12:17:42 | DEBUG server heartbeat line 1062
+12:17:43 | DEBUG server heartbeat line 1063
+12:17:44 | DEBUG server heartbeat line 1064
+12:17:45 | DEBUG server heartbeat line 1065
+12:17:46 | DEBUG server heartbeat line 1066
+12:17:47 | DEBUG server heartbeat line 1067
+12:17:48 | DEBUG server heartbeat line 1068
+12:17:49 | DEBUG server heartbeat line 1069
+12:17:50 | DEBUG server heartbeat line 1070
+12:17:51 | DEBUG server heartbeat line 1071
+12:17:52 | DEBUG server heartbeat line 1072
+12:17:53 | DEBUG server heartbeat line 1073
+12:17:54 | DEBUG server heartbeat line 1074
+12:17:55 | DEBUG server heartbeat line 1075
+12:17:56 | DEBUG server heartbeat line 1076
+12:17:57 | DEBUG server heartbeat line 1077
+12:17:58 | DEBUG server heartbeat line 1078
+12:17:59 | DEBUG server heartbeat line 1079
+12:18:00 | DEBUG server heartbeat line 1080
+12:18:01 | DEBUG server heartbeat line 1081
+12:18:02 | DEBUG server heartbeat line 1082
+12:18:03 | DEBUG server heartbeat line 1083
+12:18:04 | DEBUG server heartbeat line 1084
+12:18:05 | DEBUG server heartbeat line 1085
+12:18:06 | DEBUG server heartbeat line 1086
+12:18:07 | DEBUG server heartbeat line 1087
+12:18:08 | DEBUG server heartbeat line 1088
+12:18:09 | DEBUG server heartbeat line 1089
+12:18:10 | DEBUG server heartbeat line 1090
+12:18:11 | DEBUG server heartbeat line 1091
+12:18:12 | DEBUG server heartbeat line 1092
+12:18:13 | DEBUG server heartbeat line 1093
+12:18:14 | DEBUG server heartbeat line 1094
+12:18:15 | DEBUG server heartbeat line 1095
+12:18:16 | DEBUG server heartbeat line 1096
+12:18:17 | DEBUG server heartbeat line 1097
+12:18:18 | DEBUG server heartbeat line 1098
+12:18:19 | DEBUG server heartbeat line 1099
+12:18:20 | DEBUG server heartbeat line 1100
+12:18:21 | DEBUG server heartbeat line 1101
+12:18:22 | DEBUG server heartbeat line 1102
+12:18:23 | DEBUG server heartbeat line 1103
+12:18:24 | DEBUG server heartbeat line 1104
+12:18:25 | DEBUG server heartbeat line 1105
+12:18:26 | DEBUG server heartbeat line 1106
+12:18:27 | DEBUG server heartbeat line 1107
+12:18:28 | DEBUG server heartbeat line 1108
+12:18:29 | DEBUG server heartbeat line 1109
+12:18:30 | DEBUG server heartbeat line 1110
+12:18:31 | DEBUG server heartbeat line 1111
+12:18:32 | DEBUG server heartbeat line 1112
+12:18:33 | DEBUG server heartbeat line 1113
+12:18:34 | DEBUG server heartbeat line 1114
+12:18:35 | DEBUG server heartbeat line 1115
+12:18:36 | DEBUG server heartbeat line 1116
+12:18:37 | DEBUG server heartbeat line 1117
+12:18:38 | DEBUG server heartbeat line 1118
+12:18:39 | DEBUG server heartbeat line 1119
+12:18:40 | DEBUG server heartbeat line 1120
+12:18:41 | DEBUG server heartbeat line 1121
+12:18:42 | DEBUG server heartbeat line 1122
+12:18:43 | DEBUG server heartbeat line 1123
+12:18:44 | DEBUG server heartbeat line 1124
+12:18:45 | DEBUG server heartbeat line 1125
+12:18:46 | DEBUG server heartbeat line 1126
+12:18:47 | DEBUG server heartbeat line 1127
+12:18:48 | DEBUG server heartbeat line 1128
+12:18:49 | DEBUG server heartbeat line 1129
+12:18:50 | DEBUG server heartbeat line 1130
+12:18:51 | DEBUG server heartbeat line 1131
+12:18:52 | DEBUG server heartbeat line 1132
+12:18:53 | DEBUG server heartbeat line 1133
+12:18:54 | DEBUG server heartbeat line 1134
+12:18:55 | DEBUG server heartbeat line 1135
+12:18:56 | DEBUG server heartbeat line 1136
+12:18:57 | DEBUG server heartbeat line 1137
+12:18:58 | DEBUG server heartbeat line 1138
+12:18:59 | DEBUG server heartbeat line 1139
+12:19:00 | DEBUG server heartbeat line 1140
+12:19:01 | DEBUG server heartbeat line 1141
+12:19:02 | DEBUG server heartbeat line 1142
+12:19:03 | DEBUG server heartbeat line 1143
+12:19:04 | DEBUG server heartbeat line 1144
+12:19:05 | DEBUG server heartbeat line 1145
+12:19:06 | DEBUG server heartbeat line 1146
+12:19:07 | DEBUG server heartbeat line 1147
+12:19:08 | DEBUG server heartbeat line 1148
+12:19:09 | DEBUG server heartbeat line 1149
+12:19:10 | DEBUG server heartbeat line 1150
+12:19:11 | DEBUG server heartbeat line 1151
+12:19:12 | DEBUG server heartbeat line 1152
+12:19:13 | DEBUG server heartbeat line 1153
+12:19:14 | DEBUG server heartbeat line 1154
+12:19:15 | DEBUG server heartbeat line 1155
+12:19:16 | DEBUG server heartbeat line 1156
+12:19:17 | DEBUG server heartbeat line 1157
+12:19:18 | DEBUG server heartbeat line 1158
+12:19:19 | DEBUG server heartbeat line 1159
+12:19:20 | DEBUG server heartbeat line 1160
+12:19:21 | DEBUG server heartbeat line 1161
+12:19:22 | DEBUG server heartbeat line 1162
+12:19:23 | DEBUG server heartbeat line 1163
+12:19:24 | DEBUG server heartbeat line 1164
+12:19:25 | DEBUG server heartbeat line 1165
+12:19:26 | DEBUG server heartbeat line 1166
+12:19:27 | DEBUG server heartbeat line 1167
+12:19:28 | DEBUG server heartbeat line 1168
+12:19:29 | DEBUG server heartbeat line 1169
+12:19:30 | DEBUG server heartbeat line 1170
+12:19:31 | DEBUG server heartbeat line 1171
+12:19:32 | DEBUG server heartbeat line 1172
+12:19:33 | DEBUG server heartbeat line 1173
+12:19:34 | DEBUG server heartbeat line 1174
+12:19:35 | DEBUG server heartbeat line 1175
+12:19:36 | DEBUG server heartbeat line 1176
+12:19:37 | DEBUG server heartbeat line 1177
+12:19:38 | DEBUG server heartbeat line 1178
+12:19:39 | DEBUG server heartbeat line 1179
+12:19:40 | DEBUG server heartbeat line 1180
+12:19:41 | DEBUG server heartbeat line 1181
+12:19:42 | DEBUG server heartbeat line 1182
+12:19:43 | DEBUG server heartbeat line 1183
+12:19:44 | DEBUG server heartbeat line 1184
+12:19:45 | DEBUG server heartbeat line 1185
+12:19:46 | DEBUG server heartbeat line 1186
+12:19:47 | DEBUG server heartbeat line 1187
+12:19:48 | DEBUG server heartbeat line 1188
+12:19:49 | DEBUG server heartbeat line 1189
+12:19:50 | DEBUG server heartbeat line 1190
+12:19:51 | DEBUG server heartbeat line 1191
+12:19:52 | DEBUG server heartbeat line 1192
+12:19:53 | DEBUG server heartbeat line 1193
+12:19:54 | DEBUG server heartbeat line 1194
+12:19:55 | DEBUG server heartbeat line 1195
+12:19:56 | DEBUG server heartbeat line 1196
+12:19:57 | DEBUG server heartbeat line 1197
+12:19:58 | DEBUG server heartbeat line 1198
+12:19:59 | DEBUG server heartbeat line 1199
+12:20:00 | DEBUG server heartbeat line 1200
+12:20:01 | DEBUG server heartbeat line 1201
+12:20:02 | DEBUG server heartbeat line 1202
+12:20:03 | DEBUG server heartbeat line 1203
+12:20:04 | DEBUG server heartbeat line 1204
+12:20:05 | DEBUG server heartbeat line 1205
+12:20:06 | DEBUG server heartbeat line 1206
+12:20:07 | DEBUG server heartbeat line 1207
+12:20:08 | DEBUG server heartbeat line 1208
+12:20:09 | DEBUG server heartbeat line 1209
+12:20:10 | DEBUG server heartbeat line 1210
+12:20:11 | DEBUG server heartbeat line 1211
+12:20:12 | DEBUG server heartbeat line 1212
+12:20:13 | DEBUG server heartbeat line 1213
+12:20:14 | DEBUG server heartbeat line 1214
+12:20:15 | DEBUG server heartbeat line 1215
+12:20:16 | DEBUG server heartbeat line 1216
+12:20:17 | DEBUG server heartbeat line 1217
+12:20:18 | DEBUG server heartbeat line 1218
+12:20:19 | DEBUG server heartbeat line 1219
+12:20:20 | DEBUG server heartbeat line 1220
+12:20:21 | DEBUG server heartbeat line 1221
+12:20:22 | DEBUG server heartbeat line 1222
+12:20:23 | DEBUG server heartbeat line 1223
+12:20:24 | DEBUG server heartbeat line 1224
+12:20:25 | DEBUG server heartbeat line 1225
+12:20:26 | DEBUG server heartbeat line 1226
+12:20:27 | DEBUG server heartbeat line 1227
+12:20:28 | DEBUG server heartbeat line 1228
+12:20:29 | DEBUG server heartbeat line 1229
+12:20:30 | DEBUG server heartbeat line 1230
+12:20:31 | DEBUG server heartbeat line 1231
+12:20:32 | DEBUG server heartbeat line 1232
+12:20:33 | DEBUG server heartbeat line 1233
+12:20:34 | DEBUG server heartbeat line 1234
+12:20:35 | DEBUG server heartbeat line 1235
+12:20:36 | DEBUG server heartbeat line 1236
+12:20:37 | DEBUG server heartbeat line 1237
+12:20:38 | DEBUG server heartbeat line 1238
+12:20:39 | DEBUG server heartbeat line 1239
+12:20:40 | DEBUG server heartbeat line 1240
+12:20:41 | DEBUG server heartbeat line 1241
+12:20:42 | DEBUG server heartbeat line 1242
+12:20:43 | DEBUG server heartbeat line 1243
+12:20:44 | DEBUG server heartbeat line 1244
+12:20:45 | DEBUG server heartbeat line 1245
+12:20:46 | DEBUG server heartbeat line 1246
+12:20:47 | DEBUG server heartbeat line 1247
+12:20:48 | DEBUG server heartbeat line 1248
+12:20:49 | DEBUG server heartbeat line 1249
+12:20:50 | DEBUG server heartbeat line 1250
+12:20:51 | DEBUG server heartbeat line 1251
+12:20:52 | DEBUG server heartbeat line 1252
+12:20:53 | DEBUG server heartbeat line 1253
+12:20:54 | DEBUG server heartbeat line 1254
+12:20:55 | DEBUG server heartbeat line 1255
+12:20:56 | DEBUG server heartbeat line 1256
+12:20:57 | DEBUG server heartbeat line 1257
+12:20:58 | DEBUG server heartbeat line 1258
+12:20:59 | DEBUG server heartbeat line 1259
+12:21:00 | DEBUG server heartbeat line 1260
+12:21:01 | DEBUG server heartbeat line 1261
+12:21:02 | DEBUG server heartbeat line 1262
+12:21:03 | DEBUG server heartbeat line 1263
+12:21:04 | DEBUG server heartbeat line 1264
+12:21:05 | DEBUG server heartbeat line 1265
+12:21:06 | DEBUG server heartbeat line 1266
+12:21:07 | DEBUG server heartbeat line 1267
+12:21:08 | DEBUG server heartbeat line 1268
+12:21:09 | DEBUG server heartbeat line 1269
+12:21:10 | DEBUG server heartbeat line 1270
+12:21:11 | DEBUG server heartbeat line 1271
+12:21:12 | DEBUG server heartbeat line 1272
+12:21:13 | DEBUG server heartbeat line 1273
+12:21:14 | DEBUG server heartbeat line 1274
+12:21:15 | DEBUG server heartbeat line 1275
+12:21:16 | DEBUG server heartbeat line 1276
+12:21:17 | DEBUG server heartbeat line 1277
+12:21:18 | DEBUG server heartbeat line 1278
+12:21:19 | DEBUG server heartbeat line 1279
+12:21:20 | DEBUG server heartbeat line 1280
+12:21:21 | DEBUG server heartbeat line 1281
+12:21:22 | DEBUG server heartbeat line 1282
+12:21:23 | DEBUG server heartbeat line 1283
+12:21:24 | DEBUG server heartbeat line 1284
+12:21:25 | DEBUG server heartbeat line 1285
+12:21:26 | DEBUG server heartbeat line 1286
+12:21:27 | DEBUG server heartbeat line 1287
+12:21:28 | DEBUG server heartbeat line 1288
+12:21:29 | DEBUG server heartbeat line 1289
+12:21:30 | DEBUG server heartbeat line 1290
+12:21:31 | DEBUG server heartbeat line 1291
+12:21:32 | DEBUG server heartbeat line 1292
+12:21:33 | DEBUG server heartbeat line 1293
+12:21:34 | DEBUG server heartbeat line 1294
+12:21:35 | DEBUG server heartbeat line 1295
+12:21:36 | DEBUG server heartbeat line 1296
+12:21:37 | DEBUG server heartbeat line 1297
+12:21:38 | DEBUG server heartbeat line 1298
+12:21:39 | DEBUG server heartbeat line 1299
+12:21:40 | DEBUG server heartbeat line 1300
+12:21:41 | DEBUG server heartbeat line 1301
+12:21:42 | DEBUG server heartbeat line 1302
+12:21:43 | DEBUG server heartbeat line 1303
+12:21:44 | DEBUG server heartbeat line 1304
+12:21:45 | DEBUG server heartbeat line 1305
+12:21:46 | DEBUG server heartbeat line 1306
+12:21:47 | DEBUG server heartbeat line 1307
+12:21:48 | DEBUG server heartbeat line 1308
+12:21:49 | DEBUG server heartbeat line 1309
+12:21:50 | DEBUG server heartbeat line 1310
+12:21:51 | DEBUG server heartbeat line 1311
+12:21:52 | DEBUG server heartbeat line 1312
+12:21:53 | DEBUG server heartbeat line 1313
+12:21:54 | DEBUG server heartbeat line 1314
+12:21:55 | DEBUG server heartbeat line 1315
+12:21:56 | DEBUG server heartbeat line 1316
+12:21:57 | DEBUG server heartbeat line 1317
+12:21:58 | DEBUG server heartbeat line 1318
+12:21:59 | DEBUG server heartbeat line 1319
+12:22:00 | DEBUG server heartbeat line 1320
+12:22:01 | DEBUG server heartbeat line 1321
+12:22:02 | DEBUG server heartbeat line 1322
+12:22:03 | DEBUG server heartbeat line 1323
+12:22:04 | DEBUG server heartbeat line 1324
+12:22:05 | DEBUG server heartbeat line 1325
+12:22:06 | DEBUG server heartbeat line 1326
+12:22:07 | DEBUG server heartbeat line 1327
+12:22:08 | DEBUG server heartbeat line 1328
+12:22:09 | DEBUG server heartbeat line 1329
+12:22:10 | DEBUG server heartbeat line 1330
+12:22:11 | DEBUG server heartbeat line 1331
+12:22:12 | DEBUG server heartbeat line 1332
+12:22:13 | DEBUG server heartbeat line 1333
+12:22:14 | DEBUG server heartbeat line 1334
+12:22:15 | DEBUG server heartbeat line 1335
+12:22:16 | DEBUG server heartbeat line 1336
+12:22:17 | DEBUG server heartbeat line 1337
+12:22:18 | DEBUG server heartbeat line 1338
+12:22:19 | DEBUG server heartbeat line 1339
+12:22:20 | DEBUG server heartbeat line 1340
+12:22:21 | DEBUG server heartbeat line 1341
+12:22:22 | DEBUG server heartbeat line 1342
+12:22:23 | DEBUG server heartbeat line 1343
+12:22:24 | DEBUG server heartbeat line 1344
+12:22:25 | DEBUG server heartbeat line 1345
+12:22:26 | DEBUG server heartbeat line 1346
+12:22:27 | DEBUG server heartbeat line 1347
+12:22:28 | DEBUG server heartbeat line 1348
+12:22:29 | DEBUG server heartbeat line 1349
+12:22:30 | DEBUG server heartbeat line 1350
+12:22:31 | DEBUG server heartbeat line 1351
+12:22:32 | DEBUG server heartbeat line 1352
+12:22:33 | DEBUG server heartbeat line 1353
+12:22:34 | DEBUG server heartbeat line 1354
+12:22:35 | DEBUG server heartbeat line 1355
+12:22:36 | DEBUG server heartbeat line 1356
+12:22:37 | DEBUG server heartbeat line 1357
+12:22:38 | DEBUG server heartbeat line 1358
+12:22:39 | DEBUG server heartbeat line 1359
+12:22:40 | DEBUG server heartbeat line 1360
+12:22:41 | DEBUG server heartbeat line 1361
+12:22:42 | DEBUG server heartbeat line 1362
+12:22:43 | DEBUG server heartbeat line 1363
+12:22:44 | DEBUG server heartbeat line 1364
+12:22:45 | DEBUG server heartbeat line 1365
+12:22:46 | DEBUG server heartbeat line 1366
+12:22:47 | DEBUG server heartbeat line 1367
+12:22:48 | DEBUG server heartbeat line 1368
+12:22:49 | DEBUG server heartbeat line 1369
+12:22:50 | DEBUG server heartbeat line 1370
+12:22:51 | DEBUG server heartbeat line 1371
+12:22:52 | DEBUG server heartbeat line 1372
+12:22:53 | DEBUG server heartbeat line 1373
+12:22:54 | DEBUG server heartbeat line 1374
+12:22:55 | DEBUG server heartbeat line 1375
+12:22:56 | DEBUG server heartbeat line 1376
+12:22:57 | DEBUG server heartbeat line 1377
+12:22:58 | DEBUG server heartbeat line 1378
+12:22:59 | DEBUG server heartbeat line 1379
+12:23:00 | DEBUG server heartbeat line 1380
+12:23:01 | DEBUG server heartbeat line 1381
+12:23:02 | DEBUG server heartbeat line 1382
+12:23:03 | DEBUG server heartbeat line 1383
+12:23:04 | DEBUG server heartbeat line 1384
+12:23:05 | DEBUG server heartbeat line 1385
+12:23:06 | DEBUG server heartbeat line 1386
+12:23:07 | DEBUG server heartbeat line 1387
+12:23:08 | DEBUG server heartbeat line 1388
+12:23:09 | DEBUG server heartbeat line 1389
+12:23:10 | DEBUG server heartbeat line 1390
+12:23:11 | DEBUG server heartbeat line 1391
+12:23:12 | DEBUG server heartbeat line 1392
+12:23:13 | DEBUG server heartbeat line 1393
+12:23:14 | DEBUG server heartbeat line 1394
+12:23:15 | DEBUG server heartbeat line 1395
+12:23:16 | DEBUG server heartbeat line 1396
+12:23:17 | DEBUG server heartbeat line 1397
+12:23:18 | DEBUG server heartbeat line 1398
+12:23:19 | DEBUG server heartbeat line 1399
+12:23:20 | DEBUG server heartbeat line 1400
+12:23:21 | DEBUG server heartbeat line 1401
+12:23:22 | DEBUG server heartbeat line 1402
+12:23:23 | DEBUG server heartbeat line 1403
+12:23:24 | DEBUG server heartbeat line 1404
+12:23:25 | DEBUG server heartbeat line 1405
+12:23:26 | DEBUG server heartbeat line 1406
+12:23:27 | DEBUG server heartbeat line 1407
+12:23:28 | DEBUG server heartbeat line 1408
+12:23:29 | DEBUG server heartbeat line 1409
+12:23:30 | DEBUG server heartbeat line 1410
+12:23:31 | DEBUG server heartbeat line 1411
+12:23:32 | DEBUG server heartbeat line 1412
+12:23:33 | DEBUG server heartbeat line 1413
+12:23:34 | DEBUG server heartbeat line 1414
+12:23:35 | DEBUG server heartbeat line 1415
+12:23:36 | DEBUG server heartbeat line 1416
+12:23:37 | DEBUG server heartbeat line 1417
+12:23:38 | DEBUG server heartbeat line 1418
+12:23:39 | DEBUG server heartbeat line 1419
+12:23:40 | DEBUG server heartbeat line 1420
+12:23:41 | DEBUG server heartbeat line 1421
+12:23:42 | DEBUG server heartbeat line 1422
+12:23:43 | DEBUG server heartbeat line 1423
+12:23:44 | DEBUG server heartbeat line 1424
+12:23:45 | DEBUG server heartbeat line 1425
+12:23:46 | DEBUG server heartbeat line 1426
+12:23:47 | DEBUG server heartbeat line 1427
+12:23:48 | DEBUG server heartbeat line 1428
+12:23:49 | DEBUG server heartbeat line 1429
+12:23:50 | DEBUG server heartbeat line 1430
+12:23:51 | DEBUG server heartbeat line 1431
+12:23:52 | DEBUG server heartbeat line 1432
+12:23:53 | DEBUG server heartbeat line 1433
+12:23:54 | DEBUG server heartbeat line 1434
+12:23:55 | DEBUG server heartbeat line 1435
+12:23:56 | DEBUG server heartbeat line 1436
+12:23:57 | DEBUG server heartbeat line 1437
+12:23:58 | DEBUG server heartbeat line 1438
+12:23:59 | DEBUG server heartbeat line 1439
+12:24:00 | DEBUG server heartbeat line 1440
+12:24:01 | DEBUG server heartbeat line 1441
+12:24:02 | DEBUG server heartbeat line 1442
+12:24:03 | DEBUG server heartbeat line 1443
+12:24:04 | DEBUG server heartbeat line 1444
+12:24:05 | DEBUG server heartbeat line 1445
+12:24:06 | DEBUG server heartbeat line 1446
+12:24:07 | DEBUG server heartbeat line 1447
+12:24:08 | DEBUG server heartbeat line 1448
+12:24:09 | DEBUG server heartbeat line 1449
+12:24:10 | DEBUG server heartbeat line 1450
+12:24:11 | DEBUG server heartbeat line 1451
+12:24:12 | DEBUG server heartbeat line 1452
+12:24:13 | DEBUG server heartbeat line 1453
+12:24:14 | DEBUG server heartbeat line 1454
+12:24:15 | DEBUG server heartbeat line 1455
+12:24:16 | DEBUG server heartbeat line 1456
+12:24:17 | DEBUG server heartbeat line 1457
+12:24:18 | DEBUG server heartbeat line 1458
+12:24:19 | DEBUG server heartbeat line 1459
+12:24:20 | DEBUG server heartbeat line 1460
+12:24:21 | DEBUG server heartbeat line 1461
+12:24:22 | DEBUG server heartbeat line 1462
+12:24:23 | DEBUG server heartbeat line 1463
+12:24:24 | DEBUG server heartbeat line 1464
+12:24:25 | DEBUG server heartbeat line 1465
+12:24:26 | DEBUG server heartbeat line 1466
+12:24:27 | DEBUG server heartbeat line 1467
+12:24:28 | DEBUG server heartbeat line 1468
+12:24:29 | DEBUG server heartbeat line 1469
+12:24:30 | DEBUG server heartbeat line 1470
+12:24:31 | DEBUG server heartbeat line 1471
+12:24:32 | DEBUG server heartbeat line 1472
+12:24:33 | DEBUG server heartbeat line 1473
+12:24:34 | DEBUG server heartbeat line 1474
+12:24:35 | DEBUG server heartbeat line 1475
+12:24:36 | DEBUG server heartbeat line 1476
+12:24:37 | DEBUG server heartbeat line 1477
+12:24:38 | DEBUG server heartbeat line 1478
+12:24:39 | DEBUG server heartbeat line 1479
+12:24:40 | DEBUG server heartbeat line 1480
+12:24:41 | DEBUG server heartbeat line 1481
+12:24:42 | DEBUG server heartbeat line 1482
+12:24:43 | DEBUG server heartbeat line 1483
+12:24:44 | DEBUG server heartbeat line 1484
+12:24:45 | DEBUG server heartbeat line 1485
+12:24:46 | DEBUG server heartbeat line 1486
+12:24:47 | DEBUG server heartbeat line 1487
+12:24:48 | DEBUG server heartbeat line 1488
+12:24:49 | DEBUG server heartbeat line 1489
+12:24:50 | DEBUG server heartbeat line 1490
+12:24:51 | DEBUG server heartbeat line 1491
+12:24:52 | DEBUG server heartbeat line 1492
+12:24:53 | DEBUG server heartbeat line 1493
+12:24:54 | DEBUG server heartbeat line 1494
+12:24:55 | DEBUG server heartbeat line 1495
+12:24:56 | DEBUG server heartbeat line 1496
+12:24:57 | DEBUG server heartbeat line 1497
+12:24:58 | DEBUG server heartbeat line 1498
+12:24:59 | DEBUG server heartbeat line 1499
+12:25:00 | DEBUG server heartbeat line 1500
+12:25:01 | DEBUG server heartbeat line 1501
+12:25:02 | DEBUG server heartbeat line 1502
+12:25:03 | DEBUG server heartbeat line 1503
+12:25:04 | DEBUG server heartbeat line 1504
+12:25:05 | DEBUG server heartbeat line 1505
+12:25:06 | DEBUG server heartbeat line 1506
+12:25:07 | DEBUG server heartbeat line 1507
+12:25:08 | DEBUG server heartbeat line 1508
+12:25:09 | DEBUG server heartbeat line 1509
+12:25:10 | DEBUG server heartbeat line 1510
+12:25:11 | DEBUG server heartbeat line 1511
+12:25:12 | DEBUG server heartbeat line 1512
+12:25:13 | DEBUG server heartbeat line 1513
+12:25:14 | DEBUG server heartbeat line 1514
+12:25:15 | DEBUG server heartbeat line 1515
+12:25:16 | DEBUG server heartbeat line 1516
+12:25:17 | DEBUG server heartbeat line 1517
+12:25:18 | DEBUG server heartbeat line 1518
+12:25:19 | DEBUG server heartbeat line 1519
+12:25:20 | DEBUG server heartbeat line 1520
+12:25:21 | DEBUG server heartbeat line 1521
+12:25:22 | DEBUG server heartbeat line 1522
+12:25:23 | DEBUG server heartbeat line 1523
+12:25:24 | DEBUG server heartbeat line 1524
+12:25:25 | DEBUG server heartbeat line 1525
+12:25:26 | DEBUG server heartbeat line 1526
+12:25:27 | DEBUG server heartbeat line 1527
+12:25:28 | DEBUG server heartbeat line 1528
+12:25:29 | DEBUG server heartbeat line 1529
+12:25:30 | DEBUG server heartbeat line 1530
+12:25:31 | DEBUG server heartbeat line 1531
+12:25:32 | DEBUG server heartbeat line 1532
+12:25:33 | DEBUG server heartbeat line 1533
+12:25:34 | DEBUG server heartbeat line 1534
+12:25:35 | DEBUG server heartbeat line 1535
+12:25:36 | DEBUG server heartbeat line 1536
+12:25:37 | DEBUG server heartbeat line 1537
+12:25:38 | DEBUG server heartbeat line 1538
+12:25:39 | DEBUG server heartbeat line 1539
+12:25:40 | DEBUG server heartbeat line 1540
+12:25:41 | DEBUG server heartbeat line 1541
+12:25:42 | DEBUG server heartbeat line 1542
+12:25:43 | DEBUG server heartbeat line 1543
+12:25:44 | DEBUG server heartbeat line 1544
+12:25:45 | DEBUG server heartbeat line 1545
+12:25:46 | DEBUG server heartbeat line 1546
+12:25:47 | DEBUG server heartbeat line 1547
+12:25:48 | DEBUG server heartbeat line 1548
+12:25:49 | DEBUG server heartbeat line 1549
+12:25:50 | DEBUG server heartbeat line 1550
+12:25:51 | DEBUG server heartbeat line 1551
+12:25:52 | DEBUG server heartbeat line 1552
+12:25:53 | DEBUG server heartbeat line 1553
+12:25:54 | DEBUG server heartbeat line 1554
+12:25:55 | DEBUG server heartbeat line 1555
+12:25:56 | DEBUG server heartbeat line 1556
+12:25:57 | DEBUG server heartbeat line 1557
+12:25:58 | DEBUG server heartbeat line 1558
+12:25:59 | DEBUG server heartbeat line 1559
+12:26:00 | DEBUG server heartbeat line 1560
+12:26:01 | DEBUG server heartbeat line 1561
+12:26:02 | DEBUG server heartbeat line 1562
+12:26:03 | DEBUG server heartbeat line 1563
+12:26:04 | DEBUG server heartbeat line 1564
+12:26:05 | DEBUG server heartbeat line 1565
+12:26:06 | DEBUG server heartbeat line 1566
+12:26:07 | DEBUG server heartbeat line 1567
+12:26:08 | DEBUG server heartbeat line 1568
+12:26:09 | DEBUG server heartbeat line 1569
+12:26:10 | DEBUG server heartbeat line 1570
+12:26:11 | DEBUG server heartbeat line 1571
+12:26:12 | DEBUG server heartbeat line 1572
+12:26:13 | DEBUG server heartbeat line 1573
+12:26:14 | DEBUG server heartbeat line 1574
+12:26:15 | DEBUG server heartbeat line 1575
+12:26:16 | DEBUG server heartbeat line 1576
+12:26:17 | DEBUG server heartbeat line 1577
+12:26:18 | DEBUG server heartbeat line 1578
+12:26:19 | DEBUG server heartbeat line 1579
+12:26:20 | DEBUG server heartbeat line 1580
+12:26:21 | DEBUG server heartbeat line 1581
+12:26:22 | DEBUG server heartbeat line 1582
+12:26:23 | DEBUG server heartbeat line 1583
+12:26:24 | DEBUG server heartbeat line 1584
+12:26:25 | DEBUG server heartbeat line 1585
+12:26:26 | DEBUG server heartbeat line 1586
+12:26:27 | DEBUG server heartbeat line 1587
+12:26:28 | DEBUG server heartbeat line 1588
+12:26:29 | DEBUG server heartbeat line 1589
+12:26:30 | DEBUG server heartbeat line 1590
+12:26:31 | DEBUG server heartbeat line 1591
+12:26:32 | DEBUG server heartbeat line 1592
+12:26:33 | DEBUG server heartbeat line 1593
+12:26:34 | DEBUG server heartbeat line 1594
+12:26:35 | DEBUG server heartbeat line 1595
+12:26:36 | DEBUG server heartbeat line 1596
+12:26:37 | DEBUG server heartbeat line 1597
+12:26:38 | DEBUG server heartbeat line 1598
+12:26:39 | DEBUG server heartbeat line 1599
+12:26:40 | DEBUG server heartbeat line 1600
+12:26:41 | DEBUG server heartbeat line 1601
+12:26:42 | DEBUG server heartbeat line 1602
+12:26:43 | DEBUG server heartbeat line 1603
+12:26:44 | DEBUG server heartbeat line 1604
+12:26:45 | DEBUG server heartbeat line 1605
+12:26:46 | DEBUG server heartbeat line 1606
+12:26:47 | DEBUG server heartbeat line 1607
+12:26:48 | DEBUG server heartbeat line 1608
+12:26:49 | DEBUG server heartbeat line 1609
+12:26:50 | DEBUG server heartbeat line 1610
+12:26:51 | DEBUG server heartbeat line 1611
+12:26:52 | DEBUG server heartbeat line 1612
+12:26:53 | DEBUG server heartbeat line 1613
+12:26:54 | DEBUG server heartbeat line 1614
+12:26:55 | DEBUG server heartbeat line 1615
+12:26:56 | DEBUG server heartbeat line 1616
+12:26:57 | DEBUG server heartbeat line 1617
+12:26:58 | DEBUG server heartbeat line 1618
+12:26:59 | DEBUG server heartbeat line 1619
+12:27:00 | DEBUG server heartbeat line 1620
+12:27:01 | DEBUG server heartbeat line 1621
+12:27:02 | DEBUG server heartbeat line 1622
+12:27:03 | DEBUG server heartbeat line 1623
+12:27:04 | DEBUG server heartbeat line 1624
+12:27:05 | DEBUG server heartbeat line 1625
+12:27:06 | DEBUG server heartbeat line 1626
+12:27:07 | DEBUG server heartbeat line 1627
+12:27:08 | DEBUG server heartbeat line 1628
+12:27:09 | DEBUG server heartbeat line 1629
+12:27:10 | DEBUG server heartbeat line 1630
+12:27:11 | DEBUG server heartbeat line 1631
+12:27:12 | DEBUG server heartbeat line 1632
+12:27:13 | DEBUG server heartbeat line 1633
+12:27:14 | DEBUG server heartbeat line 1634
+12:27:15 | DEBUG server heartbeat line 1635
+12:27:16 | DEBUG server heartbeat line 1636
+12:27:17 | DEBUG server heartbeat line 1637
+12:27:18 | DEBUG server heartbeat line 1638
+12:27:19 | DEBUG server heartbeat line 1639
+12:27:20 | DEBUG server heartbeat line 1640
+12:27:21 | DEBUG server heartbeat line 1641
+12:27:22 | DEBUG server heartbeat line 1642
+12:27:23 | DEBUG server heartbeat line 1643
+12:27:24 | DEBUG server heartbeat line 1644
+12:27:25 | DEBUG server heartbeat line 1645
+12:27:26 | DEBUG server heartbeat line 1646
+12:27:27 | DEBUG server heartbeat line 1647
+12:27:28 | DEBUG server heartbeat line 1648
+12:27:29 | DEBUG server heartbeat line 1649
+12:27:30 | DEBUG server heartbeat line 1650
+12:27:31 | DEBUG server heartbeat line 1651
+12:27:32 | DEBUG server heartbeat line 1652
+12:27:33 | DEBUG server heartbeat line 1653
+12:27:34 | DEBUG server heartbeat line 1654
+12:27:35 | DEBUG server heartbeat line 1655
+12:27:36 | DEBUG server heartbeat line 1656
+12:27:37 | DEBUG server heartbeat line 1657
+12:27:38 | DEBUG server heartbeat line 1658
+12:27:39 | DEBUG server heartbeat line 1659
+12:27:40 | DEBUG server heartbeat line 1660
+12:27:41 | DEBUG server heartbeat line 1661
+12:27:42 | DEBUG server heartbeat line 1662
+12:27:43 | DEBUG server heartbeat line 1663
+12:27:44 | DEBUG server heartbeat line 1664
+12:27:45 | DEBUG server heartbeat line 1665
+12:27:46 | DEBUG server heartbeat line 1666
+12:27:47 | DEBUG server heartbeat line 1667
+12:27:48 | DEBUG server heartbeat line 1668
+12:27:49 | DEBUG server heartbeat line 1669
+12:27:50 | DEBUG server heartbeat line 1670
+12:27:51 | DEBUG server heartbeat line 1671
+12:27:52 | DEBUG server heartbeat line 1672
+12:27:53 | DEBUG server heartbeat line 1673
+12:27:54 | DEBUG server heartbeat line 1674
+12:27:55 | DEBUG server heartbeat line 1675
+12:27:56 | DEBUG server heartbeat line 1676
+12:27:57 | DEBUG server heartbeat line 1677
+12:27:58 | DEBUG server heartbeat line 1678
+12:27:59 | DEBUG server heartbeat line 1679
+12:28:00 | DEBUG server heartbeat line 1680
+12:28:01 | DEBUG server heartbeat line 1681
+12:28:02 | DEBUG server heartbeat line 1682
+12:28:03 | DEBUG server heartbeat line 1683
+12:28:04 | DEBUG server heartbeat line 1684
+12:28:05 | DEBUG server heartbeat line 1685
+12:28:06 | DEBUG server heartbeat line 1686
+12:28:07 | DEBUG server heartbeat line 1687
+12:28:08 | DEBUG server heartbeat line 1688
+12:28:09 | DEBUG server heartbeat line 1689
+12:28:10 | DEBUG server heartbeat line 1690
+12:28:11 | DEBUG server heartbeat line 1691
+12:28:12 | DEBUG server heartbeat line 1692
+12:28:13 | DEBUG server heartbeat line 1693
+12:28:14 | DEBUG server heartbeat line 1694
+12:28:15 | DEBUG server heartbeat line 1695
+12:28:16 | DEBUG server heartbeat line 1696
+12:28:17 | DEBUG server heartbeat line 1697
+12:28:18 | DEBUG server heartbeat line 1698
+12:28:19 | DEBUG server heartbeat line 1699
+12:28:20 | DEBUG server heartbeat line 1700
+12:28:21 | DEBUG server heartbeat line 1701
+12:28:22 | DEBUG server heartbeat line 1702
+12:28:23 | DEBUG server heartbeat line 1703
+12:28:24 | DEBUG server heartbeat line 1704
+12:28:25 | DEBUG server heartbeat line 1705
+12:28:26 | DEBUG server heartbeat line 1706
+12:28:27 | DEBUG server heartbeat line 1707
+12:28:28 | DEBUG server heartbeat line 1708
+12:28:29 | DEBUG server heartbeat line 1709
+12:28:30 | DEBUG server heartbeat line 1710
+12:28:31 | DEBUG server heartbeat line 1711
+12:28:32 | DEBUG server heartbeat line 1712
+12:28:33 | DEBUG server heartbeat line 1713
+12:28:34 | DEBUG server heartbeat line 1714
+12:28:35 | DEBUG server heartbeat line 1715
+12:28:36 | DEBUG server heartbeat line 1716
+12:28:37 | DEBUG server heartbeat line 1717
+12:28:38 | DEBUG server heartbeat line 1718
+12:28:39 | DEBUG server heartbeat line 1719
+12:28:40 | DEBUG server heartbeat line 1720
+12:28:41 | DEBUG server heartbeat line 1721
+12:28:42 | DEBUG server heartbeat line 1722
+12:28:43 | DEBUG server heartbeat line 1723
+12:28:44 | DEBUG server heartbeat line 1724
+12:28:45 | DEBUG server heartbeat line 1725
+12:28:46 | DEBUG server heartbeat line 1726
+12:28:47 | DEBUG server heartbeat line 1727
+12:28:48 | DEBUG server heartbeat line 1728
+12:28:49 | DEBUG server heartbeat line 1729
+12:28:50 | DEBUG server heartbeat line 1730
+12:28:51 | DEBUG server heartbeat line 1731
+12:28:52 | DEBUG server heartbeat line 1732
+12:28:53 | DEBUG server heartbeat line 1733
+12:28:54 | DEBUG server heartbeat line 1734
+12:28:55 | DEBUG server heartbeat line 1735
+12:28:56 | DEBUG server heartbeat line 1736
+12:28:57 | DEBUG server heartbeat line 1737
+12:28:58 | DEBUG server heartbeat line 1738
+12:28:59 | DEBUG server heartbeat line 1739
+12:29:00 | DEBUG server heartbeat line 1740
+12:29:01 | DEBUG server heartbeat line 1741
+12:29:02 | DEBUG server heartbeat line 1742
+12:29:03 | DEBUG server heartbeat line 1743
+12:29:04 | DEBUG server heartbeat line 1744
+12:29:05 | DEBUG server heartbeat line 1745
+12:29:06 | DEBUG server heartbeat line 1746
+12:29:07 | DEBUG server heartbeat line 1747
+12:29:08 | DEBUG server heartbeat line 1748
+12:29:09 | DEBUG server heartbeat line 1749
+12:29:10 | DEBUG server heartbeat line 1750
+12:29:11 | DEBUG server heartbeat line 1751
+12:29:12 | DEBUG server heartbeat line 1752
+12:29:13 | DEBUG server heartbeat line 1753
+12:29:14 | DEBUG server heartbeat line 1754
+12:29:15 | DEBUG server heartbeat line 1755
+12:29:16 | DEBUG server heartbeat line 1756
+12:29:17 | DEBUG server heartbeat line 1757
+12:29:18 | DEBUG server heartbeat line 1758
+12:29:19 | DEBUG server heartbeat line 1759
+12:29:20 | DEBUG server heartbeat line 1760
+12:29:21 | DEBUG server heartbeat line 1761
+12:29:22 | DEBUG server heartbeat line 1762
+12:29:23 | DEBUG server heartbeat line 1763
+12:29:24 | DEBUG server heartbeat line 1764
+12:29:25 | DEBUG server heartbeat line 1765
+12:29:26 | DEBUG server heartbeat line 1766
+12:29:27 | DEBUG server heartbeat line 1767
+12:29:28 | DEBUG server heartbeat line 1768
+12:29:29 | DEBUG server heartbeat line 1769
+12:29:30 | DEBUG server heartbeat line 1770
+12:29:31 | DEBUG server heartbeat line 1771
+12:29:32 | DEBUG server heartbeat line 1772
+12:29:33 | DEBUG server heartbeat line 1773
+12:29:34 | DEBUG server heartbeat line 1774
+12:29:35 | DEBUG server heartbeat line 1775
+12:29:36 | DEBUG server heartbeat line 1776
+12:29:37 | DEBUG server heartbeat line 1777
+12:29:38 | DEBUG server heartbeat line 1778
+12:29:39 | DEBUG server heartbeat line 1779
+12:29:40 | DEBUG server heartbeat line 1780
+12:29:41 | DEBUG server heartbeat line 1781
+12:29:42 | DEBUG server heartbeat line 1782
+12:29:43 | DEBUG server heartbeat line 1783
+12:29:44 | DEBUG server heartbeat line 1784
+12:29:45 | DEBUG server heartbeat line 1785
+12:29:46 | DEBUG server heartbeat line 1786
+12:29:47 | DEBUG server heartbeat line 1787
+12:29:48 | DEBUG server heartbeat line 1788
+12:29:49 | DEBUG server heartbeat line 1789
+12:29:50 | DEBUG server heartbeat line 1790
+12:29:51 | DEBUG server heartbeat line 1791
+12:29:52 | DEBUG server heartbeat line 1792
+12:29:53 | DEBUG server heartbeat line 1793
+12:29:54 | DEBUG server heartbeat line 1794
+12:29:55 | DEBUG server heartbeat line 1795
+12:29:56 | DEBUG server heartbeat line 1796
+12:29:57 | DEBUG server heartbeat line 1797
+12:29:58 | DEBUG server heartbeat line 1798
+12:29:59 | DEBUG server heartbeat line 1799
+12:30:00 | DEBUG server heartbeat line 1800
+12:30:01 | DEBUG server heartbeat line 1801
+12:30:02 | DEBUG server heartbeat line 1802
+12:30:03 | DEBUG server heartbeat line 1803
+12:30:04 | DEBUG server heartbeat line 1804
+12:30:05 | DEBUG server heartbeat line 1805
+12:30:06 | DEBUG server heartbeat line 1806
+12:30:07 | DEBUG server heartbeat line 1807
+12:30:08 | DEBUG server heartbeat line 1808
+12:30:09 | DEBUG server heartbeat line 1809
+12:30:10 | DEBUG server heartbeat line 1810
+12:30:11 | DEBUG server heartbeat line 1811
+12:30:12 | DEBUG server heartbeat line 1812
+12:30:13 | DEBUG server heartbeat line 1813
+12:30:14 | DEBUG server heartbeat line 1814
+12:30:15 | DEBUG server heartbeat line 1815
+12:30:16 | DEBUG server heartbeat line 1816
+12:30:17 | DEBUG server heartbeat line 1817
+12:30:18 | DEBUG server heartbeat line 1818
+12:30:19 | DEBUG server heartbeat line 1819
+12:30:20 | DEBUG server heartbeat line 1820
+12:30:21 | DEBUG server heartbeat line 1821
+12:30:22 | DEBUG server heartbeat line 1822
+12:30:23 | DEBUG server heartbeat line 1823
+12:30:24 | DEBUG server heartbeat line 1824
+12:30:25 | DEBUG server heartbeat line 1825
+12:30:26 | DEBUG server heartbeat line 1826
+12:30:27 | DEBUG server heartbeat line 1827
+12:30:28 | DEBUG server heartbeat line 1828
+12:30:29 | DEBUG server heartbeat line 1829
+12:30:30 | DEBUG server heartbeat line 1830
+12:30:31 | DEBUG server heartbeat line 1831
+12:30:32 | DEBUG server heartbeat line 1832
+12:30:33 | DEBUG server heartbeat line 1833
+12:30:34 | DEBUG server heartbeat line 1834
+12:30:35 | DEBUG server heartbeat line 1835
+12:30:36 | DEBUG server heartbeat line 1836
+12:30:37 | DEBUG server heartbeat line 1837
+12:30:38 | DEBUG server heartbeat line 1838
+12:30:39 | DEBUG server heartbeat line 1839
+12:30:40 | DEBUG server heartbeat line 1840
+12:30:41 | DEBUG server heartbeat line 1841
+12:30:42 | DEBUG server heartbeat line 1842
+12:30:43 | DEBUG server heartbeat line 1843
+12:30:44 | DEBUG server heartbeat line 1844
+12:30:45 | DEBUG server heartbeat line 1845
+12:30:46 | DEBUG server heartbeat line 1846
+12:30:47 | DEBUG server heartbeat line 1847
+12:30:48 | DEBUG server heartbeat line 1848
+12:30:49 | DEBUG server heartbeat line 1849
+12:30:50 | DEBUG server heartbeat line 1850
+12:30:51 | DEBUG server heartbeat line 1851
+12:30:52 | DEBUG server heartbeat line 1852
+12:30:53 | DEBUG server heartbeat line 1853
+12:30:54 | DEBUG server heartbeat line 1854
+12:30:55 | DEBUG server heartbeat line 1855
+12:30:56 | DEBUG server heartbeat line 1856
+12:30:57 | DEBUG server heartbeat line 1857
+12:30:58 | DEBUG server heartbeat line 1858
+12:30:59 | DEBUG server heartbeat line 1859
+12:31:00 | DEBUG server heartbeat line 1860
+12:31:01 | DEBUG server heartbeat line 1861
+12:31:02 | DEBUG server heartbeat line 1862
+12:31:03 | DEBUG server heartbeat line 1863
+12:31:04 | DEBUG server heartbeat line 1864
+12:31:05 | DEBUG server heartbeat line 1865
+12:31:06 | DEBUG server heartbeat line 1866
+12:31:07 | DEBUG server heartbeat line 1867
+12:31:08 | DEBUG server heartbeat line 1868
+12:31:09 | DEBUG server heartbeat line 1869
+12:31:10 | DEBUG server heartbeat line 1870
+12:31:11 | DEBUG server heartbeat line 1871
+12:31:12 | DEBUG server heartbeat line 1872
+12:31:13 | DEBUG server heartbeat line 1873
+12:31:14 | DEBUG server heartbeat line 1874
+12:31:15 | DEBUG server heartbeat line 1875
+12:31:16 | DEBUG server heartbeat line 1876
+12:31:17 | DEBUG server heartbeat line 1877
+12:31:18 | DEBUG server heartbeat line 1878
+12:31:19 | DEBUG server heartbeat line 1879
+12:31:20 | DEBUG server heartbeat line 1880
+12:31:21 | DEBUG server heartbeat line 1881
+12:31:22 | DEBUG server heartbeat line 1882
+12:31:23 | DEBUG server heartbeat line 1883
+12:31:24 | DEBUG server heartbeat line 1884
+12:31:25 | DEBUG server heartbeat line 1885
+12:31:26 | DEBUG server heartbeat line 1886
+12:31:27 | DEBUG server heartbeat line 1887
+12:31:28 | DEBUG server heartbeat line 1888
+12:31:29 | DEBUG server heartbeat line 1889
+12:31:30 | DEBUG server heartbeat line 1890
+12:31:31 | DEBUG server heartbeat line 1891
+12:31:32 | DEBUG server heartbeat line 1892
+12:31:33 | DEBUG server heartbeat line 1893
+12:31:34 | DEBUG server heartbeat line 1894
+12:31:35 | DEBUG server heartbeat line 1895
+12:31:36 | DEBUG server heartbeat line 1896
+12:31:37 | DEBUG server heartbeat line 1897
+12:31:38 | DEBUG server heartbeat line 1898
+12:31:39 | DEBUG server heartbeat line 1899
+12:31:40 | DEBUG server heartbeat line 1900
+12:31:41 | DEBUG server heartbeat line 1901
+12:31:42 | DEBUG server heartbeat line 1902
+12:31:43 | DEBUG server heartbeat line 1903
+12:31:44 | DEBUG server heartbeat line 1904
+12:31:45 | DEBUG server heartbeat line 1905
+12:31:46 | DEBUG server heartbeat line 1906
+12:31:47 | DEBUG server heartbeat line 1907
+12:31:48 | DEBUG server heartbeat line 1908
+12:31:49 | DEBUG server heartbeat line 1909
+12:31:50 | DEBUG server heartbeat line 1910
+12:31:51 | DEBUG server heartbeat line 1911
+12:31:52 | DEBUG server heartbeat line 1912
+12:31:53 | DEBUG server heartbeat line 1913
+12:31:54 | DEBUG server heartbeat line 1914
+12:31:55 | DEBUG server heartbeat line 1915
+12:31:56 | DEBUG server heartbeat line 1916
+12:31:57 | DEBUG server heartbeat line 1917
+12:31:58 | DEBUG server heartbeat line 1918
+12:31:59 | DEBUG server heartbeat line 1919
+12:32:00 | DEBUG server heartbeat line 1920
+12:32:01 | DEBUG server heartbeat line 1921
+12:32:02 | DEBUG server heartbeat line 1922
+12:32:03 | DEBUG server heartbeat line 1923
+12:32:04 | DEBUG server heartbeat line 1924
+12:32:05 | DEBUG server heartbeat line 1925
+12:32:06 | DEBUG server heartbeat line 1926
+12:32:07 | DEBUG server heartbeat line 1927
+12:32:08 | DEBUG server heartbeat line 1928
+12:32:09 | DEBUG server heartbeat line 1929
+12:32:10 | DEBUG server heartbeat line 1930
+12:32:11 | DEBUG server heartbeat line 1931
+12:32:12 | DEBUG server heartbeat line 1932
+12:32:13 | DEBUG server heartbeat line 1933
+12:32:14 | DEBUG server heartbeat line 1934
+12:32:15 | DEBUG server heartbeat line 1935
+12:32:16 | DEBUG server heartbeat line 1936
+12:32:17 | DEBUG server heartbeat line 1937
+12:32:18 | DEBUG server heartbeat line 1938
+12:32:19 | DEBUG server heartbeat line 1939
+12:32:20 | DEBUG server heartbeat line 1940
+12:32:21 | DEBUG server heartbeat line 1941
+12:32:22 | DEBUG server heartbeat line 1942
+12:32:23 | DEBUG server heartbeat line 1943
+12:32:24 | DEBUG server heartbeat line 1944
+12:32:25 | DEBUG server heartbeat line 1945
+12:32:26 | DEBUG server heartbeat line 1946
+12:32:27 | DEBUG server heartbeat line 1947
+12:32:28 | DEBUG server heartbeat line 1948
+12:32:29 | DEBUG server heartbeat line 1949
+12:32:30 | DEBUG server heartbeat line 1950
+12:32:31 | DEBUG server heartbeat line 1951
+12:32:32 | DEBUG server heartbeat line 1952
+12:32:33 | DEBUG server heartbeat line 1953
+12:32:34 | DEBUG server heartbeat line 1954
+12:32:35 | DEBUG server heartbeat line 1955
+12:32:36 | DEBUG server heartbeat line 1956
+12:32:37 | DEBUG server heartbeat line 1957
+12:32:38 | DEBUG server heartbeat line 1958
+12:32:39 | DEBUG server heartbeat line 1959
+12:32:40 | DEBUG server heartbeat line 1960
+12:32:41 | DEBUG server heartbeat line 1961
+12:32:42 | DEBUG server heartbeat line 1962
+12:32:43 | DEBUG server heartbeat line 1963
+12:32:44 | DEBUG server heartbeat line 1964
+12:32:45 | DEBUG server heartbeat line 1965
+12:32:46 | DEBUG server heartbeat line 1966
+12:32:47 | DEBUG server heartbeat line 1967
+12:32:48 | DEBUG server heartbeat line 1968
+12:32:49 | DEBUG server heartbeat line 1969
+12:32:50 | DEBUG server heartbeat line 1970
+12:32:51 | DEBUG server heartbeat line 1971
+12:32:52 | DEBUG server heartbeat line 1972
+12:32:53 | DEBUG server heartbeat line 1973
+12:32:54 | DEBUG server heartbeat line 1974
+12:32:55 | DEBUG server heartbeat line 1975
+12:32:56 | DEBUG server heartbeat line 1976
+12:32:57 | DEBUG server heartbeat line 1977
+12:32:58 | DEBUG server heartbeat line 1978
+12:32:59 | DEBUG server heartbeat line 1979
+12:33:00 | DEBUG server heartbeat line 1980
+12:33:01 | DEBUG server heartbeat line 1981
+12:33:02 | DEBUG server heartbeat line 1982
+12:33:03 | DEBUG server heartbeat line 1983
+12:33:04 | DEBUG server heartbeat line 1984
+12:33:05 | DEBUG server heartbeat line 1985
+12:33:06 | DEBUG server heartbeat line 1986
+12:33:07 | DEBUG server heartbeat line 1987
+12:33:08 | DEBUG server heartbeat line 1988
+12:33:09 | DEBUG server heartbeat line 1989
+12:33:10 | DEBUG server heartbeat line 1990
+12:33:11 | DEBUG server heartbeat line 1991
+12:33:12 | DEBUG server heartbeat line 1992
+12:33:13 | DEBUG server heartbeat line 1993
+12:33:14 | DEBUG server heartbeat line 1994
+12:33:15 | DEBUG server heartbeat line 1995
+12:33:16 | DEBUG server heartbeat line 1996
+12:33:17 | DEBUG server heartbeat line 1997
+12:33:18 | DEBUG server heartbeat line 1998
+12:33:19 | DEBUG server heartbeat line 1999
+12:33:20 | DEBUG server heartbeat line 2000
+12:33:21 | DEBUG server heartbeat line 2001
+12:33:22 | DEBUG server heartbeat line 2002
+12:33:23 | DEBUG server heartbeat line 2003
+12:33:24 | DEBUG server heartbeat line 2004
+12:33:25 | DEBUG server heartbeat line 2005
+12:33:26 | DEBUG server heartbeat line 2006
+12:33:27 | DEBUG server heartbeat line 2007
+12:33:28 | DEBUG server heartbeat line 2008
+12:33:29 | DEBUG server heartbeat line 2009
+12:33:30 | DEBUG server heartbeat line 2010
+12:33:31 | DEBUG server heartbeat line 2011
+12:33:32 | DEBUG server heartbeat line 2012
+12:33:33 | DEBUG server heartbeat line 2013
+12:33:34 | DEBUG server heartbeat line 2014
+12:33:35 | DEBUG server heartbeat line 2015
+12:33:36 | DEBUG server heartbeat line 2016
+12:33:37 | DEBUG server heartbeat line 2017
+12:33:38 | DEBUG server heartbeat line 2018
+12:33:39 | DEBUG server heartbeat line 2019
+12:33:40 | DEBUG server heartbeat line 2020
+12:33:41 | DEBUG server heartbeat line 2021
+12:33:42 | DEBUG server heartbeat line 2022
+12:33:43 | DEBUG server heartbeat line 2023
+12:33:44 | DEBUG server heartbeat line 2024
+12:33:45 | DEBUG server heartbeat line 2025
+12:33:46 | DEBUG server heartbeat line 2026
+12:33:47 | DEBUG server heartbeat line 2027
+12:33:48 | DEBUG server heartbeat line 2028
+12:33:49 | DEBUG server heartbeat line 2029
+12:33:50 | DEBUG server heartbeat line 2030
+12:33:51 | DEBUG server heartbeat line 2031
+12:33:52 | DEBUG server heartbeat line 2032
+12:33:53 | DEBUG server heartbeat line 2033
+12:33:54 | DEBUG server heartbeat line 2034
+12:33:55 | DEBUG server heartbeat line 2035
+12:33:56 | DEBUG server heartbeat line 2036
+12:33:57 | DEBUG server heartbeat line 2037
+12:33:58 | DEBUG server heartbeat line 2038
+12:33:59 | DEBUG server heartbeat line 2039
+12:34:00 | DEBUG server heartbeat line 2040
+12:34:01 | DEBUG server heartbeat line 2041
+12:34:02 | DEBUG server heartbeat line 2042
+12:34:03 | DEBUG server heartbeat line 2043
+12:34:04 | DEBUG server heartbeat line 2044
+12:34:05 | DEBUG server heartbeat line 2045
+12:34:06 | DEBUG server heartbeat line 2046
+12:34:07 | DEBUG server heartbeat line 2047
+12:34:08 | DEBUG server heartbeat line 2048
+12:34:09 | DEBUG server heartbeat line 2049
+12:34:10 | DEBUG server heartbeat line 2050
+12:34:11 | DEBUG server heartbeat line 2051
+12:34:12 | DEBUG server heartbeat line 2052
+12:34:13 | DEBUG server heartbeat line 2053
+12:34:14 | DEBUG server heartbeat line 2054
+12:34:15 | DEBUG server heartbeat line 2055
+12:34:16 | DEBUG server heartbeat line 2056
+12:34:17 | DEBUG server heartbeat line 2057
+12:34:18 | DEBUG server heartbeat line 2058
+12:34:19 | DEBUG server heartbeat line 2059
+12:34:20 | DEBUG server heartbeat line 2060
+12:34:21 | DEBUG server heartbeat line 2061
+12:34:22 | DEBUG server heartbeat line 2062
+12:34:23 | DEBUG server heartbeat line 2063
+12:34:24 | DEBUG server heartbeat line 2064
+12:34:25 | DEBUG server heartbeat line 2065
+12:34:26 | DEBUG server heartbeat line 2066
+12:34:27 | DEBUG server heartbeat line 2067
+12:34:28 | DEBUG server heartbeat line 2068
+12:34:29 | DEBUG server heartbeat line 2069
+12:34:30 | DEBUG server heartbeat line 2070
+12:34:31 | DEBUG server heartbeat line 2071
+12:34:32 | DEBUG server heartbeat line 2072
+12:34:33 | DEBUG server heartbeat line 2073
+12:34:34 | DEBUG server heartbeat line 2074
+12:34:35 | DEBUG server heartbeat line 2075
+12:34:36 | DEBUG server heartbeat line 2076
+12:34:37 | DEBUG server heartbeat line 2077
+12:34:38 | DEBUG server heartbeat line 2078
+12:34:39 | DEBUG server heartbeat line 2079
+12:34:40 | DEBUG server heartbeat line 2080
+12:34:41 | DEBUG server heartbeat line 2081
+12:34:42 | DEBUG server heartbeat line 2082
+12:34:43 | DEBUG server heartbeat line 2083
+12:34:44 | DEBUG server heartbeat line 2084
+12:34:45 | DEBUG server heartbeat line 2085
+12:34:46 | DEBUG server heartbeat line 2086
+12:34:47 | DEBUG server heartbeat line 2087
+12:34:48 | DEBUG server heartbeat line 2088
+12:34:49 | DEBUG server heartbeat line 2089
+12:34:50 | DEBUG server heartbeat line 2090
+12:34:51 | DEBUG server heartbeat line 2091
+12:34:52 | DEBUG server heartbeat line 2092
+12:34:53 | DEBUG server heartbeat line 2093
+12:34:54 | DEBUG server heartbeat line 2094
+12:34:55 | DEBUG server heartbeat line 2095
+12:34:56 | DEBUG server heartbeat line 2096
+12:34:57 | DEBUG server heartbeat line 2097
+12:34:58 | DEBUG server heartbeat line 2098
+12:34:59 | DEBUG server heartbeat line 2099
+12:35:00 | DEBUG server heartbeat line 2100
+12:35:01 | DEBUG server heartbeat line 2101
+12:35:02 | DEBUG server heartbeat line 2102
+12:35:03 | DEBUG server heartbeat line 2103
+12:35:04 | DEBUG server heartbeat line 2104
+12:35:05 | DEBUG server heartbeat line 2105
+12:35:06 | DEBUG server heartbeat line 2106
+12:35:07 | DEBUG server heartbeat line 2107
+12:35:08 | DEBUG server heartbeat line 2108
+12:35:09 | DEBUG server heartbeat line 2109
+12:35:10 | DEBUG server heartbeat line 2110
+12:35:11 | DEBUG server heartbeat line 2111
+12:35:12 | DEBUG server heartbeat line 2112
+12:35:13 | DEBUG server heartbeat line 2113
+12:35:14 | DEBUG server heartbeat line 2114
+12:35:15 | DEBUG server heartbeat line 2115
+12:35:16 | DEBUG server heartbeat line 2116
+12:35:17 | DEBUG server heartbeat line 2117
+12:35:18 | DEBUG server heartbeat line 2118
+12:35:19 | DEBUG server heartbeat line 2119
+12:35:20 | DEBUG server heartbeat line 2120
+12:35:21 | DEBUG server heartbeat line 2121
+12:35:22 | DEBUG server heartbeat line 2122
+12:35:23 | DEBUG server heartbeat line 2123
+12:35:24 | DEBUG server heartbeat line 2124
+12:35:25 | DEBUG server heartbeat line 2125
+12:35:26 | DEBUG server heartbeat line 2126
+12:35:27 | DEBUG server heartbeat line 2127
+12:35:28 | DEBUG server heartbeat line 2128
+12:35:29 | DEBUG server heartbeat line 2129
+12:35:30 | DEBUG server heartbeat line 2130
+12:35:31 | DEBUG server heartbeat line 2131
+12:35:32 | DEBUG server heartbeat line 2132
+12:35:33 | DEBUG server heartbeat line 2133
+12:35:34 | DEBUG server heartbeat line 2134
+12:35:35 | DEBUG server heartbeat line 2135
+12:35:36 | DEBUG server heartbeat line 2136
+12:35:37 | DEBUG server heartbeat line 2137
+12:35:38 | DEBUG server heartbeat line 2138
+12:35:39 | DEBUG server heartbeat line 2139
+12:35:40 | DEBUG server heartbeat line 2140
+12:35:41 | DEBUG server heartbeat line 2141
+12:35:42 | DEBUG server heartbeat line 2142
+12:35:43 | DEBUG server heartbeat line 2143
+12:35:44 | DEBUG server heartbeat line 2144
+12:35:45 | DEBUG server heartbeat line 2145
+12:35:46 | DEBUG server heartbeat line 2146
+12:35:47 | DEBUG server heartbeat line 2147
+12:35:48 | DEBUG server heartbeat line 2148
+12:35:49 | DEBUG server heartbeat line 2149
+12:35:50 | DEBUG server heartbeat line 2150
+12:35:51 | DEBUG server heartbeat line 2151
+12:35:52 | DEBUG server heartbeat line 2152
+12:35:53 | DEBUG server heartbeat line 2153
+12:35:54 | DEBUG server heartbeat line 2154
+12:35:55 | DEBUG server heartbeat line 2155
+12:35:56 | DEBUG server heartbeat line 2156
+12:35:57 | DEBUG server heartbeat line 2157
+12:35:58 | DEBUG server heartbeat line 2158
+12:35:59 | DEBUG server heartbeat line 2159
+12:36:00 | DEBUG server heartbeat line 2160
+12:36:01 | DEBUG server heartbeat line 2161
+12:36:02 | DEBUG server heartbeat line 2162
+12:36:03 | DEBUG server heartbeat line 2163
+12:36:04 | DEBUG server heartbeat line 2164
+12:36:05 | DEBUG server heartbeat line 2165
+12:36:06 | DEBUG server heartbeat line 2166
+12:36:07 | DEBUG server heartbeat line 2167
+12:36:08 | DEBUG server heartbeat line 2168
+12:36:09 | DEBUG server heartbeat line 2169
+12:36:10 | DEBUG server heartbeat line 2170
+12:36:11 | DEBUG server heartbeat line 2171
+12:36:12 | DEBUG server heartbeat line 2172
+12:36:13 | DEBUG server heartbeat line 2173
+12:36:14 | DEBUG server heartbeat line 2174
+12:36:15 | DEBUG server heartbeat line 2175
+12:36:16 | DEBUG server heartbeat line 2176
+12:36:17 | DEBUG server heartbeat line 2177
+12:36:18 | DEBUG server heartbeat line 2178
+12:36:19 | DEBUG server heartbeat line 2179
+12:36:20 | DEBUG server heartbeat line 2180
+12:36:21 | DEBUG server heartbeat line 2181
+12:36:22 | DEBUG server heartbeat line 2182
+12:36:23 | DEBUG server heartbeat line 2183
+12:36:24 | DEBUG server heartbeat line 2184
+12:36:25 | DEBUG server heartbeat line 2185
+12:36:26 | DEBUG server heartbeat line 2186
+12:36:27 | DEBUG server heartbeat line 2187
+12:36:28 | DEBUG server heartbeat line 2188
+12:36:29 | DEBUG server heartbeat line 2189
+12:36:30 | DEBUG server heartbeat line 2190
+12:36:31 | DEBUG server heartbeat line 2191
+12:36:32 | DEBUG server heartbeat line 2192
+12:36:33 | DEBUG server heartbeat line 2193
+12:36:34 | DEBUG server heartbeat line 2194
+12:36:35 | DEBUG server heartbeat line 2195
+12:36:36 | DEBUG server heartbeat line 2196
+12:36:37 | DEBUG server heartbeat line 2197
+12:36:38 | DEBUG server heartbeat line 2198
+12:36:39 | DEBUG server heartbeat line 2199
+12:36:40 | DEBUG server heartbeat line 2200
+12:36:41 | DEBUG server heartbeat line 2201
+12:36:42 | DEBUG server heartbeat line 2202
+12:36:43 | DEBUG server heartbeat line 2203
+12:36:44 | DEBUG server heartbeat line 2204
+12:36:45 | DEBUG server heartbeat line 2205
+12:36:46 | DEBUG server heartbeat line 2206
+12:36:47 | DEBUG server heartbeat line 2207
+12:36:48 | DEBUG server heartbeat line 2208
+12:36:49 | DEBUG server heartbeat line 2209
+12:36:50 | DEBUG server heartbeat line 2210
+12:36:51 | DEBUG server heartbeat line 2211
+12:36:52 | DEBUG server heartbeat line 2212
+12:36:53 | DEBUG server heartbeat line 2213
+12:36:54 | DEBUG server heartbeat line 2214
+12:36:55 | DEBUG server heartbeat line 2215
+12:36:56 | DEBUG server heartbeat line 2216
+12:36:57 | DEBUG server heartbeat line 2217
+12:36:58 | DEBUG server heartbeat line 2218
+12:36:59 | DEBUG server heartbeat line 2219
+12:37:00 | DEBUG server heartbeat line 2220
+12:37:01 | DEBUG server heartbeat line 2221
+12:37:02 | DEBUG server heartbeat line 2222
+12:37:03 | DEBUG server heartbeat line 2223
+12:37:04 | DEBUG server heartbeat line 2224
+12:37:05 | DEBUG server heartbeat line 2225
+12:37:06 | DEBUG server heartbeat line 2226
+12:37:07 | DEBUG server heartbeat line 2227
+12:37:08 | DEBUG server heartbeat line 2228
+12:37:09 | DEBUG server heartbeat line 2229
+12:37:10 | DEBUG server heartbeat line 2230
+12:37:11 | DEBUG server heartbeat line 2231
+12:37:12 | DEBUG server heartbeat line 2232
+12:37:13 | DEBUG server heartbeat line 2233
+12:37:14 | DEBUG server heartbeat line 2234
+12:37:15 | DEBUG server heartbeat line 2235
+12:37:16 | DEBUG server heartbeat line 2236
+12:37:17 | DEBUG server heartbeat line 2237
+12:37:18 | DEBUG server heartbeat line 2238
+12:37:19 | DEBUG server heartbeat line 2239
+12:37:20 | DEBUG server heartbeat line 2240
+12:37:21 | DEBUG server heartbeat line 2241
+12:37:22 | DEBUG server heartbeat line 2242
+12:37:23 | DEBUG server heartbeat line 2243
+12:37:24 | DEBUG server heartbeat line 2244
+12:37:25 | DEBUG server heartbeat line 2245
+12:37:26 | DEBUG server heartbeat line 2246
+12:37:27 | DEBUG server heartbeat line 2247
+12:37:28 | DEBUG server heartbeat line 2248
+12:37:29 | DEBUG server heartbeat line 2249
+12:37:30 | DEBUG server heartbeat line 2250
+12:37:31 | DEBUG server heartbeat line 2251
+12:37:32 | DEBUG server heartbeat line 2252
+12:37:33 | DEBUG server heartbeat line 2253
+12:37:34 | DEBUG server heartbeat line 2254
+12:37:35 | DEBUG server heartbeat line 2255
+12:37:36 | DEBUG server heartbeat line 2256
+12:37:37 | DEBUG server heartbeat line 2257
+12:37:38 | DEBUG server heartbeat line 2258
+12:37:39 | DEBUG server heartbeat line 2259
+12:37:40 | DEBUG server heartbeat line 2260
+12:37:41 | DEBUG server heartbeat line 2261
+12:37:42 | DEBUG server heartbeat line 2262
+12:37:43 | DEBUG server heartbeat line 2263
+12:37:44 | DEBUG server heartbeat line 2264
+12:37:45 | DEBUG server heartbeat line 2265
+12:37:46 | DEBUG server heartbeat line 2266
+12:37:47 | DEBUG server heartbeat line 2267
+12:37:48 | DEBUG server heartbeat line 2268
+12:37:49 | DEBUG server heartbeat line 2269
+12:37:50 | DEBUG server heartbeat line 2270
+12:37:51 | DEBUG server heartbeat line 2271
+12:37:52 | DEBUG server heartbeat line 2272
+12:37:53 | DEBUG server heartbeat line 2273
+12:37:54 | DEBUG server heartbeat line 2274
+12:37:55 | DEBUG server heartbeat line 2275
+12:37:56 | DEBUG server heartbeat line 2276
+12:37:57 | DEBUG server heartbeat line 2277
+12:37:58 | DEBUG server heartbeat line 2278
+12:37:59 | DEBUG server heartbeat line 2279
+12:38:00 | DEBUG server heartbeat line 2280
+12:38:01 | DEBUG server heartbeat line 2281
+12:38:02 | DEBUG server heartbeat line 2282
+12:38:03 | DEBUG server heartbeat line 2283
+12:38:04 | DEBUG server heartbeat line 2284
+12:38:05 | DEBUG server heartbeat line 2285
+12:38:06 | DEBUG server heartbeat line 2286
+12:38:07 | DEBUG server heartbeat line 2287
+12:38:08 | DEBUG server heartbeat line 2288
+12:38:09 | DEBUG server heartbeat line 2289
+12:38:10 | DEBUG server heartbeat line 2290
+12:38:11 | DEBUG server heartbeat line 2291
+12:38:12 | DEBUG server heartbeat line 2292
+12:38:13 | DEBUG server heartbeat line 2293
+12:38:14 | DEBUG server heartbeat line 2294
+12:38:15 | DEBUG server heartbeat line 2295
+12:38:16 | DEBUG server heartbeat line 2296
+12:38:17 | DEBUG server heartbeat line 2297
+12:38:18 | DEBUG server heartbeat line 2298
+12:38:19 | DEBUG server heartbeat line 2299
+12:38:20 | DEBUG server heartbeat line 2300
+12:38:21 | DEBUG server heartbeat line 2301
+12:38:22 | DEBUG server heartbeat line 2302
+12:38:23 | DEBUG server heartbeat line 2303
+12:38:24 | DEBUG server heartbeat line 2304
+12:38:25 | DEBUG server heartbeat line 2305
+12:38:26 | DEBUG server heartbeat line 2306
+12:38:27 | DEBUG server heartbeat line 2307
+12:38:28 | DEBUG server heartbeat line 2308
+12:38:29 | DEBUG server heartbeat line 2309
+12:38:30 | DEBUG server heartbeat line 2310
+12:38:31 | DEBUG server heartbeat line 2311
+12:38:32 | DEBUG server heartbeat line 2312
+12:38:33 | DEBUG server heartbeat line 2313
+12:38:34 | DEBUG server heartbeat line 2314
+12:38:35 | DEBUG server heartbeat line 2315
+12:38:36 | DEBUG server heartbeat line 2316
+12:38:37 | DEBUG server heartbeat line 2317
+12:38:38 | DEBUG server heartbeat line 2318
+12:38:39 | DEBUG server heartbeat line 2319
+12:38:40 | DEBUG server heartbeat line 2320
+12:38:41 | DEBUG server heartbeat line 2321
+12:38:42 | DEBUG server heartbeat line 2322
+12:38:43 | DEBUG server heartbeat line 2323
+12:38:44 | DEBUG server heartbeat line 2324
+12:38:45 | DEBUG server heartbeat line 2325
+12:38:46 | DEBUG server heartbeat line 2326
+12:38:47 | DEBUG server heartbeat line 2327
+12:38:48 | DEBUG server heartbeat line 2328
+12:38:49 | DEBUG server heartbeat line 2329
+12:38:50 | DEBUG server heartbeat line 2330
+12:38:51 | DEBUG server heartbeat line 2331
+12:38:52 | DEBUG server heartbeat line 2332
+12:38:53 | DEBUG server heartbeat line 2333
+12:38:54 | DEBUG server heartbeat line 2334
+12:38:55 | DEBUG server heartbeat line 2335
+12:38:56 | DEBUG server heartbeat line 2336
+12:38:57 | DEBUG server heartbeat line 2337
+12:38:58 | DEBUG server heartbeat line 2338
+12:38:59 | DEBUG server heartbeat line 2339
+12:39:00 | DEBUG server heartbeat line 2340
+12:39:01 | DEBUG server heartbeat line 2341
+12:39:02 | DEBUG server heartbeat line 2342
+12:39:03 | DEBUG server heartbeat line 2343
+12:39:04 | DEBUG server heartbeat line 2344
+12:39:05 | DEBUG server heartbeat line 2345
+12:39:06 | DEBUG server heartbeat line 2346
+12:39:07 | DEBUG server heartbeat line 2347
+12:39:08 | DEBUG server heartbeat line 2348
+12:39:09 | DEBUG server heartbeat line 2349
+12:39:10 | DEBUG server heartbeat line 2350
+12:39:11 | DEBUG server heartbeat line 2351
+12:39:12 | DEBUG server heartbeat line 2352
+12:39:13 | DEBUG server heartbeat line 2353
+12:39:14 | DEBUG server heartbeat line 2354
+12:39:15 | DEBUG server heartbeat line 2355
+12:39:16 | DEBUG server heartbeat line 2356
+12:39:17 | DEBUG server heartbeat line 2357
+12:39:18 | DEBUG server heartbeat line 2358
+12:39:19 | DEBUG server heartbeat line 2359
+12:39:20 | DEBUG server heartbeat line 2360
+12:39:21 | DEBUG server heartbeat line 2361
+12:39:22 | DEBUG server heartbeat line 2362
+12:39:23 | DEBUG server heartbeat line 2363
+12:39:24 | DEBUG server heartbeat line 2364
+12:39:25 | DEBUG server heartbeat line 2365
+12:39:26 | DEBUG server heartbeat line 2366
+12:39:27 | DEBUG server heartbeat line 2367
+12:39:28 | DEBUG server heartbeat line 2368
+12:39:29 | DEBUG server heartbeat line 2369
+12:39:30 | DEBUG server heartbeat line 2370
+12:39:31 | DEBUG server heartbeat line 2371
+12:39:32 | DEBUG server heartbeat line 2372
+12:39:33 | DEBUG server heartbeat line 2373
+12:39:34 | DEBUG server heartbeat line 2374
+12:39:35 | DEBUG server heartbeat line 2375
+12:39:36 | DEBUG server heartbeat line 2376
+12:39:37 | DEBUG server heartbeat line 2377
+12:39:38 | DEBUG server heartbeat line 2378
+12:39:39 | DEBUG server heartbeat line 2379
+12:39:40 | DEBUG server heartbeat line 2380
+12:39:41 | DEBUG server heartbeat line 2381
+12:39:42 | DEBUG server heartbeat line 2382
+12:39:43 | DEBUG server heartbeat line 2383
+12:39:44 | DEBUG server heartbeat line 2384
+12:39:45 | DEBUG server heartbeat line 2385
+12:39:46 | DEBUG server heartbeat line 2386
+12:39:47 | DEBUG server heartbeat line 2387
+12:39:48 | DEBUG server heartbeat line 2388
+12:39:49 | DEBUG server heartbeat line 2389
+12:39:50 | DEBUG server heartbeat line 2390
+12:39:51 | DEBUG server heartbeat line 2391
+12:39:52 | DEBUG server heartbeat line 2392
+12:39:53 | DEBUG server heartbeat line 2393
+12:39:54 | DEBUG server heartbeat line 2394
+12:39:55 | DEBUG server heartbeat line 2395
+12:39:56 | DEBUG server heartbeat line 2396
+12:39:57 | DEBUG server heartbeat line 2397
+12:39:58 | DEBUG server heartbeat line 2398
+12:39:59 | DEBUG server heartbeat line 2399
+12:40:00 | DEBUG server heartbeat line 2400
+12:40:01 | DEBUG server heartbeat line 2401
+12:40:02 | DEBUG server heartbeat line 2402
+12:40:03 | DEBUG server heartbeat line 2403
+12:40:04 | DEBUG server heartbeat line 2404
+12:40:05 | DEBUG server heartbeat line 2405
+12:40:06 | DEBUG server heartbeat line 2406
+12:40:07 | DEBUG server heartbeat line 2407
+12:40:08 | DEBUG server heartbeat line 2408
+12:40:09 | DEBUG server heartbeat line 2409
+12:40:10 | DEBUG server heartbeat line 2410
+12:40:11 | DEBUG server heartbeat line 2411
+12:40:12 | DEBUG server heartbeat line 2412
+12:40:13 | DEBUG server heartbeat line 2413
+12:40:14 | DEBUG server heartbeat line 2414
+12:40:15 | DEBUG server heartbeat line 2415
+12:40:16 | DEBUG server heartbeat line 2416
+12:40:17 | DEBUG server heartbeat line 2417
+12:40:18 | DEBUG server heartbeat line 2418
+12:40:19 | DEBUG server heartbeat line 2419
+12:40:20 | DEBUG server heartbeat line 2420
+12:40:21 | DEBUG server heartbeat line 2421
+12:40:22 | DEBUG server heartbeat line 2422
+12:40:23 | DEBUG server heartbeat line 2423
+12:40:24 | DEBUG server heartbeat line 2424
+12:40:25 | DEBUG server heartbeat line 2425
+12:40:26 | DEBUG server heartbeat line 2426
+12:40:27 | DEBUG server heartbeat line 2427
+12:40:28 | DEBUG server heartbeat line 2428
+12:40:29 | DEBUG server heartbeat line 2429
+12:40:30 | DEBUG server heartbeat line 2430
+12:40:31 | DEBUG server heartbeat line 2431
+12:40:32 | DEBUG server heartbeat line 2432
+12:40:33 | DEBUG server heartbeat line 2433
+12:40:34 | DEBUG server heartbeat line 2434
+12:40:35 | DEBUG server heartbeat line 2435
+12:40:36 | DEBUG server heartbeat line 2436
+12:40:37 | DEBUG server heartbeat line 2437
+12:40:38 | DEBUG server heartbeat line 2438
+12:40:39 | DEBUG server heartbeat line 2439
+12:40:40 | DEBUG server heartbeat line 2440
+12:40:41 | DEBUG server heartbeat line 2441
+12:40:42 | DEBUG server heartbeat line 2442
+12:40:43 | DEBUG server heartbeat line 2443
+12:40:44 | DEBUG server heartbeat line 2444
+12:40:45 | DEBUG server heartbeat line 2445
+12:40:46 | DEBUG server heartbeat line 2446
+12:40:47 | DEBUG server heartbeat line 2447
+12:40:48 | DEBUG server heartbeat line 2448
+12:40:49 | DEBUG server heartbeat line 2449
+12:40:50 | DEBUG server heartbeat line 2450
+12:40:51 | DEBUG server heartbeat line 2451
+12:40:52 | DEBUG server heartbeat line 2452
+12:40:53 | DEBUG server heartbeat line 2453
+12:40:54 | DEBUG server heartbeat line 2454
+12:40:55 | DEBUG server heartbeat line 2455
+12:40:56 | DEBUG server heartbeat line 2456
+12:40:57 | DEBUG server heartbeat line 2457
+12:40:58 | DEBUG server heartbeat line 2458
+12:40:59 | DEBUG server heartbeat line 2459
+12:41:00 | DEBUG server heartbeat line 2460
+12:41:01 | DEBUG server heartbeat line 2461
+12:41:02 | DEBUG server heartbeat line 2462
+12:41:03 | DEBUG server heartbeat line 2463
+12:41:04 | DEBUG server heartbeat line 2464
+12:41:05 | DEBUG server heartbeat line 2465
+12:41:06 | DEBUG server heartbeat line 2466
+12:41:07 | DEBUG server heartbeat line 2467
+12:41:08 | DEBUG server heartbeat line 2468
+12:41:09 | DEBUG server heartbeat line 2469
+12:41:10 | DEBUG server heartbeat line 2470
+12:41:11 | DEBUG server heartbeat line 2471
+12:41:12 | DEBUG server heartbeat line 2472
+12:41:13 | DEBUG server heartbeat line 2473
+12:41:14 | DEBUG server heartbeat line 2474
+12:41:15 | DEBUG server heartbeat line 2475
+12:41:16 | DEBUG server heartbeat line 2476
+12:41:17 | DEBUG server heartbeat line 2477
+12:41:18 | DEBUG server heartbeat line 2478
+12:41:19 | DEBUG server heartbeat line 2479
+12:41:20 | DEBUG server heartbeat line 2480
+12:41:21 | DEBUG server heartbeat line 2481
+12:41:22 | DEBUG server heartbeat line 2482
+12:41:23 | DEBUG server heartbeat line 2483
+12:41:24 | DEBUG server heartbeat line 2484
+12:41:25 | DEBUG server heartbeat line 2485
+12:41:26 | DEBUG server heartbeat line 2486
+12:41:27 | DEBUG server heartbeat line 2487
+12:41:28 | DEBUG server heartbeat line 2488
+12:41:29 | DEBUG server heartbeat line 2489
+12:41:30 | DEBUG server heartbeat line 2490
+12:41:31 | DEBUG server heartbeat line 2491
+12:41:32 | DEBUG server heartbeat line 2492
+12:41:33 | DEBUG server heartbeat line 2493
+12:41:34 | DEBUG server heartbeat line 2494
+12:41:35 | DEBUG server heartbeat line 2495
+12:41:36 | DEBUG server heartbeat line 2496
+12:41:37 | DEBUG server heartbeat line 2497
+12:41:38 | DEBUG server heartbeat line 2498
+12:41:39 | DEBUG server heartbeat line 2499
+12:41:40 | DEBUG server heartbeat line 2500
+12:41:41 | DEBUG server heartbeat line 2501
+12:41:42 | DEBUG server heartbeat line 2502
+12:41:43 | DEBUG server heartbeat line 2503
+12:41:44 | DEBUG server heartbeat line 2504
+12:41:45 | DEBUG server heartbeat line 2505
+12:41:46 | DEBUG server heartbeat line 2506
+12:41:47 | DEBUG server heartbeat line 2507
+12:41:48 | DEBUG server heartbeat line 2508
+12:41:49 | DEBUG server heartbeat line 2509
+12:41:50 | DEBUG server heartbeat line 2510
+12:41:51 | DEBUG server heartbeat line 2511
+12:41:52 | DEBUG server heartbeat line 2512
+12:41:53 | DEBUG server heartbeat line 2513
+12:41:54 | DEBUG server heartbeat line 2514
+12:41:55 | DEBUG server heartbeat line 2515
+12:41:56 | DEBUG server heartbeat line 2516
+12:41:57 | DEBUG server heartbeat line 2517
+12:41:58 | DEBUG server heartbeat line 2518
+12:41:59 | DEBUG server heartbeat line 2519
+12:42:00 | DEBUG server heartbeat line 2520
+12:42:01 | DEBUG server heartbeat line 2521
+12:42:02 | DEBUG server heartbeat line 2522
+12:42:03 | DEBUG server heartbeat line 2523
+12:42:04 | DEBUG server heartbeat line 2524
+12:42:05 | DEBUG server heartbeat line 2525
+12:42:06 | DEBUG server heartbeat line 2526
+12:42:07 | DEBUG server heartbeat line 2527
+12:42:08 | DEBUG server heartbeat line 2528
+12:42:09 | DEBUG server heartbeat line 2529
+12:42:10 | DEBUG server heartbeat line 2530
+12:42:11 | DEBUG server heartbeat line 2531
+12:42:12 | DEBUG server heartbeat line 2532
+12:42:13 | DEBUG server heartbeat line 2533
+12:42:14 | DEBUG server heartbeat line 2534
+12:42:15 | DEBUG server heartbeat line 2535
+12:42:16 | DEBUG server heartbeat line 2536
+12:42:17 | DEBUG server heartbeat line 2537
+12:42:18 | DEBUG server heartbeat line 2538
+12:42:19 | DEBUG server heartbeat line 2539
+12:42:20 | DEBUG server heartbeat line 2540
+12:42:21 | DEBUG server heartbeat line 2541
+12:42:22 | DEBUG server heartbeat line 2542
+12:42:23 | DEBUG server heartbeat line 2543
+12:42:24 | DEBUG server heartbeat line 2544
+12:42:25 | DEBUG server heartbeat line 2545
+12:42:26 | DEBUG server heartbeat line 2546
+12:42:27 | DEBUG server heartbeat line 2547
+12:42:28 | DEBUG server heartbeat line 2548
+12:42:29 | DEBUG server heartbeat line 2549
+12:42:30 | DEBUG server heartbeat line 2550
+12:42:31 | DEBUG server heartbeat line 2551
+12:42:32 | DEBUG server heartbeat line 2552
+12:42:33 | DEBUG server heartbeat line 2553
+12:42:34 | DEBUG server heartbeat line 2554
+12:42:35 | DEBUG server heartbeat line 2555
+12:42:36 | DEBUG server heartbeat line 2556
+12:42:37 | DEBUG server heartbeat line 2557
+12:42:38 | DEBUG server heartbeat line 2558
+12:42:39 | DEBUG server heartbeat line 2559
+12:42:40 | DEBUG server heartbeat line 2560
+12:42:41 | DEBUG server heartbeat line 2561
+12:42:42 | DEBUG server heartbeat line 2562
+12:42:43 | DEBUG server heartbeat line 2563
+12:42:44 | DEBUG server heartbeat line 2564
+12:42:45 | DEBUG server heartbeat line 2565
+12:42:46 | DEBUG server heartbeat line 2566
+12:42:47 | DEBUG server heartbeat line 2567
+12:42:48 | DEBUG server heartbeat line 2568
+12:42:49 | DEBUG server heartbeat line 2569
+12:42:50 | DEBUG server heartbeat line 2570
+12:42:51 | DEBUG server heartbeat line 2571
+12:42:52 | DEBUG server heartbeat line 2572
+12:42:53 | DEBUG server heartbeat line 2573
+12:42:54 | DEBUG server heartbeat line 2574
+12:42:55 | DEBUG server heartbeat line 2575
+12:42:56 | DEBUG server heartbeat line 2576
+12:42:57 | DEBUG server heartbeat line 2577
+12:42:58 | DEBUG server heartbeat line 2578
+12:42:59 | DEBUG server heartbeat line 2579
+12:43:00 | DEBUG server heartbeat line 2580
+12:43:01 | DEBUG server heartbeat line 2581
+12:43:02 | DEBUG server heartbeat line 2582
+12:43:03 | DEBUG server heartbeat line 2583
+12:43:04 | DEBUG server heartbeat line 2584
+12:43:05 | DEBUG server heartbeat line 2585
+12:43:06 | DEBUG server heartbeat line 2586
+12:43:07 | DEBUG server heartbeat line 2587
+12:43:08 | DEBUG server heartbeat line 2588
+12:43:09 | DEBUG server heartbeat line 2589
+12:43:10 | DEBUG server heartbeat line 2590
+12:43:11 | DEBUG server heartbeat line 2591
+12:43:12 | DEBUG server heartbeat line 2592
+12:43:13 | DEBUG server heartbeat line 2593
+12:43:14 | DEBUG server heartbeat line 2594
+12:43:15 | DEBUG server heartbeat line 2595
+12:43:16 | DEBUG server heartbeat line 2596
+12:43:17 | DEBUG server heartbeat line 2597
+12:43:18 | DEBUG server heartbeat line 2598
+12:43:19 | DEBUG server heartbeat line 2599
+12:43:20 | DEBUG server heartbeat line 2600
+12:43:21 | DEBUG server heartbeat line 2601
+12:43:22 | DEBUG server heartbeat line 2602
+12:43:23 | DEBUG server heartbeat line 2603
+12:43:24 | DEBUG server heartbeat line 2604
+12:43:25 | DEBUG server heartbeat line 2605
+12:43:26 | DEBUG server heartbeat line 2606
+12:43:27 | DEBUG server heartbeat line 2607
+12:43:28 | DEBUG server heartbeat line 2608
+12:43:29 | DEBUG server heartbeat line 2609
+12:43:30 | DEBUG server heartbeat line 2610
+12:43:31 | DEBUG server heartbeat line 2611
+12:43:32 | DEBUG server heartbeat line 2612
+12:43:33 | DEBUG server heartbeat line 2613
+12:43:34 | DEBUG server heartbeat line 2614
+12:43:35 | DEBUG server heartbeat line 2615
+12:43:36 | DEBUG server heartbeat line 2616
+12:43:37 | DEBUG server heartbeat line 2617
+12:43:38 | DEBUG server heartbeat line 2618
+12:43:39 | DEBUG server heartbeat line 2619
+12:43:40 | DEBUG server heartbeat line 2620
+12:43:41 | DEBUG server heartbeat line 2621
+12:43:42 | DEBUG server heartbeat line 2622
+12:43:43 | DEBUG server heartbeat line 2623
+12:43:44 | DEBUG server heartbeat line 2624
+12:43:45 | DEBUG server heartbeat line 2625
+12:43:46 | DEBUG server heartbeat line 2626
+12:43:47 | DEBUG server heartbeat line 2627
+12:43:48 | DEBUG server heartbeat line 2628
+12:43:49 | DEBUG server heartbeat line 2629
+12:43:50 | DEBUG server heartbeat line 2630
+12:43:51 | DEBUG server heartbeat line 2631
+12:43:52 | DEBUG server heartbeat line 2632
+12:43:53 | DEBUG server heartbeat line 2633
+12:43:54 | DEBUG server heartbeat line 2634
+12:43:55 | DEBUG server heartbeat line 2635
+12:43:56 | DEBUG server heartbeat line 2636
+12:43:57 | DEBUG server heartbeat line 2637
+12:43:58 | DEBUG server heartbeat line 2638
+12:43:59 | DEBUG server heartbeat line 2639
+12:44:00 | DEBUG server heartbeat line 2640
+12:44:01 | DEBUG server heartbeat line 2641
+12:44:02 | DEBUG server heartbeat line 2642
+12:44:03 | DEBUG server heartbeat line 2643
+12:44:04 | DEBUG server heartbeat line 2644
+12:44:05 | DEBUG server heartbeat line 2645
+12:44:06 | DEBUG server heartbeat line 2646
+12:44:07 | DEBUG server heartbeat line 2647
+12:44:08 | DEBUG server heartbeat line 2648
+12:44:09 | DEBUG server heartbeat line 2649
+12:44:10 | DEBUG server heartbeat line 2650
+12:44:11 | DEBUG server heartbeat line 2651
+12:44:12 | DEBUG server heartbeat line 2652
+12:44:13 | DEBUG server heartbeat line 2653
+12:44:14 | DEBUG server heartbeat line 2654
+12:44:15 | DEBUG server heartbeat line 2655
+12:44:16 | DEBUG server heartbeat line 2656
+12:44:17 | DEBUG server heartbeat line 2657
+12:44:18 | DEBUG server heartbeat line 2658
+12:44:19 | DEBUG server heartbeat line 2659
+12:44:20 | DEBUG server heartbeat line 2660
+12:44:21 | DEBUG server heartbeat line 2661
+12:44:22 | DEBUG server heartbeat line 2662
+12:44:23 | DEBUG server heartbeat line 2663
+12:44:24 | DEBUG server heartbeat line 2664
+12:44:25 | DEBUG server heartbeat line 2665
+12:44:26 | DEBUG server heartbeat line 2666
+12:44:27 | DEBUG server heartbeat line 2667
+12:44:28 | DEBUG server heartbeat line 2668
+12:44:29 | DEBUG server heartbeat line 2669
+12:44:30 | DEBUG server heartbeat line 2670
+12:44:31 | DEBUG server heartbeat line 2671
+12:44:32 | DEBUG server heartbeat line 2672
+12:44:33 | DEBUG server heartbeat line 2673
+12:44:34 | DEBUG server heartbeat line 2674
+12:44:35 | DEBUG server heartbeat line 2675
+12:44:36 | DEBUG server heartbeat line 2676
+12:44:37 | DEBUG server heartbeat line 2677
+12:44:38 | DEBUG server heartbeat line 2678
+12:44:39 | DEBUG server heartbeat line 2679
+12:44:40 | DEBUG server heartbeat line 2680
+12:44:41 | DEBUG server heartbeat line 2681
+12:44:42 | DEBUG server heartbeat line 2682
+12:44:43 | DEBUG server heartbeat line 2683
+12:44:44 | DEBUG server heartbeat line 2684
+12:44:45 | DEBUG server heartbeat line 2685
+12:44:46 | DEBUG server heartbeat line 2686
+12:44:47 | DEBUG server heartbeat line 2687
+12:44:48 | DEBUG server heartbeat line 2688
+12:44:49 | DEBUG server heartbeat line 2689
+12:44:50 | DEBUG server heartbeat line 2690
+12:44:51 | DEBUG server heartbeat line 2691
+12:44:52 | DEBUG server heartbeat line 2692
+12:44:53 | DEBUG server heartbeat line 2693
+12:44:54 | DEBUG server heartbeat line 2694
+12:44:55 | DEBUG server heartbeat line 2695
+12:44:56 | DEBUG server heartbeat line 2696
+12:44:57 | DEBUG server heartbeat line 2697
+12:44:58 | DEBUG server heartbeat line 2698
+12:44:59 | DEBUG server heartbeat line 2699
+12:45:00 | DEBUG server heartbeat line 2700
+12:45:01 | DEBUG server heartbeat line 2701
+12:45:02 | DEBUG server heartbeat line 2702
+12:45:03 | DEBUG server heartbeat line 2703
+12:45:04 | DEBUG server heartbeat line 2704
+12:45:05 | DEBUG server heartbeat line 2705
+12:45:06 | DEBUG server heartbeat line 2706
+12:45:07 | DEBUG server heartbeat line 2707
+12:45:08 | DEBUG server heartbeat line 2708
+12:45:09 | DEBUG server heartbeat line 2709
+12:45:10 | DEBUG server heartbeat line 2710
+12:45:11 | DEBUG server heartbeat line 2711
+12:45:12 | DEBUG server heartbeat line 2712
+12:45:13 | DEBUG server heartbeat line 2713
+12:45:14 | DEBUG server heartbeat line 2714
+12:45:15 | DEBUG server heartbeat line 2715
+12:45:16 | DEBUG server heartbeat line 2716
+12:45:17 | DEBUG server heartbeat line 2717
+12:45:18 | DEBUG server heartbeat line 2718
+12:45:19 | DEBUG server heartbeat line 2719
+12:45:20 | DEBUG server heartbeat line 2720
+12:45:21 | DEBUG server heartbeat line 2721
+12:45:22 | DEBUG server heartbeat line 2722
+12:45:23 | DEBUG server heartbeat line 2723
+12:45:24 | DEBUG server heartbeat line 2724
+12:45:25 | DEBUG server heartbeat line 2725
+12:45:26 | DEBUG server heartbeat line 2726
+12:45:27 | DEBUG server heartbeat line 2727
+12:45:28 | DEBUG server heartbeat line 2728
+12:45:29 | DEBUG server heartbeat line 2729
+12:45:30 | DEBUG server heartbeat line 2730
+12:45:31 | DEBUG server heartbeat line 2731
+12:45:32 | DEBUG server heartbeat line 2732
+12:45:33 | DEBUG server heartbeat line 2733
+12:45:34 | DEBUG server heartbeat line 2734
+12:45:35 | DEBUG server heartbeat line 2735
+12:45:36 | DEBUG server heartbeat line 2736
+12:45:37 | DEBUG server heartbeat line 2737
+12:45:38 | DEBUG server heartbeat line 2738
+12:45:39 | DEBUG server heartbeat line 2739
+12:45:40 | DEBUG server heartbeat line 2740
+12:45:41 | DEBUG server heartbeat line 2741
+12:45:42 | DEBUG server heartbeat line 2742
+12:45:43 | DEBUG server heartbeat line 2743
+12:45:44 | DEBUG server heartbeat line 2744
+12:45:45 | DEBUG server heartbeat line 2745
+12:45:46 | DEBUG server heartbeat line 2746
+12:45:47 | DEBUG server heartbeat line 2747
+12:45:48 | DEBUG server heartbeat line 2748
+12:45:49 | DEBUG server heartbeat line 2749
+12:45:50 | DEBUG server heartbeat line 2750
+12:45:51 | DEBUG server heartbeat line 2751
+12:45:52 | DEBUG server heartbeat line 2752
+12:45:53 | DEBUG server heartbeat line 2753
+12:45:54 | DEBUG server heartbeat line 2754
+12:45:55 | DEBUG server heartbeat line 2755
+12:45:56 | DEBUG server heartbeat line 2756
+12:45:57 | DEBUG server heartbeat line 2757
+12:45:58 | DEBUG server heartbeat line 2758
+12:45:59 | DEBUG server heartbeat line 2759
+12:46:00 | DEBUG server heartbeat line 2760
+12:46:01 | DEBUG server heartbeat line 2761
+12:46:02 | DEBUG server heartbeat line 2762
+12:46:03 | DEBUG server heartbeat line 2763
+12:46:04 | DEBUG server heartbeat line 2764
+12:46:05 | DEBUG server heartbeat line 2765
+12:46:06 | DEBUG server heartbeat line 2766
+12:46:07 | DEBUG server heartbeat line 2767
+12:46:08 | DEBUG server heartbeat line 2768
+12:46:09 | DEBUG server heartbeat line 2769
+12:46:10 | DEBUG server heartbeat line 2770
+12:46:11 | DEBUG server heartbeat line 2771
+12:46:12 | DEBUG server heartbeat line 2772
+12:46:13 | DEBUG server heartbeat line 2773
+12:46:14 | DEBUG server heartbeat line 2774
+12:46:15 | DEBUG server heartbeat line 2775
+12:46:16 | DEBUG server heartbeat line 2776
+12:46:17 | DEBUG server heartbeat line 2777
+12:46:18 | DEBUG server heartbeat line 2778
+12:46:19 | DEBUG server heartbeat line 2779
+12:46:20 | DEBUG server heartbeat line 2780
+12:46:21 | DEBUG server heartbeat line 2781
+12:46:22 | DEBUG server heartbeat line 2782
+12:46:23 | DEBUG server heartbeat line 2783
+12:46:24 | DEBUG server heartbeat line 2784
+12:46:25 | DEBUG server heartbeat line 2785
+12:46:26 | DEBUG server heartbeat line 2786
+12:46:27 | DEBUG server heartbeat line 2787
+12:46:28 | DEBUG server heartbeat line 2788
+12:46:29 | DEBUG server heartbeat line 2789
+12:46:30 | DEBUG server heartbeat line 2790
+12:46:31 | DEBUG server heartbeat line 2791
+12:46:32 | DEBUG server heartbeat line 2792
+12:46:33 | DEBUG server heartbeat line 2793
+12:46:34 | DEBUG server heartbeat line 2794
+12:46:35 | DEBUG server heartbeat line 2795
+12:46:36 | DEBUG server heartbeat line 2796
+12:46:37 | DEBUG server heartbeat line 2797
+12:46:38 | DEBUG server heartbeat line 2798
+12:46:39 | DEBUG server heartbeat line 2799
+12:46:40 | DEBUG server heartbeat line 2800
+12:46:41 | DEBUG server heartbeat line 2801
+12:46:42 | DEBUG server heartbeat line 2802
+12:46:43 | DEBUG server heartbeat line 2803
+12:46:44 | DEBUG server heartbeat line 2804
+12:46:45 | DEBUG server heartbeat line 2805
+12:46:46 | DEBUG server heartbeat line 2806
+12:46:47 | DEBUG server heartbeat line 2807
+12:46:48 | DEBUG server heartbeat line 2808
+12:46:49 | DEBUG server heartbeat line 2809
+12:46:50 | DEBUG server heartbeat line 2810
+12:46:51 | DEBUG server heartbeat line 2811
+12:46:52 | DEBUG server heartbeat line 2812
+12:46:53 | DEBUG server heartbeat line 2813
+12:46:54 | DEBUG server heartbeat line 2814
+12:46:55 | DEBUG server heartbeat line 2815
+12:46:56 | DEBUG server heartbeat line 2816
+12:46:57 | DEBUG server heartbeat line 2817
+12:46:58 | DEBUG server heartbeat line 2818
+12:46:59 | DEBUG server heartbeat line 2819
+12:47:00 | DEBUG server heartbeat line 2820
+12:47:01 | DEBUG server heartbeat line 2821
+12:47:02 | DEBUG server heartbeat line 2822
+12:47:03 | DEBUG server heartbeat line 2823
+12:47:04 | DEBUG server heartbeat line 2824
+12:47:05 | DEBUG server heartbeat line 2825
+12:47:06 | DEBUG server heartbeat line 2826
+12:47:07 | DEBUG server heartbeat line 2827
+12:47:08 | DEBUG server heartbeat line 2828
+12:47:09 | DEBUG server heartbeat line 2829
+12:47:10 | DEBUG server heartbeat line 2830
+12:47:11 | DEBUG server heartbeat line 2831
+12:47:12 | DEBUG server heartbeat line 2832
+12:47:13 | DEBUG server heartbeat line 2833
+12:47:14 | DEBUG server heartbeat line 2834
+12:47:15 | DEBUG server heartbeat line 2835
+12:47:16 | DEBUG server heartbeat line 2836
+12:47:17 | DEBUG server heartbeat line 2837
+12:47:18 | DEBUG server heartbeat line 2838
+12:47:19 | DEBUG server heartbeat line 2839
+12:47:20 | DEBUG server heartbeat line 2840
+12:47:21 | DEBUG server heartbeat line 2841
+12:47:22 | DEBUG server heartbeat line 2842
+12:47:23 | DEBUG server heartbeat line 2843
+12:47:24 | DEBUG server heartbeat line 2844
+12:47:25 | DEBUG server heartbeat line 2845
+12:47:26 | DEBUG server heartbeat line 2846
+12:47:27 | DEBUG server heartbeat line 2847
+12:47:28 | DEBUG server heartbeat line 2848
+12:47:29 | DEBUG server heartbeat line 2849
+12:47:30 | DEBUG server heartbeat line 2850
+12:47:31 | DEBUG server heartbeat line 2851
+12:47:32 | DEBUG server heartbeat line 2852
+12:47:33 | DEBUG server heartbeat line 2853
+12:47:34 | DEBUG server heartbeat line 2854
+12:47:35 | DEBUG server heartbeat line 2855
+12:47:36 | DEBUG server heartbeat line 2856
+12:47:37 | DEBUG server heartbeat line 2857
+12:47:38 | DEBUG server heartbeat line 2858
+12:47:39 | DEBUG server heartbeat line 2859
+12:47:40 | DEBUG server heartbeat line 2860
+12:47:41 | DEBUG server heartbeat line 2861
+12:47:42 | DEBUG server heartbeat line 2862
+12:47:43 | DEBUG server heartbeat line 2863
+12:47:44 | DEBUG server heartbeat line 2864
+12:47:45 | DEBUG server heartbeat line 2865
+12:47:46 | DEBUG server heartbeat line 2866
+12:47:47 | DEBUG server heartbeat line 2867
+12:47:48 | DEBUG server heartbeat line 2868
+12:47:49 | DEBUG server heartbeat line 2869
+12:47:50 | DEBUG server heartbeat line 2870
+12:47:51 | DEBUG server heartbeat line 2871
+12:47:52 | DEBUG server heartbeat line 2872
+12:47:53 | DEBUG server heartbeat line 2873
+12:47:54 | DEBUG server heartbeat line 2874
+12:47:55 | DEBUG server heartbeat line 2875
+12:47:56 | DEBUG server heartbeat line 2876
+12:47:57 | DEBUG server heartbeat line 2877
+12:47:58 | DEBUG server heartbeat line 2878
+12:47:59 | DEBUG server heartbeat line 2879
+12:48:00 | DEBUG server heartbeat line 2880
+12:48:01 | DEBUG server heartbeat line 2881
+12:48:02 | DEBUG server heartbeat line 2882
+12:48:03 | DEBUG server heartbeat line 2883
+12:48:04 | DEBUG server heartbeat line 2884
+12:48:05 | DEBUG server heartbeat line 2885
+12:48:06 | DEBUG server heartbeat line 2886
+12:48:07 | DEBUG server heartbeat line 2887
+12:48:08 | DEBUG server heartbeat line 2888
+12:48:09 | DEBUG server heartbeat line 2889
+12:48:10 | DEBUG server heartbeat line 2890
+12:48:11 | DEBUG server heartbeat line 2891
+12:48:12 | DEBUG server heartbeat line 2892
+12:48:13 | DEBUG server heartbeat line 2893
+12:48:14 | DEBUG server heartbeat line 2894
+12:48:15 | DEBUG server heartbeat line 2895
+12:48:16 | DEBUG server heartbeat line 2896
+12:48:17 | DEBUG server heartbeat line 2897
+12:48:18 | DEBUG server heartbeat line 2898
+12:48:19 | DEBUG server heartbeat line 2899
+12:48:20 | DEBUG server heartbeat line 2900
+12:48:21 | DEBUG server heartbeat line 2901
+12:48:22 | DEBUG server heartbeat line 2902
+12:48:23 | DEBUG server heartbeat line 2903
+12:48:24 | DEBUG server heartbeat line 2904
+12:48:25 | DEBUG server heartbeat line 2905
+12:48:26 | DEBUG server heartbeat line 2906
+12:48:27 | DEBUG server heartbeat line 2907
+12:48:28 | DEBUG server heartbeat line 2908
+12:48:29 | DEBUG server heartbeat line 2909
+12:48:30 | DEBUG server heartbeat line 2910
+12:48:31 | DEBUG server heartbeat line 2911
+12:48:32 | DEBUG server heartbeat line 2912
+12:48:33 | DEBUG server heartbeat line 2913
+12:48:34 | DEBUG server heartbeat line 2914
+12:48:35 | DEBUG server heartbeat line 2915
+12:48:36 | DEBUG server heartbeat line 2916
+12:48:37 | DEBUG server heartbeat line 2917
+12:48:38 | DEBUG server heartbeat line 2918
+12:48:39 | DEBUG server heartbeat line 2919
+12:48:40 | DEBUG server heartbeat line 2920
+12:48:41 | DEBUG server heartbeat line 2921
+12:48:42 | DEBUG server heartbeat line 2922
+12:48:43 | DEBUG server heartbeat line 2923
+12:48:44 | DEBUG server heartbeat line 2924
+12:48:45 | DEBUG server heartbeat line 2925
+12:48:46 | DEBUG server heartbeat line 2926
+12:48:47 | DEBUG server heartbeat line 2927
+12:48:48 | DEBUG server heartbeat line 2928
+12:48:49 | DEBUG server heartbeat line 2929
+12:48:50 | DEBUG server heartbeat line 2930
+12:48:51 | DEBUG server heartbeat line 2931
+12:48:52 | DEBUG server heartbeat line 2932
+12:48:53 | DEBUG server heartbeat line 2933
+12:48:54 | DEBUG server heartbeat line 2934
+12:48:55 | DEBUG server heartbeat line 2935
+12:48:56 | DEBUG server heartbeat line 2936
+12:48:57 | DEBUG server heartbeat line 2937
+12:48:58 | DEBUG server heartbeat line 2938
+12:48:59 | DEBUG server heartbeat line 2939
+12:49:00 | DEBUG server heartbeat line 2940
+12:49:01 | DEBUG server heartbeat line 2941
+12:49:02 | DEBUG server heartbeat line 2942
+12:49:03 | DEBUG server heartbeat line 2943
+12:49:04 | DEBUG server heartbeat line 2944
+12:49:05 | DEBUG server heartbeat line 2945
+12:49:06 | DEBUG server heartbeat line 2946
+12:49:07 | DEBUG server heartbeat line 2947
+12:49:08 | DEBUG server heartbeat line 2948
+12:49:09 | DEBUG server heartbeat line 2949
+12:49:10 | DEBUG server heartbeat line 2950
+12:49:11 | DEBUG server heartbeat line 2951
+12:49:12 | DEBUG server heartbeat line 2952
+12:49:13 | DEBUG server heartbeat line 2953
+12:49:14 | DEBUG server heartbeat line 2954
+12:49:15 | DEBUG server heartbeat line 2955
+12:49:16 | DEBUG server heartbeat line 2956
+12:49:17 | DEBUG server heartbeat line 2957
+12:49:18 | DEBUG server heartbeat line 2958
+12:49:19 | DEBUG server heartbeat line 2959
+12:49:20 | DEBUG server heartbeat line 2960
+12:49:21 | DEBUG server heartbeat line 2961
+12:49:22 | DEBUG server heartbeat line 2962
+12:49:23 | DEBUG server heartbeat line 2963
+12:49:24 | DEBUG server heartbeat line 2964
+12:49:25 | DEBUG server heartbeat line 2965
+12:49:26 | DEBUG server heartbeat line 2966
+12:49:27 | DEBUG server heartbeat line 2967
+12:49:28 | DEBUG server heartbeat line 2968
+12:49:29 | DEBUG server heartbeat line 2969
+12:49:30 | DEBUG server heartbeat line 2970
+12:49:31 | DEBUG server heartbeat line 2971
+12:49:32 | DEBUG server heartbeat line 2972
+12:49:33 | DEBUG server heartbeat line 2973
+12:49:34 | DEBUG server heartbeat line 2974
+12:49:35 | DEBUG server heartbeat line 2975
+12:49:36 | DEBUG server heartbeat line 2976
+12:49:37 | DEBUG server heartbeat line 2977
+12:49:38 | DEBUG server heartbeat line 2978
+12:49:39 | DEBUG server heartbeat line 2979
+12:49:40 | DEBUG server heartbeat line 2980
+12:49:41 | DEBUG server heartbeat line 2981
+12:49:42 | DEBUG server heartbeat line 2982
+12:49:43 | DEBUG server heartbeat line 2983
+12:49:44 | DEBUG server heartbeat line 2984
+12:49:45 | DEBUG server heartbeat line 2985
+12:49:46 | DEBUG server heartbeat line 2986
+12:49:47 | DEBUG server heartbeat line 2987
+12:49:48 | DEBUG server heartbeat line 2988
+12:49:49 | DEBUG server heartbeat line 2989
+12:49:50 | DEBUG server heartbeat line 2990
+12:49:51 | DEBUG server heartbeat line 2991
+12:49:52 | DEBUG server heartbeat line 2992
+12:49:53 | DEBUG server heartbeat line 2993
+12:49:54 | DEBUG server heartbeat line 2994
+12:49:55 | DEBUG server heartbeat line 2995
+12:49:56 | DEBUG server heartbeat line 2996
+12:49:57 | DEBUG server heartbeat line 2997
+12:49:58 | DEBUG server heartbeat line 2998
+12:49:59 | DEBUG server heartbeat line 2999
+12:50:00 | DEBUG server heartbeat line 3000
+12:50:01 | DEBUG server heartbeat line 3001
+12:50:02 | DEBUG server heartbeat line 3002
+12:50:03 | DEBUG server heartbeat line 3003
+12:50:04 | DEBUG server heartbeat line 3004
+12:50:05 | DEBUG server heartbeat line 3005
+12:50:06 | DEBUG server heartbeat line 3006
+12:50:07 | DEBUG server heartbeat line 3007
+12:50:08 | DEBUG server heartbeat line 3008
+12:50:09 | DEBUG server heartbeat line 3009
+12:50:10 | DEBUG server heartbeat line 3010
+12:50:11 | DEBUG server heartbeat line 3011
+12:50:12 | DEBUG server heartbeat line 3012
+12:50:13 | DEBUG server heartbeat line 3013
+12:50:14 | DEBUG server heartbeat line 3014
+12:50:15 | DEBUG server heartbeat line 3015
+12:50:16 | DEBUG server heartbeat line 3016
+12:50:17 | DEBUG server heartbeat line 3017
+12:50:18 | DEBUG server heartbeat line 3018
+12:50:19 | DEBUG server heartbeat line 3019
+12:50:20 | DEBUG server heartbeat line 3020
+12:50:21 | DEBUG server heartbeat line 3021
+12:50:22 | DEBUG server heartbeat line 3022
+12:50:23 | DEBUG server heartbeat line 3023
+12:50:24 | DEBUG server heartbeat line 3024
+12:50:25 | DEBUG server heartbeat line 3025
+12:50:26 | DEBUG server heartbeat line 3026
+12:50:27 | DEBUG server heartbeat line 3027
+12:50:28 | DEBUG server heartbeat line 3028
+12:50:29 | DEBUG server heartbeat line 3029
+12:50:30 | DEBUG server heartbeat line 3030
+12:50:31 | DEBUG server heartbeat line 3031
+12:50:32 | DEBUG server heartbeat line 3032
+12:50:33 | DEBUG server heartbeat line 3033
+12:50:34 | DEBUG server heartbeat line 3034
+12:50:35 | DEBUG server heartbeat line 3035
+12:50:36 | DEBUG server heartbeat line 3036
+12:50:37 | DEBUG server heartbeat line 3037
+12:50:38 | DEBUG server heartbeat line 3038
+12:50:39 | DEBUG server heartbeat line 3039
+12:50:40 | DEBUG server heartbeat line 3040
+12:50:41 | DEBUG server heartbeat line 3041
+12:50:42 | DEBUG server heartbeat line 3042
+12:50:43 | DEBUG server heartbeat line 3043
+12:50:44 | DEBUG server heartbeat line 3044
+12:50:45 | DEBUG server heartbeat line 3045
+12:50:46 | DEBUG server heartbeat line 3046
+12:50:47 | DEBUG server heartbeat line 3047
+12:50:48 | DEBUG server heartbeat line 3048
+12:50:49 | DEBUG server heartbeat line 3049
+12:50:50 | DEBUG server heartbeat line 3050
+12:50:51 | DEBUG server heartbeat line 3051
+12:50:52 | DEBUG server heartbeat line 3052
+12:50:53 | DEBUG server heartbeat line 3053
+12:50:54 | DEBUG server heartbeat line 3054
+12:50:55 | DEBUG server heartbeat line 3055
+12:50:56 | DEBUG server heartbeat line 3056
+12:50:57 | DEBUG server heartbeat line 3057
+12:50:58 | DEBUG server heartbeat line 3058
+12:50:59 | DEBUG server heartbeat line 3059
+12:51:00 | DEBUG server heartbeat line 3060
+12:51:01 | DEBUG server heartbeat line 3061
+12:51:02 | DEBUG server heartbeat line 3062
+12:51:03 | DEBUG server heartbeat line 3063
+12:51:04 | DEBUG server heartbeat line 3064
+12:51:05 | DEBUG server heartbeat line 3065
+12:51:06 | DEBUG server heartbeat line 3066
+12:51:07 | DEBUG server heartbeat line 3067
+12:51:08 | DEBUG server heartbeat line 3068
+12:51:09 | DEBUG server heartbeat line 3069
+12:51:10 | DEBUG server heartbeat line 3070
+12:51:11 | DEBUG server heartbeat line 3071
+12:51:12 | DEBUG server heartbeat line 3072
+12:51:13 | DEBUG server heartbeat line 3073
+12:51:14 | DEBUG server heartbeat line 3074
+12:51:15 | DEBUG server heartbeat line 3075
+12:51:16 | DEBUG server heartbeat line 3076
+12:51:17 | DEBUG server heartbeat line 3077
+12:51:18 | DEBUG server heartbeat line 3078
+12:51:19 | DEBUG server heartbeat line 3079
+12:51:20 | DEBUG server heartbeat line 3080
+12:51:21 | DEBUG server heartbeat line 3081
+12:51:22 | DEBUG server heartbeat line 3082
+12:51:23 | DEBUG server heartbeat line 3083
+12:51:24 | DEBUG server heartbeat line 3084
+12:51:25 | DEBUG server heartbeat line 3085
+12:51:26 | DEBUG server heartbeat line 3086
+12:51:27 | DEBUG server heartbeat line 3087
+12:51:28 | DEBUG server heartbeat line 3088
+12:51:29 | DEBUG server heartbeat line 3089
+12:51:30 | DEBUG server heartbeat line 3090
+12:51:31 | DEBUG server heartbeat line 3091
+12:51:32 | DEBUG server heartbeat line 3092
+12:51:33 | DEBUG server heartbeat line 3093
+12:51:34 | DEBUG server heartbeat line 3094
+12:51:35 | DEBUG server heartbeat line 3095
+12:51:36 | DEBUG server heartbeat line 3096
+12:51:37 | DEBUG server heartbeat line 3097
+12:51:38 | DEBUG server heartbeat line 3098
+12:51:39 | DEBUG server heartbeat line 3099
+12:51:40 | DEBUG server heartbeat line 3100
+12:51:41 | DEBUG server heartbeat line 3101
+12:51:42 | DEBUG server heartbeat line 3102
+12:51:43 | DEBUG server heartbeat line 3103
+12:51:44 | DEBUG server heartbeat line 3104
+12:51:45 | DEBUG server heartbeat line 3105
+12:51:46 | DEBUG server heartbeat line 3106
+12:51:47 | DEBUG server heartbeat line 3107
+12:51:48 | DEBUG server heartbeat line 3108
+12:51:49 | DEBUG server heartbeat line 3109
+12:51:50 | DEBUG server heartbeat line 3110
+12:51:51 | DEBUG server heartbeat line 3111
+12:51:52 | DEBUG server heartbeat line 3112
+12:51:53 | DEBUG server heartbeat line 3113
+12:51:54 | DEBUG server heartbeat line 3114
+12:51:55 | DEBUG server heartbeat line 3115
+12:51:56 | DEBUG server heartbeat line 3116
+12:51:57 | DEBUG server heartbeat line 3117
+12:51:58 | DEBUG server heartbeat line 3118
+12:51:59 | DEBUG server heartbeat line 3119
+12:52:00 | DEBUG server heartbeat line 3120
+12:52:01 | DEBUG server heartbeat line 3121
+12:52:02 | DEBUG server heartbeat line 3122
+12:52:03 | DEBUG server heartbeat line 3123
+12:52:04 | DEBUG server heartbeat line 3124
+12:52:05 | DEBUG server heartbeat line 3125
+12:52:06 | DEBUG server heartbeat line 3126
+12:52:07 | DEBUG server heartbeat line 3127
+12:52:08 | DEBUG server heartbeat line 3128
+12:52:09 | DEBUG server heartbeat line 3129
+12:52:10 | DEBUG server heartbeat line 3130
+12:52:11 | DEBUG server heartbeat line 3131
+12:52:12 | DEBUG server heartbeat line 3132
+12:52:13 | DEBUG server heartbeat line 3133
+12:52:14 | DEBUG server heartbeat line 3134
+12:52:15 | DEBUG server heartbeat line 3135
+12:52:16 | DEBUG server heartbeat line 3136
+12:52:17 | DEBUG server heartbeat line 3137
+12:52:18 | DEBUG server heartbeat line 3138
+12:52:19 | DEBUG server heartbeat line 3139
+12:52:20 | DEBUG server heartbeat line 3140
+12:52:21 | DEBUG server heartbeat line 3141
+12:52:22 | DEBUG server heartbeat line 3142
+12:52:23 | DEBUG server heartbeat line 3143
+12:52:24 | DEBUG server heartbeat line 3144
+12:52:25 | DEBUG server heartbeat line 3145
+12:52:26 | DEBUG server heartbeat line 3146
+12:52:27 | DEBUG server heartbeat line 3147
+12:52:28 | DEBUG server heartbeat line 3148
+12:52:29 | DEBUG server heartbeat line 3149
+12:52:30 | DEBUG server heartbeat line 3150
+12:52:31 | DEBUG server heartbeat line 3151
+12:52:32 | DEBUG server heartbeat line 3152
+12:52:33 | DEBUG server heartbeat line 3153
+12:52:34 | DEBUG server heartbeat line 3154
+12:52:35 | DEBUG server heartbeat line 3155
+12:52:36 | DEBUG server heartbeat line 3156
+12:52:37 | DEBUG server heartbeat line 3157
+12:52:38 | DEBUG server heartbeat line 3158
+12:52:39 | DEBUG server heartbeat line 3159
+12:52:40 | DEBUG server heartbeat line 3160
+12:52:41 | DEBUG server heartbeat line 3161
+12:52:42 | DEBUG server heartbeat line 3162
+12:52:43 | DEBUG server heartbeat line 3163
+12:52:44 | DEBUG server heartbeat line 3164
+12:52:45 | DEBUG server heartbeat line 3165
+12:52:46 | DEBUG server heartbeat line 3166
+12:52:47 | DEBUG server heartbeat line 3167
+12:52:48 | DEBUG server heartbeat line 3168
+12:52:49 | DEBUG server heartbeat line 3169
+12:52:50 | DEBUG server heartbeat line 3170
+12:52:51 | DEBUG server heartbeat line 3171
+12:52:52 | DEBUG server heartbeat line 3172
+12:52:53 | DEBUG server heartbeat line 3173
+12:52:54 | DEBUG server heartbeat line 3174
+12:52:55 | DEBUG server heartbeat line 3175
+12:52:56 | DEBUG server heartbeat line 3176
+12:52:57 | DEBUG server heartbeat line 3177
+12:52:58 | DEBUG server heartbeat line 3178
+12:52:59 | DEBUG server heartbeat line 3179
+12:53:00 | DEBUG server heartbeat line 3180
+12:53:01 | DEBUG server heartbeat line 3181
+12:53:02 | DEBUG server heartbeat line 3182
+12:53:03 | DEBUG server heartbeat line 3183
+12:53:04 | DEBUG server heartbeat line 3184
+12:53:05 | DEBUG server heartbeat line 3185
+12:53:06 | DEBUG server heartbeat line 3186
+12:53:07 | DEBUG server heartbeat line 3187
+12:53:08 | DEBUG server heartbeat line 3188
+12:53:09 | DEBUG server heartbeat line 3189
+12:53:10 | DEBUG server heartbeat line 3190
+12:53:11 | DEBUG server heartbeat line 3191
+12:53:12 | DEBUG server heartbeat line 3192
+12:53:13 | DEBUG server heartbeat line 3193
+12:53:14 | DEBUG server heartbeat line 3194
+12:53:15 | DEBUG server heartbeat line 3195
+12:53:16 | DEBUG server heartbeat line 3196
+12:53:17 | DEBUG server heartbeat line 3197
+12:53:18 | DEBUG server heartbeat line 3198
+12:53:19 | DEBUG server heartbeat line 3199
+12:53:20 | DEBUG server heartbeat line 3200
+12:53:21 | DEBUG server heartbeat line 3201
+12:53:22 | DEBUG server heartbeat line 3202
+12:53:23 | DEBUG server heartbeat line 3203
+12:53:24 | DEBUG server heartbeat line 3204
+12:53:25 | DEBUG server heartbeat line 3205
+12:53:26 | DEBUG server heartbeat line 3206
+12:53:27 | DEBUG server heartbeat line 3207
+12:53:28 | DEBUG server heartbeat line 3208
+12:53:29 | DEBUG server heartbeat line 3209
+12:53:30 | DEBUG server heartbeat line 3210
+12:53:31 | DEBUG server heartbeat line 3211
+12:53:32 | DEBUG server heartbeat line 3212
+12:53:33 | DEBUG server heartbeat line 3213
+12:53:34 | DEBUG server heartbeat line 3214
+12:53:35 | DEBUG server heartbeat line 3215
+12:53:36 | DEBUG server heartbeat line 3216
+12:53:37 | DEBUG server heartbeat line 3217
+12:53:38 | DEBUG server heartbeat line 3218
+12:53:39 | DEBUG server heartbeat line 3219
+12:53:40 | DEBUG server heartbeat line 3220
+12:53:41 | DEBUG server heartbeat line 3221
+12:53:42 | DEBUG server heartbeat line 3222
+12:53:43 | DEBUG server heartbeat line 3223
+12:53:44 | DEBUG server heartbeat line 3224
+12:53:45 | DEBUG server heartbeat line 3225
+12:53:46 | DEBUG server heartbeat line 3226
+12:53:47 | DEBUG server heartbeat line 3227
+12:53:48 | DEBUG server heartbeat line 3228
+12:53:49 | DEBUG server heartbeat line 3229
+12:53:50 | DEBUG server heartbeat line 3230
+12:53:51 | DEBUG server heartbeat line 3231
+12:53:52 | DEBUG server heartbeat line 3232
+12:53:53 | DEBUG server heartbeat line 3233
+12:53:54 | DEBUG server heartbeat line 3234
+12:53:55 | DEBUG server heartbeat line 3235
+12:53:56 | DEBUG server heartbeat line 3236
+12:53:57 | DEBUG server heartbeat line 3237
+12:53:58 | DEBUG server heartbeat line 3238
+12:53:59 | DEBUG server heartbeat line 3239
+12:54:00 | DEBUG server heartbeat line 3240
+12:54:01 | DEBUG server heartbeat line 3241
+12:54:02 | DEBUG server heartbeat line 3242
+12:54:03 | DEBUG server heartbeat line 3243
+12:54:04 | DEBUG server heartbeat line 3244
+12:54:05 | DEBUG server heartbeat line 3245
+12:54:06 | DEBUG server heartbeat line 3246
+12:54:07 | DEBUG server heartbeat line 3247
+12:54:08 | DEBUG server heartbeat line 3248
+12:54:09 | DEBUG server heartbeat line 3249
+12:54:10 | DEBUG server heartbeat line 3250
+12:54:11 | DEBUG server heartbeat line 3251
+12:54:12 | DEBUG server heartbeat line 3252
+12:54:13 | DEBUG server heartbeat line 3253
+12:54:14 | DEBUG server heartbeat line 3254
+12:54:15 | DEBUG server heartbeat line 3255
+12:54:16 | DEBUG server heartbeat line 3256
+12:54:17 | DEBUG server heartbeat line 3257
+12:54:18 | DEBUG server heartbeat line 3258
+12:54:19 | DEBUG server heartbeat line 3259
+12:54:20 | DEBUG server heartbeat line 3260
+12:54:21 | DEBUG server heartbeat line 3261
+12:54:22 | DEBUG server heartbeat line 3262
+12:54:23 | DEBUG server heartbeat line 3263
+12:54:24 | DEBUG server heartbeat line 3264
+12:54:25 | DEBUG server heartbeat line 3265
+12:54:26 | DEBUG server heartbeat line 3266
+12:54:27 | DEBUG server heartbeat line 3267
+12:54:28 | DEBUG server heartbeat line 3268
+12:54:29 | DEBUG server heartbeat line 3269
+12:54:30 | DEBUG server heartbeat line 3270
+12:54:31 | DEBUG server heartbeat line 3271
+12:54:32 | DEBUG server heartbeat line 3272
+12:54:33 | DEBUG server heartbeat line 3273
+12:54:34 | DEBUG server heartbeat line 3274
+12:54:35 | DEBUG server heartbeat line 3275
+12:54:36 | DEBUG server heartbeat line 3276
+12:54:37 | DEBUG server heartbeat line 3277
+12:54:38 | DEBUG server heartbeat line 3278
+12:54:39 | DEBUG server heartbeat line 3279
+12:54:40 | DEBUG server heartbeat line 3280
+12:54:41 | DEBUG server heartbeat line 3281
+12:54:42 | DEBUG server heartbeat line 3282
+12:54:43 | DEBUG server heartbeat line 3283
+12:54:44 | DEBUG server heartbeat line 3284
+12:54:45 | DEBUG server heartbeat line 3285
+12:54:46 | DEBUG server heartbeat line 3286
+12:54:47 | DEBUG server heartbeat line 3287
+12:54:48 | DEBUG server heartbeat line 3288
+12:54:49 | DEBUG server heartbeat line 3289
+12:54:50 | DEBUG server heartbeat line 3290
+12:54:51 | DEBUG server heartbeat line 3291
+12:54:52 | DEBUG server heartbeat line 3292
+12:54:53 | DEBUG server heartbeat line 3293
+12:54:54 | DEBUG server heartbeat line 3294
+12:54:55 | DEBUG server heartbeat line 3295
+12:54:56 | DEBUG server heartbeat line 3296
+12:54:57 | DEBUG server heartbeat line 3297
+12:54:58 | DEBUG server heartbeat line 3298
+12:54:59 | DEBUG server heartbeat line 3299
+12:55:00 | DEBUG server heartbeat line 3300
+12:55:01 | DEBUG server heartbeat line 3301
+12:55:02 | DEBUG server heartbeat line 3302
+12:55:03 | DEBUG server heartbeat line 3303
+12:55:04 | DEBUG server heartbeat line 3304
+12:55:05 | DEBUG server heartbeat line 3305
+12:55:06 | DEBUG server heartbeat line 3306
+12:55:07 | DEBUG server heartbeat line 3307
+12:55:08 | DEBUG server heartbeat line 3308
+12:55:09 | DEBUG server heartbeat line 3309
+12:55:10 | DEBUG server heartbeat line 3310
+12:55:11 | DEBUG server heartbeat line 3311
+12:55:12 | DEBUG server heartbeat line 3312
+12:55:13 | DEBUG server heartbeat line 3313
+12:55:14 | DEBUG server heartbeat line 3314
+12:55:15 | DEBUG server heartbeat line 3315
+12:55:16 | DEBUG server heartbeat line 3316
+12:55:17 | DEBUG server heartbeat line 3317
+12:55:18 | DEBUG server heartbeat line 3318
+12:55:19 | DEBUG server heartbeat line 3319
+12:55:20 | DEBUG server heartbeat line 3320
+12:55:21 | DEBUG server heartbeat line 3321
+12:55:22 | DEBUG server heartbeat line 3322
+12:55:23 | DEBUG server heartbeat line 3323
+12:55:24 | DEBUG server heartbeat line 3324
+12:55:25 | DEBUG server heartbeat line 3325
+12:55:26 | DEBUG server heartbeat line 3326
+12:55:27 | DEBUG server heartbeat line 3327
+12:55:28 | DEBUG server heartbeat line 3328
+12:55:29 | DEBUG server heartbeat line 3329
+12:55:30 | DEBUG server heartbeat line 3330
+12:55:31 | DEBUG server heartbeat line 3331
+12:55:32 | DEBUG server heartbeat line 3332
+12:55:33 | DEBUG server heartbeat line 3333
+12:55:34 | DEBUG server heartbeat line 3334
+12:55:35 | DEBUG server heartbeat line 3335
+12:55:36 | DEBUG server heartbeat line 3336
+12:55:37 | DEBUG server heartbeat line 3337
+12:55:38 | DEBUG server heartbeat line 3338
+12:55:39 | DEBUG server heartbeat line 3339
+12:55:40 | DEBUG server heartbeat line 3340
+12:55:41 | DEBUG server heartbeat line 3341
+12:55:42 | DEBUG server heartbeat line 3342
+12:55:43 | DEBUG server heartbeat line 3343
+12:55:44 | DEBUG server heartbeat line 3344
+12:55:45 | DEBUG server heartbeat line 3345
+12:55:46 | DEBUG server heartbeat line 3346
+12:55:47 | DEBUG server heartbeat line 3347
+12:55:48 | DEBUG server heartbeat line 3348
+12:55:49 | DEBUG server heartbeat line 3349
+12:55:50 | DEBUG server heartbeat line 3350
+12:55:51 | DEBUG server heartbeat line 3351
+12:55:52 | DEBUG server heartbeat line 3352
+12:55:53 | DEBUG server heartbeat line 3353
+12:55:54 | DEBUG server heartbeat line 3354
+12:55:55 | DEBUG server heartbeat line 3355
+12:55:56 | DEBUG server heartbeat line 3356
+12:55:57 | DEBUG server heartbeat line 3357
+12:55:58 | DEBUG server heartbeat line 3358
+12:55:59 | DEBUG server heartbeat line 3359
+12:56:00 | DEBUG server heartbeat line 3360
+12:56:01 | DEBUG server heartbeat line 3361
+12:56:02 | DEBUG server heartbeat line 3362
+12:56:03 | DEBUG server heartbeat line 3363
+12:56:04 | DEBUG server heartbeat line 3364
+12:56:05 | DEBUG server heartbeat line 3365
+12:56:06 | DEBUG server heartbeat line 3366
+12:56:07 | DEBUG server heartbeat line 3367
+12:56:08 | DEBUG server heartbeat line 3368
+12:56:09 | DEBUG server heartbeat line 3369
+12:56:10 | DEBUG server heartbeat line 3370
+12:56:11 | DEBUG server heartbeat line 3371
+12:56:12 | DEBUG server heartbeat line 3372
+12:56:13 | DEBUG server heartbeat line 3373
+12:56:14 | DEBUG server heartbeat line 3374
+12:56:15 | DEBUG server heartbeat line 3375
+12:56:16 | DEBUG server heartbeat line 3376
+12:56:17 | DEBUG server heartbeat line 3377
+12:56:18 | DEBUG server heartbeat line 3378
+12:56:19 | DEBUG server heartbeat line 3379
+12:56:20 | DEBUG server heartbeat line 3380
+12:56:21 | DEBUG server heartbeat line 3381
+12:56:22 | DEBUG server heartbeat line 3382
+12:56:23 | DEBUG server heartbeat line 3383
+12:56:24 | DEBUG server heartbeat line 3384

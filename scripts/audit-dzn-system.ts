@@ -351,6 +351,9 @@ function auditAdmSyncWiring() {
   checkIncludes("functions/_lib/adm-sync.ts", "queueDiscordPostUpdatesForGuild", "ADM data changes queue Discord post updates");
   checkIncludes("functions/_lib/adm-sync.ts", "importReadableAdmLinesIntoDatabase", "ADM fixture import uses database write path");
   checkIncludes("functions/_lib/adm-sync.ts", "last_import_report_json", "ADM import report is stored with sync state");
+  checkIncludes("functions/_lib/adm-sync.ts", "processPendingAdmImportJobs", "Scheduled ADM import jobs continue in chunks");
+  checkIncludes("functions/_lib/adm-sync.ts", "createScheduledAdmImportJobForServer", "Scheduled ADM processing uses chunked import jobs");
+  checkIncludes("functions/_lib/adm-sync.ts", "scheduled_nitrado", "Automatic Nitrado imports are tagged separately from manual uploads");
   checkIncludes("functions/_lib/adm-sync.ts", "validateAdmCursorForLines", "ADM cursor hash validation is implemented");
 }
 
