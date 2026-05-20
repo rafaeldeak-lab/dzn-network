@@ -24,6 +24,7 @@ import type {
   PublicCacheDebug,
   PublicCacheRebuildResult,
   SyncLockRecoveryResult,
+  ManualAdmImportResult,
 } from "./types";
 
 export async function getMe() {
@@ -179,6 +180,17 @@ export async function runManualSync(linkedServerId?: string) {
   return request<AdmSyncRunResult>("/api/sync/adm/run", {
     method: "POST",
     body: JSON.stringify(linkedServerId ? { linked_server_id: linkedServerId } : {}),
+  });
+}
+
+export async function importManualAdmText(linkedServerId: string, data: {
+  filename: string;
+  admText: string;
+  source?: "manual_paste" | "manual_upload" | string;
+}) {
+  return request<ManualAdmImportResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/manual-import`, {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 

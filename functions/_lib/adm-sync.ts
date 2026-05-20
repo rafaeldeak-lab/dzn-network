@@ -24,6 +24,7 @@ import {
   ensureAutomationSchema,
   getDueAdmDiscoveryAutomationServers,
   getDueAdmAutomationServers,
+  isActiveSubscriptionStatus,
   markAdmPullStarted,
   queueDiscordPostUpdatesForGuild,
   recordAdmCadenceObservation,
@@ -36,7 +37,7 @@ import {
   refreshNitradoServerMetadata,
   type ScheduledMetadataSyncResult,
 } from "./server-metadata";
-import type { PlanKey } from "./plans";
+import { normalizePlanKey, type PlanKey } from "./plans";
 import type { Env } from "./types";
 
 export type SyncLinkedServer = {
@@ -137,6 +138,9 @@ export type AdmImportDebugReport = {
   cursorEnd: number;
   rawKilledByLinesFound: number;
   parsedPvpKills: number;
+  parsedJoins: number;
+  parsedDisconnects: number;
+  parsedPlayerlistSnapshots: number;
   skippedDeadHitLines: number;
   parsedSuicides: number;
   parsedUncreditedDeaths: number;
@@ -184,9 +188,45 @@ export type AdmFixtureImportResult = {
   report: AdmDatabaseImportReport;
   cursorBefore: number;
   cursorAfter: number;
+  rawLines: number;
+  rawEventsStored: number;
+  playerEventsStored: number;
+  killEventsStored: number;
+  buildEventsStored: number;
+  eventsCreated: number;
+  killsCreated: number;
+  deathsCreated: number;
+  joinsCreated: number;
+  disconnectsCreated: number;
+  playerlistSnapshotsParsed: number;
+  duplicateLines: number;
+  publicCacheUpdated: boolean;
+  discordQueuesCreated: number;
   totalKills: number;
   totalDeaths: number;
   longestKillDistance: number;
+};
+
+export type ManualAdmTextImportResult = {
+  ok: true;
+  filename: string;
+  source: "manual_paste" | "manual_upload" | string;
+  raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  written_kills: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  suicides: number;
+  uncredited_deaths: number;
+  duplicate_skips: number;
+  failed_writes: number;
+  public_cache_updated: boolean;
+  discord_jobs_queued: number;
+  total_kills: number;
+  total_deaths: number;
+  import_report: AdmDatabaseImportReport;
 };
 
 export type AdmSyncStatusCode =
@@ -339,6 +379,12 @@ type DiscoveredAdmFileForSync = {
   name: string;
   path: string | null;
   timestamp: number | null;
+};
+
+type ManualImportLinkedServer = SyncLinkedServer & {
+  guild_id: string | null;
+  plan_key: PlanKey;
+  subscription_status: string | null;
 };
 
 function verifyAdmServerScope(linkedServer: SyncLinkedServer, syncRunId: string): AdmSyncContext {
@@ -1513,6 +1559,9 @@ export function buildAdmImportDebugReport(
     cursorEnd,
     rawKilledByLinesFound: pendingLines.filter(hasRawPlayerKillLine).length,
     parsedPvpKills: pvpKillLineNumbers.length,
+    parsedJoins: pendingEvents.filter((event) => event.eventType === "player_connected").length,
+    parsedDisconnects: pendingEvents.filter((event) => event.eventType === "player_disconnected").length,
+    parsedPlayerlistSnapshots: pendingEvents.filter((event) => event.eventType === "playerlist_snapshot").length,
     skippedDeadHitLines: pendingEvents.filter(isDeadHitNonKillEvent).length,
     parsedSuicides: pendingEvents.filter((event) => event.eventType === "player_suicide").length,
     parsedUncreditedDeaths: pendingEvents.filter((event) => event.eventType === "player_died_stats").length,
@@ -1534,20 +1583,34 @@ export async function importReadableAdmLinesIntoDatabase(
     publicServerName?: string | null;
     updatePublicCache?: boolean;
     queueDiscordPosts?: boolean;
+    ignoreExistingCursor?: boolean;
   },
 ): Promise<AdmFixtureImportResult> {
   await ensureAdmSyncSchema(env);
   const now = new Date().toISOString();
-  const triggerType: "manual" | "scheduled" = input.triggerType === "scheduled" ? "scheduled" : "manual";
+  const triggerType = input.triggerType ?? "manual";
   const maxLinesPerRun = clampPositiveInteger(input.maxLinesPerRun ?? 50000, 50000);
   const existingState = await getSyncState(env, input.context.linkedServerId);
-  const cursorBefore = Number(existingState?.last_processed_line ?? 0);
-  const cursorValidation = await validateAdmCursorForLines({
-    lines: input.lines,
-    sameFile: existingState?.last_processed_file === input.context.admFileName,
-    savedLine: cursorBefore,
-    savedHash: existingState?.last_processed_adm_line_hash ?? null,
-  });
+  const savedCursorBefore = Number(existingState?.last_processed_line ?? 0);
+  const cursorBefore = input.ignoreExistingCursor ? 0 : savedCursorBefore;
+  const cursorValidation = input.ignoreExistingCursor
+    ? {
+      cursorValidationStatus: "new_file" as AdmCursorValidationStatus,
+      cursorValidationError: null,
+      cursorRecoveryStrategy: null,
+      cursorRecoveryReason: "manual_full_reprocess",
+      previousLineHash: null,
+      currentLineHash: null,
+      cursorLineChecked: null,
+      cursorHashMatched: null,
+      startLine: 0,
+    }
+    : await validateAdmCursorForLines({
+      lines: input.lines,
+      sameFile: existingState?.last_processed_file === input.context.admFileName,
+      savedLine: cursorBefore,
+      savedHash: existingState?.last_processed_adm_line_hash ?? null,
+    });
   const cursorValidationReport: AdmCursorValidationReport = {
     cursorValidationStatus: cursorValidation.cursorValidationStatus,
     cursorValidationError: cursorValidation.cursorValidationError,
@@ -1755,6 +1818,20 @@ export async function importReadableAdmLinesIntoDatabase(
       report,
       cursorBefore,
       cursorAfter,
+      rawLines: input.lines.length,
+      rawEventsStored,
+      playerEventsStored,
+      killEventsStored,
+      buildEventsStored,
+      eventsCreated,
+      killsCreated,
+      deathsCreated,
+      joinsCreated,
+      disconnectsCreated,
+      playerlistSnapshotsParsed: baseReport.parsedPlayerlistSnapshots,
+      duplicateLines,
+      publicCacheUpdated,
+      discordQueuesCreated,
       totalKills: totals.totalKills,
       totalDeaths: totals.totalDeaths,
       longestKillDistance: totals.longestKillDistance,
@@ -1766,7 +1843,7 @@ export async function importReadableAdmLinesIntoDatabase(
       latestAdmPath: input.admPath ?? context.admFileName,
       sourceServiceId: context.nitradoServiceId,
       lastProcessedFile: existingState?.last_processed_file ?? null,
-      lastProcessedLine: cursorBefore,
+      lastProcessedLine: savedCursorBefore,
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
       status: "dzn_write_error",
       message: `ADM write failed. ${safeSyncErrorMessage(error)}`,
@@ -1802,11 +1879,84 @@ export async function importReadableAdmLinesIntoDatabase(
       report,
       cursorBefore,
       cursorAfter: cursorBefore,
+      rawLines: input.lines.length,
+      rawEventsStored: 0,
+      playerEventsStored: 0,
+      killEventsStored: 0,
+      buildEventsStored: 0,
+      eventsCreated: 0,
+      killsCreated: 0,
+      deathsCreated: 0,
+      joinsCreated: 0,
+      disconnectsCreated: 0,
+      playerlistSnapshotsParsed: baseReport.parsedPlayerlistSnapshots,
+      duplicateLines: 0,
+      publicCacheUpdated: false,
+      discordQueuesCreated: 0,
       totalKills: 0,
       totalDeaths: 0,
       longestKillDistance: 0,
     };
   }
+}
+
+export async function importAdmTextForServer(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    filename: string;
+    admText: string;
+    source?: "manual_paste" | "manual_upload" | string;
+    maxLinesPerRun?: number;
+  },
+): Promise<ManualAdmTextImportResult> {
+  await ensureAdmSyncSchema(env);
+  const filename = sanitizeManualAdmFilename(input.filename);
+  if (!filename) throw new Error("A valid ADM filename is required.");
+  const rawText = typeof input.admText === "string" ? input.admText : "";
+  if (!rawText.trim()) throw new Error("ADM text is required.");
+
+  const server = await getLinkedServerForAdmImport(env, input.linkedServerId);
+  if (!server) throw new Error("Server not found.");
+  const scope = withAdmFile(verifyAdmServerScope(server, crypto.randomUUID()), filename);
+  const lines = splitAdmText(rawText);
+  if (!lines.length) throw new Error("ADM text did not contain readable lines.");
+  const source = input.source ?? "manual_paste";
+  const result = await importReadableAdmLinesIntoDatabase(env, {
+    context: scope,
+    lines,
+    admPath: filename,
+    triggerType: source,
+    maxLinesPerRun: input.maxLinesPerRun ?? 50000,
+    guildId: server.guild_id,
+    planKey: server.plan_key,
+    publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
+    updatePublicCache: Boolean(server.guild_id),
+    queueDiscordPosts: Boolean(server.guild_id && isActiveSubscriptionStatus(server.subscription_status)),
+    ignoreExistingCursor: true,
+  });
+
+  return {
+    ok: true,
+    filename,
+    source,
+    raw_lines: result.rawLines,
+    raw_kill_lines_found: result.report.rawKilledByLinesFound,
+    parsed_kills: result.report.parsedPvpKills,
+    written_kills: result.report.writtenKills,
+    joins: result.joinsCreated,
+    disconnects: result.disconnectsCreated,
+    playerlist_snapshots: result.playerlistSnapshotsParsed,
+    suicides: result.report.parsedSuicides,
+    uncredited_deaths: result.report.parsedUncreditedDeaths,
+    duplicate_skips: Math.max(result.duplicateLines, result.report.duplicateSkips),
+    failed_writes: result.report.failedWrites,
+    public_cache_updated: result.publicCacheUpdated,
+    discord_jobs_queued: result.discordQueuesCreated,
+    total_kills: result.totalKills,
+    total_deaths: result.totalDeaths,
+    import_report: result.report,
+  };
 }
 
 function clampCursorLine(value: number, lineCount: number) {
@@ -2736,6 +2886,61 @@ async function getOwnedLinkedServer(env: Env, userId: string, linkedServerId?: s
     )
     .bind(linkedServerId, userId)
     .first<SyncLinkedServer>();
+}
+
+async function getLinkedServerForAdmImport(env: Env, linkedServerId: string): Promise<ManualImportLinkedServer | null> {
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT
+         linked_servers.id,
+         linked_servers.user_id,
+         linked_servers.guild_id,
+         linked_servers.nitrado_service_id,
+         linked_servers.server_name,
+         linked_servers.display_name,
+         linked_servers.hostname,
+         linked_servers.nitrado_service_name,
+         server_log_config.adm_path AS adm_path,
+         server_subscriptions.plan_key,
+         server_subscriptions.status AS subscription_status
+       FROM linked_servers
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE linked_servers.id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServerId)
+    .first<SyncLinkedServer & {
+      guild_id: string | null;
+      plan_key: string | null;
+      subscription_status: string | null;
+    }>();
+  if (!row) return null;
+  return {
+    ...row,
+    plan_key: normalizePlanKey(row.plan_key),
+    subscription_status: row.subscription_status ?? null,
+  };
+}
+
+function sanitizeManualAdmFilename(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 240) return null;
+  const filename = fileNameFromPath(trimmed) ?? trimmed;
+  if (!/\.(adm|txt)$/i.test(filename)) return null;
+  if (/[<>:"\\|?*\u0000-\u001f]/.test(filename)) return null;
+  return filename;
+}
+
+function splitAdmText(value: string) {
+  return value
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
 }
 
 async function ensureAdmSyncDetailColumns(env: Env) {
@@ -3758,7 +3963,7 @@ export async function recordSyncRun(
     id?: string;
     linkedServerId: string | null;
     sourceServiceId?: string | null;
-    triggerType: "manual" | "scheduled";
+    triggerType: "manual" | "scheduled" | string;
     status: string;
     message: string | null;
     linesRead: number;
@@ -4137,6 +4342,9 @@ function parseAdmDatabaseImportReport(value: unknown): AdmDatabaseImportReport |
       cursorEnd: numberOrZero(parsed.cursorEnd),
       rawKilledByLinesFound: numberOrZero(parsed.rawKilledByLinesFound),
       parsedPvpKills: numberOrZero(parsed.parsedPvpKills),
+      parsedJoins: numberOrZero(parsed.parsedJoins),
+      parsedDisconnects: numberOrZero(parsed.parsedDisconnects),
+      parsedPlayerlistSnapshots: numberOrZero(parsed.parsedPlayerlistSnapshots),
       skippedDeadHitLines: numberOrZero(parsed.skippedDeadHitLines),
       parsedSuicides: numberOrZero(parsed.parsedSuicides),
       parsedUncreditedDeaths: numberOrZero(parsed.parsedUncreditedDeaths),

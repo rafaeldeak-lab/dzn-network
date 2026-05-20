@@ -772,6 +772,9 @@ export type AdmSyncStatus = {
     cursorEnd: number;
     rawKilledByLinesFound: number;
     parsedPvpKills: number;
+    parsedJoins?: number;
+    parsedDisconnects?: number;
+    parsedPlayerlistSnapshots?: number;
     skippedDeadHitLines: number;
     parsedSuicides: number;
     parsedUncreditedDeaths: number;
@@ -806,6 +809,28 @@ export type AdmSyncStatus = {
   } | null;
   current_recovery_action: string;
   recent_sync_runs: SyncRunSummary[];
+};
+
+export type ManualAdmImportResult = {
+  ok: true;
+  filename: string;
+  source: string;
+  raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  written_kills: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  suicides: number;
+  uncredited_deaths: number;
+  duplicate_skips: number;
+  failed_writes: number;
+  public_cache_updated: boolean;
+  discord_jobs_queued: number;
+  total_kills: number;
+  total_deaths: number;
+  import_report: NonNullable<AdmSyncStatus["last_adm_import_report"]>;
 };
 
 export type AdmFileDiscoveryCandidateDebug = {

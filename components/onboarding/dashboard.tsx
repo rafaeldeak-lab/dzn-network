@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -217,6 +217,10 @@ function ServerDashboard({
   const [nitradoLogSettingsCheck, setNitradoLogSettingsCheck] = useState<NitradoLogSettingsCheckResponse | null>(null);
   const [savingNitradoLogSettings, setSavingNitradoLogSettings] = useState(false);
   const [checkingNitradoLogSettings, setCheckingNitradoLogSettings] = useState(false);
+  const [manualAdmFilename, setManualAdmFilename] = useState("");
+  const [manualAdmText, setManualAdmText] = useState("");
+  const [manualAdmImporting, setManualAdmImporting] = useState(false);
+  const [manualAdmImportResult, setManualAdmImportResult] = useState<ManualAdmImportResult | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
@@ -600,6 +604,45 @@ function ServerDashboard({
     } finally {
       setSyncing(false);
     }
+  }
+
+  async function importPastedAdmNow() {
+    const filename = manualAdmFilename.trim();
+    const admText = manualAdmText.trim();
+    if (!filename) {
+      setActionMessage("Enter the ADM filename before importing.");
+      return;
+    }
+    if (!admText) {
+      setActionMessage("Paste ADM log text before importing.");
+      return;
+    }
+
+    setManualAdmImporting(true);
+    setActionMessage("");
+    try {
+      const result = await importManualAdmText(server.id, {
+        filename,
+        admText: manualAdmText,
+        source: "manual_paste",
+      });
+      setManualAdmImportResult(result);
+      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
+      await onRefresh();
+      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
+      if (cacheDebug) setPublicCacheDebug(cacheDebug);
+      setActionMessage(`Manual ADM import complete. Parsed ${result.parsed_kills} PvP kills and wrote ${result.written_kills}.`);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to import pasted ADM text.");
+    } finally {
+      setManualAdmImporting(false);
+    }
+  }
+
+  async function loadManualAdmFile(file: File | null) {
+    if (!file) return;
+    setManualAdmFilename(file.name);
+    setManualAdmText(await file.text());
   }
 
   async function runDiagnostics() {
@@ -1145,6 +1188,16 @@ function ServerDashboard({
                 result={syncLockRecoveryResult}
                 recovering={recoveringSyncLocks}
                 onRecover={recoverSyncLocks}
+              />
+              <ManualAdmImportPanel
+                filename={manualAdmFilename}
+                admText={manualAdmText}
+                importing={manualAdmImporting}
+                result={manualAdmImportResult}
+                onFilenameChange={setManualAdmFilename}
+                onTextChange={setManualAdmText}
+                onFileSelected={loadManualAdmFile}
+                onImport={importPastedAdmNow}
               />
               {admFileDiscoveryDebug ? (
                 <AdmFileDiscoveryDebugPanel
@@ -2928,6 +2981,105 @@ function SyncLockRecoveryPanel({
   );
 }
 
+function ManualAdmImportPanel({
+  filename,
+  admText,
+  importing,
+  result,
+  onFilenameChange,
+  onTextChange,
+  onFileSelected,
+  onImport,
+}: {
+  filename: string;
+  admText: string;
+  importing: boolean;
+  result: ManualAdmImportResult | null;
+  onFilenameChange: (value: string) => void;
+  onTextChange: (value: string) => void;
+  onFileSelected: (file: File | null) => void;
+  onImport: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-violet-300/18 bg-violet-400/8 p-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-violet-100">Manual ADM Import</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-zinc-300">
+            Use this only if Nitrado can show the ADM but DZN cannot download it automatically.
+          </p>
+        </div>
+        <label className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-xs font-black uppercase text-zinc-100 transition hover:border-violet-300/35">
+          <Download className="h-4 w-4" />
+          Upload .ADM
+          <input
+            type="file"
+            accept=".ADM,.adm,.txt,text/plain"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0] ?? null;
+              void onFileSelected(file);
+              event.currentTarget.value = "";
+            }}
+          />
+        </label>
+      </div>
+      <div className="mt-4 grid gap-3">
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          ADM filename
+          <input
+            type="text"
+            value={filename}
+            onChange={(event) => onFilenameChange(event.currentTarget.value)}
+            placeholder="DayZServer_PS4_x64_2026-05-20_09-01-27.ADM"
+            className="rounded-lg border border-white/10 bg-black/34 px-3 py-2 text-sm font-bold normal-case text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          Paste ADM log text
+          <textarea
+            value={admText}
+            onChange={(event) => onTextChange(event.currentTarget.value)}
+            rows={8}
+            placeholder="AdminLog started on ..."
+            className="min-h-40 resize-y rounded-lg border border-white/10 bg-black/34 px-3 py-2 font-mono text-xs leading-5 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45"
+          />
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs font-bold text-zinc-400">
+            This imports through the same ADM parser/write path, rebuilds stats, refreshes public cache, and queues allowed Discord posts.
+          </p>
+          <button
+            type="button"
+            disabled={importing || !filename.trim() || !admText.trim()}
+            onClick={onImport}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-violet-300/25 bg-violet-500/18 px-3 py-2 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            <DatabaseZap className={`h-4 w-4 ${importing ? "animate-pulse" : ""}`} />
+            {importing ? "Importing..." : "Import Pasted ADM Now"}
+          </button>
+        </div>
+      </div>
+      {result ? (
+        <div className="mt-4 grid gap-2 rounded-lg border border-emerald-300/18 bg-emerald-400/8 p-3 md:grid-cols-2 xl:grid-cols-4">
+          <MiniInfo label="Parsed PvP Kills" value={String(result.parsed_kills)} />
+          <MiniInfo label="Written Kills" value={String(result.written_kills)} />
+          <MiniInfo label="Joins" value={String(result.joins)} />
+          <MiniInfo label="Disconnects" value={String(result.disconnects)} />
+          <MiniInfo label="PlayerList Snapshots" value={String(result.playerlist_snapshots)} />
+          <MiniInfo label="Duplicate Skips" value={String(result.duplicate_skips)} />
+          <MiniInfo label="Failed Writes" value={String(result.failed_writes)} />
+          <MiniInfo label="Public Cache" value={result.public_cache_updated ? "Updated" : "Skipped"} />
+          <MiniInfo label="Discord Jobs" value={String(result.discord_jobs_queued)} />
+          <MiniInfo label="Total Kills" value={String(result.total_kills)} />
+          <MiniInfo label="Total Deaths" value={String(result.total_deaths)} />
+          <MiniInfo label="Source" value={formatSyncTrigger(result.source)} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function HealthCountLine({ label, counts }: { label: string; counts: Record<string, number> }) {
   const entries = Object.entries(counts);
   return (
@@ -3426,6 +3578,9 @@ function LastSyncDetails({
               <div className="mt-3 grid gap-2 md:grid-cols-2">
                 <MiniInfo label="Parsed Kills" value={String(syncStatus.last_adm_import_report.parsedPvpKills)} />
                 <MiniInfo label="Written Kills" value={String(syncStatus.last_adm_import_report.writtenKills)} />
+                <MiniInfo label="Parsed Joins" value={String(syncStatus.last_adm_import_report.parsedJoins ?? 0)} />
+                <MiniInfo label="Parsed Disconnects" value={String(syncStatus.last_adm_import_report.parsedDisconnects ?? 0)} />
+                <MiniInfo label="PlayerList Snapshots" value={String(syncStatus.last_adm_import_report.parsedPlayerlistSnapshots ?? 0)} />
                 <MiniInfo label="Duplicate Skips" value={String(syncStatus.last_adm_import_report.duplicateSkips)} />
                 <MiniInfo label="Failed Writes" value={String(syncStatus.last_adm_import_report.failedWrites)} />
                 <MiniInfo label="Cursor Advanced" value={syncStatus.last_adm_import_report.cursorAdvanced ? "Yes" : "No"} />

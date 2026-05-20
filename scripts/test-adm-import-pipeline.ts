@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  importAdmTextForServer,
   importReadableAdmLinesIntoDatabase,
   type AdmSyncContext,
 } from "../functions/_lib/adm-sync";
@@ -23,6 +24,11 @@ const context: AdmSyncContext = {
 };
 
 async function main() {
+  const manualEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/manual-import.ts", "utf8");
+  assert.match(manualEndpointSource, /requireServerOwnerOrDznAdmin/);
+  assert.match(manualEndpointSource, /getSessionUser/);
+  assert.match(manualEndpointSource, /ADM text is required/);
+
   const successDb = new MemoryD1();
   const successResult = await importReadableAdmLinesIntoDatabase(makeEnv(successDb), {
     context,
@@ -102,6 +108,33 @@ async function main() {
   assert.equal(latestResult.report.cursorAfter, latestFixtureLines.length);
   assert.equal(latestResult.report.publicCacheUpdated, true);
   assert.equal(latestDb.serverPublicCache.get(latestGuildId)?.last_adm_update_at !== null, true);
+
+  const manualDb = new MemoryD1();
+  const manualText = fixtureLines.join("\n");
+  const manualResult = await importAdmTextForServer(makeEnv(manualDb), {
+    linkedServerId,
+    filename: fixtureName,
+    admText: manualText,
+    source: "manual_paste",
+  });
+  assert.equal(manualResult.ok, true);
+  assert.equal(manualResult.source, "manual_paste");
+  assert.equal(manualResult.parsed_kills, 10);
+  assert.equal(manualResult.written_kills, 10);
+  assert.equal(manualResult.public_cache_updated, true);
+  assert.equal(manualResult.discord_jobs_queued > 0, true);
+  assert.equal(manualDb.killEvents.length, 10);
+  assert.equal(manualDb.syncRuns.at(-1)?.trigger_type, "manual_paste");
+  const repeatedManualResult = await importAdmTextForServer(makeEnv(manualDb), {
+    linkedServerId,
+    filename: fixtureName,
+    admText: manualText,
+    source: "manual_paste",
+  });
+  assert.equal(manualDb.killEvents.length, 10);
+  assert.equal(repeatedManualResult.parsed_kills, 10);
+  assert.equal(repeatedManualResult.written_kills, 0);
+  assert.equal(repeatedManualResult.duplicate_skips > 0, true);
 
   const clusteredMustardKills = successDb.killEvents.filter((event) =>
     event.killer_name === "mustard_coffer74" &&
@@ -304,7 +337,19 @@ class MemoryD1 {
   admSyncState = new Map<string, MemoryRow>();
   serverPublicCache = new Map<string, MemoryRow>();
   automationJobs: MemoryRow[] = [];
-  linkedServers = new Map<string, MemoryRow>([[linkedServerId, { id: linkedServerId, nitrado_service_id: nitradoServiceId }]]);
+  linkedServers = new Map<string, MemoryRow>([[linkedServerId, {
+    id: linkedServerId,
+    user_id: "fixture-user",
+    guild_id: guildId,
+    nitrado_service_id: nitradoServiceId,
+    server_name: "Fixture Server",
+    display_name: "Fixture Server",
+    hostname: "Fixture Server",
+    nitrado_service_name: "Fixture Service",
+    adm_path: null,
+    plan_key: "partner",
+    subscription_status: "active",
+  }]]);
   failKillInsertAfter: number | null;
   killInsertAttempts = 0;
 
@@ -539,6 +584,7 @@ class MemoryStatement {
     const q = normalizeSql(this.query);
     if (q.includes("from adm_sync_state") && q.includes("select *")) return (this.db.admSyncState.get(String(this.values[0])) ?? null) as T | null;
     if (q.includes("select last_import_report_json from adm_sync_state")) return ({ last_import_report_json: this.db.admSyncState.get(String(this.values[0]))?.last_import_report_json ?? null } as T);
+    if (q.includes("from linked_servers") && q.includes("server_subscriptions.plan_key")) return (this.db.linkedServers.get(String(this.values[0])) ?? null) as T | null;
     if (q.includes("select nitrado_service_id from linked_servers")) return (this.db.linkedServers.get(String(this.values[0])) ?? { nitrado_service_id: null }) as T;
     if (q.includes("from player_profiles") && q.includes("player_id = ?")) {
       return (this.db.playerProfiles.find((profile) => profile.linked_server_id === this.values[0] && profile.player_id === this.values[1]) ?? null) as T | null;

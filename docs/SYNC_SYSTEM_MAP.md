@@ -86,6 +86,14 @@ When Nitrado's seek/sample route fails but the normal file download route works,
 
 If Nitrado `game_specific.log_files` is stale or missing a newer ADM file that is visible through the file browser fallback, DZN reports `nitrado_api_log_files_stale_or_missing` and prefers the newer readable fallback candidate.
 
+Emergency Manual ADM Import:
+
+- Sync Health includes **Manual ADM Import** for owner/admin users when the Nitrado Web UI can display ADM text but DZN cannot download it automatically.
+- `POST /api/servers/[serverId]/adm/manual-import` accepts a filename plus pasted ADM text and routes it through the same ADM parser/write path as scheduled processing.
+- Manual paste imports write supported kills/deaths/joins/disconnects/PlayerList snapshots, rebuild server stats, update `server_public_cache`, queue plan-allowed Discord post jobs, and save the Last ADM Import Report.
+- Manual paste imports force a full-file reprocess from line 0 but still use existing event dedupe, so pasting the same ADM twice should report duplicate skips and must not double-count stats.
+- This does not remove or bypass the automatic Nitrado discovery/download path; it is a recovery path while Nitrado file access is unavailable.
+
 Discovery intervals:
 
 | Plan | ADM discovery checked |
