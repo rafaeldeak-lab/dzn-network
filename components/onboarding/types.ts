@@ -830,6 +830,13 @@ export type AdmFileDiscoveryCandidateDebug = {
   download_fallback_status: string;
   download_fallback_error: string | null;
   selected_read_method: "seek" | "download_fallback" | "none";
+  selected_successful_path: string | null;
+  attempted_paths: Array<{
+    path: string;
+    tokenRequestOk: boolean;
+    fileFetchOk: boolean;
+    error?: string | null;
+  }>;
   first_lines_preview: string[];
   read_attempts: Array<{
     method: "seek" | "download";

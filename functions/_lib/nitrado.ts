@@ -148,6 +148,28 @@ export type AdmReadAttempt = {
   success: boolean;
 };
 
+export type AdmFileTextReadPathAttempt = {
+  path: string;
+  tokenRequestOk: boolean;
+  fileFetchOk: boolean;
+  error?: string | null;
+};
+
+export type AdmFileTextFallbackResult = {
+  ok: boolean;
+  text?: string;
+  selectedPath?: string;
+  readMethod?: "seek" | "download_fallback";
+  seekAttempted: boolean;
+  seekOk: boolean;
+  seekError?: string;
+  downloadAttempted: boolean;
+  downloadOk: boolean;
+  downloadError?: string;
+  attemptedPaths: AdmFileTextReadPathAttempt[];
+  readAttempts: AdmReadAttempt[];
+};
+
 export type AdmStatAttempt = {
   path: string;
   pathVariantLabel: string | null;
@@ -324,6 +346,8 @@ export type NitradoAdmDiscoveryCandidateDebug = {
   download_fallback_status: SampleFetchStatus | SafeApiStatus | "not_attempted";
   download_fallback_error: string | null;
   selected_read_method: "seek" | "download_fallback" | "none";
+  selected_successful_path: string | null;
+  attempted_paths: AdmFileTextReadPathAttempt[];
   first_lines_preview: string[];
   read_attempts: Array<{
     method: "seek" | "download";
@@ -591,29 +615,25 @@ export async function debugNitradoAdmFileDiscovery(
     let sample: string | null = null;
     let sampleStatus: SampleFetchStatus | SafeApiStatus | "not_attempted" = "not_attempted";
     let sampleError: string | null = null;
+    let readResult: AdmFileTextFallbackResult | null = null;
 
     if (shouldSample) {
-      const details: GameSpecificLogDetails = {
-        ...gameSpecificLogs,
-        admLogFiles: dedupeFileEntries([entry, ...gameSpecificLogs.admLogFiles]),
-        selectedAdmFile: entry,
-      };
-      const variants = buildAdmReadPathVariants(details, entry.path);
-      const labels = createPathVariantLabelMap(variants);
-      for (const variant of variants) {
-        const result = await readNitradoFileSample(token, serviceId, variant.path, readAttempts, labels, {
+      readResult = await readAdmFileTextWithFallback({
+        token,
+        serviceId,
+        fileName: entry.name,
+        originalPath: entry.path,
+        username: gameSpecificLogs.username,
+        options: {
           ...options,
           mode: "sample",
           fullDownloadFallback: true,
-        });
-        sampleStatus = result.status;
-        sampleError = result.errorMessageSafe;
-        if (result.sample && containsDayZAdminLogMarkers(result.sample)) {
-          sample = result.sample;
-          sampleError = null;
-          break;
-        }
-      }
+        },
+      });
+      readAttempts.push(...readResult.readAttempts);
+      sample = readResult.ok ? readResult.text ?? null : null;
+      sampleStatus = readResult.ok ? "OK" : readResult.downloadError ? "error" : "not_attempted";
+      sampleError = readResult.ok ? null : readResult.downloadError ?? readResult.seekError ?? "ADM file could not be read";
     }
     const seekAttempts = readAttempts.filter((attempt) => attempt.method === "seek");
     const downloadAttempts = readAttempts.filter((attempt) => attempt.method === "download");
@@ -644,11 +664,20 @@ export async function debugNitradoAdmFileDiscovery(
       download_fallback_error: lastDownloadAttempt?.sampleReadSucceeded ? null : lastDownloadAttempt?.errorMessageSafe ?? null,
       selected_read_method: !sample
         ? "none"
-        : successfulReadAttempt?.method === "seek"
-        ? "seek"
-        : successfulReadAttempt?.method === "download"
-          ? "download_fallback"
-          : "none",
+        : readResult?.readMethod ?? (
+          successfulReadAttempt?.method === "seek"
+            ? "seek"
+            : successfulReadAttempt?.method === "download"
+              ? "download_fallback"
+              : "none"
+        ),
+      selected_successful_path: readResult?.selectedPath
+        ? maskNitradoUsernameInPath(readResult.selectedPath, gameSpecificLogs.username)
+        : null,
+      attempted_paths: (readResult?.attemptedPaths ?? []).map((attempt) => ({
+        ...attempt,
+        path: maskNitradoUsernameInPath(attempt.path, gameSpecificLogs.username),
+      })),
       first_lines_preview: splitAdmLines(sample).slice(0, 5).map((line) => line.slice(0, 220)),
       read_attempts: readAttempts.map((attempt) => ({
         method: attempt.method,
@@ -1566,6 +1595,102 @@ async function readNitradoFileSample(
   return download.errorMessageSafe ? download : seek;
 }
 
+export async function readAdmFileTextWithFallback(params: {
+  token: string;
+  serviceId: string;
+  fileName: string;
+  originalPath?: string | null;
+  username?: string | null;
+  options?: AdmReadOptions;
+}): Promise<AdmFileTextFallbackResult> {
+  const fileName = params.fileName.trim();
+  const originalPath = params.originalPath?.trim() || fileName;
+  const details: GameSpecificLogDetails = {
+    username: params.username ?? null,
+    usernameFound: Boolean(params.username),
+    logFilesFound: Boolean(originalPath),
+    logFilesReturned: originalPath ? 1 : 0,
+    admLogFiles: [{ name: fileName, path: originalPath, type: "file" }],
+    selectedAdmFile: { name: fileName, path: originalPath, type: "file" },
+    logContextPaths: originalPath ? [originalPath] : [],
+  };
+  const variants = buildAdmReadPathVariants(details, originalPath);
+  const labels = createPathVariantLabelMap(variants);
+  const readAttempts: AdmReadAttempt[] = [];
+  const mode = params.options?.mode ?? "full";
+  let seekError: string | undefined;
+  let downloadError: string | undefined;
+  const attemptedPaths: AdmFileTextReadPathAttempt[] = [];
+
+  for (const variant of variants) {
+    const seek = await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
+      ...params.options,
+      mode: mode === "full" ? "full" : "sample",
+    });
+    if (seek.sample && containsDayZAdminLogMarkers(seek.sample)) {
+      return {
+        ok: true,
+        text: seek.sample,
+        selectedPath: variant.path,
+        readMethod: "seek",
+        seekAttempted: true,
+        seekOk: true,
+        seekError: undefined,
+        downloadAttempted: false,
+        downloadOk: false,
+        downloadError: undefined,
+        attemptedPaths: [],
+        readAttempts,
+      };
+    }
+    if (seek.errorMessageSafe) seekError = seek.errorMessageSafe;
+
+    if (params.options?.fullDownloadFallback === false) continue;
+
+    const download = await readNitradoFileViaDownload(params.token, params.serviceId, variant.path, readAttempts, labels, {
+      ...params.options,
+      mode: "full",
+    });
+    const attempt = readAttempts.at(-1);
+    const pathAttempt: AdmFileTextReadPathAttempt = {
+      path: variant.path,
+      tokenRequestOk: Boolean(attempt?.downloadTokenCreated),
+      fileFetchOk: Boolean(attempt?.sampleReadSucceeded),
+      error: attempt?.sampleReadSucceeded ? null : attempt?.errorMessageSafe ?? download.errorMessageSafe ?? null,
+    };
+    attemptedPaths.push(pathAttempt);
+    if (download.sample && containsDayZAdminLogMarkers(download.sample)) {
+      return {
+        ok: true,
+        text: download.sample,
+        selectedPath: variant.path,
+        readMethod: "download_fallback",
+        seekAttempted: true,
+        seekOk: false,
+        seekError,
+        downloadAttempted: true,
+        downloadOk: true,
+        downloadError: undefined,
+        attemptedPaths,
+        readAttempts,
+      };
+    }
+    if (download.errorMessageSafe) downloadError = download.errorMessageSafe;
+  }
+
+  return {
+    ok: false,
+    seekAttempted: true,
+    seekOk: false,
+    seekError,
+    downloadAttempted: attemptedPaths.length > 0,
+    downloadOk: false,
+    downloadError,
+    attemptedPaths,
+    readAttempts,
+  };
+}
+
 async function readNitradoAdmCandidate(
   token: string,
   serviceId: string,
@@ -1578,33 +1703,34 @@ async function readNitradoAdmCandidate(
     admLogFiles: dedupeFileEntries([candidate, ...gameSpecificLogs.admLogFiles]),
     selectedAdmFile: candidate,
   };
-  const variants = buildAdmReadPathVariants(details, candidate.path);
-  const labels = createPathVariantLabelMap(variants);
+  const read = await readAdmFileTextWithFallback({
+    token,
+    serviceId,
+    fileName: candidate.name,
+    originalPath: candidate.path,
+    username: details.username,
+    options,
+  });
+  const lines = splitAdmLines(read.text);
+  if (!read.ok || !lines.some((line) => containsDayZAdminLogMarkers(line))) return null;
 
-  for (const variant of variants) {
-    const attempts: AdmReadAttempt[] = [];
-    const sample = await readNitradoFileSample(token, serviceId, variant.path, attempts, labels, options);
-    const lines = splitAdmLines(sample.sample);
-    if (!lines.some((line) => containsDayZAdminLogMarkers(line))) continue;
+  console.log("DZN ADM FILE READ VARIANT USED", {
+    serviceId,
+    sourceLabel: `batch ${read.readMethod ?? "unknown"}`,
+    method: read.readMethod === "seek" ? "file_server/seek" : "file_server/download",
+    file: candidate.name,
+    path: read.selectedPath ? maskNitradoUsernameInPath(read.selectedPath, gameSpecificLogs.username) : null,
+    lineCount: lines.length,
+  });
 
-    console.log("DZN ADM FILE READ VARIANT USED", {
-      serviceId,
-      sourceLabel: `batch ${variant.label}`,
-      method: "file_server/read",
-      file: candidate.name,
-      path: maskNitradoUsernameInPath(variant.path, gameSpecificLogs.username),
-      lineCount: lines.length,
-    });
-
-    return {
-      name: candidate.name,
-      path: variant.path,
-      lines,
-      readableRouteUsed: "/services/{serviceId}/gameservers/file_server/read",
-    };
-  }
-
-  return null;
+  return {
+    name: candidate.name,
+    path: read.selectedPath ?? candidate.path,
+    lines,
+    readableRouteUsed: read.readMethod === "seek"
+      ? "/services/{serviceId}/gameservers/file_server/seek"
+      : "/services/{serviceId}/gameservers/file_server/download",
+  };
 }
 
 async function readNitradoFileViaSeek(
@@ -2643,25 +2769,32 @@ function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: 
     if (isUnsafeRemotePathForRequest(normalized)) continue;
     const fileName = normalized.split("/").filter(Boolean).at(-1);
     if (!fileName || !/(\.adm$|dayzserver.*\.adm$)/i.test(fileName)) continue;
-    const visiblePath = normalizeRemotePath(manualPath || (normalized.includes("/") ? normalized : `dayzps/config/${fileName}`));
+    const visiblePath = normalizeRemotePath(manualPath || normalized || `dayzps/config/${fileName}`);
 
-    variants.push({ label: "A", path: fileName });
-    variants.push({ label: "B", path: `/${fileName}` });
-    variants.push({ label: "C", path: visiblePath });
-    variants.push({ label: "D", path: `/${visiblePath}` });
-    variants.push({ label: "C1", path: `config/${fileName}` });
-    variants.push({ label: "D1", path: `/config/${fileName}` });
+    variants.push({ label: "original", path: visiblePath });
+    variants.push({ label: "dayzps-config", path: `dayzps/config/${fileName}` });
+    variants.push({ label: "slash-dayzps-config", path: `/dayzps/config/${fileName}` });
+
+    if (details.username) {
+      variants.push({ label: "games-ftproot-dayzps-config", path: `games/${details.username}/ftproot/dayzps/config/${fileName}` });
+      variants.push({ label: "slash-games-ftproot-dayzps-config", path: `/games/${details.username}/ftproot/dayzps/config/${fileName}` });
+    }
+
+    variants.push({ label: "config", path: `config/${fileName}` });
+    variants.push({ label: "slash-config", path: `/config/${fileName}` });
+    variants.push({ label: "filename", path: fileName });
+    variants.push({ label: "slash-filename", path: `/${fileName}` });
 
     if (!details.username) continue;
 
-    variants.push({ label: "E", path: `/games/${details.username}/noftp/${fileName}` });
-    variants.push({ label: "F", path: `/games/${details.username}/noftp/dayzps/config/${fileName}` });
-    variants.push({ label: "G", path: `/games/${details.username}/noftp/config/${fileName}` });
+    variants.push({ label: "games-noftp-filename", path: `/games/${details.username}/noftp/${fileName}` });
+    variants.push({ label: "games-noftp-dayzps-config", path: `/games/${details.username}/noftp/dayzps/config/${fileName}` });
+    variants.push({ label: "games-noftp-config", path: `/games/${details.username}/noftp/config/${fileName}` });
 
     const noftpPath = normalized.toLowerCase().startsWith(`games/${details.username.toLowerCase()}/noftp/`)
       ? `/${normalized}`
       : `/games/${details.username}/noftp/${normalized}`;
-    variants.push({ label: "H", path: noftpPath });
+    variants.push({ label: "games-noftp-original", path: noftpPath });
   }
 
   return dedupePathVariants(variants).slice(0, 80);
@@ -3261,12 +3394,12 @@ function dedupeStrings(values: string[]) {
 function maskNitradoUsernameInPath(path: string, username: string | null) {
   if (!username) return path;
   const escaped = escapeRegExp(username);
-  return path.replace(new RegExp(`(/?games/)${escaped}(/noftp)`, "gi"), "$1{gameserver-username}$2");
+  return path.replace(new RegExp(`(/?games/)${escaped}(/(?:noftp|ftproot))`, "gi"), "$1{gameserver-username}$2");
 }
 
 function pathUsesNitradoUsername(path: string, username: string) {
   const escaped = escapeRegExp(username);
-  return new RegExp(`/?games/${escaped}/noftp`, "i").test(path);
+  return new RegExp(`/?games/${escaped}/(?:noftp|ftproot)`, "i").test(path);
 }
 
 function escapeRegExp(value: string) {

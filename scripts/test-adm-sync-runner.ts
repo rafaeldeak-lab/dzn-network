@@ -16,6 +16,7 @@ import {
   debugNitradoAdmFileDiscovery,
   fetchReadableNitradoAdmFiles,
   parseNitradoAdmFilenameTimestamp,
+  readAdmFileTextWithFallback,
 } from "../functions/_lib/nitrado";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -390,6 +391,22 @@ async function runNitradoReadFallbackTests() {
     assert.equal(batch.newestAdmFileName, latestAdm);
     assert.equal(batch.candidates.at(-1)?.name, latestAdm);
     assert.equal(batch.files.some((file) => file.name === latestAdm), true);
+    const directRead = await readAdmFileTextWithFallback({
+      token: "unit-token",
+      serviceId: "17428528",
+      fileName: latestAdm,
+      originalPath: latestAdm,
+      username: "gameserver-unit",
+      options: { mode: "full" },
+    });
+    assert.equal(directRead.ok, true);
+    assert.equal(directRead.readMethod, "download_fallback");
+    assert.equal(directRead.seekAttempted, true);
+    assert.equal(directRead.seekOk, false);
+    assert.equal(directRead.downloadAttempted, true);
+    assert.equal(directRead.downloadOk, true);
+    assert.equal(directRead.selectedPath, `dayzps/config/${latestAdm}`);
+    assert.equal(directRead.text?.includes("AdminLog started on 2026-05-20 at 08:02:52"), true);
 
     const debug = await debugNitradoAdmFileDiscovery("unit-token", "17428528", {
       knownLatestFileName: latestAdm,
@@ -403,6 +420,8 @@ async function runNitradoReadFallbackTests() {
     assert.equal(selected?.download_fallback_attempted, true);
     assert.equal(selected?.download_fallback_error, null);
     assert.equal(selected?.selected_read_method, "download_fallback");
+    assert.equal(selected?.selected_successful_path, `dayzps/config/${latestAdm}`);
+    assert.equal(selected?.attempted_paths.some((attempt) => attempt.path === `dayzps/config/${latestAdm}` && attempt.fileFetchOk), true);
     assert.equal(selected?.first_lines_preview[0], "AdminLog started on 2026-05-20 at 08:02:52");
     const debugJson = JSON.stringify(debug);
     assert.equal(debugJson.includes("files.dzn.test"), false);
@@ -463,7 +482,8 @@ function mockNitradoFetch(options: {
       return jsonResponse({ data: { url: "https://files.dzn.test/adm-download", token: "secret-download-token" } });
     }
     if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/download")) {
-      if (!options.downloadSucceeds) return jsonResponse({ error: "download failed" }, 403);
+      const requestedPath = url.searchParams.get("file") ?? "";
+      if (!options.downloadSucceeds || !requestedPath.includes("/")) return jsonResponse({ error: "download failed" }, 404);
       return jsonResponse({ data: { url: "https://files.dzn.test/adm-download", token: "secret-download-token" } });
     }
     if (url.hostname === "files.dzn.test") {

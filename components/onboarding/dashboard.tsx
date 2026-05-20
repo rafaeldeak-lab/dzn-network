@@ -3527,6 +3527,7 @@ function AdmFileDiscoveryDebugPanel({
                   <MiniInfo label="Seek Sample" value={candidate.seek_sample_attempted ? candidate.seek_sample_status : "Not attempted"} />
                   <MiniInfo label="Download Fallback" value={candidate.download_fallback_attempted ? candidate.download_fallback_status : "Not attempted"} />
                   <MiniInfo label="Read Method" value={candidate.selected_read_method === "download_fallback" ? "Download fallback" : candidate.selected_read_method === "seek" ? "Seek" : "None"} />
+                  <MiniInfo label="Selected Path" value={candidate.selected_successful_path ?? "None"} />
                 </div>
                 {candidate.seek_sample_error ? (
                   <p className="mt-2 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-2 font-bold text-amber-100">
@@ -3552,6 +3553,20 @@ function AdmFileDiscoveryDebugPanel({
                   <p className="mt-2 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-2 font-bold text-amber-100">
                     Sample error: {candidate.sample_read_error}
                   </p>
+                ) : null}
+                {candidate.attempted_paths?.length ? (
+                  <details className="mt-2 rounded-md border border-white/10 bg-black/25 px-2 py-2">
+                    <summary className="cursor-pointer text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">
+                      Download path attempts
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      {candidate.attempted_paths.map((attempt) => (
+                        <p key={attempt.path} className="break-all text-[11px] font-bold text-zinc-400">
+                          {attempt.fileFetchOk ? "OK" : "FAIL"} · token {attempt.tokenRequestOk ? "ok" : "failed"} · {attempt.path}{attempt.error ? ` · ${attempt.error}` : ""}
+                        </p>
+                      ))}
+                    </div>
+                  </details>
                 ) : null}
                 {candidate.first_lines_preview.length ? (
                   <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/35 px-2 py-2 text-[11px] leading-5 text-zinc-300">

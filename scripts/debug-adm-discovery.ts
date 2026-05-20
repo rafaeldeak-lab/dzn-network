@@ -97,9 +97,13 @@ async function main() {
       `read=${candidate.sample_read_attempted ? candidate.sample_read_success ? `ok:${candidate.selected_read_method}` : `fail:${candidate.sample_read_error ?? candidate.readable_sample_status}` : "not_sampled"}`,
       `seek=${candidate.seek_sample_attempted ? candidate.seek_sample_error ?? candidate.seek_sample_status : "not_attempted"}`,
       `download=${candidate.download_fallback_attempted ? candidate.download_fallback_error ?? candidate.download_fallback_status : "not_attempted"}`,
+      `selectedPath=${candidate.selected_successful_path ?? "none"}`,
       `sources=${candidate.sources.join("+") || "unknown"}`,
       `path=${candidate.path}`,
     ].join(" "));
+    for (const attempt of candidate.attempted_paths ?? []) {
+      console.log(`  download-path ${attempt.fileFetchOk ? "ok" : "fail"} token=${attempt.tokenRequestOk ? "ok" : "fail"} ${attempt.path}${attempt.error ? ` (${attempt.error})` : ""}`);
+    }
   }
 
   if (debug.known_latest_file_present === false) {
