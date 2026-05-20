@@ -131,6 +131,9 @@ function auditRestartStateMachine() {
   checkFile("migrations/0023_adm_cursor_hash_validation.sql", "ADM cursor hash validation migration");
   checkIncludes("migrations/0023_adm_cursor_hash_validation.sql", "last_processed_adm_line_hash", "Migration stores last processed ADM line hash");
   checkIncludes("migrations/0023_adm_cursor_hash_validation.sql", "last_cursor_validation_status", "Migration stores cursor validation status");
+  checkFile("migrations/0026_adm_import_jobs.sql", "ADM import jobs migration");
+  checkIncludes("migrations/0026_adm_import_jobs.sql", "adm_import_jobs", "Migration stores manual ADM import jobs");
+  checkIncludes("migrations/0026_adm_import_jobs.sql", "current_line", "Migration stores chunk progress");
   checkFile("migrations/0020_adm_observed_cadence.sql", "ADM observed cadence migration");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "first_adm_after_restart_delay_minutes", "Migration stores first ADM after restart delay");
   checkIncludes("migrations/0020_adm_observed_cadence.sql", "observed_playerlist_interval_minutes", "Migration stores observed PlayerList interval");
@@ -161,6 +164,9 @@ function auditDueServerSelection() {
   checkIncludes("functions/_lib/adm-sync.ts", "skipped_unreadable", "Processing skips unreadable newest ADM safely");
   checkIncludes("functions/_lib/adm-sync.ts", "importReadableAdmLinesIntoDatabase", "Fixture import uses production database write helpers");
   checkIncludes("functions/_lib/adm-sync.ts", "last_import_report_json", "Last ADM import report is saved");
+  checkIncludes("functions/_lib/adm-sync.ts", "createAdmImportJobForServer", "Chunked manual ADM import job creation exists");
+  checkIncludes("functions/_lib/adm-sync.ts", "processNextAdmImportJobChunk", "Chunked manual ADM import processing exists");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job.ts", "processNextAdmImportJobChunk", "Owner/admin chunked ADM import endpoint exists");
   checkIncludes("functions/_lib/adm-sync.ts", "cursorAdvanced", "Import report tracks cursor advancement");
   checkIncludes("functions/_lib/adm-sync.ts", "last_processed_adm_line_hash", "ADM cursor stores SHA-1 hash of the last processed line");
   checkIncludes("functions/_lib/adm-sync.ts", "validateAdmCursorForLines", "ADM cursor hash is validated before trusting saved line number");

@@ -26,6 +26,7 @@ import type {
   SyncLockRecoveryResult,
   ManualAdmImportApiResult,
   BulkAdmImportApiResult,
+  AdmImportJobApiResult,
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
@@ -207,6 +208,24 @@ export async function bulkImportAdmFiles(linkedServerId: string, data: {
 }) {
   const query = data.preview ? "?preview=1" : "";
   return manualAdmRequest<BulkAdmImportApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/bulk-import${query}`, data);
+}
+
+export async function createAdmImportJob(linkedServerId: string, data: {
+  filename: string;
+  admText: string;
+  source?: "manual_file_upload" | "manual_paste" | string;
+}) {
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job`, {
+    action: "create",
+    ...data,
+  });
+}
+
+export async function processAdmImportJob(linkedServerId: string, jobId: string) {
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job`, {
+    action: "process",
+    job_id: jobId,
+  });
 }
 
 export async function forceProcessLatestAdm(linkedServerId: string) {

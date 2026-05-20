@@ -917,6 +917,9 @@ export type BulkAdmFileResult = {
   filename: string;
   source: string;
   status: "previewed" | "imported" | "failed" | string;
+  job_id?: string | null;
+  chunks_processed?: number;
+  total_chunks?: number;
   raw_lines: number;
   raw_kill_lines_found: number;
   parsed_kills: number;
@@ -975,6 +978,37 @@ export type BulkAdmImportResult = {
 export type BulkAdmImportApiResult = BulkAdmImportResult | ManualAdmImportErrorResult;
 
 export type ManualAdmParsePreviewApiResult = ManualAdmParsePreviewResult | ManualAdmImportErrorResult;
+
+export type AdmImportJobProgressResult = {
+  ok: true;
+  http_status?: number;
+  response_body?: string;
+  job_id: string;
+  filename: string;
+  source: string;
+  status: "queued" | "parsing" | "writing" | "rebuilding" | "completed" | "failed";
+  total_lines: number;
+  current_line: number;
+  chunk_size: number;
+  total_chunks: number;
+  chunks_processed: number;
+  progress: number;
+  parsed_kills: number;
+  written_kills: number;
+  duplicate_skips: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  hit_lines: number;
+  raw_events_stored: number;
+  player_events_stored: number;
+  public_cache_updated: boolean;
+  discord_jobs_queued: number;
+  warnings: string[];
+  file_result: BulkAdmFileResult | null;
+};
+
+export type AdmImportJobApiResult = AdmImportJobProgressResult | ManualAdmImportErrorResult;
 
 export type AdmFileDiscoveryCandidateDebug = {
   name: string;
