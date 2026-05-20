@@ -41,9 +41,9 @@ export async function handleMetadataSyncRun(
   { request, env }: PagesContext,
   handlers: MetadataSyncRunHandlers = DEFAULT_HANDLERS,
 ) {
-  const body = await readJson<MetadataSyncRunBody>(request);
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
+  const body = await readJson<MetadataSyncRunBody>(request);
 
   const source = normalizeAutomationCronSource(body.source, body.cron);
   const startedAt = new Date().toISOString();

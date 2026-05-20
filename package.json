@@ -51,9 +51,10 @@
     "check:automation-live": "tsx scripts/check-automation-live.ts",
     "check:cron-production": "tsx scripts/check-cron-production.ts",
     "check:server-due-state": "tsx scripts/check-server-due-state.ts",
-      "debug:adm-discovery": "tsx scripts/debug-adm-discovery.ts",
-      "import:adm-text": "tsx scripts/import-adm-text.ts",
-      "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live"
+    "debug:adm-discovery": "tsx scripts/debug-adm-discovery.ts",
+    "import:adm-text": "tsx scripts/import-adm-text.ts",
+    "import:adm-files": "tsx scripts/import-adm-files.ts",
+    "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live"
   },
   "dependencies": {
     "d3-geo": "^3.1.1",
