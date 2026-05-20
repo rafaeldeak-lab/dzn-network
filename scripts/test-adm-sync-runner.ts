@@ -450,6 +450,26 @@ async function runNitradoReadFallbackTests() {
     globalThis.fetch = mockNitradoFetch({
       logFiles: [admPath],
       seekFails: true,
+      downloadSucceeds: true,
+      admText,
+      directDownloadText: true,
+    });
+    const directTextRead = await readAdmFileTextWithFallback({
+      token: "unit-token",
+      serviceId: "17428528",
+      fileName: latestAdm,
+      originalPath: admPath,
+      username: "gameserver-unit",
+      options: { mode: "full" },
+    });
+    assert.equal(directTextRead.ok, true);
+    assert.equal(directTextRead.readMethod, "download_fallback");
+    assert.equal(directTextRead.downloadOk, true);
+    assert.equal(directTextRead.text?.includes("AdminLog started on 2026-05-20 at 08:02:52"), true);
+
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: [admPath],
+      seekFails: true,
       downloadSucceeds: false,
       admText,
     });
@@ -478,6 +498,7 @@ function mockNitradoFetch(options: {
   downloadSucceeds: boolean;
   admText: string;
   acceptedDownloadPath?: string;
+  directDownloadText?: boolean;
 }): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
@@ -507,6 +528,12 @@ function mockNitradoFetch(options: {
       const acceptedPath = options.acceptedDownloadPath ?? null;
       const pathAccepted = acceptedPath ? requestedPath === acceptedPath : requestedPath.includes("/");
       if (!options.downloadSucceeds || !pathAccepted) return jsonResponse({ error: "download failed" }, 404);
+      if (options.directDownloadText) {
+        return new Response(options.admText, {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        });
+      }
       return jsonResponse({ data: { url: "https://files.dzn.test/adm-download", token: "secret-download-token" } });
     }
     if (url.hostname === "files.dzn.test") {

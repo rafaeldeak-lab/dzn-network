@@ -1767,7 +1767,26 @@ async function readNitradoFileViaSeek(
       }));
       return createSampleResult(null, status, false, "not_attempted", false, safeFileApiError(status));
     }
-    const payload = await parseJsonPayload(response);
+    const bodyText = await response.text().catch(() => "");
+    const payload = parseJsonText(bodyText, responseContentType);
+    if (bodyText && (!payload || containsDayZAdminLogMarkers(bodyText))) {
+      const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
+      const direct = createSampleResult(bodyText.slice(0, maxBytes), "OK", false, "OK", true, null);
+      readAttempts?.push(createReadAttempt(file, "seek", "OK", {
+        pathVariantLabel,
+        requestUrlPathOnly,
+        httpStatusCode: response.status,
+        responseContentType,
+        responseShape: emptyResponseShape(),
+        errorMessageSafe: null,
+        downloadTokenCreated: false,
+        tokenUrlReceived: false,
+        sampleFetchAttempted: true,
+        sampleFetchStatus: "OK",
+        sampleReadSucceeded: true,
+      }));
+      return direct;
+    }
     const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "seek", sample.status, {
       pathVariantLabel,
@@ -1827,7 +1846,26 @@ async function readNitradoFileViaDownload(
       }));
       return createSampleResult(null, status, false, "not_attempted", false, safeFileApiError(status));
     }
-    const payload = await parseJsonPayload(response);
+    const bodyText = await response.text().catch(() => "");
+    const payload = parseJsonText(bodyText, responseContentType);
+    if (bodyText && (!payload || containsDayZAdminLogMarkers(bodyText))) {
+      const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
+      const direct = createSampleResult(bodyText.slice(0, maxBytes), "OK", false, "OK", true, null);
+      readAttempts?.push(createReadAttempt(file, "download", "OK", {
+        pathVariantLabel,
+        requestUrlPathOnly,
+        httpStatusCode: response.status,
+        responseContentType,
+        responseShape: emptyResponseShape(),
+        errorMessageSafe: null,
+        downloadTokenCreated: false,
+        tokenUrlReceived: false,
+        sampleFetchAttempted: true,
+        sampleFetchStatus: "OK",
+        sampleReadSucceeded: true,
+      }));
+      return direct;
+    }
     const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "download", sample.status, {
       pathVariantLabel,
