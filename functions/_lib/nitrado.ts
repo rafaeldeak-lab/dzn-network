@@ -554,6 +554,31 @@ export async function fetchReadableNitradoAdmFiles(
     if (readable) files.push(readable);
   }
 
+  if (!files.length && newest) {
+    const fallback = await runNitradoLogAccessDiagnosticsInternal(token, serviceId, {
+      ...options,
+      preferredAdmFileName: newest.name,
+      preferredAdmPath: newest.path,
+      mode: options.mode ?? "sample",
+      fullDownloadFallback: true,
+    });
+    if (fallback.lines.some((line) => containsDayZAdminLogMarkers(line))) {
+      console.log("DZN ADM BROAD LOG ACCESS FALLBACK USED", {
+        serviceId,
+        file: newest.name,
+        route: fallback.diagnostics.readable.routeRecommendation,
+        sourceLabel: fallback.diagnostics.readable.sourceLabel,
+        lineCount: fallback.lines.length,
+      });
+      files.push({
+        name: fallback.diagnostics.newestAdmFileName ?? newest.name,
+        path: newest.path,
+        lines: fallback.lines,
+        readableRouteUsed: fallback.diagnostics.readable.routeRecommendation,
+      });
+    }
+  }
+
   return {
     files,
     candidates: allEntries.map((entry) => ({
