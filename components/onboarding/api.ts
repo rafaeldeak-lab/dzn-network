@@ -246,6 +246,10 @@ export async function continueAdmImportJob(linkedServerId: string, jobId: string
   return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/continue`, { jobId });
 }
 
+export async function cancelAdmImportJob(linkedServerId: string, jobId: string) {
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/cancel`, { jobId });
+}
+
 export async function getAdmImportJobStatus(linkedServerId: string, jobId: string) {
   return request<AdmImportJobStatusApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/status?job_id=${encodeURIComponent(jobId)}`, {
     cache: "no-store",

@@ -282,7 +282,7 @@ export type ManualAdmBulkFileResult = {
   ok: boolean;
   filename: string;
   source: string;
-  status: "previewed" | "imported" | "completed_with_warnings" | "duplicate_only" | "failed";
+  status: "previewed" | "imported" | "completed_with_warnings" | "duplicate_only" | "completed_duplicate_only" | "processing" | "failed" | "failed_retryable" | "cancelled";
   job_id?: string | null;
   job_status?: string | null;
   chunks_processed?: number;
@@ -318,12 +318,15 @@ export type AdmImportJobProgressResult = {
   job_id: string;
   filename: string;
   source: string;
-  status: "queued" | "processing" | "parsing" | "writing" | "rebuilding" | "completed" | "completed_with_warnings" | "failed" | "failed_retryable";
+  status: "queued" | "processing" | "parsing" | "writing" | "rebuilding" | "completed" | "completed_with_warnings" | "failed" | "failed_retryable" | "cancelled";
   total_lines: number;
   current_line: number;
   chunk_size: number;
   total_chunks: number;
   chunks_processed: number;
+  display_current_chunk: number;
+  chunk_count_mismatch?: boolean;
+  already_processed?: boolean;
   import_hit_lines?: boolean;
   last_chunk_index?: number | null;
   failed_chunk_index?: number | null;
@@ -2569,7 +2572,7 @@ export async function importAdmFilesForServer(
 const MANUAL_ADM_IMPORT_CHUNK_SIZE = 25;
 const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 10;
-const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 3;
+const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 5;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
 
 type AdmImportJobRow = {
@@ -2709,7 +2712,7 @@ export async function startAdmImportLineJobForServer(
   if (!filename) throw new Error("A valid ADM filename is required.");
   const totalLines = Math.max(1, Math.trunc(Number(input.totalLines ?? 0)));
   const chunkSize = Math.max(1, Math.min(25, Math.trunc(input.chunkSize ?? MANUAL_ADM_UPLOAD_CHUNK_SIZE)));
-  const totalChunks = Math.max(1, Math.trunc(Number(input.totalChunks ?? Math.ceil(totalLines / chunkSize))));
+  const totalChunks = Math.max(1, Math.ceil(totalLines / chunkSize), Math.trunc(Number(input.totalChunks ?? Math.ceil(totalLines / chunkSize))));
   const now = new Date().toISOString();
   const source = input.source ?? "manual_file_upload";
   const db = requireDb(env);
@@ -2767,6 +2770,9 @@ export async function processAdmImportJobLineChunk(
   const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
   if (!row) throw new Error("ADM import job not found.");
   if (row.status === "completed" || row.status === "completed_with_warnings") return toAdmImportJobProgress(row);
+  if (row.status === "cancelled") return toAdmImportJobProgress(row);
+  if (row.status === "cancelled") return toAdmImportJobProgress(row);
+  if (row.status === "cancelled") return toAdmImportJobProgress(row);
 
   const server = await getLinkedServerForAdmImport(env, input.linkedServerId);
   if (!server) throw new Error("Server not found.");
@@ -2776,11 +2782,15 @@ export async function processAdmImportJobLineChunk(
   if (!chunkLines.some((line) => line.trim().length > 0)) throw new Error("ADM import chunk did not contain readable lines.");
   const startLine = Math.max(0, Math.trunc(Number(input.startLine ?? 0)));
   const currentLine = Math.max(0, Number(row.current_line ?? 0));
+  const totalLines = Math.max(0, Number(row.total_lines ?? 0));
   const chunkIndex = Math.max(0, Math.trunc(Number(input.chunkIndex ?? 0)));
   const db = requireDb(env);
 
+  if (currentLine >= totalLines && totalLines > 0) {
+    return await finalizeAdmImportJob(env, server, row, null);
+  }
   if (startLine < currentLine) {
-    return toAdmImportJobProgress(row);
+    return { ...toAdmImportJobProgress(row), already_processed: true };
   }
   if (startLine > currentLine) {
     throw new Error(`ADM import chunk is out of order. Expected line ${currentLine}, received ${startLine}.`);
@@ -2803,7 +2813,7 @@ export async function processAdmImportJobLineChunk(
       triggerType: row.source,
     });
     const warnings = [...parseJobWarnings(row), ...chunkResult.parserWarnings.map((warning) => `${row.filename}: ${warning}`)];
-    const nextCurrentLine = Math.min(Number(row.total_lines ?? startLine + chunkLines.length), startLine + chunkLines.length);
+    const nextCurrentLine = Math.min(totalLines || startLine + chunkLines.length, startLine + chunkLines.length);
     const chunksProcessed = Math.max(Number(row.chunks_processed ?? 0), chunkIndex + 1);
     await db
       .prepare(
@@ -2858,6 +2868,9 @@ export async function processAdmImportJobLineChunk(
 
     const updated = await getAdmImportJob(env, input.linkedServerId, input.jobId);
     if (!updated) throw new Error("ADM import job disappeared after chunk write.");
+    if (nextCurrentLine >= totalLines && totalLines > 0) {
+      return await finalizeAdmImportJob(env, server, updated, null);
+    }
     return toAdmImportJobProgress(updated);
   } catch (error) {
     if (chunkLines.length === 1) {
@@ -2955,6 +2968,32 @@ export async function retryAdmImportLineJobForServer(
     .run();
   const updated = await getAdmImportJob(env, input.linkedServerId, input.jobId);
   if (!updated) throw new Error("ADM import job disappeared after retry reset.");
+  return toAdmImportJobProgress(updated);
+}
+
+export async function cancelAdmImportLineJobForServer(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    jobId: string;
+  },
+): Promise<AdmImportJobProgressResult> {
+  await ensureAdmSyncSchema(env);
+  const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+  if (!row) throw new Error("ADM import job not found.");
+  if (row.status === "completed" || row.status === "completed_with_warnings" || row.status === "cancelled") return toAdmImportJobProgress(row);
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_import_jobs SET
+        status = 'cancelled',
+        error_message = COALESCE(error_message, 'ADM import cancelled by owner/admin. Already written events were preserved.'),
+        updated_at = ?
+       WHERE id = ? AND server_id = ?`,
+    )
+    .bind(new Date().toISOString(), row.id, input.linkedServerId)
+    .run();
+  const updated = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+  if (!updated) throw new Error("ADM import job disappeared after cancel.");
   return toAdmImportJobProgress(updated);
 }
 
@@ -3469,7 +3508,7 @@ export async function processNextAdmImportJobChunk(
     });
     const warnings = [...parseJobWarnings(row), ...chunkResult.parserWarnings.map((warning) => `${row.filename}: ${warning}`)];
     const nextCurrentLine = endLine;
-    const chunksProcessed = Number(row.chunks_processed ?? 0) + 1;
+    const chunksProcessed = Math.max(Number(row.chunks_processed ?? 0) + 1, Math.ceil(nextCurrentLine / chunkSize));
     const status = nextCurrentLine >= lines.length ? "rebuilding" : "queued";
     await db
       .prepare(
@@ -3683,6 +3722,7 @@ async function finalizeAdmImportJob(
   const warnings = parseJobWarnings(row);
   const initialWarningCount = warnings.length;
   const totalLines = Number(row.total_lines ?? 0);
+  const chunkStats = getNormalizedAdmJobChunkStats(row);
 
   try {
     await rebuildServerStats(env, row.server_id);
@@ -3874,7 +3914,7 @@ async function finalizeAdmImportJob(
   const finalStatus: AdmImportJobProgressResult["status"] = hasFinishWarnings || hasSkippedFailedLineWarning ? "completed_with_warnings" : "completed";
   const fileStatus: ManualAdmBulkFileResult["status"] =
     finalStatus === "completed_with_warnings" ? "completed_with_warnings" :
-      Number(row.written_kills ?? 0) === 0 && Number(row.duplicate_skips ?? 0) > 0 && Number(row.failed_writes ?? 0) === 0 ? "duplicate_only" :
+      Number(row.written_kills ?? 0) === 0 && Number(row.duplicate_skips ?? 0) > 0 && Number(row.failed_writes ?? 0) === 0 ? "completed_duplicate_only" :
         "imported";
 
   const fileResult: ManualAdmBulkFileResult = {
@@ -3884,8 +3924,8 @@ async function finalizeAdmImportJob(
     status: fileStatus,
     job_id: row.id,
     job_status: finalStatus,
-    chunks_processed: Number(row.total_chunks ?? 0),
-    total_chunks: Number(row.total_chunks ?? 0),
+    chunks_processed: chunkStats.totalChunks,
+    total_chunks: chunkStats.totalChunks,
     raw_lines: totalLines,
     raw_kill_lines_found: fullReport.rawKilledByLinesFound,
     parsed_kills: fullReport.parsedPvpKills,
@@ -3914,7 +3954,8 @@ async function finalizeAdmImportJob(
       `UPDATE adm_import_jobs SET
         status = ?,
         current_line = total_lines,
-        chunks_processed = total_chunks,
+        total_chunks = ?,
+        chunks_processed = ?,
         public_cache_updated = ?,
         discord_jobs_queued = ?,
         warnings_json = ?,
@@ -3923,7 +3964,7 @@ async function finalizeAdmImportJob(
         updated_at = ?
        WHERE id = ? AND server_id = ?`,
     )
-    .bind(finalStatus, publicCacheUpdated ? 1 : 0, discordQueuesCreated, JSON.stringify(warnings), JSON.stringify(fileResult), now, now, row.id, row.server_id)
+    .bind(finalStatus, chunkStats.totalChunks, chunkStats.totalChunks, publicCacheUpdated ? 1 : 0, discordQueuesCreated, JSON.stringify(warnings), JSON.stringify(fileResult), now, now, row.id, row.server_id)
     .run();
 
   const completed = await getAdmImportJob(env, row.server_id, row.id);
@@ -4181,12 +4222,12 @@ function scheduledJobResultFromProgress(
 
 async function recoverStaleAdmImportJobs(env: Env, source: string) {
   const now = new Date().toISOString();
-  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   await requireDb(env)
     .prepare(
       `UPDATE adm_import_jobs SET
         status = 'failed_retryable',
-        error_message = COALESCE(error_message, 'Scheduled ADM import job stalled for more than 10 minutes. Cron will retry it automatically.'),
+        error_message = COALESCE(error_message, 'Scheduled ADM import job stalled for more than 5 minutes. Cron or dashboard Continue Import can retry it automatically.'),
         updated_at = ?
        WHERE source = ?
          AND status IN ('processing', 'parsing', 'writing', 'rebuilding')
@@ -4226,23 +4267,28 @@ function parseJobWarnings(row: Pick<AdmImportJobRow, "warnings_json">) {
 
 function toAdmImportJobProgress(row: AdmImportJobRow): AdmImportJobProgressResult {
   const fileResult = parseJobFileResult(row.result_json);
-  const totalLines = Number(row.total_lines ?? 0);
-  const currentLine = Math.min(totalLines, Number(row.current_line ?? 0));
+  const chunkStats = getNormalizedAdmJobChunkStats(row);
+  const warnings = parseJobWarnings(row);
+  const chunkWarnings = chunkStats.chunkCountMismatch
+    ? [`${row.filename}: chunk_count_mismatch corrected for display. Stored ${chunkStats.storedTotalChunks}, calculated ${chunkStats.calculatedTotalChunks}, processed ${chunkStats.rawChunksProcessed}.`]
+    : [];
   return {
     ok: true,
     job_id: row.id,
     filename: row.filename,
     source: row.source,
     status: normalizeImportJobStatus(row.status),
-    total_lines: totalLines,
-    current_line: currentLine,
-    chunk_size: Number(row.chunk_size ?? MANUAL_ADM_IMPORT_CHUNK_SIZE),
-    total_chunks: Number(row.total_chunks ?? 1),
-    chunks_processed: Number(row.chunks_processed ?? 0),
+    total_lines: chunkStats.totalLines,
+    current_line: chunkStats.currentLine,
+    chunk_size: chunkStats.chunkSize,
+    total_chunks: chunkStats.totalChunks,
+    chunks_processed: chunkStats.chunksProcessed,
+    display_current_chunk: chunkStats.displayCurrentChunk,
+    chunk_count_mismatch: chunkStats.chunkCountMismatch,
     import_hit_lines: Number(row.import_hit_lines ?? 0) === 1,
     last_chunk_index: row.last_chunk_index === null || row.last_chunk_index === undefined ? null : Number(row.last_chunk_index),
     failed_chunk_index: row.failed_chunk_index === null || row.failed_chunk_index === undefined ? null : Number(row.failed_chunk_index),
-    progress: totalLines > 0 ? currentLine / totalLines : 0,
+    progress: chunkStats.totalLines > 0 ? Math.max(0, Math.min(1, chunkStats.currentLine / chunkStats.totalLines)) : 0,
     parsed_kills: Number(row.parsed_kills ?? 0),
     written_kills: Number(row.written_kills ?? 0),
     duplicate_skips: Number(row.duplicate_skips ?? 0),
@@ -4254,12 +4300,41 @@ function toAdmImportJobProgress(row: AdmImportJobRow): AdmImportJobProgressResul
     player_events_stored: Number(row.player_events ?? 0),
     public_cache_updated: Boolean(Number(row.public_cache_updated ?? 0)),
     discord_jobs_queued: Number(row.discord_jobs_queued ?? 0),
-    warnings: parseJobWarnings(row),
+    warnings: [...warnings, ...chunkWarnings],
     file_result: fileResult,
     error_message: row.error_message ?? null,
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
     completed_at: row.completed_at ?? null,
+  };
+}
+
+function getNormalizedAdmJobChunkStats(row: AdmImportJobRow) {
+  const totalLines = Math.max(0, Number(row.total_lines ?? 0));
+  const chunkSize = Math.max(1, Number(row.chunk_size ?? MANUAL_ADM_IMPORT_CHUNK_SIZE));
+  const currentLine = Math.max(0, Math.min(totalLines, Number(row.current_line ?? 0)));
+  const calculatedTotalChunks = Math.max(1, Math.ceil(Math.max(totalLines, 1) / chunkSize));
+  const storedTotalChunks = Math.max(1, Number(row.total_chunks ?? 0));
+  const rawChunksProcessed = Math.max(0, Number(row.chunks_processed ?? 0));
+  const chunksFromLine = currentLine >= totalLines && totalLines > 0
+    ? calculatedTotalChunks
+    : Math.ceil(currentLine / chunkSize);
+  const totalChunks = Math.max(storedTotalChunks, calculatedTotalChunks, rawChunksProcessed, chunksFromLine);
+  const chunksProcessed = Math.max(0, Math.min(totalChunks, Math.max(rawChunksProcessed, chunksFromLine)));
+  const displayCurrentChunk = currentLine >= totalLines && totalLines > 0
+    ? totalChunks
+    : Math.max(1, Math.min(totalChunks, chunksProcessed + 1));
+  return {
+    totalLines,
+    chunkSize,
+    currentLine,
+    calculatedTotalChunks,
+    storedTotalChunks,
+    rawChunksProcessed,
+    totalChunks,
+    chunksProcessed,
+    displayCurrentChunk,
+    chunkCountMismatch: storedTotalChunks < calculatedTotalChunks || storedTotalChunks < rawChunksProcessed,
   };
 }
 
@@ -4274,7 +4349,7 @@ function parseJobFileResult(value: string | null): ManualAdmBulkFileResult | nul
 }
 
 function normalizeImportJobStatus(value: string): AdmImportJobProgressResult["status"] {
-  if (value === "queued" || value === "processing" || value === "parsing" || value === "writing" || value === "rebuilding" || value === "completed" || value === "completed_with_warnings" || value === "failed" || value === "failed_retryable") return value;
+  if (value === "queued" || value === "processing" || value === "parsing" || value === "writing" || value === "rebuilding" || value === "completed" || value === "completed_with_warnings" || value === "failed" || value === "failed_retryable" || value === "cancelled") return value;
   return "queued";
 }
 

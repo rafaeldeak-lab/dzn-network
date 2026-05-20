@@ -32,7 +32,7 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -83,6 +83,11 @@ type AdmBulkProgress = {
   status?: string;
   writtenKills?: number;
   duplicateSkips?: number;
+  chunksPerMinute?: number | null;
+  estimatedRemainingSeconds?: number | null;
+  lastChunkAt?: string | null;
+  activeInBrowser?: boolean;
+  runnerState?: "running" | "paused" | "finishing";
 };
 
 type DashboardTotalsSnapshot = {
@@ -103,6 +108,9 @@ type DashboardTotalsDelta = {
 const ADM_IMPORT_UPLOAD_CHUNK_SIZE = 10;
 const ADM_IMPORT_RETRY_CHUNK_SIZES = [5, 1] as const;
 const ADM_IMPORT_PREVIOUS_LINE_CONTEXT = 5;
+const ADM_CHUNK_RUNNER_DELAY_MS = 300;
+const ADM_CHUNK_RUNNER_RATE_LIMIT_DELAY_MS = 1500;
+const ADM_CHUNK_RUNNER_MAX_BROWSER_CHUNKS = 1200;
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -278,6 +286,8 @@ function ServerDashboard({
   const [bulkAdmImportResult, setBulkAdmImportResult] = useState<BulkAdmImportResult | null>(null);
   const [bulkAdmImportError, setBulkAdmImportError] = useState<ManualAdmImportErrorResult | null>(null);
   const [bulkAdmImportProgress, setBulkAdmImportProgress] = useState<AdmBulkProgress | null>(null);
+  const [admChunkRunnerPaused, setAdmChunkRunnerPaused] = useState(false);
+  const [admChunkRunnerJob, setAdmChunkRunnerJob] = useState<{ jobId: string; filename: string } | null>(null);
   const [admImportTotalsDelta, setAdmImportTotalsDelta] = useState<DashboardTotalsDelta | null>(null);
   const [forceLatestAdmRunning, setForceLatestAdmRunning] = useState(false);
   const [forceLatestAdmResult, setForceLatestAdmResult] = useState<AdmSyncRunResult | null>(null);
@@ -291,6 +301,7 @@ function ServerDashboard({
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const onRefreshRef = useRef(onRefresh);
+  const admChunkRunnerControlRef = useRef({ paused: false, cancelled: false, runId: 0 });
   const server = useMemo(
     () => ({
       ...serverProp,
@@ -772,6 +783,62 @@ function ServerDashboard({
     return files;
   }
 
+  function beginAdmChunkRunner(jobId: string, filename: string) {
+    const runId = admChunkRunnerControlRef.current.runId + 1;
+    admChunkRunnerControlRef.current = { paused: false, cancelled: false, runId };
+    setAdmChunkRunnerPaused(false);
+    setAdmChunkRunnerJob({ jobId, filename });
+    return runId;
+  }
+
+  function isAdmChunkRunnerStopped(runId: number) {
+    const control = admChunkRunnerControlRef.current;
+    return control.runId !== runId || control.paused || control.cancelled;
+  }
+
+  function pauseAdmChunkRunner() {
+    admChunkRunnerControlRef.current.paused = true;
+    setAdmChunkRunnerPaused(true);
+    setActionMessage("ADM import paused. Already written events remain saved; Resume Import will continue from the next chunk.");
+  }
+
+  async function cancelActiveAdmImportJob(filename?: string, jobId?: string | null) {
+    const active = jobId
+      ? { jobId, filename: filename ?? admChunkRunnerJob?.filename ?? "ADM import" }
+      : admChunkRunnerJob;
+    if (!active?.jobId) {
+      setActionMessage("No active ADM import job is available to cancel.");
+      return;
+    }
+    const confirmed = window.confirm("Cancel this ADM import job? Already imported events and stats will remain saved.");
+    if (!confirmed) return;
+    admChunkRunnerControlRef.current.cancelled = true;
+    setAdmChunkRunnerPaused(false);
+    try {
+      const cancelled = await cancelAdmImportJob(server.id, active.jobId);
+      if (!cancelled.ok) {
+        setBulkAdmImportError(cancelled);
+        setActionMessage(`ADM import cancel failed: ${cancelled.message}`);
+        return;
+      }
+      setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+        current,
+        makeProcessingBulkAdmFileResultFromJob(cancelled, cancelled.source),
+        cancelled.source,
+        Math.max(current?.files_uploaded ?? 1, 1),
+      ));
+      setActionMessage(`${active.filename} was cancelled. Already imported events remain saved.`);
+    } catch (error) {
+      const failure = makeClientAdmFailure(error, "adm_import_cancel_exception", "ADM import cancel failed before a response was received.");
+      setBulkAdmImportError(failure);
+      setActionMessage(`ADM import cancel failed: ${failure.message}`);
+    } finally {
+      setManualAdmImporting(false);
+      setAdmChunkRunnerJob(null);
+      setBulkAdmImportProgress(null);
+    }
+  }
+
   async function previewAdmFilesNow() {
     const files = buildAdmBulkFiles();
     if (!files.length) {
@@ -829,6 +896,12 @@ function ServerDashboard({
         const fileResult = await importSingleAdmFileInChunks(file, source, index + 1, files.length);
         fileResults.push(fileResult);
         setBulkAdmImportResult(summarizeClientBulkAdmResults([...fileResults], source, files.length));
+        if (isProcessingBulkAdmFile(fileResult)) {
+          setActionMessage(admChunkRunnerControlRef.current.paused
+            ? "ADM import paused. Resume Import will continue from the saved chunk."
+            : "ADM import is still processing. Use Continue Import to keep the browser runner attached.");
+          return;
+        }
       }
 
       const response = summarizeClientBulkAdmResults(fileResults, source, files.length);
@@ -843,6 +916,7 @@ function ServerDashboard({
       setActionMessage(`Bulk ADM import failed: ${failure.message}`);
     } finally {
       setManualAdmImporting(false);
+      if (!admChunkRunnerControlRef.current.paused) setAdmChunkRunnerJob(null);
       setBulkAdmImportProgress(null);
     }
   }
@@ -887,6 +961,7 @@ function ServerDashboard({
       setActionMessage(`ADM file retry failed: ${failure.message}`);
     } finally {
       setManualAdmImporting(false);
+      if (!admChunkRunnerControlRef.current.paused) setAdmChunkRunnerJob(null);
       setBulkAdmImportProgress(null);
     }
   }
@@ -905,18 +980,7 @@ function ServerDashboard({
         const fileResult = await importSingleAdmFileInChunks(selectedFile, source, 1, 1);
         setBulkAdmImportResult((current) => replaceBulkAdmFileResult(current, fileResult, source, selectedCount));
       } else if (jobId) {
-        const continued = await continueAdmImportJob(server.id, jobId);
-        if (!continued.ok) {
-          setBulkAdmImportError(continued);
-          setActionMessage(`${filename} could not continue from the server-side job. Reselect the file if this was a manual upload.`);
-          return;
-        }
-        setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
-          current,
-          makeProcessingBulkAdmFileResultFromJob(continued, continued.source),
-          continued.source,
-          selectedCount,
-        ));
+        await runServerSideAdmImportJobToCompletion(filename, jobId, source, selectedCount);
       } else {
         const latest = await getLatestAdmImportJob(server.id, filename);
         if (latest.ok && (isActiveAdmImportJobStatus(latest.job.status) || latest.job.status === "failed_retryable")) {
@@ -926,22 +990,7 @@ function ServerDashboard({
             latest.job.source,
             selectedCount,
           ));
-          if (isActiveAdmImportJobStatus(latest.job.status)) {
-            setActionMessage(`${filename} is already processing. DZN reattached to the existing ADM import job.`);
-            return;
-          }
-          const continued = await continueAdmImportJob(server.id, latest.job.job_id);
-          if (!continued.ok) {
-            setBulkAdmImportError(continued);
-            setActionMessage(`${filename} could not continue from the latest server-side job. Reselect the file if this was a manual upload.`);
-            return;
-          }
-          setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
-            current,
-            makeProcessingBulkAdmFileResultFromJob(continued, continued.source),
-            continued.source,
-            selectedCount,
-          ));
+          await runServerSideAdmImportJobToCompletion(filename, latest.job.job_id, latest.job.source, selectedCount);
         } else {
           setBulkAdmImportError({
             ok: false,
@@ -951,6 +1000,10 @@ function ServerDashboard({
           });
           return;
         }
+      }
+      if (admChunkRunnerControlRef.current.paused) {
+        setActionMessage("ADM import paused. Resume Import will continue from the saved chunk.");
+        return;
       }
       const refreshed = await refreshDashboardAfterManualAdmImport(beforeTotals);
       setActionMessage(refreshed
@@ -962,8 +1015,71 @@ function ServerDashboard({
       setActionMessage(`ADM import continue failed: ${failure.message}`);
     } finally {
       setManualAdmImporting(false);
+      if (!admChunkRunnerControlRef.current.paused) setAdmChunkRunnerJob(null);
       setBulkAdmImportProgress(null);
     }
+  }
+
+  async function runServerSideAdmImportJobToCompletion(
+    filename: string,
+    jobId: string,
+    source: string,
+    selectedCount: number,
+  ) {
+    const runId = beginAdmChunkRunner(jobId, filename);
+    const runnerStartedAt = Date.now();
+    let progress = await getAdmImportJobStatus(server.id, jobId)
+      .then((status) => (status.ok ? status.job : null))
+      .catch(() => null);
+    const startingChunksProcessed = progress ? normalizeChunkProgress(progress).chunksProcessed : 0;
+    let browserChunksProcessed = 0;
+
+    while (browserChunksProcessed < ADM_CHUNK_RUNNER_MAX_BROWSER_CHUNKS) {
+      if (isAdmChunkRunnerStopped(runId)) return;
+      let continued = await continueAdmImportJob(server.id, jobId);
+      if (!continued.ok && isAdmRateLimitedFailure(continued)) {
+        setBulkAdmImportProgress((current) => current ? { ...current, status: "rate limited - backing off", runnerState: "running" } : current);
+        await sleep(ADM_CHUNK_RUNNER_RATE_LIMIT_DELAY_MS);
+        continued = await continueAdmImportJob(server.id, jobId);
+      }
+      if (!continued.ok) {
+        setBulkAdmImportError(continued);
+        setActionMessage(`${filename} could not continue from the server-side job. Reselect the file if this was a manual upload.`);
+        return;
+      }
+      const nextProgress = continued;
+      progress = nextProgress;
+      browserChunksProcessed += 1;
+      const display = normalizeChunkProgress(nextProgress);
+      const metrics = makeAdmChunkRunnerMetrics(runnerStartedAt, startingChunksProcessed, display.chunksProcessed, display.totalChunks);
+      setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+        current,
+        makeProcessingBulkAdmFileResultFromJob(nextProgress, nextProgress.source ?? source),
+        nextProgress.source ?? source,
+        selectedCount,
+      ));
+      setBulkAdmImportProgress({
+        current: 1,
+        total: 1,
+        filename,
+        chunkCurrent: display.displayCurrentChunk,
+        chunkTotal: display.totalChunks,
+        status: nextProgress.already_processed ? "chunk already processed - advancing" : nextProgress.status,
+        writtenKills: nextProgress.written_kills,
+        duplicateSkips: nextProgress.duplicate_skips,
+        chunksPerMinute: metrics.chunksPerMinute,
+        estimatedRemainingSeconds: metrics.estimatedRemainingSeconds,
+        lastChunkAt: nextProgress.updated_at ?? new Date().toISOString(),
+        activeInBrowser: true,
+        runnerState: isCompletedAdmImportJobStatus(nextProgress.status) ? "finishing" : "running",
+      });
+      if (isCompletedAdmImportJobStatus(nextProgress.status) || nextProgress.status === "failed" || nextProgress.status === "failed_retryable" || nextProgress.status === "cancelled") {
+        return;
+      }
+      await sleep(ADM_CHUNK_RUNNER_DELAY_MS);
+    }
+
+    setActionMessage("ADM chunk runner reached the browser safety limit. Use Resume Import to continue.");
   }
 
   async function importSingleAdmFileInChunks(
@@ -1004,35 +1120,65 @@ function ServerDashboard({
     }
 
     let progress: AdmImportJobProgressResult = created;
+    const runId = beginAdmChunkRunner(progress.job_id, file.filename);
+    const runnerStartedAt = Date.now();
+    const startingChunksProcessed = normalizeChunkProgress(progress).chunksProcessed;
+    setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+      current,
+      makeProcessingBulkAdmFileResultFromJob(progress, source),
+      source,
+      fileTotal,
+    ));
     setBulkAdmImportProgress({
       current: fileIndex,
       total: fileTotal,
       filename: file.filename,
-      chunkCurrent: progress.chunks_processed,
-      chunkTotal: progress.total_chunks,
-      status: "queued",
+      chunkCurrent: normalizeChunkProgress(progress).displayCurrentChunk,
+      chunkTotal: normalizeChunkProgress(progress).totalChunks,
+      status: "browser runner active",
       writtenKills: progress.written_kills,
       duplicateSkips: progress.duplicate_skips,
+      activeInBrowser: true,
+      runnerState: "running",
     });
 
-    while (progress.current_line < lines.length) {
+    let browserChunksProcessed = 0;
+    while (progress.current_line < lines.length && !isCompletedAdmImportJobStatus(progress.status)) {
+      if (isAdmChunkRunnerStopped(runId)) {
+        return makeProcessingBulkAdmFileResultFromJob(progress, source);
+      }
+      if (browserChunksProcessed >= ADM_CHUNK_RUNNER_MAX_BROWSER_CHUNKS) {
+        return makeFailedBulkAdmFileResult(file, {
+          ok: false,
+          error_code: "adm_chunk_runner_safety_limit",
+          message: "ADM chunk runner stopped at the browser safety limit. Use Resume Import to continue.",
+          details: { job_id: progress.job_id, chunks_processed: progress.chunks_processed, total_chunks: progress.total_chunks },
+        }, source);
+      }
       const chunkIndex = Math.max(0, Math.floor(progress.current_line / ADM_IMPORT_UPLOAD_CHUNK_SIZE));
       const chunk = {
         index: chunkIndex,
         startLine: progress.current_line,
         lines: lines.slice(progress.current_line, Math.min(lines.length, progress.current_line + ADM_IMPORT_UPLOAD_CHUNK_SIZE)),
       };
+      const progressDisplay = normalizeChunkProgress(progress);
+      const metrics = makeAdmChunkRunnerMetrics(runnerStartedAt, startingChunksProcessed, progressDisplay.chunksProcessed, progressDisplay.totalChunks);
       setBulkAdmImportProgress({
         current: fileIndex,
         total: fileTotal,
         filename: file.filename,
-        chunkCurrent: chunk.index,
-        chunkTotal: chunks.length,
+        chunkCurrent: progressDisplay.displayCurrentChunk,
+        chunkTotal: progressDisplay.totalChunks,
         status: `processing chunk ${chunk.index + 1}/${chunks.length}`,
         writtenKills: progress.written_kills,
         duplicateSkips: progress.duplicate_skips,
+        chunksPerMinute: metrics.chunksPerMinute,
+        estimatedRemainingSeconds: metrics.estimatedRemainingSeconds,
+        lastChunkAt: progress.updated_at ?? null,
+        activeInBrowser: true,
+        runnerState: "running",
       });
-      const next = await sendAdmImportChunkWithFallback({
+      let next = await sendAdmImportChunkWithFallback({
         file,
         source,
         jobId: progress.job_id,
@@ -1043,37 +1189,69 @@ function ServerDashboard({
         progress,
         totalChunks: chunks.length,
       });
+      if (!next.ok && isAdmRateLimitedFailure(next)) {
+        setBulkAdmImportProgress((current) => current ? { ...current, status: "rate limited - backing off", runnerState: "running" } : current);
+        await sleep(ADM_CHUNK_RUNNER_RATE_LIMIT_DELAY_MS);
+        next = await sendAdmImportChunkWithFallback({
+          file,
+          source,
+          jobId: progress.job_id,
+          chunkIndex: chunk.index,
+          startLine: chunk.startLine,
+          lines: chunk.lines,
+          allLines: lines,
+          progress,
+          totalChunks: chunks.length,
+        });
+      }
       if (!next.ok) {
         return makeFailedBulkAdmFileResult(file, next, source);
       }
       progress = next;
+      browserChunksProcessed += 1;
       setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
         current,
         makeProcessingBulkAdmFileResultFromJob(progress, source),
         source,
         fileTotal,
       ));
+      const nextDisplay = normalizeChunkProgress(progress);
+      const nextMetrics = makeAdmChunkRunnerMetrics(runnerStartedAt, startingChunksProcessed, nextDisplay.chunksProcessed, nextDisplay.totalChunks);
       setBulkAdmImportProgress({
         current: fileIndex,
         total: fileTotal,
         filename: file.filename,
-        chunkCurrent: progress.chunks_processed,
-        chunkTotal: progress.total_chunks,
-        status: progress.status,
+        chunkCurrent: nextDisplay.displayCurrentChunk,
+        chunkTotal: nextDisplay.totalChunks,
+        status: progress.already_processed ? "chunk already processed - advancing" : progress.status,
         writtenKills: progress.written_kills,
         duplicateSkips: progress.duplicate_skips,
+        chunksPerMinute: nextMetrics.chunksPerMinute,
+        estimatedRemainingSeconds: nextMetrics.estimatedRemainingSeconds,
+        lastChunkAt: progress.updated_at ?? new Date().toISOString(),
+        activeInBrowser: true,
+        runnerState: isCompletedAdmImportJobStatus(progress.status) ? "finishing" : "running",
       });
+      if (progress.current_line < lines.length && !isCompletedAdmImportJobStatus(progress.status)) {
+        await sleep(ADM_CHUNK_RUNNER_DELAY_MS);
+      }
+    }
+
+    if (isCompletedAdmImportJobStatus(progress.status)) {
+      return progress.file_result ?? makeProcessingBulkAdmFileResultFromJob(progress, source);
     }
 
     setBulkAdmImportProgress({
       current: fileIndex,
       total: fileTotal,
       filename: file.filename,
-      chunkCurrent: progress.chunks_processed,
-      chunkTotal: progress.total_chunks,
+      chunkCurrent: normalizeChunkProgress(progress).displayCurrentChunk,
+      chunkTotal: normalizeChunkProgress(progress).totalChunks,
       status: "finishing",
       writtenKills: progress.written_kills,
       duplicateSkips: progress.duplicate_skips,
+      activeInBrowser: true,
+      runnerState: "finishing",
     });
     const finished = await finishAdmImportJob(server.id, progress.job_id);
     if (!finished.ok) {
@@ -1965,6 +2143,8 @@ function ServerDashboard({
                 bulkResult={displayedBulkAdmImportResult}
                 bulkFailure={bulkAdmImportError}
                 bulkProgress={bulkAdmImportProgress}
+                runnerPaused={admChunkRunnerPaused}
+                activeRunnerJob={admChunkRunnerJob}
                 totalsDelta={admImportTotalsDelta}
                 importHitLines={manualAdmImportHitLines}
                 refreshFailed={manualAdmRefreshFailed}
@@ -1980,6 +2160,8 @@ function ServerDashboard({
                 onBulkPreview={previewAdmFilesNow}
                 onRetryBulkFile={retryBulkAdmFile}
                 onContinueBulkFile={continueBulkAdmFile}
+                onPauseImport={pauseAdmChunkRunner}
+                onCancelImport={cancelActiveAdmImportJob}
                 onRetryRefresh={refreshDashboardAfterManualAdmImport}
               />
               {admFileDiscoveryDebug ? (
@@ -3670,8 +3852,8 @@ function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus 
   const backfillActive = Boolean(syncStatus?.adm_backfill_status?.active_job || syncStatus?.adm_backfill_status?.queued_files?.length);
   const nextAction = job
     ? job.status === "failed_retryable"
-      ? "Cron will retry the stalled chunk job automatically."
-      : "Cron will process the next chunk on the next ADM run."
+      ? "Cron will retry the stalled chunk job automatically, or an owner can use Continue Import to resume it now."
+      : "Dashboard Continue Import can actively process chunks now. Cron remains the background backup."
     : readFailed && !backfillActive
       ? "Retry Nitrado ADM download on the next discovery or processing run."
       : "Wait for the next Nitrado ADM file after reset.";
@@ -3688,13 +3870,15 @@ function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus 
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <MiniInfo label="Source" value={job?.source ?? report?.importSource ?? "scheduled_nitrado"} />
-        <MiniInfo label="Chunk" value={job ? `${Math.min(job.total_chunks, job.chunks_processed + 1)}/${job.total_chunks}` : "No active job"} />
+        <MiniInfo label="Chunk" value={job ? `${job.display_current_chunk ?? Math.min(job.total_chunks, job.chunks_processed + 1)}/${job.total_chunks}` : "No active job"} />
         <MiniInfo label="Parsed Kills" value={String(job?.parsed_kills ?? report?.parsedPvpKills ?? 0)} />
         <MiniInfo label="Written Kills" value={String(job?.written_kills ?? report?.writtenKills ?? 0)} />
         <MiniInfo label="Joins" value={String(job?.joins ?? report?.parsedJoins ?? 0)} />
         <MiniInfo label="Disconnects" value={String(job?.disconnects ?? report?.parsedDisconnects ?? 0)} />
         <MiniInfo label="PlayerList" value={String(job?.playerlist_snapshots ?? report?.parsedPlayerlistSnapshots ?? 0)} />
         <MiniInfo label="Last Updated" value={job?.updated_at ? formatDashboardDate(job.updated_at) : report?.importedAt ? formatDashboardDate(report.importedAt) : "Waiting"} />
+        <MiniInfo label="Duplicate Skips" value={String(job?.duplicate_skips ?? report?.duplicateSkips ?? 0)} />
+        <MiniInfo label="Chunk Count" value={job?.chunk_count_mismatch ? "Corrected for display" : "OK"} />
       </div>
       <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-300">
         {readFailed && !backfillActive ? syncStatus?.last_adm_discovery_error ?? syncStatus?.last_sync_message ?? nextAction : nextAction}
@@ -3895,6 +4079,8 @@ function ManualAdmImportPanel({
   bulkResult,
   bulkFailure,
   bulkProgress,
+  runnerPaused,
+  activeRunnerJob,
   totalsDelta,
   importHitLines,
   refreshFailed,
@@ -3910,6 +4096,8 @@ function ManualAdmImportPanel({
   onBulkPreview,
   onRetryBulkFile,
   onContinueBulkFile,
+  onPauseImport,
+  onCancelImport,
   onRetryRefresh,
 }: {
   filename: string;
@@ -3923,6 +4111,8 @@ function ManualAdmImportPanel({
   bulkResult: BulkAdmImportResult | null;
   bulkFailure: ManualAdmImportErrorResult | null;
   bulkProgress: AdmBulkProgress | null;
+  runnerPaused: boolean;
+  activeRunnerJob: { jobId: string; filename: string } | null;
   totalsDelta: DashboardTotalsDelta | null;
   importHitLines: boolean;
   refreshFailed: boolean;
@@ -3938,6 +4128,8 @@ function ManualAdmImportPanel({
   onBulkPreview: () => void;
   onRetryBulkFile: (filename: string) => void;
   onContinueBulkFile: (filename: string, jobId?: string | null) => void;
+  onPauseImport: () => void;
+  onCancelImport: (filename?: string, jobId?: string | null) => void;
   onRetryRefresh: () => Promise<boolean>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -4080,12 +4272,38 @@ function ManualAdmImportPanel({
                 Written kills: {bulkProgress.writtenKills ?? 0} | Duplicates: {bulkProgress.duplicateSkips ?? 0}
               </p>
             ) : null}
+            {bulkProgress.activeInBrowser ? (
+              <div className="mt-2 grid gap-2 text-[10px] font-black uppercase text-violet-100 sm:grid-cols-3">
+                <span>{bulkProgress.chunksPerMinute ? `${bulkProgress.chunksPerMinute} chunks/min` : "Calculating speed"}</span>
+                <span>{bulkProgress.estimatedRemainingSeconds !== null && bulkProgress.estimatedRemainingSeconds !== undefined ? `${formatDuration(bulkProgress.estimatedRemainingSeconds * 1000)} remaining` : "ETA pending"}</span>
+                <span>{bulkProgress.lastChunkAt ? `Last chunk ${formatDashboardDate(bulkProgress.lastChunkAt)}` : "First chunk pending"}</span>
+              </div>
+            ) : null}
+            {activeRunnerJob ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={!importing}
+                  onClick={onPauseImport}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  Pause Import
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCancelImport(activeRunnerJob.filename, activeRunnerJob.jobId)}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-300/25 bg-rose-400/10 px-3 py-2 text-[10px] font-black uppercase text-rose-50 transition hover:border-rose-300/45"
+                >
+                  Cancel Import
+                </button>
+              </div>
+            ) : null}
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
               <div
                 className="h-full rounded-full bg-violet-300 transition-all"
                 style={{
                   width: `${bulkProgress.chunkTotal
-                    ? Math.max(4, Math.round(((Math.max(0, bulkProgress.current - 1) + ((bulkProgress.chunkCurrent ?? 0) / bulkProgress.chunkTotal)) / bulkProgress.total) * 100))
+                    ? Math.max(4, Math.min(100, Math.round(((Math.max(0, bulkProgress.current - 1) + (Math.min(bulkProgress.chunkCurrent ?? 0, bulkProgress.chunkTotal) / bulkProgress.chunkTotal)) / bulkProgress.total) * 100)))
                     : bulkProgress.total ? Math.max(4, Math.round((bulkProgress.current / bulkProgress.total) * 100)) : 4}%`,
                 }}
               />
@@ -4117,7 +4335,17 @@ function ManualAdmImportPanel({
         <ManualAdmFailurePanel failure={bulkFailure} title="Bulk ADM Import Failed" />
       ) : null}
       {bulkResult ? (
-        <BulkAdmImportResultPanel result={bulkResult} totalsDelta={totalsDelta} importing={importing} onRetryFile={onRetryBulkFile} onContinueFile={onContinueBulkFile} />
+        <BulkAdmImportResultPanel
+          result={bulkResult}
+          totalsDelta={totalsDelta}
+          importing={importing}
+          runnerPaused={runnerPaused}
+          activeRunnerJob={activeRunnerJob}
+          onRetryFile={onRetryBulkFile}
+          onContinueFile={onContinueBulkFile}
+          onPauseImport={onPauseImport}
+          onCancelImport={onCancelImport}
+        />
       ) : null}
       {preview ? (
         <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-3">
@@ -4281,14 +4509,22 @@ function BulkAdmImportResultPanel({
   result,
   totalsDelta,
   importing,
+  runnerPaused,
+  activeRunnerJob,
   onRetryFile,
   onContinueFile,
+  onPauseImport,
+  onCancelImport,
 }: {
   result: BulkAdmImportResult;
   totalsDelta: DashboardTotalsDelta | null;
   importing: boolean;
+  runnerPaused: boolean;
+  activeRunnerJob: { jobId: string; filename: string } | null;
   onRetryFile: (filename: string) => void;
   onContinueFile: (filename: string, jobId?: string | null) => void;
+  onPauseImport: () => void;
+  onCancelImport: (filename?: string, jobId?: string | null) => void;
 }) {
   const failedFiles = result.files.filter(isFailedBulkAdmFile);
   const processingFiles = result.files.filter(isProcessingBulkAdmFile);
@@ -4340,15 +4576,35 @@ function BulkAdmImportResultPanel({
                   </p>
                 </div>
                 {result.mode === "import" ? (
-                  <button
-                    type="button"
-                    disabled={importing}
-                    onClick={() => onContinueFile(file.filename, file.job_id)}
-                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${importing ? "animate-spin" : ""}`} />
-                    Continue Import
-                  </button>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {importing && activeRunnerJob?.jobId === file.job_id ? (
+                      <button
+                        type="button"
+                        onClick={onPauseImport}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:border-cyan-300/45"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        Pause Import
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={importing}
+                        onClick={() => onContinueFile(file.filename, file.job_id)}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${importing ? "animate-spin" : ""}`} />
+                        {runnerPaused && activeRunnerJob?.jobId === file.job_id ? "Resume Import" : "Continue Import"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onCancelImport(file.filename, file.job_id)}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-300/25 bg-rose-400/10 px-3 py-2 text-[10px] font-black uppercase text-rose-50 transition hover:border-rose-300/45"
+                    >
+                      Cancel Import
+                    </button>
+                  </div>
                 ) : null}
               </div>
               <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
@@ -4358,9 +4614,11 @@ function BulkAdmImportResultPanel({
                 <MiniInfo label="Joins" value={String(file.joins)} />
                 <MiniInfo label="Disconnects" value={String(file.disconnects)} />
                 <MiniInfo label="PlayerList" value={String(file.playerlist_snapshots)} />
+                <MiniInfo label="Job Status" value={formatStatusLabel(file.job_status ?? file.status)} />
+                <MiniInfo label="Last Error" value={String(file.message ?? "None")} />
               </div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/40">
-                <div className="h-full rounded-full bg-cyan-300" style={{ width: `${Math.max(2, Math.min(100, file.total_chunks ? ((file.chunks_processed ?? 0) / file.total_chunks) * 100 : 2))}%` }} />
+                <div className="h-full rounded-full bg-cyan-300" style={{ width: `${getSafeAdmChunkProgressPercent(file)}%` }} />
               </div>
             </div>
           ))}
@@ -5730,7 +5988,7 @@ function listingFormFromPartial(listing: Partial<LinkedServer>): Partial<PublicL
 
 function getManualSyncMessage(result: AdmSyncRunResult) {
   if (["processing_in_chunks", "adm_import_job_queued"].includes(result.status)) {
-    return result.message || "Processing latest ADM in chunks. DZN will continue on the next cron tick.";
+    return result.message || "Processing ADM in chunks. Continue Import can accelerate it now; cron remains the backup.";
   }
   if (result.status === "no_new_lines") {
     return "Latest ADM checked just now. No new ADM lines since last sync.";
@@ -5832,6 +6090,7 @@ function makeWarningBulkAdmFileResultFromProgress(
   clientTotalChunks: number,
 ): BulkAdmFileResult {
   const warning = `${failure.error_code}: ${failure.message}`;
+  const chunkProgress = normalizeChunkProgress(progress);
   return {
     ok: true,
     filename: file.filename,
@@ -5872,8 +6131,8 @@ function makeWarningBulkAdmFileResultFromProgress(
     details: failure.details,
     http_status: failure.http_status,
     response_body: failure.response_body,
-    chunks_processed: progress.chunks_processed,
-    total_chunks: progress.total_chunks,
+    chunks_processed: chunkProgress.chunksProcessed,
+    total_chunks: chunkProgress.totalChunks,
   };
 }
 
@@ -5883,20 +6142,21 @@ function makeProcessingBulkAdmFileResultFromJob(
 ): BulkAdmFileResult {
   const completed = isCompletedAdmImportJobStatus(job.status);
   const fileResult = job.file_result;
+  const chunkProgress = normalizeChunkProgress(job);
   if (completed && fileResult) {
     return {
       ...fileResult,
       job_id: job.job_id,
       job_status: job.status,
-      chunks_processed: job.chunks_processed,
-      total_chunks: job.total_chunks,
+      chunks_processed: chunkProgress.chunksProcessed,
+      total_chunks: chunkProgress.totalChunks,
     };
   }
   return {
     ok: true,
     filename: job.filename,
     source,
-    status: completed ? "completed_with_warnings" : job.status === "failed_retryable" ? "failed_retryable" : "processing",
+    status: job.status === "cancelled" ? "cancelled" : completed ? "completed_with_warnings" : job.status === "failed_retryable" ? "failed_retryable" : "processing",
     failed_endpoint: null,
     failed_chunk_index: job.failed_chunk_index ?? null,
     first_failed_line_number: null,
@@ -5906,8 +6166,8 @@ function makeProcessingBulkAdmFileResultFromJob(
     client_total_chunks: job.total_chunks,
     job_status: job.status,
     job_id: job.job_id,
-    chunks_processed: job.chunks_processed,
-    total_chunks: job.total_chunks,
+    chunks_processed: chunkProgress.chunksProcessed,
+    total_chunks: chunkProgress.totalChunks,
     raw_lines: job.total_lines,
     raw_kill_lines_found: job.parsed_kills,
     parsed_kills: job.parsed_kills,
@@ -5922,7 +6182,7 @@ function makeProcessingBulkAdmFileResultFromJob(
     raw_events_stored: job.raw_events_stored,
     player_events_stored: job.player_events_stored,
     duplicate_skips: job.duplicate_skips,
-    failed_writes: 0,
+    failed_writes: job.status === "failed_retryable" || job.status === "failed" ? 1 : 0,
     public_cache_updated: job.public_cache_updated,
     discord_jobs_queued: job.discord_jobs_queued,
     parser_warnings: job.warnings,
@@ -5998,6 +6258,37 @@ function makeDashboardTotalsSnapshot(server: LinkedServer, status: AdmSyncStatus
   };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isAdmRateLimitedFailure(result: ManualAdmImportErrorResult) {
+  return result.http_status === 429 || /rate.?limit|too many requests/i.test(`${result.error_code} ${result.message}`);
+}
+
+function normalizeChunkProgress(job: Pick<AdmImportJobProgressResult, "total_lines" | "current_line" | "chunk_size" | "total_chunks" | "chunks_processed" | "display_current_chunk">) {
+  const totalLines = Math.max(0, numberFromUnknown(job.total_lines) ?? 0);
+  const chunkSize = Math.max(1, numberFromUnknown(job.chunk_size || ADM_IMPORT_UPLOAD_CHUNK_SIZE) ?? ADM_IMPORT_UPLOAD_CHUNK_SIZE);
+  const calculatedTotalChunks = Math.max(1, Math.ceil(Math.max(totalLines, 1) / chunkSize));
+  const rawTotalChunks = Math.max(1, numberFromUnknown(job.total_chunks) ?? 1);
+  const currentLine = Math.max(0, Math.min(totalLines, numberFromUnknown(job.current_line) ?? 0));
+  const rawChunksProcessed = Math.max(0, numberFromUnknown(job.chunks_processed) ?? 0);
+  const chunksFromLine = currentLine >= totalLines && totalLines > 0 ? calculatedTotalChunks : Math.ceil(currentLine / chunkSize);
+  const totalChunks = Math.max(rawTotalChunks, calculatedTotalChunks, rawChunksProcessed, chunksFromLine);
+  const chunksProcessed = Math.max(0, Math.min(totalChunks, Math.max(rawChunksProcessed, chunksFromLine)));
+  const displayCurrentChunk = Math.max(1, Math.min(totalChunks, numberFromUnknown(job.display_current_chunk ?? (currentLine >= totalLines && totalLines > 0 ? totalChunks : chunksProcessed + 1)) ?? 1));
+  return { totalChunks, chunksProcessed, displayCurrentChunk };
+}
+
+function makeAdmChunkRunnerMetrics(startedAtMs: number, startingChunksProcessed: number, chunksProcessed: number, totalChunks: number) {
+  const elapsedMinutes = Math.max((Date.now() - startedAtMs) / 60000, 1 / 60);
+  const chunksDoneThisRun = Math.max(0, chunksProcessed - startingChunksProcessed);
+  const chunksPerMinute = chunksDoneThisRun > 0 ? Math.round(chunksDoneThisRun / elapsedMinutes) : null;
+  const remainingChunks = Math.max(0, totalChunks - chunksProcessed);
+  const estimatedRemainingSeconds = chunksPerMinute && chunksPerMinute > 0 ? Math.round((remainingChunks / chunksPerMinute) * 60) : null;
+  return { chunksPerMinute, estimatedRemainingSeconds };
+}
+
 function makeDashboardTotalsDelta(before: DashboardTotalsSnapshot, after: DashboardTotalsSnapshot): DashboardTotalsDelta {
   return {
     before,
@@ -6012,7 +6303,7 @@ function makeDashboardTotalsDelta(before: DashboardTotalsSnapshot, after: Dashbo
 }
 
 function isFailedBulkAdmFile(file: BulkAdmFileResult) {
-  return !file.ok || file.status === "failed" || (file.status === "failed_retryable" && !hasActiveAdmImportProgress(file));
+  return !file.ok || file.status === "failed" || file.status === "cancelled" || (file.status === "failed_retryable" && !hasActiveAdmImportProgress(file));
 }
 
 function isCompletedBulkAdmFile(file: BulkAdmFileResult) {
@@ -6035,6 +6326,13 @@ function hasActiveAdmImportProgress(file: BulkAdmFileResult) {
   return (file.chunks_processed ?? 0) > 0 && (file.total_chunks ?? 0) > (file.chunks_processed ?? 0);
 }
 
+function getSafeAdmChunkProgressPercent(file: Pick<BulkAdmFileResult, "chunks_processed" | "total_chunks" | "raw_lines">) {
+  const totalChunks = Math.max(1, numberFromUnknown(file.total_chunks) ?? 1);
+  const chunksProcessed = Math.max(0, Math.min(totalChunks, numberFromUnknown(file.chunks_processed) ?? 0));
+  if (totalChunks <= 0 || (numberFromUnknown(file.raw_lines) ?? 0) <= 0) return 2;
+  return Math.max(2, Math.min(100, Math.round((chunksProcessed / totalChunks) * 100)));
+}
+
 function findActiveAdmImportJobFromResult(result: BulkAdmImportResult | null) {
   const file = result?.files.find((candidate) => candidate.job_id && (isProcessingBulkAdmFile(candidate) || (candidate.status === "failed_retryable" && hasActiveAdmImportProgress(candidate))));
   if (!file?.job_id) return null;
@@ -6048,7 +6346,7 @@ function findActiveAdmImportJobFromResult(result: BulkAdmImportResult | null) {
 
 function isDedupeOnlyBulkAdmFile(file: BulkAdmFileResult) {
   return file.ok
-    && (file.status === "duplicate_only" || file.status === "imported" || file.status === "completed_with_warnings")
+    && (file.status === "duplicate_only" || file.status === "completed_duplicate_only" || file.status === "imported" || file.status === "completed_with_warnings")
     && file.parsed_kills > 0
     && file.written_kills === 0
     && file.duplicate_skips > 0
@@ -6058,6 +6356,7 @@ function isDedupeOnlyBulkAdmFile(file: BulkAdmFileResult) {
 function getBulkAdmFileOutcomeLabel(file: BulkAdmFileResult, mode: BulkAdmImportResult["mode"]) {
   if (mode === "preview") return "Previewed";
   if (isProcessingBulkAdmFile(file)) return "Import in progress";
+  if (file.status === "cancelled") return "Cancelled";
   if (isFailedBulkAdmFile(file)) return "Needs retry";
   if (isDedupeOnlyBulkAdmFile(file)) return "Already imported - skipped by dedupe";
   if (file.status === "completed_with_warnings") return "Completed with warnings";
@@ -6258,8 +6557,8 @@ function getRecentFeedStatus(syncStatus: AdmSyncStatus | null, currentStatus: st
     const job = syncStatus?.active_adm_import_job;
     return {
       message: job
-        ? `Processing ${job.filename} in chunks (${job.chunks_processed}/${job.total_chunks}). Next chunk runs on the next cron tick.`
-        : "Processing latest ADM in chunks. Next chunk runs on the next cron tick.",
+        ? `Processing ${job.filename} in chunks (${job.display_current_chunk ?? job.chunks_processed}/${job.total_chunks}). Continue Import can keep it moving now.`
+        : "Processing latest ADM in chunks. Continue Import can keep it moving now.",
       className: "border-emerald-300/15 bg-emerald-400/8 text-emerald-50",
     };
   }
@@ -6518,7 +6817,7 @@ function formatActiveAdmImportJob(job: AdmSyncStatus["active_adm_import_job"]) {
   if (!job) return "No active chunk job";
   if (job.status === "completed") return "Completed";
   const totalChunks = Math.max(1, job.total_chunks);
-  const nextChunk = Math.min(totalChunks, Math.max(1, job.chunks_processed + 1));
+  const nextChunk = Math.min(totalChunks, Math.max(1, job.display_current_chunk ?? job.chunks_processed + 1));
   return `${formatStatusLabel(job.status)} - ${job.filename} - chunk ${nextChunk}/${totalChunks}, ${job.parsed_kills} parsed kills, ${job.written_kills} written`;
 }
 
