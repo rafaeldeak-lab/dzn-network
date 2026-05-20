@@ -430,6 +430,24 @@ async function runNitradoReadFallbackTests() {
     globalThis.fetch = mockNitradoFetch({
       logFiles: [admPath],
       seekFails: true,
+      downloadSucceeds: true,
+      admText,
+      acceptedDownloadPath: `/dayzps/config/${latestAdm}`,
+    });
+    const slashRead = await readAdmFileTextWithFallback({
+      token: "unit-token",
+      serviceId: "17428528",
+      fileName: latestAdm,
+      originalPath: latestAdm,
+      username: "gameserver-unit",
+      options: { mode: "full" },
+    });
+    assert.equal(slashRead.ok, true);
+    assert.equal(slashRead.selectedPath, `/dayzps/config/${latestAdm}`);
+
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: [admPath],
+      seekFails: true,
       downloadSucceeds: false,
       admText,
     });
@@ -457,6 +475,7 @@ function mockNitradoFetch(options: {
   seekFails: boolean;
   downloadSucceeds: boolean;
   admText: string;
+  acceptedDownloadPath?: string;
 }): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
@@ -483,7 +502,9 @@ function mockNitradoFetch(options: {
     }
     if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/download")) {
       const requestedPath = url.searchParams.get("file") ?? "";
-      if (!options.downloadSucceeds || !requestedPath.includes("/")) return jsonResponse({ error: "download failed" }, 404);
+      const acceptedPath = options.acceptedDownloadPath ?? null;
+      const pathAccepted = acceptedPath ? requestedPath === acceptedPath : requestedPath.includes("/");
+      if (!options.downloadSucceeds || !pathAccepted) return jsonResponse({ error: "download failed" }, 404);
       return jsonResponse({ data: { url: "https://files.dzn.test/adm-download", token: "secret-download-token" } });
     }
     if (url.hostname === "files.dzn.test") {

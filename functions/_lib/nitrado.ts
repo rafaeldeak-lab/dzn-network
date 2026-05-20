@@ -2778,6 +2778,10 @@ function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: 
     if (details.username) {
       variants.push({ label: "games-ftproot-dayzps-config", path: `games/${details.username}/ftproot/dayzps/config/${fileName}` });
       variants.push({ label: "slash-games-ftproot-dayzps-config", path: `/games/${details.username}/ftproot/dayzps/config/${fileName}` });
+      variants.push({ label: "games-ftproot-config", path: `games/${details.username}/ftproot/config/${fileName}` });
+      variants.push({ label: "slash-games-ftproot-config", path: `/games/${details.username}/ftproot/config/${fileName}` });
+      variants.push({ label: "games-ftproot-filename", path: `games/${details.username}/ftproot/${fileName}` });
+      variants.push({ label: "slash-games-ftproot-filename", path: `/games/${details.username}/ftproot/${fileName}` });
     }
 
     variants.push({ label: "config", path: `config/${fileName}` });
@@ -2787,9 +2791,12 @@ function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: 
 
     if (!details.username) continue;
 
-    variants.push({ label: "games-noftp-filename", path: `/games/${details.username}/noftp/${fileName}` });
-    variants.push({ label: "games-noftp-dayzps-config", path: `/games/${details.username}/noftp/dayzps/config/${fileName}` });
-    variants.push({ label: "games-noftp-config", path: `/games/${details.username}/noftp/config/${fileName}` });
+    variants.push({ label: "games-noftp-filename", path: `games/${details.username}/noftp/${fileName}` });
+    variants.push({ label: "slash-games-noftp-filename", path: `/games/${details.username}/noftp/${fileName}` });
+    variants.push({ label: "games-noftp-dayzps-config", path: `games/${details.username}/noftp/dayzps/config/${fileName}` });
+    variants.push({ label: "slash-games-noftp-dayzps-config", path: `/games/${details.username}/noftp/dayzps/config/${fileName}` });
+    variants.push({ label: "games-noftp-config", path: `games/${details.username}/noftp/config/${fileName}` });
+    variants.push({ label: "slash-games-noftp-config", path: `/games/${details.username}/noftp/config/${fileName}` });
 
     const noftpPath = normalized.toLowerCase().startsWith(`games/${details.username.toLowerCase()}/noftp/`)
       ? `/${normalized}`
@@ -2873,10 +2880,10 @@ function createServiceDetailsDebug(
 function dedupePathVariants(variants: AdmPathVariant[]) {
   const seen = new Map<string, AdmPathVariant>();
   for (const variant of variants) {
-    const normalized = normalizeRemotePath(variant.path);
+    const normalized = variant.path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
     if (isUnsafeRemotePathForRequest(normalized)) continue;
     if (!seen.has(normalized.toLowerCase())) {
-      seen.set(normalized.toLowerCase(), variant);
+      seen.set(normalized.toLowerCase(), { ...variant, path: normalized });
     }
   }
   return [...seen.values()];
