@@ -18,6 +18,7 @@ type CronEndpoint = {
 const WORKER_NAME = "dzn-adm-sync-worker";
 const DZN_CRON_SECRET_HEADER = "x-dzn-cron-secret";
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
+const CRON_ENDPOINT_TIMEOUT_MS = 55000;
 
 const CRON_ENDPOINTS: CronEndpoint[] = [
   {
@@ -77,8 +78,24 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
   }
 
   const baseUrl = appBaseUrl(env);
-  const results = [];
-  for (const endpoint of CRON_ENDPOINTS) {
+  const results = await Promise.all(CRON_ENDPOINTS.map((endpoint) => runCronEndpoint(endpoint, baseUrl, secret, options)));
+
+  console.log("DZN CLOUDFLARE WORKER CRON TICK COMPLETE", {
+    ok: results.every((result) => result.ok),
+    endpoints: results.map((result) => ({ label: result.label, status: result.status, ok: result.ok })),
+  });
+  return { ok: results.every((result) => result.ok), results };
+}
+
+async function runCronEndpoint(
+  endpoint: CronEndpoint,
+  baseUrl: string,
+  secret: string,
+  options: { cron: string | null; scheduledTime: number },
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CRON_ENDPOINT_TIMEOUT_MS);
+  try {
     const response = await globalThis.fetch(new URL(endpoint.path, baseUrl).toString(), {
       method: "POST",
       headers: {
@@ -91,6 +108,7 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
         cron: options.cron ?? "cloudflare-worker",
         scheduled_time: options.scheduledTime,
       }),
+      signal: controller.signal,
     });
     const body = await response.json().catch(() => null);
     const result = {
@@ -105,14 +123,23 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
         status: response.status,
       });
     }
-    results.push(result);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "request failed";
+    console.warn("DZN AUTOMATION CRON ENDPOINT FAILED", {
+      endpoint: endpoint.label,
+      status: "request_failed",
+      message,
+    });
+    return {
+      label: endpoint.label,
+      status: 0,
+      ok: false,
+      body: { ok: false, error: message },
+    };
+  } finally {
+    clearTimeout(timeout);
   }
-
-  console.log("DZN CLOUDFLARE WORKER CRON TICK COMPLETE", {
-    ok: results.every((result) => result.ok),
-    endpoints: results.map((result) => ({ label: result.label, status: result.status, ok: result.ok })),
-  });
-  return { ok: results.every((result) => result.ok), results };
 }
 
 function appBaseUrl(env: Env) {
