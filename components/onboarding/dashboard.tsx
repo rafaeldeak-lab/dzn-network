@@ -23,6 +23,7 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
+  Upload,
   Users,
   Wrench,
   X,
@@ -31,8 +32,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -53,6 +54,12 @@ type DiscordChannelFetchFailure = {
   status: number | null;
   retryable: boolean;
   attempted_at: string;
+};
+
+type AdmUploadFile = {
+  filename: string;
+  admText: string;
+  size: number;
 };
 
 export function Dashboard() {
@@ -219,11 +226,16 @@ function ServerDashboard({
   const [checkingNitradoLogSettings, setCheckingNitradoLogSettings] = useState(false);
   const [manualAdmFilename, setManualAdmFilename] = useState("");
   const [manualAdmText, setManualAdmText] = useState("");
+  const [manualAdmFiles, setManualAdmFiles] = useState<AdmUploadFile[]>([]);
   const [manualAdmImporting, setManualAdmImporting] = useState(false);
   const [manualAdmPreviewing, setManualAdmPreviewing] = useState(false);
   const [manualAdmImportResult, setManualAdmImportResult] = useState<ManualAdmImportResult | null>(null);
   const [manualAdmImportError, setManualAdmImportError] = useState<ManualAdmImportErrorResult | null>(null);
   const [manualAdmParsePreview, setManualAdmParsePreview] = useState<ManualAdmParsePreviewResult | null>(null);
+  const [bulkAdmImportResult, setBulkAdmImportResult] = useState<BulkAdmImportResult | null>(null);
+  const [bulkAdmImportError, setBulkAdmImportError] = useState<ManualAdmImportErrorResult | null>(null);
+  const [forceLatestAdmRunning, setForceLatestAdmRunning] = useState(false);
+  const [forceLatestAdmResult, setForceLatestAdmResult] = useState<AdmSyncRunResult | null>(null);
   const [manualAdmRefreshFailed, setManualAdmRefreshFailed] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
@@ -656,6 +668,105 @@ function ServerDashboard({
     }
   }
 
+  function buildAdmBulkFiles() {
+    const files = manualAdmFiles.map((file) => ({ filename: file.filename, admText: file.admText }));
+    const pastedFilename = manualAdmFilename.trim();
+    const pastedText = manualAdmText.trim();
+    if (pastedFilename && pastedText && !files.some((file) => file.filename === pastedFilename && file.admText === manualAdmText)) {
+      files.push({ filename: pastedFilename, admText: manualAdmText });
+    }
+    return files;
+  }
+
+  async function previewAdmFilesNow() {
+    const files = buildAdmBulkFiles();
+    if (!files.length) {
+      setActionMessage("Upload ADM files or paste ADM text before previewing.");
+      return;
+    }
+
+    setManualAdmPreviewing(true);
+    setManualAdmImportError(null);
+    setBulkAdmImportError(null);
+    setActionMessage("");
+    try {
+      const response = await bulkImportAdmFiles(server.id, {
+        files,
+        source: "manual_file_upload",
+        preview: true,
+      });
+      if (!response.ok) {
+        setBulkAdmImportError(response);
+        setActionMessage(`ADM file preview failed: ${response.message}`);
+        return;
+      }
+      setBulkAdmImportResult(response);
+      setActionMessage(`ADM file preview found ${response.parsed_kills} PvP kills across ${response.files_uploaded} file${response.files_uploaded === 1 ? "" : "s"}.`);
+    } catch (error) {
+      const failure = makeClientAdmFailure(error, "bulk_preview_exception", "ADM file preview failed before a response was received.");
+      setBulkAdmImportError(failure);
+      setActionMessage(`ADM file preview failed: ${failure.message}`);
+    } finally {
+      setManualAdmPreviewing(false);
+    }
+  }
+
+  async function importAdmFilesNow() {
+    const files = buildAdmBulkFiles();
+    if (!files.length) {
+      setActionMessage("Upload ADM files or paste ADM text before importing.");
+      return;
+    }
+
+    setManualAdmImporting(true);
+    setActionMessage("");
+    setManualAdmImportError(null);
+    setBulkAdmImportError(null);
+    try {
+      const response = await bulkImportAdmFiles(server.id, {
+        files,
+        source: manualAdmFiles.length ? "manual_file_upload" : "manual_paste",
+      });
+      if (!response.ok) {
+        setBulkAdmImportError(response);
+        setActionMessage(`Bulk ADM import failed: ${response.message}`);
+        return;
+      }
+
+      setBulkAdmImportResult(response);
+      const refreshed = await refreshDashboardAfterManualAdmImport();
+      setActionMessage(refreshed
+        ? `Bulk ADM import complete. Parsed ${response.parsed_kills} PvP kills and wrote ${response.written_kills}.`
+        : "Bulk ADM import succeeded, but dashboard refresh failed. Hard refresh or retry refresh.");
+    } catch (error) {
+      const failure = makeClientAdmFailure(error, "bulk_import_exception", "Bulk ADM import failed before a response was received.");
+      setBulkAdmImportError(failure);
+      setActionMessage(`Bulk ADM import failed: ${failure.message}`);
+    } finally {
+      setManualAdmImporting(false);
+    }
+  }
+
+  async function forceProcessLatestAdmNow() {
+    setForceLatestAdmRunning(true);
+    setActionMessage("");
+    try {
+      const response = await forceProcessLatestAdm(server.id);
+      if ("ok" in response && response.ok === false) {
+        setActionMessage(`Force latest ADM failed: ${response.message}`);
+        return;
+      }
+      setLastSyncResult(response);
+      setForceLatestAdmResult(response);
+      await refreshDashboardAfterManualAdmImport();
+      setActionMessage(getManualSyncMessage(response));
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to force process latest ADM.");
+    } finally {
+      setForceLatestAdmRunning(false);
+    }
+  }
+
   async function previewPastedAdmNow() {
     const filename = manualAdmFilename.trim();
     const admText = manualAdmText.trim();
@@ -698,6 +809,25 @@ function ServerDashboard({
     if (!file) return;
     setManualAdmFilename(file.name);
     setManualAdmText(await file.text());
+  }
+
+  async function loadManualAdmFiles(files: FileList | File[] | null) {
+    if (!files?.length) return;
+    const loaded = await Promise.all(Array.from(files).map(async (file) => ({
+      filename: file.name,
+      admText: await file.text(),
+      size: file.size,
+    })));
+    setManualAdmFiles(loaded);
+    if (loaded[0]) {
+      setManualAdmFilename(loaded[0].filename);
+      setManualAdmText(loaded[0].admText);
+    }
+    setBulkAdmImportResult(null);
+    setBulkAdmImportError(null);
+    setManualAdmImportResult(null);
+    setManualAdmImportError(null);
+    setManualAdmParsePreview(null);
   }
 
   async function refreshDashboardAfterManualAdmImport() {
@@ -1185,6 +1315,15 @@ function ServerDashboard({
                   </button>
                   <button
                     type="button"
+                    disabled={forceLatestAdmRunning}
+                    onClick={forceProcessLatestAdmNow}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${forceLatestAdmRunning ? "animate-spin" : ""}`} />
+                    {forceLatestAdmRunning ? "Processing..." : "Force Process Latest ADM Now"}
+                  </button>
+                  <button
+                    type="button"
                     disabled={refreshingSyncData}
                     onClick={refreshNow}
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
@@ -1202,9 +1341,6 @@ function ServerDashboard({
                 <MiniInfo label="Last Discovery Check" value={syncStatus?.last_adm_discovery_check_at ? formatDashboardDate(syncStatus.last_adm_discovery_check_at) : "Not checked"} />
                 <MiniInfo label="Next Discovery Check" value={syncStatus?.next_adm_discovery_due_at ? formatDashboardDate(syncStatus.next_adm_discovery_due_at) : "Not scheduled"} />
                 <MiniInfo label="Discovery Status" value={formatSyncStatus(syncStatus?.adm_discovery_status ?? effectiveSyncStatus)} />
-                <MiniInfo label="Newest Available ADM" value={syncStatus?.newest_available_adm_filename ?? latestAdmFile} />
-                <MiniInfo label="Newest ADM Age" value={formatMinutesAgo(syncStatus?.newest_adm_file_age_minutes, "Waiting for ADM")} />
-                <MiniInfo label="Newest Readable ADM" value={syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
                 <MiniInfo label="Observed ADM Cadence" value={formatAdmCadence(syncStatus?.observed_adm_cadence_minutes)} />
                 <MiniInfo label="Last ADM Event" value={syncStatus?.last_useful_adm_event_at ? formatCompactDate(syncStatus.last_useful_adm_event_at) : "No useful event yet"} />
                 <MiniInfo label="Last PlayerList" value={syncStatus?.last_playerlist_at ? formatCompactDate(syncStatus.last_playerlist_at) : "No PlayerList yet"} />
@@ -1215,26 +1351,34 @@ function ServerDashboard({
                 <MiniInfo label="Next Processing Check" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(syncStatus.next_adm_pull_due_at) : "Not scheduled"} />
                 <MiniInfo label="Latest File Readable" value={latestAdmReadable} />
                 <MiniInfo label="ADM Health" value={syncStatus?.adm_health_label ?? "Delayed"} />
-                <MiniInfo label="Latest ADM Processed" value={syncStatus?.latest_adm_processed ?? "Not processed"} />
-                <MiniInfo label="Newest Unprocessed ADM" value={syncStatus?.newest_unprocessed_adm_file ?? "None queued"} />
-                <MiniInfo label="Unreadable Files Queued" value={String(syncStatus?.unreadable_files_queued ?? 0)} />
-                <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
                 <MiniInfo label="Last Checked" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not checked"} />
                 <MiniInfo label="Last Successful Feed Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(syncStatus.last_manual_sync_at) : "Not synced"} />
                 <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
-                <MiniInfo label="Last Sync Duration" value={formatDuration(lastSyncDuration)} />
                 <MiniInfo label="Next Action" value={syncHealth.status === "error" ? syncHealth.nextAction : "Continue syncing after fresh ADM activity"} />
-                <MiniInfo label="Lines Read This Check" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
-                <MiniInfo label="New Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
-                <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
-                <MiniInfo label="Kills Created" value={String(syncStatus?.last_kills_created ?? lastSyncResult?.killsCreated ?? 0)} />
-                <MiniInfo label="Raw Kill Lines Found" value={String(syncStatus?.raw_kill_lines_found ?? 0)} />
-                <MiniInfo label="Kill Lines Parsed" value={String(syncStatus?.parsed_kill_lines_found ?? 0)} />
-                <MiniInfo label="Parser Skipped Lines" value={String(syncStatus?.parser_skipped_lines ?? 0)} />
-                <MiniInfo label="Recovery Action" value={syncStatus?.current_recovery_action ?? "ADM sync healthy"} />
               </div>
+              <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+                <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">Show ADM Technical Diagnostics</summary>
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <MiniInfo label="Newest Available ADM" value={syncStatus?.newest_available_adm_filename ?? latestAdmFile} />
+                  <MiniInfo label="Newest ADM Age" value={formatMinutesAgo(syncStatus?.newest_adm_file_age_minutes, "Waiting for ADM")} />
+                  <MiniInfo label="Newest Readable ADM" value={syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
+                  <MiniInfo label="Latest ADM Processed" value={syncStatus?.latest_adm_processed ?? "Not processed"} />
+                  <MiniInfo label="Newest Unprocessed ADM" value={syncStatus?.newest_unprocessed_adm_file ?? "None queued"} />
+                  <MiniInfo label="Unreadable Files Queued" value={String(syncStatus?.unreadable_files_queued ?? 0)} />
+                  <MiniInfo label="Last Processed Line" value={String(syncStatus?.last_processed_line ?? 0)} />
+                  <MiniInfo label="Last Sync Duration" value={formatDuration(lastSyncDuration)} />
+                  <MiniInfo label="Lines Read This Check" value={String(syncStatus?.last_lines_read ?? lastSyncResult?.linesRead ?? 0)} />
+                  <MiniInfo label="New Lines Processed" value={String(syncStatus?.last_lines_processed ?? lastSyncResult?.linesProcessed ?? 0)} />
+                  <MiniInfo label="Events Created" value={String(syncStatus?.last_events_created ?? lastSyncResult?.eventsCreated ?? 0)} />
+                  <MiniInfo label="Kills Created" value={String(syncStatus?.last_kills_created ?? lastSyncResult?.killsCreated ?? 0)} />
+                  <MiniInfo label="Raw Kill Lines Found" value={String(syncStatus?.raw_kill_lines_found ?? 0)} />
+                  <MiniInfo label="Kill Lines Parsed" value={String(syncStatus?.parsed_kill_lines_found ?? 0)} />
+                  <MiniInfo label="Parser Skipped Lines" value={String(syncStatus?.parser_skipped_lines ?? 0)} />
+                  <MiniInfo label="Recovery Action" value={syncStatus?.current_recovery_action ?? "ADM sync healthy"} />
+                </div>
+              </details>
               <p className="mt-4 rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-xs font-bold leading-5 text-zinc-300">
                 DZN can check whether a new ADM file exists more often than it processes the full file. Nitrado still controls when the ADM file is uploaded and readable.
               </p>
@@ -1256,6 +1400,24 @@ function ServerDashboard({
                   {liveRefreshWarning}
                 </p>
               ) : null}
+              {forceLatestAdmResult ? (
+                <div className="mt-4 rounded-lg border border-emerald-300/18 bg-emerald-400/8 p-3">
+                  <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-xs font-black uppercase text-emerald-100">Force Process Latest ADM Result</p>
+                      <p className="mt-1 text-sm font-bold leading-6 text-emerald-50">{getManualSyncMessage(forceLatestAdmResult)}</p>
+                    </div>
+                    <SmallBadge tone={forceLatestAdmResult.status === "completed" ? "emerald" : "orange"}>{formatSyncStatus(forceLatestAdmResult.status)}</SmallBadge>
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                    <MiniInfo label="Lines Read" value={String(forceLatestAdmResult.linesRead ?? 0)} />
+                    <MiniInfo label="Lines Processed" value={String(forceLatestAdmResult.linesProcessed ?? 0)} />
+                    <MiniInfo label="Events Created" value={String(forceLatestAdmResult.eventsCreated ?? 0)} />
+                    <MiniInfo label="Kills Created" value={String(forceLatestAdmResult.killsCreated ?? 0)} />
+                    <MiniInfo label="Duration" value={formatDuration(forceLatestAdmResult.syncDurationMs ?? null)} />
+                  </div>
+                </div>
+              ) : null}
               {publicCacheDebug ? (
                 <PublicCacheHealthPanel
                   debug={publicCacheDebug}
@@ -1273,18 +1435,24 @@ function ServerDashboard({
               <ManualAdmImportPanel
                 filename={manualAdmFilename}
                 admText={manualAdmText}
+                uploadedFiles={manualAdmFiles}
                 importing={manualAdmImporting}
                 previewing={manualAdmPreviewing}
                 result={manualAdmImportResult}
                 failure={manualAdmImportError}
                 preview={manualAdmParsePreview}
+                bulkResult={bulkAdmImportResult}
+                bulkFailure={bulkAdmImportError}
                 refreshFailed={manualAdmRefreshFailed}
                 history={syncStatus?.manual_import_history ?? []}
                 onFilenameChange={setManualAdmFilename}
                 onTextChange={setManualAdmText}
                 onFileSelected={loadManualAdmFile}
+                onFilesSelected={loadManualAdmFiles}
                 onImport={importPastedAdmNow}
                 onPreview={previewPastedAdmNow}
+                onBulkImport={importAdmFilesNow}
+                onBulkPreview={previewAdmFilesNow}
                 onRetryRefresh={refreshDashboardAfterManualAdmImport}
               />
               {admFileDiscoveryDebug ? (
@@ -3072,61 +3240,94 @@ function SyncLockRecoveryPanel({
 function ManualAdmImportPanel({
   filename,
   admText,
+  uploadedFiles,
   importing,
   previewing,
   result,
   failure,
   preview,
+  bulkResult,
+  bulkFailure,
   refreshFailed,
   history,
   onFilenameChange,
   onTextChange,
   onFileSelected,
+  onFilesSelected,
   onImport,
   onPreview,
+  onBulkImport,
+  onBulkPreview,
   onRetryRefresh,
 }: {
   filename: string;
   admText: string;
+  uploadedFiles: AdmUploadFile[];
   importing: boolean;
   previewing: boolean;
   result: ManualAdmImportResult | null;
   failure: ManualAdmImportErrorResult | null;
   preview: ManualAdmParsePreviewResult | null;
+  bulkResult: BulkAdmImportResult | null;
+  bulkFailure: ManualAdmImportErrorResult | null;
   refreshFailed: boolean;
   history: AdmSyncStatus["manual_import_history"];
   onFilenameChange: (value: string) => void;
   onTextChange: (value: string) => void;
   onFileSelected: (file: File | null) => void;
+  onFilesSelected: (files: FileList | File[] | null) => void;
   onImport: () => void;
   onPreview: () => void;
+  onBulkImport: () => void;
+  onBulkPreview: () => void;
   onRetryRefresh: () => Promise<boolean>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const hasBulkFiles = uploadedFiles.length > 0;
+  const canRunBulk = hasBulkFiles || (filename.trim() && admText.trim());
   return (
     <div className="mt-4 rounded-lg border border-violet-300/18 bg-violet-400/8 p-3">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase text-violet-100">Manual ADM Import</p>
+          <p className="text-xs font-black uppercase text-violet-100">ADM File Import</p>
           <p className="mt-1 text-sm font-bold leading-6 text-zinc-300">
-            Use this only if Nitrado can show the ADM but DZN cannot download it automatically.
+            Upload one or more ADM files, or paste text if Nitrado can show the ADM but DZN cannot download it automatically.
           </p>
         </div>
         <label className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-xs font-black uppercase text-zinc-100 transition hover:border-violet-300/35">
-          <Download className="h-4 w-4" />
-          Upload .ADM
+          <Upload className="h-4 w-4" />
+          Upload ADM Files
           <input
             type="file"
+            multiple
             accept=".ADM,.adm,.txt,text/plain"
             className="hidden"
             onChange={(event) => {
-              const file = event.currentTarget.files?.[0] ?? null;
-              void onFileSelected(file);
+              const files = event.currentTarget.files;
+              if (files && files.length > 1) {
+                void onFilesSelected(files);
+              } else {
+                void onFileSelected(files?.[0] ?? null);
+                void onFilesSelected(files);
+              }
               event.currentTarget.value = "";
             }}
           />
         </label>
       </div>
+      {uploadedFiles.length ? (
+        <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+          <p className="text-[10px] font-black uppercase text-zinc-400">Selected files</p>
+          <div className="mt-2 grid gap-2">
+            {uploadedFiles.map((file) => (
+              <div key={`${file.filename}-${file.size}`} className="flex flex-col gap-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                <span className="break-all text-xs font-bold text-zinc-100">{file.filename}</span>
+                <span className="text-[10px] font-black uppercase text-zinc-500">{formatBytes(file.size)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-4 grid gap-3">
         <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
           ADM filename
@@ -3150,30 +3351,56 @@ function ManualAdmImportPanel({
         </label>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs font-bold text-zinc-400">
-            This imports through the same ADM parser/write path, rebuilds stats, refreshes public cache, and queues allowed Discord posts.
+            Imports use the same ADM parser/write path as scheduled sync, rebuild stats, refresh public cache, and queue allowed Discord posts.
           </p>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              disabled={previewing || importing || !filename.trim() || !admText.trim()}
-              onClick={onPreview}
+              disabled={previewing || importing || !canRunBulk}
+              onClick={onBulkPreview}
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-500/12 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
             >
               <ListChecks className={`h-4 w-4 ${previewing ? "animate-pulse" : ""}`} />
-              {previewing ? "Previewing..." : "Preview Parsed ADM"}
+              {previewing ? "Previewing..." : "Preview ADM Files"}
             </button>
             <button
               type="button"
-              disabled={importing || !filename.trim() || !admText.trim()}
-              onClick={onImport}
+              disabled={importing || !canRunBulk}
+              onClick={onBulkImport}
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/25 bg-violet-500/18 px-3 py-2 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
             >
               <DatabaseZap className={`h-4 w-4 ${importing ? "animate-pulse" : ""}`} />
-              {importing ? "Importing..." : "Import Pasted ADM Now"}
+              {importing ? "Importing..." : "Import ADM Files Now"}
             </button>
           </div>
         </div>
+        {filename.trim() && admText.trim() ? (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={previewing || importing}
+              onClick={onPreview}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100 transition hover:border-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Preview Pasted Text Only
+            </button>
+            <button
+              type="button"
+              disabled={importing}
+              onClick={onImport}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100 transition hover:border-violet-300/35 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Import Pasted Text Only
+            </button>
+          </div>
+        ) : null}
       </div>
+      {bulkFailure ? (
+        <ManualAdmFailurePanel failure={bulkFailure} title="Bulk ADM Import Failed" />
+      ) : null}
+      {bulkResult ? (
+        <BulkAdmImportResultPanel result={bulkResult} />
+      ) : null}
       {preview ? (
         <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-3">
           <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
@@ -3328,6 +3555,109 @@ function ManualAdmImportPanel({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function BulkAdmImportResultPanel({ result }: { result: BulkAdmImportResult }) {
+  const statusTone = result.failed_files > 0 || result.errors.length ? "orange" : "emerald";
+  return (
+    <div className={`mt-4 rounded-lg border p-3 ${statusTone === "emerald" ? "border-emerald-300/18 bg-emerald-400/8" : "border-amber-300/20 bg-amber-400/10"}`}>
+      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className={`text-xs font-black uppercase ${statusTone === "emerald" ? "text-emerald-100" : "text-amber-100"}`}>Bulk ADM Import Result</p>
+          <p className={`mt-1 text-sm font-bold ${statusTone === "emerald" ? "text-emerald-50" : "text-amber-50"}`}>
+            {result.mode === "preview" ? "Previewed" : "Imported"} {result.files_uploaded} ADM file{result.files_uploaded === 1 ? "" : "s"}.
+          </p>
+        </div>
+        <SmallBadge tone={statusTone}>{result.failed_files > 0 ? `${result.failed_files} Failed` : result.mode === "preview" ? "Preview Ready" : "Succeeded"}</SmallBadge>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="HTTP Status" value={result.http_status ? String(result.http_status) : "Not recorded"} />
+        <MiniInfo label="Files Uploaded" value={String(result.files_uploaded)} />
+        <MiniInfo label="Files Imported" value={String(result.files_imported)} />
+        <MiniInfo label="Failed Files" value={String(result.failed_files)} />
+        <MiniInfo label="Raw Lines" value={String(result.total_raw_lines)} />
+        <MiniInfo label="Parsed PvP Kills" value={String(result.parsed_kills)} />
+        <MiniInfo label="Written PvP Kills" value={String(result.written_kills)} />
+        <MiniInfo label="Duplicate Kills Skipped" value={String(result.duplicate_kills_skipped)} />
+        <MiniInfo label="Joins" value={String(result.joins)} />
+        <MiniInfo label="Disconnects" value={String(result.disconnects)} />
+        <MiniInfo label="PlayerList Snapshots" value={String(result.playerlist_snapshots)} />
+        <MiniInfo label="Deaths" value={String(result.deaths)} />
+        <MiniInfo label="Suicides" value={String(result.suicides)} />
+        <MiniInfo label="Hit Lines" value={String(result.hit_lines)} />
+        <MiniInfo label="Raw Events Stored" value={String(result.raw_events_stored)} />
+        <MiniInfo label="Player Events Stored" value={String(result.player_events_stored)} />
+        <MiniInfo label="Public Cache" value={result.public_cache_updated ? "Updated" : result.mode === "preview" ? "Preview only" : "Not updated"} />
+        <MiniInfo label="Discord Jobs Queued" value={String(result.discord_jobs_queued)} />
+      </div>
+      {result.warnings.length || result.errors.length ? (
+        <div className="mt-3 grid gap-2">
+          {[...result.errors, ...result.warnings].map((message) => (
+            <p key={message} className="rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{message}</p>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-4 grid gap-3">
+        {result.files.map((file) => (
+          <details key={`${file.filename}-${file.status}`} open={result.files.length <= 3} className="rounded-lg border border-white/10 bg-black/24 p-3">
+            <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">
+              {file.filename} - {formatStatusLabel(file.status)}
+            </summary>
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+              <MiniInfo label="Parsed Kills" value={String(file.parsed_kills)} />
+              <MiniInfo label="Written Kills" value={String(file.written_kills)} />
+              <MiniInfo label="Joins" value={String(file.joins)} />
+              <MiniInfo label="Disconnects" value={String(file.disconnects)} />
+              <MiniInfo label="PlayerList" value={String(file.playerlist_snapshots)} />
+              <MiniInfo label="Duplicates" value={String(file.duplicate_skips)} />
+              <MiniInfo label="Failed Writes" value={String(file.failed_writes)} />
+              <MiniInfo label="Hit Lines" value={String(file.hit_lines)} />
+              <MiniInfo label="Raw Events" value={String(file.raw_events_stored)} />
+              <MiniInfo label="Player Events" value={String(file.player_events_stored)} />
+            </div>
+            {file.message ? (
+              <p className="mt-3 rounded-md border border-rose-300/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100">{file.message}</p>
+            ) : null}
+            <div className="mt-3 grid gap-2">
+              {file.kill_previews.length ? file.kill_previews.slice(0, 5).map((kill) => (
+                <p key={`${file.filename}-${kill.line_number}-${kill.killer_name}-${kill.victim_name}`} className="rounded-md border border-cyan-300/15 bg-black/20 px-3 py-2 text-xs font-bold text-cyan-50">
+                  Line {kill.line_number}: {kill.victim_name ?? "Unknown victim"} -&gt; {kill.killer_name ?? "Unknown killer"}{kill.weapon ? ` / ${kill.weapon}` : ""}{kill.distance !== null ? ` / ${kill.distance}m` : ""}
+                </p>
+              )) : (
+                <p className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-bold text-zinc-400">No PvP kill previews for this file.</p>
+              )}
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ManualAdmFailurePanel({ failure, title }: { failure: ManualAdmImportErrorResult; title: string }) {
+  return (
+    <div className="mt-4 rounded-lg border border-rose-300/20 bg-rose-400/10 p-3">
+      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-rose-100">{title}</p>
+          <p className="mt-1 text-sm font-bold text-rose-50">{failure.message}</p>
+        </div>
+        <SmallBadge tone="orange">{failure.error_code}</SmallBadge>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="HTTP Status" value={failure.http_status !== undefined ? String(failure.http_status) : "Not recorded"} />
+        <MiniInfo label="Error Code" value={failure.error_code} />
+        <MiniInfo label="Message" value={failure.message} />
+        <MiniInfo label="Details" value={formatDebugValue(failure.details)} />
+      </div>
+      {failure.response_body ? (
+        <details className="mt-3 rounded-md border border-white/10 bg-black/24 p-3">
+          <summary className="cursor-pointer text-xs font-black uppercase text-rose-100">Response Body</summary>
+          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs text-rose-50">{failure.response_body}</pre>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -4179,6 +4509,13 @@ function formatDebugValue(value: unknown) {
   }
 }
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function metadataPatchFromRefreshResult(result: Awaited<ReturnType<typeof refreshServerMetadata>>): Partial<LinkedServer> {
   const metadata = result.metadata ?? {};
   const patch: Partial<LinkedServer> = {
@@ -4550,6 +4887,15 @@ function getManualSyncMessage(result: AdmSyncRunResult) {
     return "Player activity synced successfully.";
   }
   return result.message;
+}
+
+function makeClientAdmFailure(error: unknown, errorCode: string, fallbackMessage: string): ManualAdmImportErrorResult {
+  return {
+    ok: false,
+    error_code: errorCode,
+    message: error instanceof Error ? error.message : fallbackMessage,
+    details: error instanceof Error ? error.stack ?? error.message : String(error),
+  };
 }
 
 function normalizeDashboardSyncStatus(status: string, latestAdmFile: string) {

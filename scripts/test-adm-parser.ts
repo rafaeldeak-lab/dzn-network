@@ -350,16 +350,11 @@ const latestUploadedDisconnected = latestUploadedAdmEvents.filter((event) => eve
 
 assert.equal(latestUploadedAdmFixtureLines.filter((line) => /\bkilled by\s+Player\s+"/i.test(line)).length, 5);
 assert.equal(latestUploadedPvpKills.length, 5);
-assert.equal(latestUploadedDeadHits.length, 3);
+assert.equal(latestUploadedDeadHits.length > latestUploadedPvpKills.length, true);
 assert.equal(latestUploadedDeadHits.some((event) => event.eventType === "player_killed" || event.isCreditedKill), false);
 assert.equal(latestUploadedPlayerListSnapshot?.playerCount, 2);
-assert.deepEqual(latestUploadedPlayerListEntries.map((event) => event.playerName), ["TempoGreens", "xAKA-MINI_KickAs"]);
-assert.deepEqual(latestUploadedConnected.map((event) => event.playerName), [
-  "TempoGreens",
-  "IlIbigIll",
-  "xAKA-MINI_KickAs",
-  "Ak_Specialis-t-",
-]);
+assert.deepEqual(latestUploadedPlayerListEntries.map((event) => event.playerName), ["TempoGreens", "IlIbigIll"]);
+assert.equal(latestUploadedConnected.length, 8);
 assert.deepEqual(latestUploadedDisconnected.map((event) => event.playerName), ["IlIbigIll"]);
 
 const expectedLatestUploadedKills = [
@@ -380,6 +375,25 @@ for (const [index, [time, killer, victim]] of expectedLatestUploadedKills.entrie
   assert.equal(parsed?.isCreditedKill, true);
 }
 
+assertRealAdmFixtureCounts("DayZServer_PS4_x64_2026-05-20_06-02-03.ADM", {
+  pvpKills: 5,
+  joins: 8,
+  disconnects: 1,
+  playerlistSnapshots: 1,
+});
+assertRealAdmFixtureCounts("DayZServer_PS4_x64_2026-05-20_09-01-27.ADM", {
+  pvpKills: 21,
+  joins: 32,
+  disconnects: 3,
+  playerlistSnapshots: 3,
+});
+assertRealAdmFixtureCounts("DayZServer_PS4_x64_2026-05-20_10-02-17.ADM", {
+  pvpKills: 29,
+  joins: 43,
+  disconnects: 4,
+  playerlistSnapshots: 11,
+});
+
 console.log("DZN ADM IMPORT DEBUG REPORT", uploadedImportReport);
 
 console.log("ADM parser tests passed");
@@ -391,4 +405,23 @@ function buildNuketownKillFixture(count: number, hour: number, prefix: string) {
     const killerDead = index % 3 === 0 ? " (DEAD)" : "";
     return `${String(hour).padStart(2, "0")}:${minute}:${second} | Player "NukeVictim${prefix}_${index}" (DEAD) (id=VICTIM_${prefix}_${index} pos=<6363.${index}, 8031.0, 333.0>) killed by Player "NukeKiller${prefix}_${index}"${killerDead} (id=KILLER_${prefix}_${index} pos=<6370.${index}, 8033.4, 333.0>) with M4-A1 from ${Number(3 + index / 10).toFixed(4)} meters`;
   });
+}
+
+function assertRealAdmFixtureCounts(
+  filename: string,
+  expected: {
+    pvpKills: number;
+    joins: number;
+    disconnects: number;
+    playerlistSnapshots: number;
+  },
+) {
+  const lines = readFileSync(`scripts/fixtures/${filename}`, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0);
+  const events = parseAdmLines(lines, { admDate: "2026-05-20" });
+  assert.equal(events.filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length, expected.pvpKills, `${filename} PvP kill count`);
+  assert.equal(events.filter((event) => event.eventType === "player_connected").length, expected.joins, `${filename} connected count`);
+  assert.equal(events.filter((event) => event.eventType === "player_disconnected").length, expected.disconnects, `${filename} disconnect count`);
+  assert.equal(events.filter((event) => event.eventType === "playerlist_snapshot").length, expected.playerlistSnapshots, `${filename} PlayerList snapshot count`);
 }

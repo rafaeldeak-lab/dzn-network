@@ -775,6 +775,7 @@ export type AdmSyncStatus = {
     parsedJoins?: number;
     parsedDisconnects?: number;
     parsedPlayerlistSnapshots?: number;
+    parsedHitLines?: number;
     skippedDeadHitLines: number;
     parsedSuicides: number;
     parsedUncreditedDeaths: number;
@@ -842,11 +843,15 @@ export type ManualAdmImportResult = {
   raw_kill_lines_found: number;
   parsed_kills: number;
   written_kills: number;
+  deaths: number;
   joins: number;
   disconnects: number;
   playerlist_snapshots: number;
   suicides: number;
   uncredited_deaths: number;
+  hit_lines: number;
+  raw_events_stored: number;
+  player_events_stored: number;
   duplicate_skips: number;
   failed_writes: number;
   public_cache_updated: boolean;
@@ -856,6 +861,15 @@ export type ManualAdmImportResult = {
   parser_warnings: string[];
   total_kills: number;
   total_deaths: number;
+  kill_previews: Array<{
+    line_number: number;
+    occurred_at: string | null;
+    victim_name: string | null;
+    killer_name: string | null;
+    weapon: string | null;
+    distance: number | null;
+    event_type: "pvp_kill";
+  }>;
   import_report: NonNullable<AdmSyncStatus["last_adm_import_report"]>;
 };
 
@@ -884,6 +898,7 @@ export type ManualAdmParsePreviewResult = {
   playerlist_snapshots: number;
   suicides: number;
   uncredited_deaths: number;
+  hit_lines: number;
   skipped_dead_hit_lines: number;
   parser_warnings: string[];
   kill_previews: Array<{
@@ -896,6 +911,68 @@ export type ManualAdmParsePreviewResult = {
     event_type: "pvp_kill";
   }>;
 };
+
+export type BulkAdmFileResult = {
+  ok: boolean;
+  filename: string;
+  source: string;
+  status: "previewed" | "imported" | "failed" | string;
+  raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  written_kills: number;
+  deaths: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  suicides: number;
+  uncredited_deaths: number;
+  hit_lines: number;
+  raw_events_stored: number;
+  player_events_stored: number;
+  duplicate_skips: number;
+  failed_writes: number;
+  public_cache_updated: boolean;
+  discord_jobs_queued: number;
+  parser_warnings: string[];
+  kill_previews: ManualAdmParsePreviewResult["kill_previews"];
+  import_report_id: string | null;
+  imported_at: string | null;
+  error_code?: string;
+  message?: string;
+  details?: unknown;
+};
+
+export type BulkAdmImportResult = {
+  ok: true;
+  http_status?: number;
+  response_body?: string;
+  mode: "preview" | "import";
+  source: string;
+  files_uploaded: number;
+  files_imported: number;
+  failed_files: number;
+  total_raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  written_kills: number;
+  duplicate_kills_skipped: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  deaths: number;
+  suicides: number;
+  hit_lines: number;
+  raw_events_stored: number;
+  player_events_stored: number;
+  public_cache_updated: boolean;
+  discord_jobs_queued: number;
+  warnings: string[];
+  errors: string[];
+  files: BulkAdmFileResult[];
+};
+
+export type BulkAdmImportApiResult = BulkAdmImportResult | ManualAdmImportErrorResult;
 
 export type ManualAdmParsePreviewApiResult = ManualAdmParsePreviewResult | ManualAdmImportErrorResult;
 

@@ -89,8 +89,11 @@ If Nitrado `game_specific.log_files` is stale or missing a newer ADM file that i
 Emergency Manual ADM Import:
 
 - Sync Health includes **Manual ADM Import** for owner/admin users when the Nitrado Web UI can display ADM text but DZN cannot download it automatically.
-- `POST /api/servers/[serverId]/adm/parse-preview` powers **Preview Parsed ADM**, parsing pasted text without database writes. It supports both `HH:MM:SS` and `MM:SS` ADM timestamps and shows the first 10 parsed kill previews.
-- `POST /api/servers/[serverId]/adm/manual-import` accepts a filename plus pasted ADM text and routes it through the same ADM parser/write path as scheduled processing.
+- `POST /api/servers/[serverId]/adm/bulk-import?preview=1` powers **Preview ADM Files**, parsing uploaded files or pasted text without database writes. Files are sorted by parsed ADM filename timestamp so older logs import before newer logs.
+- `POST /api/servers/[serverId]/adm/bulk-import` powers **Import ADM Files Now**, importing one or more uploaded `.ADM`/`.txt` files through the same ADM parser/write path as scheduled processing. It writes kills, player events, PlayerList snapshots, raw events, stats, public cache, and plan-allowed Discord queues.
+- `POST /api/servers/[serverId]/adm/parse-preview` remains available for **Preview Pasted Text Only**, parsing a single pasted ADM text without database writes. It supports both `HH:MM:SS` and `MM:SS` ADM timestamps and shows the first 10 parsed kill previews.
+- `POST /api/servers/[serverId]/adm/manual-import` remains available for **Import Pasted Text Only**, accepting one filename plus pasted ADM text and routing it through the same ADM parser/write path as scheduled processing.
+- `POST /api/servers/[serverId]/adm/force-latest` powers **Force Process Latest ADM Now**, rediscovering the newest Nitrado ADM and running the real automatic ADM processing path immediately for the selected server.
 - Manual paste imports write supported kills/deaths/joins/disconnects/PlayerList snapshots, rebuild server stats, update `server_public_cache`, queue plan-allowed Discord post jobs, and save the Last ADM Import Report. Public cache and Discord queue failures are surfaced as warnings after DB writes instead of hiding parsed/written counts.
 - Manual import and preview endpoints always return structured JSON with `ok`, `error_code`, `message`, and `details` on failures so the dashboard can show HTTP status and response body instead of hanging on a generic error.
 - Manual paste imports force a full-file reprocess from line 0 but still use existing event dedupe, so pasting the same ADM twice should report duplicate skips and must not double-count stats.

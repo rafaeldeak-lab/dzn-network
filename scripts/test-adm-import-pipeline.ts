@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import {
   getRecentAdmSyncEvents,
+  importAdmFilesForServer,
   importAdmTextForServer,
   importReadableAdmLinesIntoDatabase,
   previewManualAdmText,
@@ -14,6 +15,15 @@ const fixtureName = "DayZServer_PS4_x64_2026-05-19_16-01-55.ADM";
 const fixtureLines = readFileSync(`scripts/fixtures/${fixtureName}`, "utf8").split(/\r?\n/).filter(Boolean);
 const latestFixtureName = "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM";
 const latestFixtureLines = readFileSync(`scripts/fixtures/${latestFixtureName}`, "utf8").split(/\r?\n/).filter(Boolean);
+const bulkFixtureNames = [
+  "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",
+  "DayZServer_PS4_x64_2026-05-20_09-01-27.ADM",
+  "DayZServer_PS4_x64_2026-05-20_10-02-17.ADM",
+] as const;
+const bulkFixtureFiles = bulkFixtureNames.map((filename) => ({
+  filename,
+  admText: readFileSync(`scripts/fixtures/${filename}`, "utf8"),
+}));
 const linkedServerId = "fixture-linked-server";
 const guildId = "fixture-guild";
 const nitradoServiceId = "fixture-service";
@@ -30,6 +40,8 @@ const context: AdmSyncContext = {
 async function main() {
   const manualEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/manual-import.ts", "utf8");
   const previewEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/parse-preview.ts", "utf8");
+  const bulkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/bulk-import.ts", "utf8");
+  const forceLatestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/force-latest.ts", "utf8");
   assert.match(manualEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(manualEndpointSource, /getSessionUser/);
   assert.match(manualEndpointSource, /ADM text is required/);
@@ -37,6 +49,11 @@ async function main() {
   assert.match(manualEndpointSource, /manual_adm_import_failed/);
   assert.match(previewEndpointSource, /previewManualAdmText/);
   assert.match(previewEndpointSource, /error_code/);
+  assert.match(bulkEndpointSource, /importAdmFilesForServer/);
+  assert.match(bulkEndpointSource, /multipart\/form-data/);
+  assert.match(bulkEndpointSource, /requireServerOwnerOrDznAdmin/);
+  assert.match(forceLatestEndpointSource, /runAdmSync/);
+  assert.match(forceLatestEndpointSource, /requireServerOwnerOrDznAdmin/);
 
   const successDb = new MemoryD1();
   const successResult = await importReadableAdmLinesIntoDatabase(makeEnv(successDb), {
@@ -106,9 +123,9 @@ async function main() {
   });
   assert.equal(latestResult.status, "completed");
   assert.equal(latestDb.killEvents.filter((event) => event.linked_server_id === latestLinkedServerId).length, 5);
-  assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_connected").length, 4);
+  assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_connected").length, 8);
   assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_disconnected").length, 1);
-  assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_hit").length, 3);
+  assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_hit").length, 74);
   assert.equal(latestDb.serverStats.get(latestLinkedServerId)?.total_kills, 5);
   assert.equal(latestResult.report.rawKilledByLinesFound, 5);
   assert.equal(latestResult.report.parsedPvpKills, 5);
@@ -205,6 +222,61 @@ async function main() {
   assert.equal(duplicateSingleLineResult.parsed_kills, 1);
   assert.equal(duplicateSingleLineResult.written_kills, 0);
   assert.equal(duplicateSingleLineResult.duplicate_skips >= 1, true);
+
+  const bulkPreview = await importAdmFilesForServer(makeEnv(new MemoryD1()), {
+    linkedServerId,
+    files: bulkFixtureFiles,
+    source: "manual_file_upload",
+    previewOnly: true,
+  });
+  assert.equal(bulkPreview.mode, "preview");
+  assert.equal(bulkPreview.files_uploaded, 3);
+  assert.equal(bulkPreview.parsed_kills, 55);
+  assert.equal(bulkPreview.joins, 83);
+  assert.equal(bulkPreview.disconnects, 8);
+  assert.equal(bulkPreview.playerlist_snapshots, 15);
+  assert.deepEqual(bulkPreview.files.map((file) => file.filename), [...bulkFixtureNames]);
+
+  const bulkDb = new MemoryD1();
+  const bulkResult = await importAdmFilesForServer(makeEnv(bulkDb), {
+    linkedServerId,
+    files: [...bulkFixtureFiles].reverse(),
+    source: "manual_file_upload",
+  });
+  assert.equal(bulkResult.mode, "import");
+  assert.equal(bulkResult.files_uploaded, 3);
+  assert.equal(bulkResult.files_imported, 3);
+  assert.equal(bulkResult.failed_files, 0);
+  assert.equal(bulkResult.parsed_kills, 55);
+  assert.equal(bulkResult.written_kills, 55);
+  assert.equal(bulkResult.joins, 83);
+  assert.equal(bulkResult.disconnects, 8);
+  assert.equal(bulkResult.playerlist_snapshots, 15);
+  assert.equal(bulkResult.public_cache_updated, true);
+  assert.equal(bulkResult.discord_jobs_queued > 0, true);
+  assert.deepEqual(bulkResult.files.map((file) => file.filename), [...bulkFixtureNames]);
+  assert.equal(bulkDb.killEvents.length, 55);
+  assert.equal(bulkDb.serverStats.get(linkedServerId)?.total_kills, 55);
+  assert.equal(bulkDb.serverStats.get(linkedServerId)?.total_joins, 83);
+  assert.equal(bulkDb.serverStats.get(linkedServerId)?.total_disconnects, 8);
+  assert.equal(bulkDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+  assert.equal(bulkDb.automationJobs.length > 0, true);
+  const bulkRecentEvents = await getRecentAdmSyncEvents(makeEnv(bulkDb), "fixture-user", linkedServerId, 25);
+  assert.equal(bulkRecentEvents.length > 0, true);
+  assert.equal(bulkRecentEvents.some((event) => event.source === "kill"), true);
+  const bulkTopKillers = countBy(bulkDb.killEvents, "killer_name");
+  assert.equal(Number(bulkTopKillers["xAKA-MINI_KickAs"] ?? 0) > 0, true);
+
+  const duplicateBulkResult = await importAdmFilesForServer(makeEnv(bulkDb), {
+    linkedServerId,
+    files: bulkFixtureFiles,
+    source: "manual_file_upload",
+  });
+  assert.equal(duplicateBulkResult.parsed_kills, 55);
+  assert.equal(duplicateBulkResult.written_kills, 0);
+  assert.equal(duplicateBulkResult.duplicate_kills_skipped >= 55, true);
+  assert.equal(bulkDb.killEvents.length, 55);
+  assert.equal(bulkDb.serverStats.get(linkedServerId)?.total_kills, 55);
 
   const clusteredMustardKills = successDb.killEvents.filter((event) =>
     event.killer_name === "mustard_coffer74" &&
@@ -369,6 +441,9 @@ async function main() {
     dashboardStatsKills: successDb.serverStats.get(linkedServerId)?.total_kills,
     publicCacheUpdated: successResult.report.publicCacheUpdated,
     discordQueuesCreated: successResult.report.discordQueuesCreated,
+    bulkParsedKills: bulkResult.parsed_kills,
+    bulkWrittenKills: bulkResult.written_kills,
+    bulkDuplicateReimportWrittenKills: duplicateBulkResult.written_kills,
   });
 }
 

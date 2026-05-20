@@ -141,6 +141,7 @@ export type AdmImportDebugReport = {
   parsedJoins: number;
   parsedDisconnects: number;
   parsedPlayerlistSnapshots: number;
+  parsedHitLines: number;
   skippedDeadHitLines: number;
   parsedSuicides: number;
   parsedUncreditedDeaths: number;
@@ -222,11 +223,15 @@ export type ManualAdmTextImportResult = {
   raw_kill_lines_found: number;
   parsed_kills: number;
   written_kills: number;
+  deaths: number;
   joins: number;
   disconnects: number;
   playerlist_snapshots: number;
   suicides: number;
   uncredited_deaths: number;
+  hit_lines: number;
+  raw_events_stored: number;
+  player_events_stored: number;
   duplicate_skips: number;
   failed_writes: number;
   public_cache_updated: boolean;
@@ -236,7 +241,18 @@ export type ManualAdmTextImportResult = {
   parser_warnings: string[];
   total_kills: number;
   total_deaths: number;
+  kill_previews: ManualAdmKillPreview[];
   import_report: AdmDatabaseImportReport;
+};
+
+export type ManualAdmKillPreview = {
+  line_number: number;
+  occurred_at: string | null;
+  victim_name: string | null;
+  killer_name: string | null;
+  weapon: string | null;
+  distance: number | null;
+  event_type: "pvp_kill";
 };
 
 export type ManualAdmParsePreviewResult = {
@@ -251,17 +267,73 @@ export type ManualAdmParsePreviewResult = {
   playerlist_snapshots: number;
   suicides: number;
   uncredited_deaths: number;
+  hit_lines: number;
   skipped_dead_hit_lines: number;
   parser_warnings: string[];
-  kill_previews: Array<{
-    line_number: number;
-    occurred_at: string | null;
-    victim_name: string | null;
-    killer_name: string | null;
-    weapon: string | null;
-    distance: number | null;
-    event_type: "pvp_kill";
-  }>;
+  kill_previews: ManualAdmKillPreview[];
+};
+
+export type ManualAdmBulkFileInput = {
+  filename: string;
+  admText: string;
+};
+
+export type ManualAdmBulkFileResult = {
+  ok: boolean;
+  filename: string;
+  source: string;
+  status: "previewed" | "imported" | "failed";
+  raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  written_kills: number;
+  deaths: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  suicides: number;
+  uncredited_deaths: number;
+  hit_lines: number;
+  raw_events_stored: number;
+  player_events_stored: number;
+  duplicate_skips: number;
+  failed_writes: number;
+  public_cache_updated: boolean;
+  discord_jobs_queued: number;
+  parser_warnings: string[];
+  kill_previews: ManualAdmKillPreview[];
+  import_report_id: string | null;
+  imported_at: string | null;
+  error_code?: string;
+  message?: string;
+  details?: unknown;
+};
+
+export type ManualAdmBulkImportResult = {
+  ok: true;
+  mode: "preview" | "import";
+  source: string;
+  files_uploaded: number;
+  files_imported: number;
+  failed_files: number;
+  total_raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  written_kills: number;
+  duplicate_kills_skipped: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  deaths: number;
+  suicides: number;
+  hit_lines: number;
+  raw_events_stored: number;
+  player_events_stored: number;
+  public_cache_updated: boolean;
+  discord_jobs_queued: number;
+  warnings: string[];
+  errors: string[];
+  files: ManualAdmBulkFileResult[];
 };
 
 export type ManualAdmImportHistoryItem = {
@@ -1614,6 +1686,7 @@ export function buildAdmImportDebugReport(
     parsedJoins: pendingEvents.filter((event) => event.eventType === "player_connected").length,
     parsedDisconnects: pendingEvents.filter((event) => event.eventType === "player_disconnected").length,
     parsedPlayerlistSnapshots: pendingEvents.filter((event) => event.eventType === "playerlist_snapshot").length,
+    parsedHitLines: pendingEvents.filter(isHitEvent).length,
     skippedDeadHitLines: pendingEvents.filter(isDeadHitNonKillEvent).length,
     parsedSuicides: pendingEvents.filter((event) => event.eventType === "player_suicide").length,
     parsedUncreditedDeaths: pendingEvents.filter((event) => event.eventType === "player_died_stats").length,
@@ -2058,6 +2131,7 @@ export async function importAdmTextForServer(
     ...(result.report.cacheRefreshStatus === "failed" ? ["Public cache update failed after ADM rows were written."] : []),
     ...(result.report.discordQueueStatus === "failed" ? ["Discord auto-post queueing failed after ADM rows were written."] : []),
   ];
+  const killPreviews = buildKillPreviews(lines, filename, 5);
 
   return {
     ok: true,
@@ -2067,11 +2141,15 @@ export async function importAdmTextForServer(
     raw_kill_lines_found: result.report.rawKilledByLinesFound,
     parsed_kills: result.report.parsedPvpKills,
     written_kills: result.report.writtenKills,
+    deaths: result.report.writtenKills + result.report.parsedSuicides + result.report.parsedUncreditedDeaths,
     joins: result.joinsCreated,
     disconnects: result.disconnectsCreated,
     playerlist_snapshots: result.playerlistSnapshotsParsed,
     suicides: result.report.parsedSuicides,
     uncredited_deaths: result.report.parsedUncreditedDeaths,
+    hit_lines: result.report.parsedHitLines,
+    raw_events_stored: result.rawEventsStored,
+    player_events_stored: result.playerEventsStored,
     duplicate_skips: Math.max(result.duplicateLines, result.report.duplicateSkips),
     failed_writes: result.report.failedWrites,
     public_cache_updated: result.publicCacheUpdated,
@@ -2081,8 +2159,127 @@ export async function importAdmTextForServer(
     parser_warnings: warnings,
     total_kills: result.totalKills,
     total_deaths: result.totalDeaths,
+    kill_previews: killPreviews,
     import_report: result.report,
   };
+}
+
+export async function importAdmFilesForServer(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    files: ManualAdmBulkFileInput[];
+    source?: "manual_file_upload" | "manual_paste" | string;
+    previewOnly?: boolean;
+  },
+): Promise<ManualAdmBulkImportResult> {
+  const source = input.source ?? "manual_file_upload";
+  const files = normaliseBulkAdmFiles(input.files);
+  if (!files.length) throw new Error("At least one ADM file is required.");
+
+  const results: ManualAdmBulkFileResult[] = [];
+  for (const file of files) {
+    try {
+      if (input.previewOnly) {
+        const preview = previewManualAdmText(file);
+        results.push({
+          ok: true,
+          filename: preview.filename,
+          source,
+          status: "previewed",
+          raw_lines: preview.raw_lines,
+          raw_kill_lines_found: preview.raw_kill_lines_found,
+          parsed_kills: preview.parsed_kills,
+          written_kills: 0,
+          deaths: preview.parsed_kills + preview.suicides + preview.uncredited_deaths,
+          joins: preview.joins,
+          disconnects: preview.disconnects,
+          playerlist_snapshots: preview.playerlist_snapshots,
+          suicides: preview.suicides,
+          uncredited_deaths: preview.uncredited_deaths,
+          hit_lines: preview.hit_lines,
+          raw_events_stored: 0,
+          player_events_stored: 0,
+          duplicate_skips: 0,
+          failed_writes: 0,
+          public_cache_updated: false,
+          discord_jobs_queued: 0,
+          parser_warnings: preview.parser_warnings,
+          kill_previews: preview.kill_previews.slice(0, 5),
+          import_report_id: null,
+          imported_at: null,
+        });
+        continue;
+      }
+
+      const imported = await importAdmTextForServer(env, {
+        linkedServerId: input.linkedServerId,
+        filename: file.filename,
+        admText: file.admText,
+        source,
+      });
+      results.push({
+        ok: true,
+        filename: imported.filename,
+        source: imported.source,
+        status: "imported",
+        raw_lines: imported.raw_lines,
+        raw_kill_lines_found: imported.raw_kill_lines_found,
+        parsed_kills: imported.parsed_kills,
+        written_kills: imported.written_kills,
+        deaths: imported.deaths,
+        joins: imported.joins,
+        disconnects: imported.disconnects,
+        playerlist_snapshots: imported.playerlist_snapshots,
+        suicides: imported.suicides,
+        uncredited_deaths: imported.uncredited_deaths,
+        hit_lines: imported.hit_lines,
+        raw_events_stored: imported.raw_events_stored,
+        player_events_stored: imported.player_events_stored,
+        duplicate_skips: imported.duplicate_skips,
+        failed_writes: imported.failed_writes,
+        public_cache_updated: imported.public_cache_updated,
+        discord_jobs_queued: imported.discord_jobs_queued,
+        parser_warnings: imported.parser_warnings,
+        kill_previews: imported.kill_previews.slice(0, 5),
+        import_report_id: imported.import_report_id,
+        imported_at: imported.imported_at,
+      });
+    } catch (error) {
+      results.push({
+        ok: false,
+        filename: sanitizeManualAdmFilename(file.filename) ?? file.filename,
+        source,
+        status: "failed",
+        raw_lines: splitAdmText(file.admText).length,
+        raw_kill_lines_found: 0,
+        parsed_kills: 0,
+        written_kills: 0,
+        deaths: 0,
+        joins: 0,
+        disconnects: 0,
+        playerlist_snapshots: 0,
+        suicides: 0,
+        uncredited_deaths: 0,
+        hit_lines: 0,
+        raw_events_stored: 0,
+        player_events_stored: 0,
+        duplicate_skips: 0,
+        failed_writes: 0,
+        public_cache_updated: false,
+        discord_jobs_queued: 0,
+        parser_warnings: [],
+        kill_previews: [],
+        import_report_id: null,
+        imported_at: null,
+        error_code: "adm_file_import_failed",
+        message: error instanceof Error ? error.message : "ADM file import failed.",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return summariseBulkAdmImportResults(input.previewOnly ? "preview" : "import", source, results);
 }
 
 export function previewManualAdmText(input: {
@@ -2101,20 +2298,6 @@ export function previewManualAdmText(input: {
     cursorStart: 0,
     cursorEnd: lines.length,
   });
-  const parsed = parseAdmLines(lines, { admDate: extractAdmDateFromFile(filename) ?? undefined });
-  const killPreviews = parsed
-    .map((event, index) => ({ event, index }))
-    .filter(({ event }) => event.eventType === "player_killed" && event.isCreditedKill)
-    .slice(0, 10)
-    .map(({ event, index }) => ({
-      line_number: index + 1,
-      occurred_at: event.occurredAt,
-      victim_name: event.victimName,
-      killer_name: event.killerName,
-      weapon: event.weapon,
-      distance: event.distance,
-      event_type: "pvp_kill" as const,
-    }));
 
   return {
     ok: true,
@@ -2128,9 +2311,73 @@ export function previewManualAdmText(input: {
     playerlist_snapshots: report.parsedPlayerlistSnapshots,
     suicides: report.parsedSuicides,
     uncredited_deaths: report.parsedUncreditedDeaths,
+    hit_lines: report.parsedHitLines,
     skipped_dead_hit_lines: report.skippedDeadHitLines,
     parser_warnings: buildParserWarnings(report),
-    kill_previews: killPreviews,
+    kill_previews: buildKillPreviews(lines, filename, 10),
+  };
+}
+
+function buildKillPreviews(lines: string[], filename: string | null, limit: number): ManualAdmKillPreview[] {
+  return parseAdmLines(lines, { admDate: extractAdmDateFromFile(filename) ?? undefined })
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.eventType === "player_killed" && event.isCreditedKill)
+    .slice(0, limit)
+    .map(({ event, index }) => ({
+      line_number: index + 1,
+      occurred_at: event.occurredAt,
+      victim_name: event.victimName,
+      killer_name: event.killerName,
+      weapon: event.weapon,
+      distance: event.distance,
+      event_type: "pvp_kill" as const,
+    }));
+}
+
+function normaliseBulkAdmFiles(files: ManualAdmBulkFileInput[]) {
+  return files
+    .map((file) => ({
+      filename: sanitizeManualAdmFilename(file.filename) ?? "",
+      admText: typeof file.admText === "string" ? file.admText : "",
+    }))
+    .filter((file) => file.filename && file.admText.trim())
+    .sort((a, b) => compareAdmFileNamesChronological(a.filename, b.filename));
+}
+
+function summariseBulkAdmImportResults(
+  mode: "preview" | "import",
+  source: string,
+  files: ManualAdmBulkFileResult[],
+): ManualAdmBulkImportResult {
+  const warnings = files.flatMap((file) => file.parser_warnings.map((warning) => `${file.filename}: ${warning}`));
+  const errors = files
+    .filter((file) => !file.ok)
+    .map((file) => `${file.filename}: ${file.message ?? file.error_code ?? "failed"}`);
+  return {
+    ok: true,
+    mode,
+    source,
+    files_uploaded: files.length,
+    files_imported: files.filter((file) => file.ok && file.status === "imported").length,
+    failed_files: files.filter((file) => !file.ok || file.status === "failed").length,
+    total_raw_lines: files.reduce((total, file) => total + file.raw_lines, 0),
+    raw_kill_lines_found: files.reduce((total, file) => total + file.raw_kill_lines_found, 0),
+    parsed_kills: files.reduce((total, file) => total + file.parsed_kills, 0),
+    written_kills: files.reduce((total, file) => total + file.written_kills, 0),
+    duplicate_kills_skipped: files.reduce((total, file) => total + file.duplicate_skips, 0),
+    joins: files.reduce((total, file) => total + file.joins, 0),
+    disconnects: files.reduce((total, file) => total + file.disconnects, 0),
+    playerlist_snapshots: files.reduce((total, file) => total + file.playerlist_snapshots, 0),
+    deaths: files.reduce((total, file) => total + file.deaths, 0),
+    suicides: files.reduce((total, file) => total + file.suicides, 0),
+    hit_lines: files.reduce((total, file) => total + file.hit_lines, 0),
+    raw_events_stored: files.reduce((total, file) => total + file.raw_events_stored, 0),
+    player_events_stored: files.reduce((total, file) => total + file.player_events_stored, 0),
+    public_cache_updated: files.some((file) => file.public_cache_updated),
+    discord_jobs_queued: files.reduce((total, file) => total + file.discord_jobs_queued, 0),
+    warnings,
+    errors,
+    files,
   };
 }
 
@@ -2165,6 +2412,12 @@ function isDeadHitNonKillEvent(event: ParsedAdmEvent) {
     event.victimDead &&
     !event.isCreditedKill
   );
+}
+
+function isHitEvent(event: ParsedAdmEvent) {
+  return event.eventType === "player_hit" ||
+    event.eventType === "player_hit_explosion" ||
+    event.eventType === "player_hit_unknown_attacker";
 }
 
 function importDebugKillKey(event: ParsedAdmEvent) {
@@ -4598,6 +4851,7 @@ function parseAdmDatabaseImportReport(value: unknown): AdmDatabaseImportReport |
       parsedJoins: numberOrZero(parsed.parsedJoins),
       parsedDisconnects: numberOrZero(parsed.parsedDisconnects),
       parsedPlayerlistSnapshots: numberOrZero(parsed.parsedPlayerlistSnapshots),
+      parsedHitLines: numberOrZero(parsed.parsedHitLines),
       skippedDeadHitLines: numberOrZero(parsed.skippedDeadHitLines),
       parsedSuicides: numberOrZero(parsed.parsedSuicides),
       parsedUncreditedDeaths: numberOrZero(parsed.parsedUncreditedDeaths),

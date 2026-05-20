@@ -25,6 +25,7 @@ import type {
   PublicCacheRebuildResult,
   SyncLockRecoveryResult,
   ManualAdmImportApiResult,
+  BulkAdmImportApiResult,
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
@@ -197,6 +198,22 @@ export async function previewManualAdmText(linkedServerId: string, data: {
   admText: string;
 }) {
   return manualAdmRequest<ManualAdmParsePreviewApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/parse-preview`, data);
+}
+
+export async function bulkImportAdmFiles(linkedServerId: string, data: {
+  files: Array<{ filename: string; admText: string }>;
+  source?: "manual_file_upload" | "manual_paste" | string;
+  preview?: boolean;
+}) {
+  const query = data.preview ? "?preview=1" : "";
+  return manualAdmRequest<BulkAdmImportApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/bulk-import${query}`, data);
+}
+
+export async function forceProcessLatestAdm(linkedServerId: string) {
+  return request<(AdmSyncRunResult & { ok?: true }) | { ok: false; error_code: string; message: string; details?: unknown }>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/force-latest`, {
+    method: "POST",
+    cache: "no-store",
+  });
 }
 
 export async function refreshServerMetadata(linkedServerId: string) {
