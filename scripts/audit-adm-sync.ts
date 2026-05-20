@@ -80,6 +80,12 @@ function auditNewestFileSelection() {
   checkIncludes("functions/_lib/nitrado.ts", "parseAdmTimestamp(entry.name)", "Filename timestamp parsing used first");
   checkIncludes("functions/_lib/nitrado.ts", "entry.modified", "Modified-time fallback is used");
   checkIncludes("functions/_lib/nitrado.ts", "isAdmFile(entry)", "Only ADM files are selected for ADM parsing");
+  checkIncludes("functions/_lib/nitrado.ts", "debugNitradoAdmFileDiscovery", "ADM discovery debug helper exists");
+  checkIncludes("functions/_lib/nitrado.ts", "nitrado_api_log_files_stale_or_missing", "Stale game_specific log_files can be diagnosed");
+  checkIncludes("functions/_lib/nitrado.ts", "candidates: allEntries.map", "Discovery exposes every ADM candidate, not only read candidates");
+  checkIncludes("functions/api/servers/[serverId]/adm-file-discovery/debug.ts", "debugNitradoAdmFileDiscovery", "Owner/admin ADM discovery debug endpoint exists");
+  checkIncludes("scripts/debug-adm-discovery.ts", "debugNitradoAdmFileDiscovery", "CLI ADM discovery debug script exists");
+  checkIncludes("scripts/fixtures/DayZServer_PS4_x64_2026-05-20_06-02-03.ADM", "06:18:09", "Latest uploaded ADM fixture exists");
   checkIncludes("functions/_lib/adm-sync.ts", "compareAdmCandidatesChronological", "Sync candidate sort uses timestamp fallback");
   checkIncludes("functions/_lib/adm-sync.ts", "selectNewestDiscoveredAdmFile", "Newest available ADM is recorded");
   checkIncludes("functions/_lib/adm-sync.ts", "selectNewestReadableAdmFile", "Newest readable ADM is recorded");
@@ -197,6 +203,11 @@ function auditPackageCommand() {
     pass("test:full-system includes ADM audit", packageJson.scripts["test:full-system"]);
   } else {
     fail("test:full-system includes ADM audit", "test:full-system does not run audit:adm-sync.");
+  }
+  if (packageJson.scripts?.["debug:adm-discovery"] === "tsx scripts/debug-adm-discovery.ts") {
+    pass("Package command debug:adm-discovery", packageJson.scripts["debug:adm-discovery"]);
+  } else {
+    fail("Package command debug:adm-discovery", "Package command is missing or points to the wrong script.");
   }
 }
 

@@ -12,6 +12,7 @@ import {
   normalizeAdmSyncStateMachineStatus,
 } from "../functions/_lib/adm-sync";
 import { parseAdmLines } from "../functions/_lib/adm-parser";
+import { parseNitradoAdmFilenameTimestamp } from "../functions/_lib/nitrado";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
@@ -87,6 +88,17 @@ assert.equal(compareAdmFileNamesChronological(
   "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
   "DayZServer_PS4_x64_2026-05-17_17-01-42.ADM",
 ) > 0, true);
+assert.equal(
+  compareAdmFileNamesChronological(
+    "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",
+    "DayZServer_PS4_x64_2026-05-19_21-01-43.ADM",
+  ) > 0,
+  true,
+);
+assert.equal(
+  parseNitradoAdmFilenameTimestamp("dayzps/config/DayZServer_PS4_x64_2026-05-20_06-02-03.ADM"),
+  Date.UTC(2026, 4, 20, 6, 2, 3),
+);
 
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
 const endpointSource = readFileSync("functions/api/sync/adm/run.ts", "utf8");
@@ -105,6 +117,10 @@ const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
 assert.equal(nitradoSource.includes("DZN ADM FILE READ VARIANT USED"), true);
 assert.equal(nitradoSource.includes("DZN ADM LATEST FILE SELECTION FIXED"), true);
 assert.equal(nitradoSource.includes("fetchReadableNitradoAdmFiles"), true);
+assert.equal(nitradoSource.includes("debugNitradoAdmFileDiscovery"), true);
+assert.equal(nitradoSource.includes("candidates: allEntries.map"), true);
+assert.equal(nitradoSource.includes("nitrado_api_log_files_stale_or_missing"), true);
+assert.equal(nitradoSource.includes("findFirstArrayByKeys"), true);
 assert.equal(nitradoSource.includes("fetchNitradoLogSettingsVerification"), true);
 assert.equal(nitradoSource.includes("admin_log_enabled"), true);
 assert.equal(nitradoSource.includes("server_log_enabled"), true);
@@ -113,7 +129,12 @@ assert.equal(nitradoSource.includes("function isDisabled"), true);
 const packageSource = readFileSync("package.json", "utf8");
 assert.equal(packageSource.includes("diagnose:adm-import"), true);
 assert.equal(packageSource.includes("adm:audit-health"), true);
+assert.equal(packageSource.includes("debug:adm-discovery"), true);
 assert.equal(packageSource.includes("adm:backfill-missing"), true);
+const admDiscoveryDebugEndpointSource = readFileSync("functions/api/servers/[serverId]/adm-file-discovery/debug.ts", "utf8");
+assert.equal(admDiscoveryDebugEndpointSource.includes("debugNitradoAdmFileDiscovery"), true);
+assert.equal(admDiscoveryDebugEndpointSource.includes("TOKEN_ENCRYPTION_KEY"), true);
+assert.equal(admDiscoveryDebugEndpointSource.includes("current_saved_state"), true);
 const diagnoseImportSource = readFileSync("scripts/diagnose-adm-import.ts", "utf8");
 assert.equal(diagnoseImportSource.includes("DZN ADM KILL IMPORT DIAGNOSTICS READY"), true);
 assert.equal(admSyncSource.includes("adm_sync_file_state"), true);

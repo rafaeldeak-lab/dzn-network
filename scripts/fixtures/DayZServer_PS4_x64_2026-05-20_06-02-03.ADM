@@ -1,0 +1,20 @@
+AdminLog started on 2026-05-20 at 06:02:03
+06:17:01 | Player "TempoGreens" (id=TEMPO_GREENS pos=<6370.0, 8040.0, 333.0>) is connected
+06:17:05 | Player "IlIbigIll" (id=ILI_BIG_ILL pos=<6366.0, 8038.0, 333.0>) is connected
+06:17:10 | Player "xAKA-MINI_KickAs" (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>) is connected
+06:17:14 | Player "Ak_Specialis-t-" (id=AK_SPECIALIST pos=<6358.0, 8035.0, 333.0>) is connected
+06:17:55 | ##### PlayerList log: 2 players
+06:17:55 | #####
+06:17:55 | Player "TempoGreens" (id=TEMPO_GREENS pos=<6370.0, 8040.0, 333.0>)
+06:17:55 | Player "xAKA-MINI_KickAs" (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>)
+06:17:55 | #####
+06:18:09 | Player "TempoGreens" (DEAD) (id=TEMPO_GREENS pos=<6370.0, 8040.0, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>) with M4-A1 from 8.121 meters
+06:18:35 | Player "xAKA-MINI_KickAs" (DEAD) (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>) killed by Player "IlIbigIll" (id=ILI_BIG_ILL pos=<6366.0, 8038.0, 333.0>) with M4-A1 from 4.132 meters
+06:18:35 | Player "IlIbigIll" (DEAD) (id=ILI_BIG_ILL pos=<6366.0, 8038.0, 333.0>) killed by Player "TempoGreens" (id=TEMPO_GREENS pos=<6370.0, 8040.0, 333.0>) with M4-A1 from 4.472 meters
+06:18:42 | Player "IlIbigIll" (DEAD) (id=ILI_BIG_ILL pos=<6368.0, 8042.0, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>) with M4-A1 from 7.81 meters
+06:18:43 | Player "xAKA-MINI_KickAs" (DEAD) (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>) killed by Player "IlIbigIll" (DEAD) (id=ILI_BIG_ILL pos=<6368.0, 8042.0, 333.0>) with M4-A1 from 7.81 meters
+06:18:49 | Player "xAKA-MINI_KickAs" (DEAD) (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>)[HP: 0] hit by Player "IlIbigIll" (DEAD) (id=ILI_BIG_ILL pos=<6368.0, 8042.0, 333.0>) into Torso(1) for 30 damage (Bullet_556x45) with M4-A1 from 7.81 meters
+06:18:51 | Player "xAKA-MINI_KickAs" (DEAD) (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>)[HP: 0] hit by Player "IlIbigIll" (DEAD) (id=ILI_BIG_ILL pos=<6368.0, 8042.0, 333.0>) into LeftArm(18) for 20 damage (Bullet_556x45) with M4-A1 from 7.81 meters
+06:18:53 | Player "xAKA-MINI_KickAs" (DEAD) (id=MINI_KICKAS pos=<6362.0, 8037.0, 333.0>)[HP: 0] hit by Player "IlIbigIll" (DEAD) (id=ILI_BIG_ILL pos=<6368.0, 8042.0, 333.0>) into Head(0) for 90 damage (Bullet_556x45) with M4-A1 from 7.81 meters
+06:21:05 | Player "IlIbigIll" (id=ILI_BIG_ILL pos=<6381.0, 8050.0, 333.0>) has been disconnected
+06:21:10 | Player "Ak_Specialis-t-" (id=AK_SPECIALIST pos=<6358.0, 8035.0, 333.0>) placed WoodenCrate

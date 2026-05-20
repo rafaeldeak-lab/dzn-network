@@ -2,6 +2,7 @@ import type {
   AdmRecentSyncEvent,
   AdmSyncRunResult,
   AdmSyncStatus,
+  AdmFileDiscoveryDebug,
   AuthResponse,
   AdvertisingBumpStatus,
   AutomationHealth,
@@ -156,6 +157,13 @@ export async function runLogAccessDiagnostics() {
 export async function getNitradoLogSettings(linkedServerId: string, options: { check?: boolean } = {}) {
   const query = options.check ? "?check=1" : "";
   return request<NitradoLogSettingsCheckResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings${query}`, {
+    cache: "no-store",
+  });
+}
+
+export async function getAdmFileDiscoveryDebug(linkedServerId: string, options: { knownLatestFile?: string } = {}) {
+  const query = options.knownLatestFile ? `?known_latest_file=${encodeURIComponent(options.knownLatestFile)}` : "";
+  return request<AdmFileDiscoveryDebug>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm-file-discovery/debug${query}`, {
     cache: "no-store",
   });
 }

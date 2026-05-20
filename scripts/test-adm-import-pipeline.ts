@@ -9,6 +9,8 @@ import type { Env } from "../functions/_lib/types";
 
 const fixtureName = "DayZServer_PS4_x64_2026-05-19_16-01-55.ADM";
 const fixtureLines = readFileSync(`scripts/fixtures/${fixtureName}`, "utf8").split(/\r?\n/).filter(Boolean);
+const latestFixtureName = "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM";
+const latestFixtureLines = readFileSync(`scripts/fixtures/${latestFixtureName}`, "utf8").split(/\r?\n/).filter(Boolean);
 const linkedServerId = "fixture-linked-server";
 const guildId = "fixture-guild";
 const nitradoServiceId = "fixture-service";
@@ -69,6 +71,37 @@ async function main() {
   assert.equal(successResult.report.discordQueuesCreated > 0, true);
   assert.equal(successDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
   assert.equal(successDb.automationJobs.length > 0, true);
+
+  const latestDb = new MemoryD1();
+  const latestLinkedServerId = "latest-fixture-linked-server";
+  const latestGuildId = "latest-fixture-guild";
+  const latestResult = await importReadableAdmLinesIntoDatabase(makeEnv(latestDb), {
+    context: {
+      ...context,
+      linkedServerId: latestLinkedServerId,
+      admFileName: latestFixtureName,
+      syncRunId: "latest-fixture-sync-run",
+    },
+    lines: latestFixtureLines,
+    guildId: latestGuildId,
+    planKey: "partner",
+    publicServerName: "Latest Fixture Server",
+    updatePublicCache: true,
+    queueDiscordPosts: true,
+  });
+  assert.equal(latestResult.status, "completed");
+  assert.equal(latestDb.killEvents.filter((event) => event.linked_server_id === latestLinkedServerId).length, 5);
+  assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_connected").length, 4);
+  assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_disconnected").length, 1);
+  assert.equal(latestDb.playerEvents.filter((event) => event.linked_server_id === latestLinkedServerId && event.event_type === "player_hit").length, 3);
+  assert.equal(latestDb.serverStats.get(latestLinkedServerId)?.total_kills, 5);
+  assert.equal(latestResult.report.rawKilledByLinesFound, 5);
+  assert.equal(latestResult.report.parsedPvpKills, 5);
+  assert.equal(latestResult.report.writtenKills, 5);
+  assert.equal(latestResult.report.cursorBefore, 0);
+  assert.equal(latestResult.report.cursorAfter, latestFixtureLines.length);
+  assert.equal(latestResult.report.publicCacheUpdated, true);
+  assert.equal(latestDb.serverPublicCache.get(latestGuildId)?.last_adm_update_at !== null, true);
 
   const clusteredMustardKills = successDb.killEvents.filter((event) =>
     event.killer_name === "mustard_coffer74" &&

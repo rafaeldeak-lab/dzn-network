@@ -288,6 +288,7 @@ export type NitradoDiscoveredAdmFile = {
   name: string;
   path: string;
   timestamp: number | null;
+  modifiedAt?: string | number | null;
 };
 
 export type NitradoReadableAdmFileBatch = {
@@ -298,6 +299,59 @@ export type NitradoReadableAdmFileBatch = {
   previousLatestAdmFileName: string | null;
   lastCheckedAt: string;
   apiStatus: SafeApiStatus;
+};
+
+export type NitradoAdmDiscoveryCandidateDebug = {
+  name: string;
+  path: string;
+  sources: string[];
+  parsed_timestamp: string | null;
+  modified_at: string | number | null;
+  sort_key: number | null;
+  is_adm: boolean;
+  selected_as_newest_available: boolean;
+  selected_as_expected_by_filename: boolean;
+  selected_as_expected_by_modified: boolean;
+  sample_read_attempted: boolean;
+  sample_read_success: boolean;
+  sample_read_error: string | null;
+  readable_sample_status: SampleFetchStatus | SafeApiStatus | "not_attempted";
+  first_lines_preview: string[];
+  read_attempts: Array<{
+    method: "seek" | "download";
+    pathVariantLabel: string | null;
+    requestUrlPathOnly: string;
+    httpStatusCode: number | null;
+    status: SafeApiStatus;
+    sampleFetchAttempted: boolean;
+    sampleFetchStatus: SampleFetchStatus;
+    sampleReadSucceeded: boolean;
+    errorMessageSafe: string | null;
+  }>;
+};
+
+export type NitradoAdmFileDiscoveryDebug = {
+  ok: true;
+  service_id: string;
+  username: string | null;
+  server_name: string | null;
+  base_paths_used: string[];
+  checked_at: string;
+  service_details_status: SafeApiStatus;
+  log_files_raw_count: number;
+  game_specific_adm_count: number;
+  listed_adm_count: number;
+  preferred_adm_count: number;
+  total_adm_candidates: number;
+  list_attempts: AdmListAttempt[];
+  adm_candidates: NitradoAdmDiscoveryCandidateDebug[];
+  selected_newest_available: NitradoAdmDiscoveryCandidateDebug | null;
+  selected_newest_readable: NitradoAdmDiscoveryCandidateDebug | null;
+  newest_by_filename: NitradoAdmDiscoveryCandidateDebug | null;
+  newest_by_modified: NitradoAdmDiscoveryCandidateDebug | null;
+  known_latest_file: string | null;
+  known_latest_file_present: boolean | null;
+  problem_flags: string[];
 };
 
 export async function validateNitradoToken(token: string) {
@@ -463,16 +517,165 @@ export async function fetchReadableNitradoAdmFiles(
 
   return {
     files,
-    candidates: readCandidates.map((entry) => ({
+    candidates: allEntries.map((entry) => ({
       name: entry.name,
       path: entry.path,
       timestamp: timestampScore(entry),
+      modifiedAt: entry.modified ?? null,
     })),
     filesFound: allEntries.length,
     newestAdmFileName: newest?.name ?? null,
     previousLatestAdmFileName,
     lastCheckedAt,
     apiStatus: serviceProbe.attempt.status,
+  };
+}
+
+export async function debugNitradoAdmFileDiscovery(
+  token: string,
+  serviceId: string,
+  options: AdmReadOptions & {
+    knownLatestFileName?: string | null;
+    sampleLimit?: number;
+  } = {},
+): Promise<NitradoAdmFileDiscoveryDebug> {
+  const checkedAt = new Date().toISOString();
+  const serviceProbe = await probeNitradoEndpoint(token, "A gameserver details", `/services/${encodeURIComponent(serviceId)}/gameservers`);
+  const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
+  const service = normalizeGameserverDetails(serviceProbe.payload, serviceId);
+  const preferredEntries = buildPreferredAdmEntries(options.preferredAdmFileName, options.preferredAdmPath);
+  const searchDirs = await buildAdmSearchDirs(token, serviceId);
+  const listAttempts: AdmListAttempt[] = [];
+  const listedEntries: NitradoFileEntry[] = [];
+
+  for (const dir of searchDirs) {
+    listedEntries.push(...await listAdmFileEntries(token, serviceId, dir, listAttempts));
+  }
+
+  const sourcesByPath = buildAdmCandidateSourceMap({
+    gameSpecific: gameSpecificLogs.admLogFiles,
+    listed: listedEntries,
+    preferred: preferredEntries,
+  });
+  const allEntries = dedupeFileEntries([
+    ...gameSpecificLogs.admLogFiles,
+    ...listedEntries,
+    ...preferredEntries,
+  ]).sort(compareAdmFilesNewestFirst);
+  const newestAvailable = allEntries[0] ?? null;
+  const newestByFilename = pickNewestByFilenameTimestamp(allEntries);
+  const newestByModified = pickNewestByModifiedTime(allEntries);
+  const sampleLimit = Math.max(1, Math.min(Math.trunc(options.sampleLimit ?? 12), 24));
+  const sampleCandidates = new Set(allEntries.slice(0, sampleLimit).map((entry) => normalizeRemotePath(entry.path).toLowerCase()));
+  const debugCandidates: NitradoAdmDiscoveryCandidateDebug[] = [];
+
+  for (const entry of allEntries) {
+    const normalizedPath = normalizeRemotePath(entry.path).toLowerCase();
+    const shouldSample = sampleCandidates.has(normalizedPath);
+    const readAttempts: AdmReadAttempt[] = [];
+    let sample: string | null = null;
+    let sampleStatus: SampleFetchStatus | SafeApiStatus | "not_attempted" = "not_attempted";
+    let sampleError: string | null = null;
+
+    if (shouldSample) {
+      const details: GameSpecificLogDetails = {
+        ...gameSpecificLogs,
+        admLogFiles: dedupeFileEntries([entry, ...gameSpecificLogs.admLogFiles]),
+        selectedAdmFile: entry,
+      };
+      const variants = buildAdmReadPathVariants(details, entry.path);
+      const labels = createPathVariantLabelMap(variants);
+      for (const variant of variants) {
+        const result = await readNitradoFileSample(token, serviceId, variant.path, readAttempts, labels, {
+          ...options,
+          mode: "sample",
+        });
+        sampleStatus = result.status;
+        sampleError = result.errorMessageSafe;
+        if (result.sample && containsDayZAdminLogMarkers(result.sample)) {
+          sample = result.sample;
+          sampleError = null;
+          break;
+        }
+      }
+    }
+
+    debugCandidates.push({
+      name: entry.name,
+      path: maskNitradoUsernameInPath(entry.path, gameSpecificLogs.username),
+      sources: sourcesByPath.get(normalizedPath) ?? [],
+      parsed_timestamp: timestampIso(parseAdmTimestamp(entry.name) ?? parseAdmTimestamp(entry.path)),
+      modified_at: entry.modified ?? null,
+      sort_key: timestampScore(entry),
+      is_adm: isAdmFile(entry),
+      selected_as_newest_available: sameAdmEntry(entry, newestAvailable),
+      selected_as_expected_by_filename: sameAdmEntry(entry, newestByFilename),
+      selected_as_expected_by_modified: sameAdmEntry(entry, newestByModified),
+      sample_read_attempted: shouldSample,
+      sample_read_success: sample !== null,
+      sample_read_error: sample ? null : sampleError,
+      readable_sample_status: sample ? "OK" : sampleStatus,
+      first_lines_preview: splitAdmLines(sample).slice(0, 5).map((line) => line.slice(0, 220)),
+      read_attempts: readAttempts.map((attempt) => ({
+        method: attempt.method,
+        pathVariantLabel: attempt.pathVariantLabel,
+        requestUrlPathOnly: attempt.requestUrlPathOnly,
+        httpStatusCode: attempt.httpStatusCode,
+        status: attempt.status,
+        sampleFetchAttempted: attempt.sampleFetchAttempted,
+        sampleFetchStatus: attempt.sampleFetchStatus,
+        sampleReadSucceeded: attempt.sampleReadSucceeded,
+        errorMessageSafe: attempt.errorMessageSafe,
+      })),
+    });
+  }
+
+  const selectedNewestAvailable = debugCandidates.find((candidate) => candidate.selected_as_newest_available) ?? null;
+  const selectedNewestReadable = debugCandidates.find((candidate) => candidate.sample_read_success) ?? null;
+  const expectedByFilename = debugCandidates.find((candidate) => candidate.selected_as_expected_by_filename) ?? null;
+  const expectedByModified = debugCandidates.find((candidate) => candidate.selected_as_expected_by_modified) ?? null;
+  const knownLatestFile = options.knownLatestFileName ?? null;
+  const knownLatestFilePresent = knownLatestFile
+    ? debugCandidates.some((candidate) => candidate.name.toLowerCase() === knownLatestFile.toLowerCase())
+    : null;
+  const problemFlags: string[] = [];
+  if (knownLatestFile && knownLatestFilePresent === false) problemFlags.push("known_latest_file_missing_from_nitrado_candidates");
+  if (gameSpecificLogs.admLogFiles.length === 0 && listedEntries.length > 0) problemFlags.push("game_specific_log_files_empty_file_browser_used");
+  if (gameSpecificLogs.admLogFiles.length > 0 && listedEntries.length > 0) {
+    const newestGameSpecific = pickNewestAdmFile([...gameSpecificLogs.admLogFiles]);
+    const newestListed = pickNewestAdmFile([...listedEntries]);
+    const gameSpecificScore = newestGameSpecific ? timestampScore(newestGameSpecific) ?? 0 : 0;
+    const listedScore = newestListed ? timestampScore(newestListed) ?? 0 : 0;
+    if (listedScore > gameSpecificScore) problemFlags.push("nitrado_api_log_files_stale_or_missing");
+  }
+  if (selectedNewestAvailable && expectedByFilename && selectedNewestAvailable.name !== expectedByFilename.name) {
+    problemFlags.push("newest_available_differs_from_filename_sort");
+  }
+  if (selectedNewestAvailable && !selectedNewestAvailable.sample_read_attempted) problemFlags.push("newest_available_not_sampled");
+  if (selectedNewestAvailable && !selectedNewestReadable) problemFlags.push("newest_available_not_readable");
+
+  return {
+    ok: true,
+    service_id: serviceId,
+    username: gameSpecificLogs.username,
+    server_name: service.name ?? null,
+    base_paths_used: searchDirs.map(displayDir),
+    checked_at: checkedAt,
+    service_details_status: serviceProbe.attempt.status,
+    log_files_raw_count: gameSpecificLogs.logFilesReturned,
+    game_specific_adm_count: gameSpecificLogs.admLogFiles.length,
+    listed_adm_count: listedEntries.length,
+    preferred_adm_count: preferredEntries.length,
+    total_adm_candidates: allEntries.length,
+    list_attempts: listAttempts,
+    adm_candidates: debugCandidates,
+    selected_newest_available: selectedNewestAvailable,
+    selected_newest_readable: selectedNewestReadable,
+    newest_by_filename: expectedByFilename,
+    newest_by_modified: expectedByModified,
+    known_latest_file: knownLatestFile,
+    known_latest_file_present: knownLatestFilePresent,
+    problem_flags: problemFlags,
   };
 }
 
@@ -2022,7 +2225,7 @@ function tokenFromValue(value: unknown): DownloadTokenDescriptor | null {
 }
 
 function normalizeFileEntries(payload: unknown, dir: string): NitradoFileEntry[] {
-  const entries = findArrayByKey(payload, "entries") ?? [];
+  const entries = findFirstArrayByKeys(payload, ["entries", "files", "items", "file"]) ?? [];
   return entries
     .map((entry) => normalizeFileEntry(entry, dir))
     .filter((entry): entry is NitradoFileEntry => Boolean(entry));
@@ -2090,6 +2293,14 @@ function findArrayByKey(value: unknown, key: string): unknown[] | null {
   if (Array.isArray(record[key])) return record[key];
   for (const child of Object.values(record)) {
     const found = findArrayByKey(child, key);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findFirstArrayByKeys(value: unknown, keys: string[]) {
+  for (const key of keys) {
+    const found = findArrayByKey(value, key);
     if (found) return found;
   }
   return null;
@@ -2187,8 +2398,37 @@ function dedupeFileEntries(entries: NitradoFileEntry[]) {
   return [...seen.values()];
 }
 
+function buildAdmCandidateSourceMap(entries: {
+  gameSpecific: NitradoFileEntry[];
+  listed: NitradoFileEntry[];
+  preferred: NitradoFileEntry[];
+}) {
+  const map = new Map<string, string[]>();
+  for (const [source, sourceEntries] of Object.entries(entries)) {
+    for (const entry of sourceEntries) {
+      const key = normalizeRemotePath(entry.path).toLowerCase();
+      const existing = map.get(key) ?? [];
+      if (!existing.includes(source)) existing.push(source);
+      map.set(key, existing);
+    }
+  }
+  return map;
+}
+
 function pickNewestAdmFile(entries: NitradoFileEntry[]) {
   return entries.sort(compareAdmFilesNewestFirst)[0] ?? null;
+}
+
+function pickNewestByFilenameTimestamp(entries: NitradoFileEntry[]) {
+  return entries
+    .filter((entry) => (parseAdmTimestamp(entry.name) ?? parseAdmTimestamp(entry.path)) !== null)
+    .sort((a, b) => (parseAdmTimestamp(b.name) ?? parseAdmTimestamp(b.path) ?? 0) - (parseAdmTimestamp(a.name) ?? parseAdmTimestamp(a.path) ?? 0))[0] ?? null;
+}
+
+function pickNewestByModifiedTime(entries: NitradoFileEntry[]) {
+  return entries
+    .filter((entry) => modifiedTimestampScore(entry) !== null)
+    .sort((a, b) => (modifiedTimestampScore(b) ?? 0) - (modifiedTimestampScore(a) ?? 0))[0] ?? null;
 }
 
 function compareAdmFilesNewestFirst(a: NitradoFileEntry, b: NitradoFileEntry) {
@@ -2213,6 +2453,15 @@ function timestampScore(entry: NitradoFileEntry) {
   return null;
 }
 
+function modifiedTimestampScore(entry: NitradoFileEntry) {
+  if (typeof entry.modified === "number") return entry.modified;
+  if (typeof entry.modified === "string") {
+    const parsed = Date.parse(entry.modified);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
 function parseAdmTimestamp(value: string) {
   const match = value.match(/(\d{4})[-_](\d{2})[-_](\d{2})[_-](\d{2})[-_](\d{2})[-_](\d{2})/);
   if (!match) return null;
@@ -2225,6 +2474,20 @@ function parseAdmTimestamp(value: string) {
     Number(minute),
     Number(second),
   );
+}
+
+export function parseNitradoAdmFilenameTimestamp(value: string) {
+  return parseAdmTimestamp(value);
+}
+
+function sameAdmEntry(a: NitradoFileEntry | null, b: NitradoFileEntry | null) {
+  if (!a || !b) return false;
+  return normalizeRemotePath(a.path).toLowerCase() === normalizeRemotePath(b.path).toLowerCase();
+}
+
+function timestampIso(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return null;
+  return new Date(value).toISOString();
 }
 
 function containsDayZAdminLogMarkers(sample: string | null) {

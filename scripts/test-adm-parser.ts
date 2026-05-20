@@ -324,6 +324,50 @@ assert.deepEqual(uploadedKillTotals, {
   "xAKA-MINI_KickAs": 1,
 });
 
+const latestUploadedAdmFixtureName = "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM";
+const latestUploadedAdmFixtureLines = readFileSync(`scripts/fixtures/${latestUploadedAdmFixtureName}`, "utf8")
+  .split(/\r?\n/)
+  .filter((line) => line.trim().length > 0);
+const latestUploadedAdmEvents = parseAdmLines(latestUploadedAdmFixtureLines, { admDate: "2026-05-20" });
+const latestUploadedPvpKills = latestUploadedAdmEvents.filter((event) => event.eventType === "player_killed" && event.isCreditedKill);
+const latestUploadedDeadHits = latestUploadedAdmEvents.filter((event) => event.eventType === "player_hit" && event.victimDead && !event.isCreditedKill);
+const latestUploadedPlayerListSnapshot = latestUploadedAdmEvents.find((event) => event.eventType === "playerlist_snapshot");
+const latestUploadedPlayerListEntries = latestUploadedAdmEvents.filter((event) => event.eventType === "playerlist_entry");
+const latestUploadedConnected = latestUploadedAdmEvents.filter((event) => event.eventType === "player_connected");
+const latestUploadedDisconnected = latestUploadedAdmEvents.filter((event) => event.eventType === "player_disconnected");
+
+assert.equal(latestUploadedAdmFixtureLines.filter((line) => /\bkilled by\s+Player\s+"/i.test(line)).length, 5);
+assert.equal(latestUploadedPvpKills.length, 5);
+assert.equal(latestUploadedDeadHits.length, 3);
+assert.equal(latestUploadedDeadHits.some((event) => event.eventType === "player_killed" || event.isCreditedKill), false);
+assert.equal(latestUploadedPlayerListSnapshot?.playerCount, 2);
+assert.deepEqual(latestUploadedPlayerListEntries.map((event) => event.playerName), ["TempoGreens", "xAKA-MINI_KickAs"]);
+assert.deepEqual(latestUploadedConnected.map((event) => event.playerName), [
+  "TempoGreens",
+  "IlIbigIll",
+  "xAKA-MINI_KickAs",
+  "Ak_Specialis-t-",
+]);
+assert.deepEqual(latestUploadedDisconnected.map((event) => event.playerName), ["IlIbigIll"]);
+
+const expectedLatestUploadedKills = [
+  ["06:18:09", "xAKA-MINI_KickAs", "TempoGreens"],
+  ["06:18:35", "IlIbigIll", "xAKA-MINI_KickAs"],
+  ["06:18:35", "TempoGreens", "IlIbigIll"],
+  ["06:18:42", "xAKA-MINI_KickAs", "IlIbigIll"],
+  ["06:18:43", "IlIbigIll", "xAKA-MINI_KickAs"],
+] as const;
+
+for (const [index, [time, killer, victim]] of expectedLatestUploadedKills.entries()) {
+  const parsed = latestUploadedPvpKills[index];
+  assert.equal(parsed?.occurredAt, `2026-05-20T${time}.000Z`);
+  assert.equal(parsed?.killerName, killer);
+  assert.equal(parsed?.victimName, victim);
+  assert.equal(parsed?.weapon, "M4-A1");
+  assert.equal(parsed?.isPvpKill, true);
+  assert.equal(parsed?.isCreditedKill, true);
+}
+
 console.log("DZN ADM IMPORT DEBUG REPORT", uploadedImportReport);
 
 console.log("ADM parser tests passed");

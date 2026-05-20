@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, logoutAndRedirect, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -182,9 +182,12 @@ function ServerDashboard({
   const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
   const [recentEvents, setRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [logDiagnostics, setLogDiagnostics] = useState<NitradoLogAccessDiagnostics | null>(null);
+  const [admFileDiscoveryDebug, setAdmFileDiscoveryDebug] = useState<AdmFileDiscoveryDebug | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [syncDetailsOpen, setSyncDetailsOpen] = useState(false);
+  const [admFileDiscoveryOpen, setAdmFileDiscoveryOpen] = useState(false);
   const [diagnosingLogs, setDiagnosingLogs] = useState(false);
+  const [checkingAdmFileDiscovery, setCheckingAdmFileDiscovery] = useState(false);
   const [clearingTestData, setClearingTestData] = useState(false);
   const [clearingFailedRuns, setClearingFailedRuns] = useState(false);
   const [dangerAction, setDangerAction] = useState<"server" | "account" | null>(null);
@@ -615,6 +618,25 @@ function ServerDashboard({
     }
   }
 
+  async function checkAdmFileDiscoveryNow() {
+    setCheckingAdmFileDiscovery(true);
+    setActionMessage("");
+    try {
+      const result = await getAdmFileDiscoveryDebug(server.id, {
+        knownLatestFile: "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM",
+      });
+      setAdmFileDiscoveryDebug(result);
+      setAdmFileDiscoveryOpen(true);
+      const selected = result.selected_newest_available?.name ?? "no ADM file";
+      const readable = result.selected_newest_readable?.name ?? "no readable ADM file";
+      setActionMessage(`ADM discovery checked. Newest candidate: ${selected}; newest readable: ${readable}.`);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Unable to check ADM file discovery.");
+    } finally {
+      setCheckingAdmFileDiscovery(false);
+    }
+  }
+
   async function clearTestData() {
     setClearingTestData(true);
     setActionMessage("");
@@ -1027,15 +1049,26 @@ function ServerDashboard({
             <DashboardPanel className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <PanelHeader icon={<DatabaseZap className={`h-5 w-5 ${refreshingSyncData ? "animate-pulse" : ""}`} />} title="Sync Engine Status" />
-                <button
-                  type="button"
-                  disabled={refreshingSyncData}
-                  onClick={refreshNow}
-                  className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
-                  {manualRefreshing ? "Refreshing..." : "Refresh Status"}
-                </button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={checkingAdmFileDiscovery}
+                    onClick={checkAdmFileDiscoveryNow}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-purple-300/20 bg-purple-400/10 px-3 py-2 text-xs font-black uppercase text-purple-50 transition hover:border-purple-300/45 hover:bg-purple-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <DatabaseZap className={`h-3.5 w-3.5 ${checkingAdmFileDiscovery ? "animate-pulse" : ""}`} />
+                    {checkingAdmFileDiscovery ? "Checking..." : "Check ADM Files"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={refreshingSyncData}
+                    onClick={refreshNow}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
+                    {manualRefreshing ? "Refreshing..." : "Refresh Status"}
+                  </button>
+                </div>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 <MiniInfo label="Auto-refresh" value="On (15s)" />
@@ -1113,6 +1146,13 @@ function ServerDashboard({
                 recovering={recoveringSyncLocks}
                 onRecover={recoverSyncLocks}
               />
+              {admFileDiscoveryDebug ? (
+                <AdmFileDiscoveryDebugPanel
+                  debug={admFileDiscoveryDebug}
+                  open={admFileDiscoveryOpen}
+                  onToggle={() => setAdmFileDiscoveryOpen((value) => !value)}
+                />
+              ) : null}
               <LastSyncDetails open={syncDetailsOpen} onToggle={() => setSyncDetailsOpen((value) => !value)} latestAdmFile={latestAdmFile} syncStatus={syncStatus} lastSyncResult={lastSyncResult} />
             </DashboardPanel>
           </div>
@@ -3406,6 +3446,101 @@ function LastSyncDetails({
               ) : null}
             </div>
           ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AdmFileDiscoveryDebugPanel({
+  debug,
+  open,
+  onToggle,
+}: {
+  debug: AdmFileDiscoveryDebug;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const topCandidates = debug.adm_candidates.slice(0, 12);
+  return (
+    <div className="mt-4 rounded-lg border border-purple-300/15 bg-purple-400/8">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left text-xs font-black uppercase text-zinc-200"
+      >
+        <span>ADM File Discovery Diagnostics</span>
+        <span className={debug.problem_flags.length ? "text-amber-200" : "text-emerald-200"}>
+          {debug.problem_flags.length ? "Warnings" : "Checked"}
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-white/10 p-3">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            <MiniInfo label="Nitrado Service ID" value={debug.service_id} />
+            <MiniInfo label="Nitrado Username" value={debug.username ?? "Not found"} />
+            <MiniInfo label="Raw log_files Count" value={String(debug.log_files_raw_count)} />
+            <MiniInfo label="Total ADM Candidates" value={String(debug.total_adm_candidates)} />
+            <MiniInfo label="Listed ADM Candidates" value={String(debug.listed_adm_count)} />
+            <MiniInfo label="Newest Selected" value={debug.selected_newest_available?.name ?? "None"} />
+            <MiniInfo label="Expected By Filename" value={debug.newest_by_filename?.name ?? "None"} />
+            <MiniInfo label="Newest Readable" value={debug.selected_newest_readable?.name ?? "None"} />
+            <MiniInfo label="Known 2026-05-20 File" value={debug.known_latest_file_present === null ? "Not checked" : debug.known_latest_file_present ? "Present" : "Missing"} />
+            <MiniInfo label="Saved Newest Available" value={debug.current_saved_state?.newest_available_adm_filename ?? "None"} />
+            <MiniInfo label="Saved Newest Readable" value={debug.current_saved_state?.newest_readable_adm_filename ?? "None"} />
+            <MiniInfo label="Last Discovery Check" value={debug.current_saved_state?.last_adm_discovery_check_at ? formatDashboardDate(debug.current_saved_state.last_adm_discovery_check_at) : "Not checked"} />
+          </div>
+          {debug.problem_flags.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {debug.problem_flags.map((flag) => <SmallBadge key={flag} tone="orange">{formatStatusLabel(flag)}</SmallBadge>)}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-lg border border-emerald-300/15 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">
+              DZN selected the newest ADM candidate it could see from Nitrado.
+            </p>
+          )}
+          <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-3">
+            <p className="text-[10px] font-black uppercase text-zinc-400">Directories searched</p>
+            <p className="mt-1 break-words text-xs font-bold leading-5 text-zinc-300">{debug.base_paths_used.join(", ") || "None"}</p>
+          </div>
+          <div className="mt-3 max-h-[440px] overflow-auto rounded-lg border border-white/10">
+            {topCandidates.length ? topCandidates.map((candidate) => (
+              <div key={`${candidate.path}-${candidate.name}`} className="border-b border-white/10 bg-black/20 px-3 py-3 text-xs last:border-b-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="break-all font-black text-white">{candidate.name}</p>
+                    <p className="mt-1 break-all text-[11px] font-bold text-zinc-500">{candidate.path}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {candidate.selected_as_newest_available ? <SmallBadge tone="cyan">Newest</SmallBadge> : null}
+                    {candidate.sample_read_success ? <SmallBadge tone="emerald">Readable</SmallBadge> : candidate.sample_read_attempted ? <SmallBadge tone="orange">Unreadable</SmallBadge> : <SmallBadge tone="zinc">Not sampled</SmallBadge>}
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-4">
+                  <MiniInfo label="Parsed Timestamp" value={candidate.parsed_timestamp ? formatDashboardDate(candidate.parsed_timestamp) : "Not parsed"} />
+                  <MiniInfo label="Modified" value={candidate.modified_at ? String(candidate.modified_at) : "Not provided"} />
+                  <MiniInfo label="Sort Score" value={candidate.sort_key === null ? "None" : String(candidate.sort_key)} />
+                  <MiniInfo label="Sources" value={candidate.sources.join(", ") || "Unknown"} />
+                </div>
+                {candidate.sample_read_error ? (
+                  <p className="mt-2 rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-2 font-bold text-amber-100">
+                    Sample error: {candidate.sample_read_error}
+                  </p>
+                ) : null}
+                {candidate.first_lines_preview.length ? (
+                  <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/35 px-2 py-2 text-[11px] leading-5 text-zinc-300">
+                    {candidate.first_lines_preview.join("\n")}
+                  </pre>
+                ) : null}
+              </div>
+            )) : (
+              <div className="px-3 py-3 text-sm font-bold text-zinc-400">No ADM candidates were returned by Nitrado.</div>
+            )}
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <MiniInfo label="List Attempts" value={String(debug.list_attempts.length)} />
+            <MiniInfo label="Service Details Status" value={debug.service_details_status} />
+          </div>
         </div>
       ) : null}
     </div>

@@ -218,6 +218,7 @@ function auditSyncEndpoints() {
   checkFile("functions/api/automation/health.ts", "Automation health endpoint");
   checkIncludes("functions/api/automation/health.ts", "requireDznAdmin", "Automation health is Owner/Admin only");
   checkFile("functions/api/servers/[serverId]/auto-posts/run-now.ts", "Server Run Now endpoint");
+  checkFile("functions/api/servers/[serverId]/adm-file-discovery/debug.ts", "ADM file discovery debug endpoint");
   checkFile("functions/api/servers/[serverId]/public-cache/debug.ts", "Public cache debug endpoint");
   checkFile("functions/api/servers/[serverId]/public-cache/rebuild.ts", "Public cache rebuild endpoint");
   checkFile("functions/api/servers/[serverId]/sync/recover-locks.ts", "Stuck sync lock recovery endpoint");
@@ -291,6 +292,8 @@ function auditDashboardStructure() {
   }
   checkIncludes(dashboard, "Last Sync Details", "Sync details are expandable");
   checkIncludes(dashboard, "ADM API Diagnostics", "ADM diagnostics are expandable");
+  checkIncludes(dashboard, "ADM File Discovery Diagnostics", "ADM file discovery diagnostics are expandable");
+  checkIncludes(dashboard, "Check ADM Files", "ADM file discovery can be checked from Sync Health");
   checkIncludes(dashboard, "Nitrado Log Settings", "Nitrado log settings checklist is visible");
   checkIncludes(dashboard, "Check Nitrado Log Settings", "Nitrado log settings can be checked automatically");
   checkIncludes(dashboard, "Checks for new ADM files every", "ADM discovery timing is visible");
@@ -319,7 +322,7 @@ function auditDiscordAutoPosts() {
 
 function auditPackageCommands() {
   const packageJson = JSON.parse(readSource("package.json")) as { scripts?: Record<string, string> };
-  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "check:cron-production", "check:server-due-state", "test:adm-import-pipeline", "test:public-profile-sync", "test:full-system"]) {
+  for (const command of ["audit:system", "audit:adm-sync", "check:automation-live", "check:cron-production", "check:server-due-state", "debug:adm-discovery", "test:adm-import-pipeline", "test:public-profile-sync", "test:full-system"]) {
     if (packageJson.scripts?.[command]) pass(`Package command ${command}`, packageJson.scripts[command]);
     else fail(`Package command ${command}`, "Package command is missing.");
   }
@@ -328,6 +331,8 @@ function auditPackageCommands() {
 function auditAdmSyncWiring() {
   checkIncludes("functions/_lib/nitrado.ts", "timestampScore(entry)", "Nitrado ADM sorting parses filename timestamp and modified fallback");
   checkIncludes("functions/_lib/nitrado.ts", "pickNewestAdmFile", "Nitrado newest ADM file selection helper exists");
+  checkIncludes("functions/_lib/nitrado.ts", "debugNitradoAdmFileDiscovery", "Detailed ADM discovery diagnostics helper exists");
+  checkIncludes("functions/_lib/nitrado.ts", "nitrado_api_log_files_stale_or_missing", "Nitrado stale log_files diagnosis exists");
   checkIncludes("functions/_lib/adm-sync.ts", "compareAdmCandidatesChronological", "ADM candidate sorting uses parsed timestamp fallback");
   checkIncludes("functions/_lib/adm-sync.ts", "selectNewestDiscoveredAdmFile", "Newest discovered ADM evidence is tracked");
   checkIncludes("functions/_lib/adm-sync.ts", "latest_adm_unreadable", "Latest unreadable ADM state exists");

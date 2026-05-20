@@ -808,6 +808,77 @@ export type AdmSyncStatus = {
   recent_sync_runs: SyncRunSummary[];
 };
 
+export type AdmFileDiscoveryCandidateDebug = {
+  name: string;
+  path: string;
+  sources: string[];
+  parsed_timestamp: string | null;
+  modified_at: string | number | null;
+  sort_key: number | null;
+  is_adm: boolean;
+  selected_as_newest_available: boolean;
+  selected_as_expected_by_filename: boolean;
+  selected_as_expected_by_modified: boolean;
+  sample_read_attempted: boolean;
+  sample_read_success: boolean;
+  sample_read_error: string | null;
+  readable_sample_status: string;
+  first_lines_preview: string[];
+  read_attempts: Array<{
+    method: "seek" | "download";
+    pathVariantLabel: string | null;
+    requestUrlPathOnly: string;
+    httpStatusCode: number | null;
+    status: string;
+    sampleFetchAttempted: boolean;
+    sampleFetchStatus: string;
+    sampleReadSucceeded: boolean;
+    errorMessageSafe: string | null;
+  }>;
+};
+
+export type AdmFileDiscoveryDebug = {
+  ok: true;
+  linked_server_id: string;
+  service_id: string;
+  username: string | null;
+  server_name: string | null;
+  base_paths_used: string[];
+  checked_at: string;
+  service_details_status: string;
+  log_files_raw_count: number;
+  game_specific_adm_count: number;
+  listed_adm_count: number;
+  preferred_adm_count: number;
+  total_adm_candidates: number;
+  list_attempts: Array<{
+    dir: string;
+    search: string | null;
+    status: string;
+    fileCount: number;
+    admFileCount: number;
+  }>;
+  adm_candidates: AdmFileDiscoveryCandidateDebug[];
+  selected_newest_available: AdmFileDiscoveryCandidateDebug | null;
+  selected_newest_readable: AdmFileDiscoveryCandidateDebug | null;
+  newest_by_filename: AdmFileDiscoveryCandidateDebug | null;
+  newest_by_modified: AdmFileDiscoveryCandidateDebug | null;
+  known_latest_file: string | null;
+  known_latest_file_present: boolean | null;
+  problem_flags: string[];
+  current_saved_state: {
+    newest_available_adm_filename: string | null;
+    newest_available_adm_timestamp: string | null;
+    newest_readable_adm_filename: string | null;
+    newest_readable_adm_timestamp: string | null;
+    last_processed_adm_filename: string | null;
+    last_processed_adm_line: number | null;
+    last_adm_discovery_check_at: string | null;
+    next_adm_discovery_due_at: string | null;
+    adm_discovery_status: string | null;
+  } | null;
+};
+
 export type SyncRunSummary = {
   id: string;
   trigger_type: string;
