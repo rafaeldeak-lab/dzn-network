@@ -38,6 +38,7 @@ includesAll(homeStatsRoute, [
   "ok: false",
 ]);
 assert.equal(homeStatsRoute.includes("withPublicApiMetadata(applyHomeStatsAccess(emptyHomeStats()"), false, "Home stats must not return fake zero payloads as successful fallback responses.");
+assert.equal(homeStatsRoute.includes("server_stats.longest_kill_distance"), false, "Home stats must not query non-existent server_stats longest-kill columns.");
 
 for (const route of [
   "functions/api/public/leaderboards.ts",

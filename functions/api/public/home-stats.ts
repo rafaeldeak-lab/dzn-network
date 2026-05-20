@@ -443,7 +443,7 @@ async function getPreviewTopServers(db: D1Database) {
         COALESCE(server_stats.total_deaths, 0) AS total_deaths,
         COALESCE(server_stats.unique_players, 0) AS unique_players,
         COALESCE(server_stats.total_joins, 0) AS total_joins,
-        COALESCE(server_stats.longest_kill_distance, 0) AS longest_kill,
+        COALESCE((SELECT MAX(distance) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill,
         CASE
           WHEN COALESCE(server_stats.total_joins, 0) > 0
             OR COALESCE(server_stats.total_disconnects, 0) > 0
