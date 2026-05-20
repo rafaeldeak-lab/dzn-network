@@ -60,6 +60,17 @@ type AdmUploadFile = {
   filename: string;
   admText: string;
   size: number;
+  preview: AdmUploadFilePreview;
+};
+
+type AdmUploadFilePreview = {
+  lineCount: number;
+  chunkCount: number;
+  parsedKills: number;
+  joins: number;
+  disconnects: number;
+  playerlistSnapshots: number;
+  firstLinePreview: string;
 };
 
 type AdmBulkProgress = {
@@ -89,6 +100,7 @@ type DashboardTotalsDelta = {
 };
 
 const ADM_IMPORT_UPLOAD_CHUNK_SIZE = 10;
+const ADM_IMPORT_RETRY_CHUNK_SIZES = [5, 1] as const;
 const ADM_IMPORT_PREVIOUS_LINE_CONTEXT = 5;
 
 export function Dashboard() {
@@ -855,7 +867,18 @@ function ServerDashboard({
       source,
       importHitLines: manualAdmImportHitLines,
     });
-    if (!created.ok) return makeFailedBulkAdmFileResult(file, created, source);
+    if (!created.ok) {
+      return makeFailedBulkAdmFileResult(file, {
+        ...created,
+        details: {
+          ...(typeof created.details === "object" && created.details ? created.details : {}),
+          endpoint: "/adm/import-job/start",
+          client_file_read_ok: true,
+          client_total_lines: lines.length,
+          client_total_chunks: chunks.length,
+        },
+      }, source);
+    }
 
     let progress: AdmImportJobProgressResult = created;
     setBulkAdmImportProgress({
@@ -880,29 +903,19 @@ function ServerDashboard({
         writtenKills: progress.written_kills,
         duplicateSkips: progress.duplicate_skips,
       });
-      const next = await sendAdmImportJobChunk(server.id, {
+      const next = await sendAdmImportChunkWithFallback({
+        file,
+        source,
         jobId: progress.job_id,
-        filename: file.filename,
         chunkIndex: chunk.index,
         startLine: chunk.startLine,
         lines: chunk.lines,
-        previousLines: lines.slice(Math.max(0, chunk.startLine - ADM_IMPORT_PREVIOUS_LINE_CONTEXT), chunk.startLine),
+        allLines: lines,
+        progress,
+        totalChunks: chunks.length,
       });
       if (!next.ok) {
-        return makeFailedBulkAdmFileResult(file, {
-          ...next,
-          details: {
-            ...(typeof next.details === "object" && next.details ? next.details : {}),
-            endpoint: "/adm/import-job/chunk",
-            chunk_index: chunk.index,
-            start_line: chunk.startLine,
-            job_id: progress.job_id,
-            chunks_processed: progress.chunks_processed,
-            total_chunks: chunks.length,
-            written_kills: progress.written_kills,
-            duplicate_skips: progress.duplicate_skips,
-          },
-        }, source);
+        return makeFailedBulkAdmFileResult(file, next, source);
       }
       progress = next;
       setBulkAdmImportProgress({
@@ -935,10 +948,14 @@ function ServerDashboard({
           ...(typeof finished.details === "object" && finished.details ? finished.details : {}),
           endpoint: "/adm/import-job/finish",
           job_id: progress.job_id,
+          job_status: progress.status,
           chunks_processed: progress.chunks_processed,
           total_chunks: progress.total_chunks,
           written_kills: progress.written_kills,
           duplicate_skips: progress.duplicate_skips,
+          client_file_read_ok: file.admText.length > 0,
+          client_total_lines: lines.length,
+          client_total_chunks: chunks.length,
         },
       }, source);
     }
@@ -950,6 +967,107 @@ function ServerDashboard({
       message: "ADM import job completed without a file result.",
       details: progress,
     }, source);
+  }
+
+  async function sendAdmImportChunkWithFallback(input: {
+    file: { filename: string; admText: string };
+    source: string;
+    jobId: string;
+    chunkIndex: number;
+    startLine: number;
+    lines: string[];
+    allLines: string[];
+    progress: AdmImportJobProgressResult;
+    totalChunks: number;
+  }): Promise<AdmImportJobProgressResult | ManualAdmImportErrorResult> {
+    const firstAttempt = await sendAdmImportChunkAttempt(input, input.lines, input.startLine, input.chunkIndex, ADM_IMPORT_UPLOAD_CHUNK_SIZE);
+    if (firstAttempt.ok) return firstAttempt;
+
+    for (const retrySize of ADM_IMPORT_RETRY_CHUNK_SIZES) {
+      const retryResult = await sendAdmImportChunkRangeInSmallerPieces(input, retrySize, firstAttempt);
+      if (retryResult.ok) return retryResult;
+      if (retrySize === 1) return retryResult;
+    }
+    return firstAttempt;
+  }
+
+  async function sendAdmImportChunkRangeInSmallerPieces(
+    input: {
+      file: { filename: string; admText: string };
+      source: string;
+      jobId: string;
+      chunkIndex: number;
+      startLine: number;
+      lines: string[];
+      allLines: string[];
+      progress: AdmImportJobProgressResult;
+      totalChunks: number;
+    },
+    retrySize: number,
+    originalFailure: ManualAdmImportErrorResult,
+  ): Promise<AdmImportJobProgressResult | ManualAdmImportErrorResult> {
+    let latestProgress = input.progress;
+    for (let offset = 0; offset < input.lines.length; offset += retrySize) {
+      const subLines = input.lines.slice(offset, offset + retrySize);
+      const subStartLine = input.startLine + offset;
+      const subAttempt = await sendAdmImportChunkAttempt(input, subLines, subStartLine, input.chunkIndex, retrySize, originalFailure);
+      if (!subAttempt.ok) return subAttempt;
+      latestProgress = subAttempt;
+    }
+    return latestProgress;
+  }
+
+  async function sendAdmImportChunkAttempt(
+    input: {
+      file: { filename: string; admText: string };
+      source: string;
+      jobId: string;
+      chunkIndex: number;
+      startLine: number;
+      lines: string[];
+      allLines: string[];
+      progress: AdmImportJobProgressResult;
+      totalChunks: number;
+    },
+    linesToSend: string[],
+    startLine: number,
+    chunkIndex: number,
+    attemptedChunkSize: number,
+    previousFailure?: ManualAdmImportErrorResult,
+  ): Promise<AdmImportJobProgressResult | ManualAdmImportErrorResult> {
+    const response = await sendAdmImportJobChunk(server.id, {
+      jobId: input.jobId,
+      filename: input.file.filename,
+      chunkIndex,
+      startLine,
+      lines: linesToSend,
+      previousLines: input.allLines.slice(Math.max(0, startLine - ADM_IMPORT_PREVIOUS_LINE_CONTEXT), startLine),
+    });
+    if (response.ok) return response;
+    return {
+      ...response,
+      details: {
+        ...(typeof response.details === "object" && response.details ? response.details : {}),
+        previous_error_code: previousFailure?.error_code,
+        previous_message: previousFailure?.message,
+        endpoint: "/adm/import-job/chunk",
+        chunk_index: chunkIndex,
+        attempted_chunk_size: attemptedChunkSize,
+        start_line: startLine,
+        end_line: startLine + linesToSend.length,
+        first_failed_line_number: startLine + 1,
+        first_failed_line_preview: linesToSend[0]?.slice(0, 180) ?? "",
+        job_id: input.jobId,
+        job_status: input.progress.status,
+        chunks_processed: input.progress.chunks_processed,
+        total_chunks: input.totalChunks,
+        written_kills: input.progress.written_kills,
+        duplicate_skips: input.progress.duplicate_skips,
+        client_file_read_ok: input.file.admText.length > 0,
+        client_total_lines: input.allLines.length,
+        client_total_chunks: input.totalChunks,
+      },
+    };
   }
 
   async function forceProcessLatestAdmNow() {
@@ -1018,11 +1136,15 @@ function ServerDashboard({
 
   async function loadManualAdmFiles(files: FileList | File[] | null) {
     if (!files?.length) return;
-    const loaded = await Promise.all(Array.from(files).map(async (file) => ({
-      filename: file.name,
-      admText: await file.text(),
-      size: file.size,
-    })));
+    const loaded = await Promise.all(Array.from(files).map(async (file) => {
+      const admText = await file.text();
+      return {
+        filename: file.name,
+        admText,
+        size: file.size,
+        preview: buildAdmUploadPreview(file.name, admText),
+      };
+    }));
     setManualAdmFiles(loaded);
     if (loaded[0]) {
       setManualAdmFilename(loaded[0].filename);
@@ -3560,9 +3682,24 @@ function ManualAdmImportPanel({
           <p className="text-[10px] font-black uppercase text-zinc-400">Selected files</p>
           <div className="mt-2 grid gap-2">
             {uploadedFiles.map((file) => (
-              <div key={`${file.filename}-${file.size}`} className="flex flex-col gap-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                <span className="break-all text-xs font-bold text-zinc-100">{file.filename}</span>
-                <span className="text-[10px] font-black uppercase text-zinc-500">{formatBytes(file.size)}</span>
+              <div key={`${file.filename}-${file.size}`} className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="break-all text-xs font-bold text-zinc-100">{file.filename}</span>
+                  <span className="text-[10px] font-black uppercase text-zinc-500">{formatBytes(file.size)}</span>
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                  <MiniInfo label="Lines Detected" value={String(file.preview.lineCount)} />
+                  <MiniInfo label="Chunks" value={String(file.preview.chunkCount)} />
+                  <MiniInfo label="Preview Kills" value={String(file.preview.parsedKills)} />
+                  <MiniInfo label="Joins" value={String(file.preview.joins)} />
+                  <MiniInfo label="Disconnects" value={String(file.preview.disconnects)} />
+                  <MiniInfo label="PlayerList" value={String(file.preview.playerlistSnapshots)} />
+                </div>
+                {file.preview.firstLinePreview ? (
+                  <p className="mt-2 break-words rounded border border-white/10 bg-black/24 px-2 py-1 font-mono text-[10px] text-zinc-400">
+                    First line: {file.preview.firstLinePreview}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>
@@ -3938,6 +4075,29 @@ function BulkAdmImportResultPanel({
                     </button>
                   ) : null}
                 </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                  <MiniInfo label="Failed Endpoint" value={file.failed_endpoint ?? "Not recorded"} />
+                  <MiniInfo label="Failed Chunk" value={file.failed_chunk_index !== null && file.failed_chunk_index !== undefined ? String(file.failed_chunk_index) : "Not recorded"} />
+                  <MiniInfo label="HTTP Status" value={file.http_status !== undefined ? String(file.http_status) : "Not recorded"} />
+                  <MiniInfo label="Error Code" value={file.error_code ?? "Not recorded"} />
+                  <MiniInfo label="Client File Read" value={file.client_file_read_ok === false ? "Failed" : "OK"} />
+                  <MiniInfo label="Client Lines" value={file.client_total_lines !== undefined ? String(file.client_total_lines) : "Not recorded"} />
+                  <MiniInfo label="Client Chunks" value={file.client_total_chunks !== undefined ? String(file.client_total_chunks) : "Not recorded"} />
+                  <MiniInfo label="Job ID" value={file.job_id ? file.job_id.slice(0, 8) : "Not recorded"} />
+                  <MiniInfo label="Job Status" value={file.job_status ?? "Not recorded"} />
+                  <MiniInfo label="First Failed Line" value={file.first_failed_line_number !== null && file.first_failed_line_number !== undefined ? String(file.first_failed_line_number) : "Not recorded"} />
+                </div>
+                {file.first_failed_line_preview ? (
+                  <p className="mt-3 break-words rounded-md border border-rose-300/20 bg-black/24 px-3 py-2 font-mono text-xs text-rose-50">
+                    {file.first_failed_line_preview}
+                  </p>
+                ) : null}
+                {file.response_body ? (
+                  <details className="mt-3 rounded-md border border-white/10 bg-black/24 p-3">
+                    <summary className="cursor-pointer text-xs font-black uppercase text-rose-100">Response Body</summary>
+                    <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs text-rose-50">{file.response_body}</pre>
+                  </details>
+                ) : null}
               </div>
             ))}
           </div>
@@ -5272,12 +5432,23 @@ function makeFailedBulkAdmFileResult(
   source: string,
 ): BulkAdmFileResult {
   const detailRecord = failure.details && typeof failure.details === "object" ? failure.details as Record<string, unknown> : {};
+  const rawLines = file.admText.split(/\r?\n/).filter((line) => line.trim()).length;
+  const totalChunks = Math.ceil(rawLines / ADM_IMPORT_UPLOAD_CHUNK_SIZE);
   return {
     ok: false,
     filename: file.filename,
     source,
     status: "failed",
-    raw_lines: file.admText.split(/\r?\n/).filter((line) => line.trim()).length,
+    failed_endpoint: stringFromUnknown(detailRecord.endpoint ?? detailRecord.failed_endpoint),
+    failed_chunk_index: numberFromUnknown(detailRecord.chunk_index ?? detailRecord.failed_chunk_index),
+    first_failed_line_number: numberFromUnknown(detailRecord.first_failed_line_number ?? detailRecord.start_line),
+    first_failed_line_preview: stringFromUnknown(detailRecord.first_failed_line_preview),
+    client_file_read_ok: Boolean(detailRecord.client_file_read_ok ?? file.admText.length > 0),
+    client_total_lines: numberFromUnknown(detailRecord.client_total_lines) ?? rawLines,
+    client_total_chunks: numberFromUnknown(detailRecord.client_total_chunks) ?? totalChunks,
+    job_status: stringFromUnknown(detailRecord.job_status),
+    job_id: stringFromUnknown(detailRecord.job_id),
+    raw_lines: rawLines,
     raw_kill_lines_found: 0,
     parsed_kills: 0,
     written_kills: 0,
@@ -5303,6 +5474,8 @@ function makeFailedBulkAdmFileResult(
     error_code: failure.error_code,
     message: failure.message,
     details: failure.details,
+    http_status: failure.http_status,
+    response_body: failure.response_body,
   };
 }
 
@@ -5326,6 +5499,23 @@ function chunkAdmLinesForUpload(lines: string[], chunkSize: number) {
 function numberFromUnknown(value: unknown) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : undefined;
+}
+
+function stringFromUnknown(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function buildAdmUploadPreview(filename: string, text: string): AdmUploadFilePreview {
+  const lines = splitAdmTextForUpload(text);
+  return {
+    lineCount: lines.length,
+    chunkCount: chunkAdmLinesForUpload(lines, ADM_IMPORT_UPLOAD_CHUNK_SIZE).length,
+    parsedKills: lines.filter((line) => /\bkilled by Player\b/i.test(line)).length,
+    joins: lines.filter((line) => /\bis connected\b/i.test(line)).length,
+    disconnects: lines.filter((line) => /\b(has been disconnected|disconnected)\b/i.test(line)).length,
+    playerlistSnapshots: lines.filter((line) => /PlayerList log:/i.test(line)).length,
+    firstLinePreview: lines[0]?.slice(0, 160) ?? "",
+  };
 }
 
 function findLinkedServerInAuthResponse(auth: AuthResponse, serverId: string): LinkedServer | null {

@@ -14,6 +14,7 @@ type StartAdmImportJobBody = {
 };
 
 export const onRequestPost: PagesFunction = async ({ request, env, params }) => {
+  let requestDetails: Record<string, unknown> = {};
   try {
     const linkedServerId = sanitizeLinkedServerId(params.serverId);
     if (!linkedServerId) return admImportJobError(400, "invalid_server_id", "Invalid server id.");
@@ -33,6 +34,13 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
     if (!filename.trim()) return admImportJobError(400, "missing_filename", "ADM filename is required.");
     const totalLines = Number(body.totalLines ?? 0);
     if (!Number.isFinite(totalLines) || totalLines <= 0) return admImportJobError(400, "missing_total_lines", "ADM total line count is required.");
+    requestDetails = {
+      filename,
+      totalLines,
+      totalChunks: Number(body.totalChunks ?? 0),
+      chunkSize: Number(body.chunkSize ?? 10),
+      source: body.source ?? "manual_file_upload",
+    };
 
     const result = await startAdmImportLineJobForServer(env, {
       linkedServerId,
@@ -45,7 +53,10 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
     });
     return admImportJobJson(result);
   } catch (error) {
-    return admImportJobError(500, "adm_import_job_start_failed", "Unable to start ADM import job.", debugDetails(request, error));
+    return admImportJobError(500, "adm_import_job_start_failed", "Unable to start ADM import job.", {
+      ...requestDetails,
+      ...debugDetails(request, error),
+    });
   }
 };
 

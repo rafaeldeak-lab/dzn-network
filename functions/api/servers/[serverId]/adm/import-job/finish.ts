@@ -9,6 +9,7 @@ type FinishAdmImportJobBody = {
 };
 
 export const onRequestPost: PagesFunction = async ({ request, env, params }) => {
+  let requestDetails: Record<string, unknown> = {};
   try {
     const linkedServerId = sanitizeLinkedServerId(params.serverId);
     if (!linkedServerId) return admImportJobError(400, "invalid_server_id", "Invalid server id.");
@@ -26,10 +27,14 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
     const body = await readJson<FinishAdmImportJobBody>(request);
     const jobId = sanitizeJobId(body.jobId);
     if (!jobId) return admImportJobError(400, "missing_job_id", "ADM import job id is required.");
+    requestDetails = { jobId };
     const result = await finishAdmImportLineJobForServer(env, { linkedServerId, jobId });
     return admImportJobJson(result);
   } catch (error) {
-    return admImportJobError(500, "adm_import_job_finish_failed", "Unable to finish ADM import job.", debugDetails(request, error));
+    return admImportJobError(500, "adm_import_job_finish_failed", "Unable to finish ADM import job.", {
+      ...requestDetails,
+      ...debugDetails(request, error),
+    });
   }
 };
 

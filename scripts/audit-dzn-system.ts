@@ -354,6 +354,11 @@ function auditAdmSyncWiring() {
   checkIncludes("functions/_lib/adm-sync.ts", "processPendingAdmImportJobs", "Scheduled ADM import jobs continue in chunks");
   checkIncludes("functions/_lib/adm-sync.ts", "createScheduledAdmImportJobForServer", "Scheduled ADM processing uses chunked import jobs");
   checkIncludes("functions/_lib/adm-sync.ts", "scheduled_nitrado", "Automatic Nitrado imports are tagged separately from manual uploads");
+  checkIncludes("functions/_lib/adm-sync.ts", "skipFailedAdmImportLine", "ADM chunk import can skip one bad line without failing the file");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "requestDetails", "ADM chunk endpoint returns structured diagnostics");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "firstLinePreview", "ADM chunk endpoint includes failed line preview context");
+  checkIncludes("components/onboarding/dashboard.tsx", "ADM_IMPORT_RETRY_CHUNK_SIZES = [5, 1]", "Dashboard retries failed ADM chunks at 5-line and 1-line sizes");
+  checkIncludes("components/onboarding/dashboard.tsx", "sendAdmImportChunkWithFallback", "Dashboard import UI avoids failing the whole file on one failed chunk");
   checkIncludes("functions/_lib/adm-sync.ts", "validateAdmCursorForLines", "ADM cursor hash validation is implemented");
 }
 

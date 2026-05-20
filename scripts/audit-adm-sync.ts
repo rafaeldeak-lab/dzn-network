@@ -171,8 +171,11 @@ function auditDueServerSelection() {
   checkIncludes("functions/_lib/adm-sync.ts", "processPendingAdmImportJobs", "Scheduled ADM chunk import jobs continue on cron");
   checkIncludes("functions/_lib/adm-sync.ts", "createScheduledAdmImportJobForServer", "Scheduled ADM processing creates chunked import jobs");
   checkIncludes("functions/_lib/adm-sync.ts", "scheduled_nitrado", "Scheduled Nitrado imports use a dedicated job source");
+  checkIncludes("functions/_lib/adm-sync.ts", "skipFailedAdmImportLine", "Single bad ADM import lines are skipped without failing the full file");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/start.ts", "startAdmImportLineJobForServer", "Owner/admin ADM import start endpoint exists");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "processAdmImportJobLineChunk", "Owner/admin ADM import chunk endpoint exists");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "requestDetails", "ADM chunk endpoint returns structured failure diagnostics");
+  checkIncludes("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "firstLinePreview", "ADM chunk endpoint reports first failed line preview");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job/finish.ts", "finishAdmImportLineJobForServer", "Owner/admin ADM import finish endpoint exists");
   checkIncludes("functions/api/servers/[serverId]/adm/import-job.ts", "chunked_import_required", "Legacy full-file ADM import route is disabled");
   checkIncludes("functions/_lib/adm-sync.ts", "cursorAdvanced", "Import report tracks cursor advancement");
@@ -207,6 +210,10 @@ function auditDashboardWording() {
   checkIncludes("components/onboarding/dashboard.tsx", "Last ADM Import Report", "Dashboard shows last ADM import report diagnostics");
   checkIncludes("components/onboarding/dashboard.tsx", "Chunk Import Job", "Dashboard shows active ADM chunk import progress");
   checkIncludes("components/onboarding/dashboard.tsx", "Processing latest ADM in chunks", "Dashboard explains scheduled chunk processing");
+  checkIncludes("components/onboarding/dashboard.tsx", "ADM_IMPORT_RETRY_CHUNK_SIZES = [5, 1]", "Dashboard retries failed chunks with smaller 5-line and 1-line chunks");
+  checkIncludes("components/onboarding/dashboard.tsx", "sendAdmImportChunkWithFallback", "Dashboard import UI uses chunk fallback before failing a file");
+  checkIncludes("components/onboarding/dashboard.tsx", "Lines Detected", "Dashboard shows client-side ADM file line counts before import");
+  checkIncludes("components/onboarding/dashboard.tsx", "First Failed Line", "Dashboard shows failed chunk line diagnostics");
   checkIncludes("components/onboarding/dashboard.tsx", "ADM cursor verified.", "Dashboard shows cursor hash validation wording");
   checkIncludes("components/onboarding/dashboard.tsx", "DZN detected ADM cursor mismatch", "Dashboard explains safe cursor recovery");
 }

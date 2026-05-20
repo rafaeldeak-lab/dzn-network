@@ -2633,12 +2633,62 @@ export async function processAdmImportJobLineChunk(
     if (!updated) throw new Error("ADM import job disappeared after chunk write.");
     return toAdmImportJobProgress(updated);
   } catch (error) {
+    if (chunkLines.length === 1) {
+      return await skipFailedAdmImportLine(env, {
+        row,
+        linkedServerId: input.linkedServerId,
+        chunkIndex,
+        nextCurrentLine: Math.min(Number(row.total_lines ?? startLine + 1), startLine + 1),
+        message: `${row.filename}: skipped line ${startLine + 1} after parser/write failure. ${safeSyncErrorMessage(error)}`,
+      });
+    }
     await db
       .prepare("UPDATE adm_import_jobs SET status = 'failed', error_message = ?, failed_chunk_index = ?, failed_writes = failed_writes + 1, updated_at = ? WHERE id = ? AND server_id = ?")
       .bind(safeSyncErrorMessage(error), chunkIndex, new Date().toISOString(), row.id, input.linkedServerId)
       .run();
     throw error;
   }
+}
+
+async function skipFailedAdmImportLine(
+  env: Env,
+  input: {
+    row: AdmImportJobRow;
+    linkedServerId: string;
+    chunkIndex: number;
+    nextCurrentLine: number;
+    message: string;
+  },
+) {
+  const warnings = [...parseJobWarnings(input.row), input.message];
+  const chunksProcessed = Math.max(Number(input.row.chunks_processed ?? 0), input.chunkIndex + 1);
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_import_jobs SET
+        status = 'queued',
+        current_line = ?,
+        chunks_processed = ?,
+        failed_writes = failed_writes + 1,
+        warnings_json = ?,
+        last_chunk_index = ?,
+        failed_chunk_index = NULL,
+        error_message = NULL,
+        updated_at = ?
+       WHERE id = ? AND server_id = ?`,
+    )
+    .bind(
+      input.nextCurrentLine,
+      chunksProcessed,
+      JSON.stringify(warnings),
+      input.chunkIndex,
+      new Date().toISOString(),
+      input.row.id,
+      input.linkedServerId,
+    )
+    .run();
+  const updated = await getAdmImportJob(env, input.linkedServerId, input.row.id);
+  if (!updated) throw new Error("ADM import job disappeared after failed line skip.");
+  return toAdmImportJobProgress(updated);
 }
 
 export async function finishAdmImportLineJobForServer(

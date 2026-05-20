@@ -14,6 +14,15 @@ type ChunkAdmImportJobBody = {
 };
 
 export const onRequestPost: PagesFunction = async ({ request, env, params }) => {
+  let requestDetails: Partial<{
+    jobId: string;
+    filename: string;
+    chunkIndex: number;
+    startLine: number;
+    endLine: number;
+    firstLinePreview: string;
+    lineCount: number;
+  }> = {};
   try {
     const linkedServerId = sanitizeLinkedServerId(params.serverId);
     if (!linkedServerId) return admImportJobError(400, "invalid_server_id", "Invalid server id.");
@@ -36,19 +45,34 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
     if (!Array.isArray(body.lines) || !body.lines.some((line) => typeof line === "string" && line.trim())) {
       return admImportJobError(400, "missing_chunk_lines", "ADM import chunk lines are required.");
     }
+    const chunkIndex = Number(body.chunkIndex ?? 0);
+    const startLine = Number(body.startLine ?? 0);
+    const lines = body.lines;
+    requestDetails = {
+      jobId,
+      filename,
+      chunkIndex,
+      startLine,
+      endLine: startLine + lines.length,
+      lineCount: lines.length,
+      firstLinePreview: typeof lines[0] === "string" ? lines[0].slice(0, 180) : "",
+    };
 
     const result = await processAdmImportJobLineChunk(env, {
       linkedServerId,
       jobId,
       filename,
-      chunkIndex: Number(body.chunkIndex ?? 0),
-      startLine: Number(body.startLine ?? 0),
-      lines: body.lines,
+      chunkIndex,
+      startLine,
+      lines,
       previousLines: Array.isArray(body.previousLines) ? body.previousLines : [],
     });
     return admImportJobJson(result);
   } catch (error) {
-    return admImportJobError(500, "adm_import_job_chunk_failed", "Unable to process ADM import chunk.", debugDetails(request, error));
+    return admImportJobError(500, "adm_import_job_chunk_failed", "Unable to process ADM import chunk.", {
+      ...requestDetails,
+      ...debugDetails(request, error),
+    });
   }
 };
 

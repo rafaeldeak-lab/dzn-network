@@ -50,6 +50,7 @@ async function main() {
   const previewEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/parse-preview.ts", "utf8");
   const bulkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/bulk-import.ts", "utf8");
   const forceLatestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/force-latest.ts", "utf8");
+  const chunkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/import-job/chunk.ts", "utf8");
   const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
   assert.match(manualEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(manualEndpointSource, /getSessionUser/);
@@ -70,6 +71,12 @@ async function main() {
   assert.doesNotMatch(dashboardSource, /Chunks"\s+value=\{[^}]*"Fast path"/);
   assert.match(dashboardSource, /for \(const \[index, file\] of files\.entries\(\)\)/);
   assert.match(dashboardSource, /Retry this file/);
+  assert.match(dashboardSource, /ADM_IMPORT_RETRY_CHUNK_SIZES = \[5, 1\]/);
+  assert.match(dashboardSource, /sendAdmImportChunkWithFallback/);
+  assert.match(dashboardSource, /Lines Detected/);
+  assert.match(dashboardSource, /Preview Kills/);
+  assert.match(dashboardSource, /Failed Endpoint/);
+  assert.match(dashboardSource, /First Failed Line/);
   assert.match(dashboardSource, /refreshDashboardAfterManualAdmImport\(\)/);
   assert.match(dashboardSource, /Bulk ADM Import Summary/);
   assert.match(dashboardSource, /Previous Import Attempts/);
@@ -81,6 +88,8 @@ async function main() {
   assert.doesNotMatch(dashboardSource, /open=\{result\.files\.length <= 3\}/);
   assert.match(forceLatestEndpointSource, /createScheduledAdmImportJobForServer/);
   assert.match(forceLatestEndpointSource, /requireServerOwnerOrDznAdmin/);
+  assert.match(chunkEndpointSource, /requestDetails/);
+  assert.match(chunkEndpointSource, /firstLinePreview/);
   assert.match(dashboardSource, /Chunk Import Job/);
   assert.match(dashboardSource, /Processing latest ADM in chunks/);
 
@@ -398,6 +407,18 @@ async function main() {
   assert.equal(largePreview.disconnects, 15);
   assert.equal(largePreview.playerlist_snapshots, 10);
 
+  const largeBrowserDb = new MemoryD1();
+  const largeBrowserImport = await importChunkedAdmText(makeEnv(largeBrowserDb), linkedServerId, largeFixtureName, largeFixtureText, { chunkSize: 10 });
+  assert.equal(largeBrowserImport.status, "completed");
+  assert.equal(largeBrowserImport.total_chunks, Math.ceil(3385 / 10));
+  assert.equal(largeBrowserImport.file_result?.parsed_kills, 216);
+  assert.equal(largeBrowserImport.file_result?.written_kills, 216);
+  assert.equal(largeBrowserImport.file_result?.joins, 378);
+  assert.equal(largeBrowserImport.file_result?.disconnects, 15);
+  assert.equal(largeBrowserImport.file_result?.playerlist_snapshots, 10);
+  assert.equal(largeBrowserDb.killEvents.length, 216);
+  assert.equal(largeBrowserDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+
   const scheduledJobDb = new MemoryD1();
   const scheduledJob = await createAdmImportJobForServer(makeEnv(scheduledJobDb), {
     linkedServerId,
@@ -490,6 +511,32 @@ async function main() {
   assert.equal(retryProgress.file_result?.parsed_kills, 5);
   assert.equal(retryProgress.file_result?.written_kills, 5);
   assert.equal(chunkRetryDb.killEvents.length, 5);
+
+  const badSingleLineDb = new MemoryD1({ failKillInsertAfter: 0 });
+  let badSingleLineProgress = await startAdmImportLineJobForServer(makeEnv(badSingleLineDb), {
+    linkedServerId,
+    filename: demonchaserFixtureName,
+    totalLines: 1,
+    totalChunks: 1,
+    source: "manual_file_upload",
+    chunkSize: 1,
+  });
+  badSingleLineProgress = await processAdmImportJobLineChunk(makeEnv(badSingleLineDb), {
+    linkedServerId,
+    jobId: badSingleLineProgress.job_id,
+    filename: demonchaserFixtureName,
+    chunkIndex: 0,
+    startLine: 0,
+    lines: [demonchaserKillLine],
+    previousLines: [],
+  });
+  assert.equal(badSingleLineProgress.current_line, 1);
+  assert.equal(badSingleLineProgress.warnings.some((warning) => warning.includes("skipped line 1")), true);
+  badSingleLineDb.failKillInsertAfter = null;
+  badSingleLineProgress = await finishAdmImportLineJobForServer(makeEnv(badSingleLineDb), { linkedServerId, jobId: badSingleLineProgress.job_id });
+  assert.equal(badSingleLineProgress.status, "completed");
+  assert.equal(badSingleLineProgress.file_result?.failed_writes, 1);
+  assert.equal(badSingleLineDb.killEvents.length, 0);
 
   const clusteredMustardKills = successDb.killEvents.filter((event) =>
     event.killer_name === "mustard_coffer74" &&
@@ -1008,13 +1055,27 @@ class MemoryStatement {
       row.updated_at = this.values[0];
       return changed(1);
     }
-    if (q.startsWith("update adm_import_jobs set status = 'queued'") && q.includes("failed_chunk_index = null") && !q.includes("parsed_kills")) {
+    if (q.startsWith("update adm_import_jobs set status = 'queued'") && q.includes("failed_chunk_index = null") && !q.includes("parsed_kills") && !q.includes("current_line")) {
       const row = this.db.admImportJobs.get(String(this.values[1]));
       if (!row) return changed(0);
       row.status = "queued";
       row.error_message = null;
       row.failed_chunk_index = null;
       row.updated_at = this.values[0];
+      return changed(1);
+    }
+    if (q.includes("update adm_import_jobs set") && q.includes("failed_writes = failed_writes + 1") && q.includes("current_line = ?") && !q.includes("parsed_kills")) {
+      const row = this.db.admImportJobs.get(String(this.values[5]));
+      if (!row) return changed(0);
+      row.status = "queued";
+      row.current_line = Number(this.values[0] ?? row.current_line);
+      row.chunks_processed = Number(this.values[1] ?? row.chunks_processed);
+      row.failed_writes = Number(row.failed_writes ?? 0) + 1;
+      row.warnings_json = this.values[2];
+      row.last_chunk_index = this.values[3];
+      row.failed_chunk_index = null;
+      row.error_message = null;
+      row.updated_at = this.values[4];
       return changed(1);
     }
     if (q.includes("update adm_import_jobs set") && q.includes("parsed_kills = parsed_kills +")) {

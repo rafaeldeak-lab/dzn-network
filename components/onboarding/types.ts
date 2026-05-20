@@ -918,6 +918,14 @@ export type BulkAdmFileResult = {
   filename: string;
   source: string;
   status: "previewed" | "imported" | "failed" | string;
+  failed_endpoint?: string | null;
+  failed_chunk_index?: number | null;
+  first_failed_line_number?: number | null;
+  first_failed_line_preview?: string | null;
+  client_file_read_ok?: boolean;
+  client_total_lines?: number;
+  client_total_chunks?: number;
+  job_status?: string | null;
   job_id?: string | null;
   chunks_processed?: number;
   total_chunks?: number;
@@ -945,6 +953,8 @@ export type BulkAdmFileResult = {
   error_code?: string;
   message?: string;
   details?: unknown;
+  http_status?: number;
+  response_body?: string;
 };
 
 export type BulkAdmImportResult = {
