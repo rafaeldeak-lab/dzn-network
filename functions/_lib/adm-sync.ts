@@ -323,6 +323,9 @@ export type AdmImportJobProgressResult = {
   chunk_size: number;
   total_chunks: number;
   chunks_processed: number;
+  import_hit_lines?: boolean;
+  last_chunk_index?: number | null;
+  failed_chunk_index?: number | null;
   progress: number;
   parsed_kills: number;
   written_kills: number;
@@ -2313,6 +2316,7 @@ export async function importAdmFilesForServer(
 }
 
 const MANUAL_ADM_IMPORT_CHUNK_SIZE = 25;
+const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 
 type AdmImportJobRow = {
   id: string;
@@ -2327,6 +2331,10 @@ type AdmImportJobRow = {
   chunk_size: number;
   total_chunks: number;
   chunks_processed: number;
+  import_hit_lines?: number | null;
+  raw_kill_lines_found?: number | null;
+  last_chunk_index?: number | null;
+  failed_chunk_index?: number | null;
   parsed_kills: number;
   written_kills: number;
   duplicate_skips: number;
@@ -2426,6 +2434,219 @@ export async function createAdmImportJobForServer(
   const row = await getAdmImportJob(env, input.linkedServerId, id);
   if (!row) throw new Error("ADM import job could not be created.");
   return toAdmImportJobProgress(row);
+}
+
+export async function startAdmImportLineJobForServer(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    filename: string;
+    totalLines: number;
+    totalChunks: number;
+    source?: "manual_file_upload" | "manual_paste" | string;
+    chunkSize?: number;
+    importHitLines?: boolean;
+  },
+): Promise<AdmImportJobProgressResult> {
+  await ensureAdmSyncSchema(env);
+  const server = await getLinkedServerForAdmImport(env, input.linkedServerId);
+  if (!server) throw new Error("Server not found.");
+  const filename = sanitizeManualAdmFilename(input.filename);
+  if (!filename) throw new Error("A valid ADM filename is required.");
+  const totalLines = Math.max(1, Math.trunc(Number(input.totalLines ?? 0)));
+  const chunkSize = Math.max(1, Math.min(25, Math.trunc(input.chunkSize ?? MANUAL_ADM_UPLOAD_CHUNK_SIZE)));
+  const totalChunks = Math.max(1, Math.trunc(Number(input.totalChunks ?? Math.ceil(totalLines / chunkSize))));
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const source = input.source ?? "manual_file_upload";
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `INSERT INTO adm_import_jobs (
+        id, server_id, source_service_id, filename, source, status, adm_text,
+        total_lines, current_line, chunk_size, total_chunks, chunks_processed,
+        import_hit_lines, raw_kill_lines_found, last_chunk_index, failed_chunk_index,
+        parsed_kills, written_kills, duplicate_skips, joins, disconnects,
+        playerlist_snapshots, deaths, suicides, uncredited_deaths, hit_lines,
+        raw_events, player_events, failed_writes, public_cache_updated,
+        discord_jobs_queued, warnings_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'queued', '', ?, 0, ?, ?, 0, ?, 0, -1, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '[]', ?, ?)`,
+    )
+    .bind(
+      id,
+      input.linkedServerId,
+      server.nitrado_service_id,
+      filename,
+      source,
+      totalLines,
+      chunkSize,
+      totalChunks,
+      input.importHitLines ? 1 : 0,
+      now,
+      now,
+    )
+    .run();
+
+  const row = await getAdmImportJob(env, input.linkedServerId, id);
+  if (!row) throw new Error("ADM import job could not be created.");
+  return toAdmImportJobProgress(row);
+}
+
+export async function processAdmImportJobLineChunk(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    jobId: string;
+    filename: string;
+    chunkIndex: number;
+    startLine: number;
+    lines: string[];
+    previousLines?: string[];
+  },
+): Promise<AdmImportJobProgressResult> {
+  await ensureAdmSyncSchema(env);
+  const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+  if (!row) throw new Error("ADM import job not found.");
+  if (row.status === "completed") return toAdmImportJobProgress(row);
+
+  const server = await getLinkedServerForAdmImport(env, input.linkedServerId);
+  if (!server) throw new Error("Server not found.");
+  if (sanitizeManualAdmFilename(input.filename) !== row.filename) throw new Error("ADM import chunk filename does not match the job.");
+
+  const chunkLines = Array.isArray(input.lines) ? input.lines.filter((line): line is string => typeof line === "string") : [];
+  if (!chunkLines.some((line) => line.trim().length > 0)) throw new Error("ADM import chunk did not contain readable lines.");
+  const startLine = Math.max(0, Math.trunc(Number(input.startLine ?? 0)));
+  const currentLine = Math.max(0, Number(row.current_line ?? 0));
+  const chunkIndex = Math.max(0, Math.trunc(Number(input.chunkIndex ?? 0)));
+  const db = requireDb(env);
+
+  if (startLine < currentLine) {
+    return toAdmImportJobProgress(row);
+  }
+  if (startLine > currentLine) {
+    throw new Error(`ADM import chunk is out of order. Expected line ${currentLine}, received ${startLine}.`);
+  }
+
+  await db
+    .prepare("UPDATE adm_import_jobs SET status = 'writing', error_message = NULL, failed_chunk_index = NULL, updated_at = ? WHERE id = ? AND server_id = ?")
+    .bind(new Date().toISOString(), row.id, input.linkedServerId)
+    .run();
+
+  try {
+    const context = withAdmFile(verifyAdmServerScope(server, row.id), row.filename);
+    const chunkResult = await writeAdmImportChunk(env, {
+      context,
+      chunkLines,
+      previousLines: Array.isArray(input.previousLines) ? input.previousLines.filter((line): line is string => typeof line === "string") : [],
+      startLine,
+      endLine: startLine + chunkLines.length,
+      includeHitLines: Number(row.import_hit_lines ?? 0) === 1,
+      triggerType: row.source,
+    });
+    const warnings = [...parseJobWarnings(row), ...chunkResult.parserWarnings.map((warning) => `${row.filename}: ${warning}`)];
+    const nextCurrentLine = Math.min(Number(row.total_lines ?? startLine + chunkLines.length), startLine + chunkLines.length);
+    const chunksProcessed = Math.max(Number(row.chunks_processed ?? 0), chunkIndex + 1);
+    await db
+      .prepare(
+        `UPDATE adm_import_jobs SET
+          status = 'queued',
+          current_line = ?,
+          chunks_processed = ?,
+          raw_kill_lines_found = raw_kill_lines_found + ?,
+          last_chunk_index = ?,
+          failed_chunk_index = NULL,
+          parsed_kills = parsed_kills + ?,
+          written_kills = written_kills + ?,
+          duplicate_skips = duplicate_skips + ?,
+          joins = joins + ?,
+          disconnects = disconnects + ?,
+          playerlist_snapshots = playerlist_snapshots + ?,
+          deaths = deaths + ?,
+          suicides = suicides + ?,
+          uncredited_deaths = uncredited_deaths + ?,
+          hit_lines = hit_lines + ?,
+          raw_events = raw_events + ?,
+          player_events = player_events + ?,
+          failed_writes = failed_writes + ?,
+          warnings_json = ?,
+          updated_at = ?
+         WHERE id = ? AND server_id = ?`,
+      )
+      .bind(
+        nextCurrentLine,
+        chunksProcessed,
+        chunkResult.rawKilledByLinesFound,
+        chunkIndex,
+        chunkResult.parsedKills,
+        chunkResult.writtenKills,
+        chunkResult.duplicateSkips,
+        chunkResult.joins,
+        chunkResult.disconnects,
+        chunkResult.playerlistSnapshots,
+        chunkResult.deaths,
+        chunkResult.suicides,
+        chunkResult.uncreditedDeaths,
+        chunkResult.hitLines,
+        chunkResult.rawEventsStored,
+        chunkResult.playerEventsStored,
+        chunkResult.failedWrites,
+        JSON.stringify(warnings),
+        new Date().toISOString(),
+        row.id,
+        input.linkedServerId,
+      )
+      .run();
+
+    const updated = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+    if (!updated) throw new Error("ADM import job disappeared after chunk write.");
+    return toAdmImportJobProgress(updated);
+  } catch (error) {
+    await db
+      .prepare("UPDATE adm_import_jobs SET status = 'failed', error_message = ?, failed_chunk_index = ?, failed_writes = failed_writes + 1, updated_at = ? WHERE id = ? AND server_id = ?")
+      .bind(safeSyncErrorMessage(error), chunkIndex, new Date().toISOString(), row.id, input.linkedServerId)
+      .run();
+    throw error;
+  }
+}
+
+export async function finishAdmImportLineJobForServer(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    jobId: string;
+  },
+): Promise<AdmImportJobProgressResult> {
+  await ensureAdmSyncSchema(env);
+  const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+  if (!row) throw new Error("ADM import job not found.");
+  if (row.status === "completed") return toAdmImportJobProgress(row);
+  if (Number(row.current_line ?? 0) < Number(row.total_lines ?? 0)) {
+    throw new Error(`ADM import job is incomplete. Processed ${row.current_line} of ${row.total_lines} lines.`);
+  }
+  const server = await getLinkedServerForAdmImport(env, input.linkedServerId);
+  if (!server) throw new Error("Server not found.");
+  return await finalizeAdmImportJob(env, server, row, null);
+}
+
+export async function retryAdmImportLineJobForServer(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    jobId: string;
+  },
+): Promise<AdmImportJobProgressResult> {
+  await ensureAdmSyncSchema(env);
+  const row = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+  if (!row) throw new Error("ADM import job not found.");
+  if (row.status === "completed") return toAdmImportJobProgress(row);
+  const db = requireDb(env);
+  await db
+    .prepare("UPDATE adm_import_jobs SET status = 'queued', error_message = NULL, failed_chunk_index = NULL, updated_at = ? WHERE id = ? AND server_id = ?")
+    .bind(new Date().toISOString(), row.id, input.linkedServerId)
+    .run();
+  const updated = await getAdmImportJob(env, input.linkedServerId, input.jobId);
+  if (!updated) throw new Error("ADM import job disappeared after retry reset.");
+  return toAdmImportJobProgress(updated);
 }
 
 export async function processNextAdmImportJobChunk(
@@ -2536,21 +2757,29 @@ async function writeAdmImportChunk(
   env: Env,
   input: {
     context: AdmSyncContext;
-    allLines: string[];
+    allLines?: string[];
+    chunkLines?: string[];
+    previousLines?: string[];
     startLine: number;
-    endLine: number;
+    endLine?: number;
+    includeHitLines?: boolean;
     triggerType: string;
   },
 ): Promise<AdmChunkWriteResult> {
-  const chunkLines = input.allLines.slice(input.startLine, input.endLine);
+  const chunkLines = input.chunkLines ?? input.allLines?.slice(input.startLine, input.endLine ?? input.startLine) ?? [];
   const parsedLines = parseAdmLines(chunkLines, { admDate: extractAdmDateFromFile(input.context.admFileName) ?? undefined });
+  const reportCursorStart = input.chunkLines ? 0 : input.startLine;
+  const reportCursorEnd = input.chunkLines ? chunkLines.length : input.endLine ?? input.startLine + chunkLines.length;
   const chunkReport = buildAdmImportDebugReport(chunkLines, {
     admFileName: input.context.admFileName,
-    cursorStart: input.startLine,
-    cursorEnd: input.endLine,
+    cursorStart: reportCursorStart,
+    cursorEnd: reportCursorEnd,
   });
-  const recentDeathLines = seedRecentDeathContext(input.allLines, input.context.admFileName, input.startLine);
+  const recentDeathLines = input.previousLines
+    ? seedRecentDeathContextFromPreviousLines(input.previousLines, input.context.admFileName, input.startLine)
+    : seedRecentDeathContext(input.allLines ?? [], input.context.admFileName, input.startLine);
   const parserWarnings = buildParserWarnings(chunkReport);
+  const includeHitLines = input.includeHitLines === true;
   let rawEventsStored = 0;
   let playerEventsStored = 0;
   let buildEventsStored = 0;
@@ -2565,6 +2794,9 @@ async function writeAdmImportChunk(
   for (let index = 0; index < parsedLines.length; index += 1) {
     const parsed = parsedLines[index];
     const lineNumber = input.startLine + index + 1;
+    if (!includeHitLines && isHitEvent(parsed)) {
+      continue;
+    }
     const rawInserted = await insertRawEvent(env, input.context, lineNumber, parsed.rawLine, parsed);
     if (rawInserted) {
       rawEventsStored += 1;
@@ -2622,11 +2854,23 @@ function seedRecentDeathContext(lines: string[], filename: string | null, startL
   return recentDeathLines;
 }
 
+function seedRecentDeathContextFromPreviousLines(lines: string[], filename: string | null, nextStartLine: number) {
+  const recentDeathLines = new Map<string, number>();
+  if (!lines.length) return recentDeathLines;
+  const startLine = Math.max(0, nextStartLine - lines.length);
+  const previous = parseAdmLines(lines, { admDate: extractAdmDateFromFile(filename) ?? undefined });
+  for (let index = 0; index < previous.length; index += 1) {
+    const parsed = previous[index];
+    if (isDeathCountingEvent(parsed)) markDeathCounted(recentDeathLines, parsed, startLine + index + 1);
+  }
+  return recentDeathLines;
+}
+
 async function finalizeAdmImportJob(
   env: Env,
   server: ManualImportLinkedServer,
   row: AdmImportJobRow,
-  lines: string[],
+  lines: string[] | null,
 ): Promise<AdmImportJobProgressResult> {
   const existing = await getAdmImportJob(env, row.server_id, row.id);
   if (existing?.status === "completed") return toAdmImportJobProgress(existing);
@@ -2643,6 +2887,7 @@ async function finalizeAdmImportJob(
   let discordQueuesCreated = 0;
   let discordQueueStatus: AdmDatabaseImportReport["discordQueueStatus"] = "skipped";
   const warnings = parseJobWarnings(row);
+  const totalLines = Number(row.total_lines ?? 0);
 
   await rebuildServerStats(env, row.server_id);
   await rebuildServerBuildStats(env, row.server_id);
@@ -2686,11 +2931,28 @@ async function finalizeAdmImportJob(
     }
   }
 
-  const fullReport = buildAdmImportDebugReport(lines, {
-    admFileName: row.filename,
-    cursorStart: 0,
-    cursorEnd: lines.length,
-  });
+  const fullReport = lines
+    ? buildAdmImportDebugReport(lines, {
+      admFileName: row.filename,
+      cursorStart: 0,
+      cursorEnd: lines.length,
+    })
+    : {
+      admFileName: row.filename,
+      cursorStart: 0,
+      cursorEnd: totalLines,
+      rawKilledByLinesFound: Number(row.raw_kill_lines_found ?? row.parsed_kills ?? 0),
+      parsedPvpKills: Number(row.parsed_kills ?? 0),
+      parsedJoins: Number(row.joins ?? 0),
+      parsedDisconnects: Number(row.disconnects ?? 0),
+      parsedPlayerlistSnapshots: Number(row.playerlist_snapshots ?? 0),
+      parsedHitLines: Number(row.hit_lines ?? 0),
+      skippedDeadHitLines: 0,
+      parsedSuicides: Number(row.suicides ?? 0),
+      parsedUncreditedDeaths: Number(row.uncredited_deaths ?? 0),
+      duplicateSkips: Number(row.duplicate_skips ?? 0),
+      pvpKillLineNumbers: [],
+    };
   const report: AdmDatabaseImportReport = {
     ...fullReport,
     importSource: row.source,
@@ -2702,7 +2964,7 @@ async function finalizeAdmImportJob(
     writtenKills: Number(row.written_kills ?? 0),
     failedWrites: Number(row.failed_writes ?? 0),
     cursorBefore: 0,
-    cursorAfter: lines.length,
+    cursorAfter: totalLines,
     cursorAdvanced: true,
     publicCacheUpdated,
     discordQueuesCreated,
@@ -2718,19 +2980,21 @@ async function finalizeAdmImportJob(
     cursorHashMatched: null,
     duplicateSkips: Number(row.duplicate_skips ?? 0),
   };
-  const cursorSnapshot = await buildProcessedCursorSnapshot(lines, lines.length);
+  const cursorSnapshot = lines
+    ? await buildProcessedCursorSnapshot(lines, lines.length)
+    : { hash: null, preview: null };
   await upsertSyncState(env, row.server_id, {
     latestAdmFile: row.filename,
     latestAdmPath: row.filename,
     sourceServiceId: server.nitrado_service_id ?? row.source_service_id ?? "manual-adm-import",
     lastProcessedFile: row.filename,
-    lastProcessedLine: lines.length,
-    lastProcessedOffset: calculateAdmLineOffset(lines, lines.length),
+    lastProcessedLine: totalLines,
+    lastProcessedOffset: lines ? calculateAdmLineOffset(lines, lines.length) : totalLines,
     status: "completed",
     message: `Manual ADM import completed in ${row.total_chunks} chunk${Number(row.total_chunks) === 1 ? "" : "s"}. Kill events inserted: ${row.written_kills}.`,
     lastSyncAt: now,
-    linesRead: lines.length,
-    linesProcessed: lines.length,
+    linesRead: totalLines,
+    linesProcessed: totalLines,
     rawEventsStored: Number(row.raw_events ?? 0),
     playerEventsStored: Number(row.player_events ?? 0),
     killEventsStored: Number(row.written_kills ?? 0),
@@ -2758,7 +3022,7 @@ async function finalizeAdmImportJob(
   const syncRunMessage = buildAdmImportSyncRunMessage({
     source: row.source,
     filename: row.filename,
-    rawLines: lines.length,
+    rawLines: totalLines,
     parsedKills: fullReport.parsedPvpKills,
     writtenKills: Number(row.written_kills ?? 0),
     joins: Number(row.joins ?? 0),
@@ -2775,8 +3039,8 @@ async function finalizeAdmImportJob(
     triggerType: row.source,
     status: "completed",
     message: syncRunMessage,
-    linesRead: lines.length,
-    linesProcessed: lines.length,
+    linesRead: totalLines,
+    linesProcessed: totalLines,
     eventsCreated: Number(row.player_events ?? 0) + Number(row.written_kills ?? 0),
     killsCreated: Number(row.written_kills ?? 0),
     startedAt: row.created_at ?? now,
@@ -2792,7 +3056,7 @@ async function finalizeAdmImportJob(
     job_id: row.id,
     chunks_processed: Number(row.total_chunks ?? 0),
     total_chunks: Number(row.total_chunks ?? 0),
-    raw_lines: lines.length,
+    raw_lines: totalLines,
     raw_kill_lines_found: fullReport.rawKilledByLinesFound,
     parsed_kills: fullReport.parsedPvpKills,
     written_kills: Number(row.written_kills ?? 0),
@@ -2810,7 +3074,7 @@ async function finalizeAdmImportJob(
     public_cache_updated: publicCacheUpdated,
     discord_jobs_queued: discordQueuesCreated,
     parser_warnings: warnings,
-    kill_previews: buildKillPreviews(lines, row.filename, 5),
+    kill_previews: lines ? buildKillPreviews(lines, row.filename, 5) : [],
     import_report_id: row.id,
     imported_at: now,
   };
@@ -2868,6 +3132,9 @@ function toAdmImportJobProgress(row: AdmImportJobRow): AdmImportJobProgressResul
     chunk_size: Number(row.chunk_size ?? MANUAL_ADM_IMPORT_CHUNK_SIZE),
     total_chunks: Number(row.total_chunks ?? 1),
     chunks_processed: Number(row.chunks_processed ?? 0),
+    import_hit_lines: Number(row.import_hit_lines ?? 0) === 1,
+    last_chunk_index: row.last_chunk_index === null || row.last_chunk_index === undefined ? null : Number(row.last_chunk_index),
+    failed_chunk_index: row.failed_chunk_index === null || row.failed_chunk_index === undefined ? null : Number(row.failed_chunk_index),
     progress: totalLines > 0 ? currentLine / totalLines : 0,
     parsed_kills: Number(row.parsed_kills ?? 0),
     written_kills: Number(row.written_kills ?? 0),
@@ -3288,6 +3555,7 @@ export async function getRecentAdmSyncEvents(
            occurred_at,
            created_at,
            raw_line,
+           0 AS event_priority,
            COALESCE(occurred_at, created_at) AS sort_time
        FROM kill_events
        WHERE linked_server_id = ?
@@ -3316,9 +3584,15 @@ export async function getRecentAdmSyncEvents(
            occurred_at,
            created_at,
            raw_line,
+           CASE
+             WHEN event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats') THEN 1
+             WHEN event_type IN ('player_connected', 'player_disconnected', 'playerlist_snapshot') THEN 2
+             ELSE 3
+           END AS event_priority,
            COALESCE(occurred_at, created_at) AS sort_time
        FROM player_events
        WHERE linked_server_id = ?
+         AND event_type NOT LIKE 'player_hit%'
          AND (
             ? = 1
             OR (
@@ -3341,6 +3615,7 @@ export async function getRecentAdmSyncEvents(
            occurred_at,
            created_at,
            raw_line,
+           4 AS event_priority,
            COALESCE(occurred_at, created_at) AS sort_time
        FROM build_events
        WHERE linked_server_id = ?
@@ -3353,7 +3628,7 @@ export async function getRecentAdmSyncEvents(
             )
           )
        )
-       ORDER BY sort_time DESC, created_at DESC
+       ORDER BY event_priority ASC, sort_time DESC, created_at DESC
        LIMIT ?`,
     )
     .bind(
@@ -5635,6 +5910,10 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     chunk_size INTEGER DEFAULT 25,
     total_chunks INTEGER DEFAULT 1,
     chunks_processed INTEGER DEFAULT 0,
+    import_hit_lines INTEGER DEFAULT 0,
+    raw_kill_lines_found INTEGER DEFAULT 0,
+    last_chunk_index INTEGER DEFAULT -1,
+    failed_chunk_index INTEGER,
     parsed_kills INTEGER DEFAULT 0,
     written_kills INTEGER DEFAULT 0,
     duplicate_skips INTEGER DEFAULT 0,

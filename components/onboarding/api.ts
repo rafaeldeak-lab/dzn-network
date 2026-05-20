@@ -210,22 +210,34 @@ export async function bulkImportAdmFiles(linkedServerId: string, data: {
   return manualAdmRequest<BulkAdmImportApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/bulk-import${query}`, data);
 }
 
-export async function createAdmImportJob(linkedServerId: string, data: {
+export async function startAdmImportJob(linkedServerId: string, data: {
   filename: string;
-  admText: string;
+  totalLines: number;
+  totalChunks: number;
+  chunkSize: number;
   source?: "manual_file_upload" | "manual_paste" | string;
+  importHitLines?: boolean;
 }) {
-  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job`, {
-    action: "create",
-    ...data,
-  });
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/start`, data);
 }
 
-export async function processAdmImportJob(linkedServerId: string, jobId: string) {
-  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job`, {
-    action: "process",
-    job_id: jobId,
-  });
+export async function sendAdmImportJobChunk(linkedServerId: string, data: {
+  jobId: string;
+  filename: string;
+  chunkIndex: number;
+  startLine: number;
+  lines: string[];
+  previousLines?: string[];
+}) {
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/chunk`, data);
+}
+
+export async function finishAdmImportJob(linkedServerId: string, jobId: string) {
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/finish`, { jobId });
+}
+
+export async function retryAdmImportJob(linkedServerId: string, jobId: string) {
+  return manualAdmRequest<AdmImportJobApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/import-job/retry`, { jobId });
 }
 
 export async function forceProcessLatestAdm(linkedServerId: string) {

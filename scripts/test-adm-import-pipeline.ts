@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
-  createAdmImportJobForServer,
+  finishAdmImportLineJobForServer,
   getRecentAdmSyncEvents,
   importAdmFilesForServer,
   importAdmTextForServer,
   importReadableAdmLinesIntoDatabase,
-  processNextAdmImportJobChunk,
+  processAdmImportJobLineChunk,
   previewManualAdmText,
+  startAdmImportLineJobForServer,
   type AdmSyncContext,
 } from "../functions/_lib/adm-sync";
 import type { Env } from "../functions/_lib/types";
@@ -57,8 +58,11 @@ async function main() {
   assert.match(bulkEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(bulkEndpointSource, /chunked_import_required/);
   assert.match(bulkEndpointSource, /ADM file imports must use chunked import jobs/);
-  assert.match(dashboardSource, /createAdmImportJob/);
-  assert.match(dashboardSource, /processAdmImportJob/);
+  assert.match(dashboardSource, /startAdmImportJob/);
+  assert.match(dashboardSource, /sendAdmImportJobChunk/);
+  assert.match(dashboardSource, /finishAdmImportJob/);
+  assert.match(dashboardSource, /ADM_IMPORT_UPLOAD_CHUNK_SIZE = 10/);
+  assert.doesNotMatch(dashboardSource, /Chunks"\s+value=\{[^}]*"Fast path"/);
   assert.match(dashboardSource, /for \(const \[index, file\] of files\.entries\(\)\)/);
   assert.match(dashboardSource, /Retry this file/);
   assert.match(dashboardSource, /refreshDashboardAfterManualAdmImport\(\)/);
@@ -351,20 +355,9 @@ async function main() {
   const chunkedDb = new MemoryD1();
   const chunkedResults = [];
   for (const file of bulkFixtureFiles) {
-    let progress = await createAdmImportJobForServer(makeEnv(chunkedDb), {
-      linkedServerId,
-      filename: file.filename,
-      admText: file.admText,
-      source: "manual_file_upload",
-      chunkSize: 25,
-    });
-    while (progress.status !== "completed") {
-      progress = await processNextAdmImportJobChunk(makeEnv(chunkedDb), {
-        linkedServerId,
-        jobId: progress.job_id,
-      });
-    }
+    const progress = await importChunkedAdmText(makeEnv(chunkedDb), linkedServerId, file.filename, file.admText, { chunkSize: 10 });
     assert.equal(progress.file_result?.status, "imported");
+    assert.equal(progress.total_chunks > 1, true);
     chunkedResults.push(progress.file_result);
   }
   assert.equal(chunkedResults.reduce((total, file) => total + Number(file?.parsed_kills ?? 0), 0), 55);
@@ -376,22 +369,11 @@ async function main() {
   assert.equal(chunkedDb.serverStats.get(linkedServerId)?.total_kills, 55);
   assert.equal(chunkedDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
   assert.equal(chunkedDb.automationJobs.length > 0, true);
+  assert.equal(chunkedDb.playerEvents.filter((event) => String(event.event_type).startsWith("player_hit")).length, 0);
 
   const duplicateChunkedResults = [];
   for (const file of bulkFixtureFiles) {
-    let progress = await createAdmImportJobForServer(makeEnv(chunkedDb), {
-      linkedServerId,
-      filename: file.filename,
-      admText: file.admText,
-      source: "manual_file_upload",
-      chunkSize: 25,
-    });
-    while (progress.status !== "completed") {
-      progress = await processNextAdmImportJobChunk(makeEnv(chunkedDb), {
-        linkedServerId,
-        jobId: progress.job_id,
-      });
-    }
+    const progress = await importChunkedAdmText(makeEnv(chunkedDb), linkedServerId, file.filename, file.admText, { chunkSize: 10 });
     duplicateChunkedResults.push(progress.file_result);
   }
   assert.equal(duplicateChunkedResults.reduce((total, file) => total + Number(file?.written_kills ?? 0), 0), 0);
@@ -399,25 +381,41 @@ async function main() {
   assert.equal(chunkedDb.killEvents.length, 55);
 
   const chunkRetryDb = new MemoryD1({ failKillInsertAfter: 0 });
-  let retryProgress = await createAdmImportJobForServer(makeEnv(chunkRetryDb), {
+  const retryLines = latestFixtureLines;
+  let retryProgress = await startAdmImportLineJobForServer(makeEnv(chunkRetryDb), {
     linkedServerId,
     filename: latestFixtureName,
-    admText: readFileSync(`scripts/fixtures/${latestFixtureName}`, "utf8"),
+    totalLines: retryLines.length,
+    totalChunks: Math.ceil(retryLines.length / 25),
     source: "manual_file_upload",
     chunkSize: 25,
   });
   await assert.rejects(
-    () => processNextAdmImportJobChunk(makeEnv(chunkRetryDb), { linkedServerId, jobId: retryProgress.job_id }),
+    () => processAdmImportJobLineChunk(makeEnv(chunkRetryDb), {
+      linkedServerId,
+      jobId: retryProgress.job_id,
+      filename: latestFixtureName,
+      chunkIndex: 0,
+      startLine: 0,
+      lines: retryLines.slice(0, 25),
+      previousLines: [],
+    }),
     /simulated kill_events write failure/,
   );
   assert.equal(chunkRetryDb.admImportJobs.get(retryProgress.job_id)?.current_line, 0);
   chunkRetryDb.failKillInsertAfter = null;
-  while (retryProgress.status !== "completed") {
-    retryProgress = await processNextAdmImportJobChunk(makeEnv(chunkRetryDb), {
+  for (const [index, chunk] of chunkAdmLines(retryLines, 25).entries()) {
+    retryProgress = await processAdmImportJobLineChunk(makeEnv(chunkRetryDb), {
       linkedServerId,
       jobId: retryProgress.job_id,
+      filename: latestFixtureName,
+      chunkIndex: index,
+      startLine: chunk.startLine,
+      lines: chunk.lines,
+      previousLines: retryLines.slice(Math.max(0, chunk.startLine - 5), chunk.startLine),
     });
   }
+  retryProgress = await finishAdmImportLineJobForServer(makeEnv(chunkRetryDb), { linkedServerId, jobId: retryProgress.job_id });
   assert.equal(retryProgress.file_result?.parsed_kills, 5);
   assert.equal(retryProgress.file_result?.written_kills, 5);
   assert.equal(chunkRetryDb.killEvents.length, 5);
@@ -601,6 +599,46 @@ function countBy(rows: Array<Record<string, unknown>>, key: string) {
     acc[value] = (acc[value] ?? 0) + 1;
     return acc;
   }, {});
+}
+
+function chunkAdmLines(lines: string[], chunkSize: number) {
+  const chunks: Array<{ startLine: number; lines: string[] }> = [];
+  for (let startLine = 0; startLine < lines.length; startLine += chunkSize) {
+    chunks.push({ startLine, lines: lines.slice(startLine, startLine + chunkSize) });
+  }
+  return chunks;
+}
+
+async function importChunkedAdmText(
+  env: Env,
+  serverId: string,
+  filename: string,
+  admText: string,
+  options: { chunkSize: number; importHitLines?: boolean },
+) {
+  const lines = admText.split(/\r?\n/).filter((line) => line.trim());
+  const chunks = chunkAdmLines(lines, options.chunkSize);
+  let progress = await startAdmImportLineJobForServer(env, {
+    linkedServerId: serverId,
+    filename,
+    totalLines: lines.length,
+    totalChunks: chunks.length,
+    source: "manual_file_upload",
+    chunkSize: options.chunkSize,
+    importHitLines: options.importHitLines ?? false,
+  });
+  for (const [index, chunk] of chunks.entries()) {
+    progress = await processAdmImportJobLineChunk(env, {
+      linkedServerId: serverId,
+      jobId: progress.job_id,
+      filename,
+      chunkIndex: index,
+      startLine: chunk.startLine,
+      lines: chunk.lines,
+      previousLines: lines.slice(Math.max(0, chunk.startLine - 5), chunk.startLine),
+    });
+  }
+  return await finishAdmImportLineJobForServer(env, { linkedServerId: serverId, jobId: progress.job_id });
 }
 
 async function sha1(value: string) {
@@ -831,6 +869,7 @@ class MemoryStatement {
       return changed(1);
     }
     if (q.includes("insert into adm_import_jobs")) {
+      const chunkProtocol = q.includes("import_hit_lines");
       this.db.admImportJobs.set(String(this.values[0]), {
         id: this.values[0],
         server_id: this.values[1],
@@ -838,12 +877,16 @@ class MemoryStatement {
         filename: this.values[3],
         source: this.values[4],
         status: "queued",
-        adm_text: this.values[5],
-        total_lines: Number(this.values[6] ?? 0),
+        adm_text: chunkProtocol ? "" : this.values[5],
+        total_lines: Number(this.values[chunkProtocol ? 5 : 6] ?? 0),
         current_line: 0,
-        chunk_size: Number(this.values[7] ?? 25),
-        total_chunks: Number(this.values[8] ?? 1),
+        chunk_size: Number(this.values[chunkProtocol ? 6 : 7] ?? 25),
+        total_chunks: Number(this.values[chunkProtocol ? 7 : 8] ?? 1),
         chunks_processed: 0,
+        import_hit_lines: chunkProtocol ? this.values[8] : 0,
+        raw_kill_lines_found: 0,
+        last_chunk_index: -1,
+        failed_chunk_index: null,
         parsed_kills: 0,
         written_kills: 0,
         duplicate_skips: 0,
@@ -862,8 +905,8 @@ class MemoryStatement {
         warnings_json: "[]",
         error_message: null,
         result_json: null,
-        created_at: this.values[9],
-        updated_at: this.values[10],
+        created_at: this.values[chunkProtocol ? 9 : 9],
+        updated_at: this.values[chunkProtocol ? 10 : 10],
         completed_at: null,
       });
       return changed(1);
@@ -877,12 +920,14 @@ class MemoryStatement {
       return changed(1);
     }
     if (q.startsWith("update adm_import_jobs set status = 'failed'")) {
-      const row = this.db.admImportJobs.get(String(this.values[2]));
+      const chunkProtocol = q.includes("failed_chunk_index");
+      const row = this.db.admImportJobs.get(String(this.values[chunkProtocol ? 3 : 2]));
       if (!row) return changed(0);
       row.status = "failed";
       row.error_message = this.values[0];
+      if (chunkProtocol) row.failed_chunk_index = this.values[1];
       row.failed_writes = Number(row.failed_writes ?? 0) + 1;
-      row.updated_at = this.values[1];
+      row.updated_at = this.values[chunkProtocol ? 2 : 1];
       return changed(1);
     }
     if (q.startsWith("update adm_import_jobs set status = 'rebuilding'")) {
@@ -892,27 +937,44 @@ class MemoryStatement {
       row.updated_at = this.values[0];
       return changed(1);
     }
-    if (q.includes("update adm_import_jobs set") && q.includes("parsed_kills = parsed_kills +")) {
-      const row = this.db.admImportJobs.get(String(this.values[18]));
+    if (q.startsWith("update adm_import_jobs set status = 'queued'") && q.includes("failed_chunk_index = null") && !q.includes("parsed_kills")) {
+      const row = this.db.admImportJobs.get(String(this.values[1]));
       if (!row) return changed(0);
-      row.status = this.values[0];
-      row.current_line = Number(this.values[1] ?? row.current_line);
-      row.chunks_processed = Number(this.values[2] ?? row.chunks_processed);
-      row.parsed_kills = Number(row.parsed_kills ?? 0) + Number(this.values[3] ?? 0);
-      row.written_kills = Number(row.written_kills ?? 0) + Number(this.values[4] ?? 0);
-      row.duplicate_skips = Number(row.duplicate_skips ?? 0) + Number(this.values[5] ?? 0);
-      row.joins = Number(row.joins ?? 0) + Number(this.values[6] ?? 0);
-      row.disconnects = Number(row.disconnects ?? 0) + Number(this.values[7] ?? 0);
-      row.playerlist_snapshots = Number(row.playerlist_snapshots ?? 0) + Number(this.values[8] ?? 0);
-      row.deaths = Number(row.deaths ?? 0) + Number(this.values[9] ?? 0);
-      row.suicides = Number(row.suicides ?? 0) + Number(this.values[10] ?? 0);
-      row.uncredited_deaths = Number(row.uncredited_deaths ?? 0) + Number(this.values[11] ?? 0);
-      row.hit_lines = Number(row.hit_lines ?? 0) + Number(this.values[12] ?? 0);
-      row.raw_events = Number(row.raw_events ?? 0) + Number(this.values[13] ?? 0);
-      row.player_events = Number(row.player_events ?? 0) + Number(this.values[14] ?? 0);
-      row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[15] ?? 0);
-      row.warnings_json = this.values[16];
-      row.updated_at = this.values[17];
+      row.status = "queued";
+      row.error_message = null;
+      row.failed_chunk_index = null;
+      row.updated_at = this.values[0];
+      return changed(1);
+    }
+    if (q.includes("update adm_import_jobs set") && q.includes("parsed_kills = parsed_kills +")) {
+      const chunkProtocol = q.includes("raw_kill_lines_found = raw_kill_lines_found +");
+      const row = this.db.admImportJobs.get(String(this.values[chunkProtocol ? 19 : 18]));
+      if (!row) return changed(0);
+      row.status = chunkProtocol ? "queued" : this.values[0];
+      row.current_line = Number(this.values[chunkProtocol ? 0 : 1] ?? row.current_line);
+      row.chunks_processed = Number(this.values[chunkProtocol ? 1 : 2] ?? row.chunks_processed);
+      let offset = 3;
+      if (chunkProtocol) {
+        row.raw_kill_lines_found = Number(row.raw_kill_lines_found ?? 0) + Number(this.values[2] ?? 0);
+        row.last_chunk_index = this.values[3];
+        row.failed_chunk_index = null;
+        offset = 4;
+      }
+      row.parsed_kills = Number(row.parsed_kills ?? 0) + Number(this.values[offset] ?? 0);
+      row.written_kills = Number(row.written_kills ?? 0) + Number(this.values[offset + 1] ?? 0);
+      row.duplicate_skips = Number(row.duplicate_skips ?? 0) + Number(this.values[offset + 2] ?? 0);
+      row.joins = Number(row.joins ?? 0) + Number(this.values[offset + 3] ?? 0);
+      row.disconnects = Number(row.disconnects ?? 0) + Number(this.values[offset + 4] ?? 0);
+      row.playerlist_snapshots = Number(row.playerlist_snapshots ?? 0) + Number(this.values[offset + 5] ?? 0);
+      row.deaths = Number(row.deaths ?? 0) + Number(this.values[offset + 6] ?? 0);
+      row.suicides = Number(row.suicides ?? 0) + Number(this.values[offset + 7] ?? 0);
+      row.uncredited_deaths = Number(row.uncredited_deaths ?? 0) + Number(this.values[offset + 8] ?? 0);
+      row.hit_lines = Number(row.hit_lines ?? 0) + Number(this.values[offset + 9] ?? 0);
+      row.raw_events = Number(row.raw_events ?? 0) + Number(this.values[offset + 10] ?? 0);
+      row.player_events = Number(row.player_events ?? 0) + Number(this.values[offset + 11] ?? 0);
+      row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12] ?? 0);
+      row.warnings_json = this.values[offset + 13];
+      row.updated_at = this.values[offset + 14];
       return changed(1);
     }
     if (q.includes("update adm_import_jobs set") && q.includes("status = 'completed'")) {
@@ -1053,10 +1115,11 @@ class MemoryStatement {
             occurred_at: event.occurred_at ?? null,
             created_at: event.created_at ?? event.occurred_at ?? null,
             raw_line: event.raw_line ?? null,
+            event_priority: 0,
             sort_time: event.occurred_at ?? event.created_at ?? "",
           })),
         ...this.db.playerEvents
-          .filter((event) => event.linked_server_id === linkedServer)
+          .filter((event) => event.linked_server_id === linkedServer && !String(event.event_type ?? "").startsWith("player_hit"))
           .map((event) => ({
             source: "player",
             event_type: event.event_type ?? "unknown",
@@ -1068,10 +1131,11 @@ class MemoryStatement {
             occurred_at: event.occurred_at ?? null,
             created_at: event.created_at ?? event.occurred_at ?? null,
             raw_line: event.raw_line ?? null,
+            event_priority: ["player_suicide", "player_killed_environment", "player_died_stats"].includes(String(event.event_type)) ? 1 : ["player_connected", "player_disconnected", "playerlist_snapshot"].includes(String(event.event_type)) ? 2 : 3,
             sort_time: event.occurred_at ?? event.created_at ?? "",
           })),
       ]
-        .sort((a, b) => String(b.sort_time).localeCompare(String(a.sort_time)))
+        .sort((a, b) => Number(a.event_priority) - Number(b.event_priority) || String(b.sort_time).localeCompare(String(a.sort_time)))
         .slice(0, limit);
       return { results: rows as T[] };
     }

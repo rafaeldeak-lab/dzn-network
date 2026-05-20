@@ -992,6 +992,9 @@ export type AdmImportJobProgressResult = {
   chunk_size: number;
   total_chunks: number;
   chunks_processed: number;
+  import_hit_lines?: boolean;
+  last_chunk_index?: number | null;
+  failed_chunk_index?: number | null;
   progress: number;
   parsed_kills: number;
   written_kills: number;

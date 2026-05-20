@@ -32,7 +32,7 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, processAdmImportJob, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -68,9 +68,13 @@ type AdmBulkProgress = {
   filename: string | null;
   chunkCurrent?: number;
   chunkTotal?: number;
+  status?: string;
   writtenKills?: number;
   duplicateSkips?: number;
 };
+
+const ADM_IMPORT_UPLOAD_CHUNK_SIZE = 10;
+const ADM_IMPORT_PREVIOUS_LINE_CONTEXT = 5;
 
 export function Dashboard() {
   const [auth, setAuth] = useState<AuthResponse | null>(null);
@@ -237,6 +241,7 @@ function ServerDashboard({
   const [manualAdmFilename, setManualAdmFilename] = useState("");
   const [manualAdmText, setManualAdmText] = useState("");
   const [manualAdmFiles, setManualAdmFiles] = useState<AdmUploadFile[]>([]);
+  const [manualAdmImportHitLines, setManualAdmImportHitLines] = useState(false);
   const [manualAdmImporting, setManualAdmImporting] = useState(false);
   const [manualAdmPreviewing, setManualAdmPreviewing] = useState(false);
   const [manualAdmImportResult, setManualAdmImportResult] = useState<ManualAdmImportResult | null>(null);
@@ -809,10 +814,23 @@ function ServerDashboard({
     fileIndex: number,
     fileTotal: number,
   ): Promise<BulkAdmFileResult> {
-    const created = await createAdmImportJob(server.id, {
+    const lines = splitAdmTextForUpload(file.admText);
+    if (!lines.length) {
+      return makeFailedBulkAdmFileResult(file, {
+        ok: false,
+        error_code: "empty_adm_file",
+        message: "ADM file did not contain readable lines.",
+        details: { filename: file.filename },
+      }, source);
+    }
+    const chunks = chunkAdmLinesForUpload(lines, ADM_IMPORT_UPLOAD_CHUNK_SIZE);
+    const created = await startAdmImportJob(server.id, {
       filename: file.filename,
-      admText: file.admText,
+      totalLines: lines.length,
+      totalChunks: chunks.length,
+      chunkSize: ADM_IMPORT_UPLOAD_CHUNK_SIZE,
       source,
+      importHitLines: manualAdmImportHitLines,
     });
     if (!created.ok) return makeFailedBulkAdmFileResult(file, created, source);
 
@@ -823,20 +841,41 @@ function ServerDashboard({
       filename: file.filename,
       chunkCurrent: progress.chunks_processed,
       chunkTotal: progress.total_chunks,
+      status: "queued",
       writtenKills: progress.written_kills,
       duplicateSkips: progress.duplicate_skips,
     });
 
-    while (progress.status !== "completed") {
-      const next = await processAdmImportJob(server.id, progress.job_id);
+    for (const chunk of chunks) {
+      setBulkAdmImportProgress({
+        current: fileIndex,
+        total: fileTotal,
+        filename: file.filename,
+        chunkCurrent: chunk.index,
+        chunkTotal: chunks.length,
+        status: `processing chunk ${chunk.index + 1}/${chunks.length}`,
+        writtenKills: progress.written_kills,
+        duplicateSkips: progress.duplicate_skips,
+      });
+      const next = await sendAdmImportJobChunk(server.id, {
+        jobId: progress.job_id,
+        filename: file.filename,
+        chunkIndex: chunk.index,
+        startLine: chunk.startLine,
+        lines: chunk.lines,
+        previousLines: lines.slice(Math.max(0, chunk.startLine - ADM_IMPORT_PREVIOUS_LINE_CONTEXT), chunk.startLine),
+      });
       if (!next.ok) {
         return makeFailedBulkAdmFileResult(file, {
           ...next,
           details: {
             ...(typeof next.details === "object" && next.details ? next.details : {}),
+            endpoint: "/adm/import-job/chunk",
+            chunk_index: chunk.index,
+            start_line: chunk.startLine,
             job_id: progress.job_id,
             chunks_processed: progress.chunks_processed,
-            total_chunks: progress.total_chunks,
+            total_chunks: chunks.length,
             written_kills: progress.written_kills,
             duplicate_skips: progress.duplicate_skips,
           },
@@ -849,10 +888,38 @@ function ServerDashboard({
         filename: file.filename,
         chunkCurrent: progress.chunks_processed,
         chunkTotal: progress.total_chunks,
+        status: progress.status,
         writtenKills: progress.written_kills,
         duplicateSkips: progress.duplicate_skips,
       });
     }
+
+    setBulkAdmImportProgress({
+      current: fileIndex,
+      total: fileTotal,
+      filename: file.filename,
+      chunkCurrent: progress.chunks_processed,
+      chunkTotal: progress.total_chunks,
+      status: "finishing",
+      writtenKills: progress.written_kills,
+      duplicateSkips: progress.duplicate_skips,
+    });
+    const finished = await finishAdmImportJob(server.id, progress.job_id);
+    if (!finished.ok) {
+      return makeFailedBulkAdmFileResult(file, {
+        ...finished,
+        details: {
+          ...(typeof finished.details === "object" && finished.details ? finished.details : {}),
+          endpoint: "/adm/import-job/finish",
+          job_id: progress.job_id,
+          chunks_processed: progress.chunks_processed,
+          total_chunks: progress.total_chunks,
+          written_kills: progress.written_kills,
+          duplicate_skips: progress.duplicate_skips,
+        },
+      }, source);
+    }
+    progress = finished;
 
     return progress.file_result ?? makeFailedBulkAdmFileResult(file, {
       ok: false,
@@ -1559,10 +1626,12 @@ function ServerDashboard({
                 bulkResult={bulkAdmImportResult}
                 bulkFailure={bulkAdmImportError}
                 bulkProgress={bulkAdmImportProgress}
+                importHitLines={manualAdmImportHitLines}
                 refreshFailed={manualAdmRefreshFailed}
                 history={syncStatus?.manual_import_history ?? []}
                 onFilenameChange={setManualAdmFilename}
                 onTextChange={setManualAdmText}
+                onImportHitLinesChange={setManualAdmImportHitLines}
                 onFileSelected={loadManualAdmFile}
                 onFilesSelected={loadManualAdmFiles}
                 onImport={importPastedAdmNow}
@@ -3366,10 +3435,12 @@ function ManualAdmImportPanel({
   bulkResult,
   bulkFailure,
   bulkProgress,
+  importHitLines,
   refreshFailed,
   history,
   onFilenameChange,
   onTextChange,
+  onImportHitLinesChange,
   onFileSelected,
   onFilesSelected,
   onImport,
@@ -3390,10 +3461,12 @@ function ManualAdmImportPanel({
   bulkResult: BulkAdmImportResult | null;
   bulkFailure: ManualAdmImportErrorResult | null;
   bulkProgress: AdmBulkProgress | null;
+  importHitLines: boolean;
   refreshFailed: boolean;
   history: AdmSyncStatus["manual_import_history"];
   onFilenameChange: (value: string) => void;
   onTextChange: (value: string) => void;
+  onImportHitLinesChange: (value: boolean) => void;
   onFileSelected: (file: File | null) => void;
   onFilesSelected: (files: FileList | File[] | null) => void;
   onImport: () => void;
@@ -3471,9 +3544,23 @@ function ManualAdmImportPanel({
           />
         </label>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs font-bold text-zinc-400">
-            Imports use the same ADM parser/write path as scheduled sync, rebuild stats, refresh public cache, and queue allowed Discord posts.
-          </p>
+          <div className="grid gap-2">
+            <p className="text-xs font-bold text-zinc-400">
+              Imports use browser-side 10-line chunks, rebuild stats once after each file, refresh public cache, and queue allowed Discord posts.
+            </p>
+            <label className="flex items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold normal-case text-zinc-300">
+              <input
+                type="checkbox"
+                checked={importHitLines}
+                onChange={(event) => onImportHitLinesChange(event.currentTarget.checked)}
+                className="mt-0.5 h-4 w-4 accent-violet-400"
+              />
+              <span>
+                Import hit feed lines
+                <span className="block text-[10px] font-black uppercase text-zinc-500">Off by default to avoid hit-spam and Worker/D1 request limits.</span>
+              </span>
+            </label>
+          </div>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
             <button
               type="button"
@@ -3506,6 +3593,9 @@ function ManualAdmImportPanel({
                 {bulkProgress.chunkTotal ? ` - chunk ${bulkProgress.chunkCurrent ?? 0}/${bulkProgress.chunkTotal}` : ""}
               </p>
             </div>
+            {bulkProgress.status ? (
+              <p className="mt-1 text-[10px] font-black uppercase text-violet-200">{bulkProgress.status}</p>
+            ) : null}
             {bulkProgress.chunkTotal ? (
               <p className="mt-1 text-[10px] font-black uppercase text-violet-200">
                 Written kills: {bulkProgress.writtenKills ?? 0} | Duplicates: {bulkProgress.duplicateSkips ?? 0}
@@ -3778,7 +3868,7 @@ function BulkAdmImportResultPanel({
               <MiniInfo label="Hit Lines" value={String(file.hit_lines)} />
               <MiniInfo label="Raw Events" value={String(file.raw_events_stored)} />
               <MiniInfo label="Player Events" value={String(file.player_events_stored)} />
-              <MiniInfo label="Chunks" value={file.total_chunks ? `${file.chunks_processed ?? 0}/${file.total_chunks}` : "Fast path"} />
+              <MiniInfo label="Chunks" value={file.total_chunks ? `${file.chunks_processed ?? 0}/${file.total_chunks}` : "Chunked"} />
             </div>
             {file.message ? (
               <p className="mt-3 rounded-md border border-rose-300/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100">{file.message}</p>
@@ -5077,6 +5167,7 @@ function makeFailedBulkAdmFileResult(
   failure: ManualAdmImportErrorResult,
   source: string,
 ): BulkAdmFileResult {
+  const detailRecord = failure.details && typeof failure.details === "object" ? failure.details as Record<string, unknown> : {};
   return {
     ok: false,
     filename: file.filename,
@@ -5103,10 +5194,34 @@ function makeFailedBulkAdmFileResult(
     kill_previews: [],
     import_report_id: null,
     imported_at: null,
+    chunks_processed: numberFromUnknown(detailRecord.chunks_processed ?? detailRecord.chunk_index ?? 0),
+    total_chunks: numberFromUnknown(detailRecord.total_chunks ?? 0),
     error_code: failure.error_code,
     message: failure.message,
     details: failure.details,
   };
+}
+
+function splitAdmTextForUpload(text: string) {
+  return text.split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
+}
+
+function chunkAdmLinesForUpload(lines: string[], chunkSize: number) {
+  const safeChunkSize = Math.max(1, Math.min(25, Math.trunc(chunkSize)));
+  const chunks: Array<{ index: number; startLine: number; lines: string[] }> = [];
+  for (let startLine = 0; startLine < lines.length; startLine += safeChunkSize) {
+    chunks.push({
+      index: chunks.length,
+      startLine,
+      lines: lines.slice(startLine, startLine + safeChunkSize),
+    });
+  }
+  return chunks;
+}
+
+function numberFromUnknown(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : undefined;
 }
 
 function summarizeClientBulkAdmResults(
