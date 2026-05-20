@@ -31,8 +31,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import { bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
+import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -220,7 +220,10 @@ function ServerDashboard({
   const [manualAdmFilename, setManualAdmFilename] = useState("");
   const [manualAdmText, setManualAdmText] = useState("");
   const [manualAdmImporting, setManualAdmImporting] = useState(false);
+  const [manualAdmPreviewing, setManualAdmPreviewing] = useState(false);
   const [manualAdmImportResult, setManualAdmImportResult] = useState<ManualAdmImportResult | null>(null);
+  const [manualAdmImportError, setManualAdmImportError] = useState<ManualAdmImportErrorResult | null>(null);
+  const [manualAdmParsePreview, setManualAdmParsePreview] = useState<ManualAdmParsePreviewResult | null>(null);
   const [manualAdmRefreshFailed, setManualAdmRefreshFailed] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
@@ -621,21 +624,73 @@ function ServerDashboard({
 
     setManualAdmImporting(true);
     setActionMessage("");
+    setManualAdmImportError(null);
     try {
-      const result = await importManualAdmText(server.id, {
+      const response = await importManualAdmText(server.id, {
         filename,
         admText: manualAdmText,
         source: "manual_paste",
       });
-      setManualAdmImportResult(result);
+      if (!response.ok) {
+        setManualAdmImportError(response);
+        setActionMessage(`Manual ADM import failed: ${response.message}`);
+        return;
+      }
+
+      setManualAdmImportResult(response);
       const refreshed = await refreshDashboardAfterManualAdmImport();
       setActionMessage(refreshed
-        ? `Manual ADM import complete. Parsed ${result.parsed_kills} PvP kills and wrote ${result.written_kills}.`
+        ? `Manual ADM import complete. Parsed ${response.parsed_kills} PvP kills and wrote ${response.written_kills}.`
         : "Manual ADM import succeeded, but dashboard refresh failed. Hard refresh or retry refresh.");
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to import pasted ADM text.");
+      const failure: ManualAdmImportErrorResult = {
+        ok: false,
+        error_code: "client_exception",
+        message: error instanceof Error ? error.message : "Manual ADM import failed before a response was received.",
+        details: error instanceof Error ? error.stack ?? error.message : String(error),
+      };
+      setManualAdmImportError(failure);
+      setActionMessage(`Manual ADM import failed: ${failure.message}`);
     } finally {
       setManualAdmImporting(false);
+    }
+  }
+
+  async function previewPastedAdmNow() {
+    const filename = manualAdmFilename.trim();
+    const admText = manualAdmText.trim();
+    if (!filename) {
+      setActionMessage("Enter the ADM filename before previewing.");
+      return;
+    }
+    if (!admText) {
+      setActionMessage("Paste ADM log text before previewing.");
+      return;
+    }
+
+    setManualAdmPreviewing(true);
+    setManualAdmImportError(null);
+    setActionMessage("");
+    try {
+      const response = await previewManualAdmText(server.id, { filename, admText: manualAdmText });
+      if (!response.ok) {
+        setManualAdmImportError(response);
+        setActionMessage(`ADM parse preview failed: ${response.message}`);
+        return;
+      }
+      setManualAdmParsePreview(response);
+      setActionMessage(`ADM preview found ${response.parsed_kills} PvP kill${response.parsed_kills === 1 ? "" : "s"}.`);
+    } catch (error) {
+      const failure: ManualAdmImportErrorResult = {
+        ok: false,
+        error_code: "client_exception",
+        message: error instanceof Error ? error.message : "ADM parse preview failed before a response was received.",
+        details: error instanceof Error ? error.stack ?? error.message : String(error),
+      };
+      setManualAdmImportError(failure);
+      setActionMessage(`ADM parse preview failed: ${failure.message}`);
+    } finally {
+      setManualAdmPreviewing(false);
     }
   }
 
@@ -1219,13 +1274,17 @@ function ServerDashboard({
                 filename={manualAdmFilename}
                 admText={manualAdmText}
                 importing={manualAdmImporting}
+                previewing={manualAdmPreviewing}
                 result={manualAdmImportResult}
+                failure={manualAdmImportError}
+                preview={manualAdmParsePreview}
                 refreshFailed={manualAdmRefreshFailed}
                 history={syncStatus?.manual_import_history ?? []}
                 onFilenameChange={setManualAdmFilename}
                 onTextChange={setManualAdmText}
                 onFileSelected={loadManualAdmFile}
                 onImport={importPastedAdmNow}
+                onPreview={previewPastedAdmNow}
                 onRetryRefresh={refreshDashboardAfterManualAdmImport}
               />
               {admFileDiscoveryDebug ? (
@@ -3014,25 +3073,33 @@ function ManualAdmImportPanel({
   filename,
   admText,
   importing,
+  previewing,
   result,
+  failure,
+  preview,
   refreshFailed,
   history,
   onFilenameChange,
   onTextChange,
   onFileSelected,
   onImport,
+  onPreview,
   onRetryRefresh,
 }: {
   filename: string;
   admText: string;
   importing: boolean;
+  previewing: boolean;
   result: ManualAdmImportResult | null;
+  failure: ManualAdmImportErrorResult | null;
+  preview: ManualAdmParsePreviewResult | null;
   refreshFailed: boolean;
   history: AdmSyncStatus["manual_import_history"];
   onFilenameChange: (value: string) => void;
   onTextChange: (value: string) => void;
   onFileSelected: (file: File | null) => void;
   onImport: () => void;
+  onPreview: () => void;
   onRetryRefresh: () => Promise<boolean>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -3085,17 +3152,83 @@ function ManualAdmImportPanel({
           <p className="text-xs font-bold text-zinc-400">
             This imports through the same ADM parser/write path, rebuilds stats, refreshes public cache, and queues allowed Discord posts.
           </p>
-          <button
-            type="button"
-            disabled={importing || !filename.trim() || !admText.trim()}
-            onClick={onImport}
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-violet-300/25 bg-violet-500/18 px-3 py-2 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
-          >
-            <DatabaseZap className={`h-4 w-4 ${importing ? "animate-pulse" : ""}`} />
-            {importing ? "Importing..." : "Import Pasted ADM Now"}
-          </button>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              disabled={previewing || importing || !filename.trim() || !admText.trim()}
+              onClick={onPreview}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-500/12 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <ListChecks className={`h-4 w-4 ${previewing ? "animate-pulse" : ""}`} />
+              {previewing ? "Previewing..." : "Preview Parsed ADM"}
+            </button>
+            <button
+              type="button"
+              disabled={importing || !filename.trim() || !admText.trim()}
+              onClick={onImport}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/25 bg-violet-500/18 px-3 py-2 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <DatabaseZap className={`h-4 w-4 ${importing ? "animate-pulse" : ""}`} />
+              {importing ? "Importing..." : "Import Pasted ADM Now"}
+            </button>
+          </div>
         </div>
       </div>
+      {preview ? (
+        <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-3">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase text-cyan-100">Parsed ADM Preview</p>
+              <p className="mt-1 break-all text-sm font-bold text-cyan-50">{preview.filename}</p>
+            </div>
+            <SmallBadge tone={preview.parsed_kills > 0 ? "emerald" : "orange"}>{preview.parsed_kills} PvP Kill{preview.parsed_kills === 1 ? "" : "s"}</SmallBadge>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <MiniInfo label="HTTP Status" value={preview.http_status ? String(preview.http_status) : "Not recorded"} />
+            <MiniInfo label="Raw Lines" value={String(preview.raw_lines)} />
+            <MiniInfo label="Raw Kill Lines" value={String(preview.raw_kill_lines_found)} />
+            <MiniInfo label="Parsed PvP Kills" value={String(preview.parsed_kills)} />
+            <MiniInfo label="Joins" value={String(preview.joins)} />
+            <MiniInfo label="Disconnects" value={String(preview.disconnects)} />
+            <MiniInfo label="PlayerList" value={String(preview.playerlist_snapshots)} />
+            <MiniInfo label="Dead Hits Skipped" value={String(preview.skipped_dead_hit_lines)} />
+          </div>
+          <div className="mt-3 grid gap-2">
+            {preview.kill_previews.length ? preview.kill_previews.map((kill) => (
+              <p key={`${kill.line_number}-${kill.killer_name}-${kill.victim_name}`} className="rounded-md border border-cyan-300/15 bg-black/20 px-3 py-2 text-xs font-bold text-cyan-50">
+                Line {kill.line_number}: {kill.victim_name ?? "Unknown victim"} -&gt; {kill.killer_name ?? "Unknown killer"}{kill.weapon ? ` / ${kill.weapon}` : ""}{kill.distance !== null ? ` / ${kill.distance}m` : ""}
+              </p>
+            )) : (
+              <p className="rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">
+                No PvP kill lines parsed from this text.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {failure ? (
+        <div className="mt-4 rounded-lg border border-rose-300/20 bg-rose-400/10 p-3">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase text-rose-100">Manual ADM Import Failed</p>
+              <p className="mt-1 text-sm font-bold text-rose-50">{failure.message}</p>
+            </div>
+            <SmallBadge tone="orange">{failure.error_code}</SmallBadge>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <MiniInfo label="HTTP Status" value={failure.http_status !== undefined ? String(failure.http_status) : "Not recorded"} />
+            <MiniInfo label="Error Code" value={failure.error_code} />
+            <MiniInfo label="Message" value={failure.message} />
+            <MiniInfo label="Details" value={formatDebugValue(failure.details)} />
+          </div>
+          {failure.response_body ? (
+            <details className="mt-3 rounded-md border border-white/10 bg-black/24 p-3">
+              <summary className="cursor-pointer text-xs font-black uppercase text-rose-100">Response Body</summary>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs text-rose-50">{failure.response_body}</pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
       {refreshFailed ? (
         <div className="mt-4 flex flex-col gap-3 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3 md:flex-row md:items-center md:justify-between">
           <p className="text-sm font-bold leading-6 text-amber-50">
@@ -3123,6 +3256,7 @@ function ManualAdmImportPanel({
           <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             <MiniInfo label="Source" value={formatSyncTrigger(result.source)} />
             <MiniInfo label="Imported At" value={formatDashboardDate(result.imported_at)} />
+            <MiniInfo label="HTTP Status" value={result.http_status ? String(result.http_status) : "Not recorded"} />
             <MiniInfo label="Import Report ID" value={result.import_report_id.slice(0, 8)} />
             <MiniInfo label="Raw Lines" value={String(result.raw_lines)} />
             <MiniInfo label="Parsed PvP Kills" value={String(result.parsed_kills)} />
@@ -3149,6 +3283,12 @@ function ManualAdmImportPanel({
               No parser warnings were reported for this manual import.
             </p>
           )}
+          {result.response_body ? (
+            <details className="mt-3 rounded-md border border-white/10 bg-black/24 p-3">
+              <summary className="cursor-pointer text-xs font-black uppercase text-emerald-100">Response Body</summary>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs text-emerald-50">{result.response_body}</pre>
+            </details>
+          ) : null}
         </div>
       ) : null}
       <div className="mt-4 rounded-lg border border-white/10 bg-black/24">
@@ -4027,6 +4167,16 @@ function LogDiagnosticsPanel({
 function formatDashboardDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatDebugValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "None";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function metadataPatchFromRefreshResult(result: Awaited<ReturnType<typeof refreshServerMetadata>>): Partial<LinkedServer> {

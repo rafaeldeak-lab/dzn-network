@@ -53,6 +53,18 @@ assert.equal(deadKillerPvpKill.weapon, "M4-A1");
 assert.equal(deadKillerPvpKill.distance, 11.6167);
 assert.equal(deadKillerPvpKill.isCreditedKill, true);
 
+const demonchaserManualPasteKillLine = '00:58 | Player "Demonchaser69420" (DEAD) (id=PLZk8nv5S7Wc90LP6G_b7J3eLJVZqgjF5v74mmBUXws= pos=<6427.9, 8104.8, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6410.2, 8089.4, 339.5>) with M4-A1 from 24.38 meters';
+const demonchaserManualPasteKill = parseAdmLine(demonchaserManualPasteKillLine, { admDate: "2026-05-20" });
+assert.equal(demonchaserManualPasteKill.eventType, "player_killed");
+assert.equal(demonchaserManualPasteKill.victimName, "Demonchaser69420");
+assert.equal(demonchaserManualPasteKill.killerName, "xAKA-MINI_KickAs");
+assert.equal(demonchaserManualPasteKill.weapon, "M4-A1");
+assert.equal(demonchaserManualPasteKill.distance, 24.38);
+assert.equal(demonchaserManualPasteKill.occurredAt, "2026-05-20T00:00:58.000Z");
+assert.equal(demonchaserManualPasteKill.isPvpKill, true);
+assert.equal(demonchaserManualPasteKill.isCreditedKill, true);
+assert.equal(parseAdmLines([demonchaserManualPasteKillLine], { admDate: "2026-05-20" }).filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length, 1);
+
 const playerHit = parseAdmLine(
   '13:46:10 | Player "VictimName" (DEAD) (id=VICTIM_ID pos=<4511.8, 10366.9, 339.4>)[HP: 0] hit by Player "KillerName" (id=KILLER_ID pos=<4519.4, 10373.2, 339.4>) into Head(0) for 30.5589 damage (Bullet_308Win) with LAR from 9.836 meters',
   context,

@@ -1,66 +1,44 @@
-import { importAdmTextForServer } from "../../../../_lib/adm-sync";
+import { previewManualAdmText } from "../../../../_lib/adm-sync";
 import { getSessionUser } from "../../../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import type { PagesFunction } from "../../../../_lib/types";
 
-type ManualAdmImportBody = {
+type ManualAdmPreviewBody = {
   filename?: string;
   admText?: string;
-  source?: string;
 };
 
 export const onRequestPost: PagesFunction = async ({ request, env, params }) => {
   try {
     const linkedServerId = sanitizeLinkedServerId(params.serverId);
-    if (!linkedServerId) {
-      return manualAdmError(400, "invalid_server_id", "Invalid server id.");
-    }
+    if (!linkedServerId) return previewError(400, "invalid_server_id", "Invalid server id.");
 
     const user = await getSessionUser(env, request);
     const access = await requireServerOwnerOrDznAdmin(env, user, linkedServerId);
     if (!access.allowed) {
-      return manualAdmError(
+      return previewError(
         access.reason === "not_found" ? 404 : 403,
         access.reason === "not_found" ? "server_not_found" : "forbidden",
         access.reason === "not_found" ? "Server not found." : "Forbidden.",
       );
     }
 
-    const body = await readJson<ManualAdmImportBody>(request);
+    const body = await readJson<ManualAdmPreviewBody>(request);
     const filename = typeof body.filename === "string" ? body.filename : "";
     const admText = typeof body.admText === "string" ? body.admText : "";
-    const source = typeof body.source === "string" && body.source.trim() ? body.source.trim() : "manual_paste";
+    if (!filename.trim()) return previewError(400, "missing_filename", "ADM filename is required.");
+    if (!admText.trim()) return previewError(400, "missing_adm_text", "ADM text is required.");
 
-    if (!filename.trim()) return manualAdmError(400, "missing_filename", "ADM filename is required.");
-    if (!admText.trim()) return manualAdmError(400, "missing_adm_text", "ADM text is required.");
-
-    const result = await importAdmTextForServer(env, {
-      linkedServerId,
-      filename,
-      admText,
-      source,
-    });
-    if (result.failed_writes > 0 || result.import_report.failedWrites > 0) {
-      return manualAdmError(500, "adm_write_failed", "ADM parsed, but one or more database writes failed.", {
-        filename: result.filename,
-        source: result.source,
-        parsed_kills: result.parsed_kills,
-        written_kills: result.written_kills,
-        failed_writes: result.failed_writes,
-        import_report: result.import_report,
-      });
-    }
-    return json(result, {
+    return json(previewManualAdmText({ filename, admText }), {
       headers: {
         "cache-control": "private, no-store, no-cache, must-revalidate",
         vary: "Cookie",
       },
     });
   } catch (error) {
-    return manualAdmError(500, "manual_adm_import_failed", "Unable to import ADM text.", {
+    return previewError(500, "manual_adm_parse_preview_failed", "Unable to preview ADM text.", {
       error: error instanceof Error ? error.message : String(error),
-      stack: isDebugRequest(request) && error instanceof Error ? error.stack : undefined,
     });
   }
 };
@@ -78,7 +56,7 @@ function sanitizeLinkedServerId(value: unknown) {
   return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
 }
 
-function manualAdmError(status: number, errorCode: string, message: string, details: unknown = null) {
+function previewError(status: number, errorCode: string, message: string, details: unknown = null) {
   return json({
     ok: false,
     error_code: errorCode,
@@ -91,12 +69,4 @@ function manualAdmError(status: number, errorCode: string, message: string, deta
       vary: "Cookie",
     },
   });
-}
-
-function isDebugRequest(request: Request) {
-  try {
-    return new URL(request.url).searchParams.get("debug") === "1";
-  } catch {
-    return false;
-  }
 }

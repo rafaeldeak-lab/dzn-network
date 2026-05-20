@@ -158,9 +158,9 @@ export function parseAdmLines(lines: string[], options: { admDate?: string } = {
 
 export function parseTimestamp(rawLine: string, context: AdmParseContext = {}): TimestampResult {
   const line = rawLine.trim();
-  const prefixed = /^(\d{2}:\d{2}:\d{2})\s*\|\s*([\s\S]*)$/.exec(line);
+  const prefixed = /^((?:\d{1,2}:)?\d{2}:\d{2})\s*\|\s*([\s\S]*)$/.exec(line);
   if (prefixed) {
-    const time = prefixed[1];
+    const time = normaliseAdmTime(prefixed[1]);
     const body = prefixed[2].trim();
     const resolvedDate = resolveTimestampDate(context.admDate, time, context.previousTime);
     return {
@@ -187,6 +187,14 @@ export function parseTimestamp(rawLine: string, context: AdmParseContext = {}): 
     admDate: context.admDate ?? null,
     body: line,
   };
+}
+
+function normaliseAdmTime(value: string) {
+  const parts = value.split(":");
+  if (parts.length === 2) {
+    return `00:${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
+  }
+  return parts.map((part) => part.padStart(2, "0")).join(":");
 }
 
 export function parsePosition(value: string): AdmPosition | null {

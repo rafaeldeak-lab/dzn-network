@@ -239,6 +239,31 @@ export type ManualAdmTextImportResult = {
   import_report: AdmDatabaseImportReport;
 };
 
+export type ManualAdmParsePreviewResult = {
+  ok: true;
+  filename: string;
+  source: "manual_preview";
+  raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  suicides: number;
+  uncredited_deaths: number;
+  skipped_dead_hit_lines: number;
+  parser_warnings: string[];
+  kill_previews: Array<{
+    line_number: number;
+    occurred_at: string | null;
+    victim_name: string | null;
+    killer_name: string | null;
+    weapon: string | null;
+    distance: number | null;
+    event_type: "pvp_kill";
+  }>;
+};
+
 export type ManualAdmImportHistoryItem = {
   id: string;
   filename: string | null;
@@ -1798,12 +1823,12 @@ export async function importReadableAdmLinesIntoDatabase(
 
     if (input.updatePublicCache && input.guildId && input.planKey) {
       try {
-        await upsertServerPublicCache(env, {
+        await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
           guildId: input.guildId,
           planKey: input.planKey,
           publicServerName: input.publicServerName,
           lastAdmUpdateAt: now,
-        });
+        }), "public cache update");
         publicCacheUpdated = true;
         cacheRefreshStatus = "updated";
       } catch {
@@ -1813,7 +1838,7 @@ export async function importReadableAdmLinesIntoDatabase(
 
     if (input.queueDiscordPosts && input.guildId && input.planKey && (eventsCreated > 0 || killsCreated > 0 || buildEventsStored > 0)) {
       try {
-        discordQueuesCreated = await queueDiscordPostUpdatesForGuild(env, input.guildId, input.planKey, [
+        discordQueuesCreated = await withManualAdmPhaseTimeout(queueDiscordPostUpdatesForGuild(env, input.guildId, input.planKey, [
           "leaderboard_embed",
           "daily_summary_embed",
           "event_leaderboard_embed",
@@ -1826,7 +1851,7 @@ export async function importReadableAdmLinesIntoDatabase(
           "build_feed_embed",
           "admin_alerts_embed",
           "admin_logs_embed",
-        ], "adm-data-change");
+        ], "adm-data-change"), "Discord post queue");
         discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
       } catch {
         discordQueueStatus = "failed";
@@ -2028,6 +2053,11 @@ export async function importAdmTextForServer(
     queueDiscordPosts: Boolean(server.guild_id && isActiveSubscriptionStatus(server.subscription_status)),
     ignoreExistingCursor: true,
   });
+  const warnings = [
+    ...result.parserWarnings,
+    ...(result.report.cacheRefreshStatus === "failed" ? ["Public cache update failed after ADM rows were written."] : []),
+    ...(result.report.discordQueueStatus === "failed" ? ["Discord auto-post queueing failed after ADM rows were written."] : []),
+  ];
 
   return {
     ok: true,
@@ -2048,11 +2078,74 @@ export async function importAdmTextForServer(
     discord_jobs_queued: result.discordQueuesCreated,
     import_report_id: result.importReportId,
     imported_at: result.importedAt,
-    parser_warnings: result.parserWarnings,
+    parser_warnings: warnings,
     total_kills: result.totalKills,
     total_deaths: result.totalDeaths,
     import_report: result.report,
   };
+}
+
+export function previewManualAdmText(input: {
+  filename: string;
+  admText: string;
+}): ManualAdmParsePreviewResult {
+  const filename = sanitizeManualAdmFilename(input.filename);
+  if (!filename) throw new Error("A valid ADM filename is required.");
+  const rawText = typeof input.admText === "string" ? input.admText : "";
+  if (!rawText.trim()) throw new Error("ADM text is required.");
+  const lines = splitAdmText(rawText);
+  if (!lines.length) throw new Error("ADM text did not contain readable lines.");
+
+  const report = buildAdmImportDebugReport(lines, {
+    admFileName: filename,
+    cursorStart: 0,
+    cursorEnd: lines.length,
+  });
+  const parsed = parseAdmLines(lines, { admDate: extractAdmDateFromFile(filename) ?? undefined });
+  const killPreviews = parsed
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.eventType === "player_killed" && event.isCreditedKill)
+    .slice(0, 10)
+    .map(({ event, index }) => ({
+      line_number: index + 1,
+      occurred_at: event.occurredAt,
+      victim_name: event.victimName,
+      killer_name: event.killerName,
+      weapon: event.weapon,
+      distance: event.distance,
+      event_type: "pvp_kill" as const,
+    }));
+
+  return {
+    ok: true,
+    filename,
+    source: "manual_preview",
+    raw_lines: lines.length,
+    raw_kill_lines_found: report.rawKilledByLinesFound,
+    parsed_kills: report.parsedPvpKills,
+    joins: report.parsedJoins,
+    disconnects: report.parsedDisconnects,
+    playerlist_snapshots: report.parsedPlayerlistSnapshots,
+    suicides: report.parsedSuicides,
+    uncredited_deaths: report.parsedUncreditedDeaths,
+    skipped_dead_hit_lines: report.skippedDeadHitLines,
+    parser_warnings: buildParserWarnings(report),
+    kill_previews: killPreviews,
+  };
+}
+
+async function withManualAdmPhaseTimeout<T>(promise: Promise<T>, phase: string, timeoutMs = 8000): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${phase} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function clampCursorLine(value: number, lineCount: number) {

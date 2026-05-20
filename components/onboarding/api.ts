@@ -24,7 +24,8 @@ import type {
   PublicCacheDebug,
   PublicCacheRebuildResult,
   SyncLockRecoveryResult,
-  ManualAdmImportResult,
+  ManualAdmImportApiResult,
+  ManualAdmParsePreviewApiResult,
 } from "./types";
 
 export async function getMe() {
@@ -188,10 +189,14 @@ export async function importManualAdmText(linkedServerId: string, data: {
   admText: string;
   source?: "manual_paste" | "manual_upload" | string;
 }) {
-  return request<ManualAdmImportResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/manual-import`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+  return manualAdmRequest<ManualAdmImportApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/manual-import`, data);
+}
+
+export async function previewManualAdmText(linkedServerId: string, data: {
+  filename: string;
+  admText: string;
+}) {
+  return manualAdmRequest<ManualAdmParsePreviewApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/parse-preview`, data);
 }
 
 export async function refreshServerMetadata(linkedServerId: string) {
@@ -370,6 +375,60 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
   if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
   return data;
+}
+
+async function manualAdmRequest<T extends { ok: boolean; http_status?: number; response_body?: string }>(path: string, data: unknown): Promise<T> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 120000);
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+    const responseBody = await response.text();
+    const parsed = parseJsonBody(responseBody);
+    if (parsed && typeof parsed === "object") {
+      return {
+        ...(parsed as T),
+        http_status: response.status,
+        response_body: responseBody,
+      };
+    }
+    return {
+      ok: false,
+      http_status: response.status,
+      response_body: responseBody,
+      error_code: response.ok ? "invalid_json_response" : "request_failed",
+      message: response.ok ? "The ADM import endpoint returned an invalid JSON response." : `Request failed: ${response.status}`,
+      details: responseBody,
+    } as unknown as T;
+  } catch (error) {
+    const aborted = error instanceof DOMException && error.name === "AbortError";
+    return {
+      ok: false,
+      http_status: 0,
+      response_body: "",
+      error_code: aborted ? "request_timeout" : "fetch_failed",
+      message: aborted ? "Manual ADM import timed out before the server returned a response." : error instanceof Error ? error.message : "Manual ADM import request failed.",
+      details: error instanceof Error ? error.message : String(error),
+    } as unknown as T;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function parseJsonBody(value: string) {
+  try {
+    return value ? JSON.parse(value) as unknown : null;
+  } catch {
+    return null;
+  }
 }
 
 export type DeletionResponse = {

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  getRecentAdmSyncEvents,
   importAdmTextForServer,
   importReadableAdmLinesIntoDatabase,
+  previewManualAdmText,
   type AdmSyncContext,
 } from "../functions/_lib/adm-sync";
 import type { Env } from "../functions/_lib/types";
@@ -15,6 +17,8 @@ const latestFixtureLines = readFileSync(`scripts/fixtures/${latestFixtureName}`,
 const linkedServerId = "fixture-linked-server";
 const guildId = "fixture-guild";
 const nitradoServiceId = "fixture-service";
+const demonchaserFixtureName = "DayZServer_PS4_x64_2026-05-20_09-01-27.ADM";
+const demonchaserKillLine = '00:58 | Player "Demonchaser69420" (DEAD) (id=PLZk8nv5S7Wc90LP6G_b7J3eLJVZqgjF5v74mmBUXws= pos=<6427.9, 8104.8, 333.0>) killed by Player "xAKA-MINI_KickAs" (id=6UDi_1JJT6kT7ZWKpdbggtlbhidMn3_vtINTDfoBY9Q= pos=<6410.2, 8089.4, 339.5>) with M4-A1 from 24.38 meters';
 const context: AdmSyncContext = {
   linkedServerId,
   nitradoServiceId,
@@ -25,9 +29,14 @@ const context: AdmSyncContext = {
 
 async function main() {
   const manualEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/manual-import.ts", "utf8");
+  const previewEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/parse-preview.ts", "utf8");
   assert.match(manualEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(manualEndpointSource, /getSessionUser/);
   assert.match(manualEndpointSource, /ADM text is required/);
+  assert.match(manualEndpointSource, /error_code/);
+  assert.match(manualEndpointSource, /manual_adm_import_failed/);
+  assert.match(previewEndpointSource, /previewManualAdmText/);
+  assert.match(previewEndpointSource, /error_code/);
 
   const successDb = new MemoryD1();
   const successResult = await importReadableAdmLinesIntoDatabase(makeEnv(successDb), {
@@ -145,6 +154,57 @@ async function main() {
   assert.equal(repeatedManualResult.parsed_kills, 10);
   assert.equal(repeatedManualResult.written_kills, 0);
   assert.equal(repeatedManualResult.duplicate_skips > 0, true);
+
+  const singleLinePreview = previewManualAdmText({
+    filename: demonchaserFixtureName,
+    admText: demonchaserKillLine,
+  });
+  assert.equal(singleLinePreview.ok, true);
+  assert.equal(singleLinePreview.raw_lines, 1);
+  assert.equal(singleLinePreview.raw_kill_lines_found, 1);
+  assert.equal(singleLinePreview.parsed_kills, 1);
+  assert.equal(singleLinePreview.kill_previews[0]?.victim_name, "Demonchaser69420");
+  assert.equal(singleLinePreview.kill_previews[0]?.killer_name, "xAKA-MINI_KickAs");
+  assert.equal(singleLinePreview.kill_previews[0]?.weapon, "M4-A1");
+  assert.equal(singleLinePreview.kill_previews[0]?.distance, 24.38);
+
+  const singleLineDb = new MemoryD1();
+  const singleLineResult = await importAdmTextForServer(makeEnv(singleLineDb), {
+    linkedServerId,
+    filename: demonchaserFixtureName,
+    admText: demonchaserKillLine,
+    source: "manual_paste",
+  });
+  assert.equal(singleLineResult.ok, true);
+  assert.equal(singleLineResult.parsed_kills, 1);
+  assert.equal(singleLineResult.written_kills, 1);
+  assert.equal(singleLineResult.import_report.importSource, "manual_paste");
+  assert.equal(singleLineDb.killEvents.length, 1);
+  assert.equal(singleLineDb.killEvents[0]?.victim_name, "Demonchaser69420");
+  assert.equal(singleLineDb.killEvents[0]?.killer_name, "xAKA-MINI_KickAs");
+  assert.equal(singleLineDb.killEvents[0]?.weapon, "M4-A1");
+  assert.equal(singleLineDb.killEvents[0]?.distance, 24.38);
+  assert.equal(singleLineDb.serverStats.get(linkedServerId)?.total_kills, 1);
+  assert.equal(singleLineDb.serverStats.get(linkedServerId)?.total_deaths, 1);
+  assert.equal(singleLineDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+  assert.equal(singleLineDb.automationJobs.length > 0, true);
+  const singleLineRecentEvents = await getRecentAdmSyncEvents(makeEnv(singleLineDb), "fixture-user", linkedServerId, 5);
+  assert.equal(singleLineRecentEvents[0]?.source, "kill");
+  assert.equal(singleLineRecentEvents[0]?.victim_name, "Demonchaser69420");
+  assert.equal(singleLineRecentEvents[0]?.killer_name, "xAKA-MINI_KickAs");
+  assert.equal(singleLineRecentEvents[0]?.weapon, "M4-A1");
+  assert.equal(singleLineRecentEvents[0]?.distance, 24.38);
+
+  const duplicateSingleLineResult = await importAdmTextForServer(makeEnv(singleLineDb), {
+    linkedServerId,
+    filename: demonchaserFixtureName,
+    admText: demonchaserKillLine,
+    source: "manual_paste",
+  });
+  assert.equal(singleLineDb.killEvents.length, 1);
+  assert.equal(duplicateSingleLineResult.parsed_kills, 1);
+  assert.equal(duplicateSingleLineResult.written_kills, 0);
+  assert.equal(duplicateSingleLineResult.duplicate_skips >= 1, true);
 
   const clusteredMustardKills = successDb.killEvents.filter((event) =>
     event.killer_name === "mustard_coffer74" &&
@@ -595,6 +655,10 @@ class MemoryStatement {
     if (q.includes("from adm_sync_state") && q.includes("select *")) return (this.db.admSyncState.get(String(this.values[0])) ?? null) as T | null;
     if (q.includes("select last_import_report_json from adm_sync_state")) return ({ last_import_report_json: this.db.admSyncState.get(String(this.values[0]))?.last_import_report_json ?? null } as T);
     if (q.includes("from linked_servers") && q.includes("server_subscriptions.plan_key")) return (this.db.linkedServers.get(String(this.values[0])) ?? null) as T | null;
+    if (q.includes("from linked_servers") && q.includes("where linked_servers.id = ?") && q.includes("linked_servers.user_id = ?")) {
+      const row = this.db.linkedServers.get(String(this.values[0]));
+      return (row && row.user_id === this.values[1] ? row : null) as T | null;
+    }
     if (q.includes("select nitrado_service_id from linked_servers")) return (this.db.linkedServers.get(String(this.values[0])) ?? { nitrado_service_id: null }) as T;
     if (q.includes("from player_profiles") && q.includes("player_id = ?")) {
       return (this.db.playerProfiles.find((profile) => profile.linked_server_id === this.values[0] && profile.player_id === this.values[1]) ?? null) as T | null;
@@ -644,6 +708,45 @@ class MemoryStatement {
   async all<T>(): Promise<{ results: T[] }> {
     const q = normalizeSql(this.query);
     if (q.startsWith("pragma table_info")) return { results: [] };
+    if (q.includes("select source, event_type") && q.includes("from kill_events") && q.includes("union all")) {
+      const linkedServer = String(this.values[0]);
+      const limit = Number(this.values.at(-1) ?? 10);
+      const rows = [
+        ...this.db.killEvents
+          .filter((event) => event.linked_server_id === linkedServer)
+          .map((event) => ({
+            source: "kill",
+            event_type: "player_killed",
+            player_name: null,
+            killer_name: event.killer_name ?? null,
+            victim_name: event.victim_name ?? null,
+            weapon: event.weapon ?? null,
+            distance: event.distance ?? null,
+            occurred_at: event.occurred_at ?? null,
+            created_at: event.created_at ?? event.occurred_at ?? null,
+            raw_line: event.raw_line ?? null,
+            sort_time: event.occurred_at ?? event.created_at ?? "",
+          })),
+        ...this.db.playerEvents
+          .filter((event) => event.linked_server_id === linkedServer)
+          .map((event) => ({
+            source: "player",
+            event_type: event.event_type ?? "unknown",
+            player_name: event.player_name ?? null,
+            killer_name: null,
+            victim_name: null,
+            weapon: null,
+            distance: null,
+            occurred_at: event.occurred_at ?? null,
+            created_at: event.created_at ?? event.occurred_at ?? null,
+            raw_line: event.raw_line ?? null,
+            sort_time: event.occurred_at ?? event.created_at ?? "",
+          })),
+      ]
+        .sort((a, b) => String(b.sort_time).localeCompare(String(a.sort_time)))
+        .slice(0, limit);
+      return { results: rows as T[] };
+    }
     return { results: [] };
   }
 

@@ -89,8 +89,10 @@ If Nitrado `game_specific.log_files` is stale or missing a newer ADM file that i
 Emergency Manual ADM Import:
 
 - Sync Health includes **Manual ADM Import** for owner/admin users when the Nitrado Web UI can display ADM text but DZN cannot download it automatically.
+- `POST /api/servers/[serverId]/adm/parse-preview` powers **Preview Parsed ADM**, parsing pasted text without database writes. It supports both `HH:MM:SS` and `MM:SS` ADM timestamps and shows the first 10 parsed kill previews.
 - `POST /api/servers/[serverId]/adm/manual-import` accepts a filename plus pasted ADM text and routes it through the same ADM parser/write path as scheduled processing.
-- Manual paste imports write supported kills/deaths/joins/disconnects/PlayerList snapshots, rebuild server stats, update `server_public_cache`, queue plan-allowed Discord post jobs, and save the Last ADM Import Report.
+- Manual paste imports write supported kills/deaths/joins/disconnects/PlayerList snapshots, rebuild server stats, update `server_public_cache`, queue plan-allowed Discord post jobs, and save the Last ADM Import Report. Public cache and Discord queue failures are surfaced as warnings after DB writes instead of hiding parsed/written counts.
+- Manual import and preview endpoints always return structured JSON with `ok`, `error_code`, `message`, and `details` on failures so the dashboard can show HTTP status and response body instead of hanging on a generic error.
 - Manual paste imports force a full-file reprocess from line 0 but still use existing event dedupe, so pasting the same ADM twice should report duplicate skips and must not double-count stats.
 - The dashboard keeps manual import success separate from automatic ADM download state. Automatic download can still show `latest_adm_unreadable`, while Manual ADM Import Result shows the pasted import counts, import id/time, public cache status, Discord queue count, and parser warnings.
 - After import, the dashboard explicitly refetches sync status, recent synced events, public-cache diagnostics, automation health, and server data. If that refresh fails, the import result remains visible with a Retry Dashboard Refresh action.

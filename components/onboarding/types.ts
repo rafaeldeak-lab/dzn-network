@@ -834,6 +834,8 @@ export type ManualAdmImportHistoryItem = {
 
 export type ManualAdmImportResult = {
   ok: true;
+  http_status?: number;
+  response_body?: string;
   filename: string;
   source: string;
   raw_lines: number;
@@ -856,6 +858,46 @@ export type ManualAdmImportResult = {
   total_deaths: number;
   import_report: NonNullable<AdmSyncStatus["last_adm_import_report"]>;
 };
+
+export type ManualAdmImportErrorResult = {
+  ok: false;
+  http_status?: number;
+  response_body?: string;
+  error_code: string;
+  message: string;
+  details?: unknown;
+};
+
+export type ManualAdmImportApiResult = ManualAdmImportResult | ManualAdmImportErrorResult;
+
+export type ManualAdmParsePreviewResult = {
+  ok: true;
+  http_status?: number;
+  response_body?: string;
+  filename: string;
+  source: "manual_preview";
+  raw_lines: number;
+  raw_kill_lines_found: number;
+  parsed_kills: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  suicides: number;
+  uncredited_deaths: number;
+  skipped_dead_hit_lines: number;
+  parser_warnings: string[];
+  kill_previews: Array<{
+    line_number: number;
+    occurred_at: string | null;
+    victim_name: string | null;
+    killer_name: string | null;
+    weapon: string | null;
+    distance: number | null;
+    event_type: "pvp_kill";
+  }>;
+};
+
+export type ManualAdmParsePreviewApiResult = ManualAdmParsePreviewResult | ManualAdmImportErrorResult;
 
 export type AdmFileDiscoveryCandidateDebug = {
   name: string;
