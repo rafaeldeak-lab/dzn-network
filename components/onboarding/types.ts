@@ -780,6 +780,10 @@ export type AdmSyncStatus = {
     parsedUncreditedDeaths: number;
     duplicateSkips: number;
     pvpKillLineNumbers: number[];
+    importSource?: string | null;
+    importedAt?: string | null;
+    importReportId?: string | null;
+    parserWarnings?: string[];
     attemptedDbWrites: number;
     successfulDbWrites: number;
     writtenKills: number;
@@ -807,8 +811,25 @@ export type AdmSyncStatus = {
     cursorLineChecked: number | null;
     cursorHashMatched: boolean | null;
   } | null;
+  manual_import_history: ManualAdmImportHistoryItem[];
   current_recovery_action: string;
   recent_sync_runs: SyncRunSummary[];
+};
+
+export type ManualAdmImportHistoryItem = {
+  id: string;
+  filename: string | null;
+  imported_at: string | null;
+  source: string;
+  status: string;
+  raw_lines: number;
+  parsed_kills: number;
+  written_kills: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  duplicate_skips: number;
+  failed_writes: number;
 };
 
 export type ManualAdmImportResult = {
@@ -828,6 +849,9 @@ export type ManualAdmImportResult = {
   failed_writes: number;
   public_cache_updated: boolean;
   discord_jobs_queued: number;
+  import_report_id: string;
+  imported_at: string;
+  parser_warnings: string[];
   total_kills: number;
   total_deaths: number;
   import_report: NonNullable<AdmSyncStatus["last_adm_import_report"]>;

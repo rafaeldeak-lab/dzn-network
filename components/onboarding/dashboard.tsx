@@ -221,6 +221,7 @@ function ServerDashboard({
   const [manualAdmText, setManualAdmText] = useState("");
   const [manualAdmImporting, setManualAdmImporting] = useState(false);
   const [manualAdmImportResult, setManualAdmImportResult] = useState<ManualAdmImportResult | null>(null);
+  const [manualAdmRefreshFailed, setManualAdmRefreshFailed] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [liveRefreshWarning, setLiveRefreshWarning] = useState("");
   const [actionMessage, setActionMessage] = useState("");
@@ -627,11 +628,10 @@ function ServerDashboard({
         source: "manual_paste",
       });
       setManualAdmImportResult(result);
-      await refreshSyncData({ warnOnError: false, queueIfBusy: true });
-      await onRefresh();
-      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
-      if (cacheDebug) setPublicCacheDebug(cacheDebug);
-      setActionMessage(`Manual ADM import complete. Parsed ${result.parsed_kills} PvP kills and wrote ${result.written_kills}.`);
+      const refreshed = await refreshDashboardAfterManualAdmImport();
+      setActionMessage(refreshed
+        ? `Manual ADM import complete. Parsed ${result.parsed_kills} PvP kills and wrote ${result.written_kills}.`
+        : "Manual ADM import succeeded, but dashboard refresh failed. Hard refresh or retry refresh.");
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Unable to import pasted ADM text.");
     } finally {
@@ -643,6 +643,32 @@ function ServerDashboard({
     if (!file) return;
     setManualAdmFilename(file.name);
     setManualAdmText(await file.text());
+  }
+
+  async function refreshDashboardAfterManualAdmImport() {
+    setManualAdmRefreshFailed(false);
+    setRefreshingSyncData(true);
+    const [serverRefresh, statusResult, eventsResult, publicCacheResult, automationResult] = await Promise.allSettled([
+      onRefresh(),
+      getSyncStatus(server.id),
+      getRecentSyncEvents(server.id),
+      getPublicCacheDebug(server.id),
+      getAutomationHealth(),
+    ]);
+
+    if (statusResult.status === "fulfilled") setSyncStatus(statusResult.value.status);
+    if (eventsResult.status === "fulfilled") setRecentEvents(eventsResult.value.events);
+    if (publicCacheResult.status === "fulfilled") setPublicCacheDebug(publicCacheResult.value);
+    if (automationResult.status === "fulfilled") setAutomationHealth(automationResult.value);
+    const ok = [serverRefresh, statusResult, eventsResult, publicCacheResult].every((result) => result.status === "fulfilled");
+    if (ok) {
+      setLastRefreshedAt(new Date().toISOString());
+      setLiveRefreshWarning("");
+    } else {
+      setManualAdmRefreshFailed(true);
+    }
+    setRefreshingSyncData(false);
+    return ok;
   }
 
   async function runDiagnostics() {
@@ -1194,10 +1220,13 @@ function ServerDashboard({
                 admText={manualAdmText}
                 importing={manualAdmImporting}
                 result={manualAdmImportResult}
+                refreshFailed={manualAdmRefreshFailed}
+                history={syncStatus?.manual_import_history ?? []}
                 onFilenameChange={setManualAdmFilename}
                 onTextChange={setManualAdmText}
                 onFileSelected={loadManualAdmFile}
                 onImport={importPastedAdmNow}
+                onRetryRefresh={refreshDashboardAfterManualAdmImport}
               />
               {admFileDiscoveryDebug ? (
                 <AdmFileDiscoveryDebugPanel
@@ -2986,20 +3015,27 @@ function ManualAdmImportPanel({
   admText,
   importing,
   result,
+  refreshFailed,
+  history,
   onFilenameChange,
   onTextChange,
   onFileSelected,
   onImport,
+  onRetryRefresh,
 }: {
   filename: string;
   admText: string;
   importing: boolean;
   result: ManualAdmImportResult | null;
+  refreshFailed: boolean;
+  history: AdmSyncStatus["manual_import_history"];
   onFilenameChange: (value: string) => void;
   onTextChange: (value: string) => void;
   onFileSelected: (file: File | null) => void;
   onImport: () => void;
+  onRetryRefresh: () => Promise<boolean>;
 }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
   return (
     <div className="mt-4 rounded-lg border border-violet-300/18 bg-violet-400/8 p-3">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -3060,22 +3096,98 @@ function ManualAdmImportPanel({
           </button>
         </div>
       </div>
-      {result ? (
-        <div className="mt-4 grid gap-2 rounded-lg border border-emerald-300/18 bg-emerald-400/8 p-3 md:grid-cols-2 xl:grid-cols-4">
-          <MiniInfo label="Parsed PvP Kills" value={String(result.parsed_kills)} />
-          <MiniInfo label="Written Kills" value={String(result.written_kills)} />
-          <MiniInfo label="Joins" value={String(result.joins)} />
-          <MiniInfo label="Disconnects" value={String(result.disconnects)} />
-          <MiniInfo label="PlayerList Snapshots" value={String(result.playerlist_snapshots)} />
-          <MiniInfo label="Duplicate Skips" value={String(result.duplicate_skips)} />
-          <MiniInfo label="Failed Writes" value={String(result.failed_writes)} />
-          <MiniInfo label="Public Cache" value={result.public_cache_updated ? "Updated" : "Skipped"} />
-          <MiniInfo label="Discord Jobs" value={String(result.discord_jobs_queued)} />
-          <MiniInfo label="Total Kills" value={String(result.total_kills)} />
-          <MiniInfo label="Total Deaths" value={String(result.total_deaths)} />
-          <MiniInfo label="Source" value={formatSyncTrigger(result.source)} />
+      {refreshFailed ? (
+        <div className="mt-4 flex flex-col gap-3 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm font-bold leading-6 text-amber-50">
+            Import succeeded but dashboard refresh failed. Hard refresh or retry refresh.
+          </p>
+          <button
+            type="button"
+            onClick={() => void onRetryRefresh()}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-200/30 bg-amber-300/12 px-3 py-2 text-xs font-black uppercase text-amber-50 transition hover:border-amber-200/50"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Retry Dashboard Refresh
+          </button>
         </div>
       ) : null}
+      {result ? (
+        <div className="mt-4 rounded-lg border border-emerald-300/18 bg-emerald-400/8 p-3">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase text-emerald-100">Manual ADM Import Result</p>
+              <p className="mt-1 break-all text-sm font-bold text-emerald-50">{result.filename}</p>
+            </div>
+            <SmallBadge tone={result.failed_writes > 0 ? "orange" : "emerald"}>{result.failed_writes > 0 ? "Needs Review" : "Succeeded"}</SmallBadge>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <MiniInfo label="Source" value={formatSyncTrigger(result.source)} />
+            <MiniInfo label="Imported At" value={formatDashboardDate(result.imported_at)} />
+            <MiniInfo label="Import Report ID" value={result.import_report_id.slice(0, 8)} />
+            <MiniInfo label="Raw Lines" value={String(result.raw_lines)} />
+            <MiniInfo label="Parsed PvP Kills" value={String(result.parsed_kills)} />
+            <MiniInfo label="Written Kills" value={String(result.written_kills)} />
+            <MiniInfo label="Deaths" value={String(result.import_report.parsedSuicides + result.import_report.parsedUncreditedDeaths + result.written_kills)} />
+            <MiniInfo label="Joins" value={String(result.joins)} />
+            <MiniInfo label="Disconnects" value={String(result.disconnects)} />
+            <MiniInfo label="PlayerList Snapshots" value={String(result.playerlist_snapshots)} />
+            <MiniInfo label="Duplicate Skips" value={String(result.duplicate_skips)} />
+            <MiniInfo label="Failed Writes" value={String(result.failed_writes)} />
+            <MiniInfo label="Public Cache" value={result.public_cache_updated ? "Updated" : "Skipped"} />
+            <MiniInfo label="Discord Jobs" value={String(result.discord_jobs_queued)} />
+            <MiniInfo label="Total Kills" value={String(result.total_kills)} />
+            <MiniInfo label="Total Deaths" value={String(result.total_deaths)} />
+          </div>
+          {result.parser_warnings.length ? (
+            <div className="mt-3 grid gap-2">
+              {result.parser_warnings.map((warning) => (
+                <p key={warning} className="rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">{warning}</p>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-md border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">
+              No parser warnings were reported for this manual import.
+            </p>
+          )}
+        </div>
+      ) : null}
+      <div className="mt-4 rounded-lg border border-white/10 bg-black/24">
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((value) => !value)}
+          className="flex w-full items-center justify-between px-3 py-3 text-left text-xs font-black uppercase text-zinc-200"
+        >
+          <span>Manual ADM Imports</span>
+          <span className="text-cyan-200">{historyOpen ? "Hide" : "Show"}</span>
+        </button>
+        {historyOpen ? (
+          <div className="grid gap-2 border-t border-white/10 p-3">
+            {history.length ? history.slice(0, 5).map((item) => (
+              <div key={item.id} className="rounded-lg border border-white/10 bg-black/24 p-3">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="break-all text-sm font-black text-white">{item.filename ?? "Manual ADM import"}</p>
+                    <p className="mt-1 text-xs font-bold text-zinc-500">{item.imported_at ? formatDashboardDate(item.imported_at) : "Time unknown"} | {formatSyncTrigger(item.source)}</p>
+                  </div>
+                  <SmallBadge tone={item.status === "completed" ? "emerald" : "orange"}>{formatStatusLabel(item.status)}</SmallBadge>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                  <MiniInfo label="Parsed Kills" value={String(item.parsed_kills)} />
+                  <MiniInfo label="Written Kills" value={String(item.written_kills)} />
+                  <MiniInfo label="Joins" value={String(item.joins)} />
+                  <MiniInfo label="Disconnects" value={String(item.disconnects)} />
+                  <MiniInfo label="Duplicates" value={String(item.duplicate_skips)} />
+                  <MiniInfo label="Failed Writes" value={String(item.failed_writes)} />
+                </div>
+              </div>
+            )) : (
+              <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">
+                No manual ADM imports recorded yet.
+              </p>
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -3576,6 +3688,10 @@ function LastSyncDetails({
                 {getAdmCursorValidationMessage(syncStatus.last_adm_import_report.cursorValidationStatus)}
               </p>
               <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <MiniInfo label="Source" value={syncStatus.last_adm_import_report.importSource ? formatSyncTrigger(syncStatus.last_adm_import_report.importSource) : "Unknown"} />
+                <MiniInfo label="Imported At" value={syncStatus.last_adm_import_report.importedAt ? formatDashboardDate(syncStatus.last_adm_import_report.importedAt) : "Unknown"} />
+                <MiniInfo label="Import Report ID" value={syncStatus.last_adm_import_report.importReportId ? syncStatus.last_adm_import_report.importReportId.slice(0, 8) : "None"} />
+                <MiniInfo label="ADM Filename" value={syncStatus.last_adm_import_report.admFileName ?? "Unknown"} />
                 <MiniInfo label="Parsed Kills" value={String(syncStatus.last_adm_import_report.parsedPvpKills)} />
                 <MiniInfo label="Written Kills" value={String(syncStatus.last_adm_import_report.writtenKills)} />
                 <MiniInfo label="Parsed Joins" value={String(syncStatus.last_adm_import_report.parsedJoins ?? 0)} />
@@ -3598,6 +3714,13 @@ function LastSyncDetails({
                 <p className="mt-3 rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
                   {syncStatus.last_adm_import_report.cursorValidationError}
                 </p>
+              ) : null}
+              {syncStatus.last_adm_import_report.parserWarnings?.length ? (
+                <div className="mt-3 grid gap-2">
+                  {syncStatus.last_adm_import_report.parserWarnings.map((warning) => (
+                    <p key={warning} className="rounded-md border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">{warning}</p>
+                  ))}
+                </div>
               ) : null}
             </div>
           ) : null}

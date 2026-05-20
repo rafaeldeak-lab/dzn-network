@@ -121,10 +121,20 @@ async function main() {
   assert.equal(manualResult.source, "manual_paste");
   assert.equal(manualResult.parsed_kills, 10);
   assert.equal(manualResult.written_kills, 10);
+  assert.match(manualResult.import_report_id, /^[0-9a-f-]{36}$/);
+  assert.equal(manualResult.import_report.importSource, "manual_paste");
+  assert.equal(manualResult.import_report.admFileName, fixtureName);
+  assert.equal(manualResult.import_report.parsedJoins, 1);
+  assert.equal(manualResult.import_report.parsedPlayerlistSnapshots, 1);
   assert.equal(manualResult.public_cache_updated, true);
   assert.equal(manualResult.discord_jobs_queued > 0, true);
   assert.equal(manualDb.killEvents.length, 10);
   assert.equal(manualDb.syncRuns.at(-1)?.trigger_type, "manual_paste");
+  const manualRunPayload = JSON.parse(String(manualDb.syncRuns.at(-1)?.message ?? "{}")) as Record<string, unknown>;
+  assert.equal(manualRunPayload.type, "manual_adm_import");
+  assert.equal(manualRunPayload.filename, fixtureName);
+  assert.equal(manualRunPayload.parsed_kills, 10);
+  assert.equal(manualRunPayload.written_kills, 10);
   const repeatedManualResult = await importAdmTextForServer(makeEnv(manualDb), {
     linkedServerId,
     filename: fixtureName,

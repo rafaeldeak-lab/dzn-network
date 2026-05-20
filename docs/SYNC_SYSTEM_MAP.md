@@ -92,6 +92,9 @@ Emergency Manual ADM Import:
 - `POST /api/servers/[serverId]/adm/manual-import` accepts a filename plus pasted ADM text and routes it through the same ADM parser/write path as scheduled processing.
 - Manual paste imports write supported kills/deaths/joins/disconnects/PlayerList snapshots, rebuild server stats, update `server_public_cache`, queue plan-allowed Discord post jobs, and save the Last ADM Import Report.
 - Manual paste imports force a full-file reprocess from line 0 but still use existing event dedupe, so pasting the same ADM twice should report duplicate skips and must not double-count stats.
+- The dashboard keeps manual import success separate from automatic ADM download state. Automatic download can still show `latest_adm_unreadable`, while Manual ADM Import Result shows the pasted import counts, import id/time, public cache status, Discord queue count, and parser warnings.
+- After import, the dashboard explicitly refetches sync status, recent synced events, public-cache diagnostics, automation health, and server data. If that refresh fails, the import result remains visible with a Retry Dashboard Refresh action.
+- Sync Health includes a collapsed Manual ADM Imports history based on recent `manual_paste` / `manual_upload` sync runs.
 - This does not remove or bypass the automatic Nitrado discovery/download path; it is a recovery path while Nitrado file access is unavailable.
 
 Discovery intervals:

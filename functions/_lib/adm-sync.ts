@@ -169,6 +169,10 @@ type AdmCursorValidationReport = {
 };
 
 export type AdmDatabaseImportReport = AdmImportDebugReport & {
+  importSource?: string | null;
+  importedAt?: string | null;
+  importReportId?: string | null;
+  parserWarnings?: string[];
   attemptedDbWrites: number;
   successfulDbWrites: number;
   writtenKills: number;
@@ -202,6 +206,9 @@ export type AdmFixtureImportResult = {
   duplicateLines: number;
   publicCacheUpdated: boolean;
   discordQueuesCreated: number;
+  importReportId: string;
+  importedAt: string;
+  parserWarnings: string[];
   totalKills: number;
   totalDeaths: number;
   longestKillDistance: number;
@@ -224,9 +231,28 @@ export type ManualAdmTextImportResult = {
   failed_writes: number;
   public_cache_updated: boolean;
   discord_jobs_queued: number;
+  import_report_id: string;
+  imported_at: string;
+  parser_warnings: string[];
   total_kills: number;
   total_deaths: number;
   import_report: AdmDatabaseImportReport;
+};
+
+export type ManualAdmImportHistoryItem = {
+  id: string;
+  filename: string | null;
+  imported_at: string | null;
+  source: string;
+  status: string;
+  raw_lines: number;
+  parsed_kills: number;
+  written_kills: number;
+  joins: number;
+  disconnects: number;
+  playerlist_snapshots: number;
+  duplicate_skips: number;
+  failed_writes: number;
 };
 
 export type AdmSyncStatusCode =
@@ -340,6 +366,7 @@ export type AdmSyncStatus = {
   last_adm_import_report: AdmDatabaseImportReport | null;
   current_recovery_action: string;
   recent_sync_runs: AdmSyncRunSummary[];
+  manual_import_history: ManualAdmImportHistoryItem[];
 };
 
 export type AdmRecentSyncEvent = {
@@ -1570,6 +1597,48 @@ export function buildAdmImportDebugReport(
   };
 }
 
+function buildParserWarnings(report: AdmImportDebugReport) {
+  const warnings: string[] = [];
+  const missedKillLines = report.rawKilledByLinesFound - report.parsedPvpKills;
+  if (missedKillLines > 0) {
+    warnings.push(`${missedKillLines} raw killed-by line${missedKillLines === 1 ? "" : "s"} did not parse as PvP kills.`);
+  }
+  if (report.skippedDeadHitLines > 0) {
+    warnings.push(`${report.skippedDeadHitLines} DEAD hit line${report.skippedDeadHitLines === 1 ? "" : "s"} skipped as non-kills.`);
+  }
+  return warnings;
+}
+
+function buildAdmImportSyncRunMessage(values: {
+  source: string;
+  filename: string | null;
+  rawLines: number;
+  parsedKills: number;
+  writtenKills: number;
+  joins: number;
+  disconnects: number;
+  playerlistSnapshots: number;
+  duplicateSkips: number;
+  failedWrites: number;
+  importedAt: string;
+}) {
+  if (values.source !== "manual_paste" && values.source !== "manual_upload") return "Fixture ADM import completed.";
+  return JSON.stringify({
+    type: "manual_adm_import",
+    filename: values.filename,
+    imported_at: values.importedAt,
+    source: values.source,
+    raw_lines: values.rawLines,
+    parsed_kills: values.parsedKills,
+    written_kills: values.writtenKills,
+    joins: values.joins,
+    disconnects: values.disconnects,
+    playerlist_snapshots: values.playerlistSnapshots,
+    duplicate_skips: values.duplicateSkips,
+    failed_writes: values.failedWrites,
+  });
+}
+
 export async function importReadableAdmLinesIntoDatabase(
   env: Env,
   input: {
@@ -1633,6 +1702,7 @@ export async function importReadableAdmLinesIntoDatabase(
   const syncRunId = input.context.syncRunId ?? crypto.randomUUID();
   const context = { ...input.context, syncRunId };
   const startedAt = now;
+  const parserWarnings = buildParserWarnings(baseReport);
   let attemptedDbWrites = 0;
   let successfulDbWrites = 0;
   let rawEventsStored = 0;
@@ -1655,6 +1725,10 @@ export async function importReadableAdmLinesIntoDatabase(
 
   const buildReport = (values: { failedWrites?: number; cursorLine?: number } = {}): AdmDatabaseImportReport => ({
     ...baseReport,
+    importSource: triggerType,
+    importedAt: now,
+    importReportId: syncRunId,
+    parserWarnings,
     attemptedDbWrites,
     successfulDbWrites,
     writtenKills: killEventsStored,
@@ -1796,13 +1870,26 @@ export async function importReadableAdmLinesIntoDatabase(
       cursorRecoveryStrategy: cursorValidationReport.cursorRecoveryStrategy,
       cursorRecoveryReason: cursorValidationReport.cursorRecoveryReason,
     });
+    const syncRunMessage = buildAdmImportSyncRunMessage({
+      source: triggerType,
+      filename: context.admFileName,
+      rawLines: input.lines.length,
+      parsedKills: baseReport.parsedPvpKills,
+      writtenKills: killEventsStored,
+      joins: joinsCreated,
+      disconnects: disconnectsCreated,
+      playerlistSnapshots: baseReport.parsedPlayerlistSnapshots,
+      duplicateSkips: duplicateLines,
+      failedWrites: 0,
+      importedAt: now,
+    });
     await recordSyncRun(env, {
       id: syncRunId,
       linkedServerId: context.linkedServerId,
       sourceServiceId: context.nitradoServiceId,
       triggerType,
       status: "completed",
-      message: "Fixture ADM import completed.",
+      message: syncRunMessage,
       linesRead: input.lines.length,
       linesProcessed: pendingParsedEvents.length,
       eventsCreated,
@@ -1832,6 +1919,9 @@ export async function importReadableAdmLinesIntoDatabase(
       duplicateLines,
       publicCacheUpdated,
       discordQueuesCreated,
+      importReportId: syncRunId,
+      importedAt: now,
+      parserWarnings,
       totalKills: totals.totalKills,
       totalDeaths: totals.totalDeaths,
       longestKillDistance: totals.longestKillDistance,
@@ -1893,6 +1983,9 @@ export async function importReadableAdmLinesIntoDatabase(
       duplicateLines: 0,
       publicCacheUpdated: false,
       discordQueuesCreated: 0,
+      importReportId: syncRunId,
+      importedAt: now,
+      parserWarnings,
       totalKills: 0,
       totalDeaths: 0,
       longestKillDistance: 0,
@@ -1953,6 +2046,9 @@ export async function importAdmTextForServer(
     failed_writes: result.report.failedWrites,
     public_cache_updated: result.publicCacheUpdated,
     discord_jobs_queued: result.discordQueuesCreated,
+    import_report_id: result.importReportId,
+    imported_at: result.importedAt,
+    parser_warnings: result.parserWarnings,
     total_kills: result.totalKills,
     total_deaths: result.totalDeaths,
     import_report: result.report,
@@ -2122,6 +2218,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     countQueuedUnreadableAdmFiles(env, linkedServer.id),
     getNewestUnprocessedAdmFile(env, linkedServer.id),
   ]);
+  const manualImportHistory = await getManualAdmImportHistory(env, linkedServer.id, 5);
   const currentStatus = stringOrDefault(row?.last_sync_status, "not_started");
   const newestAvailableAdmTimestamp = typeof row?.newest_available_adm_timestamp === "string" ? row.newest_available_adm_timestamp : null;
   const observedAdmCadenceMinutes = nullablePositiveInteger(row?.observed_adm_cadence_minutes);
@@ -2196,6 +2293,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     last_adm_import_report: parseAdmDatabaseImportReport(row?.last_import_report_json),
     current_recovery_action: getAdmRecoveryAction(currentStatus, unreadableQueued),
     recent_sync_runs: recentRuns,
+    manual_import_history: manualImportHistory,
   };
 }
 
@@ -4054,6 +4152,68 @@ async function getLatestSuccessfulSyncRun(env: Env, linkedServerId: string) {
   return row ? mapSyncRunSummary(row) : null;
 }
 
+async function getManualAdmImportHistory(env: Env, linkedServerId: string, limit: number): Promise<ManualAdmImportHistoryItem[]> {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT id, trigger_type, status, message, lines_read, kills_created, started_at, finished_at, created_at
+       FROM sync_runs
+       WHERE linked_server_id = ?
+         AND trigger_type IN ('manual_paste', 'manual_upload')
+       ORDER BY COALESCE(finished_at, started_at, created_at) DESC
+       LIMIT ?`,
+    )
+    .bind(linkedServerId, limit)
+    .all<AdmSyncRunSummary>();
+  return (rows.results ?? []).map(mapManualAdmImportHistoryItem);
+}
+
+function mapManualAdmImportHistoryItem(row: AdmSyncRunSummary): ManualAdmImportHistoryItem {
+  const parsed = parseManualAdmImportSyncRunMessage(row.message);
+  return {
+    id: row.id,
+    filename: parsed.filename ?? null,
+    imported_at: parsed.imported_at ?? row.finished_at ?? row.started_at ?? row.created_at,
+    source: parsed.source ?? row.trigger_type,
+    status: row.status,
+    raw_lines: parsed.raw_lines ?? numberOrZero(row.lines_read),
+    parsed_kills: parsed.parsed_kills ?? numberOrZero(row.kills_created),
+    written_kills: parsed.written_kills ?? numberOrZero(row.kills_created),
+    joins: parsed.joins ?? 0,
+    disconnects: parsed.disconnects ?? 0,
+    playerlist_snapshots: parsed.playerlist_snapshots ?? 0,
+    duplicate_skips: parsed.duplicate_skips ?? 0,
+    failed_writes: parsed.failed_writes ?? (row.status === "completed" ? 0 : 1),
+  };
+}
+
+function parseManualAdmImportSyncRunMessage(value: string | null): Partial<ManualAdmImportHistoryItem> & {
+  imported_at?: string | null;
+  raw_lines?: number;
+  parsed_kills?: number;
+  written_kills?: number;
+} {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (parsed.type !== "manual_adm_import") return {};
+    return {
+      filename: typeof parsed.filename === "string" ? parsed.filename : null,
+      imported_at: typeof parsed.imported_at === "string" ? parsed.imported_at : null,
+      source: typeof parsed.source === "string" ? parsed.source : "manual_paste",
+      raw_lines: numberOrZero(parsed.raw_lines),
+      parsed_kills: numberOrZero(parsed.parsed_kills),
+      written_kills: numberOrZero(parsed.written_kills),
+      joins: numberOrZero(parsed.joins),
+      disconnects: numberOrZero(parsed.disconnects),
+      playerlist_snapshots: numberOrZero(parsed.playerlist_snapshots),
+      duplicate_skips: numberOrZero(parsed.duplicate_skips),
+      failed_writes: numberOrZero(parsed.failed_writes),
+    };
+  } catch {
+    return {};
+  }
+}
+
 function mapSyncRunSummary(row: AdmSyncRunSummary): AdmSyncRunSummary {
   return {
     id: row.id,
@@ -4350,6 +4510,10 @@ function parseAdmDatabaseImportReport(value: unknown): AdmDatabaseImportReport |
       parsedUncreditedDeaths: numberOrZero(parsed.parsedUncreditedDeaths),
       duplicateSkips: numberOrZero(parsed.duplicateSkips),
       pvpKillLineNumbers: Array.isArray(parsed.pvpKillLineNumbers) ? parsed.pvpKillLineNumbers.map(numberOrZero).filter((line) => line > 0) : [],
+      importSource: typeof parsed.importSource === "string" ? parsed.importSource : null,
+      importedAt: typeof parsed.importedAt === "string" ? parsed.importedAt : null,
+      importReportId: typeof parsed.importReportId === "string" ? parsed.importReportId : null,
+      parserWarnings: Array.isArray(parsed.parserWarnings) ? parsed.parserWarnings.filter((warning): warning is string => typeof warning === "string") : [],
       attemptedDbWrites: numberOrZero(parsed.attemptedDbWrites),
       successfulDbWrites: numberOrZero(parsed.successfulDbWrites),
       writtenKills: numberOrZero(parsed.writtenKills),
