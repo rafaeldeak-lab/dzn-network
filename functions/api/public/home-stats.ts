@@ -71,6 +71,19 @@ type BuildLeaderboardRow = PublicBuildLeaderboardRow & {
   storage_expansion_built: number;
 };
 
+type PreviewTopServerRow = {
+  public_slug: string | null;
+  server_name: string | null;
+  server_type: string | null;
+  total_kills: number | null;
+  total_deaths: number | null;
+  unique_players: number | null;
+  total_joins: number | null;
+  longest_kill: number | null;
+  stats_active: number | null;
+  updated_at: string | null;
+};
+
 type HomeStatsSectionReason = "login_required" | "plan_required" | null;
 
 type HomeStatsSectionAccess = {
@@ -109,17 +122,58 @@ const MOCK_PLAYER_PREFIXES = ["MockSurvivor", "MockBandit", "MockRunner"];
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
+  const headers = publicAccessCacheHeaders(viewerLoggedIn);
 
   if (!env.DB) {
-    return json(applyHomeStatsAccess(emptyHomeStats(), viewerLoggedIn), { headers: publicAccessCacheHeaders(viewerLoggedIn) });
+    return json(applyHomeStatsAccess(emptyHomeStats(), viewerLoggedIn), { headers });
   }
 
-  await ensureLinkedServerMetadataColumns(env);
-  await ensureAdmSyncSchema(env);
-  await ensureBuildEventSchema(env);
-  const data = await buildHomeStats(env);
-  return json(applyHomeStatsAccess(data, viewerLoggedIn), { headers: publicAccessCacheHeaders(viewerLoggedIn) });
+  if (!viewerLoggedIn) {
+    const data = await buildPreviewHomeStats(env).catch((error) => {
+      console.warn("DZN HOME STATS PREVIEW FALLBACK", safeErrorMessage(error));
+      return emptyHomeStats();
+    });
+    return json(applyHomeStatsAccess(data, false), { headers });
+  }
+
+  try {
+    await ensureLinkedServerMetadataColumns(env);
+    await ensureAdmSyncSchema(env);
+    await ensureBuildEventSchema(env);
+    const data = await buildHomeStats(env);
+    return json(applyHomeStatsAccess(data, true), { headers });
+  } catch (error) {
+    console.warn("DZN HOME STATS FULL FALLBACK", safeErrorMessage(error));
+    return json(applyHomeStatsAccess(emptyHomeStats(), true), { headers });
+  }
 };
+
+async function buildPreviewHomeStats(env: Env) {
+  const db = requireDb(env);
+  const [totals, topServers] = await Promise.all([
+    getPreviewTotals(db),
+    getPreviewTopServers(db),
+  ]);
+  const data = emptyHomeStats();
+  return {
+    ...data,
+    totals: {
+      ...data.totals,
+      serversLinked: numberOrZero(totals.serversLinked),
+      statsActiveServers: numberOrZero(totals.statsActiveServers),
+    },
+    network_pulse: {
+      ...data.network_pulse,
+      active_servers: numberOrZero(totals.statsActiveServers),
+      top_server: topServers[0] ?? null,
+    },
+    topServers,
+    syncHealth: {
+      active: numberOrZero(totals.statsActiveServers),
+      pending: Math.max(numberOrZero(totals.serversLinked) - numberOrZero(totals.statsActiveServers), 0),
+    },
+  };
+}
 
 async function buildHomeStats(env: Env) {
   const db = requireDb(env);
@@ -272,6 +326,82 @@ async function getTotals(db: D1Database) {
     structuresBuilt: 0,
     buildScore: 0,
   };
+}
+
+async function getPreviewTotals(db: D1Database) {
+  const row = await db
+    .prepare(
+      `SELECT
+        COUNT(linked_servers.id) AS serversLinked,
+        SUM(
+          CASE
+            WHEN COALESCE(server_stats.total_joins, 0) > 0
+              OR COALESCE(server_stats.total_disconnects, 0) > 0
+              OR COALESCE(server_stats.total_deaths, 0) > 0
+              OR COALESCE(server_stats.total_kills, 0) > 0
+              OR COALESCE(server_stats.unique_players, 0) > 0
+              OR COALESCE(server_public_cache.updated_at, server_public_cache.last_status_update_at, server_public_cache.last_adm_update_at) IS NOT NULL
+            THEN 1 ELSE 0
+          END
+        ) AS statsActiveServers
+       FROM linked_servers
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
+    )
+    .first<Pick<TotalsRow, "serversLinked" | "statsActiveServers">>();
+  return row ?? { serversLinked: 0, statsActiveServers: 0 };
+}
+
+async function getPreviewTopServers(db: D1Database) {
+  const result = await db
+    .prepare(
+      `SELECT
+        linked_servers.public_slug,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        COALESCE(server_stats.total_kills, 0) AS total_kills,
+        COALESCE(server_stats.total_deaths, 0) AS total_deaths,
+        COALESCE(server_stats.unique_players, 0) AS unique_players,
+        COALESCE(server_stats.total_joins, 0) AS total_joins,
+        COALESCE(server_stats.longest_kill_distance, 0) AS longest_kill,
+        CASE
+          WHEN COALESCE(server_stats.total_joins, 0) > 0
+            OR COALESCE(server_stats.total_disconnects, 0) > 0
+            OR COALESCE(server_stats.total_deaths, 0) > 0
+            OR COALESCE(server_stats.total_kills, 0) > 0
+            OR COALESCE(server_stats.unique_players, 0) > 0
+            OR COALESCE(server_public_cache.updated_at, server_public_cache.last_status_update_at, server_public_cache.last_adm_update_at) IS NOT NULL
+          THEN 1 ELSE 0
+        END AS stats_active,
+        COALESCE(server_public_cache.updated_at, server_public_cache.last_status_update_at, server_public_cache.last_adm_update_at, linked_servers.updated_at, linked_servers.created_at) AS updated_at
+       FROM linked_servers
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY stats_active DESC, updated_at DESC
+       LIMIT 3`,
+    )
+    .all<PreviewTopServerRow>();
+
+  return (result.results ?? []).map((server, index) => ({
+    public_slug: server.public_slug,
+    server_name: server.server_name,
+    guild_name: null,
+    server_type: normalizeText(server.server_type, "UNKNOWN"),
+    total_kills: numberOrZero(server.total_kills),
+    total_deaths: numberOrZero(server.total_deaths),
+    unique_players: numberOrZero(server.unique_players),
+    total_joins: numberOrZero(server.total_joins),
+    longest_kill: numberOrZero(server.longest_kill),
+    stats_active: numberOrZero(server.stats_active),
+    rank: index + 1,
+    score: 0,
+    score_label: "Login required",
+    score_breakdown: null,
+  }));
 }
 
 async function buildBuildLeaderboardRows(db: D1Database, rows: PublicBuildLeaderboardRow[]) {
@@ -886,6 +1016,10 @@ function firstString(...values: unknown[]) {
 function normalizeText(value: string | null, fallback: string) {
   const text = value?.replace(/_/g, " ").trim();
   return text ? text.toUpperCase() : fallback;
+}
+
+function safeErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function roundOne(value: number) {

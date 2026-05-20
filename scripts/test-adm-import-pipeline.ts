@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import {
   createAdmImportJobForServer,
+  createScheduledAdmImportJobForServer,
   finishAdmImportLineJobForServer,
   getAdmImportJobProgressForServer,
   getLatestAdmImportJobProgressForFilename,
@@ -10,6 +11,7 @@ import {
   importAdmFilesForServer,
   importAdmTextForServer,
   importReadableAdmLinesIntoDatabase,
+  isAdmFileNewerThan,
   processPendingAdmImportJobs,
   processAdmImportJobLineChunk,
   processNextAdmImportJobChunk,
@@ -550,6 +552,118 @@ async function main() {
   assert.equal(scheduledJobDb.serverStats.get(linkedServerId)?.total_kills, 216);
   assert.equal(scheduledJobDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
   assert.equal(scheduledJobDb.automationJobs.length > 0, true);
+
+  assert.equal(isAdmFileNewerThan("DayZServer_PS4_x64_2026-05-20_13-02-00.ADM", largeFixtureName), true);
+  assert.equal(isAdmFileNewerThan(largeFixtureName, largeFixtureName), false);
+  assert.equal(isAdmFileNewerThan("DayZServer_PS4_x64_2026-05-19_16-01-55.ADM", largeFixtureName), false);
+
+  const scheduledCreateDb = new MemoryD1();
+  const scheduledCreate = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(scheduledCreateDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(scheduledCreate.status, "adm_import_job_queued");
+  assert.equal(scheduledCreate.job?.source, "scheduled_nitrado");
+  assert.equal(scheduledCreate.job?.current_line, 0);
+  assert.equal(scheduledCreate.job?.chunks_processed, 0);
+  assert.equal(scheduledCreateDb.admImportJobs.size, 1);
+  assert.equal(String([...scheduledCreateDb.admImportJobs.values()][0]?.adm_text ?? "").includes("AdminLog started"), true);
+  const repeatedScheduledCreate = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(scheduledCreateDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(repeatedScheduledCreate.duplicateExistingJob, true);
+  assert.equal(repeatedScheduledCreate.job?.current_line, 0);
+  assert.equal(repeatedScheduledCreate.job?.chunks_processed, 0);
+
+  const scheduledDuplicateDb = new MemoryD1();
+  const mockAdmName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
+  scheduledDuplicateDb.admSyncState.set(linkedServerId, {
+    linked_server_id: linkedServerId,
+    latest_adm_file: mockAdmName,
+    latest_adm_path: mockAdmName,
+    last_processed_file: mockAdmName,
+    last_processed_line: 14,
+    last_processed_offset: 14,
+    last_sync_status: "completed",
+    last_sync_message: "Manual import completed.",
+    last_sync_at: "2026-05-20T12:00:00.000Z",
+  });
+  const scheduledDuplicate = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(scheduledDuplicateDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(scheduledDuplicate.status, "no_new_lines");
+  assert.equal(scheduledDuplicate.job, null);
+  assert.equal(scheduledDuplicateDb.admImportJobs.size, 0);
+
+  const manualCompletedDedupeDb = new MemoryD1();
+  const manualMockImport = await importAdmTextForServer(makeEnv(manualCompletedDedupeDb), {
+    linkedServerId,
+    filename: mockAdmName,
+    admText: [
+      "AdminLog started on 2026-05-14 at 13:45:00",
+      '13:45:05 | Player "MockSurvivor" is connected',
+      '13:47:22 | Player "MockSurvivor" has been disconnected',
+    ].join("\n"),
+    source: "manual_file_upload",
+  });
+  assert.equal(manualMockImport.ok, true);
+  assert.equal(manualCompletedDedupeDb.admSyncState.get(linkedServerId)?.last_processed_file, mockAdmName);
+  const manualCompletedScheduledDuplicate = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(manualCompletedDedupeDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(manualCompletedScheduledDuplicate.status, "no_new_lines");
+  assert.equal(manualCompletedDedupeDb.admImportJobs.size, 0);
+
+  const newerAfterCompletedDb = new MemoryD1();
+  newerAfterCompletedDb.admSyncState.set(linkedServerId, {
+    linked_server_id: linkedServerId,
+    latest_adm_file: "DAYZSERVER_PS4_X64_2026-05-13_11-29-09.ADM",
+    latest_adm_path: "DAYZSERVER_PS4_X64_2026-05-13_11-29-09.ADM",
+    last_processed_file: "DAYZSERVER_PS4_X64_2026-05-13_11-29-09.ADM",
+    last_processed_line: 14,
+    last_processed_offset: 14,
+    last_sync_status: "completed",
+    last_sync_message: "Earlier ADM import completed.",
+    last_sync_at: "2026-05-20T12:00:00.000Z",
+  });
+  const newerAfterCompleted = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(newerAfterCompletedDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(newerAfterCompleted.status, "adm_import_job_queued");
+  assert.equal(newerAfterCompleted.job?.filename, mockAdmName);
+  assert.equal(newerAfterCompletedDb.admImportJobs.size, 1);
+
+  const staleScheduledDb = new MemoryD1();
+  const staleScheduledJob = await createAdmImportJobForServer(makeEnv(staleScheduledDb), {
+    linkedServerId,
+    filename: largeFixtureName,
+    admText: largeFixtureText,
+    source: "scheduled_nitrado",
+    chunkSize: 10,
+  });
+  const staleRow = staleScheduledDb.admImportJobs.get(staleScheduledJob.job_id);
+  if (staleRow) {
+    staleRow.status = "writing";
+    staleRow.updated_at = "2026-05-20T10:00:00.000Z";
+  }
+  const recoveredStaleScheduled = await processPendingAdmImportJobs(makeEnv(staleScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(recoveredStaleScheduled.processedJobs, 1);
+  assert.equal(recoveredStaleScheduled.chunksProcessed, 1);
+  assert.equal(staleScheduledDb.admImportJobs.get(staleScheduledJob.job_id)?.current_line, 10);
 
   const duplicateLargeManual = await importChunkedAdmText(makeEnv(scheduledJobDb), linkedServerId, largeFixtureName, largeFixtureText, { chunkSize: 10 });
   assert.equal(duplicateLargeManual.file_result?.parsed_kills, 216);
@@ -1132,6 +1246,25 @@ class MemoryStatement {
       row.error_message = null;
       row.updated_at = this.values[0];
       return changed(1);
+    }
+    if (q.includes("scheduled adm import job stalled for more than 10 minutes")) {
+      let changes = 0;
+      const source = String(this.values[1] ?? "");
+      const cutoff = String(this.values[2] ?? "");
+      for (const row of this.db.admImportJobs.values()) {
+        const updatedAt = String(row.updated_at ?? row.created_at ?? "");
+        if (
+          row.source === source &&
+          ["processing", "parsing", "writing", "rebuilding"].includes(String(row.status)) &&
+          updatedAt < cutoff
+        ) {
+          row.status = "failed_retryable";
+          row.error_message = row.error_message ?? "Scheduled ADM import job stalled for more than 10 minutes. Cron will retry it automatically.";
+          row.updated_at = this.values[0];
+          changes += 1;
+        }
+      }
+      return changed(changes);
     }
     if (q.startsWith("update adm_import_jobs set status = 'failed'") || q.startsWith("update adm_import_jobs set status = 'failed_retryable'")) {
       const chunkProtocol = q.includes("failed_chunk_index");

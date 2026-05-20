@@ -1228,6 +1228,9 @@ export async function getAutomationHealth(env: Env) {
   const now = new Date().toISOString();
   const statusLockCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const admLockCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const admImportJobCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const todayStart = new Date(new Date().setUTCHours(0, 0, 0, 0)).toISOString();
+  const admImportJobsTableExists = await tableExists(db, "adm_import_jobs");
 
   const [
     lastRuns,
@@ -1248,6 +1251,10 @@ export async function getAutomationHealth(env: Env) {
     planCounts,
     statusCounts,
     dueServerDiagnostics,
+    newestAdmState,
+    latestScheduledAdmJob,
+    admImportJobCounts,
+    admImportJobTimes,
   ] = await Promise.all([
     db
       .prepare(
@@ -1416,6 +1423,106 @@ export async function getAutomationHealth(env: Env) {
         adm_sync_started_at: string | null;
         skipped_reason: string | null;
       }>(),
+    db
+      .prepare(
+        `SELECT newest_available_adm_filename, newest_available_adm_timestamp,
+                newest_readable_adm_filename, newest_readable_adm_timestamp,
+                next_adm_discovery_due_at, next_adm_pull_due_at
+         FROM server_sync_state
+         WHERE newest_available_adm_filename IS NOT NULL
+            OR newest_readable_adm_filename IS NOT NULL
+         ORDER BY COALESCE(newest_available_adm_timestamp, newest_readable_adm_timestamp, updated_at) DESC
+         LIMIT 1`,
+      )
+      .first<{
+        newest_available_adm_filename: string | null;
+        newest_available_adm_timestamp: string | null;
+        newest_readable_adm_filename: string | null;
+        newest_readable_adm_timestamp: string | null;
+        next_adm_discovery_due_at: string | null;
+        next_adm_pull_due_at: string | null;
+      }>(),
+    admImportJobsTableExists ? db
+      .prepare(
+        `SELECT id, server_id, filename, source, status, total_lines, current_line,
+                chunk_size, total_chunks, chunks_processed, parsed_kills, written_kills,
+                joins, disconnects, playerlist_snapshots, error_message, updated_at, completed_at
+         FROM adm_import_jobs
+         WHERE source = 'scheduled_nitrado'
+         ORDER BY updated_at DESC, created_at DESC
+         LIMIT 1`,
+      )
+      .first<{
+        id: string;
+        server_id: string;
+        filename: string;
+        source: string;
+        status: string;
+        total_lines: number | null;
+        current_line: number | null;
+        chunk_size: number | null;
+        total_chunks: number | null;
+        chunks_processed: number | null;
+        parsed_kills: number | null;
+        written_kills: number | null;
+        joins: number | null;
+        disconnects: number | null;
+        playerlist_snapshots: number | null;
+        error_message: string | null;
+        updated_at: string | null;
+        completed_at: string | null;
+      }>() : Promise.resolve(null),
+    admImportJobsTableExists ? db
+      .prepare(
+        `SELECT
+          SUM(CASE WHEN status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding') THEN 1 ELSE 0 END) AS active_count,
+          SUM(CASE WHEN status = 'failed_retryable' THEN 1 ELSE 0 END) AS failed_retryable_count,
+          SUM(CASE WHEN status IN ('processing', 'parsing', 'writing', 'rebuilding') AND COALESCE(updated_at, created_at) < ? THEN 1 ELSE 0 END) AS stuck_count,
+          SUM(CASE WHEN status IN ('completed', 'completed_with_warnings') AND COALESCE(completed_at, updated_at, created_at) >= ? THEN 1 ELSE 0 END) AS completed_today_count
+         FROM adm_import_jobs
+         WHERE source = 'scheduled_nitrado'`,
+      )
+      .bind(admImportJobCutoff, todayStart)
+      .first<{
+        active_count: number | null;
+        failed_retryable_count: number | null;
+        stuck_count: number | null;
+        completed_today_count: number | null;
+      }>() : Promise.resolve(null),
+    admImportJobsTableExists ? db
+      .prepare(
+        `SELECT
+          MAX(CASE WHEN source = 'scheduled_nitrado' AND chunks_processed > 0 THEN updated_at ELSE NULL END) AS last_chunk_processed_at,
+          (SELECT filename FROM adm_import_jobs
+           WHERE source = 'scheduled_nitrado'
+             AND status IN ('completed', 'completed_with_warnings')
+           ORDER BY COALESCE(completed_at, updated_at, created_at) DESC
+           LIMIT 1) AS last_completed_adm_file,
+          MIN(next_adm_discovery_due_at) AS next_adm_discovery_due_at,
+          MIN(next_adm_pull_due_at) AS next_adm_processing_due_at
+         FROM server_sync_state
+         LEFT JOIN adm_import_jobs ON adm_import_jobs.source = 'scheduled_nitrado'`,
+      )
+      .first<{
+        last_chunk_processed_at: string | null;
+        last_completed_adm_file: string | null;
+        next_adm_discovery_due_at: string | null;
+        next_adm_processing_due_at: string | null;
+      }>() : db
+      .prepare(
+        `SELECT
+          NULL AS last_chunk_processed_at,
+          NULL AS last_completed_adm_file,
+          MIN(next_adm_discovery_due_at) AS next_adm_discovery_due_at,
+          MIN(next_adm_pull_due_at) AS next_adm_processing_due_at
+         FROM server_sync_state`,
+      )
+      .first<{
+        last_chunk_processed_at: string | null;
+        last_completed_adm_file: string | null;
+        next_adm_discovery_due_at: string | null;
+        next_adm_processing_due_at: string | null;
+      }>(),
   ]);
 
   const cronHealth = buildAutomationCronHealth({
@@ -1459,6 +1566,39 @@ export async function getAutomationHealth(env: Env) {
     due_metadata_jobs: dueMetadata,
     due_adm_discovery_jobs: dueAdmDiscovery,
     due_adm_jobs: dueAdm,
+    newest_adm_found: newestAdmState?.newest_available_adm_filename ?? null,
+    newest_adm_found_at: newestAdmState?.newest_available_adm_timestamp ?? null,
+    newest_adm_readable: Boolean(newestAdmState?.newest_readable_adm_filename && newestAdmState.newest_readable_adm_filename === newestAdmState.newest_available_adm_filename),
+    newest_readable_adm_filename: newestAdmState?.newest_readable_adm_filename ?? null,
+    newest_readable_adm_timestamp: newestAdmState?.newest_readable_adm_timestamp ?? null,
+    latest_scheduled_nitrado_job: latestScheduledAdmJob ? {
+      id: latestScheduledAdmJob.id,
+      server_id: latestScheduledAdmJob.server_id,
+      filename: latestScheduledAdmJob.filename,
+      source: latestScheduledAdmJob.source,
+      status: latestScheduledAdmJob.status,
+      total_lines: nullableInteger(latestScheduledAdmJob.total_lines) ?? 0,
+      current_line: nullableInteger(latestScheduledAdmJob.current_line) ?? 0,
+      chunk_size: nullableInteger(latestScheduledAdmJob.chunk_size) ?? 0,
+      total_chunks: nullableInteger(latestScheduledAdmJob.total_chunks) ?? 0,
+      chunks_processed: nullableInteger(latestScheduledAdmJob.chunks_processed) ?? 0,
+      parsed_kills: nullableInteger(latestScheduledAdmJob.parsed_kills) ?? 0,
+      written_kills: nullableInteger(latestScheduledAdmJob.written_kills) ?? 0,
+      joins: nullableInteger(latestScheduledAdmJob.joins) ?? 0,
+      disconnects: nullableInteger(latestScheduledAdmJob.disconnects) ?? 0,
+      playerlist_snapshots: nullableInteger(latestScheduledAdmJob.playerlist_snapshots) ?? 0,
+      error_message: latestScheduledAdmJob.error_message,
+      updated_at: latestScheduledAdmJob.updated_at,
+      completed_at: latestScheduledAdmJob.completed_at,
+    } : null,
+    active_adm_import_jobs_count: nullableInteger(admImportJobCounts?.active_count) ?? 0,
+    stuck_adm_import_jobs_count: nullableInteger(admImportJobCounts?.stuck_count) ?? 0,
+    completed_adm_import_jobs_today: nullableInteger(admImportJobCounts?.completed_today_count) ?? 0,
+    failed_retryable_adm_import_jobs: nullableInteger(admImportJobCounts?.failed_retryable_count) ?? 0,
+    last_adm_import_chunk_processed_at: admImportJobTimes?.last_chunk_processed_at ?? null,
+    last_completed_adm_file: admImportJobTimes?.last_completed_adm_file ?? null,
+    next_adm_discovery_due_at: admImportJobTimes?.next_adm_discovery_due_at ?? newestAdmState?.next_adm_discovery_due_at ?? null,
+    next_adm_processing_due_at: admImportJobTimes?.next_adm_processing_due_at ?? newestAdmState?.next_adm_pull_due_at ?? null,
     queued_discord_post_jobs: queuedDiscord,
     failed_jobs: failedJobs,
     stuck_currently_checking_status_locks: stuckStatusLocks,

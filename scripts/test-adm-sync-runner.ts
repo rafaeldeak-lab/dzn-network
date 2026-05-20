@@ -488,6 +488,8 @@ async function runNitradoReadFallbackTests() {
     });
     assert.equal(unreadableBatch.newestAdmFileName, latestAdm);
     assert.equal(unreadableBatch.files.length, 0);
+    assert.equal(unreadableBatch.readErrors.some((error) => error.includes(latestAdm)), true);
+    assert.equal(typeof unreadableBatch.readError, "string");
     const unreadableDebug = await debugNitradoAdmFileDiscovery("unit-token", "17428528", {
       knownLatestFileName: latestAdm,
       sampleLimit: 1,

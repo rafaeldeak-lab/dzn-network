@@ -322,6 +322,8 @@ export type NitradoReadableAdmFileBatch = {
   previousLatestAdmFileName: string | null;
   lastCheckedAt: string;
   apiStatus: SafeApiStatus;
+  readErrors: string[];
+  readError: string | null;
 };
 
 export type NitradoAdmDiscoveryCandidateDebug = {
@@ -546,12 +548,14 @@ export async function fetchReadableNitradoAdmFiles(
   });
 
   const files: NitradoReadableAdmFile[] = [];
+  const readErrors: string[] = [];
   for (const candidate of readCandidates) {
     const readable = await readNitradoAdmCandidate(token, serviceId, candidate, gameSpecificLogs, {
       ...options,
       fullDownloadFallback: options.mode === "full" || sameAdmEntry(candidate, newest),
     });
-    if (readable) files.push(readable);
+    if (readable.file) files.push(readable.file);
+    else if (readable.error) readErrors.push(`${candidate.name}: ${readable.error}`);
   }
 
   if (!files.length && newest) {
@@ -576,9 +580,12 @@ export async function fetchReadableNitradoAdmFiles(
         lines: fallback.lines,
         readableRouteUsed: fallback.diagnostics.readable.routeRecommendation,
       });
+    } else if (fallback.diagnostics.readable.message) {
+      readErrors.push(`${newest.name}: ${fallback.diagnostics.readable.message}`);
     }
   }
 
+  const uniqueReadErrors = dedupeStrings(readErrors).slice(0, 8);
   return {
     files,
     candidates: allEntries.map((entry) => ({
@@ -592,6 +599,8 @@ export async function fetchReadableNitradoAdmFiles(
     previousLatestAdmFileName,
     lastCheckedAt,
     apiStatus: serviceProbe.attempt.status,
+    readErrors: uniqueReadErrors,
+    readError: uniqueReadErrors[0] ?? null,
   };
 }
 
@@ -1722,7 +1731,7 @@ async function readNitradoAdmCandidate(
   candidate: NitradoFileEntry,
   gameSpecificLogs: GameSpecificLogDetails,
   options: AdmReadOptions,
-): Promise<NitradoReadableAdmFile | null> {
+): Promise<{ file: NitradoReadableAdmFile | null; error: string | null }> {
   const details: GameSpecificLogDetails = {
     ...gameSpecificLogs,
     admLogFiles: dedupeFileEntries([candidate, ...gameSpecificLogs.admLogFiles]),
@@ -1737,7 +1746,12 @@ async function readNitradoAdmCandidate(
     options,
   });
   const lines = splitAdmLines(read.text);
-  if (!read.ok || !lines.some((line) => containsDayZAdminLogMarkers(line))) return null;
+  if (!read.ok || !lines.some((line) => containsDayZAdminLogMarkers(line))) {
+    return {
+      file: null,
+      error: summarizeAdmFileTextReadFailure(read),
+    };
+  }
 
   console.log("DZN ADM FILE READ VARIANT USED", {
     serviceId,
@@ -1749,13 +1763,21 @@ async function readNitradoAdmCandidate(
   });
 
   return {
-    name: candidate.name,
-    path: read.selectedPath ?? candidate.path,
-    lines,
-    readableRouteUsed: read.readMethod === "seek"
-      ? "/services/{serviceId}/gameservers/file_server/seek"
-      : "/services/{serviceId}/gameservers/file_server/download",
+    file: {
+      name: candidate.name,
+      path: read.selectedPath ?? candidate.path,
+      lines,
+      readableRouteUsed: read.readMethod === "seek"
+        ? "/services/{serviceId}/gameservers/file_server/seek"
+        : "/services/{serviceId}/gameservers/file_server/download",
+    },
+    error: null,
   };
+}
+
+function summarizeAdmFileTextReadFailure(read: AdmFileTextFallbackResult) {
+  const pathError = read.attemptedPaths.find((attempt) => attempt.error)?.error;
+  return read.downloadError ?? read.seekError ?? pathError ?? "Nitrado did not return readable DayZ ADM text for this file.";
 }
 
 async function readNitradoFileViaSeek(

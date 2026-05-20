@@ -435,10 +435,15 @@ function ServerDashboard({
   const statsSyncActive = syncHasProcessedLines || admState.kind === "connected";
   const statsSyncPending = !statsSyncActive && admState.kind === "discovered_read_pending";
   const latestAdmFile = syncStatus?.latest_adm_file ?? server.adm_latest_file ?? "Not detected";
-  const effectiveSyncStatus = normalizeDashboardSyncStatus(
-    syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started"),
-    latestAdmFile,
-  );
+  const syncStatusActiveAdmImportJob = syncStatus?.active_adm_import_job && isActiveAdmImportJobStatus(syncStatus.active_adm_import_job.status)
+    ? syncStatus.active_adm_import_job
+    : null;
+  const effectiveSyncStatus = syncStatusActiveAdmImportJob
+    ? "processing_in_chunks"
+    : normalizeDashboardSyncStatus(
+      syncStatus?.last_sync_status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started"),
+      latestAdmFile,
+    );
   const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
   const activityCount = (syncStatus?.total_joins ?? 0) + (syncStatus?.total_disconnects ?? 0) + (syncStatus?.total_deaths ?? 0);
   const noPvpKillsYet = statsSyncActive && (syncStatus?.total_kills ?? 0) === 0;
@@ -458,6 +463,7 @@ function ServerDashboard({
   const latestAdmReadable = getLatestAdmReadableLabel(effectiveSyncStatus);
   const recentFeedStatus = getRecentFeedStatus(syncStatus, effectiveSyncStatus, recentEvents.length);
   const recentFeedBadge = getRecentFeedBadge(recentEventsAreMock, effectiveSyncStatus);
+  const overviewAdmSyncStatus = getOverviewAdmSyncStatus(effectiveSyncStatus, Boolean(syncStatusActiveAdmImportJob), statsSyncActive);
   const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
   const processedPercent = getProcessedPercent(syncStatus);
   const nextScheduledSync = getNextScheduledSync(syncStatus?.last_scheduled_sync_at ?? null);
@@ -539,9 +545,6 @@ function ServerDashboard({
     }
   }, [server.id]);
 
-  const syncStatusActiveAdmImportJob = syncStatus?.active_adm_import_job && isActiveAdmImportJobStatus(syncStatus.active_adm_import_job.status)
-    ? syncStatus.active_adm_import_job
-    : null;
   const activeBulkAdmImportJob = findActiveAdmImportJobFromResult(bulkAdmImportResult);
   const activeAdmImportJobForPolling = syncStatusActiveAdmImportJob ?? activeBulkAdmImportJob ?? null;
   const activeAdmImportJobPollId = activeAdmImportJobForPolling?.job_id ?? null;
@@ -1619,7 +1622,7 @@ function ServerDashboard({
                 <HeroMetric icon={<Gauge className="h-4 w-4" />} label={networkAddressLabel} value={networkAddress} />
                 <HeroMetric icon={<Users className="h-4 w-4" />} label="Players" value={playerSlotsLabel} />
                 <HeroMetric icon={<BarChart3 className="h-4 w-4" />} label="Rank" value={globalRankLabel} title={scoreTitle} />
-                <HeroMetric icon={<CircleCheck className="h-4 w-4" />} label="Status" value={statsSyncActive ? "Synced" : formatSyncStatus(effectiveSyncStatus)} />
+                <HeroMetric icon={<CircleCheck className="h-4 w-4" />} label="Status" value={overviewAdmSyncStatus} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {tags.length ? tags.slice(0, 6).map((tag) => <TagPill key={tag}>{tag}</TagPill>) : <span className="text-sm text-zinc-400">No tags selected</span>}
@@ -1634,7 +1637,7 @@ function ServerDashboard({
             <HealthCard icon={<Server className="h-4 w-4" />} label="Server" value={formatServerStatus(server.status)} tone="emerald" />
             <HealthCard icon={<Gamepad2 className="h-4 w-4" />} label="Discord" value="Connected" tone="violet" />
             <HealthCard icon={<DatabaseZap className="h-4 w-4" />} label="Nitrado" value="Connected" tone="amber" />
-            <HealthCard icon={<ListChecks className="h-4 w-4" />} label="ADM" value={admState.badge} tone="cyan" />
+            <HealthCard icon={<ListChecks className="h-4 w-4" />} label="ADM" value={overviewAdmSyncStatus} tone="cyan" />
             <HealthCard icon={<Zap className="h-4 w-4" />} label="Sync Engine" value={syncHealth.status === "error" ? "Needs Action" : "Active"} tone="violet" />
           </div>
           <div className={`rounded-lg border p-4 ${dashboardSyncBanner.className}`}>
@@ -1844,6 +1847,7 @@ function ServerDashboard({
                 <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
                 <MiniInfo label="Next Action" value={syncHealth.status === "error" ? syncHealth.nextAction : "Continue syncing after fresh ADM activity"} />
               </div>
+              <AutomaticAdmImportJobPanel syncStatus={syncStatus} />
               <details className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
                 <summary className="cursor-pointer text-xs font-black uppercase text-zinc-200">Show ADM Technical Diagnostics</summary>
                 <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -3577,6 +3581,17 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
         <MiniInfo label="Due Metadata Jobs" value={String(health.due_metadata_jobs)} />
         <MiniInfo label="Due ADM Discovery" value={String(health.due_adm_discovery_jobs ?? 0)} />
         <MiniInfo label="Due ADM Jobs" value={String(health.due_adm_jobs)} />
+        <MiniInfo label="Newest ADM Found" value={health.newest_adm_found ?? "Waiting"} />
+        <MiniInfo label="Newest ADM Readable" value={health.newest_adm_readable ? "Yes" : health.newest_adm_found ? "No" : "Waiting"} />
+        <MiniInfo label="Latest Scheduled Job" value={formatAutomationAdmJob(health.latest_scheduled_nitrado_job)} />
+        <MiniInfo label="Active ADM Jobs" value={String(health.active_adm_import_jobs_count ?? 0)} />
+        <MiniInfo label="Stuck ADM Jobs" value={String(health.stuck_adm_import_jobs_count ?? 0)} />
+        <MiniInfo label="Completed ADM Today" value={String(health.completed_adm_import_jobs_today ?? 0)} />
+        <MiniInfo label="Retryable ADM Jobs" value={String(health.failed_retryable_adm_import_jobs ?? 0)} />
+        <MiniInfo label="Last ADM Chunk" value={health.last_adm_import_chunk_processed_at ? formatDashboardDate(health.last_adm_import_chunk_processed_at) : "Waiting"} />
+        <MiniInfo label="Last Completed ADM" value={health.last_completed_adm_file ?? "None"} />
+        <MiniInfo label="Next ADM Discovery" value={health.next_adm_discovery_due_at ? formatDashboardDate(health.next_adm_discovery_due_at) : "Waiting"} />
+        <MiniInfo label="Next ADM Processing" value={health.next_adm_processing_due_at ? formatDashboardDate(health.next_adm_processing_due_at) : "Waiting"} />
         <MiniInfo label="Queued Discord Jobs" value={String(health.queued_discord_post_jobs)} />
         <MiniInfo label="Failed Jobs" value={String(health.failed_jobs)} />
         <MiniInfo label="Stuck Locks" value={`${health.stuck_currently_checking_status_locks + health.stuck_currently_syncing_adm_locks}`} />
@@ -3614,6 +3629,51 @@ function AutomationHealthPanel({ health }: { health: AutomationHealth }) {
         </div>
       ) : null}
     </DashboardPanel>
+  );
+}
+
+function AutomaticAdmImportJobPanel({ syncStatus }: { syncStatus: AdmSyncStatus | null }) {
+  const job = syncStatus?.active_adm_import_job ?? null;
+  const report = syncStatus?.last_adm_import_report ?? null;
+  const readFailed = ["adm_file_unreadable", "latest_adm_unreadable"].includes(String(syncStatus?.last_sync_status ?? "").toLowerCase());
+  const nextAction = job
+    ? job.status === "failed_retryable"
+      ? "Cron will retry the stalled chunk job automatically."
+      : "Cron will process the next chunk on the next ADM run."
+    : readFailed
+      ? "Retry Nitrado ADM download on the next discovery or processing run."
+      : "Wait for the next Nitrado ADM file after reset.";
+  return (
+    <div className="mt-4 rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-3">
+      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-cyan-100">Automatic ADM Import Job</p>
+          <p className="mt-1 text-sm font-bold leading-6 text-zinc-100">
+            {job ? job.filename : report?.admFileName ? `Latest completed ADM: ${report.admFileName}` : "No active scheduled ADM job"}
+          </p>
+        </div>
+        <SmallBadge tone={job ? "emerald" : readFailed ? "orange" : "zinc"}>{job ? formatStatusLabel(job.status) : readFailed ? "Nitrado Read Failed" : "Idle"}</SmallBadge>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="Source" value={job?.source ?? report?.importSource ?? "scheduled_nitrado"} />
+        <MiniInfo label="Chunk" value={job ? `${Math.min(job.total_chunks, job.chunks_processed + 1)}/${job.total_chunks}` : "No active job"} />
+        <MiniInfo label="Parsed Kills" value={String(job?.parsed_kills ?? report?.parsedPvpKills ?? 0)} />
+        <MiniInfo label="Written Kills" value={String(job?.written_kills ?? report?.writtenKills ?? 0)} />
+        <MiniInfo label="Joins" value={String(job?.joins ?? report?.parsedJoins ?? 0)} />
+        <MiniInfo label="Disconnects" value={String(job?.disconnects ?? report?.parsedDisconnects ?? 0)} />
+        <MiniInfo label="PlayerList" value={String(job?.playerlist_snapshots ?? report?.parsedPlayerlistSnapshots ?? 0)} />
+        <MiniInfo label="Last Updated" value={job?.updated_at ? formatDashboardDate(job.updated_at) : report?.importedAt ? formatDashboardDate(report.importedAt) : "Waiting"} />
+      </div>
+      <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-300">
+        {readFailed ? syncStatus?.last_adm_discovery_error ?? syncStatus?.last_sync_message ?? nextAction : nextAction}
+      </p>
+      {!job ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <MiniInfo label="Next Discovery" value={syncStatus?.next_adm_discovery_due_at ? formatDashboardDate(syncStatus.next_adm_discovery_due_at) : "Waiting"} />
+          <MiniInfo label="Next Processing" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(syncStatus.next_adm_pull_due_at) : "Waiting"} />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -6071,6 +6131,14 @@ function getLatestAdmReadableLabel(currentStatus: string) {
   return "Unknown";
 }
 
+function getOverviewAdmSyncStatus(currentStatus: string, hasActiveJob: boolean, statsSyncActive: boolean) {
+  const normalizedStatus = currentStatus.toLowerCase();
+  if (hasActiveJob || ["processing_in_chunks", "adm_import_job_queued"].includes(normalizedStatus)) return "Importing ADM";
+  if (["adm_file_unreadable", "latest_adm_unreadable", "adm_not_generated_yet", "waiting_after_restart", "delayed_after_restart", "no_adm_file", "read_pending"].includes(normalizedStatus)) return "Waiting for Nitrado";
+  if (statsSyncActive || ["completed", "new_data_found", "no_new_lines", "no_new_log_available", "no_supported_events", "active"].includes(normalizedStatus)) return "ADM Sync Active";
+  return "Waiting for Nitrado";
+}
+
 function getRecentFeedBadge(recentEventsAreMock: boolean, currentStatus: string): { label: string; tone: "emerald" | "orange" | "zinc" } {
   if (recentEventsAreMock) return { label: "Mock Sync Data", tone: "orange" };
   const normalizedStatus = currentStatus.toLowerCase();
@@ -6358,6 +6426,13 @@ function formatActiveAdmImportJob(job: AdmSyncStatus["active_adm_import_job"]) {
   const totalChunks = Math.max(1, job.total_chunks);
   const nextChunk = Math.min(totalChunks, Math.max(1, job.chunks_processed + 1));
   return `${formatStatusLabel(job.status)} - ${job.filename} - chunk ${nextChunk}/${totalChunks}, ${job.parsed_kills} parsed kills, ${job.written_kills} written`;
+}
+
+function formatAutomationAdmJob(job: AutomationHealth["latest_scheduled_nitrado_job"] | null | undefined) {
+  if (!job) return "None";
+  const totalChunks = Math.max(1, job.total_chunks);
+  const currentChunk = Math.min(totalChunks, Math.max(1, job.chunks_processed || 1));
+  return `${formatStatusLabel(job.status)} - ${job.filename} - ${currentChunk}/${totalChunks}`;
 }
 
 function formatMinutesAgo(value: number | null | undefined, fallback: string) {
