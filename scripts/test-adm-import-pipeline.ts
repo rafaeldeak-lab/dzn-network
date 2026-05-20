@@ -42,6 +42,7 @@ async function main() {
   const previewEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/parse-preview.ts", "utf8");
   const bulkEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/bulk-import.ts", "utf8");
   const forceLatestEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/force-latest.ts", "utf8");
+  const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
   assert.match(manualEndpointSource, /requireServerOwnerOrDznAdmin/);
   assert.match(manualEndpointSource, /getSessionUser/);
   assert.match(manualEndpointSource, /ADM text is required/);
@@ -52,6 +53,11 @@ async function main() {
   assert.match(bulkEndpointSource, /importAdmFilesForServer/);
   assert.match(bulkEndpointSource, /multipart\/form-data/);
   assert.match(bulkEndpointSource, /requireServerOwnerOrDznAdmin/);
+  assert.match(bulkEndpointSource, /sequential_import_required/);
+  assert.match(dashboardSource, /for \(const \[index, file\] of files\.entries\(\)\)/);
+  assert.match(dashboardSource, /files:\s*\[file\]/);
+  assert.match(dashboardSource, /Retry this file/);
+  assert.match(dashboardSource, /refreshDashboardAfterManualAdmImport\(\)/);
   assert.match(forceLatestEndpointSource, /runAdmSync/);
   assert.match(forceLatestEndpointSource, /requireServerOwnerOrDznAdmin/);
 
@@ -278,6 +284,66 @@ async function main() {
   assert.equal(bulkDb.killEvents.length, 55);
   assert.equal(bulkDb.serverStats.get(linkedServerId)?.total_kills, 55);
 
+  const sequentialDb = new MemoryD1();
+  const sequentialResults = [];
+  for (const file of [...bulkFixtureFiles].reverse()) {
+    sequentialResults.push(await importAdmFilesForServer(makeEnv(sequentialDb), {
+      linkedServerId,
+      files: [file],
+      source: "manual_file_upload",
+    }));
+  }
+  const sequentialWrittenKills = sequentialResults.reduce((total, result) => total + result.written_kills, 0);
+  const sequentialParsedKills = sequentialResults.reduce((total, result) => total + result.parsed_kills, 0);
+  assert.equal(sequentialResults.every((result) => result.files_uploaded === 1), true);
+  assert.equal(sequentialParsedKills, 55);
+  assert.equal(sequentialWrittenKills, 55);
+  assert.equal(sequentialDb.killEvents.length, 55);
+  assert.equal(sequentialDb.serverStats.get(linkedServerId)?.total_kills, 55);
+  assert.equal(sequentialDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+  assert.equal(sequentialDb.automationJobs.length > 0, true);
+  const sequentialRecentEvents = await getRecentAdmSyncEvents(makeEnv(sequentialDb), "fixture-user", linkedServerId, 25);
+  assert.equal(sequentialRecentEvents.some((event) => event.source === "kill"), true);
+
+  const partialRetryDb = new MemoryD1();
+  const alreadyImported = await importAdmFilesForServer(makeEnv(partialRetryDb), {
+    linkedServerId,
+    files: [bulkFixtureFiles[0]],
+    source: "manual_file_upload",
+  });
+  const duplicateFirstSequential = await importAdmFilesForServer(makeEnv(partialRetryDb), {
+    linkedServerId,
+    files: [bulkFixtureFiles[0]],
+    source: "manual_file_upload",
+  });
+  const secondSequential = await importAdmFilesForServer(makeEnv(partialRetryDb), {
+    linkedServerId,
+    files: [bulkFixtureFiles[1]],
+    source: "manual_file_upload",
+  });
+  const thirdSequential = await importAdmFilesForServer(makeEnv(partialRetryDb), {
+    linkedServerId,
+    files: [bulkFixtureFiles[2]],
+    source: "manual_file_upload",
+  });
+  assert.equal(alreadyImported.written_kills, 5);
+  assert.equal(duplicateFirstSequential.written_kills, 0);
+  assert.equal(duplicateFirstSequential.duplicate_kills_skipped >= 5, true);
+  assert.equal(secondSequential.written_kills, 21);
+  assert.equal(thirdSequential.written_kills, 29);
+  assert.equal(partialRetryDb.killEvents.length, 55);
+
+  const discordQueueFailureDb = new MemoryD1({ failAutomationJobInsert: true });
+  const discordQueueFailureResult = await importAdmFilesForServer(makeEnv(discordQueueFailureDb), {
+    linkedServerId,
+    files: [bulkFixtureFiles[0]],
+    source: "manual_file_upload",
+  });
+  assert.equal(discordQueueFailureResult.failed_files, 0);
+  assert.equal(discordQueueFailureResult.written_kills, 5);
+  assert.equal(discordQueueFailureResult.discord_jobs_queued, 0);
+  assert.equal(discordQueueFailureResult.warnings.some((warning) => warning.includes("Discord auto-post queueing failed")), true);
+
   const clusteredMustardKills = successDb.killEvents.filter((event) =>
     event.killer_name === "mustard_coffer74" &&
     event.victim_name === "Uractuallybadzzz" &&
@@ -496,10 +562,12 @@ class MemoryD1 {
     subscription_status: "active",
   }]]);
   failKillInsertAfter: number | null;
+  failAutomationJobInsert: boolean;
   killInsertAttempts = 0;
 
-  constructor(options: { failKillInsertAfter?: number | null } = {}) {
+  constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
+    this.failAutomationJobInsert = options.failAutomationJobInsert ?? false;
   }
 
   prepare(query: string) {
@@ -715,13 +783,16 @@ class MemoryStatement {
       return changed(1);
     }
     if (q.startsWith("update automation_jobs set")) return changed(0);
-    if (q.includes("insert or ignore into automation_jobs")) return this.insertIgnore(this.db.automationJobs, {
+    if (q.includes("insert or ignore into automation_jobs")) {
+      if (this.db.failAutomationJobInsert) throw new Error("simulated automation_jobs write failure");
+      return this.insertIgnore(this.db.automationJobs, {
       id: this.values[0],
       guild_id: this.values[1],
       post_type: this.values[2],
       status: "queued",
       last_error: this.values[3],
-    }, (row) => row.guild_id === this.values[1] && row.post_type === this.values[2]);
+      }, (row) => row.guild_id === this.values[1] && row.post_type === this.values[2]);
+    }
     return changed(0);
   }
 

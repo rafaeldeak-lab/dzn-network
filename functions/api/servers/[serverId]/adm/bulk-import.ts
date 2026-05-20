@@ -44,6 +44,13 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
       return bulkAdmError(400, "missing_adm_files", "Upload or paste at least one ADM file.");
     }
 
+    if (!previewOnly && parsed.files.length > 1) {
+      return bulkAdmError(400, "sequential_import_required", "Import ADM files one at a time. The dashboard processes selected files sequentially to avoid Cloudflare request limits.", {
+        files_accepted: parsed.files.length,
+        retryable: true,
+      });
+    }
+
     const result = await importAdmFilesForServer(env, {
       linkedServerId,
       files: parsed.files,

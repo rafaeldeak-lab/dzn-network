@@ -33,7 +33,7 @@ import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { bulkImportAdmFiles, bumpServer, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, forceProcessLatestAdm, getAdmFileDiscoveryDebug, getAutomationHealth, getBillingPlans, getBillingStatus, getDiscordPostingChannels, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, testOnboarding, updateServerPublicListing } from "./api";
-import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import type { AdmFileDiscoveryDebug, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 let hasLoggedMultiServerReady = false;
@@ -60,6 +60,12 @@ type AdmUploadFile = {
   filename: string;
   admText: string;
   size: number;
+};
+
+type AdmBulkProgress = {
+  current: number;
+  total: number;
+  filename: string | null;
 };
 
 export function Dashboard() {
@@ -234,6 +240,7 @@ function ServerDashboard({
   const [manualAdmParsePreview, setManualAdmParsePreview] = useState<ManualAdmParsePreviewResult | null>(null);
   const [bulkAdmImportResult, setBulkAdmImportResult] = useState<BulkAdmImportResult | null>(null);
   const [bulkAdmImportError, setBulkAdmImportError] = useState<ManualAdmImportErrorResult | null>(null);
+  const [bulkAdmImportProgress, setBulkAdmImportProgress] = useState<AdmBulkProgress | null>(null);
   const [forceLatestAdmRunning, setForceLatestAdmRunning] = useState(false);
   const [forceLatestAdmResult, setForceLatestAdmResult] = useState<AdmSyncRunResult | null>(null);
   const [manualAdmRefreshFailed, setManualAdmRefreshFailed] = useState(false);
@@ -719,20 +726,34 @@ function ServerDashboard({
     }
 
     setManualAdmImporting(true);
+    setBulkAdmImportProgress({ current: 0, total: files.length, filename: null });
     setActionMessage("");
     setManualAdmImportError(null);
     setBulkAdmImportError(null);
+    setBulkAdmImportResult(summarizeClientBulkAdmResults([], manualAdmFiles.length ? "manual_file_upload" : "manual_paste", files.length));
+    const source = manualAdmFiles.length ? "manual_file_upload" : "manual_paste";
+    const fileResults: BulkAdmFileResult[] = [];
     try {
-      const response = await bulkImportAdmFiles(server.id, {
-        files,
-        source: manualAdmFiles.length ? "manual_file_upload" : "manual_paste",
-      });
-      if (!response.ok) {
-        setBulkAdmImportError(response);
-        setActionMessage(`Bulk ADM import failed: ${response.message}`);
-        return;
+      for (const [index, file] of files.entries()) {
+        setBulkAdmImportProgress({ current: index + 1, total: files.length, filename: file.filename });
+        const response = await bulkImportAdmFiles(server.id, {
+          files: [file],
+          source,
+        });
+
+        const fileResult = response.ok
+          ? response.files[0] ?? makeFailedBulkAdmFileResult(file, {
+            ok: false,
+            error_code: "missing_file_result",
+            message: "ADM import response did not include a file result.",
+            details: response,
+          }, source)
+          : makeFailedBulkAdmFileResult(file, response, source);
+        fileResults.push(fileResult);
+        setBulkAdmImportResult(summarizeClientBulkAdmResults([...fileResults], source, files.length));
       }
 
+      const response = summarizeClientBulkAdmResults(fileResults, source, files.length);
       setBulkAdmImportResult(response);
       const refreshed = await refreshDashboardAfterManualAdmImport();
       setActionMessage(refreshed
@@ -744,6 +765,60 @@ function ServerDashboard({
       setActionMessage(`Bulk ADM import failed: ${failure.message}`);
     } finally {
       setManualAdmImporting(false);
+      setBulkAdmImportProgress(null);
+    }
+  }
+
+  async function retryBulkAdmFile(filename: string) {
+    const file = buildAdmBulkFiles().find((candidate) => candidate.filename === filename);
+    if (!file) {
+      setBulkAdmImportError({
+        ok: false,
+        error_code: "adm_file_not_available_for_retry",
+        message: "That ADM file is no longer selected. Re-upload it before retrying.",
+        details: { filename },
+      });
+      return;
+    }
+
+    const source = manualAdmFiles.length ? "manual_file_upload" : "manual_paste";
+    const selectedCount = Math.max(buildAdmBulkFiles().length, bulkAdmImportResult?.files_uploaded ?? 1);
+    setManualAdmImporting(true);
+    setBulkAdmImportProgress({ current: 1, total: 1, filename: file.filename });
+    setActionMessage("");
+    setBulkAdmImportError(null);
+    try {
+      const response = await bulkImportAdmFiles(server.id, {
+        files: [file],
+        source,
+      });
+      const fileResult = response.ok
+        ? response.files[0] ?? makeFailedBulkAdmFileResult(file, {
+          ok: false,
+          error_code: "missing_file_result",
+          message: "ADM import response did not include a file result.",
+          details: response,
+        }, source)
+        : makeFailedBulkAdmFileResult(file, response, source);
+      const merged = replaceBulkAdmFileResult(bulkAdmImportResult, fileResult, source, selectedCount);
+      setBulkAdmImportResult(merged);
+      const refreshed = await refreshDashboardAfterManualAdmImport();
+      setActionMessage(refreshed
+        ? `Retry complete for ${file.filename}. Wrote ${fileResult.written_kills} PvP kills.`
+        : `Retry complete for ${file.filename}, but dashboard refresh failed. Hard refresh or retry refresh.`);
+    } catch (error) {
+      const failure = makeClientAdmFailure(error, "bulk_retry_exception", "ADM file retry failed before a response was received.");
+      setBulkAdmImportError(failure);
+      setBulkAdmImportResult((current) => replaceBulkAdmFileResult(
+        current,
+        makeFailedBulkAdmFileResult(file, failure, source),
+        source,
+        selectedCount,
+      ));
+      setActionMessage(`ADM file retry failed: ${failure.message}`);
+    } finally {
+      setManualAdmImporting(false);
+      setBulkAdmImportProgress(null);
     }
   }
 
@@ -1443,6 +1518,7 @@ function ServerDashboard({
                 preview={manualAdmParsePreview}
                 bulkResult={bulkAdmImportResult}
                 bulkFailure={bulkAdmImportError}
+                bulkProgress={bulkAdmImportProgress}
                 refreshFailed={manualAdmRefreshFailed}
                 history={syncStatus?.manual_import_history ?? []}
                 onFilenameChange={setManualAdmFilename}
@@ -1453,6 +1529,7 @@ function ServerDashboard({
                 onPreview={previewPastedAdmNow}
                 onBulkImport={importAdmFilesNow}
                 onBulkPreview={previewAdmFilesNow}
+                onRetryBulkFile={retryBulkAdmFile}
                 onRetryRefresh={refreshDashboardAfterManualAdmImport}
               />
               {admFileDiscoveryDebug ? (
@@ -3248,6 +3325,7 @@ function ManualAdmImportPanel({
   preview,
   bulkResult,
   bulkFailure,
+  bulkProgress,
   refreshFailed,
   history,
   onFilenameChange,
@@ -3258,6 +3336,7 @@ function ManualAdmImportPanel({
   onPreview,
   onBulkImport,
   onBulkPreview,
+  onRetryBulkFile,
   onRetryRefresh,
 }: {
   filename: string;
@@ -3270,6 +3349,7 @@ function ManualAdmImportPanel({
   preview: ManualAdmParsePreviewResult | null;
   bulkResult: BulkAdmImportResult | null;
   bulkFailure: ManualAdmImportErrorResult | null;
+  bulkProgress: AdmBulkProgress | null;
   refreshFailed: boolean;
   history: AdmSyncStatus["manual_import_history"];
   onFilenameChange: (value: string) => void;
@@ -3280,6 +3360,7 @@ function ManualAdmImportPanel({
   onPreview: () => void;
   onBulkImport: () => void;
   onBulkPreview: () => void;
+  onRetryBulkFile: (filename: string) => void;
   onRetryRefresh: () => Promise<boolean>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -3374,6 +3455,22 @@ function ManualAdmImportPanel({
             </button>
           </div>
         </div>
+        {bulkProgress ? (
+          <div className="rounded-lg border border-violet-300/20 bg-violet-400/10 p-3">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs font-black uppercase text-violet-100">
+                Importing {bulkProgress.current}/{bulkProgress.total}
+              </p>
+              <p className="break-all text-xs font-bold text-violet-50">{bulkProgress.filename ?? "Preparing ADM files"}</p>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+              <div
+                className="h-full rounded-full bg-violet-300 transition-all"
+                style={{ width: `${bulkProgress.total ? Math.max(4, Math.round((bulkProgress.current / bulkProgress.total) * 100)) : 4}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
         {filename.trim() && admText.trim() ? (
           <div className="flex flex-wrap gap-2">
             <button
@@ -3399,7 +3496,7 @@ function ManualAdmImportPanel({
         <ManualAdmFailurePanel failure={bulkFailure} title="Bulk ADM Import Failed" />
       ) : null}
       {bulkResult ? (
-        <BulkAdmImportResultPanel result={bulkResult} />
+        <BulkAdmImportResultPanel result={bulkResult} importing={importing} onRetryFile={onRetryBulkFile} />
       ) : null}
       {preview ? (
         <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-3">
@@ -3559,7 +3656,15 @@ function ManualAdmImportPanel({
   );
 }
 
-function BulkAdmImportResultPanel({ result }: { result: BulkAdmImportResult }) {
+function BulkAdmImportResultPanel({
+  result,
+  importing,
+  onRetryFile,
+}: {
+  result: BulkAdmImportResult;
+  importing: boolean;
+  onRetryFile: (filename: string) => void;
+}) {
   const statusTone = result.failed_files > 0 || result.errors.length ? "orange" : "emerald";
   return (
     <div className={`mt-4 rounded-lg border p-3 ${statusTone === "emerald" ? "border-emerald-300/18 bg-emerald-400/8" : "border-amber-300/20 bg-amber-400/10"}`}>
@@ -3572,6 +3677,11 @@ function BulkAdmImportResultPanel({ result }: { result: BulkAdmImportResult }) {
         </div>
         <SmallBadge tone={statusTone}>{result.failed_files > 0 ? `${result.failed_files} Failed` : result.mode === "preview" ? "Preview Ready" : "Succeeded"}</SmallBadge>
       </div>
+      {result.mode === "import" ? (
+        <p className={`mt-2 rounded-md border px-3 py-2 text-xs font-bold ${statusTone === "emerald" ? "border-emerald-300/15 bg-emerald-400/8 text-emerald-50" : "border-amber-300/20 bg-amber-400/10 text-amber-50"}`}>
+          Imported {result.files_imported} file{result.files_imported === 1 ? "" : "s"}, added {result.written_kills} PvP kill{result.written_kills === 1 ? "" : "s"}, skipped {result.duplicate_kills_skipped} duplicate{result.duplicate_kills_skipped === 1 ? "" : "s"}, and failed {result.failed_files} file{result.failed_files === 1 ? "" : "s"}.
+        </p>
+      ) : null}
       <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <MiniInfo label="HTTP Status" value={result.http_status ? String(result.http_status) : "Not recorded"} />
         <MiniInfo label="Files Uploaded" value={String(result.files_uploaded)} />
@@ -3619,6 +3729,17 @@ function BulkAdmImportResultPanel({ result }: { result: BulkAdmImportResult }) {
             </div>
             {file.message ? (
               <p className="mt-3 rounded-md border border-rose-300/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100">{file.message}</p>
+            ) : null}
+            {result.mode === "import" && (!file.ok || file.status === "failed") ? (
+              <button
+                type="button"
+                disabled={importing}
+                onClick={() => onRetryFile(file.filename)}
+                className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-[10px] font-black uppercase text-amber-50 transition hover:border-amber-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${importing ? "animate-spin" : ""}`} />
+                Retry this file
+              </button>
             ) : null}
             <div className="mt-3 grid gap-2">
               {file.kill_previews.length ? file.kill_previews.slice(0, 5).map((kill) => (
@@ -4896,6 +5017,94 @@ function makeClientAdmFailure(error: unknown, errorCode: string, fallbackMessage
     message: error instanceof Error ? error.message : fallbackMessage,
     details: error instanceof Error ? error.stack ?? error.message : String(error),
   };
+}
+
+function makeFailedBulkAdmFileResult(
+  file: { filename: string; admText: string },
+  failure: ManualAdmImportErrorResult,
+  source: string,
+): BulkAdmFileResult {
+  return {
+    ok: false,
+    filename: file.filename,
+    source,
+    status: "failed",
+    raw_lines: file.admText.split(/\r?\n/).filter((line) => line.trim()).length,
+    raw_kill_lines_found: 0,
+    parsed_kills: 0,
+    written_kills: 0,
+    deaths: 0,
+    joins: 0,
+    disconnects: 0,
+    playerlist_snapshots: 0,
+    suicides: 0,
+    uncredited_deaths: 0,
+    hit_lines: 0,
+    raw_events_stored: 0,
+    player_events_stored: 0,
+    duplicate_skips: 0,
+    failed_writes: 0,
+    public_cache_updated: false,
+    discord_jobs_queued: 0,
+    parser_warnings: [],
+    kill_previews: [],
+    import_report_id: null,
+    imported_at: null,
+    error_code: failure.error_code,
+    message: failure.message,
+    details: failure.details,
+  };
+}
+
+function summarizeClientBulkAdmResults(
+  files: BulkAdmFileResult[],
+  source: string,
+  selectedFileCount = files.length,
+): BulkAdmImportResult {
+  const errors = files
+    .filter((file) => !file.ok || file.status === "failed")
+    .map((file) => `${file.filename}: ${file.message ?? file.error_code ?? "failed"}`);
+  const warnings = files.flatMap((file) => file.parser_warnings.map((warning) => `${file.filename}: ${warning}`));
+  return {
+    ok: true,
+    mode: "import",
+    source,
+    files_uploaded: selectedFileCount,
+    files_imported: files.filter((file) => file.ok && file.status === "imported").length,
+    failed_files: files.filter((file) => !file.ok || file.status === "failed").length,
+    total_raw_lines: files.reduce((total, file) => total + file.raw_lines, 0),
+    raw_kill_lines_found: files.reduce((total, file) => total + file.raw_kill_lines_found, 0),
+    parsed_kills: files.reduce((total, file) => total + file.parsed_kills, 0),
+    written_kills: files.reduce((total, file) => total + file.written_kills, 0),
+    duplicate_kills_skipped: files.reduce((total, file) => total + file.duplicate_skips, 0),
+    joins: files.reduce((total, file) => total + file.joins, 0),
+    disconnects: files.reduce((total, file) => total + file.disconnects, 0),
+    playerlist_snapshots: files.reduce((total, file) => total + file.playerlist_snapshots, 0),
+    deaths: files.reduce((total, file) => total + file.deaths, 0),
+    suicides: files.reduce((total, file) => total + file.suicides, 0),
+    hit_lines: files.reduce((total, file) => total + file.hit_lines, 0),
+    raw_events_stored: files.reduce((total, file) => total + file.raw_events_stored, 0),
+    player_events_stored: files.reduce((total, file) => total + file.player_events_stored, 0),
+    public_cache_updated: files.some((file) => file.public_cache_updated),
+    discord_jobs_queued: files.reduce((total, file) => total + file.discord_jobs_queued, 0),
+    warnings,
+    errors,
+    files,
+  };
+}
+
+function replaceBulkAdmFileResult(
+  current: BulkAdmImportResult | null,
+  nextFile: BulkAdmFileResult,
+  source: string,
+  selectedFileCount: number,
+): BulkAdmImportResult {
+  const existing = current?.files ?? [];
+  const replaced = existing.some((file) => file.filename === nextFile.filename);
+  const files = replaced
+    ? existing.map((file) => (file.filename === nextFile.filename ? nextFile : file))
+    : [...existing, nextFile];
+  return summarizeClientBulkAdmResults(files, source, Math.max(selectedFileCount, current?.files_uploaded ?? 0, files.length));
 }
 
 function normalizeDashboardSyncStatus(status: string, latestAdmFile: string) {
