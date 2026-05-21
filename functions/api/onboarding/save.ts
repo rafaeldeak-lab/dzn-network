@@ -16,11 +16,13 @@ import {
 import { validatePublicListingInput, type PublicListingInput } from "../../_lib/review-moderation";
 import { ensureAutomationRowsForLinkedServers } from "../../_lib/automation";
 import { saveBotOnboardingConfig } from "../../_lib/ctf-tournaments";
+import { normalizeServerCategory } from "../../_lib/server-categories";
 import type { PagesFunction } from "../../_lib/types";
 
 type SaveBody = {
   discordGuildId?: string;
   serverType?: string;
+  server_category?: string | null;
   tags?: string[];
   nitradoServiceId?: string;
   tournamentChannelId?: string;
@@ -40,6 +42,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
   if (!validateServerType(body.serverType)) {
     return json({ error: "Invalid server type" }, { status: 400 });
+  }
+  const serverCategory = typeof body.server_category === "string" && body.server_category.trim()
+    ? normalizeServerCategory(body.server_category)
+    : null;
+  if (body.server_category && !serverCategory) {
+    return json({ error: "Invalid server category" }, { status: 400 });
   }
 
   const userId = user.id;
@@ -110,6 +118,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
           nitrado_service_name = ?,
           server_name = ?,
           server_type = ?,
+          server_category = COALESCE(?, server_category),
           tags_json = ?,
           region = ?,
           game = ?,
@@ -145,6 +154,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.name,
         service.name,
         body.serverType,
+        serverCategory,
         JSON.stringify(tags),
         serviceRegion,
         service.game ?? null,
@@ -185,12 +195,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       .prepare(
         `INSERT INTO linked_servers (
           id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
-          server_name, server_type, tags_json, region, game, platform, ip_address, player_slots,
+          server_name, server_type, server_category, tags_json, region, game, platform, ip_address, player_slots,
           geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone, geo_source, geo_last_checked_at,
           public_short_description, public_description, public_discord_invite, public_website_url, public_rules,
           public_language, public_region_label, public_listing_updated_at,
           status, public_slug, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
       .bind(
         linkedServerId,
@@ -201,6 +211,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         service.name,
         service.name,
         body.serverType,
+        serverCategory,
         JSON.stringify(tags),
         serviceRegion,
         service.game ?? null,

@@ -62,11 +62,15 @@ includesAll(eventsLib, [
   "options.full === true && entitlement",
   "Math.min(sanitizeLimit(options.limit, 10, 24), 10)",
   "resolveEventStatusFilter",
+  "NO_CATEGORY",
+  "Set your server category before joining events.",
   "assertSameServerCategory(primary, opponent)",
 ]);
 
 const joinRoute = source("functions/api/events/[slug]/join.ts");
 includesAll(joinRoute, ["joinCompetitiveEvent", "readJson<JoinBody>", "server_id"]);
+const serverSettingsRoute = source("functions/api/servers/[serverId]/settings.ts");
+includesAll(serverSettingsRoute, ["normalizeServerCategory", "INVALID_SERVER_CATEGORY", "server_category", "You do not have access to this server."]);
 const matchmakingRoute = source("functions/api/events/matchmaking.ts");
 includesAll(matchmakingRoute, ["createCategorySafeMatchmaking", "opponent_server_id", "event_slug"]);
 const eventsRoute = source("functions/api/events.ts");
@@ -121,6 +125,8 @@ assert.equal(existsSync("functions/api/servers/[serverId]/ctf/dashboard.ts"), tr
 assert.equal(existsSync("functions/api/servers/[serverId]/ctf/matchmaking.ts"), true, "Existing CTF matchmaking route must still exist.");
 assert.equal(source("functions/api/leaderboards.ts").includes("./public/leaderboards"), true, "Existing /api/leaderboards alias must still work.");
 assert.equal(source("components/dzn/dzn-landing-page.tsx").includes('{ label: "Events", href: "/events" }'), true, "Top nav Events link must open the Events Hub.");
+assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to join events and matchmaking."), true, "Dashboard must remind owners to set a server category.");
+assert.equal(source("components/onboarding/setup-wizard.tsx").includes("Server Category"), true, "Onboarding must expose server category selection.");
 
 void main();
 

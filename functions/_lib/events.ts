@@ -300,7 +300,10 @@ export async function joinCompetitiveEvent(env: Env, viewer: SessionUser | null,
   if (!server) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Server not found." };
   const eventCategory = normalizeServerCategory(event.category);
   const serverCategory = normalizeServerCategoryFromRecord(server);
-  if (!eventCategory || !serverCategory || eventCategory !== serverCategory) {
+  if (!serverCategory) {
+    return { ok: false, status: 409, error: "NO_CATEGORY", message: "Set your server category before joining events." };
+  }
+  if (!eventCategory || eventCategory !== serverCategory) {
     return { ...categoryMismatchPayload(), status: 409 };
   }
   const entitlement = serverHasEventEntitlement(server);

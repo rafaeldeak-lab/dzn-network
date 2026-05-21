@@ -405,6 +405,7 @@ export async function ensureLinkedServerMetadataColumns(env: Env) {
     ["server_status", "TEXT"],
     ["is_online", "INTEGER DEFAULT 0"],
     ["server_mode", "TEXT"],
+    ["server_category", "TEXT"],
     ["server_mode_source", "TEXT"],
     ["metadata_hash", "TEXT"],
     ["metadata_last_checked_at", "TEXT"],

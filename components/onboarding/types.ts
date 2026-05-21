@@ -191,6 +191,7 @@ export type LinkedServer = {
   nitrado_service_name: string;
   server_name: string;
   server_type: string;
+  server_category?: string | null;
   tags_json: string;
   region: string | null;
   game?: string | null;

@@ -62,8 +62,10 @@ export async function ensureDraftLinkedServer(
   discordGuildId: string,
   serverType: ServerType,
   tags: string[],
+  serverCategory?: string | null,
 ) {
   const db = requireDb(env);
+  await ensureLinkedServerMetadataColumns(env);
   const guild = await db
     .prepare("SELECT id, guild_id FROM discord_guilds WHERE guild_id = ? AND owner_user_id = ? LIMIT 1")
     .bind(discordGuildId, userId)
@@ -92,12 +94,13 @@ export async function ensureDraftLinkedServer(
           discord_guild_id = ?,
           server_name = ?,
           server_type = ?,
+          server_category = COALESCE(?, server_category),
           tags_json = ?,
           status = 'pending',
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`,
       )
-      .bind(guild.guild_id, guild.id, "Pending Nitrado Service", serverType, JSON.stringify(tags), existingDraft.id)
+      .bind(guild.guild_id, guild.id, "Pending Nitrado Service", serverType, serverCategory ?? null, JSON.stringify(tags), existingDraft.id)
       .run();
     return existingDraft.id;
   }
@@ -106,8 +109,8 @@ export async function ensureDraftLinkedServer(
   await db
     .prepare(
       `INSERT INTO linked_servers (
-        id, user_id, guild_id, discord_guild_id, server_name, server_type, tags_json, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        id, user_id, guild_id, discord_guild_id, server_name, server_type, server_category, tags_json, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     )
     .bind(
       linkedServerId,
@@ -116,6 +119,7 @@ export async function ensureDraftLinkedServer(
       guild.id,
       "Pending Nitrado Service",
       serverType,
+      serverCategory ?? null,
       JSON.stringify(tags),
     )
     .run();
@@ -203,6 +207,7 @@ export async function saveLinkedServerNitradoService(
   service: NitradoService,
   serverType: ServerType,
   tags: string[],
+  serverCategory?: string | null,
 ) {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
@@ -241,6 +246,7 @@ export async function saveLinkedServerNitradoService(
         nitrado_service_name = ?,
         server_name = ?,
         server_type = ?,
+        server_category = COALESCE(?, server_category),
         tags_json = ?,
         region = ?,
         game = ?,
@@ -260,6 +266,7 @@ export async function saveLinkedServerNitradoService(
       service.name,
       service.name,
       serverType,
+      serverCategory ?? null,
       JSON.stringify(tags),
       service.ipAddress ?? service.region ?? null,
       service.game ?? null,

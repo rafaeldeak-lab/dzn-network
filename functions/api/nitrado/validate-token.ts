@@ -14,6 +14,7 @@ import {
   storePendingNitradoToken,
   validateServerType,
 } from "../../_lib/onboarding";
+import { normalizeServerCategory } from "../../_lib/server-categories";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -26,6 +27,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     token?: string;
     discordGuildId?: string;
     serverType?: string;
+    server_category?: string | null;
     tags?: string[];
     serviceId?: string;
   }>(request);
@@ -37,6 +39,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ error: "Discord guild and server type are required before token validation" }, { status: 400 });
   }
   if (!validateServerType(body.serverType)) return json({ error: "Invalid server type" }, { status: 400 });
+  const serverCategory = typeof body.server_category === "string" && body.server_category.trim()
+    ? normalizeServerCategory(body.server_category)
+    : null;
+  if (body.server_category && !serverCategory) return json({ error: "Invalid server category" }, { status: 400 });
 
   const tags = normalizeTags(body.tags);
 
@@ -60,10 +66,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       body.discordGuildId,
       body.serverType,
       tags,
+      serverCategory,
     );
 
     if (service) {
-      const savedLinkedServerId = await saveLinkedServerNitradoService(env, linkedServerId, service, body.serverType, tags);
+      const savedLinkedServerId = await saveLinkedServerNitradoService(env, linkedServerId, service, body.serverType, tags, serverCategory);
       await storePendingNitradoToken(env, user.id, savedLinkedServerId, token);
       return json({ tokenValid: true, linkedServerId: savedLinkedServerId, service });
     }

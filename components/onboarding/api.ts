@@ -53,6 +53,7 @@ export async function validateNitradoToken(data: {
   token: string;
   discordGuildId: string;
   serverType: string;
+  server_category?: string | null;
   tags: string[];
   serviceId?: string;
 }) {
@@ -69,6 +70,7 @@ export async function getNitradoServices() {
 export async function saveOnboarding(data: {
   discordGuildId: string;
   serverType: string;
+  server_category?: string | null;
   tags: string[];
   nitradoServiceId: string;
   public_short_description?: string | null;
@@ -95,6 +97,15 @@ export async function updateServerPublicListing(linkedServerId: string, data: {
   public_region_label?: string | null;
 }) {
   return request<{ ok: boolean; listing: Partial<LinkedServer> }>(`/api/servers/${encodeURIComponent(linkedServerId)}/public-listing`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateServerSettings(linkedServerId: string, data: {
+  server_category?: string | null;
+}) {
+  return request<{ ok: boolean; server: Pick<LinkedServer, "id" | "server_category"> & { server_category_label?: string } }>(`/api/servers/${encodeURIComponent(linkedServerId)}/settings`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });

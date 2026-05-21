@@ -45,6 +45,7 @@ import {
 } from "./api";
 import type { AdmApiDebug, DiscordBotStatusResponse, DiscordGuild, LinkedServer, NitradoService, OnboardingChecks } from "./types";
 import { DznLogo } from "@/components/dzn/dzn-logo";
+import { getServerCategoryOption, SERVER_CATEGORY_OPTIONS } from "./server-category-options";
 
 const steps = [
   "Connect Discord Server",
@@ -93,6 +94,7 @@ export function SetupWizard() {
   const [services, setServices] = useState<NitradoService[]>([]);
   const [selectedGuild, setSelectedGuild] = useState("");
   const [serverType, setServerType] = useState("PVP");
+  const [serverCategory, setServerCategory] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [publicListing, setPublicListing] = useState<PublicListingForm>(() => emptyPublicListing());
   const [tokenInput, setTokenInput] = useState("");
@@ -152,6 +154,7 @@ export function SetupWizard() {
             status: linkedServer.status,
           };
           setServerType(linkedServer.server_type || "PVP");
+          setServerCategory(linkedServer.server_category ?? "");
           setSelectedTags(parseLinkedServerTags(linkedServer.tags_json));
           setPublicListing(publicListingFromLinkedServer(linkedServer));
           setServices([existingService]);
@@ -250,6 +253,7 @@ export function SetupWizard() {
         serviceId: normalizedServiceId,
         discordGuildId: selectedGuild,
         serverType,
+        server_category: serverCategory || null,
         tags: selectedTags,
       });
       setTokenInput("");
@@ -276,6 +280,7 @@ export function SetupWizard() {
         token: tokenInput,
         discordGuildId: selectedGuild,
         serverType,
+        server_category: serverCategory || null,
         tags: selectedTags,
       });
       setTokenInput("");
@@ -456,7 +461,7 @@ export function SetupWizard() {
                   <BotInstallStep guild={selectedGuildData} status={botStatus} checking={botChecking} message={botStatusMessage} onCheck={checkDiscordBot} onNext={() => setStep(2)} />
                 ) : null}
                 {step === 2 ? (
-                  <TypeStep serverType={serverType} setServerType={setServerType} selectedTags={selectedTags} toggleTag={toggleTag} publicListing={publicListing} setPublicListing={setPublicListing} onNext={() => setStep(3)} />
+                  <TypeStep serverType={serverType} setServerType={setServerType} serverCategory={serverCategory} setServerCategory={setServerCategory} selectedTags={selectedTags} toggleTag={toggleTag} publicListing={publicListing} setPublicListing={setPublicListing} onNext={() => setStep(3)} />
                 ) : null}
                 {step === 3 ? (
                   <TokenStep
@@ -481,7 +486,7 @@ export function SetupWizard() {
                   )
                 ) : null}
                 {step === 5 ? (
-                  <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
+                  <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} serverCategory={serverCategory} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
                 ) : null}
                 {step === 6 ? (
                   <LiveStep
@@ -740,6 +745,8 @@ function BotInstallStep({
 function TypeStep({
   serverType,
   setServerType,
+  serverCategory,
+  setServerCategory,
   selectedTags,
   toggleTag,
   publicListing,
@@ -748,6 +755,8 @@ function TypeStep({
 }: {
   serverType: string;
   setServerType: (value: string) => void;
+  serverCategory: string;
+  setServerCategory: (value: string) => void;
   selectedTags: string[];
   toggleTag: (tag: string) => void;
   publicListing: PublicListingForm;
@@ -766,6 +775,37 @@ function TypeStep({
             {type}
           </button>
         ))}
+      </div>
+      <div className="mt-6 rounded-xl border border-amber-300/20 bg-amber-400/10 p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-100">Server Category</p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-300">
+              Required for DZN Events and matchmaking. Same-category rules keep Deathmatch, PvP, PvE, Roleplay, Hardcore, and other event brackets separated.
+            </p>
+          </div>
+          <span className="rounded-md border border-amber-300/25 bg-amber-300/10 px-2 py-1 text-[10px] font-black uppercase text-amber-100">
+            Events Ready
+          </span>
+        </div>
+        <label className="mt-4 block">
+          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">Canonical Category</span>
+          <select
+            value={serverCategory}
+            onChange={(event) => setServerCategory(event.target.value)}
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/28 px-3 text-sm font-bold text-white outline-none transition focus:border-amber-300/45 focus:bg-amber-300/[0.04]"
+          >
+            <option value="">Choose category</option>
+            {SERVER_CATEGORY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        {!serverCategory ? (
+          <p className="mt-3 text-xs font-bold leading-5 text-amber-100">
+            You can finish setup without this, but the dashboard will keep reminding you until a category is set.
+          </p>
+        ) : null}
       </div>
       <div className="mt-6 rounded-xl border border-violet-300/20 bg-[radial-gradient(circle_at_20%_0%,rgba(139,92,246,0.18),transparent_34%),rgba(5,10,24,0.68)] p-4 shadow-[0_0_36px_rgba(139,92,246,0.12)]">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1260,16 +1300,18 @@ function ServiceStep({ services, selectedService, setSelectedService, onNext, bu
   );
 }
 
-function ReviewStep({ guild, service, serverType, tags, checks, busy, onTest, onTestAdmPath, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onTestAdmPath: (path: string) => Promise<void>; onGoLive: () => void }) {
+function ReviewStep({ guild, service, serverType, serverCategory, tags, checks, busy, onTest, onTestAdmPath, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; serverCategory: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onTestAdmPath: (path: string) => Promise<void>; onGoLive: () => void }) {
   const [manualAdmPath, setManualAdmPath] = useState("");
   const setupReview = getSetupReviewState({ guild, service, checks });
   const canGoLive = setupReview.requiredPassed;
+  const categoryLabel = getServerCategoryOption(serverCategory)?.label ?? "Not set";
   return (
     <Step title="Review & Test" icon={ShieldCheck} description="Confirm details and run the owner verification checks before publishing.">
       <div className="grid gap-3 md:grid-cols-2">
         <Summary label="Discord guild" value={guild?.name ?? "Not selected"} />
         <Summary label="Nitrado service" value={service?.name ?? "Not selected"} />
         <Summary label="Server type" value={serverType} />
+        <Summary label="Server category" value={categoryLabel} />
         <Summary label="Tags" value={tags.length ? tags.join(", ") : "No optional tags"} />
       </div>
       <SetupResultBanner review={setupReview} busy={busy} />
