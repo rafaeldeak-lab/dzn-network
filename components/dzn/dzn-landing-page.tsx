@@ -36,6 +36,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 import type { AuthResponse } from "@/components/onboarding/types";
+import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import { DznLogo } from "./dzn-logo";
 import type { DznOperationalGlobeNode } from "./dzn-operational-globe";
 
@@ -297,6 +298,8 @@ const emptyHomeStats: HomeStats = {
 
 const HOME_STATS_REFRESH_MS = 30000;
 const HOME_STATS_LAST_GOOD_KEY = "dzn:lastGoodHomeStats";
+const HOME_STATS_LAST_GOOD_MAX_AGE_MS = 10 * 60 * 1000;
+type HomeStatsLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "error_initial";
 const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
 const DZN_DISCORD_INVITE_URL =
   process.env.NEXT_PUBLIC_DZN_DISCORD_INVITE_URL ||
@@ -412,9 +415,15 @@ function useHomeStats() {
     return cached?.generated_at ? new Date(cached.generated_at) : null;
   });
   const [error, setError] = useState("");
+  const [loadState, setLoadState] = useState<HomeStatsLoadState>(() => loadLastGoodHomeStats() ? "loaded" : "loading_initial");
+  const visibleHomeStatsRef = useRef(hasMeaningfulHomeStats(data));
   const latestRequestId = useRef(0);
   const inFlight = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    visibleHomeStatsRef.current = hasMeaningfulHomeStats(data);
+  }, [data]);
 
   useEffect(() => {
     let active = true;
@@ -427,20 +436,22 @@ function useHomeStats() {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      const cached = loadLastGoodHomeStats();
+      const hasVisibleData = Boolean(cached) || visibleHomeStatsRef.current;
+      setLoadState(hasVisibleData ? "refreshing" : "loading_initial");
       try {
-        const response = await fetch("/api/public/home-stats", {
+        const payload = await fetchJsonWithRetry<HomeStatsResponse>("/api/public/home-stats", {
           cache: "no-store",
           credentials: "include",
           headers: { accept: "application/json" },
           signal: controller.signal,
         });
-        const payload = (await response.json().catch(() => ({}))) as HomeStatsResponse;
-        if (!response.ok) throw new Error(payload.error || "Network stats syncing");
         if (!active || latestRequestId.current !== requestId) return;
         const normalized = normalizeHomeStats(payload.data && !payload.totals ? payload.data : payload);
         setData(normalized);
         setLastUpdated(normalized.generated_at ? new Date(normalized.generated_at) : new Date());
         if (hasMeaningfulHomeStats(normalized)) saveLastGoodHomeStats(normalized);
+        setLoadState("loaded");
         setError(normalized.stale ? "Network stats refreshing. Showing last known values." : "");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -450,8 +461,13 @@ function useHomeStats() {
             setData(cached);
             setLastUpdated((current) => (cached.generated_at ? new Date(cached.generated_at) : current));
             setError("Network stats refreshing. Showing last known values.");
+            setLoadState("refresh_failed");
+          } else if (visibleHomeStatsRef.current) {
+            setError("Network stats refresh failed. Showing last known values.");
+            setLoadState("refresh_failed");
           } else {
             setError("Network stats syncing. Latest server data is being refreshed.");
+            setLoadState("error_initial");
           }
         }
       } finally {
@@ -469,7 +485,7 @@ function useHomeStats() {
     };
   }, []);
 
-  return { data, lastUpdated, error };
+  return { data, lastUpdated, error, loadState };
 }
 
 function loadLastGoodHomeStats(): HomeStats | null {
@@ -478,6 +494,8 @@ function loadLastGoodHomeStats(): HomeStats | null {
     const raw = window.localStorage.getItem(HOME_STATS_LAST_GOOD_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as HomeStatsResponse;
+    const cachedAt = typeof (parsed as { cached_at?: unknown }).cached_at === "string" ? (parsed as { cached_at: string }).cached_at : null;
+    if (cachedAt && Date.now() - new Date(cachedAt).getTime() > HOME_STATS_LAST_GOOD_MAX_AGE_MS) return null;
     const normalized = normalizeHomeStats(parsed.data && !parsed.totals ? parsed.data : parsed);
     return hasMeaningfulHomeStats(normalized)
       ? { ...normalized, stale: true, source: "local_fallback" }
@@ -490,7 +508,7 @@ function loadLastGoodHomeStats(): HomeStats | null {
 function saveLastGoodHomeStats(value: HomeStats) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(HOME_STATS_LAST_GOOD_KEY, JSON.stringify(value));
+    window.localStorage.setItem(HOME_STATS_LAST_GOOD_KEY, JSON.stringify({ ...value, cached_at: new Date().toISOString() }));
   } catch {
     // Storage can be unavailable in private/hardened contexts.
   }
@@ -584,6 +602,7 @@ export function DznLandingPage() {
     () => (isLoggedIn ? unlockHomeStatsForLoggedIn(liveStats.data) : liveStats.data),
     [isLoggedIn, liveStats.data],
   );
+  const homeStatsPending = liveStats.loadState === "loading_initial" || liveStats.loadState === "error_initial";
   const loggedInContext = isLoggedIn
     ? authState.manageableServersCount > 0
       ? "connected_server"
@@ -615,6 +634,9 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE FEATURE CARDS POLISHED");
     console.log("DZN LIVE GLOBE TRACKER COPY UPDATED");
     console.log("DZN HOMEPAGE AUTH STATE ALIGNED");
+    console.log("DZN PUBLIC DATA LOADING HARDENED");
+    console.log("DZN LAST GOOD PUBLIC DATA PRESERVED");
+    console.log("DZN ADM SYSTEM UNTOUCHED");
     preloadBuildLeaderboardImages();
   }, []);
 
@@ -646,6 +668,7 @@ export function DznLandingPage() {
             isPreview={isPreviewMode}
             authStatus={authState.status}
             loggedInContext={loggedInContext}
+            dataPending={homeStatsPending}
           />
           {isAuthLoading ? <AuthCheckingPanel /> : null}
           {isPreviewMode ? (
@@ -653,8 +676,8 @@ export function DznLandingPage() {
           ) : (
             <>
               <GameModeGrid counts={displayHomeStats.gameModes} />
-              <NetworkOverview homeStats={displayHomeStats} />
-              <NetworkPulse homeStats={displayHomeStats} />
+              <NetworkOverview homeStats={displayHomeStats} dataPending={homeStatsPending} />
+              <NetworkPulse homeStats={displayHomeStats} dataPending={homeStatsPending} />
               <EventLeaderboardPanel homeStats={displayHomeStats} />
             </>
           )}
@@ -832,6 +855,7 @@ function HeroDashboard({
   isPreview,
   authStatus,
   loggedInContext,
+  dataPending,
 }: {
   homeStats: HomeStats;
   lastUpdated: Date | null;
@@ -839,9 +863,10 @@ function HeroDashboard({
   isPreview: boolean;
   authStatus: HomepageAuthStatus;
   loggedInContext: "logged_out" | "no_server" | "connected_server";
+  dataPending: boolean;
 }) {
-  const serverRows = useMemo(() => buildTopServerRows(homeStats), [homeStats]);
-  const activityRows = useMemo(() => buildActivityRows(homeStats), [homeStats]);
+  const serverRows = useMemo(() => dataPending ? [] : buildTopServerRows(homeStats), [dataPending, homeStats]);
+  const activityRows = useMemo(() => dataPending ? [] : buildActivityRows(homeStats), [dataPending, homeStats]);
   const isCheckingAccount = authStatus === "loading";
 
   return (
@@ -963,7 +988,7 @@ function HeroDashboard({
       </motion.div>
 
       <motion.div variants={fadeUp} className="order-2 flex flex-col gap-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
-        <TopServersPanel rows={serverRows} locked={isPreview} />
+        <TopServersPanel rows={serverRows} locked={isPreview} dataPending={dataPending} />
         {isPreview ? (
           <>
             <LockedPreviewPanel
@@ -977,8 +1002,8 @@ function HeroDashboard({
           </>
         ) : (
           <>
-            <RecentActivityPanel rows={activityRows} />
-            <LiveMapPanel homeStats={homeStats} />
+            <RecentActivityPanel rows={activityRows} dataPending={dataPending} />
+            <LiveMapPanel homeStats={homeStats} dataPending={dataPending} />
           </>
         )}
       </motion.div>
@@ -1076,7 +1101,7 @@ function LockedPreviewPanel({
   );
 }
 
-function TopServersPanel({ rows, locked = false }: { rows: TopServerPanelRow[]; locked?: boolean }) {
+function TopServersPanel({ rows, locked = false, dataPending = false }: { rows: TopServerPanelRow[]; locked?: boolean; dataPending?: boolean }) {
   return (
     <section className={`dzn-home-panel dzn-top-servers-panel ${locked ? "dzn-top-servers-panel--locked" : ""}`}>
       <div className="dzn-top-servers-header">
@@ -1106,7 +1131,11 @@ function TopServersPanel({ rows, locked = false }: { rows: TopServerPanelRow[]; 
           <span>Score</span>
         </div>
         <div className="dzn-top-servers-rows">
-          {rows.slice(0, 3).map((row) => {
+          {rows.length === 0 ? (
+            <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
+              {dataPending ? "Live data refreshing. Showing rankings when the latest snapshot is available." : "No ranked servers yet."}
+            </div>
+          ) : rows.slice(0, 3).map((row) => {
             const rowContent = (
               <>
                 <span className="dzn-top-server-rank">{row.rank}</span>
@@ -1152,11 +1181,15 @@ function TopServersPanel({ rows, locked = false }: { rows: TopServerPanelRow[]; 
   );
 }
 
-function RecentActivityPanel({ rows }: { rows: ActivityPanelRow[] }) {
+function RecentActivityPanel({ rows, dataPending = false }: { rows: ActivityPanelRow[]; dataPending?: boolean }) {
   return (
     <PanelShell title="Recent Activity" href="/servers" icon={Activity}>
       <div className="dzn-recent-activity-list">
-        {rows.slice(0, 4).map((row, index) => {
+        {rows.length === 0 ? (
+          <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
+            {dataPending ? "Live data refreshing. Recent activity will remain visible once the last-good snapshot loads." : "No recent activity yet."}
+          </div>
+        ) : rows.slice(0, 4).map((row, index) => {
           const Icon = row.icon;
           return (
             <div
@@ -1179,7 +1212,7 @@ function RecentActivityPanel({ rows }: { rows: ActivityPanelRow[] }) {
   );
 }
 
-function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
+function LiveMapPanel({ homeStats, dataPending = false }: { homeStats: HomeStats; dataPending?: boolean }) {
   const nodes = homeStats.map_nodes;
 
   return (
@@ -1200,9 +1233,9 @@ function LiveMapPanel({ homeStats }: { homeStats: HomeStats }) {
         <DznOperationalGlobe nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
-        <MiniMetric label="Sync Active" value={formatNumber(homeStats.syncHealth.active)} />
-        <MiniMetric label="Pending" value={formatNumber(homeStats.syncHealth.pending)} />
-        <MiniMetric label="Events" value={formatNumber(homeStats.totals.recentEventsCount)} />
+        <MiniMetric label="Sync Active" value={dataPending ? "Refreshing" : formatNumber(homeStats.syncHealth.active)} />
+        <MiniMetric label="Pending" value={dataPending ? "Refreshing" : formatNumber(homeStats.syncHealth.pending)} />
+        <MiniMetric label="Events" value={dataPending ? "Refreshing" : formatNumber(homeStats.totals.recentEventsCount)} />
       </div>
     </div>
   );
@@ -1332,33 +1365,33 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
   );
 }
 
-function NetworkOverview({ homeStats }: { homeStats: HomeStats }) {
+function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeStats; dataPending?: boolean }) {
   const longestKill = numberOrZero(homeStats.totals.longestKill);
   const playersOnline = numberOrZero(homeStats.totals.players_online ?? homeStats.totals.currentPlayersOnline);
   const stats = [
     {
       icon: Users,
       label: "Players Online",
-      value: formatNumber(playersOnline),
+      value: dataPending ? "Refreshing" : formatNumber(playersOnline),
       detail: "Live across connected servers",
       theme: "players",
     },
     {
       icon: Server,
       label: "Servers Linked",
-      value: formatNumber(homeStats.totals.serversLinked),
+      value: dataPending ? "Refreshing" : formatNumber(homeStats.totals.serversLinked),
       theme: "servers",
     },
     {
       icon: Crosshair,
       label: "Kills",
-      value: formatNumber(homeStats.totals.killsTracked),
+      value: dataPending ? "Refreshing" : formatNumber(homeStats.totals.killsTracked),
       theme: "kills",
     },
     {
       icon: Trophy,
       label: "Longest Kill",
-      value: longestKill > 0 ? `${formatDecimal(longestKill)}m` : "Awaiting data",
+      value: dataPending ? "Refreshing" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "Awaiting data",
       theme: "longest",
     },
   ];
@@ -1395,7 +1428,7 @@ function NetworkOverview({ homeStats }: { homeStats: HomeStats }) {
   );
 }
 
-function NetworkPulse({ homeStats }: { homeStats: HomeStats }) {
+function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats; dataPending?: boolean }) {
   const topServer = homeStats.network_pulse.top_server ?? homeStats.topServers[0] ?? null;
   const currentEvent = homeStats.network_pulse.current_event;
   const topKills = numberOrZero(topServer?.total_kills);
@@ -1405,14 +1438,14 @@ function NetworkPulse({ homeStats }: { homeStats: HomeStats }) {
     {
       icon: Wifi,
       eyebrow: "Active Servers",
-      value: `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
+      value: dataPending ? "Refreshing" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
       detail: "Live and online right now",
       theme: "active",
     },
     {
       icon: Activity,
       eyebrow: "Events",
-      value: `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
+      value: dataPending ? "Refreshing" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
       detail: "Tracked across the network",
       theme: "events",
     },

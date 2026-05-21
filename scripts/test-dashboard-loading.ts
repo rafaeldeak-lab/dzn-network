@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 
 function source(path: string) {
   return readFileSync(path, "utf8");
@@ -24,6 +25,27 @@ includesAll(publicCache, [
   "data: payload",
   "stale",
   "fallback_reason",
+  "logPublicApiLoadFailed",
+  "DZN PUBLIC API LOAD FAILED",
+]);
+
+const publicAuth = source("functions/_lib/public-auth.ts");
+includesAll(publicAuth, [
+  "publicAccessCacheHeaders",
+  "public, max-age=15, stale-while-revalidate=45",
+  "publicApiErrorHeaders",
+  "no-store, no-cache, must-revalidate",
+]);
+
+const clientFetch = source("lib/client-fetch.ts");
+includesAll(clientFetch, [
+  "fetchJsonWithRetry",
+  "DZN FETCH RETRY",
+  "RETRYABLE_STATUSES",
+  "408",
+  "429",
+  "500",
+  "504",
 ]);
 
 const homeStatsRoute = source("functions/api/public/home-stats.ts");
@@ -34,8 +56,10 @@ includesAll(homeStatsRoute, [
   "writePublicApiCache",
   "live_query_failed_using_snapshot",
   "live_query_failed_no_snapshot",
-  "status: 503",
+  "status: 500",
   "ok: false",
+  "publicApiErrorHeaders()",
+  "logPublicApiLoadFailed",
 ]);
 assert.equal(homeStatsRoute.includes("withPublicApiMetadata(applyHomeStatsAccess(emptyHomeStats()"), false, "Home stats must not return fake zero payloads as successful fallback responses.");
 assert.equal(homeStatsRoute.includes("server_stats.longest_kill_distance"), false, "Home stats must not query non-existent server_stats longest-kill columns.");
@@ -54,7 +78,9 @@ for (const route of [
     "writePublicApiCache",
     "live_query_failed_using_snapshot",
     "live_query_failed_no_snapshot",
-    "status: 503",
+    "status: 500",
+    "publicApiErrorHeaders()",
+    "logPublicApiLoadFailed",
   ]);
 }
 
@@ -65,8 +91,12 @@ includesAll(landing, [
   "saveLastGoodHomeStats",
   "hasMeaningfulHomeStats",
   "latestRequestId",
+  "fetchJsonWithRetry<HomeStatsResponse>",
+  "HOME_STATS_LAST_GOOD_MAX_AGE_MS",
+  "Network stats refresh failed. Showing last known values.",
   "payload.data && !payload.totals ? payload.data : payload",
   "Network stats refreshing. Showing last known values.",
+  "dataPending ? \"Refreshing\"",
 ]);
 assert.equal(landing.includes("setData(emptyHomeStats"), false, "Homepage refresh failures must not reset stats to empty defaults.");
 
@@ -77,8 +107,12 @@ includesAll(leaderboards, [
   "saveLastGoodLeaderboard",
   "hasMeaningfulLeaderboard",
   "latestRequestId",
+  "fetchJsonWithRetry<LeaderboardsPayload>",
+  "LEADERBOARD_LAST_GOOD_MAX_AGE_MS",
+  "error_initial",
   "data.data && !data.top_servers ? data.data : data",
   "Live data refreshing. Showing last known leaderboard.",
+  "Leaderboard data could not be loaded right now.",
 ]);
 
 const publicNetwork = source("components/network/public-network.tsx");
@@ -86,10 +120,19 @@ includesAll(publicNetwork, [
   "dzn:lastGoodPublicNetwork:",
   "loadPublicNetworkCache",
   "savePublicNetworkCache",
+  "fetchJsonWithRetry<PublicServersResponse>",
+  "PUBLIC_NETWORK_CACHE_MAX_AGE_MS",
+  "loading_initial",
+  "empty_real_data",
+  "Unable to load public servers right now.",
+  "Server list unavailable",
   "payload = data.data && !data.servers && !data.server ? data.data : data",
   "Live data refreshing. Showing last known public data.",
 ]);
 assert.equal(publicNetwork.includes("setServer(null);\n      setServers([]);\n      setStats(null);"), false, "Public network load start must not clear cached server/listing data.");
+
+const admDiff = execSync("git diff --name-only -- functions/_lib/adm-sync.ts functions/_lib/adm-parser.ts scripts/import-adm-files.ts scripts/diagnose-adm-import.ts migrations", { encoding: "utf8" }).trim();
+assert.equal(admDiff, "", `ADM reliability files must remain untouched by public loading changes: ${admDiff}`);
 
 const dashboardHealthRoute = source("functions/api/servers/[serverId]/dashboard/health.ts");
 includesAll(dashboardHealthRoute, [

@@ -5,8 +5,8 @@ import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { uniquePublicSlug } from "../../_lib/onboarding";
 import { ensureBillingSchema } from "../../_lib/plans";
-import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
-import { readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
+import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
+import { logPublicApiLoadFailed, readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -198,7 +198,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       stale: false,
     }), { headers });
   } catch (error) {
-    console.warn("DZN PUBLIC SERVERS CACHE FALLBACK", safePublicCacheError(error));
+    logPublicApiLoadFailed("/api/public/servers", 500, error, request.headers.get("cf-ray"));
     const cached = await readPublicApiCache<Record<string, unknown>>(env, cacheKey).catch(() => null);
     if (cached) {
       return json(withPublicApiMetadata(cached.payload, {
@@ -211,12 +211,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     }
     return json({
       ok: false,
-      error: slug ? "Public server profile is temporarily unavailable." : "Public server listing is temporarily unavailable.",
+      error: slug ? "public_server_profile_load_failed" : "public_servers_load_failed",
+      message: slug ? "Unable to load this public server right now." : "Unable to load public servers right now.",
       generated_at: new Date().toISOString(),
       source: "empty_no_cache",
       stale: true,
       fallback_reason: "live_query_failed_no_snapshot",
-    }, { headers, status: 503 });
+    }, { headers: publicApiErrorHeaders(), status: 500 });
   }
 };
 

@@ -4,8 +4,8 @@ import type { PublicBuildLeaderboardRow } from "../../_lib/build-events";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
-import { readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
+import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
+import { logPublicApiLoadFailed, readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
 import { getRankedPublicServers } from "../../_lib/public-leaderboards";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -127,6 +127,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const cacheKey = homeStatsCacheKey(viewerLoggedIn);
 
   if (!env.DB) {
+    logPublicApiLoadFailed("/api/public/home-stats", 500, "Database binding missing", request.headers.get("cf-ray"));
     return json({
       ok: false,
       error_code: "db_binding_missing",
@@ -135,7 +136,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       source: "empty_no_db",
       stale: true,
       fallback_reason: "db_binding_missing",
-    }, { headers, status: 503 });
+    }, { headers: publicApiErrorHeaders(), status: 500 });
   }
 
   if (!viewerLoggedIn) {
@@ -170,6 +171,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         fallback_reason: "fallback_reason" in data && typeof data.fallback_reason === "string" ? data.fallback_reason : undefined,
       }), { headers });
     } catch (error) {
+      logPublicApiLoadFailed("/api/public/home-stats", 500, error, request.headers.get("cf-ray"));
       return json({
         ok: false,
         error_code: "live_query_failed_no_snapshot",
@@ -179,7 +181,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         stale: true,
         error: safePublicCacheError(error),
         fallback_reason: "live_query_failed_no_snapshot",
-      }, { headers, status: 503 });
+      }, { headers: publicApiErrorHeaders(), status: 500 });
     }
   }
 
@@ -198,7 +200,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       stale: false,
     }), { headers });
   } catch (error) {
-    console.warn("DZN HOME STATS FULL FALLBACK", safeErrorMessage(error));
+    logPublicApiLoadFailed("/api/public/home-stats", 500, error, request.headers.get("cf-ray"));
     const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
     if (cached) {
       return json(withPublicApiMetadata(applyHomeStatsAccess(cached.payload, true), {
@@ -218,7 +220,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       stale: true,
       error: safePublicCacheError(error),
       fallback_reason: "live_query_failed_no_snapshot",
-    }, { headers, status: 503 });
+    }, { headers: publicApiErrorHeaders(), status: 500 });
   }
 };
 

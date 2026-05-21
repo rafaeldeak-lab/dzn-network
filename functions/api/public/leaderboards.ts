@@ -1,7 +1,7 @@
 import { getPublicLeaderboardsPayload } from "../../_lib/public-leaderboards";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
-import { readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
+import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
+import { logPublicApiLoadFailed, readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -21,7 +21,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       stale: false,
     }), { headers });
   } catch (error) {
-    console.warn("DZN PUBLIC LEADERBOARDS CACHE FALLBACK", safePublicCacheError(error));
+    logPublicApiLoadFailed("/api/public/leaderboards", 500, error, request.headers.get("cf-ray"));
     const cached = await readPublicApiCache<Record<string, unknown>>(env, cacheKey).catch(() => null);
     if (cached) {
       return json(withPublicApiMetadata(cached.payload, {
@@ -34,11 +34,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     }
     return json({
       ok: false,
-      error: "Public leaderboards are temporarily unavailable.",
+      error: "public_leaderboards_load_failed",
+      message: "Unable to load leaderboards right now.",
       generated_at: new Date().toISOString(),
       source: "empty_no_cache",
       stale: true,
       fallback_reason: "live_query_failed_no_snapshot",
-    }, { headers, status: 503 });
+    }, { headers: publicApiErrorHeaders(), status: 500 });
   }
 };

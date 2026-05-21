@@ -20,7 +20,16 @@ export function publicAccessCacheHeaders(viewerLoggedIn: boolean) {
         vary: "Cookie",
       }
     : {
-        "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60",
+        "cache-control": "public, max-age=15, stale-while-revalidate=45",
         vary: "Cookie",
       };
+}
+
+export function publicApiErrorHeaders() {
+  return {
+    "cache-control": "no-store, no-cache, must-revalidate",
+    pragma: "no-cache",
+    expires: "0",
+    vary: "Cookie",
+  };
 }

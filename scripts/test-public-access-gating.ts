@@ -507,7 +507,7 @@ assert.equal(navbarBlock.includes("href=\"/login?returnTo=/\""), true);
 assert.equal(navbarBlock.includes("href=\"/setup\""), true);
 assert.equal((navbarBlock.match(/Add Your Server/g) ?? []).length, 1);
 assert.equal(landingRenderBlock.includes("isPreviewMode ? ("), true);
-assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={displayHomeStats} />"), true);
+assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={displayHomeStats} dataPending={homeStatsPending} />"), true);
 assert.equal(landingRenderBlock.includes("unlockHomeStatsForLoggedIn"), true);
 assert.equal(homepageSource.includes("function useHomepageAuth"), true);
 assert.equal(homepageSource.includes("Homepage Auth Debug"), true);

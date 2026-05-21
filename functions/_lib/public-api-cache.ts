@@ -77,6 +77,15 @@ export function safePublicCacheError(error: unknown) {
   return message.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]").slice(0, 500);
 }
 
+export function logPublicApiLoadFailed(endpoint: string, status: number, error: unknown, requestId?: string | null) {
+  console.warn("DZN PUBLIC API LOAD FAILED", {
+    endpoint,
+    status,
+    request_id: requestId ?? null,
+    error: safePublicCacheError(error),
+  });
+}
+
 async function ensurePublicApiCacheSchema(env: Env) {
   if (publicApiCacheSchemaReady) return;
   const db = requireDb(env);

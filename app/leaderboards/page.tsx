@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { DznLogo } from "@/components/dzn/dzn-logo";
+import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type LeaderboardServer = {
   rank: number;
@@ -95,6 +96,8 @@ const emptyPayload = {
 };
 
 const LEADERBOARD_LAST_GOOD_KEY = "dzn:lastGoodLeaderboard";
+const LEADERBOARD_LAST_GOOD_MAX_AGE_MS = 10 * 60 * 1000;
+type LeaderboardLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "empty_real_data" | "error_initial";
 
 export default function LeaderboardsPage() {
   const [payload, setPayload] = useState<{
@@ -110,15 +113,25 @@ export default function LeaderboardsPage() {
     locked_reason: string | null;
   }>(() => loadLastGoodLeaderboard() ?? emptyPayload);
   const [loading, setLoading] = useState(() => !loadLastGoodLeaderboard());
+  const [loadState, setLoadState] = useState<LeaderboardLoadState>(() => loadLastGoodLeaderboard() ? "loaded" : "loading_initial");
   const [error, setError] = useState("");
   const inFlight = useRef(false);
   const latestRequestId = useRef(0);
+  const visiblePayloadRef = useRef(hasMeaningfulLeaderboard(payload));
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     console.log("DZN LIVE LEADERBOARDS LOADED");
     console.log("DZN CLEAN LONGEST KILLS LEADERBOARD LOADED");
     console.log("DZN SERVER RANKING SYSTEM LOADED");
+    console.log("DZN PUBLIC DATA LOADING HARDENED");
+    console.log("DZN LAST GOOD PUBLIC DATA PRESERVED");
+    console.log("DZN ADM SYSTEM UNTOUCHED");
   }, []);
+
+  useEffect(() => {
+    visiblePayloadRef.current = hasMeaningfulLeaderboard(payload);
+  }, [payload]);
 
   useEffect(() => {
     let active = true;
@@ -128,18 +141,21 @@ export default function LeaderboardsPage() {
       inFlight.current = true;
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
+      const cached = loadLastGoodLeaderboard();
+      const hasVisibleData = Boolean(cached) || visiblePayloadRef.current;
+      setLoading(!hasVisibleData);
+      setLoadState(!hasVisibleData ? "loading_initial" : "refreshing");
       try {
-        const response = await fetch("/api/public/leaderboards", {
+        const data = await fetchJsonWithRetry<LeaderboardsPayload>("/api/public/leaderboards", {
           cache: "no-store",
           credentials: "include",
           headers: { accept: "application/json" },
         });
-        const data = (await response.json().catch(() => ({}))) as LeaderboardsPayload;
-        if (!response.ok) throw new Error(data.error || "Unable to load leaderboards");
         if (!active || latestRequestId.current !== requestId) return;
         const normalized = normalizePayload(data.data && !data.top_servers ? data.data : data);
         setPayload(normalized);
         if (hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
+        setLoadState(hasMeaningfulLeaderboard(normalized) ? "loaded" : "empty_real_data");
         setError(data.stale ? "Live data refreshing. Showing last known leaderboard." : "");
       } catch (loadError) {
         if (active) {
@@ -147,8 +163,13 @@ export default function LeaderboardsPage() {
           if (cached) {
             setPayload(cached);
             setError("Live data refreshing. Showing last known leaderboard.");
+            setLoadState("refresh_failed");
+          } else if (visiblePayloadRef.current) {
+            setError("Live data refresh failed. Showing last known leaderboard.");
+            setLoadState("refresh_failed");
           } else {
-            setError(loadError instanceof Error ? loadError.message : "Unable to load leaderboards");
+            setError(loadError instanceof Error ? loadError.message : "Leaderboard data could not be loaded right now.");
+            setLoadState("error_initial");
           }
         }
       } finally {
@@ -163,11 +184,12 @@ export default function LeaderboardsPage() {
       active = false;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [reloadNonce]);
 
   const totalKills = useMemo(() => payload.top_servers.reduce((total, server) => total + server.kills, 0), [payload.top_servers]);
   const totalPlayers = payload.top_players.length;
   const longestKill = payload.best_overall_kill?.distance ?? payload.personal_best_kills[0]?.distance ?? 0;
+  const initialError = loadState === "error_initial";
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-6 text-white sm:px-6 lg:px-8">
@@ -196,28 +218,28 @@ export default function LeaderboardsPage() {
                 Ranked connected DayZ servers and players based on synced ADM activity.
               </p>
               <p className="mt-3 text-sm font-bold text-zinc-500">
-                Updated: {payload.updated_at ? formatDateTime(payload.updated_at) : loading ? "Loading live data..." : "Live data pending"}
+                Updated: {initialError ? "Unavailable" : payload.updated_at ? formatDateTime(payload.updated_at) : loading ? "Loading live data..." : "Live data pending"}
               </p>
             </div>
 
-            <div className="glass-surface animated-border rounded-lg p-5">
+            {!initialError ? <div className="glass-surface animated-border rounded-lg p-5">
               <div className="relative z-10 grid gap-3">
                 <MetricRow icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} />
                 <MetricRow icon={Crosshair} label="Kills Tracked" value={formatNumber(totalKills)} />
                 <MetricRow icon={Users} label="Ranked Players" value={String(totalPlayers)} />
                 <MetricRow icon={Trophy} label="Longest Kill" value={formatDistance(longestKill)} />
               </div>
-            </div>
+            </div> : null}
           </div>
         </section>
 
-        {error ? <MessagePanel message={error} /> : null}
+        {error ? <MessagePanel message={error} onRetry={() => setReloadNonce((value) => value + 1)} /> : null}
         {!loading && payload.is_locked ? (
           <LockedLeaderboardBanner />
         ) : null}
         {loading ? <LoadingGrid /> : null}
 
-        {!loading ? (
+        {!loading && !initialError ? (
           <div className="grid gap-6 pb-14">
             <LeaderboardTable
               title="Top Servers"
@@ -500,10 +522,15 @@ function ServerLink({ slug, label }: { slug: string | null; label: string }) {
   );
 }
 
-function MessagePanel({ message }: { message: string }) {
+function MessagePanel({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="mb-6 rounded-lg border border-red-300/20 bg-red-400/10 p-4 text-sm font-bold text-red-100">
-      {message}
+    <div className="mb-6 flex flex-col gap-3 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4 text-sm font-bold text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+      <span>{message}</span>
+      {onRetry ? (
+        <button type="button" onClick={onRetry} className="inline-flex shrink-0 rounded-lg border border-amber-200/30 bg-amber-300/10 px-3 py-2 text-xs font-black uppercase text-amber-50 transition hover:bg-amber-300/18">
+          Retry
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -547,6 +574,8 @@ function loadLastGoodLeaderboard(): ReturnType<typeof normalizePayload> | null {
     const raw = window.localStorage.getItem(LEADERBOARD_LAST_GOOD_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as LeaderboardsPayload;
+    const cachedAt = typeof (parsed as { cached_at?: unknown }).cached_at === "string" ? (parsed as { cached_at: string }).cached_at : null;
+    if (cachedAt && Date.now() - new Date(cachedAt).getTime() > LEADERBOARD_LAST_GOOD_MAX_AGE_MS) return null;
     const normalized = normalizePayload(parsed.data && !parsed.top_servers ? parsed.data : parsed);
     return hasMeaningfulLeaderboard(normalized) ? normalized : null;
   } catch {
@@ -557,13 +586,19 @@ function loadLastGoodLeaderboard(): ReturnType<typeof normalizePayload> | null {
 function saveLastGoodLeaderboard(payload: ReturnType<typeof normalizePayload>) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(LEADERBOARD_LAST_GOOD_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(LEADERBOARD_LAST_GOOD_KEY, JSON.stringify({ ...payload, cached_at: new Date().toISOString() }));
   } catch {
     // Storage can be unavailable in private/hardened contexts.
   }
 }
 
-function hasMeaningfulLeaderboard(payload: ReturnType<typeof normalizePayload>) {
+function hasMeaningfulLeaderboard(payload: {
+  top_servers: LeaderboardServer[];
+  top_players: LeaderboardPlayer[];
+  personal_best_kills: LongestKill[];
+  best_overall_kill: Omit<LongestKill, "rank"> | null;
+  latest_kill: Omit<LongestKill, "rank"> | null;
+}) {
   return payload.top_servers.length > 0
     || payload.top_players.length > 0
     || payload.personal_best_kills.length > 0

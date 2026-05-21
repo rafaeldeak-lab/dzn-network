@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -39,6 +39,7 @@ import Link from "next/link";
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
+import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type PublicServer = {
   linked_server_id: string;
@@ -172,6 +173,7 @@ type PublicNetworkCachePayload = {
   server?: PublicServer | null;
   servers?: PublicServer[];
   stats?: PublicStats | null;
+  cached_at?: string;
 };
 
 type PublicReview = {
@@ -206,6 +208,8 @@ type ReviewsResponse = {
 
 const filters = ["All", "PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
 const PUBLIC_NETWORK_LAST_GOOD_PREFIX = "dzn:lastGoodPublicNetwork:";
+const PUBLIC_NETWORK_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+type PublicLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "empty_real_data" | "error_initial";
 let hasLoggedBoostedServerDisplayPolished = false;
 
 export function PublicNetwork() {
@@ -216,22 +220,36 @@ export function PublicNetwork() {
   const [stats, setStats] = useState<PublicStats | null>(() => slug ? null : initialCache?.stats ?? null);
   const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(() => !initialCache);
+  const [loadState, setLoadState] = useState<PublicLoadState>(() => initialCache ? "loaded" : "loading_initial");
   const [error, setError] = useState("");
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const visibleDataRef = useRef(Boolean(initialCache));
 
   useEffect(() => {
     if (!hasLoggedBoostedServerDisplayPolished) {
       console.log("DZN BOOSTED SERVER DISPLAY POLISHED");
+      console.log("DZN PUBLIC DATA LOADING HARDENED");
+      console.log("DZN LAST GOOD PUBLIC DATA PRESERVED");
+      console.log("DZN ADM SYSTEM UNTOUCHED");
       hasLoggedBoostedServerDisplayPolished = true;
     }
   }, []);
 
   useEffect(() => {
+    visibleDataRef.current = slug ? Boolean(server) : servers.length > 0 || Boolean(stats);
+  }, [server, servers.length, slug, stats]);
+
+  useEffect(() => {
     const controller = new AbortController();
     const requestedSlug = slug;
     const cached = loadPublicNetworkCache(requestedSlug);
+    const hasVisibleData = requestedSlug
+      ? Boolean(cached?.server) || visibleDataRef.current
+      : Boolean((cached?.servers?.length ?? 0) > 0 || cached?.stats) || visibleDataRef.current;
 
     async function load() {
-      setLoading(!cached);
+      setLoading(!cached && !hasVisibleData);
+      setLoadState(!cached && !hasVisibleData ? "loading_initial" : "refreshing");
       setError("");
       if (cached) {
         setServer(requestedSlug ? cached.server ?? null : null);
@@ -240,9 +258,12 @@ export function PublicNetwork() {
       }
       try {
         const endpoint = requestedSlug ? `/api/public/servers?slug=${encodeURIComponent(requestedSlug)}` : "/api/public/servers";
-        const response = await fetch(endpoint, { cache: "no-store", credentials: "include", headers: { accept: "application/json" }, signal: controller.signal });
-        const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
-        if (!response.ok) throw new Error(data.error || "Unable to load public servers");
+        const data = await fetchJsonWithRetry<PublicServersResponse>(endpoint, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
         if (controller.signal.aborted || requestedSlug !== slug) return;
         const payload = data.data && !data.servers && !data.server ? data.data : data;
 
@@ -253,6 +274,7 @@ export function PublicNetwork() {
           setServers([]);
           setStats(null);
           if (matchedServer) savePublicNetworkCache(requestedSlug, { server: matchedServer });
+          setLoadState(matchedServer ? "loaded" : "empty_real_data");
           if (matchedServer) console.log("DZN SERVER PROFILE SCOPED DATA LOADED");
         } else {
           const nextServers = Array.isArray(payload.servers) ? payload.servers : [];
@@ -260,7 +282,8 @@ export function PublicNetwork() {
           setServers(nextServers);
           setStats(nextStats);
           setServer(null);
-          if (nextServers.length || nextStats) savePublicNetworkCache(null, { servers: nextServers, stats: nextStats });
+          if (nextServers.length || hasMeaningfulPublicStats(nextStats)) savePublicNetworkCache(null, { servers: nextServers, stats: nextStats });
+          setLoadState(nextServers.length > 0 ? "loaded" : "empty_real_data");
           console.log("DZN PUBLIC SERVERS FRESH DATA LOADED");
           console.log("DZN SERVER LIST RATINGS READY");
         }
@@ -273,8 +296,13 @@ export function PublicNetwork() {
           setServers(requestedSlug ? [] : fallback.servers ?? []);
           setStats(requestedSlug ? null : fallback.stats ?? null);
           setError("Live data refreshing. Showing last known public data.");
+          setLoadState("refresh_failed");
+        } else if (hasVisibleData) {
+          setError("Live data refresh failed. Showing last known public data.");
+          setLoadState("refresh_failed");
         } else {
-          setError(loadError instanceof Error ? loadError.message : "Unable to load public servers");
+          setError(loadError instanceof Error ? loadError.message : "Unable to load public servers right now.");
+          setLoadState("error_initial");
         }
       } finally {
         if (controller.signal.aborted) return;
@@ -284,7 +312,7 @@ export function PublicNetwork() {
 
     load();
     return () => controller.abort();
-  }, [slug]);
+  }, [reloadNonce, slug]);
 
   const sortedServers = useMemo(() => [...servers].sort((a, b) => serverSortRank(a) - serverSortRank(b)), [servers]);
   const filteredServers = useMemo(
@@ -299,9 +327,9 @@ export function PublicNetwork() {
       <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-5 py-6 sm:px-6 lg:px-8">
         <PublicNav />
         {slug ? (
-          <ServerProfileShell server={server} loading={loading} error={error} />
+          <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
         ) : (
-          <ServerBrowser servers={filteredServers} allServers={servers} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} error={error} />
+          <ServerBrowser servers={filteredServers} allServers={servers} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
         )}
       </div>
     </main>
@@ -360,7 +388,9 @@ function ServerBrowser({
   filter,
   setFilter,
   loading,
+  loadState,
   error,
+  onRetry,
 }: {
   servers: PublicServer[];
   allServers: PublicServer[];
@@ -368,9 +398,13 @@ function ServerBrowser({
   filter: string;
   setFilter: (filter: string) => void;
   loading: boolean;
+  loadState: PublicLoadState;
   error: string;
+  onRetry: () => void;
 }) {
   const isPreview = allServers.some((server) => server.is_locked);
+  const initialError = loadState === "error_initial";
+  const realEmpty = loadState === "empty_real_data";
   return (
     <div className="pb-16 pt-16">
       <motion.header
@@ -385,7 +419,7 @@ function ServerBrowser({
         </p>
       </motion.header>
 
-      <StatsRow stats={stats} />
+      {!initialError ? <StatsRow stats={stats} /> : null}
       {isPreview ? (
         <LoginToUnlockBanner
           className="mt-6"
@@ -415,14 +449,14 @@ function ServerBrowser({
           </div>
           <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/28 px-4 py-3 text-sm font-bold text-zinc-300">
             <Search className="h-4 w-4 text-violet-200" />
-            {loading ? "Scanning network..." : `${servers.length} visible of ${allServers.length} verified`}
+            {initialError ? "Server list unavailable" : loading ? "Scanning network..." : `${servers.length} visible of ${allServers.length} verified`}
           </div>
         </div>
 
-        {error ? <MessagePanel message={error} /> : null}
+        {error ? <MessagePanel message={error} onRetry={onRetry} /> : null}
         {loading ? <ServerSkeletonGrid /> : null}
-        {!loading && !error && servers.length === 0 ? <EmptyPublicState /> : null}
-        {!loading && !error && servers.length > 0 ? (
+        {!loading && !error && realEmpty && servers.length === 0 ? <EmptyPublicState /> : null}
+        {!loading && servers.length > 0 ? (
           <div className="mt-6 grid gap-4 lg:grid-cols-2">
             {servers.map((item, index) => (
               <ServerCard key={item.public_slug} server={item} index={index} />
@@ -631,7 +665,19 @@ function RatingStars({ rating }: { rating: number }) {
   );
 }
 
-function ServerProfileShell({ server, loading, error }: { server: PublicServer | null; loading: boolean; error: string }) {
+function ServerProfileShell({
+  server,
+  loading,
+  error,
+  loadState,
+  onRetry,
+}: {
+  server: PublicServer | null;
+  loading: boolean;
+  error: string;
+  loadState: PublicLoadState;
+  onRetry: () => void;
+}) {
   if (loading) {
     return (
       <div className="grid min-h-[70vh] place-items-center">
@@ -645,9 +691,14 @@ function ServerProfileShell({ server, loading, error }: { server: PublicServer |
     );
   }
 
-  if (error) return <ProfileMessage tone="error" message={error} />;
+  if (error && !server) return <ProfileMessage tone="error" message={error} onRetry={onRetry} />;
   if (!server) return <ProfileMessage tone="empty" message="This public DZN server page was not found." />;
-  return <ServerProfile server={server} />;
+  return (
+    <>
+      {loadState === "refresh_failed" && error ? <MessagePanel message={error} onRetry={onRetry} /> : null}
+      <ServerProfile server={server} />
+    </>
+  );
 }
 
 function ServerProfile({ server }: { server: PublicServer }) {
@@ -819,7 +870,7 @@ function ServerSkeletonGrid() {
   );
 }
 
-function ProfileMessage({ tone, message }: { tone: "error" | "empty"; message: string }) {
+function ProfileMessage({ tone, message, onRetry }: { tone: "error" | "empty"; message: string; onRetry?: () => void }) {
   return (
     <div className="grid min-h-[70vh] place-items-center">
       <div className={`glass-surface animated-border max-w-xl rounded-lg p-8 text-center ${tone === "error" ? "border-red-300/20" : ""}`}>
@@ -827,19 +878,31 @@ function ProfileMessage({ tone, message }: { tone: "error" | "empty"; message: s
           <RadioTower className="mx-auto h-12 w-12 text-violet-200" />
           <h1 className="mt-5 text-3xl font-black uppercase text-white">{tone === "error" ? "Server unavailable" : "Server not found"}</h1>
           <p className="mt-3 text-zinc-300">{message}</p>
-          <Link href="/servers" className="mt-6 inline-flex rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white">
-            Browse servers
-          </Link>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            {onRetry ? (
+              <button type="button" onClick={onRetry} className="inline-flex rounded-lg bg-violet-500 px-5 py-3 text-xs font-black uppercase text-white">
+                Retry
+              </button>
+            ) : null}
+            <Link href="/servers" className="inline-flex rounded-lg border border-white/10 bg-white/[0.04] px-5 py-3 text-xs font-black uppercase text-white">
+              Browse servers
+            </Link>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function MessagePanel({ message }: { message: string }) {
+function MessagePanel({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="mt-6 rounded-lg border border-red-300/20 bg-red-400/10 p-4 text-sm font-bold text-red-100">
-      {message}
+    <div className="mt-6 flex flex-col gap-3 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4 text-sm font-bold text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+      <span>{message}</span>
+      {onRetry ? (
+        <button type="button" onClick={onRetry} className="inline-flex shrink-0 rounded-lg border border-amber-200/30 bg-amber-300/10 px-3 py-2 text-xs font-black uppercase text-amber-50 transition hover:bg-amber-300/18">
+          Retry
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1645,6 +1708,7 @@ function loadPublicNetworkCache(slug: string | null): PublicNetworkCachePayload 
     const raw = window.localStorage.getItem(publicNetworkCacheKey(slug));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PublicNetworkCachePayload;
+    if (parsed.cached_at && Date.now() - new Date(parsed.cached_at).getTime() > PUBLIC_NETWORK_CACHE_MAX_AGE_MS) return null;
     if (slug) return parsed.server ? { server: parsed.server } : null;
     return Array.isArray(parsed.servers) || parsed.stats ? { servers: parsed.servers ?? [], stats: parsed.stats ?? null } : null;
   } catch {
@@ -1655,17 +1719,21 @@ function loadPublicNetworkCache(slug: string | null): PublicNetworkCachePayload 
 function savePublicNetworkCache(slug: string | null, payload: PublicNetworkCachePayload) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify(payload));
+    window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify({ ...payload, cached_at: new Date().toISOString() }));
   } catch {
     // Storage can be unavailable in private/hardened contexts.
   }
 }
 
 async function fetchPublicServerFallback(slug: string, signal?: AbortSignal) {
-  const response = await fetch("/api/public/servers", { cache: "no-store", credentials: "include", headers: { accept: "application/json" }, signal });
-  const data = (await response.json().catch(() => ({}))) as PublicServersResponse;
+  const data = await fetchJsonWithRetry<PublicServersResponse>("/api/public/servers", {
+    cache: "no-store",
+    credentials: "include",
+    headers: { accept: "application/json" },
+    signal,
+  });
   const payload = data.data && !data.servers ? data.data : data;
-  if (!response.ok || !Array.isArray(payload.servers)) return null;
+  if (!Array.isArray(payload.servers)) return null;
   return payload.servers.find((server) => publicServerMatchesSlug(server, slug)) ?? null;
 }
 
@@ -1806,4 +1874,14 @@ function buildStats(servers: PublicServer[]): PublicStats {
     statsSyncActive: servers.filter((server) => server.stats_sync === "Active").length,
     statsSyncPending: servers.filter((server) => server.stats_sync !== "Active").length,
   };
+}
+
+function hasMeaningfulPublicStats(stats: PublicStats | null) {
+  if (!stats) return false;
+  return stats.totalServers > 0
+    || stats.pvpServers > 0
+    || stats.pveServers > 0
+    || stats.deathmatchServers > 0
+    || stats.statsSyncActive > 0
+    || stats.statsSyncPending > 0;
 }
