@@ -126,6 +126,7 @@ export default function LeaderboardsPage() {
     console.log("DZN SERVER RANKING SYSTEM LOADED");
     console.log("DZN PUBLIC DATA LOADING HARDENED");
     console.log("DZN LAST GOOD PUBLIC DATA PRESERVED");
+    console.log("DZN PUBLIC PAGES FIRST LOAD STABILISED");
     console.log("DZN ADM SYSTEM UNTOUCHED");
   }, []);
 
@@ -156,13 +157,13 @@ export default function LeaderboardsPage() {
         setPayload(normalized);
         if (hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
         setLoadState(hasMeaningfulLeaderboard(normalized) ? "loaded" : "empty_real_data");
-        setError(data.stale ? "Live data refreshing. Showing last known leaderboard." : "");
+        setError(data.stale ? "Live refresh recovering. Showing last known data." : "");
       } catch (loadError) {
         if (active) {
           const cached = loadLastGoodLeaderboard();
           if (cached) {
             setPayload(cached);
-            setError("Live data refreshing. Showing last known leaderboard.");
+            setError("Live refresh recovering. Showing last known data.");
             setLoadState("refresh_failed");
           } else if (visiblePayloadRef.current) {
             setError("Live data refresh failed. Showing last known leaderboard.");

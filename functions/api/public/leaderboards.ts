@@ -1,18 +1,32 @@
 import { getPublicLeaderboardsPayload } from "../../_lib/public-leaderboards";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
-import { logPublicApiLoadFailed, readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
+import {
+  logPublicApi503RootCause,
+  logPublicApiLoadFailed,
+  logPublicApiSnapshotFallbackServed,
+  publicApiSnapshotAccess,
+  publicApiSnapshotFallbackHeaders,
+  publicApiSnapshotKey,
+  readPublicApiCache,
+  safePublicCacheError,
+  withPublicApiMetadata,
+  writePublicApiCache,
+} from "../../_lib/public-api-cache";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
   const headers = publicAccessCacheHeaders(viewerLoggedIn);
-  const cacheKey = `public-leaderboards:${viewerLoggedIn ? "full" : "preview"}`;
+  const accessLevel = publicApiSnapshotAccess(viewerLoggedIn);
+  const cacheKey = publicApiSnapshotKey("leaderboards", accessLevel);
+  const endpoint = "/api/public/leaderboards";
+  const requestId = request.headers.get("cf-ray");
   try {
     const generatedAt = new Date().toISOString();
     const payload = await getPublicLeaderboardsPayload(env, viewerLoggedIn);
-    await writePublicApiCache(env, cacheKey, payload, generatedAt).catch((error) => {
+    await writePublicApiCache(env, cacheKey, payload, generatedAt, accessLevel).catch((error) => {
       console.warn("DZN PUBLIC LEADERBOARDS CACHE WRITE FAILED", safePublicCacheError(error));
     });
     return json(withPublicApiMetadata(payload, {
@@ -21,25 +35,29 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       stale: false,
     }), { headers });
   } catch (error) {
-    logPublicApiLoadFailed("/api/public/leaderboards", 500, error, request.headers.get("cf-ray"));
+    logPublicApiLoadFailed(endpoint, 503, error, requestId);
     const cached = await readPublicApiCache<Record<string, unknown>>(env, cacheKey).catch(() => null);
     if (cached) {
+      logPublicApiSnapshotFallbackServed(endpoint, cacheKey, requestId);
       return json(withPublicApiMetadata(cached.payload, {
         generated_at: cached.generated_at,
         source: "snapshot",
         stale: true,
-        error: safePublicCacheError(error),
         fallback_reason: "live_query_failed_using_snapshot",
-      }), { headers });
+        snapshot_generated_at: cached.generated_at,
+        message: "Showing last known data while live refresh recovers.",
+      }), { headers: publicApiSnapshotFallbackHeaders(viewerLoggedIn) });
     }
+    logPublicApi503RootCause(endpoint, error, requestId, "leaderboards_live_query");
     return json({
       ok: false,
       error: "public_leaderboards_load_failed",
-      message: "Unable to load leaderboards right now.",
+      message: "Leaderboard data could not be loaded right now.",
       generated_at: new Date().toISOString(),
       source: "empty_no_cache",
       stale: true,
       fallback_reason: "live_query_failed_no_snapshot",
-    }, { headers: publicApiErrorHeaders(), status: 500 });
+      retry_after_seconds: 10,
+    }, { headers: publicApiErrorHeaders(), status: 503 });
   }
 };

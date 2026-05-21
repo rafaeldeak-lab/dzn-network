@@ -51,6 +51,7 @@
     "check:automation-live": "tsx scripts/check-automation-live.ts",
     "check:cron-production": "tsx scripts/check-cron-production.ts",
     "check:server-due-state": "tsx scripts/check-server-due-state.ts",
+    "prewarm:public": "tsx scripts/prewarm-public-snapshots.ts",
     "debug:adm-discovery": "tsx scripts/debug-adm-discovery.ts",
     "import:adm-text": "tsx scripts/import-adm-text.ts",
     "import:adm-files": "tsx scripts/import-adm-files.ts",

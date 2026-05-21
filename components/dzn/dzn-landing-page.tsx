@@ -452,7 +452,7 @@ function useHomeStats() {
         setLastUpdated(normalized.generated_at ? new Date(normalized.generated_at) : new Date());
         if (hasMeaningfulHomeStats(normalized)) saveLastGoodHomeStats(normalized);
         setLoadState("loaded");
-        setError(normalized.stale ? "Network stats refreshing. Showing last known values." : "");
+        setError(normalized.stale ? "Live refresh recovering. Showing last known data." : "");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         if (active) {
@@ -460,7 +460,7 @@ function useHomeStats() {
           if (cached) {
             setData(cached);
             setLastUpdated((current) => (cached.generated_at ? new Date(cached.generated_at) : current));
-            setError("Network stats refreshing. Showing last known values.");
+            setError("Live refresh recovering. Showing last known data.");
             setLoadState("refresh_failed");
           } else if (visibleHomeStatsRef.current) {
             setError("Network stats refresh failed. Showing last known values.");
@@ -636,6 +636,7 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE AUTH STATE ALIGNED");
     console.log("DZN PUBLIC DATA LOADING HARDENED");
     console.log("DZN LAST GOOD PUBLIC DATA PRESERVED");
+    console.log("DZN PUBLIC PAGES FIRST LOAD STABILISED");
     console.log("DZN ADM SYSTEM UNTOUCHED");
     preloadBuildLeaderboardImages();
   }, []);
@@ -1133,7 +1134,7 @@ function TopServersPanel({ rows, locked = false, dataPending = false }: { rows: 
         <div className="dzn-top-servers-rows">
           {rows.length === 0 ? (
             <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-              {dataPending ? "Live data refreshing. Showing rankings when the latest snapshot is available." : "No ranked servers yet."}
+              {dataPending ? "Loading live network data..." : "No ranked servers yet."}
             </div>
           ) : rows.slice(0, 3).map((row) => {
             const rowContent = (
@@ -1187,7 +1188,7 @@ function RecentActivityPanel({ rows, dataPending = false }: { rows: ActivityPane
       <div className="dzn-recent-activity-list">
         {rows.length === 0 ? (
           <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-            {dataPending ? "Live data refreshing. Recent activity will remain visible once the last-good snapshot loads." : "No recent activity yet."}
+            {dataPending ? "Loading live network data..." : "No recent activity yet."}
           </div>
         ) : rows.slice(0, 4).map((row, index) => {
           const Icon = row.icon;
@@ -1233,9 +1234,9 @@ function LiveMapPanel({ homeStats, dataPending = false }: { homeStats: HomeStats
         <DznOperationalGlobe nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
-        <MiniMetric label="Sync Active" value={dataPending ? "Refreshing" : formatNumber(homeStats.syncHealth.active)} />
-        <MiniMetric label="Pending" value={dataPending ? "Refreshing" : formatNumber(homeStats.syncHealth.pending)} />
-        <MiniMetric label="Events" value={dataPending ? "Refreshing" : formatNumber(homeStats.totals.recentEventsCount)} />
+        <MiniMetric label="Sync Active" value={dataPending ? "Loading" : formatNumber(homeStats.syncHealth.active)} />
+        <MiniMetric label="Pending" value={dataPending ? "Loading" : formatNumber(homeStats.syncHealth.pending)} />
+        <MiniMetric label="Events" value={dataPending ? "Loading" : formatNumber(homeStats.totals.recentEventsCount)} />
       </div>
     </div>
   );
@@ -1372,26 +1373,26 @@ function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeSt
     {
       icon: Users,
       label: "Players Online",
-      value: dataPending ? "Refreshing" : formatNumber(playersOnline),
+      value: dataPending ? "Loading" : formatNumber(playersOnline),
       detail: "Live across connected servers",
       theme: "players",
     },
     {
       icon: Server,
       label: "Servers Linked",
-      value: dataPending ? "Refreshing" : formatNumber(homeStats.totals.serversLinked),
+      value: dataPending ? "Loading" : formatNumber(homeStats.totals.serversLinked),
       theme: "servers",
     },
     {
       icon: Crosshair,
       label: "Kills",
-      value: dataPending ? "Refreshing" : formatNumber(homeStats.totals.killsTracked),
+      value: dataPending ? "Loading" : formatNumber(homeStats.totals.killsTracked),
       theme: "kills",
     },
     {
       icon: Trophy,
       label: "Longest Kill",
-      value: dataPending ? "Refreshing" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "Awaiting data",
+      value: dataPending ? "Loading" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "Awaiting data",
       theme: "longest",
     },
   ];
@@ -1438,14 +1439,14 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
     {
       icon: Wifi,
       eyebrow: "Active Servers",
-      value: dataPending ? "Refreshing" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
+      value: dataPending ? "Loading" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
       detail: "Live and online right now",
       theme: "active",
     },
     {
       icon: Activity,
       eyebrow: "Events",
-      value: dataPending ? "Refreshing" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
+      value: dataPending ? "Loading" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
       detail: "Tracked across the network",
       theme: "events",
     },

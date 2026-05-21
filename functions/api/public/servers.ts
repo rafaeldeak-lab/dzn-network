@@ -6,7 +6,18 @@ import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { uniquePublicSlug } from "../../_lib/onboarding";
 import { ensureBillingSchema } from "../../_lib/plans";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
-import { logPublicApiLoadFailed, readPublicApiCache, safePublicCacheError, withPublicApiMetadata, writePublicApiCache } from "../../_lib/public-api-cache";
+import {
+  logPublicApi503RootCause,
+  logPublicApiLoadFailed,
+  logPublicApiSnapshotFallbackServed,
+  publicApiSnapshotAccess,
+  publicApiSnapshotFallbackHeaders,
+  publicApiSnapshotKey,
+  readPublicApiCache,
+  safePublicCacheError,
+  withPublicApiMetadata,
+  writePublicApiCache,
+} from "../../_lib/public-api-cache";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -184,12 +195,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const slug = sanitizeSlug(url.searchParams.get("slug"));
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
   const headers = publicAccessCacheHeaders(viewerLoggedIn);
-  const cacheKey = `public-servers:${viewerLoggedIn ? "full" : "preview"}:${slug ?? "listing"}`;
+  const accessLevel = publicApiSnapshotAccess(viewerLoggedIn);
+  const cacheKey = publicApiSnapshotKey("servers", accessLevel, slug ? `profile:${slug}` : null);
+  const endpoint = "/api/public/servers";
+  const requestId = request.headers.get("cf-ray");
 
   try {
     const generatedAt = new Date().toISOString();
     const payload = await getPublicServersPayload(env, slug, viewerLoggedIn);
-    await writePublicApiCache(env, cacheKey, payload, generatedAt).catch((error) => {
+    await writePublicApiCache(env, cacheKey, payload, generatedAt, accessLevel).catch((error) => {
       console.warn("DZN PUBLIC SERVERS CACHE WRITE FAILED", safePublicCacheError(error));
     });
     return json(withPublicApiMetadata(payload, {
@@ -198,17 +212,20 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       stale: false,
     }), { headers });
   } catch (error) {
-    logPublicApiLoadFailed("/api/public/servers", 500, error, request.headers.get("cf-ray"));
+    logPublicApiLoadFailed(endpoint, 503, error, requestId);
     const cached = await readPublicApiCache<Record<string, unknown>>(env, cacheKey).catch(() => null);
     if (cached) {
+      logPublicApiSnapshotFallbackServed(endpoint, cacheKey, requestId);
       return json(withPublicApiMetadata(cached.payload, {
         generated_at: cached.generated_at,
         source: "snapshot",
         stale: true,
-        error: safePublicCacheError(error),
         fallback_reason: "live_query_failed_using_snapshot",
-      }), { headers });
+        snapshot_generated_at: cached.generated_at,
+        message: "Showing last known data while live refresh recovers.",
+      }), { headers: publicApiSnapshotFallbackHeaders(viewerLoggedIn) });
     }
+    logPublicApi503RootCause(endpoint, error, requestId, slug ? "server_profile_live_query" : "server_listing_live_query");
     return json({
       ok: false,
       error: slug ? "public_server_profile_load_failed" : "public_servers_load_failed",
@@ -217,7 +234,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       source: "empty_no_cache",
       stale: true,
       fallback_reason: "live_query_failed_no_snapshot",
-    }, { headers: publicApiErrorHeaders(), status: 500 });
+      retry_after_seconds: 10,
+    }, { headers: publicApiErrorHeaders(), status: 503 });
   }
 };
 

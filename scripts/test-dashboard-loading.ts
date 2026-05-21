@@ -14,7 +14,10 @@ function includesAll(file: string, snippets: string[]) {
 
 const publicCache = source("functions/_lib/public-api-cache.ts");
 includesAll(publicCache, [
+  "public_api_snapshots",
   "public_stats_snapshots",
+  "access_level TEXT NOT NULL",
+  "expires_at TEXT",
   "snapshot_key TEXT NOT NULL UNIQUE",
   "payload_json TEXT NOT NULL",
   "generated_at TEXT NOT NULL",
@@ -26,7 +29,10 @@ includesAll(publicCache, [
   "stale",
   "fallback_reason",
   "logPublicApiLoadFailed",
-  "DZN PUBLIC API LOAD FAILED",
+  "DZN PUBLIC API LIVE QUERY FAILED",
+  "DZN PUBLIC API SNAPSHOT FALLBACK SERVED",
+  "DZN PUBLIC API 503 ROOT CAUSE",
+  "publicApiSnapshotFallbackHeaders",
 ]);
 
 const publicAuth = source("functions/_lib/public-auth.ts");
@@ -56,10 +62,12 @@ includesAll(homeStatsRoute, [
   "writePublicApiCache",
   "live_query_failed_using_snapshot",
   "live_query_failed_no_snapshot",
-  "status: 500",
+  "status: 503",
   "ok: false",
+  "retry_after_seconds: 10",
   "publicApiErrorHeaders()",
   "logPublicApiLoadFailed",
+  "logPublicApiSnapshotFallbackServed",
 ]);
 assert.equal(homeStatsRoute.includes("withPublicApiMetadata(applyHomeStatsAccess(emptyHomeStats()"), false, "Home stats must not return fake zero payloads as successful fallback responses.");
 assert.equal(homeStatsRoute.includes("server_stats.longest_kill_distance"), false, "Home stats must not query non-existent server_stats longest-kill columns.");
@@ -78,9 +86,11 @@ for (const route of [
     "writePublicApiCache",
     "live_query_failed_using_snapshot",
     "live_query_failed_no_snapshot",
-    "status: 500",
+    "status: 503",
+    "retry_after_seconds: 10",
     "publicApiErrorHeaders()",
     "logPublicApiLoadFailed",
+    "logPublicApiSnapshotFallbackServed",
   ]);
 }
 
@@ -95,9 +105,11 @@ includesAll(landing, [
   "HOME_STATS_LAST_GOOD_MAX_AGE_MS",
   "Network stats refresh failed. Showing last known values.",
   "payload.data && !payload.totals ? payload.data : payload",
-  "Network stats refreshing. Showing last known values.",
-  "dataPending ? \"Refreshing\"",
+  "Live refresh recovering. Showing last known data.",
+  "dataPending ? \"Loading\"",
+  "Loading live network data...",
 ]);
+assert.equal(landing.includes("dataPending ? \"Refreshing\""), false, "Homepage must not render Refreshing as every stat-card value.");
 assert.equal(landing.includes("setData(emptyHomeStats"), false, "Homepage refresh failures must not reset stats to empty defaults.");
 
 const leaderboards = source("app/leaderboards/page.tsx");
@@ -111,7 +123,7 @@ includesAll(leaderboards, [
   "LEADERBOARD_LAST_GOOD_MAX_AGE_MS",
   "error_initial",
   "data.data && !data.top_servers ? data.data : data",
-  "Live data refreshing. Showing last known leaderboard.",
+  "Live refresh recovering. Showing last known data.",
   "Leaderboard data could not be loaded right now.",
 ]);
 
@@ -127,12 +139,50 @@ includesAll(publicNetwork, [
   "Unable to load public servers right now.",
   "Server list unavailable",
   "payload = data.data && !data.servers && !data.server ? data.data : data",
-  "Live data refreshing. Showing last known public data.",
+  "Live refresh recovering. Showing last known data.",
 ]);
 assert.equal(publicNetwork.includes("setServer(null);\n      setServers([]);\n      setStats(null);"), false, "Public network load start must not clear cached server/listing data.");
 
-const admDiff = execSync("git diff --name-only -- functions/_lib/adm-sync.ts functions/_lib/adm-parser.ts scripts/import-adm-files.ts scripts/diagnose-adm-import.ts migrations", { encoding: "utf8" }).trim();
-assert.equal(admDiff, "", `ADM reliability files must remain untouched by public loading changes: ${admDiff}`);
+const changedFiles = execSync("git diff --name-only", { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+const forbiddenAdmChanges = changedFiles.filter((file) => [
+  "functions/_lib/adm-sync.ts",
+  "functions/_lib/adm-parser.ts",
+  "scripts/import-adm-files.ts",
+  "scripts/diagnose-adm-import.ts",
+].includes(file) || (/^migrations\//.test(file) && /adm/i.test(file)));
+assert.deepEqual(forbiddenAdmChanges, [], `ADM reliability files must remain untouched by public loading changes: ${forbiddenAdmChanges.join(", ")}`);
+
+const publicSnapshotRun = source("functions/api/sync/public-snapshots/run.ts");
+includesAll(publicSnapshotRun, [
+  "requireCronSecret",
+  "prewarmPublicApiSnapshots",
+  "home-stats:preview",
+  "home-stats:full",
+  "servers:preview",
+  "servers:full",
+  "leaderboards:preview",
+  "leaderboards:full",
+  "server-leaderboard:preview",
+  "server-leaderboard:full",
+  "DZN PUBLIC SNAPSHOTS PREWARMED",
+]);
+
+const workflow = source(".github/workflows/dzn-adm-sync.yml");
+assert.equal(workflow.indexOf("/api/sync/metadata/run") < workflow.indexOf("/api/sync/adm/run"), true, "Metadata sync must run before ADM sync.");
+assert.equal(workflow.indexOf("/api/sync/adm/run") < workflow.indexOf("/api/sync/public-snapshots/run"), true, "Public snapshots must prewarm after ADM sync.");
+includesAll(workflow, [
+  "/api/sync/public-snapshots/run",
+  "Authorization: Bearer ${DZN_CRON_SECRET}",
+]);
+
+const packageSource = source("package.json");
+assert.equal(packageSource.includes("\"prewarm:public\": \"tsx scripts/prewarm-public-snapshots.ts\""), true);
+const prewarmScript = source("scripts/prewarm-public-snapshots.ts");
+includesAll(prewarmScript, [
+  "https://dzn-network.pages.dev/api/sync/public-snapshots/run",
+  "DZN PUBLIC SNAPSHOTS PREWARMED",
+  "DZN_CRON_SECRET",
+]);
 
 const dashboardHealthRoute = source("functions/api/servers/[serverId]/dashboard/health.ts");
 includesAll(dashboardHealthRoute, [
@@ -174,6 +224,15 @@ includesAll(migration, [
   "CREATE TABLE IF NOT EXISTS public_stats_snapshots",
   "snapshot_key TEXT NOT NULL UNIQUE",
   "payload_json TEXT NOT NULL",
+]);
+
+const publicApiMigration = source("migrations/0029_public_api_snapshots.sql");
+includesAll(publicApiMigration, [
+  "CREATE TABLE IF NOT EXISTS public_api_snapshots",
+  "snapshot_key TEXT PRIMARY KEY",
+  "access_level TEXT NOT NULL",
+  "payload_json TEXT NOT NULL",
+  "generated_at TEXT NOT NULL",
 ]);
 
 console.log("Dashboard/public loading last-good regression checks passed.");

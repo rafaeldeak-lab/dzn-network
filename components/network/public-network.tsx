@@ -230,6 +230,7 @@ export function PublicNetwork() {
       console.log("DZN BOOSTED SERVER DISPLAY POLISHED");
       console.log("DZN PUBLIC DATA LOADING HARDENED");
       console.log("DZN LAST GOOD PUBLIC DATA PRESERVED");
+      console.log("DZN PUBLIC PAGES FIRST LOAD STABILISED");
       console.log("DZN ADM SYSTEM UNTOUCHED");
       hasLoggedBoostedServerDisplayPolished = true;
     }
@@ -287,7 +288,7 @@ export function PublicNetwork() {
           console.log("DZN PUBLIC SERVERS FRESH DATA LOADED");
           console.log("DZN SERVER LIST RATINGS READY");
         }
-        setError(data.stale ? "Live data refreshing. Showing last known public data." : "");
+        setError(data.stale ? "Live refresh recovering. Showing last known data." : "");
       } catch (loadError) {
         if (controller.signal.aborted) return;
         const fallback = loadPublicNetworkCache(requestedSlug);
@@ -295,7 +296,7 @@ export function PublicNetwork() {
           setServer(requestedSlug ? fallback.server ?? null : null);
           setServers(requestedSlug ? [] : fallback.servers ?? []);
           setStats(requestedSlug ? null : fallback.stats ?? null);
-          setError("Live data refreshing. Showing last known public data.");
+          setError("Live refresh recovering. Showing last known data.");
           setLoadState("refresh_failed");
         } else if (hasVisibleData) {
           setError("Live data refresh failed. Showing last known public data.");

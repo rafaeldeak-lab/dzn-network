@@ -17,7 +17,9 @@ export function requireCronSecret(request: Request, env: Env): Response | null {
 export function isCronSecretAuthorized(request: Request, env: Env) {
   const expected = getCronSecret(env);
   if (!expected) return false;
-  const provided = request.headers.get(DZN_CRON_SECRET_HEADER);
+  const authorization = request.headers.get("authorization");
+  const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
+  const provided = request.headers.get(DZN_CRON_SECRET_HEADER) ?? bearer;
   if (!provided) return false;
   return timingSafeEqual(provided, expected);
 }
