@@ -445,7 +445,7 @@ export async function logout() {
 export function clearClientAuthState() {
   if (typeof window === "undefined") return;
 
-  const keys = ["active_server", "dzn_auth", "dzn_user", "dzn_session", "auth", "user"];
+  const keys = ["active_server", "dzn_auth", "dzn_user", "dzn_session", "auth", "user", "dzn:lastGoodDashboardAuth"];
   for (const storage of [window.localStorage, window.sessionStorage]) {
     try {
       for (const key of keys) {

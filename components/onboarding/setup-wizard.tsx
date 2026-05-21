@@ -795,9 +795,9 @@ function TypeStep({
             onChange={(event) => setServerCategory(event.target.value)}
             className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/28 px-3 text-sm font-bold text-white outline-none transition focus:border-amber-300/45 focus:bg-amber-300/[0.04]"
           >
-            <option value="">Choose category</option>
+            <option value="" className="bg-zinc-950 text-white">Choose category</option>
             {SERVER_CATEGORY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
+              <option key={option.value} value={option.value} className="bg-zinc-950 text-white">{option.label}</option>
             ))}
           </select>
         </label>

@@ -151,12 +151,22 @@ type DashboardTotalsDelta = {
   changed: boolean;
 };
 
+type DashboardStatsCache = {
+  server_id: string;
+  generated_at: string;
+  stats: DashboardHealthResult["stats"];
+  current_plan?: string | null;
+  source: "dashboard-health" | "local_fallback";
+};
+
 const ADM_IMPORT_UPLOAD_CHUNK_SIZE = 10;
 const ADM_IMPORT_RETRY_CHUNK_SIZES = [5, 1] as const;
 const ADM_IMPORT_PREVIOUS_LINE_CONTEXT = 5;
 const ADM_CHUNK_RUNNER_DELAY_MS = 300;
 const ADM_CHUNK_RUNNER_RATE_LIMIT_DELAY_MS = 1500;
 const ADM_CHUNK_RUNNER_MAX_BROWSER_CHUNKS = 1200;
+const DASHBOARD_AUTH_STORAGE_KEY = "dzn:lastGoodDashboardAuth";
+const DASHBOARD_AUTH_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 const DASHBOARD_ACTION_STORAGE_PREFIX = "dzn:activeDashboardAction:";
 const autoHardRefreshOnComplete = false;
 const ADM_PROGRESS_ACTION_KEYS = new Set([
@@ -167,6 +177,36 @@ const ADM_PROGRESS_ACTION_KEYS = new Set([
   "backfill-missing-adm",
   "run-manual-sync",
 ]);
+
+function loadDashboardAuthCache(): AuthResponse | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY) ?? window.localStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { cached_at?: string; auth?: AuthResponse };
+    const cachedAt = parsed.cached_at ? new Date(parsed.cached_at).getTime() : 0;
+    if (!parsed.auth?.authenticated || !cachedAt || Date.now() - cachedAt > DASHBOARD_AUTH_CACHE_MAX_AGE_MS) return null;
+    return parsed.auth;
+  } catch {
+    return null;
+  }
+}
+
+function saveDashboardAuthCache(auth: AuthResponse | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!auth?.authenticated) {
+      window.localStorage.removeItem(DASHBOARD_AUTH_STORAGE_KEY);
+      window.sessionStorage.removeItem(DASHBOARD_AUTH_STORAGE_KEY);
+      return;
+    }
+    const payload = JSON.stringify({ cached_at: new Date().toISOString(), auth });
+    window.localStorage.setItem(DASHBOARD_AUTH_STORAGE_KEY, payload);
+    window.sessionStorage.setItem(DASHBOARD_AUTH_STORAGE_KEY, payload);
+  } catch {
+    // Auth cache only prevents hard-refresh flicker; API auth remains the source of truth.
+  }
+}
 
 function dashboardActionStorageKey(serverId: string) {
   return `${DASHBOARD_ACTION_STORAGE_PREFIX}${serverId}`;
@@ -218,16 +258,41 @@ export function Dashboard() {
   const lastGoodAuthRef = useRef<AuthResponse | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    const cachedAuth = loadDashboardAuthCache();
+    if (cachedAuth?.authenticated) {
+      lastGoodAuthRef.current = cachedAuth;
+      void Promise.resolve().then(() => {
+        if (cancelled) return;
+        setAuth(cachedAuth);
+        setLoading(false);
+      });
+    }
+
     getMe()
       .then((nextAuth) => {
+        if (cancelled) return;
         setAuth(nextAuth);
-        if (nextAuth.authenticated) lastGoodAuthRef.current = nextAuth;
+        if (nextAuth.authenticated) {
+          lastGoodAuthRef.current = nextAuth;
+          saveDashboardAuthCache(nextAuth);
+        } else {
+          lastGoodAuthRef.current = null;
+          saveDashboardAuthCache(null);
+        }
       })
       .catch(() => {
+        if (cancelled) return;
         if (lastGoodAuthRef.current?.authenticated) setAuth(lastGoodAuthRef.current);
         else setAuth({ authenticated: false });
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function refreshAuthPreservingLastGood() {
@@ -235,8 +300,11 @@ export function Dashboard() {
       const nextAuth = await getMe();
       if (nextAuth.authenticated) {
         lastGoodAuthRef.current = nextAuth;
+        saveDashboardAuthCache(nextAuth);
         setAuth(nextAuth);
-      } else if (!lastGoodAuthRef.current?.authenticated) {
+      } else {
+        lastGoodAuthRef.current = null;
+        saveDashboardAuthCache(null);
         setAuth(nextAuth);
       }
     } catch {
@@ -360,6 +428,7 @@ function ServerDashboard({
   const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
   const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
   const [lastGoodDashboardHealth, setLastGoodDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
+  const [lastGoodDashboardStats, setLastGoodDashboardStats] = useState<DashboardStatsCache | null>(() => loadDashboardStatsCache(serverProp.id));
   const [recentEvents, setRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [lastGoodRecentEvents, setLastGoodRecentEvents] = useState<AdmRecentSyncEvent[]>([]);
   const [logDiagnostics, setLogDiagnostics] = useState<NitradoLogAccessDiagnostics | null>(null);
@@ -608,6 +677,7 @@ function ServerDashboard({
       if (!response.ok || dashboardHealthRequestIdRef.current !== requestId) return false;
       setDashboardHealth(response);
       setLastGoodDashboardHealth(response);
+      setLastGoodDashboardStats(dashboardStatsCacheFromHealth(response));
       saveDashboardHealthCache(server.id, response);
       if (response.latest_events.length && !recentEvents.length) {
         setRecentEvents(response.latest_events);
@@ -722,11 +792,19 @@ function ServerDashboard({
       effectiveSyncData?.last_sync_status ?? effectiveDashboardHealth?.sync.status ?? (statsSyncPending ? "read_pending" : admState.kind === "connected" ? "active" : "not_started"),
       latestAdmFile,
     );
+  const cachedDashboardStats = effectiveDashboardHealth
+    ? dashboardStatsCacheFromHealth(effectiveDashboardHealth)
+    : lastGoodDashboardStats;
+  const preferLastKnownStats = Boolean(cachedDashboardStats && isWaitingForNitradoStatsStatus(effectiveSyncStatus));
+  const pickDashboardStat = (syncValue: number | null | undefined, cachedValue: number | null | undefined) => {
+    if (preferLastKnownStats && cachedValue !== null && cachedValue !== undefined) return cachedValue;
+    return syncValue ?? cachedValue ?? null;
+  };
   const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
   const activityCount = (effectiveSyncData?.total_joins ?? effectiveDashboardHealth?.stats.joins ?? 0) + (effectiveSyncData?.total_disconnects ?? effectiveDashboardHealth?.stats.disconnects ?? 0) + (effectiveSyncData?.total_deaths ?? effectiveDashboardHealth?.stats.deaths ?? 0);
   const noPvpKillsYet = statsSyncActive && (effectiveSyncData?.total_kills ?? effectiveDashboardHealth?.stats.kills ?? 0) === 0;
   const globalRankLabel = formatGlobalRank(server.global_rank ?? server.rank ?? null);
-  const scoreLabel = server.score_label ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : "Pending");
+  const scoreLabel = server.score_label ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending");
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown ?? null);
   const syncBanner = getSyncBanner({
     active: statsSyncActive,
@@ -750,15 +828,17 @@ function ServerDashboard({
   const metadataChangedLabel = server.metadata_last_changed_at ? formatRelativeTime(server.metadata_last_changed_at) : null;
   const playerCountCheckedLabel = server.player_count_last_checked_at ? formatRelativeTime(server.player_count_last_checked_at) : "not checked yet";
   const playerCountStatusLabel = formatPlayerCountStatus(server.player_count_status);
+  const currentPlayers = server.current_players ?? effectiveDashboardHealth?.server.current_players ?? cachedDashboardStats?.stats.players ?? null;
+  const maxPlayers = server.max_players ?? server.player_slots ?? effectiveDashboardHealth?.server.max_players ?? null;
   const playerSlotsLabel = formatDashboardPlayerSlots(
-    server.current_players,
-    server.max_players ?? server.player_slots,
+    currentPlayers,
+    maxPlayers,
     server.player_count_last_checked_at,
     server.player_count_status,
   );
   const playerCountFreshnessDetail = formatPlayerCountFreshnessDetail(
-    server.current_players,
-    server.max_players ?? server.player_slots,
+    currentPlayers,
+    maxPlayers,
     server.player_count_last_checked_at,
     server.player_count_status,
   );
@@ -768,19 +848,20 @@ function ServerDashboard({
   const effectivePublicCacheDebug = publicCacheDebug ?? lastGoodPublicCache;
   const showingCachedDashboardData = Boolean(
     liveRefreshStatus !== "ok" &&
-    (lastGoodSyncStatus || lastGoodRecentEvents.length || lastGoodBilling || lastGoodAutomationHealth || lastGoodPublicCache || lastGoodAdmJob),
+    (lastGoodDashboardHealth || lastGoodDashboardStats || lastGoodSyncStatus || lastGoodRecentEvents.length || lastGoodBilling || lastGoodAutomationHealth || lastGoodPublicCache || lastGoodAdmJob),
   );
   const admDiscoveryInterval = effectiveBillingStatus?.entitlements.adm_discovery_interval_minutes ?? null;
   const admProcessingInterval = effectiveBillingStatus?.entitlements.adm_pull_interval_minutes ?? null;
   const dashboardStatValues = {
-    kills: effectiveSyncData?.total_kills ?? effectiveDashboardHealth?.stats.kills ?? null,
-    deaths: effectiveSyncData?.total_deaths ?? effectiveDashboardHealth?.stats.deaths ?? null,
-    joins: effectiveSyncData?.total_joins ?? effectiveDashboardHealth?.stats.joins ?? null,
-    disconnects: effectiveSyncData?.total_disconnects ?? effectiveDashboardHealth?.stats.disconnects ?? null,
-    uniquePlayers: effectiveSyncData?.unique_players ?? effectiveDashboardHealth?.stats.unique_players ?? null,
+    kills: pickDashboardStat(effectiveSyncData?.total_kills, cachedDashboardStats?.stats.kills),
+    deaths: pickDashboardStat(effectiveSyncData?.total_deaths, cachedDashboardStats?.stats.deaths),
+    joins: pickDashboardStat(effectiveSyncData?.total_joins, cachedDashboardStats?.stats.joins),
+    disconnects: pickDashboardStat(effectiveSyncData?.total_disconnects, cachedDashboardStats?.stats.disconnects),
+    uniquePlayers: pickDashboardStat(effectiveSyncData?.unique_players, cachedDashboardStats?.stats.unique_players),
     score: server.score_label
-      ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : effectiveDashboardHealth?.stats.score ? String(effectiveDashboardHealth.stats.score) : "Pending"),
+      ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending"),
   };
+  const dashboardStatDetail = preferLastKnownStats ? "Last known" : "Total";
   const publicCacheFlags = effectivePublicCacheDebug?.problem_flags ?? [];
   const publicCacheStale = publicCacheFlags.some((flag) => [
     "public_cache_missing",
@@ -2611,11 +2692,11 @@ function ServerDashboard({
       </section>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
         <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Players Online" value={playerSlotsLabel} detail={playerCountFreshnessDetail} tone="cyan" />
-        <DashboardStatTile icon={<Crosshair className="h-5 w-5" />} label="Kills" value={formatNullableDashboardNumber(dashboardStatValues.kills)} detail={dashboardStatValues.kills === null ? "Loading" : "Total"} tone="red" />
-        <DashboardStatTile icon={<AlertTriangle className="h-5 w-5" />} label="Deaths" value={formatNullableDashboardNumber(dashboardStatValues.deaths)} detail={dashboardStatValues.deaths === null ? "Loading" : "Total"} tone="orange" />
-        <DashboardStatTile icon={<ArrowRight className="h-5 w-5" />} label="Joins" value={formatNullableDashboardNumber(dashboardStatValues.joins)} detail={dashboardStatValues.joins === null ? "Loading" : "Total"} tone="emerald" />
-        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Disconnects" value={formatNullableDashboardNumber(dashboardStatValues.disconnects)} detail={dashboardStatValues.disconnects === null ? "Loading" : "Total"} tone="zinc" />
-        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Unique Players" value={formatNullableDashboardNumber(dashboardStatValues.uniquePlayers)} detail={dashboardStatValues.uniquePlayers === null ? "Loading" : "Total"} tone="violet" />
+        <DashboardStatTile icon={<Crosshair className="h-5 w-5" />} label="Kills" value={formatNullableDashboardNumber(dashboardStatValues.kills)} detail={dashboardStatValues.kills === null ? "Loading" : dashboardStatDetail} tone="red" />
+        <DashboardStatTile icon={<AlertTriangle className="h-5 w-5" />} label="Deaths" value={formatNullableDashboardNumber(dashboardStatValues.deaths)} detail={dashboardStatValues.deaths === null ? "Loading" : dashboardStatDetail} tone="orange" />
+        <DashboardStatTile icon={<ArrowRight className="h-5 w-5" />} label="Joins" value={formatNullableDashboardNumber(dashboardStatValues.joins)} detail={dashboardStatValues.joins === null ? "Loading" : dashboardStatDetail} tone="emerald" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Disconnects" value={formatNullableDashboardNumber(dashboardStatValues.disconnects)} detail={dashboardStatValues.disconnects === null ? "Loading" : dashboardStatDetail} tone="zinc" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Unique Players" value={formatNullableDashboardNumber(dashboardStatValues.uniquePlayers)} detail={dashboardStatValues.uniquePlayers === null ? "Loading" : dashboardStatDetail} tone="violet" />
         <DashboardStatTile icon={<Gauge className="h-5 w-5" />} label="Server Score" value={scoreLabel} detail="Score" tone="violet" />
         <DashboardStatTile icon={<BarChart3 className="h-5 w-5" />} label="Global Rank" value={globalRankLabel} detail="Rank" tone="orange" />
       </section>
@@ -3198,9 +3279,9 @@ function ServerCategorySettingsPanel({
             onChange={(event) => setSelectedCategory(event.target.value)}
             className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/32 px-3 text-sm font-bold text-white outline-none transition focus:border-violet-300/45 focus:bg-violet-300/[0.04]"
           >
-            <option value="">Choose category</option>
+            <option value="" className="bg-zinc-950 text-white">Choose category</option>
             {SERVER_CATEGORY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
+              <option key={option.value} value={option.value} className="bg-zinc-950 text-white">{option.label}</option>
             ))}
           </select>
         </label>
@@ -6766,6 +6847,42 @@ function formatNullableDashboardNumber(value: number | null) {
   return value === null ? "Loading" : value.toLocaleString();
 }
 
+function dashboardStatsCacheKey(serverId: string) {
+  return `dzn:lastGoodDashboardStats:${serverId}`;
+}
+
+function dashboardStatsCacheFromHealth(value: DashboardHealthResult): DashboardStatsCache {
+  return {
+    server_id: value.server_id,
+    generated_at: value.generated_at,
+    stats: value.stats,
+    current_plan: value.current_plan,
+    source: value.source === "local_fallback" ? "local_fallback" : "dashboard-health",
+  };
+}
+
+function loadDashboardStatsCache(serverId: string): DashboardStatsCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(dashboardStatsCacheKey(serverId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DashboardStatsCache;
+    if (parsed?.server_id !== serverId || !parsed.stats) return null;
+    return { ...parsed, source: "local_fallback" };
+  } catch {
+    return null;
+  }
+}
+
+function saveDashboardStatsCache(serverId: string, value: DashboardStatsCache) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(dashboardStatsCacheKey(serverId), JSON.stringify(value));
+  } catch {
+    // Last-known stat tiles are best effort only.
+  }
+}
+
 function loadDashboardHealthCache(serverId: string): DashboardHealthResult | null {
   if (typeof window === "undefined") return null;
   try {
@@ -6781,6 +6898,7 @@ function loadDashboardHealthCache(serverId: string): DashboardHealthResult | nul
 function saveDashboardHealthCache(serverId: string, value: DashboardHealthResult) {
   if (typeof window === "undefined") return;
   try {
+    saveDashboardStatsCache(serverId, dashboardStatsCacheFromHealth(value));
     window.localStorage.setItem(`dzn:lastGoodDashboard:${serverId}`, JSON.stringify(value));
     window.localStorage.setItem(`dzn:lastGoodSyncHealth:${serverId}`, JSON.stringify({
       generated_at: value.generated_at,
@@ -6791,6 +6909,20 @@ function saveDashboardHealthCache(serverId: string, value: DashboardHealthResult
   } catch {
     // Storage can be blocked in hardened browser contexts.
   }
+}
+
+function isWaitingForNitradoStatsStatus(status: string) {
+  const normalizedStatus = status.toLowerCase();
+  return [
+    "adm_file_unreadable",
+    "latest_adm_unreadable",
+    "nitrado_file_unavailable",
+    "adm_not_generated_yet",
+    "waiting_after_restart",
+    "delayed_after_restart",
+    "no_adm_file",
+    "read_pending",
+  ].includes(normalizedStatus);
 }
 
 function dashboardHealthJobToAdmJob(job: DashboardHealthResult["sync"]["active_job"]): AdmImportJobProgressResult | null {

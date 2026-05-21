@@ -2,7 +2,7 @@ export const SERVER_CATEGORY_OPTIONS = [
   { value: "deathmatch", label: "Deathmatch" },
   { value: "pvp", label: "PvP" },
   { value: "pve", label: "PvE" },
-  { value: "pvp_pve", label: "PvP / PvE" },
+  { value: "pvp_pve", label: "PvP/PvE" },
   { value: "hardcore", label: "Hardcore" },
   { value: "roleplay", label: "Roleplay" },
   { value: "faction_wars", label: "Faction Wars" },
