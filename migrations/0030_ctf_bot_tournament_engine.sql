@@ -15,7 +15,7 @@ ALTER TABLE sessions ADD COLUMN session_hash TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kill_events_event_hash ON kill_events(event_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_player_events_event_hash ON player_events(event_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_session_hash ON sessions(session_hash);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_server_subscriptions_unique_active_subscription
+CREATE INDEX IF NOT EXISTS idx_server_subscriptions_active_subscription_lookup
   ON server_subscriptions(stripe_subscription_id)
   WHERE stripe_subscription_id IS NOT NULL AND stripe_subscription_id != '';
 
