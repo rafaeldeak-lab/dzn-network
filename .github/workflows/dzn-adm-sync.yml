@@ -48,3 +48,10 @@ jobs:
             -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions","max_jobs":25}'
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "${APP_URL}/api/sync/ctf-scorecards/run" \
+            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
+            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data '{"source":"github-backup","cron":"github-actions"}'

@@ -15,6 +15,7 @@ import {
 } from "../../_lib/onboarding";
 import { validatePublicListingInput, type PublicListingInput } from "../../_lib/review-moderation";
 import { ensureAutomationRowsForLinkedServers } from "../../_lib/automation";
+import { saveBotOnboardingConfig } from "../../_lib/ctf-tournaments";
 import type { PagesFunction } from "../../_lib/types";
 
 type SaveBody = {
@@ -22,6 +23,8 @@ type SaveBody = {
   serverType?: string;
   tags?: string[];
   nitradoServiceId?: string;
+  tournamentChannelId?: string;
+  botAccessToken?: string;
 } & PublicListingInput;
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -227,6 +230,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
 
   await linkLatestNitradoConnection(env, userId, linkedServerId);
+  await saveBotOnboardingConfig(env, {
+    linkedServerId,
+    discordGuildId: guild.guild_id,
+    tournamentChannelId: body.tournamentChannelId,
+    botAccessToken: body.botAccessToken,
+  });
   await ensureAutomationRowsForLinkedServers(env);
   return json({ ok: true, linkedServerId });
 };
