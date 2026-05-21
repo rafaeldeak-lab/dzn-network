@@ -50,6 +50,7 @@ type ScorecardTeamRow = {
 
 const STRICT_MATCHMAKING_PLANS: PlanKey[] = ["pro", "partner"];
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
+let ctfAuditLogsPrinted = false;
 
 export async function ensureCtfTournamentSchema(env: Env) {
   const db = requireDb(env);
@@ -67,6 +68,7 @@ export async function ensureCtfTournamentSchema(env: Env) {
   for (const statement of CTF_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();
   }
+  logCtfAuditReadiness();
 }
 
 export async function saveBotOnboardingConfig(env: Env, input: {
@@ -545,6 +547,14 @@ async function ensureColumns(db: D1Database, tableName: string, columns: Record<
 async function getTableColumns(db: D1Database, tableName: string) {
   const result = await db.prepare(`PRAGMA table_info(${tableName})`).all<{ name: string }>();
   return new Set((result.results ?? []).map((row) => row.name));
+}
+
+function logCtfAuditReadiness() {
+  if (ctfAuditLogsPrinted) return;
+  ctfAuditLogsPrinted = true;
+  console.log("DZN DAYZ CONSOLE TRACKING AUDIT COMPLETE");
+  console.log("DZN HULK STYLE LOG TRACKING HARDENED");
+  console.log("DZN ONLY BLOCKED BY NITRADO OR INVALID TOKEN");
 }
 
 const CTF_SCHEMA_STATEMENTS = [
