@@ -1,3 +1,4 @@
+import { ensureAdmSyncSchema } from "../../../../_lib/adm-sync";
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../../../../_lib/plans";
@@ -37,6 +38,7 @@ type ServerRow = {
   last_sync_at: string | null;
   last_successful_sync_at: string | null;
   last_sync_message: string | null;
+  consecutive_failed_adm_reads: number | null;
 };
 
 type StatsRow = {
@@ -108,6 +110,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       );
     }
 
+    await ensureAdmSyncSchema(env);
     const db = requireDb(env);
     const now = new Date().toISOString();
     const [server, stats, recentEvents, activeJob, queuedJobs, completedToday, fileState, cronRows] = await Promise.all([
@@ -133,7 +136,8 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
                 adm_sync_state.last_sync_status,
                 adm_sync_state.last_sync_at,
                 adm_sync_state.last_successful_sync_at,
-                adm_sync_state.last_sync_message
+                adm_sync_state.last_sync_message,
+                adm_sync_state.consecutive_failed_adm_reads
          FROM linked_servers
          LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
          LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
@@ -249,10 +253,13 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         : statsSnapshot.kills > 0 || statsSnapshot.joins > 0 || server.last_processed_adm_filename
           ? "ADM Sync Active"
           : "Waiting for Nitrado";
+    const admNitradoReadFailure = numberOrZero(server.consecutive_failed_adm_reads) >= 3;
+    const admNitradoReadFailureMessage = "DZN cannot read your latest ADM file from Nitrado. Check that Admin Log is enabled, Reduce Log Output is disabled, and Log Playerlist is enabled in your Nitrado settings.";
     const warnings = [
       ...(!cron.adm_recent ? ["adm_cron_stale"] : []),
       ...(fileState && numberOrZero(fileState.missing_count) > 0 ? ["adm_backfill_missing"] : []),
       ...(fileState && numberOrZero(fileState.unreadable_count) > 0 ? ["nitrado_read_waiting"] : []),
+      ...(admNitradoReadFailure ? ["adm_nitrado_read_failure"] : []),
       ...(server.subscription_status && !["active", "trialing"].includes(String(server.subscription_status).toLowerCase()) ? ["subscription_not_active"] : []),
     ];
 
@@ -320,6 +327,9 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         next_adm_discovery_due_at: server.next_adm_discovery_due_at,
         next_adm_processing_due_at: server.next_adm_pull_due_at,
         last_error: sanitize(server.last_adm_discovery_error ?? server.last_sync_message),
+        consecutive_failed_adm_reads: numberOrZero(server.consecutive_failed_adm_reads),
+        adm_nitrado_read_failure: admNitradoReadFailure,
+        adm_nitrado_read_failure_message: admNitradoReadFailure ? admNitradoReadFailureMessage : null,
         next_action: activeJobSnapshot
           ? `Importing ${activeJobSnapshot.filename}`
           : server.newest_available_adm_filename && !server.newest_readable_adm_filename
@@ -333,7 +343,12 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         hasAdm: Boolean(server.newest_available_adm_filename || server.latest_adm_file || server.last_processed_adm_filename),
         hasStats: statsSnapshot.kills > 0 || statsSnapshot.joins > 0 || statsSnapshot.unique_players > 0,
       }),
+      adm_nitrado_read_failure: admNitradoReadFailure,
+      adm_nitrado_read_failure_message: admNitradoReadFailure ? admNitradoReadFailureMessage : null,
       warnings,
+      warning_messages: admNitradoReadFailure ? {
+        adm_nitrado_read_failure: admNitradoReadFailureMessage,
+      } : {},
     };
     return json({ ...payload, data: payload }, {
       headers: {

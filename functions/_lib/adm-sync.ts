@@ -92,6 +92,7 @@ type AdmSyncState = {
   last_parser_skipped_lines: number | null;
   last_unreadable_files_queued: number | null;
   last_newest_unprocessed_adm_file: string | null;
+  consecutive_failed_adm_reads: number | null;
 };
 
 export type AdmSyncResult = {
@@ -1802,6 +1803,11 @@ function getAdmBackfillReadLimit(planKey: PlanKey | string | null | undefined) {
   return 10;
 }
 
+const ADM_UNREADABLE_RETRY_LIMIT = 5;
+const ADM_UNREADABLE_RETRY_AFTER_MS = 15 * 60 * 1000;
+const SCHEDULED_ADM_UNREADABLE_RETRY_FILES_PER_RUN = 5;
+const MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN = 10;
+
 function hasRawPlayerKillLine(line: string) {
   return /\bkilled by\s+Player\s+"/i.test(line);
 }
@@ -3108,8 +3114,8 @@ export async function planAdmBackfillJobsForServer(
     readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: scheduledBudgeted ? 1 : getAdmBackfillReadLimit(linkedServer.plan_key),
-    lookbackFiles: scheduledBudgeted ? 1 : 12,
+    maxFiles: scheduledBudgeted ? 5 : getAdmBackfillReadLimit(linkedServer.plan_key),
+    lookbackFiles: scheduledBudgeted ? 10 : 12,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
 
@@ -3122,11 +3128,22 @@ export async function planAdmBackfillJobsForServer(
   const existingJobs = await getAdmImportJobsForServer(env, scope.linkedServerId);
   const handledFilenames = await getHandledAdmFilenames(env, scope.linkedServerId, scope.nitradoServiceId);
   const readableFiles = [...batch.files];
+  if (readableFiles.length > 0) {
+    await resetAdmReadFailureCounter(env, scope.linkedServerId);
+  }
+  const retryPromotion = await retryUnreadableAdmFileStatesForServer(env, linkedServer, scope, {
+    handledFilenames,
+    limit: scheduledBudgeted ? SCHEDULED_ADM_UNREADABLE_RETRY_FILES_PER_RUN : MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN,
+  });
+  readableFiles.push(...retryPromotion.readableFiles);
   const readErrorByName = new Map<string, string | null>();
   for (const error of batch.readErrors) {
     const [filename, ...rest] = error.split(":");
     const key = normalizeAdmFilenameKey(filename);
     if (key) readErrorByName.set(key, rest.join(":").trim() || error);
+  }
+  for (const [filename, error] of retryPromotion.readErrorsByFilename.entries()) {
+    readErrorByName.set(normalizeAdmFilenameKey(filename), error);
   }
   const readableByName = new Map(readableFiles.map((file) => [normalizeAdmFilenameKey(file.name), file]));
   let plannerFiles: AdmBackfillPlannerFile[] = batch.candidates.map((file) => {
@@ -3178,10 +3195,14 @@ export async function planAdmBackfillJobsForServer(
     });
   }
 
+  const latestExistingJobs = retryPromotion.createdJobs.length
+    ? await getAdmImportJobsForServer(env, scope.linkedServerId)
+    : existingJobs;
+
   const plan = buildAdmBackfillPlan({
     files: plannerFiles,
     handledFilenames,
-    existingJobs: existingJobs.map((job) => ({ filename: job.filename, status: job.status, source: job.source })),
+    existingJobs: latestExistingJobs.map((job) => ({ filename: job.filename, status: job.status, source: job.source })),
     planKey: linkedServer.plan_key,
     maxJobsToCreate,
   });
@@ -3201,7 +3222,7 @@ export async function planAdmBackfillJobsForServer(
     });
   }
 
-  const createdJobs: AdmImportJobProgressResult[] = [];
+  const createdJobs: AdmImportJobProgressResult[] = [...retryPromotion.createdJobs];
   for (const filename of plan.createFiles) {
     const readable = readableByName.get(normalizeAdmFilenameKey(filename));
     if (!readable?.lines.length) continue;
@@ -3240,6 +3261,10 @@ export async function planAdmBackfillJobsForServer(
       : plan.missingFiles.length
         ? `Missing ADM files are unreadable or already queued. ${plan.nextAction}`
         : "ADM backfill is caught up.";
+
+  if (newestReadable || retryPromotion.readableFiles.length > 0) {
+    await resetAdmReadFailureCounter(env, scope.linkedServerId);
+  }
 
   await upsertSyncState(env, scope.linkedServerId, {
     latestAdmFile: newestAvailable?.name ?? existingState?.latest_adm_file ?? null,
@@ -3328,6 +3353,9 @@ export async function createScheduledAdmImportJobForServer(
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
   const newestAvailable = selectNewestDiscoveredAdmFile(batch.candidates);
   const newestReadable = selectNewestReadableAdmFile(batch.files);
+  if (newestReadable) {
+    await resetAdmReadFailureCounter(env, scope.linkedServerId);
+  }
   const completedCursorFile = getCompletedAdmCursorFile(existingState);
   const newestAvailableIsNew = isAdmFileNewerThan(newestAvailable?.name ?? null, completedCursorFile);
   const selected = newestAvailableIsNew
@@ -5270,6 +5298,16 @@ export async function runAdmDiscoveryForLinkedServer(env: Env, userId: string, l
       ? (hasNewAvailable ? "new_adm_readable" : "no_new_log_available")
       : classifyUnavailableAdmFileStatus(newestAvailableAdm?.name ?? batch.newestAdmFileName, batch.filesFound > 0, batch.apiStatus);
     const normalizedStatus = normalizeAdmSyncStateMachineStatus(status);
+    if (newestReadableAdm) {
+      await resetAdmReadFailureCounter(env, initialScope.linkedServerId);
+    } else if (normalizedStatus === "latest_adm_unreadable" && (newestAvailableAdm?.name ?? batch.newestAdmFileName)) {
+      await incrementAdmReadFailureCounter(
+        env,
+        initialScope.linkedServerId,
+        newestAvailableAdm?.name ?? batch.newestAdmFileName ?? null,
+        batch.readError ?? getUnavailableAdmMessage(status),
+      );
+    }
     return {
       ok: !isAdmSyncErrorStatus(status),
       status: normalizedStatus === "latest_adm_unreadable" ? "latest_adm_unreadable" : normalizedStatus,
@@ -5284,9 +5322,13 @@ export async function runAdmDiscoveryForLinkedServer(env: Env, userId: string, l
   } catch (error) {
     const latestAdmFile = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
     const status = classifyNitradoExceptionStatus(error, latestAdmFile);
+    const normalizedStatus = normalizeAdmSyncStateMachineStatus(status);
+    if (normalizedStatus === "latest_adm_unreadable" && latestAdmFile) {
+      await incrementAdmReadFailureCounter(env, initialScope.linkedServerId, latestAdmFile, safeSyncErrorMessage(error));
+    }
     return {
       ok: !isAdmSyncErrorStatus(status),
-      status: normalizeAdmSyncStateMachineStatus(status),
+      status: normalizedStatus,
       message: status === "adm_file_unreadable"
         ? "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check."
         : getUnavailableAdmMessage(status),
@@ -5642,6 +5684,7 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["last_cursor_validation_at", "TEXT"],
     ["cursor_recovery_strategy", "TEXT"],
     ["cursor_recovery_reason", "TEXT"],
+    ["consecutive_failed_adm_reads", "INTEGER DEFAULT 0"],
   ]);
   await ensureMissingColumns(db, "adm_raw_events", [
     ["source_service_id", "TEXT"],
@@ -5845,12 +5888,46 @@ async function recordDiscoveredAdmFiles(env: Env, context: AdmSyncContext, files
   }
 }
 
+async function resetAdmReadFailureCounter(env: Env, linkedServerId: string) {
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_sync_state
+       SET consecutive_failed_adm_reads = 0,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE linked_server_id = ?`,
+    )
+    .bind(linkedServerId)
+    .run();
+}
+
+async function incrementAdmReadFailureCounter(env: Env, linkedServerId: string, latestAdmFile: string | null, message: string | null) {
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO adm_sync_state (
+        id, linked_server_id, latest_adm_file, last_sync_status, last_sync_message,
+        consecutive_failed_adm_reads, created_at, updated_at
+      ) VALUES (?, ?, ?, 'latest_adm_unreadable', ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(linked_server_id) DO UPDATE SET
+        latest_adm_file = COALESCE(excluded.latest_adm_file, adm_sync_state.latest_adm_file),
+        last_sync_status = CASE
+          WHEN adm_sync_state.last_sync_status IS NULL OR adm_sync_state.last_sync_status IN ('latest_adm_unreadable', 'adm_file_unreadable')
+          THEN 'latest_adm_unreadable'
+          ELSE adm_sync_state.last_sync_status
+        END,
+        last_sync_message = COALESCE(excluded.last_sync_message, adm_sync_state.last_sync_message),
+        consecutive_failed_adm_reads = COALESCE(adm_sync_state.consecutive_failed_adm_reads, 0) + 1,
+        updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(crypto.randomUUID(), linkedServerId, latestAdmFile, message)
+    .run();
+}
+
 async function recordAdmFileAttempt(
   env: Env,
   context: AdmSyncContext,
   file: DiscoveredAdmFileForSync,
   values: {
-    status: "discovered" | "unreadable" | "parser_error" | "write_error" | "processed" | "partial";
+    status: "discovered" | "unreadable" | "queued" | "failed_unreadable" | "parser_error" | "write_error" | "processed" | "partial";
     lineCount: number;
     rawKillLinesFound: number;
     parsedKillLinesFound: number;
@@ -5874,7 +5951,7 @@ async function recordAdmFileAttempt(
         adm_path = COALESCE(excluded.adm_path, adm_sync_file_state.adm_path),
         status = CASE
           WHEN adm_sync_file_state.ignored_at IS NOT NULL THEN adm_sync_file_state.status
-          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('processed', 'partial') THEN adm_sync_file_state.status
+          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'processed', 'partial', 'failed_unreadable') THEN adm_sync_file_state.status
           ELSE excluded.status
         END,
         last_checked_at = excluded.last_checked_at,
@@ -5890,7 +5967,10 @@ async function recordAdmFileAttempt(
           WHEN excluded.status = 'unreadable' THEN COALESCE(adm_sync_file_state.retry_count, 0) + 1
           ELSE COALESCE(adm_sync_file_state.retry_count, 0)
         END,
-        last_error = excluded.last_error,
+        last_error = CASE
+          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'failed_unreadable') THEN adm_sync_file_state.last_error
+          ELSE excluded.last_error
+        END,
         updated_at = excluded.updated_at`,
     )
     .bind(
@@ -5902,7 +5982,7 @@ async function recordAdmFileAttempt(
       values.status,
       now,
       now,
-      values.status === "processed" || values.status === "partial" ? now : null,
+      values.status === "processed" || values.status === "partial" || values.status === "queued" ? now : null,
       values.status === "processed" ? now : null,
       values.lineCount,
       values.lastLineProcessed ?? 0,
@@ -7289,6 +7369,190 @@ async function readSpecificAdmFileForBackfill(
   }
 }
 
+type UnreadableAdmFileRetryRow = {
+  adm_file: string;
+  adm_path: string | null;
+  retry_count: number | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+};
+
+async function retryUnreadableAdmFileStatesForServer(
+  env: Env,
+  linkedServer: ManualImportLinkedServer,
+  scope: AdmSyncContext,
+  options: {
+    handledFilenames: string[];
+    limit: number;
+  },
+): Promise<{
+  createdJobs: AdmImportJobProgressResult[];
+  readableFiles: ReadableAdmFileForSync[];
+  readErrorsByFilename: Map<string, string | null>;
+}> {
+  await markExpiredUnreadableAdmFilesFailed(env, scope);
+  const db = requireDb(env);
+  const cutoff = new Date(Date.now() - ADM_UNREADABLE_RETRY_AFTER_MS).toISOString();
+  const rows = await db
+    .prepare(
+      `SELECT adm_file, adm_path, retry_count, last_checked_at, last_error
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND source_service_id = ?
+         AND status = 'unreadable'
+         AND COALESCE(retry_count, 0) < ?
+         AND (last_checked_at IS NULL OR last_checked_at <= ?)
+       ORDER BY adm_file ASC
+       LIMIT ?`,
+    )
+    .bind(scope.linkedServerId, scope.nitradoServiceId, ADM_UNREADABLE_RETRY_LIMIT, cutoff, Math.max(1, options.limit))
+    .all<UnreadableAdmFileRetryRow>();
+
+  const handled = new Set(options.handledFilenames.map(normalizeAdmFilenameKey).filter(Boolean));
+  const createdJobs: AdmImportJobProgressResult[] = [];
+  const readableFiles: ReadableAdmFileForSync[] = [];
+  const readErrorsByFilename = new Map<string, string | null>();
+
+  for (const row of rows.results ?? []) {
+    const filename = sanitizeManualAdmFilename(row.adm_file);
+    if (!filename) continue;
+    const filenameKey = normalizeAdmFilenameKey(filename);
+    const candidate: DiscoveredAdmFileForSync = {
+      name: filename,
+      path: row.adm_path,
+      timestamp: extractAdmTimestampScore(filename),
+    };
+
+    const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, filename);
+    if (handled.has(filenameKey) || (existingJob && isCompletedAdmImportJobStatus(existingJob.status))) {
+      await recordAdmFileAttempt(env, scope, candidate, {
+        status: "processed",
+        lineCount: Number(existingJob?.total_lines ?? 0),
+        rawKillLinesFound: Number(existingJob?.raw_kill_lines_found ?? existingJob?.parsed_kills ?? 0),
+        parsedKillLinesFound: Number(existingJob?.parsed_kills ?? 0),
+        insertedKills: Number(existingJob?.written_kills ?? 0),
+        parserSkippedLines: 0,
+        lastLineProcessed: Number(existingJob?.current_line ?? existingJob?.total_lines ?? 0),
+        message: null,
+      });
+      continue;
+    }
+
+    if (existingJob && isActiveAdmImportJobStatus(existingJob.status)) {
+      await recordAdmFileAttempt(env, scope, candidate, {
+        status: "queued",
+        lineCount: Number(existingJob.total_lines ?? 0),
+        rawKillLinesFound: Number(existingJob.raw_kill_lines_found ?? existingJob.parsed_kills ?? 0),
+        parsedKillLinesFound: Number(existingJob.parsed_kills ?? 0),
+        insertedKills: Number(existingJob.written_kills ?? 0),
+        parserSkippedLines: 0,
+        lastLineProcessed: Number(existingJob.current_line ?? 0),
+        message: null,
+      });
+      continue;
+    }
+
+    const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate);
+    if (read.file?.lines.length) {
+      readableFiles.push(read.file);
+      await resetAdmReadFailureCounter(env, scope.linkedServerId);
+      const report = buildAdmImportDebugReport(read.file.lines, {
+        admFileName: read.file.name,
+        cursorStart: 0,
+        cursorEnd: read.file.lines.length,
+      });
+      const created = await createAdmImportJobForServer(env, {
+        linkedServerId: scope.linkedServerId,
+        filename: read.file.name,
+        admText: read.file.lines.join("\n"),
+        source: SCHEDULED_ADM_IMPORT_SOURCE,
+        chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+      });
+      const jobRow = await getAdmImportJob(env, scope.linkedServerId, created.job_id);
+      if (jobRow) {
+        await recordAdmImportJobProgressInSyncState(env, jobRow, "adm_backfill_queued", `Re-read unreadable ADM file ${read.file.name} and queued it for scheduled import.`);
+      }
+      await recordAdmFileAttempt(env, scope, {
+        name: read.file.name,
+        path: read.file.path,
+        timestamp: extractAdmTimestampScore(read.file.name),
+      }, {
+        status: "queued",
+        lineCount: read.file.lines.length,
+        rawKillLinesFound: report.rawKilledByLinesFound,
+        parsedKillLinesFound: report.parsedPvpKills,
+        insertedKills: 0,
+        parserSkippedLines: report.skippedDeadHitLines,
+        lastLineProcessed: 0,
+        message: null,
+      });
+      createdJobs.push(jobRow ? toAdmImportJobProgress(jobRow) : created);
+      continue;
+    }
+
+    const error = read.error ?? "ADM file still exists on Nitrado but did not return readable DayZ admin log text.";
+    readErrorsByFilename.set(filename, error);
+    await recordAdmFileAttempt(env, scope, candidate, {
+      status: "unreadable",
+      lineCount: 0,
+      rawKillLinesFound: 0,
+      parsedKillLinesFound: 0,
+      insertedKills: 0,
+      parserSkippedLines: 0,
+      message: error,
+    });
+    if (Number(row.retry_count ?? 0) + 1 >= ADM_UNREADABLE_RETRY_LIMIT) {
+      await markAdmFileFailedUnreadable(env, scope, filename, error);
+    }
+  }
+
+  await markExpiredUnreadableAdmFilesFailed(env, scope);
+  return { createdJobs, readableFiles, readErrorsByFilename };
+}
+
+async function markExpiredUnreadableAdmFilesFailed(env: Env, scope: AdmSyncContext) {
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_sync_file_state
+       SET status = 'failed_unreadable',
+           last_error = COALESCE(last_error, ?),
+           updated_at = ?
+       WHERE linked_server_id = ?
+         AND source_service_id = ?
+         AND status = 'unreadable'
+         AND COALESCE(retry_count, 0) >= ?`,
+    )
+    .bind(
+      "ADM file remained unreadable after 5 Nitrado read attempts. Check Nitrado Admin Log, Reduce Log Output, and Log Playerlist settings.",
+      new Date().toISOString(),
+      scope.linkedServerId,
+      scope.nitradoServiceId,
+      ADM_UNREADABLE_RETRY_LIMIT,
+    )
+    .run();
+}
+
+async function markAdmFileFailedUnreadable(env: Env, scope: AdmSyncContext, filename: string, error: string) {
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_sync_file_state
+       SET status = 'failed_unreadable',
+           last_error = ?,
+           updated_at = ?
+       WHERE linked_server_id = ?
+         AND source_service_id = ?
+         AND adm_file = ?`,
+    )
+    .bind(
+      `ADM file remained unreadable after ${ADM_UNREADABLE_RETRY_LIMIT} Nitrado read attempts. Last error: ${safeSyncErrorMessage(error)}`,
+      new Date().toISOString(),
+      scope.linkedServerId,
+      scope.nitradoServiceId,
+      filename,
+    )
+    .run();
+}
+
 function looksLikeAdmText(lines: string[]) {
   return lines.some((line) => /^\d{1,2}:\d{2}(?::\d{2})?\s*\|/.test(line) || /AdminLog|PlayerList|killed by Player|is connected|is connecting|disconnected/i.test(line));
 }
@@ -7563,6 +7827,7 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_cursor_validation_at TEXT,
     cursor_recovery_strategy TEXT,
     cursor_recovery_reason TEXT,
+    consecutive_failed_adm_reads INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,
