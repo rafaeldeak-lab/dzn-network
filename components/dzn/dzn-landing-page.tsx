@@ -340,7 +340,7 @@ const navItems = [
   { label: "Leaderboards", href: "/leaderboards" },
   { label: "Servers", href: "/servers" },
   { label: "Stats", href: "#stats" },
-  { label: "Events", href: "#server-events" },
+  { label: "Events", href: "/events" },
 ];
 
 const loggedOutNavItems = [

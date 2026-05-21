@@ -20,6 +20,13 @@ export type PublicLeaderboardPlayer = {
   kd_label: string;
   longest_kill: number;
   last_seen: string | null;
+  highest_killstreak?: number;
+  total_time_alive_seconds?: number;
+  headshots?: number;
+  favourite_weapon?: string;
+  combat_logs_count?: number;
+  rage_quits_count?: number;
+  spawn_kills_count?: number;
 };
 
 export type PublicLeaderboardServer = {
@@ -102,6 +109,32 @@ type PublicPlayerDeathRow = {
   last_seen: string | null;
 };
 
+export type PublicLeaderboardMetric =
+  | "total_kills"
+  | "deaths"
+  | "kd_ratio"
+  | "highest_killstreak"
+  | "longest_kill_distance"
+  | "total_survival_time_alive"
+  | "headshots"
+  | "favourite_weapon"
+  | "combat_logs"
+  | "rage_quits"
+  | "spawn_kills";
+
+export type PublicTelemetryLeaderboardRow = PublicLeaderboardPlayer & {
+  metric: PublicLeaderboardMetric;
+  metric_value: number | string | null;
+  metric_label: string;
+};
+
+export type PublicLeaderboardsOptions = {
+  full?: boolean;
+  metric?: string | null;
+  page?: number;
+  pageSize?: number;
+};
+
 export type PublicLongestKillRow = {
   player_key?: string | null;
   player_name: string | null;
@@ -122,20 +155,31 @@ type PublicServerLookupRow = {
   guild_name: string | null;
 };
 
-export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = true) {
+export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = true, options: PublicLeaderboardsOptions = {}) {
   if (!env.DB) return applyLeaderboardsAccess(emptyPublicLeaderboards(), viewerLoggedIn);
 
   await ensurePublicLeaderboardSchema(env);
+  const requestOptions = normalizePublicLeaderboardOptions(options);
+  const limit = requestOptions.full ? requestOptions.pageSize : 10;
+  const offset = requestOptions.full ? (requestOptions.page - 1) * requestOptions.pageSize : 0;
+  const selectedMetric = normalizeLeaderboardMetric(requestOptions.metric);
 
-  const [topServers, topPlayers, killSummary, buildLeaderboard] = await Promise.all([
-    getRankedPublicServers(env, 25),
-    getTopPlayers(env, 50),
-    getLongestKillSummary(env, 20),
-    getRankedBuildServers(env, 25),
+  const [topServers, topPlayers, killSummary, buildLeaderboard, playerLeaderboards, selectedMetricLeaderboard] = await Promise.all([
+    getRankedPublicServers(env, limit),
+    getTopPlayers(env, limit, undefined, offset),
+    getLongestKillSummary(env, limit),
+    getRankedBuildServers(env, limit),
+    getAllTelemetryLeaderboards(env, limit, offset),
+    getTelemetryLeaderboard(env, selectedMetric, limit, offset),
   ]);
 
   return applyLeaderboardsAccess({
     ok: true,
+    full: requestOptions.full,
+    leaderboard_limit: limit,
+    page: requestOptions.full ? requestOptions.page : 1,
+    page_size: limit,
+    selected_metric: selectedMetric,
     top_servers: topServers,
     top_players: topPlayers,
     best_overall_kill: killSummary.bestOverallKill,
@@ -143,6 +187,8 @@ export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = tr
     personal_best_kills: killSummary.personalBestKills,
     longest_kills: killSummary.personalBestKills,
     build_leaderboard: buildLeaderboard,
+    player_leaderboards: playerLeaderboards,
+    selected_metric_leaderboard: selectedMetricLeaderboard,
     updated_at: new Date().toISOString(),
   }, viewerLoggedIn);
 }
@@ -281,9 +327,11 @@ export async function getRankedPublicServers(env: Env, limit: number) {
   });
 }
 
-async function getTopPlayers(env: Env, limit: number, linkedServerId?: string) {
+async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, offset = 0) {
   const db = requireDb(env);
   const serverFilter = linkedServerId ? "AND kill_events.linked_server_id = ?" : "";
+  const queryLimit = Math.max(1, Math.min(Math.trunc(limit) || 10, 500));
+  const queryOffset = Math.max(0, Math.trunc(offset) || 0);
 
   const killStatement = db.prepare(
     `SELECT
@@ -303,11 +351,12 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string) {
          AND ${mockNameFilterSql("kill_events.killer_name")}
          ${serverFilter}
        GROUP BY kill_events.linked_server_id, player_key, linked_servers.public_slug
-       ORDER BY kills DESC, longest_kill DESC, last_seen DESC`,
+       ORDER BY kills DESC, longest_kill DESC, last_seen DESC
+       LIMIT ? OFFSET ?`,
   );
   const killRows = linkedServerId
-    ? await killStatement.bind(linkedServerId).all<PublicPlayerKillRow>()
-    : await killStatement.all<PublicPlayerKillRow>();
+    ? await killStatement.bind(linkedServerId, queryLimit, queryOffset).all<PublicPlayerKillRow>()
+    : await killStatement.bind(queryLimit, queryOffset).all<PublicPlayerKillRow>();
 
   const deathStatement = db.prepare(
     `SELECT
@@ -326,13 +375,14 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string) {
          AND ${mockNameFilterSql("kill_events.victim_name")}
          ${serverFilter}
        GROUP BY kill_events.linked_server_id, player_key, linked_servers.public_slug
-       ORDER BY deaths DESC, last_seen DESC`,
+       ORDER BY deaths DESC, last_seen DESC
+       LIMIT ? OFFSET ?`,
   );
   const deathRows = linkedServerId
-    ? await deathStatement.bind(linkedServerId).all<PublicPlayerDeathRow>()
-    : await deathStatement.all<PublicPlayerDeathRow>();
+    ? await deathStatement.bind(linkedServerId, queryLimit, queryOffset).all<PublicPlayerDeathRow>()
+    : await deathStatement.bind(queryLimit, queryOffset).all<PublicPlayerDeathRow>();
 
-  return rankPublicPlayers(mergePlayerRows(killRows.results ?? [], deathRows.results ?? []), limit);
+  return rankPublicPlayers(mergePlayerRows(killRows.results ?? [], deathRows.results ?? []), queryLimit);
 }
 
 async function getLongestKillSummary(env: Env, limit: number) {
@@ -512,6 +562,215 @@ export function selectLatestKill(rows: PublicLongestKillRow[]) {
   return row ? toKillHighlight(row) : null;
 }
 
+const PUBLIC_LEADERBOARD_METRICS: Record<PublicLeaderboardMetric, {
+  orderExpression: string;
+  valueExpression: string;
+  label: string;
+}> = {
+  total_kills: {
+    orderExpression: "COALESCE(player_profiles.kills, 0)",
+    valueExpression: "COALESCE(player_profiles.kills, 0)",
+    label: "Total Kills",
+  },
+  deaths: {
+    orderExpression: "COALESCE(player_profiles.deaths, 0)",
+    valueExpression: "COALESCE(player_profiles.deaths, 0)",
+    label: "Deaths",
+  },
+  kd_ratio: {
+    orderExpression: "CASE WHEN COALESCE(player_profiles.deaths, 0) = 0 THEN COALESCE(player_profiles.kills, 0) ELSE CAST(COALESCE(player_profiles.kills, 0) AS REAL) / COALESCE(player_profiles.deaths, 1) END",
+    valueExpression: "CASE WHEN COALESCE(player_profiles.deaths, 0) = 0 THEN COALESCE(player_profiles.kills, 0) ELSE CAST(COALESCE(player_profiles.kills, 0) AS REAL) / COALESCE(player_profiles.deaths, 1) END",
+    label: "K/D Ratio",
+  },
+  highest_killstreak: {
+    orderExpression: "COALESCE(player_profiles.highest_killstreak, 0)",
+    valueExpression: "COALESCE(player_profiles.highest_killstreak, 0)",
+    label: "Highest Killstreak",
+  },
+  longest_kill_distance: {
+    orderExpression: "COALESCE(player_profiles.longest_kill_distance, 0)",
+    valueExpression: "COALESCE(player_profiles.longest_kill_distance, 0)",
+    label: "Longest Kill",
+  },
+  total_survival_time_alive: {
+    orderExpression: "COALESCE(player_profiles.total_time_alive_seconds, 0)",
+    valueExpression: "COALESCE(player_profiles.total_time_alive_seconds, 0)",
+    label: "Survival Time",
+  },
+  headshots: {
+    orderExpression: "COALESCE(player_profiles.headshots, 0)",
+    valueExpression: "COALESCE(player_profiles.headshots, 0)",
+    label: "Headshots",
+  },
+  favourite_weapon: {
+    orderExpression: "COALESCE(player_profiles.kills, 0)",
+    valueExpression: "COALESCE(NULLIF(player_profiles.favourite_weapon, ''), 'Unknown')",
+    label: "Favourite Weapon",
+  },
+  combat_logs: {
+    orderExpression: "COALESCE(player_profiles.combat_logs_count, 0)",
+    valueExpression: "COALESCE(player_profiles.combat_logs_count, 0)",
+    label: "Combat Logs",
+  },
+  rage_quits: {
+    orderExpression: "COALESCE(player_profiles.rage_quits_count, 0)",
+    valueExpression: "COALESCE(player_profiles.rage_quits_count, 0)",
+    label: "Rage Quits",
+  },
+  spawn_kills: {
+    orderExpression: "COALESCE(player_profiles.spawn_kills_count, 0)",
+    valueExpression: "COALESCE(player_profiles.spawn_kills_count, 0)",
+    label: "Spawn Kills",
+  },
+};
+
+export function normalizeLeaderboardMetric(value: unknown): PublicLeaderboardMetric {
+  const text = typeof value === "string" ? value.trim().toLowerCase().replace(/[-\s]+/g, "_") : "";
+  if (text === "kills") return "total_kills";
+  if (text === "kd" || text === "k_d" || text === "kdr") return "kd_ratio";
+  if (text === "killstreak") return "highest_killstreak";
+  if (text === "longest_kill") return "longest_kill_distance";
+  if (text === "survival_time" || text === "time_alive") return "total_survival_time_alive";
+  if (text === "favorite_weapon") return "favourite_weapon";
+  if (text === "combat_logging") return "combat_logs";
+  if (text === "rage_quitting") return "rage_quits";
+  if (text === "spawn_killing") return "spawn_kills";
+  return isPublicLeaderboardMetric(text) ? text : "total_kills";
+}
+
+export function normalizePublicLeaderboardOptions(options: PublicLeaderboardsOptions = {}) {
+  const full = options.full === true;
+  const page = full ? Math.max(1, Math.trunc(Number(options.page ?? 1)) || 1) : 1;
+  const pageSize = full
+    ? Math.max(1, Math.min(Math.trunc(Number(options.pageSize ?? 100)) || 100, 500))
+    : 10;
+  return {
+    full,
+    metric: normalizeLeaderboardMetric(options.metric),
+    page,
+    pageSize,
+  };
+}
+
+async function getAllTelemetryLeaderboards(env: Env, limit: number, offset = 0) {
+  const entries = await Promise.all(
+    (Object.keys(PUBLIC_LEADERBOARD_METRICS) as PublicLeaderboardMetric[])
+      .map(async (metric) => [metric, await getTelemetryLeaderboard(env, metric, limit, offset)] as const),
+  );
+  return Object.fromEntries(entries) as Record<PublicLeaderboardMetric, PublicTelemetryLeaderboardRow[]>;
+}
+
+async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric, limit: number, offset = 0) {
+  const db = requireDb(env);
+  const mapping = PUBLIC_LEADERBOARD_METRICS[metric];
+  const queryLimit = Math.max(1, Math.min(Math.trunc(limit) || 10, 500));
+  const queryOffset = Math.max(0, Math.trunc(offset) || 0);
+  const result = await db
+    .prepare(
+      `SELECT
+        player_profiles.player_name,
+        player_profiles.player_id,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        linked_servers.public_slug AS server_slug,
+        COALESCE(player_profiles.kills, 0) AS kills,
+        COALESCE(player_profiles.deaths, 0) AS deaths,
+        COALESCE(player_profiles.longest_kill_distance, 0) AS longest_kill,
+        COALESCE(player_profiles.highest_killstreak, 0) AS highest_killstreak,
+        COALESCE(player_profiles.total_time_alive_seconds, 0) AS total_time_alive_seconds,
+        COALESCE(player_profiles.headshots, 0) AS headshots,
+        COALESCE(NULLIF(player_profiles.favourite_weapon, ''), 'Unknown') AS favourite_weapon,
+        COALESCE(player_profiles.combat_logs_count, 0) AS combat_logs_count,
+        COALESCE(player_profiles.rage_quits_count, 0) AS rage_quits_count,
+        COALESCE(player_profiles.spawn_kills_count, 0) AS spawn_kills_count,
+        player_profiles.last_seen_at AS last_seen,
+        ${mapping.valueExpression} AS metric_value
+       FROM player_profiles
+       INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+         AND player_profiles.player_name IS NOT NULL
+         AND ${mockNameFilterSql("player_profiles.player_name")}
+       ORDER BY ${mapping.orderExpression} DESC, COALESCE(player_profiles.kills, 0) DESC, datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(queryLimit, queryOffset)
+    .all<{
+      player_name: string | null;
+      player_id: string | null;
+      server_name: string | null;
+      server_slug: string | null;
+      kills: number | null;
+      deaths: number | null;
+      longest_kill: number | null;
+      highest_killstreak: number | null;
+      total_time_alive_seconds: number | null;
+      headshots: number | null;
+      favourite_weapon: string | null;
+      combat_logs_count: number | null;
+      rage_quits_count: number | null;
+      spawn_kills_count: number | null;
+      last_seen: string | null;
+      metric_value: number | string | null;
+    }>();
+
+  return (result.results ?? []).map((row, index) => {
+    const kills = numberOrZero(row.kills);
+    const deaths = numberOrZero(row.deaths);
+    const kd = calculateKd(kills, deaths);
+    const metricValue = normalizeMetricValue(metric, row.metric_value);
+    return {
+      rank: queryOffset + index + 1,
+      player_name: row.player_name ?? "Unknown Player",
+      player_id: null,
+      server_name: row.server_name ?? "Unnamed DZN Server",
+      server_slug: row.server_slug ?? null,
+      kills,
+      deaths,
+      kd: kd.value,
+      kd_label: kd.label,
+      longest_kill: roundOne(numberOrZero(row.longest_kill)),
+      last_seen: row.last_seen ?? null,
+      highest_killstreak: numberOrZero(row.highest_killstreak),
+      total_time_alive_seconds: numberOrZero(row.total_time_alive_seconds),
+      headshots: numberOrZero(row.headshots),
+      favourite_weapon: row.favourite_weapon ?? "Unknown",
+      combat_logs_count: numberOrZero(row.combat_logs_count),
+      rage_quits_count: numberOrZero(row.rage_quits_count),
+      spawn_kills_count: numberOrZero(row.spawn_kills_count),
+      metric,
+      metric_value: metricValue,
+      metric_label: formatMetricLabel(metric, metricValue),
+    } satisfies PublicTelemetryLeaderboardRow;
+  });
+}
+
+function normalizeMetricValue(metric: PublicLeaderboardMetric, value: number | string | null) {
+  if (metric === "favourite_weapon") return typeof value === "string" && value.trim() ? value.trim() : "Unknown";
+  if (metric === "kd_ratio") return roundTwo(numberOrZero(value));
+  if (metric === "longest_kill_distance") return roundOne(numberOrZero(value));
+  return numberOrZero(value);
+}
+
+function formatMetricLabel(metric: PublicLeaderboardMetric, value: number | string | null) {
+  if (metric === "favourite_weapon") return String(value ?? "Unknown");
+  if (metric === "kd_ratio") return numberOrZero(value).toFixed(2);
+  if (metric === "longest_kill_distance") return `${roundOne(numberOrZero(value)).toFixed(1)}m`;
+  if (metric === "total_survival_time_alive") return formatDuration(numberOrZero(value));
+  return String(numberOrZero(value));
+}
+
+function formatDuration(seconds: number) {
+  const safe = Math.max(0, Math.trunc(seconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function isPublicLeaderboardMetric(value: string): value is PublicLeaderboardMetric {
+  return Object.prototype.hasOwnProperty.call(PUBLIC_LEADERBOARD_METRICS, value);
+}
+
 function toKillHighlight(row: PublicLongestKillRow): PublicKillHighlight {
   return {
     player_name: row.player_name ?? "Unknown Player",
@@ -628,6 +887,8 @@ export function applyLeaderboardsAccess<T extends {
   personal_best_kills: PublicLongestKill[];
   longest_kills: PublicLongestKill[];
   build_leaderboard: PublicBuildLeaderboardRow[];
+  player_leaderboards?: Record<PublicLeaderboardMetric, PublicTelemetryLeaderboardRow[]>;
+  selected_metric_leaderboard?: PublicTelemetryLeaderboardRow[];
 }>(payload: T, viewerLoggedIn: boolean): T & {
   access_level: "full" | "preview";
   is_locked: boolean;
@@ -654,6 +915,8 @@ export function applyLeaderboardsAccess<T extends {
     personal_best_kills: [],
     longest_kills: [],
     build_leaderboard: [],
+    player_leaderboards: emptyTelemetryLeaderboards(),
+    selected_metric_leaderboard: [],
     access_level: "preview",
     is_locked: true,
     locked_reason: "Log in with Discord to unlock full leaderboards.",
@@ -686,6 +949,11 @@ export function applyServerLeaderboardAccess<T extends { players: PublicLeaderbo
 function emptyPublicLeaderboards() {
   return {
     ok: true,
+    full: false,
+    leaderboard_limit: 10,
+    page: 1,
+    page_size: 10,
+    selected_metric: "total_kills" as PublicLeaderboardMetric,
     top_servers: [],
     top_players: [],
     best_overall_kill: null,
@@ -693,6 +961,16 @@ function emptyPublicLeaderboards() {
     personal_best_kills: [],
     longest_kills: [],
     build_leaderboard: [],
+    player_leaderboards: emptyTelemetryLeaderboards(),
+    selected_metric_leaderboard: [],
     updated_at: new Date().toISOString(),
   };
+}
+
+function emptyTelemetryLeaderboards() {
+  const empty = {} as Record<PublicLeaderboardMetric, PublicTelemetryLeaderboardRow[]>;
+  for (const metric of Object.keys(PUBLIC_LEADERBOARD_METRICS) as PublicLeaderboardMetric[]) {
+    empty[metric] = [];
+  }
+  return empty;
 }

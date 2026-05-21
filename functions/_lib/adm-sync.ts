@@ -5661,10 +5661,23 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["source_line_number", "INTEGER"],
     ["source_sync_run_id", "TEXT"],
   ]);
-  await ensureMissingColumns(db, "player_profiles", [["source_service_id", "TEXT"]]);
+  await ensureMissingColumns(db, "player_profiles", [
+    ["source_service_id", "TEXT"],
+    ["highest_killstreak", "INTEGER DEFAULT 0"],
+    ["current_killstreak", "INTEGER DEFAULT 0"],
+    ["total_time_alive_seconds", "INTEGER DEFAULT 0"],
+    ["headshots", "INTEGER DEFAULT 0"],
+    ["favourite_weapon", "TEXT DEFAULT 'Unknown'"],
+    ["combat_logs_count", "INTEGER DEFAULT 0"],
+    ["rage_quits_count", "INTEGER DEFAULT 0"],
+    ["spawn_kills_count", "INTEGER DEFAULT 0"],
+  ]);
   await ensureMissingColumns(db, "server_stats", [["source_service_id", "TEXT"]]);
   await ensureMissingColumns(db, "sync_runs", [["source_service_id", "TEXT"]]);
   for (const statement of ADM_SYNC_SCOPE_INDEX_STATEMENTS) {
+    await db.prepare(statement).run();
+  }
+  for (const statement of PREMIUM_TELEMETRY_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();
   }
 }
@@ -6022,6 +6035,10 @@ async function persistParsedEvent(
         suicide: false,
         distance: parsed.distance,
       });
+      await evaluateLogTelemetrySequence(env, syncContext, parsed, {
+        killerProfileId,
+        victimProfileId,
+      });
       result.eventsCreated = 1;
       result.killEventsCreated = 1;
       result.killsCreated = 1;
@@ -6037,6 +6054,7 @@ async function persistParsedEvent(
     }
     const inserted = await insertBuildEvent(env, syncContext, lineNumber, parsed);
     if (inserted) {
+      await evaluateLogTelemetrySequence(env, syncContext, parsed, {});
       result.eventsCreated = 1;
       result.buildEventsCreated = 1;
     }
@@ -6054,6 +6072,10 @@ async function persistParsedEvent(
 
   result.eventsCreated = 1;
   result.playerEventsCreated = 1;
+
+  await evaluateLogTelemetrySequence(env, syncContext, parsed, {
+    playerProfileId,
+  });
 
   if (parsed.eventType === "player_connected") result.joinsCreated = 1;
   if (parsed.eventType === "player_disconnected") result.disconnectsCreated = 1;
@@ -6423,6 +6445,304 @@ async function updateProfilesForDeath(
       .bind(values.suicide ? 1 : 0, values.victimProfileId)
       .run();
   }
+}
+
+type TelemetryProfileRefs = {
+  playerProfileId?: string | null;
+  killerProfileId?: string | null;
+  victimProfileId?: string | null;
+};
+
+type ParserStateRow = {
+  id: string;
+  linked_server_id: string;
+  player_id: string;
+  player_name: string | null;
+  last_connected_at: string | null;
+  last_combat_activity_at: string | null;
+  last_died_at: string | null;
+  alive_session_started_at: string | null;
+};
+
+async function evaluateLogTelemetrySequence(
+  env: Env,
+  context: AdmSyncContext,
+  parsed: ParsedAdmEvent,
+  profileRefs: TelemetryProfileRefs,
+) {
+  const occurredAt = validIsoDate(parsed.occurredAt) ?? new Date().toISOString();
+  if (parsed.eventType === "player_connected" || parsed.eventType === "player_connecting") {
+    await commitParserState(env, context, parsed.playerId, parsed.playerName, {
+      last_connected_at: occurredAt,
+      alive_session_started_at: occurredAt,
+    });
+    return;
+  }
+
+  if (parsed.eventType === "player_hit" || parsed.eventType === "player_hit_explosion" || parsed.eventType === "player_hit_unknown_attacker") {
+    await commitParserState(env, context, parsed.playerId ?? parsed.victimId, parsed.playerName ?? parsed.victimName, {
+      last_combat_activity_at: occurredAt,
+    });
+    if (parsed.attackerName || parsed.attackerId) {
+      const attackerProfileId = parsed.attackerName
+        ? await upsertPlayerProfile(env, context, parsed.attackerName, parsed.attackerId, occurredAt)
+        : null;
+      await commitParserState(env, context, parsed.attackerId, parsed.attackerName, {
+        last_combat_activity_at: occurredAt,
+      });
+      if (attackerProfileId) {
+        await touchProfileTelemetry(env, attackerProfileId);
+      }
+    }
+    return;
+  }
+
+  if (isParsedBuildEvent(parsed)) {
+    await commitParserState(env, context, parsed.playerId, parsed.playerName, {
+      last_combat_activity_at: occurredAt,
+    });
+    return;
+  }
+
+  if (parsed.eventType === "player_killed" && parsed.isCreditedKill) {
+    const killerProfileId = profileRefs.killerProfileId ?? null;
+    const victimProfileId = profileRefs.victimProfileId ?? null;
+    if (killerProfileId) {
+      await incrementKillerTelemetry(env, context, killerProfileId, parsed, occurredAt);
+    }
+    if (victimProfileId) {
+      await resetVictimKillstreak(env, victimProfileId);
+      await closeAliveSession(env, context, parsed.victimId, parsed.victimName, victimProfileId, occurredAt);
+    }
+    const victimState = await getCachedParserState(env, context, parsed.victimId, parsed.victimName);
+    if (killerProfileId && isWithinSeconds(victimState?.last_connected_at, occurredAt, 120)) {
+      await incrementProfileCounter(env, killerProfileId, "spawn_kills_count", 1);
+    }
+    await commitParserState(env, context, parsed.killerId ?? parsed.playerId, parsed.killerName ?? parsed.playerName, {
+      last_combat_activity_at: occurredAt,
+    });
+    await commitParserState(env, context, parsed.victimId, parsed.victimName, {
+      last_combat_activity_at: occurredAt,
+      last_died_at: occurredAt,
+      alive_session_started_at: null,
+    });
+    return;
+  }
+
+  if (parsed.eventType === "player_suicide" || parsed.eventType === "player_killed_environment" || parsed.eventType === "player_died_stats") {
+    if (profileRefs.playerProfileId) {
+      await resetVictimKillstreak(env, profileRefs.playerProfileId);
+      await closeAliveSession(env, context, parsed.playerId ?? parsed.victimId, parsed.playerName ?? parsed.victimName, profileRefs.playerProfileId, occurredAt);
+    }
+    await commitParserState(env, context, parsed.playerId ?? parsed.victimId, parsed.playerName ?? parsed.victimName, {
+      last_died_at: occurredAt,
+      alive_session_started_at: null,
+    });
+    return;
+  }
+
+  if (parsed.eventType === "player_disconnected") {
+    const state = await getCachedParserState(env, context, parsed.playerId, parsed.playerName);
+    if (profileRefs.playerProfileId) {
+      if (isWithinSeconds(state?.last_combat_activity_at, occurredAt, 15)) {
+        await incrementProfileCounter(env, profileRefs.playerProfileId, "combat_logs_count", 1);
+      }
+      if (isWithinSeconds(state?.last_died_at, occurredAt, 60)) {
+        await incrementProfileCounter(env, profileRefs.playerProfileId, "rage_quits_count", 1);
+      }
+      await closeAliveSession(env, context, parsed.playerId, parsed.playerName, profileRefs.playerProfileId, occurredAt);
+    }
+    await commitParserState(env, context, parsed.playerId, parsed.playerName, {
+      alive_session_started_at: null,
+    });
+  }
+}
+
+async function incrementKillerTelemetry(env: Env, context: AdmSyncContext, profileId: string, parsed: ParsedAdmEvent, occurredAt: string) {
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `UPDATE player_profiles SET
+        current_killstreak = COALESCE(current_killstreak, 0) + 1,
+        highest_killstreak = MAX(COALESCE(highest_killstreak, 0), COALESCE(current_killstreak, 0) + 1),
+        longest_kill_distance = MAX(COALESCE(longest_kill_distance, 0), ?),
+        headshots = COALESCE(headshots, 0) + ?,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(numberOrZero(parsed.distance), isHeadshotLine(parsed.rawLine) ? 1 : 0, profileId)
+    .run();
+  if (parsed.weapon) {
+    await updatePlayerWeaponFrequency(env, context, profileId, parsed.weapon);
+  }
+  await commitParserState(env, context, parsed.killerId ?? parsed.playerId, parsed.killerName ?? parsed.playerName, {
+    last_combat_activity_at: occurredAt,
+  });
+}
+
+async function resetVictimKillstreak(env: Env, profileId: string) {
+  await requireDb(env)
+    .prepare("UPDATE player_profiles SET current_killstreak = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(profileId)
+    .run();
+}
+
+async function incrementProfileCounter(env: Env, profileId: string, column: TelemetryCounterColumn, amount: number) {
+  await requireDb(env)
+    .prepare(`UPDATE player_profiles SET ${column} = COALESCE(${column}, 0) + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(amount, profileId)
+    .run();
+}
+
+async function updatePlayerWeaponFrequency(env: Env, context: AdmSyncContext, profileId: string, weapon: string) {
+  const normalizedWeapon = weapon.trim().slice(0, 100) || "Unknown";
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `INSERT INTO player_weapon_stats (
+        player_profile_id, linked_server_id, weapon, kills, created_at, updated_at
+      ) VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(player_profile_id, weapon) DO UPDATE SET
+        kills = COALESCE(kills, 0) + 1,
+        updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(profileId, context.linkedServerId, normalizedWeapon)
+    .run();
+  const favourite = await db
+    .prepare(
+      `SELECT weapon
+       FROM player_weapon_stats
+       WHERE player_profile_id = ?
+       ORDER BY kills DESC, updated_at DESC, weapon ASC
+       LIMIT 1`,
+    )
+    .bind(profileId)
+    .first<{ weapon: string | null }>();
+  await db
+    .prepare("UPDATE player_profiles SET favourite_weapon = COALESCE(?, favourite_weapon, 'Unknown'), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(favourite?.weapon ?? normalizedWeapon, profileId)
+    .run();
+}
+
+async function getCachedParserState(env: Env, context: AdmSyncContext, playerId: string | null | undefined, playerName: string | null | undefined) {
+  const stateId = parserStateId(context, playerId, playerName);
+  if (!stateId) return null;
+  return requireDb(env)
+    .prepare("SELECT * FROM player_parser_state WHERE id = ? LIMIT 1")
+    .bind(stateId)
+    .first<ParserStateRow>();
+}
+
+async function commitParserState(
+  env: Env,
+  context: AdmSyncContext,
+  playerId: string | null | undefined,
+  playerName: string | null | undefined,
+  fields: Partial<Pick<ParserStateRow, "last_connected_at" | "last_combat_activity_at" | "last_died_at" | "alive_session_started_at">>,
+) {
+  const stateId = parserStateId(context, playerId, playerName);
+  if (!stateId) return;
+  const existing = await getCachedParserState(env, context, playerId, playerName);
+  const now = new Date().toISOString();
+  const cleanPlayerId = parserPlayerKey(playerId, playerName) ?? stateId;
+  const cleanPlayerName = playerName?.trim() || existing?.player_name || null;
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO player_parser_state (
+        id, linked_server_id, player_id, player_name,
+        last_connected_at, last_combat_activity_at, last_died_at, alive_session_started_at,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        player_name = excluded.player_name,
+        last_connected_at = excluded.last_connected_at,
+        last_combat_activity_at = excluded.last_combat_activity_at,
+        last_died_at = excluded.last_died_at,
+        alive_session_started_at = excluded.alive_session_started_at,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(
+      stateId,
+      context.linkedServerId,
+      cleanPlayerId,
+      cleanPlayerName,
+      hasOwn(fields, "last_connected_at") ? fields.last_connected_at ?? null : existing?.last_connected_at ?? null,
+      hasOwn(fields, "last_combat_activity_at") ? fields.last_combat_activity_at ?? null : existing?.last_combat_activity_at ?? null,
+      hasOwn(fields, "last_died_at") ? fields.last_died_at ?? null : existing?.last_died_at ?? null,
+      hasOwn(fields, "alive_session_started_at") ? fields.alive_session_started_at ?? null : existing?.alive_session_started_at ?? null,
+      now,
+    )
+    .run();
+}
+
+async function closeAliveSession(
+  env: Env,
+  context: AdmSyncContext,
+  playerId: string | null | undefined,
+  playerName: string | null | undefined,
+  profileId: string,
+  eventAt: string,
+) {
+  const state = await getCachedParserState(env, context, playerId, playerName);
+  const aliveFrom = state?.alive_session_started_at ?? state?.last_connected_at ?? null;
+  const aliveSeconds = boundedSecondsBetween(aliveFrom, eventAt, 7 * 24 * 60 * 60);
+  if (aliveSeconds > 0) {
+    await incrementProfileCounter(env, profileId, "total_time_alive_seconds", aliveSeconds);
+  }
+}
+
+async function touchProfileTelemetry(env: Env, profileId: string) {
+  await requireDb(env)
+    .prepare("UPDATE player_profiles SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(profileId)
+    .run();
+}
+
+type TelemetryCounterColumn =
+  | "total_time_alive_seconds"
+  | "combat_logs_count"
+  | "rage_quits_count"
+  | "spawn_kills_count";
+
+function parserStateId(context: AdmSyncContext, playerId: string | null | undefined, playerName: string | null | undefined) {
+  const playerKey = parserPlayerKey(playerId, playerName);
+  return playerKey ? `${context.linkedServerId}:${playerKey}` : null;
+}
+
+function parserPlayerKey(playerId: string | null | undefined, playerName: string | null | undefined) {
+  const id = playerId?.trim();
+  if (id) return id;
+  const name = playerName?.trim().toLowerCase();
+  return name || null;
+}
+
+function validIsoDate(value: string | null | undefined) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+function isWithinSeconds(start: string | null | undefined, end: string, maxSeconds: number) {
+  const seconds = boundedSecondsBetween(start, end, maxSeconds);
+  return seconds >= 0 && seconds <= maxSeconds;
+}
+
+function boundedSecondsBetween(start: string | null | undefined, end: string, maxSeconds: number) {
+  if (!start) return -1;
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return -1;
+  const seconds = Math.floor((endMs - startMs) / 1000);
+  if (seconds < 0 || seconds > maxSeconds) return -1;
+  return seconds;
+}
+
+function isHeadshotLine(rawLine: string) {
+  return /\bhead\s*shot\b|\bheadshot\b|\bBrain\b|\bHead\b/i.test(rawLine);
+}
+
+function hasOwn<T extends object>(object: T, key: keyof T) {
+  return Object.prototype.hasOwnProperty.call(object, key);
 }
 
 async function upsertServerStats(
@@ -7327,6 +7647,14 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     deaths INTEGER DEFAULT 0,
     suicides INTEGER DEFAULT 0,
     longest_kill_distance REAL DEFAULT 0,
+    highest_killstreak INTEGER DEFAULT 0,
+    current_killstreak INTEGER DEFAULT 0,
+    total_time_alive_seconds INTEGER DEFAULT 0,
+    headshots INTEGER DEFAULT 0,
+    favourite_weapon TEXT DEFAULT 'Unknown',
+    combat_logs_count INTEGER DEFAULT 0,
+    rage_quits_count INTEGER DEFAULT 0,
+    spawn_kills_count INTEGER DEFAULT 0,
     last_seen_at TEXT,
     first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -7455,4 +7783,39 @@ const ADM_SYNC_SCOPE_INDEX_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_player_events_service_file_line
    ON player_events(source_service_id, source_adm_file, source_line_number)`,
   `CREATE INDEX IF NOT EXISTS idx_sync_runs_source_service_id ON sync_runs(source_service_id)`,
+];
+
+const PREMIUM_TELEMETRY_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS player_parser_state (
+    id TEXT PRIMARY KEY,
+    linked_server_id TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    player_name TEXT,
+    last_connected_at TEXT,
+    last_combat_activity_at TEXT,
+    last_died_at TEXT,
+    alive_session_started_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(linked_server_id, player_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS player_weapon_stats (
+    player_profile_id TEXT NOT NULL,
+    linked_server_id TEXT NOT NULL,
+    weapon TEXT NOT NULL,
+    kills INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(player_profile_id, weapon)
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_player_profiles_highest_streak ON player_profiles(highest_killstreak DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_player_profiles_longest_kill ON player_profiles(longest_kill_distance DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_player_profiles_time_alive ON player_profiles(total_time_alive_seconds DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_player_profiles_headshots ON player_profiles(headshots DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_player_profiles_combat_logs ON player_profiles(combat_logs_count DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_player_profiles_rage_quits ON player_profiles(rage_quits_count DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_player_profiles_spawn_kills ON player_profiles(spawn_kills_count DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_player_parser_state_server_player ON player_parser_state(linked_server_id, player_id)",
+  "CREATE INDEX IF NOT EXISTS idx_player_parser_state_combat ON player_parser_state(last_combat_activity_at)",
+  "CREATE INDEX IF NOT EXISTS idx_player_weapon_stats_server_weapon ON player_weapon_stats(linked_server_id, weapon, kills DESC)",
 ];

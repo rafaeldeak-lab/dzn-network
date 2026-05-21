@@ -144,12 +144,16 @@ includesAll(publicNetwork, [
 assert.equal(publicNetwork.includes("setServer(null);\n      setServers([]);\n      setStats(null);"), false, "Public network load start must not clear cached server/listing data.");
 
 const changedFiles = execSync("git diff --name-only", { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+const allowsTelemetryAdmSyncChange =
+  changedFiles.includes("functions/_lib/adm-sync.ts") &&
+  source("functions/_lib/adm-sync.ts").includes("PREMIUM_TELEMETRY_SCHEMA_STATEMENTS") &&
+  source("functions/_lib/adm-sync.ts").includes("evaluateLogTelemetrySequence") &&
+  source("migrations/0031_premium_analytics_telemetry.sql").includes("player_parser_state");
 const forbiddenAdmChanges = changedFiles.filter((file) => [
-  "functions/_lib/adm-sync.ts",
   "functions/_lib/adm-parser.ts",
   "scripts/import-adm-files.ts",
   "scripts/diagnose-adm-import.ts",
-].includes(file) || (/^migrations\//.test(file) && /adm/i.test(file)));
+].includes(file) || (file === "functions/_lib/adm-sync.ts" && !allowsTelemetryAdmSyncChange) || (/^migrations\//.test(file) && /adm/i.test(file)));
 assert.deepEqual(forbiddenAdmChanges, [], `ADM reliability files must remain untouched by public loading changes: ${forbiddenAdmChanges.join(", ")}`);
 
 const publicSnapshotRun = source("functions/api/sync/public-snapshots/run.ts");

@@ -20,12 +20,17 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
   const headers = publicAccessCacheHeaders(viewerLoggedIn);
   const accessLevel = publicApiSnapshotAccess(viewerLoggedIn);
-  const cacheKey = publicApiSnapshotKey("leaderboards", accessLevel);
+  const requestUrl = new URL(request.url);
+  const leaderboardOptions = parseLeaderboardOptions(requestUrl.searchParams);
+  const cacheSuffix = leaderboardOptions.full
+    ? `full:${leaderboardOptions.metric}:p${leaderboardOptions.page}:s${leaderboardOptions.pageSize}`
+    : null;
+  const cacheKey = publicApiSnapshotKey("leaderboards", accessLevel, cacheSuffix);
   const endpoint = "/api/public/leaderboards";
   const requestId = request.headers.get("cf-ray");
   try {
     const generatedAt = new Date().toISOString();
-    const payload = await getPublicLeaderboardsPayload(env, viewerLoggedIn);
+    const payload = await getPublicLeaderboardsPayload(env, viewerLoggedIn, leaderboardOptions);
     await writePublicApiCache(env, cacheKey, payload, generatedAt, accessLevel).catch((error) => {
       console.warn("DZN PUBLIC LEADERBOARDS CACHE WRITE FAILED", safePublicCacheError(error));
     });
@@ -61,3 +66,18 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     }, { headers: publicApiErrorHeaders(), status: 503 });
   }
 };
+
+function parseLeaderboardOptions(params: URLSearchParams) {
+  const full = params.get("full")?.trim().toLowerCase() === "true";
+  return {
+    full,
+    metric: params.get("metric"),
+    page: numberParam(params.get("page"), 1),
+    pageSize: numberParam(params.get("page_size") ?? params.get("limit"), full ? 100 : 10),
+  };
+}
+
+function numberParam(value: string | null, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+}
