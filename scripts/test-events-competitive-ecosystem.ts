@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
-import { getEventsListPayload } from "../functions/_lib/events";
+import { getEventsListPayload, resolveEventStatusFilter } from "../functions/_lib/events";
 import { assertSameServerCategory, categoryMismatchPayload, normalizeServerCategory } from "../functions/_lib/server-categories";
 import type { Env } from "../functions/_lib/types";
 
@@ -31,6 +31,9 @@ assert.deepEqual(categoryMismatchPayload(), {
   error: "CATEGORY_MISMATCH",
   message: "Only servers in the same category can compete in this event.",
 });
+assert.deepEqual(resolveEventStatusFilter("upcoming"), ["upcoming", "registration_open", "standby"]);
+assert.deepEqual(resolveEventStatusFilter("active"), ["live"]);
+assert.deepEqual(resolveEventStatusFilter("completed"), ["ended"]);
 
 const migration = source("migrations/0032_events_competitive_ecosystem.sql");
 includesAll(migration, [
@@ -58,6 +61,7 @@ includesAll(eventsLib, [
   "FULL_EVENT_PLANS",
   "options.full === true && entitlement",
   "Math.min(sanitizeLimit(options.limit, 10, 24), 10)",
+  "resolveEventStatusFilter",
   "assertSameServerCategory(primary, opponent)",
 ]);
 
@@ -103,9 +107,13 @@ const detailUi = source("components/events/events-platform.tsx");
 includesAll(detailUi, [
   "SAME CATEGORY ONLY",
   "Cross-server matching is an exclusive Pro/Partner platform feature.",
+  "eventMatchesStatusFilter",
+  "Demo data shown until live events are created",
   "Deathmatch can only fight Deathmatch",
   "ServerCategoryBadge",
 ]);
+assert.equal(source("components/events/EventTabs.tsx").includes("/events/tournaments?status=active"), true, "Active tab must use the active status alias.");
+assert.equal(source("components/events/ChallengeBattleCard.tsx").includes("Cross-server matching is an exclusive Pro/Partner platform feature."), false, "Challenge cards should not repeat the full premium lock sentence.");
 assert.equal(source("components/events/PremiumLockedCard.tsx").includes("PRO / PARTNER FEATURE"), true);
 assert.equal(source("components/events/LeaderboardTeaser.tsx").includes("TOP 10 MASTER TEASER"), true);
 
@@ -120,6 +128,10 @@ async function main() {
   const teaserPayload = await getEventsListPayload({} as Env, null, { full: true, limit: 50 });
   assert.equal(teaserPayload.teaserMode, true, "Unauthenticated full=true must stay in teaser mode.");
   assert.equal(teaserPayload.events.length <= 10, true, "Teaser events must be capped to top 10.");
+  const upcomingPayload = await getEventsListPayload({} as Env, null, { status: "upcoming", limit: 50 });
+  assert.equal(upcomingPayload.events.every((event) => ["upcoming", "registration_open", "standby"].includes(event.status)), true, "Upcoming filter must hide live events.");
+  const activePayload = await getEventsListPayload({} as Env, null, { status: "active", limit: 50 });
+  assert.equal(activePayload.events.every((event) => event.status === "live"), true, "Active filter must only show live events.");
 
   console.log("Events competitive ecosystem tests passed.");
 }

@@ -11,7 +11,15 @@ export function ChallengeBattleCard({ match, locked = true }: { match: EventMatc
           <Radio className="h-3.5 w-3.5 animate-pulse" />
           Connected Node
         </span>
-        <ServerCategoryBadge category={match.category} label={match.category_label} compact />
+        <div className="flex items-center gap-2">
+          {locked ? (
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/28 bg-violet-500/12 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">
+              <Lock className="h-3.5 w-3.5" />
+              Pro / Partner
+            </span>
+          ) : null}
+          <ServerCategoryBadge category={match.category} label={match.category_label} compact />
+        </div>
       </div>
       <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
         <div>
@@ -30,12 +38,6 @@ export function ChallengeBattleCard({ match, locked = true }: { match: EventMatc
         <span className="rounded-md border border-white/8 bg-white/[0.03] p-2">Roster verified</span>
         <span className="rounded-md border border-white/8 bg-white/[0.03] p-2">Metric tally live</span>
       </div>
-      {locked ? (
-        <div className="mt-4 rounded-md border border-violet-300/25 bg-violet-500/10 p-3 text-xs text-violet-100">
-          <Lock className="mr-2 inline h-3.5 w-3.5" />
-          Cross-server matching is an exclusive Pro/Partner platform feature.
-        </div>
-      ) : null}
     </article>
   );
 }

@@ -183,12 +183,15 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
   const db = requireDb(env);
   const conditions = ["COALESCE(visibility, 'public') != 'private'"];
   const bindings: unknown[] = [];
-  const status = normalizeEventStatus(options.status);
+  const statusFilter = resolveEventStatusFilter(options.status);
   const category = normalizeServerCategory(options.category);
   const type = normalizeEventType(options.type);
-  if (status) {
+  if (statusFilter.length === 1) {
     conditions.push("status = ?");
-    bindings.push(status);
+    bindings.push(statusFilter[0]);
+  } else if (statusFilter.length > 1) {
+    conditions.push(`status IN (${statusFilter.map(() => "?").join(", ")})`);
+    bindings.push(...statusFilter);
   }
   if (category) {
     conditions.push("category = ?");
@@ -219,7 +222,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     .bind(...bindings, limit)
     .all<EventRow>();
   const events = (result.results ?? []).map(toEventSummary);
-  const visibleEvents = events.length ? events : demoEvents().slice(0, limit);
+  const visibleEvents = events.length ? events : filterDemoEvents(options, limit);
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -858,6 +861,16 @@ export function normalizeEventStatus(value: unknown): CompetitiveEventStatus | n
   return (EVENT_STATUSES as readonly string[]).includes(text) ? text as CompetitiveEventStatus : null;
 }
 
+export function resolveEventStatusFilter(value: unknown): CompetitiveEventStatus[] {
+  const text = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!text || text === "all") return [];
+  if (text === "active") return ["live"];
+  if (text === "completed") return ["ended"];
+  if (text === "upcoming") return ["upcoming", "registration_open", "standby"];
+  const normalized = normalizeEventStatus(text);
+  return normalized ? [normalized] : [];
+}
+
 export function normalizeEventType(value: unknown): CompetitiveEventType | null {
   const text = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (text === "ctf") return "capture_the_flag";
@@ -915,7 +928,7 @@ async function ensureColumns(db: D1Database, tableName: string, columns: Record<
 function demoEventsListPayload(options: EventListOptions, entitlement: boolean) {
   const full = options.full === true && entitlement;
   const limit = full ? sanitizeLimit(options.limit, 100, 100) : 10;
-  const events = demoEvents().slice(0, limit);
+  const events = filterDemoEvents(options, limit);
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -928,6 +941,20 @@ function demoEventsListPayload(options: EventListOptions, entitlement: boolean) 
     summary: summarizeEvents(events),
     events,
   };
+}
+
+function filterDemoEvents(options: EventListOptions, limit: number) {
+  const statusFilter = resolveEventStatusFilter(options.status);
+  const category = normalizeServerCategory(options.category);
+  const type = normalizeEventType(options.type);
+  return demoEvents()
+    .filter((event) => {
+      const statusOk = statusFilter.length === 0 || statusFilter.includes(event.status);
+      const categoryOk = !category || event.category === category;
+      const typeOk = !type || event.event_type === type;
+      return statusOk && categoryOk && typeOk;
+    })
+    .slice(0, limit);
 }
 
 function demoEventDetailPayload(slug: string, entitlement: boolean) {

@@ -28,6 +28,6 @@ export function shortTimeUntil(value: string | null | undefined) {
 
 export function eventImageStyle(url: string | null | undefined) {
   return {
-    backgroundImage: `linear-gradient(180deg, rgba(2,6,23,0.05), rgba(2,6,23,0.9)), url(${url || "/media/dzn-cinematic-survivor.png"})`,
+    backgroundImage: `linear-gradient(180deg, rgba(2,6,23,0.08), rgba(2,6,23,0.42) 46%, rgba(2,6,23,0.94)), url(${url || "/media/dzn-cinematic-survivor.png"})`,
   };
 }

@@ -5,8 +5,8 @@ import { cn } from "./event-format";
 const tabs = [
   { label: "CTF Tournaments", href: "/events" },
   { label: "Upcoming", href: "/events/tournaments?status=upcoming" },
-  { label: "Active", href: "/events/tournaments?status=live" },
-  { label: "Completed", href: "/events/tournaments?status=ended" },
+  { label: "Active", href: "/events/tournaments?status=active" },
+  { label: "Completed", href: "/events/tournaments?status=completed" },
   { label: "Challenges", href: "/events/challenges" },
 ];
 

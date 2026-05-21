@@ -2,7 +2,7 @@ import { RotateCcw } from "lucide-react";
 
 import { categoryLabel } from "./event-data";
 
-const statusOptions = ["all", "live", "registration_open", "upcoming", "ended"];
+const statusOptions = ["all", "upcoming", "active", "completed", "registration_open", "standby", "live", "ended"];
 const typeOptions = ["all", "capture_the_flag", "community_cup", "bot_tournament", "faction_wars", "seasonal_wars", "kill_race", "survival_challenge"];
 const categoryOptions = ["all", "deathmatch", "pvp", "pve", "pvp_pve", "hardcore", "roleplay", "faction_wars", "vanilla", "modded"];
 

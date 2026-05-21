@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, usePathname, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BarChart3,
@@ -46,6 +46,26 @@ import { TournamentCard } from "./TournamentCard";
 import { TournamentTable } from "./TournamentTable";
 
 type LoadState = "loading" | "loaded" | "stale";
+type TournamentStatusFilter = "all" | "upcoming" | "active" | "completed" | string;
+
+function eventMatchesStatusFilter(eventStatus: string, status: TournamentStatusFilter) {
+  const normalized = String(status || "all").toLowerCase();
+  const event = String(eventStatus || "").toLowerCase();
+  if (normalized === "all") return true;
+  if (normalized === "upcoming") return ["upcoming", "registration_open", "standby"].includes(event);
+  if (normalized === "active") return ["live", "active"].includes(event);
+  if (normalized === "completed") return ["ended", "completed"].includes(event);
+  return event === normalized;
+}
+
+function filterEventsForView(events: EventsPayload["events"], filters: { status?: string; type?: string; category?: string }) {
+  return events.filter((event) => {
+    const statusOk = eventMatchesStatusFilter(event.status, filters.status ?? "all");
+    const typeOk = !filters.type || filters.type === "all" || event.event_type === filters.type;
+    const categoryOk = !filters.category || filters.category === "all" || event.category === filters.category;
+    return statusOk && typeOk && categoryOk;
+  });
+}
 
 export function EventsHubPage() {
   const fallback = useMemo(() => fallbackEventsPayload(), []);
@@ -60,7 +80,7 @@ export function EventsHubPage() {
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
-          <SectionHeader title="Active Tournaments" href="/events/tournaments?status=live" />
+          <SectionHeader title="Active Tournaments" href="/events/tournaments?status=active" />
           <div className="grid gap-4 lg:grid-cols-3">
             {(active.length ? active : data.events.slice(0, 3)).slice(0, 3).map((event) => <TournamentCard key={event.id} event={event} />)}
           </div>
@@ -88,9 +108,17 @@ export function EventsHubPage() {
 
 export function EventsTournamentsPage() {
   const searchParams = useSearchParams();
-  const [status, setStatus] = useState(searchParams.get("status") ?? "all");
+  const router = useRouter();
+  const status = searchParams.get("status") ?? "all";
   const [type, setType] = useState("all");
   const [category, setCategory] = useState("all");
+  const handleStatus = (nextStatus: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextStatus === "all") params.delete("status");
+    else params.set("status", nextStatus);
+    const queryString = params.toString();
+    router.push(queryString ? `/events/tournaments?${queryString}` : "/events/tournaments");
+  };
   const query = useMemo(() => {
     const params = new URLSearchParams({ limit: "100", full: "true" });
     if (status !== "all") params.set("status", status);
@@ -100,28 +128,29 @@ export function EventsTournamentsPage() {
   }, [category, status, type]);
   const fallback = useMemo(() => fallbackEventsPayload(), []);
   const { data, loadState } = useEventsPayload(query, fallback);
+  const visibleEvents = useMemo(() => filterEventsForView(data.events, { status, type, category }), [category, data.events, status, type]);
   return (
     <EventsShell>
       <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<EventActionLink href="/events">Events Hub</EventActionLink>} />
-      <EventTabs active={status === "live" ? "Active" : status === "ended" ? "Completed" : status === "upcoming" ? "Upcoming" : "CTF Tournaments"} />
+      <EventTabs active={status === "active" || status === "live" ? "Active" : status === "completed" || status === "ended" ? "Completed" : status === "upcoming" ? "Upcoming" : "CTF Tournaments"} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
         <main className="space-y-4">
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3">
             <Search className="h-4 w-4 text-zinc-500" />
-            <span className="text-xs font-black uppercase text-zinc-400">Showing {data.events.length} category-safe events</span>
+            <span className="text-xs font-black uppercase text-zinc-400">Showing {visibleEvents.length} category-safe events</span>
           </div>
-          <TournamentTable events={data.events} />
+          <TournamentTable events={visibleEvents} />
         </main>
         <EventFilterPanel
           status={status}
           type={type}
           category={category}
-          onStatus={setStatus}
+          onStatus={handleStatus}
           onType={setType}
           onCategory={setCategory}
           onReset={() => {
-            setStatus("all");
+            handleStatus("all");
             setType("all");
             setCategory("all");
           }}
@@ -214,7 +243,7 @@ export function EventsChallengesPage() {
   const { data, loadState } = useEventsPayload("/api/events?type=kill_race&limit=24", fallback);
   return (
     <EventsShell>
-      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<EventActionLink href="/events/tournaments">All Events</EventActionLink>} />
+      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<EventActionLink href="/events">All Events</EventActionLink>} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
@@ -274,7 +303,7 @@ function EventsShell({ children }: { children: ReactNode }) {
           </Link>
           <nav className="mt-6 space-y-1">
             {nav.map((item) => {
-              const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+              const active = isSidebarItemActive(pathname, item.href);
               const Icon = item.icon;
               return (
                 <Link key={item.href} href={item.href} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase transition", active ? "bg-violet-500/24 text-white shadow-[0_0_18px_rgba(124,58,237,0.2)]" : "text-zinc-500 hover:bg-white/[0.04] hover:text-white")}>
@@ -292,11 +321,21 @@ function EventsShell({ children }: { children: ReactNode }) {
               <Link href="/events" className="rounded-lg border border-violet-300/30 bg-violet-500/16 px-3 py-2 text-xs font-black uppercase text-white">Events</Link>
             </div>
           </header>
-          <div className="mx-auto flex max-w-[1460px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
+          <div className="flex w-full max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
         </div>
       </div>
     </main>
   );
+}
+
+function isSidebarItemActive(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
+  if (href === "/events/challenges") return pathname.startsWith("/events/challenges");
+  if (href === "/events/tournaments") return pathname.startsWith("/events/tournaments");
+  if (href === "/events") {
+    return pathname === "/events" || (pathname.startsWith("/events/") && !pathname.startsWith("/events/tournaments") && !pathname.startsWith("/events/challenges"));
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 function useEventsPayload(endpoint: string, fallback: EventsPayload) {
@@ -465,9 +504,16 @@ function EventDetailTabs({ slug, active }: { slug: string; active: "Overview" | 
 
 function StaleNotice({ state, source }: { state: LoadState; source: string }) {
   if (state === "loaded" && source !== "display_fallback") return null;
+  const label = state === "loading"
+    ? "Syncing live data"
+    : source === "display_fallback"
+      ? "Demo data shown until live events are created"
+      : "Showing last-known event data";
   return (
-    <div className="rounded-lg border border-amber-300/22 bg-amber-500/8 px-4 py-3 text-xs font-semibold text-amber-100">
-      {state === "loading" ? "Loading live event data. Showing stable DZN event shell." : "Live event refresh recovering. Showing last known or display fallback data."}
+    <div className="flex">
+      <span className="inline-flex items-center rounded-full border border-amber-300/22 bg-amber-500/8 px-3 py-1.5 text-[10px] font-black uppercase tracking-normal text-amber-100">
+        {label}
+      </span>
     </div>
   );
 }
