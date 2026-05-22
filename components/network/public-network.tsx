@@ -288,7 +288,7 @@ export function PublicNetwork() {
           console.log("DZN PUBLIC SERVERS FRESH DATA LOADED");
           console.log("DZN SERVER LIST RATINGS READY");
         }
-        setError(data.stale ? "Live refresh recovering. Showing last known data." : "");
+        setError("");
       } catch (loadError) {
         if (controller.signal.aborted) return;
         const fallback = loadPublicNetworkCache(requestedSlug);
@@ -296,11 +296,11 @@ export function PublicNetwork() {
           setServer(requestedSlug ? fallback.server ?? null : null);
           setServers(requestedSlug ? [] : fallback.servers ?? []);
           setStats(requestedSlug ? null : fallback.stats ?? null);
-          setError("Live refresh recovering. Showing last known data.");
-          setLoadState("refresh_failed");
+          setError("");
+          setLoadState("loaded");
         } else if (hasVisibleData) {
-          setError("Live data refresh failed. Showing last known public data.");
-          setLoadState("refresh_failed");
+          setError("");
+          setLoadState("loaded");
         } else {
           setError(loadError instanceof Error ? loadError.message : "Unable to load public servers right now.");
           setLoadState("error_initial");

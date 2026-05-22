@@ -452,7 +452,7 @@ function useHomeStats() {
         setLastUpdated(normalized.generated_at ? new Date(normalized.generated_at) : new Date());
         if (hasMeaningfulHomeStats(normalized)) saveLastGoodHomeStats(normalized);
         setLoadState("loaded");
-        setError(normalized.stale ? "Live refresh recovering. Showing last known data." : "");
+        setError("");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         if (active) {
@@ -460,13 +460,13 @@ function useHomeStats() {
           if (cached) {
             setData(cached);
             setLastUpdated((current) => (cached.generated_at ? new Date(cached.generated_at) : current));
-            setError("Live refresh recovering. Showing last known data.");
-            setLoadState("refresh_failed");
+            setError("");
+            setLoadState("loaded");
           } else if (visibleHomeStatsRef.current) {
-            setError("Network stats refresh failed. Showing last known values.");
-            setLoadState("refresh_failed");
+            setError("");
+            setLoadState("loaded");
           } else {
-            setError("Network stats syncing. Latest server data is being refreshed.");
+            setError("Network stats could not be loaded right now.");
             setLoadState("error_initial");
           }
         }

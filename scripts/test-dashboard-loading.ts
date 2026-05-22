@@ -103,14 +103,15 @@ includesAll(landing, [
   "latestRequestId",
   "fetchJsonWithRetry<HomeStatsResponse>",
   "HOME_STATS_LAST_GOOD_MAX_AGE_MS",
-  "Network stats refresh failed. Showing last known values.",
+  "Network stats could not be loaded right now.",
   "payload.data && !payload.totals ? payload.data : payload",
-  "Live refresh recovering. Showing last known data.",
   "dataPending ? \"Loading\"",
   "Loading live network data...",
 ]);
 assert.equal(landing.includes("dataPending ? \"Refreshing\""), false, "Homepage must not render Refreshing as every stat-card value.");
 assert.equal(landing.includes("setData(emptyHomeStats"), false, "Homepage refresh failures must not reset stats to empty defaults.");
+assert.equal(landing.includes("Live refresh recovering. Showing last known data."), false, "Homepage must not show stale-data warning when valid data is visible.");
+assert.equal(landing.includes("Network stats refresh failed. Showing last known values."), false, "Homepage refresh failures with visible data should stay silent.");
 
 const leaderboards = source("app/leaderboards/page.tsx");
 includesAll(leaderboards, [
@@ -123,9 +124,10 @@ includesAll(leaderboards, [
   "LEADERBOARD_LAST_GOOD_MAX_AGE_MS",
   "error_initial",
   "data.data && !data.top_servers ? data.data : data",
-  "Live refresh recovering. Showing last known data.",
   "Leaderboard data could not be loaded right now.",
 ]);
+assert.equal(leaderboards.includes("Live refresh recovering. Showing last known data."), false, "Leaderboards must not show stale-data warning when valid data is visible.");
+assert.equal(leaderboards.includes("Live data refresh failed. Showing last known leaderboard."), false, "Leaderboards refresh failures with visible data should stay silent.");
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, [
@@ -139,9 +141,10 @@ includesAll(publicNetwork, [
   "Unable to load public servers right now.",
   "Server list unavailable",
   "payload = data.data && !data.servers && !data.server ? data.data : data",
-  "Live refresh recovering. Showing last known data.",
 ]);
 assert.equal(publicNetwork.includes("setServer(null);\n      setServers([]);\n      setStats(null);"), false, "Public network load start must not clear cached server/listing data.");
+assert.equal(publicNetwork.includes("Live refresh recovering. Showing last known data."), false, "Public network must not show stale-data warning when valid data is visible.");
+assert.equal(publicNetwork.includes("Live data refresh failed. Showing last known public data."), false, "Public network refresh failures with visible data should stay silent.");
 
 const changedFiles = execSync("git diff --name-only", { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
 const allowsTelemetryAdmSyncChange =

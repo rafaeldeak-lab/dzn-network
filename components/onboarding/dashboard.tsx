@@ -38,6 +38,7 @@ import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscovery
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
+const LAST_KNOWN_STAT_LABEL_THRESHOLD_MS = 60 * 60 * 1000;
 let hasLoggedMultiServerReady = false;
 
 type DiscordChannelCache = {
@@ -834,7 +835,6 @@ function ServerDashboard({
     currentPlayers,
     maxPlayers,
     server.player_count_last_checked_at,
-    server.player_count_status,
   );
   const playerCountFreshnessDetail = formatPlayerCountFreshnessDetail(
     currentPlayers,
@@ -861,7 +861,7 @@ function ServerDashboard({
     score: server.score_label
       ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending"),
   };
-  const dashboardStatDetail = preferLastKnownStats ? "Last known" : "Total";
+  const dashboardStatDetail = preferLastKnownStats && isOlderThanMs(cachedDashboardStats?.generated_at, LAST_KNOWN_STAT_LABEL_THRESHOLD_MS) ? "Last known" : "Total";
   const publicCacheFlags = effectivePublicCacheDebug?.problem_flags ?? [];
   const publicCacheStale = publicCacheFlags.some((flag) => [
     "public_cache_missing",
@@ -1236,7 +1236,7 @@ function ServerDashboard({
         setRefreshingServerInfo(true);
         setActionMessage("");
         try {
-          const beforePlayers = formatDashboardPlayerSlots(server.current_players, server.max_players ?? server.player_slots, server.player_count_last_checked_at, server.player_count_status);
+          const beforePlayers = formatDashboardPlayerSlots(server.current_players, server.max_players ?? server.player_slots, server.player_count_last_checked_at);
           action.setStep(1, `Current player count before refresh: ${beforePlayers}.`);
           const result = await refreshServerMetadata(server.id);
           const patch = metadataPatchFromRefreshResult(result);
@@ -1250,7 +1250,7 @@ function ServerDashboard({
           action.setStep(2, "Metadata updated from Nitrado.", 70);
           action.setStats({
             "Players before": beforePlayers,
-            "Players after": formatDashboardPlayerSlots(patch.current_players, patch.max_players ?? server.max_players ?? server.player_slots, patch.player_count_last_checked_at, patch.player_count_status),
+            "Players after": formatDashboardPlayerSlots(patch.current_players, patch.max_players ?? server.max_players ?? server.player_slots, patch.player_count_last_checked_at),
           });
           await onRefresh();
           const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
@@ -7225,14 +7225,19 @@ function shouldRefreshServerInfo(value: string | null | undefined) {
   return !Number.isFinite(checkedAt) || Date.now() - checkedAt > 2 * 60 * 1000;
 }
 
+function isOlderThanMs(value: string | null | undefined, thresholdMs: number) {
+  if (!value) return false;
+  const checkedAt = Date.parse(value);
+  return Number.isFinite(checkedAt) && Date.now() - checkedAt > thresholdMs;
+}
+
 function formatDashboardPlayerSlots(
   current: number | null | undefined,
   max: number | null | undefined,
   checkedAt: string | null | undefined,
-  status: string | null | undefined,
 ) {
   const fraction = formatPlayerSlots(current, max);
-  return isLivePlayerCountFresh(checkedAt, status) ? fraction : `Last known: ${fraction}`;
+  return shouldShowLastKnownPlayerCountLabel(checkedAt) ? `Last known: ${fraction}` : fraction;
 }
 
 function formatPlayerCountFreshnessDetail(
@@ -7244,8 +7249,11 @@ function formatPlayerCountFreshnessDetail(
   const fraction = formatPlayerSlots(current, max);
   const age = checkedAt ? formatRelativeTime(checkedAt) : "not checked yet";
   if (isLivePlayerCountFresh(checkedAt, status)) return `${fraction} confirmed from Nitrado ${age}`;
-  if (isLivePlayerCountWarning(checkedAt, status)) return `Live player count stale. Last known: ${fraction}. Last checked ${age}.`;
-  return `Player count stale - Nitrado metadata not refreshed for ${age}. Last known: ${fraction}.`;
+  if (shouldShowLastKnownPlayerCountLabel(checkedAt)) {
+    if (isLivePlayerCountWarning(checkedAt, status)) return `Live player count stale. Last known: ${fraction}. Last checked ${age}.`;
+    return `Player count stale - Nitrado metadata not refreshed for ${age}. Last known: ${fraction}.`;
+  }
+  return `${fraction} from the latest cached player count. Last checked ${age}.`;
 }
 
 function isLivePlayerCountFresh(checkedAt: string | null | undefined, status: string | null | undefined) {
@@ -7259,6 +7267,10 @@ function isLivePlayerCountWarning(checkedAt: string | null | undefined, status: 
   if (!checkedAt) return true;
   const checkedTime = Date.parse(checkedAt);
   return !Number.isFinite(checkedTime) || Date.now() - checkedTime > 30 * 60 * 1000;
+}
+
+function shouldShowLastKnownPlayerCountLabel(checkedAt: string | null | undefined) {
+  return isOlderThanMs(checkedAt, LAST_KNOWN_STAT_LABEL_THRESHOLD_MS);
 }
 
 function formatPlayerSlots(current: number | null | undefined, max: number | null | undefined) {

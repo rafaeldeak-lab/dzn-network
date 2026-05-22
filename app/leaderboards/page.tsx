@@ -157,17 +157,17 @@ export default function LeaderboardsPage() {
         setPayload(normalized);
         if (hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
         setLoadState(hasMeaningfulLeaderboard(normalized) ? "loaded" : "empty_real_data");
-        setError(data.stale ? "Live refresh recovering. Showing last known data." : "");
+        setError("");
       } catch (loadError) {
         if (active) {
           const cached = loadLastGoodLeaderboard();
           if (cached) {
             setPayload(cached);
-            setError("Live refresh recovering. Showing last known data.");
-            setLoadState("refresh_failed");
+            setError("");
+            setLoadState("loaded");
           } else if (visiblePayloadRef.current) {
-            setError("Live data refresh failed. Showing last known leaderboard.");
-            setLoadState("refresh_failed");
+            setError("");
+            setLoadState("loaded");
           } else {
             setError(loadError instanceof Error ? loadError.message : "Leaderboard data could not be loaded right now.");
             setLoadState("error_initial");
