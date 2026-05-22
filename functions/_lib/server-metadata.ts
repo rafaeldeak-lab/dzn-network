@@ -584,14 +584,23 @@ async function resolveGeoUpdate(linkedServer: LinkedServerMetadataRow, ipAddress
 
 async function fetchNitradoServerMetadata(env: Env, linkedServer: LinkedServerMetadataRow, now: string) {
   const token = await getNitradoTokenForLinkedServer(env, linkedServer);
-  const response = await fetch(
-    `${NITRADO_API}/services/${encodeURIComponent(linkedServer.nitrado_service_id ?? "")}/gameservers`,
-    { headers: { authorization: `Bearer ${token}`, accept: "application/json" } },
-  );
-  if (response.status === 401 || response.status === 403) throw new Error("Nitrado token cannot access this service");
-  if (!response.ok) throw new Error("Nitrado metadata fetch failed");
-  const payload = await response.json().catch(() => null);
-  return normalizeNitradoMetadata(payload, linkedServer, now);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(
+      `${NITRADO_API}/services/${encodeURIComponent(linkedServer.nitrado_service_id ?? "")}/gameservers`,
+      {
+        headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+        signal: controller.signal,
+      },
+    );
+    if (response.status === 401 || response.status === 403) throw new Error("Nitrado token cannot access this service");
+    if (!response.ok) throw new Error("Nitrado metadata fetch failed");
+    const payload = await response.json().catch(() => null);
+    return normalizeNitradoMetadata(payload, linkedServer, now);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function mockMetadata(linkedServer: LinkedServerMetadataRow, now: string) {
