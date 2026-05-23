@@ -5475,6 +5475,7 @@ export type AdmWorkerSyncTickResult = ScheduledAdmSyncResult & {
   worker_hot_path: true;
   selected_linked_server_id: string | null;
   selected_adm_file: string | null;
+  selected_adm_path: string | null;
   pre_read_d1_queries_estimate: number;
   pre_read_outbound_fetches_estimate: number;
   message: string;
@@ -5488,11 +5489,17 @@ export async function runAdmWorkerSyncTick(
     maxLinesPerServer?: number;
     linkedServerId?: string | null;
     force?: boolean;
+    targetFileName?: string | null;
+    targetFilePath?: string | null;
   } = {},
 ): Promise<AdmWorkerSyncTickResult> {
   admSchemaEnsureSkipDepth += 1;
   try {
     const budget = getAdmInvocationBudget(env);
+    const explicitTargetFileName = sanitizeWorkerTargetAdmFilename(options.targetFileName);
+    const explicitTargetPath = explicitTargetFileName
+      ? sanitizeWorkerTargetAdmPath(options.targetFilePath, explicitTargetFileName)
+      : null;
     const selected = await selectAdmWorkerServer(env, options.cursorKey ?? "last_adm_linked_server_id", {
       linkedServerId: options.linkedServerId,
       force: options.force,
@@ -5507,7 +5514,7 @@ export async function runAdmWorkerSyncTick(
 
     const activeImportJobs = Number(selected.active_import_jobs ?? 0);
     let pendingJobs: PendingAdmImportJobsResult | undefined;
-    if (activeImportJobs > 0) {
+    if (activeImportJobs > 0 && !explicitTargetFileName) {
       pendingJobs = await processAdmImportJobsUntilBudget(env, {
         maxJobs: 1,
         maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
@@ -5536,6 +5543,7 @@ export async function runAdmWorkerSyncTick(
         ];
 
     const directFileName = firstString(
+      explicitTargetFileName,
       ...(preferLatestAfterImportWork
         ? [
             selected.latest_adm_file,
@@ -5551,6 +5559,7 @@ export async function runAdmWorkerSyncTick(
           ]),
     );
     const directPath = firstString(
+      explicitTargetPath,
       ...(preferLatestAfterImportWork
         ? [
             selected.latest_adm_path,
@@ -5571,6 +5580,7 @@ export async function runAdmWorkerSyncTick(
         metadata,
         selectedLinkedServerId: selected.id,
         selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
+        selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
         pendingJobs,
         message: latestBackoffActive
           ? `Latest ADM ${selected.latest_adm_file} is unreadable; retry is scheduled for ${selected.latest_adm_next_retry_at}. Worker advanced to the next server.`
@@ -5588,6 +5598,7 @@ export async function runAdmWorkerSyncTick(
         metadata,
         selectedLinkedServerId: selected.id,
         selectedAdmFile: directFileName,
+        selectedAdmPath: directPath ?? `dayzps/config/${directFileName}`,
         pendingJobs,
         failed: 1,
         message: "No Nitrado token is available for ADM Worker file read.",
@@ -5603,7 +5614,7 @@ export async function runAdmWorkerSyncTick(
       options: {
         mode: "full",
         fullDownloadFallback: true,
-        maxPathVariants: Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+        maxPathVariants: explicitTargetFileName ? 2 : Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
         maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
         maxChunkedReadChunks: budget.maxChunkedReadChunks,
         diagnostics: {
@@ -5680,6 +5691,7 @@ export async function runAdmWorkerSyncTick(
         metadata,
         selectedLinkedServerId: selected.id,
         selectedAdmFile: directFileName,
+        selectedAdmPath: discoveredFile.path,
         pendingJobs,
         latestAdmUnreadableCount: 1,
         unavailable: 1,
@@ -5712,6 +5724,7 @@ export async function runAdmWorkerSyncTick(
           metadata,
           selectedLinkedServerId: selected.id,
           selectedAdmFile: directFileName,
+          selectedAdmPath: discoveredFile.path,
           pendingJobs,
           processingProcessed: completed ? 0 : 1,
           skippedNotDue: completed ? 1 : 0,
@@ -5785,6 +5798,7 @@ export async function runAdmWorkerSyncTick(
       metadata,
       selectedLinkedServerId: selected.id,
       selectedAdmFile: directFileName,
+      selectedAdmPath: discoveredFile.path,
       pendingJobs,
       succeeded: 1,
       newAdmReadableCount: 1,
@@ -5980,6 +5994,7 @@ function admWorkerResult(values: {
   metadata: ScheduledMetadataSyncResult;
   selectedLinkedServerId?: string | null;
   selectedAdmFile?: string | null;
+  selectedAdmPath?: string | null;
   pendingJobs?: PendingAdmImportJobsResult;
   succeeded?: number;
   failed?: number;
@@ -6003,6 +6018,7 @@ function admWorkerResult(values: {
     worker_hot_path: true,
     selected_linked_server_id: values.selectedLinkedServerId ?? null,
     selected_adm_file: values.selectedAdmFile ?? null,
+    selected_adm_path: values.selectedAdmPath ?? null,
     pre_read_d1_queries_estimate: values.selectedLinkedServerId ? 1 : 1,
     pre_read_outbound_fetches_estimate: values.selectedAdmFile ? 1 : 0,
     message: values.message,
@@ -6352,6 +6368,22 @@ function sanitizeManualAdmFilename(value: string) {
   if (!/\.(adm|txt)$/i.test(filename)) return null;
   if (/[<>:"\\|?*\u0000-\u001f]/.test(filename)) return null;
   return filename;
+}
+
+function sanitizeWorkerTargetAdmFilename(value: string | null | undefined) {
+  const filename = typeof value === "string" ? sanitizeManualAdmFilename(value) : null;
+  return filename && /\.adm$/i.test(filename) ? filename : null;
+}
+
+function sanitizeWorkerTargetAdmPath(value: string | null | undefined, filename: string) {
+  const expected = `dayzps/config/${filename}`;
+  if (typeof value !== "string") return expected;
+  const normalized = value.trim().replace(/\\/g, "/");
+  if (!normalized || normalized.length > 320 || normalized.includes("..") || /[\u0000-\u001f]/.test(normalized)) return expected;
+  const withoutLeadingSlash = normalized.replace(/^\/+/, "");
+  return withoutLeadingSlash.toLowerCase() === expected.toLowerCase()
+    ? withoutLeadingSlash
+    : expected;
 }
 
 function splitAdmText(value: string) {

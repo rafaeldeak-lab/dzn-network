@@ -3272,11 +3272,26 @@ function SyncHealthSummaryPanel({
   nextScheduledSync: string;
 }) {
   const tone = healthStatus === "error" ? "orange" : healthStatus === "pending" ? "orange" : "emerald";
-  const latestUnreadableFile = dashboardHealth?.sync.newest_available_adm_filename && dashboardHealth.sync.newest_available_adm_filename !== dashboardHealth.sync.newest_readable_adm_filename
+  const latestUnreadableFile = dashboardHealth?.sync.latest_unreadable_file
+    ?? dashboardHealth?.sync.latest_read_issue?.file_name
+    ?? (dashboardHealth?.sync.newest_available_adm_filename && dashboardHealth.sync.newest_available_adm_filename !== dashboardHealth.sync.newest_readable_adm_filename
     ? dashboardHealth.sync.newest_available_adm_filename
     : syncStatus?.newest_available_adm_filename && syncStatus.newest_available_adm_filename !== syncStatus.newest_readable_adm_filename
       ? syncStatus.newest_available_adm_filename
-      : null;
+      : null);
+  const lastSuccessfulImport = dashboardHealth?.sync.latest_completed_import?.completed_at
+    ?? dashboardHealth?.sync.latest_completed_import?.updated_at
+    ?? dashboardHealth?.sync.last_successful_sync
+    ?? syncStatus?.last_successful_sync_at
+    ?? null;
+  const lastAttemptedAdmRead = dashboardHealth?.sync.last_attempted_adm_read
+    ?? dashboardHealth?.sync.latest_read_issue?.last_diagnostic_at
+    ?? dashboardHealth?.sync.latest_read_issue?.last_checked_at
+    ?? syncStatus?.last_sync_at
+    ?? dashboardHealth?.cron.adm?.created_at
+    ?? null;
+  const classifiedError = dashboardHealth?.sync.latest_classified_error
+    ?? classifyDashboardAdmError(dashboardHealth?.sync.latest_read_issue?.last_error ?? latestError);
   return (
     <DashboardPanel className="p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -3289,12 +3304,12 @@ function SyncHealthSummaryPanel({
         <SmallBadge tone={tone}>{healthTitle}</SmallBadge>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <MiniInfo label="Last successful ADM import" value={dashboardHealth?.sync.last_successful_sync ? formatDashboardDate(dashboardHealth.sync.last_successful_sync) : syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced yet"} />
-        <MiniInfo label="Last attempted ADM read" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : dashboardHealth?.cron.adm?.created_at ? formatDashboardDate(dashboardHealth.cron.adm.created_at) : "Not checked yet"} />
+        <MiniInfo label="Last successful ADM import" value={lastSuccessfulImport ? formatDashboardDate(lastSuccessfulImport) : "Not synced yet"} />
+        <MiniInfo label="Last attempted ADM read" value={lastAttemptedAdmRead ? formatDashboardDate(lastAttemptedAdmRead) : "Not checked yet"} />
         <MiniInfo label="Next scheduled sync" value={dashboardHealth?.sync.next_adm_processing_due_at ? formatDashboardDate(dashboardHealth.sync.next_adm_processing_due_at) : nextScheduledSync} />
         <MiniInfo label="Latest readable file" value={dashboardHealth?.sync.newest_readable_adm_filename ?? syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
         <MiniInfo label="Latest unreadable file" value={latestUnreadableFile ?? "None"} />
-        <MiniInfo label="Latest classified error" value={classifyDashboardAdmError(latestError)} />
+        <MiniInfo label="Latest classified error" value={classifiedError} />
         <MiniInfo label="Next ADM read retry" value={dashboardHealth?.sync.latest_read_issue?.next_retry_at ? formatDashboardDate(dashboardHealth.sync.latest_read_issue.next_retry_at) : "Next eligible sync"} />
         <MiniInfo label="Queued backfill files" value={String(dashboardHealth?.sync.backfill_status.queued_jobs_count ?? syncStatus?.adm_backfill_status.queued_files.length ?? 0)} />
         <MiniInfo label="Unreadable queue" value={String(dashboardHealth?.sync.backfill_status.unreadable_files_count ?? syncStatus?.adm_backfill_status.unreadable_files.length ?? syncStatus?.unreadable_files_queued ?? 0)} />

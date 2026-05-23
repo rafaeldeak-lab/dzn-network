@@ -170,6 +170,10 @@ assert.equal(admSyncSource.includes("skipped_unreadable"), true);
 assert.equal(admSyncSource.includes("recordAdmCadenceObservation"), true);
 assert.equal(admSyncSource.includes("isUsefulAdmCadenceEvent"), true);
 assert.equal(admSyncSource.includes("lastPlayerlistAt"), true);
+assert.equal(admSyncSource.includes("targetFileName?: string | null"), true);
+assert.equal(admSyncSource.includes("targetFilePath?: string | null"), true);
+assert.equal(admSyncSource.includes("sanitizeWorkerTargetAdmPath"), true);
+assert.equal(admSyncSource.includes("selected_adm_path"), true);
 const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
 assert.equal(automationSource.includes("first_adm_after_restart_delay_minutes"), true);
 assert.equal(automationSource.includes("observed_playerlist_interval_minutes"), true);
@@ -190,6 +194,18 @@ assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
 const dashboardApi = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(dashboardApi.includes("/api/sync/adm/run"), true);
 assert.equal(dashboardApi.includes("/api/servers/${encodeURIComponent(linkedServerId)}/adm/auto-sync-now"), true);
+assert.equal(dashboardApi.includes("mode: \"target_file\""), true);
+const scopedAutoSyncEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/auto-sync-now.ts", "utf8");
+assert.equal(scopedAutoSyncEndpointSource.includes("parseTargetFilePayload"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("NITRADO_UPSTREAM_DOWN"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("dayzps/config/${fileName}"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("latest_read_issue"), true);
+const dashboardHealthSource = readFileSync("functions/api/servers/[serverId]/dashboard/health.ts", "utf8");
+assert.equal(dashboardHealthSource.includes("nitrado_file_read_attempts"), true);
+assert.equal(dashboardHealthSource.includes("normalizeLatestReadTruth"), true);
+assert.equal(dashboardHealthSource.includes("latest_classified_error"), true);
+assert.equal(dashboardHealthSource.includes("last_attempted_adm_read"), true);
+assert.equal(dashboardHealthSource.includes("latest_completed_import"), true);
 const dashboardUi = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardUi.includes("No ADM File"), false);
 assert.equal(dashboardUi.includes("Latest ADM Not Readable Yet"), true);
@@ -201,6 +217,8 @@ assert.equal(dashboardUi.includes("Check Nitrado Log Settings"), true);
 assert.equal(dashboardUi.includes("Nitrado log settings verified automatically"), true);
 assert.equal(dashboardUi.includes("Feed last updated"), true);
 assert.equal(dashboardUi.includes("getDashboardSyncStatusBanner"), true);
+assert.equal(dashboardUi.includes("latest_completed_import"), true);
+assert.equal(dashboardUi.includes("last_attempted_adm_read"), true);
 
 Promise.all([
   runEndpointTests(),

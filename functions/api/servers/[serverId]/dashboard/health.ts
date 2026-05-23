@@ -108,6 +108,26 @@ type AdmFileReadIssueRow = {
   last_checked_at: string | null;
 };
 
+type NitradoFileReadDiagnosticRow = {
+  file_name: string | null;
+  method: string | null;
+  endpoint_kind: string | null;
+  status: string | null;
+  http_status: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string | null;
+};
+
+type CompletedImportRow = {
+  id: string | null;
+  filename: string | null;
+  source: string | null;
+  status: string | null;
+  completed_at: string | null;
+  updated_at: string | null;
+};
+
 export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   try {
     const linkedServerId = sanitizeId(params.serverId);
@@ -253,6 +273,24 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     ]);
 
     if (!server) return dashboardHealthError(404, "server_not_found", "Server not found.");
+    const [latestDiagnostic, latestCompletedImport] = await Promise.all([
+      db.prepare(
+        `SELECT file_name, method, endpoint_kind, status, http_status, error_code, error_message, created_at
+         FROM nitrado_file_read_attempts
+         WHERE (server_id = ? OR service_id = ?)
+         ORDER BY created_at DESC
+         LIMIT 1`,
+      ).bind(linkedServerId, server.nitrado_service_id ?? "").first<NitradoFileReadDiagnosticRow>().catch(() => null),
+      db.prepare(
+        `SELECT id, filename, source, status, completed_at, updated_at
+         FROM adm_import_jobs
+         WHERE server_id = ?
+           AND status IN ('completed', 'completed_with_warnings')
+         ORDER BY COALESCE(completed_at, updated_at, created_at) DESC
+         LIMIT 1`,
+      ).bind(linkedServerId).first<CompletedImportRow>().catch(() => null),
+    ]);
+    const latestReadTruth = normalizeLatestReadTruth(latestReadIssue, latestDiagnostic);
 
     const planKey = normalizePlanKey(server.plan_key);
     const currentPlan = effectiveEntitlementPlan(planKey, server.subscription_status);
@@ -276,7 +314,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
           ? "ADM Sync Active"
           : "Waiting for Nitrado";
     const admNitradoReadFailure = numberOrZero(server.consecutive_failed_adm_reads) >= 3;
-    const admReadStatusMessage = formatAdmReadIssueMessage(latestReadIssue, server.last_sync_message);
+    const admReadStatusMessage = formatAdmReadIssueMessage(latestReadTruth, server.last_sync_message);
     const admNitradoReadFailureMessage = admReadStatusMessage
       ?? "DZN cannot read your latest ADM file from Nitrado. Check that Admin Log is enabled, Reduce Log Output is disabled, and Log Playerlist is enabled in your Nitrado settings.";
     const warnings = [
@@ -344,22 +382,36 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
               ? `Backfill ${numberOrZero(fileState?.missing_count)} missing ADM file${numberOrZero(fileState?.missing_count) === 1 ? "" : "s"}`
               : "ADM backfill caught up",
         },
-        latest_read_issue: latestReadIssue ? {
-          file_name: latestReadIssue.adm_file,
-          status: latestReadIssue.status,
-          retry_count: numberOrZero(latestReadIssue.retry_count),
-          next_retry_at: latestReadIssue.next_retry_at,
-          last_http_status: numberOrNull(latestReadIssue.last_http_status),
-          last_endpoint_kind: latestReadIssue.last_endpoint_kind,
-          last_method: latestReadIssue.last_method,
-          last_error: sanitize(latestReadIssue.last_error),
-          last_diagnostic_at: latestReadIssue.last_diagnostic_at,
-          last_checked_at: latestReadIssue.last_checked_at,
+        latest_read_issue: latestReadTruth ? {
+          file_name: latestReadTruth.adm_file,
+          status: latestReadTruth.status,
+          retry_count: numberOrZero(latestReadTruth.retry_count),
+          next_retry_at: latestReadTruth.next_retry_at,
+          last_http_status: numberOrNull(latestReadTruth.last_http_status),
+          last_endpoint_kind: latestReadTruth.last_endpoint_kind,
+          last_method: latestReadTruth.last_method,
+          last_error: sanitize(latestReadTruth.last_error),
+          last_diagnostic_at: latestReadTruth.last_diagnostic_at,
+          last_checked_at: latestReadTruth.last_checked_at,
+        } : null,
+        last_attempted_adm_read: latestReadTruth?.last_diagnostic_at ?? latestReadTruth?.last_checked_at ?? server.last_sync_at ?? null,
+        latest_unreadable_file: latestReadTruth?.adm_file ?? null,
+        latest_classified_error: classifyAdmReadIssue(latestReadTruth, server.last_sync_message),
+        latest_http_status: numberOrNull(latestReadTruth?.last_http_status),
+        latest_endpoint_kind: latestReadTruth?.last_endpoint_kind ?? null,
+        latest_method: latestReadTruth?.last_method ?? null,
+        latest_completed_import: latestCompletedImport ? {
+          id: latestCompletedImport.id,
+          filename: latestCompletedImport.filename,
+          source: latestCompletedImport.source,
+          status: latestCompletedImport.status,
+          completed_at: latestCompletedImport.completed_at,
+          updated_at: latestCompletedImport.updated_at,
         } : null,
         newest_available_adm_filename: server.newest_available_adm_filename,
         newest_readable_adm_filename: server.newest_readable_adm_filename,
         last_processed_adm_filename: server.last_processed_adm_filename ?? server.latest_adm_file,
-        last_successful_sync: server.last_successful_sync_at ?? server.last_sync_at,
+        last_successful_sync: server.last_successful_sync_at ?? latestCompletedImport?.completed_at ?? latestCompletedImport?.updated_at ?? null,
         next_adm_discovery_due_at: server.next_adm_discovery_due_at,
         next_adm_processing_due_at: server.next_adm_pull_due_at,
         last_error: sanitize(admReadStatusMessage ?? server.last_adm_discovery_error ?? server.last_sync_message),
@@ -506,6 +558,41 @@ function setupProgress(input: { hasGuild: boolean; hasService: boolean; hasAdm: 
     percent: Math.round((completed / checks.length) * 100),
     checks: checks.map(([label, done]) => ({ label, done })),
   };
+}
+
+function normalizeLatestReadTruth(issue: AdmFileReadIssueRow | null, diagnostic: NitradoFileReadDiagnosticRow | null): AdmFileReadIssueRow | null {
+  const issueTime = Date.parse(issue?.last_diagnostic_at ?? issue?.last_checked_at ?? "");
+  const diagnosticTime = Date.parse(diagnostic?.created_at ?? "");
+  if (diagnostic && (!issue || (Number.isFinite(diagnosticTime) && (!Number.isFinite(issueTime) || diagnosticTime >= issueTime)))) {
+    return {
+      adm_file: diagnostic.file_name,
+      status: diagnostic.status,
+      retry_count: issue?.retry_count ?? 0,
+      next_retry_at: issue?.next_retry_at ?? null,
+      last_http_status: diagnostic.http_status,
+      last_endpoint_kind: diagnostic.endpoint_kind,
+      last_method: diagnostic.method,
+      last_error: diagnostic.error_code ?? diagnostic.error_message,
+      last_diagnostic_at: diagnostic.created_at,
+      last_checked_at: diagnostic.created_at,
+    };
+  }
+  return issue;
+}
+
+function classifyAdmReadIssue(issue: AdmFileReadIssueRow | null, fallback: string | null | undefined) {
+  const httpStatus = numberOrNull(issue?.last_http_status);
+  const error = sanitize(issue?.last_error ?? fallback ?? "");
+  if (httpStatus && httpStatus >= 500 && httpStatus <= 504) return `HTTP ${httpStatus} / NITRADO_UPSTREAM_DOWN`;
+  if (httpStatus === 429) return "HTTP 429 / NITRADO_RATE_LIMITED";
+  if (httpStatus === 401) return "HTTP 401 / NITRADO_UNAUTHORIZED";
+  if (httpStatus === 403) return "HTTP 403 / NITRADO_FORBIDDEN";
+  if (httpStatus === 404) return "HTTP 404 / NITRADO_FILE_NOT_FOUND";
+  if (/WORKER_SUBREQUEST_LIMIT/i.test(error)) return "WORKER_SUBREQUEST_LIMIT";
+  if (/FETCH_TIMEOUT/i.test(error)) return "FETCH_TIMEOUT";
+  if (/FETCH_THREW/i.test(error)) return "FETCH_THREW";
+  if (/TOKENIZED_EMPTY_BODY/i.test(error)) return "TOKENIZED_EMPTY_BODY";
+  return error || null;
 }
 
 function formatAdmReadIssueMessage(issue: AdmFileReadIssueRow | null, fallback: string | null | undefined) {

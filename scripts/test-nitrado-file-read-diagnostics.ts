@@ -174,6 +174,10 @@ async function main() {
   assert.ok(admSyncSource.includes("await updateAdmWorkerCursor(env, options.cursorKey ?? \"last_adm_linked_server_id\", selected.id).catch(() => null);"));
   assert.ok(admSyncSource.includes("stateLatestAdmFile"));
   assert.ok(admSyncSource.includes("compareAdmFileNamesChronological(selected.latest_adm_file, directFileName) >= 0"));
+  assert.ok(admSyncSource.includes("targetFileName?: string | null"));
+  assert.ok(admSyncSource.includes("targetFilePath?: string | null"));
+  assert.ok(admSyncSource.includes("sanitizeWorkerTargetAdmPath"));
+  assert.ok(admSyncSource.includes("selected_adm_path"));
   assert.ok(admSyncSource.includes("FROM adm_sync_file_state latest_state"));
   assert.ok(workerSource.includes("runAdmWorkerSyncTick"));
   assert.ok(!workerSource.includes("runScheduledAdmSync"));

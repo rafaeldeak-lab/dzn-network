@@ -1282,6 +1282,20 @@ export type DashboardHealthResult = {
       last_diagnostic_at: string | null;
       last_checked_at: string | null;
     } | null;
+    last_attempted_adm_read?: string | null;
+    latest_unreadable_file?: string | null;
+    latest_classified_error?: string | null;
+    latest_http_status?: number | null;
+    latest_endpoint_kind?: string | null;
+    latest_method?: string | null;
+    latest_completed_import?: {
+      id: string | null;
+      filename: string | null;
+      source: string | null;
+      status: string | null;
+      completed_at: string | null;
+      updated_at: string | null;
+    } | null;
     newest_available_adm_filename: string | null;
     newest_readable_adm_filename: string | null;
     last_processed_adm_filename: string | null;

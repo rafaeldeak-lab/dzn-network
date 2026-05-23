@@ -282,10 +282,15 @@ export async function forceProcessLatestAdm(linkedServerId: string) {
   });
 }
 
-export async function runScopedAdmAutoSyncNow(linkedServerId: string) {
+export async function runScopedAdmAutoSyncNow(
+  linkedServerId: string,
+  payload?: { mode: "target_file"; fileName: string; filePath: string },
+) {
   return request<(AdmSyncRunResult & { ok?: true; worker_hot_path?: boolean; recoverable?: boolean; selected_adm_file?: string | null }) | { ok: false; error_code: string; message: string; details?: unknown }>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/auto-sync-now`, {
     method: "POST",
     cache: "no-store",
+    headers: payload ? { "content-type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
   });
 }
 
