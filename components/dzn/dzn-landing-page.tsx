@@ -466,7 +466,7 @@ function useHomeStats() {
             setError("");
             setLoadState("loaded");
           } else {
-            setError("Network stats could not be loaded right now.");
+            setError("Waiting for live data from the first synced ADM.");
             setLoadState("error_initial");
           }
         }
