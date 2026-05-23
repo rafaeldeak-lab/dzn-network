@@ -24,6 +24,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/metadata/run" \
             -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions","max_servers":25}'
@@ -31,6 +32,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/adm/run" \
             -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions","max_servers":1,"max_lines_per_server":50000}'
@@ -38,6 +40,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/public-snapshots/run" \
             -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions"}'
@@ -45,6 +48,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/discord-posts/run" \
             -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions","max_jobs":25}'
@@ -52,6 +56,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/ctf-scorecards/run" \
             -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions"}'

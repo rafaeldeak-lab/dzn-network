@@ -861,6 +861,18 @@ function ServerDashboard({
     score: server.score_label
       ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending"),
   };
+  const hasDashboardDataToDisplay = Boolean(
+    effectiveSyncData ||
+    effectiveDashboardHealth ||
+    effectiveRecentEvents.length ||
+    effectiveBillingStatus ||
+    effectiveAutomationHealth ||
+    effectivePublicCacheDebug ||
+    syncStatusActiveAdmImportJob ||
+    lastGoodAdmJob ||
+    Object.values(dashboardStatValues).some((value) => value !== "Loading" && value !== null && value !== undefined),
+  );
+  const shouldShowLiveRefreshWarning = Boolean(liveRefreshWarning && !hasDashboardDataToDisplay);
   const dashboardStatDetail = preferLastKnownStats && isOlderThanMs(cachedDashboardStats?.generated_at, LAST_KNOWN_STAT_LABEL_THRESHOLD_MS) ? "Last known" : "Total";
   const publicCacheFlags = effectivePublicCacheDebug?.problem_flags ?? [];
   const publicCacheStale = publicCacheFlags.some((flag) => [
@@ -2954,7 +2966,7 @@ function ServerDashboard({
                   <MetricTile label="Unique Players" value={dashboardStatValues.uniquePlayers} />
                 </div>
               </div>
-              {liveRefreshWarning ? (
+              {shouldShowLiveRefreshWarning ? (
                 <p className="mt-4 rounded-lg border border-orange-300/20 bg-orange-400/10 px-3 py-3 text-sm font-bold leading-6 text-orange-50">
                   {liveRefreshWarning}
                 </p>

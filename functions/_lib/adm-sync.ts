@@ -5491,42 +5491,60 @@ export async function runAdmWorkerSyncTick(
     }
 
     const activeImportJobs = Number(selected.active_import_jobs ?? 0);
+    let pendingJobs: PendingAdmImportJobsResult | undefined;
     if (activeImportJobs > 0) {
-      const pendingJobs = await processAdmImportJobsUntilBudget(env, {
+      pendingJobs = await processAdmImportJobsUntilBudget(env, {
         maxJobs: 1,
         maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
         maxRuntimeMs: 5_000,
         linkedServerId: selected.id,
         assumeSchemaReady: true,
       });
-      return admWorkerResult({
-        metadata,
-        selectedLinkedServerId: selected.id,
-        selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
-        pendingJobs,
-        message: `Processed active ADM import work for ${selected.id}.`,
-      });
     }
 
+    const preferLatestAfterImportWork = Boolean(pendingJobs && (pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0));
     const directFileName = firstString(
-      selected.target_adm_file,
-      selected.latest_adm_file,
-      fileNameFromPath(selected.target_adm_path),
-      fileNameFromPath(selected.latest_adm_path),
-      fileNameFromPath(selected.adm_path),
+      ...(preferLatestAfterImportWork
+        ? [
+            selected.latest_adm_file,
+            fileNameFromPath(selected.latest_adm_path),
+            selected.target_adm_file,
+            fileNameFromPath(selected.target_adm_path),
+            fileNameFromPath(selected.adm_path),
+          ]
+        : [
+            selected.target_adm_file,
+            selected.latest_adm_file,
+            fileNameFromPath(selected.target_adm_path),
+            fileNameFromPath(selected.latest_adm_path),
+            fileNameFromPath(selected.adm_path),
+          ]),
     );
     const directPath = firstString(
-      selected.target_adm_path,
-      selected.latest_adm_path,
-      selected.adm_path,
-      directFileName ? `dayzps/config/${directFileName}` : null,
+      ...(preferLatestAfterImportWork
+        ? [
+            selected.latest_adm_path,
+            selected.target_adm_path,
+            selected.adm_path,
+            directFileName ? `dayzps/config/${directFileName}` : null,
+          ]
+        : [
+            selected.target_adm_path,
+            selected.latest_adm_path,
+            selected.adm_path,
+            directFileName ? `dayzps/config/${directFileName}` : null,
+          ]),
     );
 
     if (!directFileName || !selected.nitrado_service_id) {
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
-        message: "Selected ADM server has no known ADM filename/path yet; broad discovery is deferred to a separate run.",
+        selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
+        pendingJobs,
+        message: pendingJobs
+          ? `Processed active ADM import work for ${selected.id}; no known latest ADM filename/path is available for direct re-read.`
+          : "Selected ADM server has no known ADM filename/path yet; broad discovery is deferred to a separate run.",
         skippedNotDue: 1,
       });
     }
@@ -5537,6 +5555,7 @@ export async function runAdmWorkerSyncTick(
         metadata,
         selectedLinkedServerId: selected.id,
         selectedAdmFile: directFileName,
+        pendingJobs,
         failed: 1,
         message: "No Nitrado token is available for ADM Worker file read.",
       });
@@ -5621,6 +5640,7 @@ export async function runAdmWorkerSyncTick(
         metadata,
         selectedLinkedServerId: selected.id,
         selectedAdmFile: directFileName,
+        pendingJobs,
         latestAdmUnreadableCount: 1,
         unavailable: 1,
         skippedUnreadable: 1,
@@ -5694,10 +5714,13 @@ export async function runAdmWorkerSyncTick(
       metadata,
       selectedLinkedServerId: selected.id,
       selectedAdmFile: directFileName,
+      pendingJobs,
       succeeded: 1,
       newAdmReadableCount: 1,
       processingProcessed: 1,
-      message: `Queued scheduled ADM chunk import for ${directFileName}.`,
+      message: pendingJobs && (pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0)
+        ? `Processed active ADM import work, then queued scheduled ADM chunk import for latest known file ${directFileName}.`
+        : `Queued scheduled ADM chunk import for ${directFileName}.`,
     });
   } finally {
     admSchemaEnsureSkipDepth = Math.max(0, admSchemaEnsureSkipDepth - 1);

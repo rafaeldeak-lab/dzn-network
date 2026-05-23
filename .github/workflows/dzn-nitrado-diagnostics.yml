@@ -57,6 +57,7 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/debug/nitrado-file-read" \
             -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
             -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data @diagnostic-payload.json
@@ -80,6 +81,7 @@ jobs:
             curl --fail-with-body --silent --show-error \
               -X POST "${APP_URL}/api/sync/adm/retry-unreadable" \
               -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+              -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
               -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
               -H "Content-Type: application/json" \
               --data @retry-payload.json
