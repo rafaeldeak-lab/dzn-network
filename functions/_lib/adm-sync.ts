@@ -5537,6 +5537,7 @@ export async function runAdmWorkerSyncTick(
     );
 
     if (!directFileName || !selected.nitrado_service_id) {
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
@@ -5551,6 +5552,7 @@ export async function runAdmWorkerSyncTick(
 
     if (!env.TOKEN_ENCRYPTION_KEY || !selected.encrypted_token || !selected.token_iv || !selected.token_auth_tag) {
       await incrementAdmReadFailureCounter(env, selected.id, directFileName, "No Nitrado token is available for ADM Worker file read.");
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
@@ -5636,6 +5638,7 @@ export async function runAdmWorkerSyncTick(
         unreadableFilesQueued: 1,
         newestUnprocessedAdmFile: directFileName,
       });
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
@@ -5649,6 +5652,38 @@ export async function runAdmWorkerSyncTick(
     }
 
     await resetAdmReadFailureCounter(env, selected.id);
+    const existingJob = await getAdmImportJobForFilename(env, selected.id, directFileName);
+    if (existingJob) {
+      const progress = toAdmImportJobProgress(existingJob);
+      const completed = isCompletedAdmImportJobStatus(progress.status);
+      if (completed || existingJob.source !== SCHEDULED_ADM_IMPORT_SOURCE || !existingJob.adm_text) {
+        await recordAdmFileAttempt(env, scope, discoveredFile, {
+          status: completed ? "processed" : "queued",
+          lineCount: lines.length,
+          rawKillLinesFound: lines.filter(hasRawPlayerKillLine).length,
+          parsedKillLinesFound: 0,
+          insertedKills: 0,
+          parserSkippedLines: 0,
+          lastLineProcessed: completed ? lines.length : 0,
+          message: completed ? null : `ADM file ${directFileName} already has an import job from ${existingJob.source}.`,
+        });
+        await recordAdmImportJobProgressInSyncState(env, existingJob, completed ? "no_new_lines" : "processing_in_chunks", completed
+          ? `ADM file ${directFileName} is already imported. DZN skipped duplicate Worker processing.`
+          : `ADM file ${directFileName} already has an import job from ${existingJob.source}.`);
+        await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id);
+        return admWorkerResult({
+          metadata,
+          selectedLinkedServerId: selected.id,
+          selectedAdmFile: directFileName,
+          pendingJobs,
+          processingProcessed: completed ? 0 : 1,
+          skippedNotDue: completed ? 1 : 0,
+          message: completed
+            ? `ADM file ${directFileName} is already imported; Worker advanced to the next server.`
+            : `ADM file ${directFileName} already has an active import job; Worker advanced to the next server.`,
+        });
+      }
+    }
     await recordAdmFileAttempt(env, scope, discoveredFile, {
       status: "queued",
       lineCount: lines.length,
@@ -5659,7 +5694,6 @@ export async function runAdmWorkerSyncTick(
       message: null,
     });
 
-    const existingJob = await getAdmImportJobForFilename(env, selected.id, directFileName);
     const job = existingJob
       ? toAdmImportJobProgress(existingJob)
       : await createAdmImportJobForServer(env, {
@@ -5757,7 +5791,15 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
              FROM adm_sync_file_state
              WHERE adm_sync_file_state.linked_server_id = linked_servers.id
                AND adm_sync_file_state.status IN ('discovered', 'unreadable')
+               AND adm_sync_file_state.ignored_at IS NULL
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM adm_import_jobs completed_or_active
+                 WHERE completed_or_active.server_id = linked_servers.id
+                   AND completed_or_active.filename = adm_sync_file_state.adm_file
+                   AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
+               )
              ORDER BY adm_sync_file_state.adm_file ASC
              LIMIT 1
            ) AS target_adm_file,
@@ -5766,7 +5808,15 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
              FROM adm_sync_file_state
              WHERE adm_sync_file_state.linked_server_id = linked_servers.id
                AND adm_sync_file_state.status IN ('discovered', 'unreadable')
+               AND adm_sync_file_state.ignored_at IS NULL
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM adm_import_jobs completed_or_active
+                 WHERE completed_or_active.server_id = linked_servers.id
+                   AND completed_or_active.filename = adm_sync_file_state.adm_file
+                   AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
+               )
              ORDER BY adm_sync_file_state.adm_file ASC
              LIMIT 1
            ) AS target_adm_path,
