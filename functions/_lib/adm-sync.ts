@@ -5600,6 +5600,12 @@ export async function runAdmWorkerSyncTick(
         || read.downloadError
         || read.seekError
         || "Nitrado did not return readable DayZ ADM text for this file.";
+      const stateLatestAdmFile = selected.latest_adm_file && compareAdmFileNamesChronological(selected.latest_adm_file, directFileName) >= 0
+        ? selected.latest_adm_file
+        : directFileName;
+      const stateLatestAdmPath = stateLatestAdmFile === selected.latest_adm_file
+        ? (selected.latest_adm_path ?? discoveredFile.path)
+        : discoveredFile.path;
       await recordAdmFileAttempt(env, scope, discoveredFile, {
         status: "unreadable",
         lineCount: 0,
@@ -5610,10 +5616,10 @@ export async function runAdmWorkerSyncTick(
         message,
         diagnostic,
       });
-      await incrementAdmReadFailureCounter(env, selected.id, directFileName, message);
+      await incrementAdmReadFailureCounter(env, selected.id, stateLatestAdmFile, message);
       await upsertSyncState(env, selected.id, {
-        latestAdmFile: directFileName,
-        latestAdmPath: discoveredFile.path,
+        latestAdmFile: stateLatestAdmFile,
+        latestAdmPath: stateLatestAdmPath,
         sourceServiceId: selected.nitrado_service_id,
         lastProcessedFile: selected.last_processed_file,
         lastProcessedLine: Number(selected.last_processed_line ?? 0),
@@ -5781,8 +5787,22 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
            server_log_config.adm_path,
            server_subscriptions.plan_key,
            server_subscriptions.status AS subscription_status,
-           adm_sync_state.latest_adm_file,
-           adm_sync_state.latest_adm_path,
+           COALESCE((
+             SELECT adm_file
+             FROM adm_sync_file_state latest_state
+             WHERE latest_state.linked_server_id = linked_servers.id
+               AND latest_state.ignored_at IS NULL
+             ORDER BY latest_state.adm_file DESC
+             LIMIT 1
+           ), adm_sync_state.latest_adm_file) AS latest_adm_file,
+           COALESCE((
+             SELECT adm_path
+             FROM adm_sync_file_state latest_state
+             WHERE latest_state.linked_server_id = linked_servers.id
+               AND latest_state.ignored_at IS NULL
+             ORDER BY latest_state.adm_file DESC
+             LIMIT 1
+           ), adm_sync_state.latest_adm_path) AS latest_adm_path,
            adm_sync_state.last_processed_file,
            adm_sync_state.last_processed_line,
            adm_sync_state.last_processed_offset,

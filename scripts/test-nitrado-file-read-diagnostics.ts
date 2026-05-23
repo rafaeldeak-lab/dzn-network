@@ -159,6 +159,9 @@ async function main() {
   assert.ok(admSyncSource.includes("completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')"));
   assert.ok(admSyncSource.includes("ADM file ${directFileName} is already imported; Worker advanced to the next server."));
   assert.ok(admSyncSource.includes("await updateAdmWorkerCursor(env, options.cursorKey ?? \"last_adm_linked_server_id\", selected.id).catch(() => null);"));
+  assert.ok(admSyncSource.includes("stateLatestAdmFile"));
+  assert.ok(admSyncSource.includes("compareAdmFileNamesChronological(selected.latest_adm_file, directFileName) >= 0"));
+  assert.ok(admSyncSource.includes("FROM adm_sync_file_state latest_state"));
   assert.ok(workerSource.includes("runAdmWorkerSyncTick"));
   assert.ok(!workerSource.includes("runScheduledAdmSync"));
   assert.ok(!workerSource.includes("selectNextAdmLinkedServerForWorker"));
