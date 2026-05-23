@@ -62,6 +62,9 @@ type AdmReadOptions = {
   diagnostics?: NitradoFileReadDiagnosticsContext;
   timeoutMs?: number;
   maxPathVariants?: number;
+  directPreferredFirst?: boolean;
+  maxListDirs?: number;
+  maxListSearches?: number;
   seekProbe?: boolean;
   chunkedSeekFallback?: boolean;
   seekOffsetBytes?: number;
@@ -558,15 +561,72 @@ export async function fetchReadableNitradoAdmFiles(
   options: AdmReadOptions = {},
 ): Promise<NitradoReadableAdmFileBatch> {
   const lastCheckedAt = new Date().toISOString();
+  const preferredEntries = buildPreferredAdmEntries(options.preferredAdmFileName, options.preferredAdmPath);
+  if (options.directPreferredFirst !== false && preferredEntries.length) {
+    const directFiles: NitradoReadableAdmFile[] = [];
+    const directErrors: string[] = [];
+    for (const candidate of preferredEntries.slice(0, Math.max(1, Math.min(Math.trunc(options.maxFiles ?? 1), 2)))) {
+      const readable = await readNitradoAdmCandidate(token, serviceId, candidate, {
+        username: null,
+        usernameFound: false,
+        logFilesFound: true,
+        logFilesReturned: 1,
+        admLogFiles: preferredEntries,
+        selectedAdmFile: candidate,
+        logContextPaths: [candidate.path],
+      }, {
+        ...options,
+        fullDownloadFallback: options.fullDownloadFallback ?? true,
+      });
+      if (readable.file) directFiles.push(readable.file);
+      else if (readable.error) directErrors.push(`${candidate.name}: ${readable.error}`);
+    }
+    if (directFiles.length) {
+      const newestDirect = pickNewestAdmFile([...preferredEntries]);
+      return {
+        files: directFiles,
+        candidates: preferredEntries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          timestamp: timestampScore(entry),
+          modifiedAt: entry.modified ?? null,
+        })),
+        filesFound: preferredEntries.length,
+        newestAdmFileName: newestDirect?.name ?? directFiles[0]?.name ?? null,
+        previousLatestAdmFileName: options.previousLatestAdmFileName ?? null,
+        lastCheckedAt,
+        apiStatus: "OK",
+        readErrors: [],
+        readError: null,
+      };
+    }
+    if (directErrors.some((error) => error.includes("WORKER_SUBREQUEST_LIMIT") || error.includes("subrequest limit"))) {
+      return {
+        files: [],
+        candidates: preferredEntries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          timestamp: timestampScore(entry),
+          modifiedAt: entry.modified ?? null,
+        })),
+        filesFound: preferredEntries.length,
+        newestAdmFileName: pickNewestAdmFile([...preferredEntries])?.name ?? null,
+        previousLatestAdmFileName: options.previousLatestAdmFileName ?? null,
+        lastCheckedAt,
+        apiStatus: "error",
+        readErrors: dedupeStrings(directErrors).slice(0, 8),
+        readError: dedupeStrings(directErrors)[0] ?? null,
+      };
+    }
+  }
   const serviceProbe = await probeNitradoEndpoint(token, "A gameserver details", `/services/${encodeURIComponent(serviceId)}/gameservers`);
   const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
-  const preferredEntries = buildPreferredAdmEntries(options.preferredAdmFileName, options.preferredAdmPath);
-  const searchDirs = await buildAdmSearchDirs(token, serviceId);
+  const searchDirs = await buildAdmSearchDirs(token, serviceId, options.maxListDirs);
   const listAttempts: AdmListAttempt[] = [];
   const listedEntries: NitradoFileEntry[] = [];
 
   for (const dir of searchDirs) {
-    listedEntries.push(...await listAdmFileEntries(token, serviceId, dir, listAttempts));
+    listedEntries.push(...await listAdmFileEntries(token, serviceId, dir, listAttempts, options.maxListSearches));
   }
 
   const allEntries = dedupeFileEntries([
@@ -1416,7 +1476,7 @@ function nitradoHeaders(token: string) {
   };
 }
 
-async function buildAdmSearchDirs(token: string, serviceId: string) {
+async function buildAdmSearchDirs(token: string, serviceId: string, maxDirs?: number) {
   const dirs = new Set(ADM_SEARCH_DIRS);
   const [bookmarks, serviceDetails] = await Promise.all([
     fetchFileBookmarks(token, serviceId),
@@ -1427,7 +1487,8 @@ async function buildAdmSearchDirs(token: string, serviceId: string) {
     addPathCandidates(dirs, value);
   }
 
-  return [...dirs].slice(0, 32);
+  const limit = Math.max(1, Math.min(32, Math.trunc(maxDirs ?? 32)));
+  return [...dirs].slice(0, limit);
 }
 
 async function listAdmFileEntries(
@@ -1435,10 +1496,12 @@ async function listAdmFileEntries(
   serviceId: string,
   dir: string,
   listAttempts?: AdmListAttempt[],
+  maxSearches?: number,
 ) {
   const seen = new Map<string, NitradoFileEntry>();
   const searches = [".ADM", ".adm", "DayZServer", "DAYZSERVER", "ADM", undefined];
-  for (const search of searches) {
+  const limitedSearches = searches.slice(0, Math.max(1, Math.min(searches.length, Math.trunc(maxSearches ?? searches.length))));
+  for (const search of limitedSearches) {
     const attempt = await fetchFileListAttempt(token, serviceId, dir, search);
     listAttempts?.push(attempt);
     for (const entry of attempt.entries) {

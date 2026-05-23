@@ -1,7 +1,6 @@
 import type { Env } from "../functions/_lib/types";
-import { ensureAdmSyncSchema, runScheduledAdmSync } from "../functions/_lib/adm-sync";
+import { runAdmWorkerSyncTick } from "../functions/_lib/adm-sync";
 import {
-  ensureAutomationRowsForLinkedServers,
   normalizeAutomationCronSource,
   recordAutomationCronRun,
   recoverStuckAutomationLocks,
@@ -18,7 +17,7 @@ type WorkerExecutionContext = {
 };
 
 type CronEndpoint = {
-  label: "metadata" | "discord-posts";
+  label: "discord-posts";
   path: string;
   body: Record<string, unknown>;
 };
@@ -28,14 +27,9 @@ const DZN_CRON_SECRET_HEADER = "x-dzn-cron-secret";
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 const CRON_ENDPOINT_TIMEOUT_MS = 55000;
 const ADM_WORKER_CURSOR_KEY = "last_adm_linked_server_id";
-const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
+const ADM_WORKER_LAST_RECOVERY_KEY = "last_automation_lock_recovery_at";
 
 const CRON_ENDPOINTS: CronEndpoint[] = [
-  {
-    label: "metadata",
-    path: "/api/sync/metadata/run",
-    body: { source: "cloudflare", cron: "cloudflare-worker", max_servers: 50 },
-  },
   {
     label: "discord-posts",
     path: "/api/sync/discord-posts/run",
@@ -84,9 +78,13 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
 
   const baseUrl = appBaseUrl(env);
   const results = [];
-  results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));
   results.push(await runDirectAdmSync(env, options));
-  results.push(await runCronEndpoint(CRON_ENDPOINTS[1], baseUrl, secret, options));
+  await runHourlyPostAdmMaintenance(env).catch((error) => {
+    console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
+      message: error instanceof Error ? error.message : "Unknown maintenance error",
+    });
+  });
+  results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));
 
   console.log("DZN CLOUDFLARE WORKER CRON TICK COMPLETE", {
     ok: results.every((result) => result.ok),
@@ -98,35 +96,11 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
 async function runDirectAdmSync(env: Env, options: { cron: string | null; scheduledTime: number }) {
   const source = normalizeAutomationCronSource("cloudflare", options.cron ?? "cloudflare-worker");
   const startedAt = new Date().toISOString();
-  const linkedServerId = await selectNextAdmLinkedServerForWorker(env);
-  if (!linkedServerId) {
-    await safeRecordWorkerCronRun(env, "success", startedAt, undefined, {
-      processedCount: 0,
-      skippedCount: 1,
-      failedCount: 0,
-    });
-    return {
-      label: "adm" as const,
-      status: 200,
-      ok: true,
-      body: {
-        ok: true,
-        source,
-        worker_direct: true,
-        selected_linked_server_id: null,
-        message: "No due ADM server or pending scheduled ADM import job found for this Worker tick.",
-      },
-    };
-  }
-
   try {
-    const result = await runScheduledAdmSync(env, {
+    const result = await runAdmWorkerSyncTick(env, {
       cron: options.cron ?? "cloudflare-worker",
-      maxServers: 1,
       maxLinesPerServer: 15000,
-      minSyncIntervalMs: 0,
-      refreshMetadata: false,
-      linkedServerId,
+      cursorKey: ADM_WORKER_CURSOR_KEY,
     });
     await safeRecordWorkerCronRun(env, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
       processedCount: result.processing_processed_count,
@@ -141,14 +115,12 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
         ...result,
         source,
         worker_direct: true,
-        selected_linked_server_id: linkedServerId,
       },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "ADM Worker sync failed";
     await safeRecordWorkerCronRun(env, "failed", startedAt, error);
     console.warn("DZN ADM WORKER DIRECT SYNC FAILED", {
-      linkedServerId,
       message,
     });
     return {
@@ -159,80 +131,29 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
         ok: false,
         source,
         worker_direct: true,
-        selected_linked_server_id: linkedServerId,
         error: message,
       },
     };
   }
 }
 
-async function selectNextAdmLinkedServerForWorker(env: Env) {
-  await ensureAutomationRowsForLinkedServers(env);
-  await recoverStuckAutomationLocks(env);
-  await ensureAdmSyncSchema(env);
-  await ensureAdmWorkerStateSchema(env);
-
-  const now = new Date().toISOString();
+async function runHourlyPostAdmMaintenance(env: Env) {
   const db = requireDb(env);
-  const cursor = await db
+  const row = await db
     .prepare("SELECT value FROM adm_worker_state WHERE key = ? LIMIT 1")
-    .bind(ADM_WORKER_CURSOR_KEY)
+    .bind(ADM_WORKER_LAST_RECOVERY_KEY)
     .first<{ value: string | null }>();
+  const lastRunAt = row?.value ? Date.parse(row.value) : 0;
+  if (Number.isFinite(lastRunAt) && Date.now() - lastRunAt < 60 * 60 * 1000) return;
 
-  const rows = await db
-    .prepare(
-      `SELECT DISTINCT linked_servers.id
-       FROM linked_servers
-       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-       JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
-       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
-         AND linked_servers.nitrado_service_id IS NOT NULL
-         AND linked_servers.nitrado_service_id != ''
-         AND lower(server_subscriptions.status) IN ('active', 'trialing')
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND (
-           COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
-           OR COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
-           OR EXISTS (
-             SELECT 1
-             FROM adm_import_jobs
-             WHERE adm_import_jobs.server_id = linked_servers.id
-               AND adm_import_jobs.source = ?
-               AND adm_import_jobs.status IN ('queued', 'processing', 'parsing', 'writing', 'failed_retryable', 'rebuilding')
-             LIMIT 1
-           )
-         )
-       ORDER BY linked_servers.id ASC
-       LIMIT 250`,
-    )
-    .bind(now, now, SCHEDULED_ADM_IMPORT_SOURCE)
-    .all<{ id: string }>();
-
-  const candidates = rows.results ?? [];
-  if (!candidates.length) return null;
-
-  const previous = cursor?.value ?? "";
-  const selected = candidates.find((row) => row.id > previous) ?? candidates[0];
+  await recoverStuckAutomationLocks(env);
   await db
     .prepare(
       `INSERT INTO adm_worker_state (key, value, updated_at)
        VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
-    .bind(ADM_WORKER_CURSOR_KEY, selected.id, now)
-    .run();
-  return selected.id;
-}
-
-async function ensureAdmWorkerStateSchema(env: Env) {
-  await requireDb(env)
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS adm_worker_state (
-        key TEXT PRIMARY KEY,
-        value TEXT,
-        updated_at TEXT NOT NULL
-      )`,
-    )
+    .bind(ADM_WORKER_LAST_RECOVERY_KEY, new Date().toISOString(), new Date().toISOString())
     .run();
 }
 

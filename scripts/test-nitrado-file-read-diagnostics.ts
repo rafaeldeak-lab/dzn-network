@@ -154,10 +154,11 @@ async function main() {
   assert.ok(admSyncSource.includes("ADM_MAX_CHUNKED_READ_CHUNKS"));
   assert.ok(admSyncSource.includes("ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("per-invocation safety budget"));
-  assert.ok(workerSource.includes("runScheduledAdmSync"));
-  assert.ok(workerSource.includes("selectNextAdmLinkedServerForWorker"));
+  assert.ok(workerSource.includes("runAdmWorkerSyncTick"));
+  assert.ok(!workerSource.includes("runScheduledAdmSync"));
+  assert.ok(!workerSource.includes("selectNextAdmLinkedServerForWorker"));
   assert.ok(workerSource.includes("adm_worker_state"));
-  assert.ok(workerSource.includes("selected_linked_server_id"));
+  assert.ok(workerSource.includes("ADM_WORKER_LAST_RECOVERY_KEY"));
   assert.ok(!workerSource.includes('path: "/api/sync/adm/run"'));
   assert.ok(workflowSource.includes("workflow_dispatch"));
   assert.ok(workflowSource.includes("/api/debug/nitrado-file-read"));

@@ -80,12 +80,13 @@ const workerSource = readFileSync("workers/adm-sync-worker.ts", "utf8");
 assert.equal(workerSource.includes("env.DZN_APP_URL"), true);
 assert.equal(workerSource.includes("https://d6f44950.dzn-network.pages.dev"), false);
 assert.equal(workerSource.includes("x-dzn-cron-secret"), true);
-assert.equal(workerSource.includes("runScheduledAdmSync"), true);
-assert.equal(workerSource.includes("selectNextAdmLinkedServerForWorker"), true);
+assert.equal(workerSource.includes("runAdmWorkerSyncTick"), true);
+assert.equal(workerSource.includes("runScheduledAdmSync"), false);
+assert.equal(workerSource.includes("selectNextAdmLinkedServerForWorker"), false);
 assert.equal(workerSource.includes("/api/sync/adm/run"), false);
-assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));"), true);
 assert.equal(workerSource.includes("results.push(await runDirectAdmSync(env, options));"), true);
-assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[1], baseUrl, secret, options));"), true);
+assert.equal(workerSource.includes("/api/sync/metadata/run"), false);
+assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 assert.equal(workflowSource.includes("- cron: \"*/5 * * * *\""), true);

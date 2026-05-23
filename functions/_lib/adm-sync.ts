@@ -740,6 +740,9 @@ export async function runAdmSync(
       preferredAdmPath,
       previousLatestAdmFileName: preferredAdmFileName,
       maxFiles: 12,
+      directPreferredFirst: true,
+      maxListDirs: 4,
+      maxListSearches: 2,
     });
     readableFiles = batch.files;
     discoveredAdmFiles = batch.candidates;
@@ -3054,9 +3057,10 @@ export async function processPendingAdmImportJobs(
     maxRuntimeMs?: number;
     source?: string;
     linkedServerId?: string | null;
+    assumeSchemaReady?: boolean;
   } = {},
 ): Promise<PendingAdmImportJobsResult> {
-  await ensureAdmSyncSchema(env);
+  if (options.assumeSchemaReady !== true) await ensureAdmSyncSchema(env);
   const maxJobs = clampPositiveInteger(options.maxJobs ?? 5, 5);
   const maxChunksPerJob = clampPositiveInteger(options.maxChunksPerJob ?? SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
   const maxRuntimeMs = clampPositiveInteger(options.maxRuntimeMs ?? 20_000, 20_000);
@@ -3115,6 +3119,7 @@ export async function processAdmImportJobsUntilBudget(
     maxRuntimeMs?: number;
     source?: string;
     linkedServerId?: string | null;
+    assumeSchemaReady?: boolean;
   } = {},
 ): Promise<PendingAdmImportJobsResult> {
   return processPendingAdmImportJobs(env, options);
@@ -3160,6 +3165,9 @@ export async function planAdmBackfillJobsForServer(
     previousLatestAdmFileName: null,
     maxFiles: scheduledBudgeted ? admBudget.maxFilesPerInvocation : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
     lookbackFiles: scheduledBudgeted ? 10 : 12,
+    directPreferredFirst: true,
+    maxListDirs: scheduledBudgeted ? 2 : 8,
+    maxListSearches: scheduledBudgeted ? 1 : 3,
     budget: admBudget,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
@@ -3410,6 +3418,9 @@ export async function createScheduledAdmImportJobForServer(
     preferredAdmPath,
     previousLatestAdmFileName: preferredAdmFileName,
     maxFiles: 12,
+    directPreferredFirst: true,
+    maxListDirs: 4,
+    maxListSearches: 2,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
   const newestAvailable = selectNewestDiscoveredAdmFile(batch.candidates);
@@ -5344,6 +5355,9 @@ export async function runAdmDiscoveryForLinkedServer(env: Env, userId: string, l
       preferredAdmPath,
       previousLatestAdmFileName: preferredAdmFileName,
       maxFiles: 6,
+      directPreferredFirst: true,
+      maxListDirs: 2,
+      maxListSearches: 1,
     });
     await recordDiscoveredAdmFiles(env, initialScope, batch.candidates);
     const newestAvailableAdm = selectNewestDiscoveredAdmFile(batch.candidates) ?? (batch.newestAdmFileName ? {
@@ -5429,6 +5443,433 @@ export type ScheduledAdmSyncResult = {
   maxLinesPerServer: number;
   metadata: ScheduledMetadataSyncResult;
 };
+
+type AdmWorkerSelectedServer = SyncLinkedServer & {
+  guild_id: string;
+  plan_key: string | null;
+  subscription_status: string | null;
+  latest_adm_file: string | null;
+  latest_adm_path: string | null;
+  last_processed_file: string | null;
+  last_processed_line: number | null;
+  last_processed_offset: number | null;
+  target_adm_file: string | null;
+  target_adm_path: string | null;
+  active_import_jobs: number | null;
+  encrypted_token: string | null;
+  token_iv: string | null;
+  token_auth_tag: string | null;
+};
+
+export type AdmWorkerSyncTickResult = ScheduledAdmSyncResult & {
+  worker_hot_path: true;
+  selected_linked_server_id: string | null;
+  selected_adm_file: string | null;
+  pre_read_d1_queries_estimate: number;
+  pre_read_outbound_fetches_estimate: number;
+  message: string;
+};
+
+export async function runAdmWorkerSyncTick(
+  env: Env,
+  options: {
+    cron?: string | null;
+    cursorKey?: string;
+    maxLinesPerServer?: number;
+  } = {},
+): Promise<AdmWorkerSyncTickResult> {
+  admSchemaEnsureSkipDepth += 1;
+  try {
+    const budget = getAdmInvocationBudget(env);
+    const selected = await selectAdmWorkerServer(env, options.cursorKey ?? "last_adm_linked_server_id");
+    const metadata = emptyScheduledMetadataSyncResult();
+    if (!selected) {
+      return admWorkerResult({
+        metadata,
+        message: "No due ADM server or pending scheduled ADM import job found for this Worker tick.",
+      });
+    }
+
+    const activeImportJobs = Number(selected.active_import_jobs ?? 0);
+    if (activeImportJobs > 0) {
+      const pendingJobs = await processAdmImportJobsUntilBudget(env, {
+        maxJobs: 1,
+        maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
+        maxRuntimeMs: 5_000,
+        linkedServerId: selected.id,
+        assumeSchemaReady: true,
+      });
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
+        pendingJobs,
+        message: `Processed active ADM import work for ${selected.id}.`,
+      });
+    }
+
+    const directFileName = firstString(
+      selected.target_adm_file,
+      selected.latest_adm_file,
+      fileNameFromPath(selected.target_adm_path),
+      fileNameFromPath(selected.latest_adm_path),
+      fileNameFromPath(selected.adm_path),
+    );
+    const directPath = firstString(
+      selected.target_adm_path,
+      selected.latest_adm_path,
+      selected.adm_path,
+      directFileName ? `dayzps/config/${directFileName}` : null,
+    );
+
+    if (!directFileName || !selected.nitrado_service_id) {
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        message: "Selected ADM server has no known ADM filename/path yet; broad discovery is deferred to a separate run.",
+        skippedNotDue: 1,
+      });
+    }
+
+    if (!env.TOKEN_ENCRYPTION_KEY || !selected.encrypted_token || !selected.token_iv || !selected.token_auth_tag) {
+      await incrementAdmReadFailureCounter(env, selected.id, directFileName, "No Nitrado token is available for ADM Worker file read.");
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedAdmFile: directFileName,
+        failed: 1,
+        message: "No Nitrado token is available for ADM Worker file read.",
+      });
+    }
+
+    const token = await decryptToken(selected.encrypted_token, selected.token_iv, selected.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+    const read = await readAdmFileTextWithFallback({
+      token,
+      serviceId: selected.nitrado_service_id,
+      fileName: directFileName,
+      originalPath: directPath ?? `dayzps/config/${directFileName}`,
+      options: {
+        mode: "full",
+        fullDownloadFallback: true,
+        maxPathVariants: Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+        maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
+        maxChunkedReadChunks: budget.maxChunkedReadChunks,
+        diagnostics: {
+          db: requireDb(env),
+          serverId: selected.id,
+          serviceId: selected.nitrado_service_id,
+          fileName: directFileName,
+          budget: budget.diagnosticRows,
+        },
+      },
+    });
+
+    const scope = verifyAdmServerScope(selected, crypto.randomUUID());
+    const discoveredFile: DiscoveredAdmFileForSync = {
+      name: directFileName,
+      path: read.selectedPath ?? directPath ?? `dayzps/config/${directFileName}`,
+      timestamp: extractAdmTimestampScore(directFileName),
+    };
+    const lines = splitAdmText(read.text ?? "");
+    const hasReadableAdm = read.ok && lines.length > 0;
+
+    if (!hasReadableAdm) {
+      const diagnostic = latestAdmFileReadDiagnostic(read);
+      const message = summarizeAdmFileReadOutcomes(read)
+        || read.downloadError
+        || read.seekError
+        || "Nitrado did not return readable DayZ ADM text for this file.";
+      await recordAdmFileAttempt(env, scope, discoveredFile, {
+        status: "unreadable",
+        lineCount: 0,
+        rawKillLinesFound: 0,
+        parsedKillLinesFound: 0,
+        insertedKills: 0,
+        parserSkippedLines: 0,
+        message,
+        diagnostic,
+      });
+      await incrementAdmReadFailureCounter(env, selected.id, directFileName, message);
+      await upsertSyncState(env, selected.id, {
+        latestAdmFile: directFileName,
+        latestAdmPath: discoveredFile.path,
+        sourceServiceId: selected.nitrado_service_id,
+        lastProcessedFile: selected.last_processed_file,
+        lastProcessedLine: Number(selected.last_processed_line ?? 0),
+        lastProcessedOffset: Number(selected.last_processed_offset ?? 0),
+        status: "latest_adm_unreadable",
+        message,
+        lastSyncAt: new Date().toISOString(),
+        linesRead: 0,
+        linesProcessed: 0,
+        rawEventsStored: 0,
+        playerEventsStored: 0,
+        killEventsStored: 0,
+        eventsCreated: 0,
+        killsCreated: 0,
+        unknownLines: 0,
+        duplicateLines: 0,
+        syncDurationMs: 0,
+        readableRoute: null,
+        rawKillLinesFound: 0,
+        parsedKillLinesFound: 0,
+        parserSkippedLines: 0,
+        unreadableFilesQueued: 1,
+        newestUnprocessedAdmFile: directFileName,
+      });
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedAdmFile: directFileName,
+        latestAdmUnreadableCount: 1,
+        unavailable: 1,
+        skippedUnreadable: 1,
+        message,
+      });
+    }
+
+    await resetAdmReadFailureCounter(env, selected.id);
+    await recordAdmFileAttempt(env, scope, discoveredFile, {
+      status: "queued",
+      lineCount: lines.length,
+      rawKillLinesFound: lines.filter(hasRawPlayerKillLine).length,
+      parsedKillLinesFound: 0,
+      insertedKills: 0,
+      parserSkippedLines: 0,
+      message: null,
+    });
+
+    const existingJob = await getAdmImportJobForFilename(env, selected.id, directFileName);
+    const job = existingJob
+      ? toAdmImportJobProgress(existingJob)
+      : await createAdmImportJobForServer(env, {
+        linkedServerId: selected.id,
+        filename: directFileName,
+        admText: lines.join("\n"),
+        source: SCHEDULED_ADM_IMPORT_SOURCE,
+        chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+      });
+    await recordAdmImportJobProgressInSyncState(env, {
+      id: job.job_id,
+      server_id: selected.id,
+      source_service_id: selected.nitrado_service_id,
+      filename: directFileName,
+      source: SCHEDULED_ADM_IMPORT_SOURCE,
+      status: job.status,
+      adm_text: lines.join("\n"),
+      total_lines: job.total_lines,
+      current_line: job.current_line,
+      chunk_size: job.chunk_size,
+      total_chunks: job.total_chunks,
+      chunks_processed: job.chunks_processed,
+      import_hit_lines: job.import_hit_lines ? 1 : 0,
+      raw_kill_lines_found: 0,
+      last_chunk_index: -1,
+      failed_chunk_index: null,
+      parsed_kills: 0,
+      written_kills: 0,
+      duplicate_skips: 0,
+      joins: 0,
+      disconnects: 0,
+      playerlist_snapshots: 0,
+      deaths: 0,
+      suicides: 0,
+      uncredited_deaths: 0,
+      hit_lines: 0,
+      raw_events: 0,
+      player_events: 0,
+      failed_writes: 0,
+      public_cache_updated: 0,
+      discord_jobs_queued: 0,
+      warnings_json: "[]",
+      error_message: null,
+      result_json: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      completed_at: null,
+    }, "adm_import_job_queued", `Queued scheduled ADM chunk import for ${directFileName}.`);
+    await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id);
+
+    return admWorkerResult({
+      metadata,
+      selectedLinkedServerId: selected.id,
+      selectedAdmFile: directFileName,
+      succeeded: 1,
+      newAdmReadableCount: 1,
+      processingProcessed: 1,
+      message: `Queued scheduled ADM chunk import for ${directFileName}.`,
+    });
+  } finally {
+    admSchemaEnsureSkipDepth = Math.max(0, admSchemaEnsureSkipDepth - 1);
+  }
+}
+
+async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWorkerSelectedServer | null> {
+  const now = new Date().toISOString();
+  const row = await requireDb(env)
+    .prepare(
+      `WITH cursor AS (
+         SELECT value FROM adm_worker_state WHERE key = ? LIMIT 1
+       ),
+       eligible AS (
+         SELECT
+           linked_servers.id,
+           linked_servers.user_id,
+           linked_servers.guild_id,
+           linked_servers.nitrado_service_id,
+           linked_servers.server_name,
+           linked_servers.display_name,
+           linked_servers.hostname,
+           linked_servers.nitrado_service_name,
+           server_log_config.adm_path,
+           server_subscriptions.plan_key,
+           server_subscriptions.status AS subscription_status,
+           adm_sync_state.latest_adm_file,
+           adm_sync_state.latest_adm_path,
+           adm_sync_state.last_processed_file,
+           adm_sync_state.last_processed_line,
+           adm_sync_state.last_processed_offset,
+           (
+             SELECT adm_file
+             FROM adm_sync_file_state
+             WHERE adm_sync_file_state.linked_server_id = linked_servers.id
+               AND adm_sync_file_state.status IN ('discovered', 'unreadable')
+               AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
+             ORDER BY adm_sync_file_state.adm_file ASC
+             LIMIT 1
+           ) AS target_adm_file,
+           (
+             SELECT adm_path
+             FROM adm_sync_file_state
+             WHERE adm_sync_file_state.linked_server_id = linked_servers.id
+               AND adm_sync_file_state.status IN ('discovered', 'unreadable')
+               AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
+             ORDER BY adm_sync_file_state.adm_file ASC
+             LIMIT 1
+           ) AS target_adm_path,
+           (
+             SELECT COUNT(*)
+             FROM adm_import_jobs
+             WHERE adm_import_jobs.server_id = linked_servers.id
+               AND adm_import_jobs.source = ?
+               AND adm_import_jobs.status IN ('queued', 'processing', 'parsing', 'writing', 'failed_retryable', 'rebuilding')
+           ) AS active_import_jobs,
+           nitrado_connections.encrypted_token,
+           nitrado_connections.token_iv,
+           nitrado_connections.token_auth_tag
+         FROM linked_servers
+         JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+         JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
+         LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+         LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+         LEFT JOIN nitrado_connections ON nitrado_connections.id = (
+           SELECT id
+           FROM nitrado_connections latest_connection
+           WHERE latest_connection.user_id = linked_servers.user_id
+             AND latest_connection.linked_server_id = linked_servers.id
+           ORDER BY latest_connection.updated_at DESC, latest_connection.id DESC
+           LIMIT 1
+         )
+         WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+           AND linked_servers.nitrado_service_id IS NOT NULL
+           AND linked_servers.nitrado_service_id != ''
+           AND lower(server_subscriptions.status) IN ('active', 'trialing')
+           AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND (
+             COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
+             OR COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
+             OR EXISTS (
+               SELECT 1
+               FROM adm_import_jobs
+               WHERE adm_import_jobs.server_id = linked_servers.id
+                 AND adm_import_jobs.source = ?
+                 AND adm_import_jobs.status IN ('queued', 'processing', 'parsing', 'writing', 'failed_retryable', 'rebuilding')
+               LIMIT 1
+             )
+           )
+       )
+       SELECT *
+       FROM eligible
+       ORDER BY
+         CASE WHEN id > COALESCE((SELECT value FROM cursor), '') THEN 0 ELSE 1 END,
+         id ASC
+       LIMIT 1`,
+    )
+    .bind(cursorKey, SCHEDULED_ADM_IMPORT_SOURCE, now, now, SCHEDULED_ADM_IMPORT_SOURCE)
+    .first<AdmWorkerSelectedServer>();
+  return row ?? null;
+}
+
+async function updateAdmWorkerCursor(env: Env, cursorKey: string, linkedServerId: string) {
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO adm_worker_state (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    .bind(cursorKey, linkedServerId, new Date().toISOString())
+    .run();
+}
+
+function admWorkerResult(values: {
+  metadata: ScheduledMetadataSyncResult;
+  selectedLinkedServerId?: string | null;
+  selectedAdmFile?: string | null;
+  pendingJobs?: PendingAdmImportJobsResult;
+  succeeded?: number;
+  failed?: number;
+  unavailable?: number;
+  skippedUnreadable?: number;
+  skippedNotDue?: number;
+  latestAdmUnreadableCount?: number;
+  newAdmReadableCount?: number;
+  processingProcessed?: number;
+  message: string;
+}): AdmWorkerSyncTickResult {
+  const pendingJobs = values.pendingJobs ?? {
+    processedJobs: 0,
+    completedJobs: 0,
+    chunksProcessed: 0,
+    failedJobs: 0,
+    results: [],
+  };
+  return {
+    ok: true,
+    worker_hot_path: true,
+    selected_linked_server_id: values.selectedLinkedServerId ?? null,
+    selected_adm_file: values.selectedAdmFile ?? null,
+    pre_read_d1_queries_estimate: values.selectedLinkedServerId ? 1 : 1,
+    pre_read_outbound_fetches_estimate: values.selectedAdmFile ? 1 : 0,
+    message: values.message,
+    processed: (values.processingProcessed ?? 0) + pendingJobs.processedJobs,
+    succeeded: (values.succeeded ?? 0) + pendingJobs.completedJobs,
+    failed: (values.failed ?? 0) + pendingJobs.failedJobs,
+    unavailable: values.unavailable ?? 0,
+    skipped: values.skippedNotDue ?? 0,
+    discovery_due_count: values.selectedLinkedServerId ? 1 : 0,
+    discovery_processed_count: values.selectedAdmFile ? 1 : 0,
+    processing_due_count: values.selectedLinkedServerId ? 1 : 0,
+    processing_processed_count: (values.processingProcessed ?? 0) + pendingJobs.processedJobs,
+    skipped_not_due: values.skippedNotDue ?? 0,
+    skipped_locked: 0,
+    skipped_unreadable: values.skippedUnreadable ?? 0,
+    waiting_after_restart_count: 0,
+    latest_adm_unreadable_count: values.latestAdmUnreadableCount ?? 0,
+    new_adm_readable_count: values.newAdmReadableCount ?? 0,
+    new_data_found_count: pendingJobs.results.filter((job) => {
+      const file = job.file_result;
+      return file ? file.written_kills > 0 || file.player_events_stored > 0 || file.raw_events_stored > 0 : false;
+    }).length,
+    pending_import_jobs_processed: pendingJobs.processedJobs,
+    pending_import_chunks_processed: pendingJobs.chunksProcessed,
+    pending_import_jobs_completed: pendingJobs.completedJobs,
+    cron: null,
+    maxServers: 1,
+    maxLinesPerServer: 15000,
+    metadata: values.metadata,
+  };
+}
 
 export async function runScheduledAdmSync(
   env: Env,
@@ -7435,6 +7876,9 @@ async function getReadableAdmFilesForLinkedServer(
     preferredAdmPath?: string | null;
     maxFiles?: number;
     lookbackFiles?: number;
+    directPreferredFirst?: boolean;
+    maxListDirs?: number;
+    maxListSearches?: number;
     budget?: AdmInvocationBudget;
   } = {},
 ): Promise<{ files: ReadableAdmFileForSync[]; candidates: DiscoveredAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; apiStatus: string; message: string; readErrors: string[]; readError: string | null }> {
@@ -7482,6 +7926,9 @@ async function getReadableAdmFilesForLinkedServer(
     preferredAdmPath: options.preferredAdmPath ?? linkedServer.adm_path,
     maxFiles: options.maxFiles,
     lookbackFiles: options.lookbackFiles,
+    directPreferredFirst: options.directPreferredFirst,
+    maxListDirs: options.maxListDirs,
+    maxListSearches: options.maxListSearches,
     maxPathVariants: options.readMode === "full" ? options.budget?.maxReadAttemptsPerFile ?? 4 : 1,
     maxTokenizedAttempts: options.budget?.maxTokenizedAttemptsPerFile ?? (options.readMode === "full" ? 2 : 1),
     maxChunkedReadChunks: options.budget?.maxChunkedReadChunks,
