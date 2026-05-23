@@ -1751,7 +1751,7 @@ function buildAutomationCronHealth(input: {
   let message: string;
   if (hasSecretMismatch) {
     status = "cron_secret_mismatch";
-    message = "A cron endpoint recently failed authorization. Check that DZN_CRON_SECRET matches in Pages, Worker, and GitHub.";
+    message = "A cron endpoint recently failed authorization. Check that SYNC_CRON_SECRET/DZN_CRON_SECRET matches in Pages, Worker, and GitHub.";
   } else if (!latest || latest.age_minutes === null || latest.age_minutes > 10) {
     status = "no_recent_automation";
     message = "No recent automation cron check-in detected.";

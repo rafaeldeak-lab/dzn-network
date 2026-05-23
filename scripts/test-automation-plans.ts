@@ -197,7 +197,7 @@ const workerSource = readFileSync("workers/adm-sync-worker.ts", "utf8");
 assert.equal(workerSource.includes("DZN_CRON_SECRET"), true);
 assert.equal(workerSource.includes("env.DZN_APP_URL"), true);
 assert.equal(workerSource.includes("x-dzn-cron-secret"), true);
-assert.equal(workerSource.includes("env.SYNC_CRON_SECRET"), false);
+assert.equal(workerSource.includes("env.SYNC_CRON_SECRET"), true);
 assert.equal(workerSource.includes("source: \"cloudflare\""), true);
 assert.equal(workerSource.includes("runScheduledAdmSync"), true);
 assert.equal(workerSource.includes("selectNextAdmLinkedServerForWorker"), true);
@@ -208,8 +208,7 @@ assert.equal(workerSource.includes("results.push(await runDirectAdmSync(env, opt
 assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[1], baseUrl, secret, options));"), true);
 
 const cronAuthSource = readFileSync("functions/_lib/cron-auth.ts", "utf8");
-assert.equal(cronAuthSource.includes("env.DZN_CRON_SECRET || null"), true);
-assert.equal(cronAuthSource.includes("env.SYNC_CRON_SECRET"), false);
+assert.equal(cronAuthSource.includes("env.DZN_CRON_SECRET || env.SYNC_CRON_SECRET || null"), true);
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts: Record<string, string> };
 assert.equal(packageJson.scripts["audit:system"], "tsx scripts/audit-dzn-system.ts");

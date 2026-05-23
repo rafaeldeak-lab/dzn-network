@@ -12,6 +12,7 @@ import { isCronSecretAuthorized, requireCronSecret } from "../functions/_lib/cro
 import type { Env } from "../functions/_lib/types";
 
 const env = { DZN_CRON_SECRET: "unit-test-secret" } as Env;
+const syncSecretEnv = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
 
 assert.equal(requireCronSecret(new Request("https://dzn.test"), env)?.status, 401);
 assert.equal(requireCronSecret(new Request("https://dzn.test", {
@@ -27,6 +28,9 @@ assert.equal(isCronSecretAuthorized(new Request("https://dzn.test", {
 assert.equal(isCronSecretAuthorized(new Request("https://dzn.test", {
   headers: { "x-dzn-cron-secret": "unit-test-secret" },
 }), env), true);
+assert.equal(isCronSecretAuthorized(new Request("https://dzn.test", {
+  headers: { "x-dzn-cron-secret": "unit-test-secret" },
+}), syncSecretEnv), true);
 
 assert.equal(getServerStatusInterval("starter"), 7);
 assert.equal(getAdmPullInterval("starter"), 60);
@@ -60,8 +64,7 @@ assert.equal(effectiveEntitlementPlan("partner", "canceled"), "free");
 
 const cronAuthSource = readFileSync("functions/_lib/cron-auth.ts", "utf8");
 assert.equal(cronAuthSource.includes("requireCronSecret"), true);
-assert.equal(cronAuthSource.includes("env.DZN_CRON_SECRET || null"), true);
-assert.equal(cronAuthSource.includes("SYNC_CRON_SECRET"), false);
+assert.equal(cronAuthSource.includes("env.DZN_CRON_SECRET || env.SYNC_CRON_SECRET || null"), true);
 
 for (const file of [
   "functions/api/sync/metadata/run.ts",

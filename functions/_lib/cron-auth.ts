@@ -25,7 +25,7 @@ export function isCronSecretAuthorized(request: Request, env: Env) {
 }
 
 export function getCronSecret(env: Env) {
-  return env.DZN_CRON_SECRET || null;
+  return env.DZN_CRON_SECRET || env.SYNC_CRON_SECRET || null;
 }
 
 function timingSafeEqual(left: string, right: string) {

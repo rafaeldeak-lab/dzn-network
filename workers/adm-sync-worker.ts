@@ -329,7 +329,7 @@ function appBaseUrl(env: Env) {
 }
 
 function getCronSecret(env: Env) {
-  return env.DZN_CRON_SECRET || null;
+  return env.DZN_CRON_SECRET || env.SYNC_CRON_SECRET || null;
 }
 
 function isHealthAuthorized(request: Request, env: Env) {

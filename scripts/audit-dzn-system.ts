@@ -83,12 +83,6 @@ function checkIncludes(relativePath: string, expected: string, title: string, de
   else fail(title, `${relativePath} does not contain ${expected}.`);
 }
 
-function checkNotIncludes(relativePath: string, unexpected: string, title: string) {
-  const source = readSource(relativePath);
-  if (!source.includes(unexpected)) pass(title, `${relativePath} does not contain ${unexpected}.`);
-  else fail(title, `${relativePath} still contains ${unexpected}.`);
-}
-
 function likelyFormatWarning(key: string, value: string) {
   if (key === "DZN_APP_URL" || key === "DISCORD_REDIRECT_URI") {
     try {
@@ -213,8 +207,7 @@ function auditSyncEndpoints() {
     checkIncludes(endpoint, "requireCronSecret", `${endpoint} uses shared cron auth`);
   }
   checkFile("functions/_lib/cron-auth.ts", "Shared cron auth helper");
-  checkIncludes("functions/_lib/cron-auth.ts", "env.DZN_CRON_SECRET || null", "Cron auth uses DZN_CRON_SECRET");
-  checkNotIncludes("functions/_lib/cron-auth.ts", "SYNC_CRON_SECRET", "Cron auth does not accept old SYNC_CRON_SECRET");
+  checkIncludes("functions/_lib/cron-auth.ts", "env.DZN_CRON_SECRET || env.SYNC_CRON_SECRET || null", "Cron auth accepts DZN_CRON_SECRET and SYNC_CRON_SECRET");
   checkFile("functions/api/automation/health.ts", "Automation health endpoint");
   checkIncludes("functions/api/automation/health.ts", "requireDznAdmin", "Automation health is Owner/Admin only");
   checkFile("functions/api/servers/[serverId]/auto-posts/run-now.ts", "Server Run Now endpoint");
