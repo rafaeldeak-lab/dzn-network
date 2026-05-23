@@ -12,46 +12,46 @@ jobs:
     steps:
       - name: Trigger scheduled metadata and ADM sync
         env:
-          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           DZN_APP_URL: ${{ vars.DZN_APP_URL }}
         run: |
-          if [ -z "$DZN_CRON_SECRET" ]; then
-            echo "DZN_CRON_SECRET is not configured."
+          if [ -z "$SYNC_CRON_SECRET" ]; then
+            echo "SYNC_CRON_SECRET is not configured."
             exit 1
           fi
           APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
 
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/metadata/run" \
-            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
-            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions","max_servers":25}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/adm/run" \
-            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
-            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions","max_servers":1,"max_lines_per_server":50000}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/public-snapshots/run" \
-            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
-            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions"}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/discord-posts/run" \
-            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
-            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions","max_jobs":25}'
 
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/sync/ctf-scorecards/run" \
-            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
-            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data '{"source":"github-backup","cron":"github-actions"}'

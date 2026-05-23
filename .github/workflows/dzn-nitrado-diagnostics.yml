@@ -31,15 +31,15 @@ jobs:
     steps:
       - name: Run production Nitrado ADM diagnostic
         env:
-          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           DZN_APP_URL: ${{ vars.DZN_APP_URL }}
           SERVICE_ID: ${{ inputs.serviceId }}
           FILE_PATH: ${{ inputs.filePath }}
           RETRY_UNREADABLE: ${{ inputs.retryUnreadable }}
           RETRY_LIMIT: ${{ inputs.limit }}
         run: |
-          if [ -z "$DZN_CRON_SECRET" ]; then
-            echo "DZN_CRON_SECRET is not configured."
+          if [ -z "$SYNC_CRON_SECRET" ]; then
+            echo "SYNC_CRON_SECRET is not configured."
             exit 1
           fi
 
@@ -56,8 +56,8 @@ jobs:
           echo "Running sanitized Nitrado file-read diagnostic for service ${SERVICE_ID}."
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/debug/nitrado-file-read" \
-            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
-            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data @diagnostic-payload.json
 
@@ -79,8 +79,8 @@ jobs:
             echo "Retrying unreadable ADM files for service ${SERVICE_ID}."
             curl --fail-with-body --silent --show-error \
               -X POST "${APP_URL}/api/sync/adm/retry-unreadable" \
-              -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
-              -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+              -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+              -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
               -H "Content-Type: application/json" \
               --data @retry-payload.json
           fi
