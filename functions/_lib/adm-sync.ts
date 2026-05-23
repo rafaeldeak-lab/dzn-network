@@ -12,6 +12,7 @@ import {
   fetchReadableNitradoAdmFiles,
   fetchReadableNitradoAdmLines,
   getAdmLogStoragePath,
+  latestAdmFileReadDiagnostic,
   mockAdmLogDetection,
   mockNitradoLogAccessDiagnostics,
   readAdmFileTextWithFallback,
@@ -3137,6 +3138,7 @@ export async function planAdmBackfillJobsForServer(
   });
   readableFiles.push(...retryPromotion.readableFiles);
   const readErrorByName = new Map<string, string | null>();
+  const readDiagnosticByName = new Map<string, NonNullable<ReturnType<typeof latestAdmFileReadDiagnostic>>>();
   for (const error of batch.readErrors) {
     const [filename, ...rest] = error.split(":");
     const key = normalizeAdmFilenameKey(filename);
@@ -3181,6 +3183,7 @@ export async function planAdmBackfillJobsForServer(
         readableByName.set(normalizeAdmFilenameKey(read.file.name), read.file);
       } else {
         readErrorByName.set(normalizeAdmFilenameKey(filename), read.error);
+        if (read.diagnostic) readDiagnosticByName.set(normalizeAdmFilenameKey(filename), read.diagnostic);
       }
     }
     plannerFiles = batch.candidates.map((file) => {
@@ -3219,6 +3222,7 @@ export async function planAdmBackfillJobsForServer(
       insertedKills: 0,
       parserSkippedLines: 0,
       message: unreadable.error ?? "ADM file exists on Nitrado but could not be downloaded. DZN will retry later without blocking newer files.",
+      diagnostic: readDiagnosticByName.get(normalizeAdmFilenameKey(candidate.name)) ?? null,
     });
   }
 
@@ -3254,13 +3258,21 @@ export async function planAdmBackfillJobsForServer(
     .map((job) => job.filename);
   const status = activeJob || createdJobs.length ? "adm_backfill_queued" : plan.missingFiles.length ? "latest_adm_unreadable" : "adm_backfill_caught_up";
   const ok = true;
-  const message = activeJob
+  const baseMessage = activeJob
     ? `ADM backfill is processing ${activeJob.filename} chunk ${Math.min(activeJob.total_chunks, activeJob.chunks_processed + 1)}/${activeJob.total_chunks}.`
     : createdJobs.length
       ? `Queued ${createdJobs.length} missing ADM file${createdJobs.length === 1 ? "" : "s"} for scheduled backfill.`
       : plan.missingFiles.length
         ? `Missing ADM files are unreadable or already queued. ${plan.nextAction}`
         : "ADM backfill is caught up.";
+  const latestUnreadable = plan.unreadableFiles.at(-1) ?? null;
+  const latestUnreadableDiagnostic = latestUnreadable
+    ? readDiagnosticByName.get(normalizeAdmFilenameKey(latestUnreadable.filename)) ?? null
+    : null;
+  const syncSummary = plan.unreadableFiles.length
+    ? `ADM sync discovered ${batch.filesFound} files; ${readableFiles.length} readable; ${plan.unreadableFiles.length} unreadable; ${createdJobs.length} queued; latest unreadable ${latestUnreadable?.filename ?? "unknown"} ${latestUnreadableDiagnostic?.httpStatus ? `HTTP ${latestUnreadableDiagnostic.httpStatus}` : latestUnreadableDiagnostic?.endpointKind ?? latestUnreadable?.error ?? "read failed"}.`
+    : null;
+  const message = syncSummary ? `${baseMessage} ${syncSummary}` : baseMessage;
 
   if (newestReadable || retryPromotion.readableFiles.length > 0) {
     await resetAdmReadFailureCounter(env, scope.linkedServerId);
@@ -5639,6 +5651,44 @@ async function getLinkedServerForAdmImport(env: Env, linkedServerId: string): Pr
   };
 }
 
+async function getLinkedServerForAdmImportByServiceId(env: Env, serviceId: string): Promise<ManualImportLinkedServer | null> {
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT
+         linked_servers.id,
+         linked_servers.user_id,
+         linked_servers.guild_id,
+         linked_servers.nitrado_service_id,
+         linked_servers.server_name,
+         linked_servers.display_name,
+         linked_servers.hostname,
+         linked_servers.nitrado_service_name,
+         server_log_config.adm_path AS adm_path,
+         server_subscriptions.plan_key,
+         server_subscriptions.status AS subscription_status
+       FROM linked_servers
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE linked_servers.nitrado_service_id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC, linked_servers.updated_at DESC
+       LIMIT 1`,
+    )
+    .bind(serviceId)
+    .first<SyncLinkedServer & {
+      guild_id: string | null;
+      plan_key: string | null;
+      subscription_status: string | null;
+    }>();
+  if (!row) return null;
+  return {
+    ...row,
+    plan_key: normalizePlanKey(row.plan_key),
+    subscription_status: row.subscription_status ?? null,
+  };
+}
+
 function sanitizeManualAdmFilename(value: string) {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 240) return null;
@@ -5685,6 +5735,14 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["cursor_recovery_strategy", "TEXT"],
     ["cursor_recovery_reason", "TEXT"],
     ["consecutive_failed_adm_reads", "INTEGER DEFAULT 0"],
+  ]);
+  await ensureMissingColumns(db, "adm_sync_file_state", [
+    ["last_http_status", "INTEGER"],
+    ["last_http_status_text", "TEXT"],
+    ["last_endpoint_kind", "TEXT"],
+    ["last_method", "TEXT"],
+    ["last_response_excerpt", "TEXT"],
+    ["last_diagnostic_at", "TEXT"],
   ]);
   await ensureMissingColumns(db, "adm_raw_events", [
     ["source_service_id", "TEXT"],
@@ -5935,18 +5993,29 @@ async function recordAdmFileAttempt(
     parserSkippedLines: number;
     lastLineProcessed?: number;
     message: string | null;
+    diagnostic?: {
+      httpStatus?: number | null;
+      httpStatusText?: string | null;
+      endpointKind?: string | null;
+      method?: string | null;
+      responseExcerpt?: string | null;
+    } | null;
   },
 ) {
   const db = requireDb(env);
   const now = new Date().toISOString();
+  const diagnostic = values.diagnostic
+    ?? (values.status === "unreadable" ? await getLatestNitradoFileReadAttemptForState(db, context, file.name).catch(() => null) : null);
   await db
     .prepare(
       `INSERT INTO adm_sync_file_state (
         id, linked_server_id, source_service_id, adm_file, adm_path, status,
         first_seen_at, last_checked_at, last_readable_at, processed_at, line_count,
         last_line_processed, raw_kill_lines_found, parsed_kill_lines_found,
-        inserted_kills, parser_skipped_lines, retry_count, last_error, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        inserted_kills, parser_skipped_lines, retry_count, last_error,
+        last_http_status, last_http_status_text, last_endpoint_kind, last_method,
+        last_response_excerpt, last_diagnostic_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(linked_server_id, source_service_id, adm_file) DO UPDATE SET
         adm_path = COALESCE(excluded.adm_path, adm_sync_file_state.adm_path),
         status = CASE
@@ -5971,6 +6040,12 @@ async function recordAdmFileAttempt(
           WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'failed_unreadable') THEN adm_sync_file_state.last_error
           ELSE excluded.last_error
         END,
+        last_http_status = COALESCE(excluded.last_http_status, adm_sync_file_state.last_http_status),
+        last_http_status_text = COALESCE(excluded.last_http_status_text, adm_sync_file_state.last_http_status_text),
+        last_endpoint_kind = COALESCE(excluded.last_endpoint_kind, adm_sync_file_state.last_endpoint_kind),
+        last_method = COALESCE(excluded.last_method, adm_sync_file_state.last_method),
+        last_response_excerpt = COALESCE(excluded.last_response_excerpt, adm_sync_file_state.last_response_excerpt),
+        last_diagnostic_at = COALESCE(excluded.last_diagnostic_at, adm_sync_file_state.last_diagnostic_at),
         updated_at = excluded.updated_at`,
     )
     .bind(
@@ -5992,9 +6067,47 @@ async function recordAdmFileAttempt(
       values.parserSkippedLines,
       values.status === "unreadable" ? 1 : 0,
       values.message,
+      diagnostic?.httpStatus ?? null,
+      diagnostic?.httpStatusText ?? null,
+      diagnostic?.endpointKind ?? null,
+      diagnostic?.method ?? null,
+      diagnostic?.responseExcerpt ?? null,
+      diagnostic ? now : null,
       now,
     )
     .run();
+}
+
+async function getLatestNitradoFileReadAttemptForState(db: D1Database, context: AdmSyncContext, filename: string) {
+  const row = await db
+    .prepare(
+      `SELECT method, endpoint_kind, status, http_status, http_status_text, error_code, error_message, response_excerpt
+       FROM nitrado_file_read_attempts
+       WHERE service_id = ?
+         AND (server_id IS NULL OR server_id = ?)
+         AND file_name = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .bind(context.nitradoServiceId, context.linkedServerId, filename)
+    .first<{
+      method: string | null;
+      endpoint_kind: string | null;
+      status: string | null;
+      http_status: number | null;
+      http_status_text: string | null;
+      error_code: string | null;
+      error_message: string | null;
+      response_excerpt: string | null;
+    }>();
+  if (!row) return null;
+  return {
+    httpStatus: row.http_status ?? null,
+    httpStatusText: row.http_status_text ?? null,
+    endpointKind: row.endpoint_kind ?? null,
+    method: row.method ?? null,
+    responseExcerpt: row.response_excerpt ?? null,
+  };
 }
 
 async function countQueuedUnreadableAdmFiles(env: Env, linkedServerId: string) {
@@ -7228,6 +7341,13 @@ export async function getReadableAdmLinesForLinkedServer(
     mode: options.readMode ?? "sample",
     preferredAdmFileName: options.preferredAdmFileName ?? undefined,
     preferredAdmPath: options.preferredAdmPath ?? linkedServer.adm_path,
+    diagnostics: {
+      db: requireDb(env),
+      serverId: linkedServer.id,
+      serviceId: linkedServer.nitrado_service_id,
+      fileName: options.preferredAdmFileName ?? undefined,
+      filePath: options.preferredAdmPath ?? linkedServer.adm_path,
+    },
   });
   if (readable.diagnostics.readable.found && !readable.lines.length) {
     throw new Error("Diagnostics could read ADM lines, but sync helper failed to process them.");
@@ -7310,6 +7430,11 @@ async function getReadableAdmFilesForLinkedServer(
     preferredAdmPath: options.preferredAdmPath ?? linkedServer.adm_path,
     maxFiles: options.maxFiles,
     lookbackFiles: options.lookbackFiles,
+    diagnostics: {
+      db: requireDb(env),
+      serverId: linkedServer.id,
+      serviceId: linkedServer.nitrado_service_id,
+    },
   });
 
   return {
@@ -7330,9 +7455,13 @@ async function readSpecificAdmFileForBackfill(
   env: Env,
   linkedServer: SyncLinkedServer,
   candidate: DiscoveredAdmFileForSync,
-): Promise<{ file: ReadableAdmFileForSync | null; error: string | null }> {
+): Promise<{
+  file: ReadableAdmFileForSync | null;
+  error: string | null;
+  diagnostic: ReturnType<typeof latestAdmFileReadDiagnostic> | null;
+}> {
   if (!linkedServer.nitrado_service_id) {
-    return { file: null, error: "No Nitrado service ID is available for ADM backfill reading." };
+    return { file: null, error: "No Nitrado service ID is available for ADM backfill reading.", diagnostic: null };
   }
 
   try {
@@ -7345,13 +7474,22 @@ async function readSpecificAdmFileForBackfill(
       options: {
         mode: "full",
         fullDownloadFallback: true,
+        diagnostics: {
+          db: requireDb(env),
+          serverId: linkedServer.id,
+          serviceId: linkedServer.nitrado_service_id,
+          fileName: candidate.name,
+          filePath: candidate.path ?? candidate.name,
+        },
       },
     });
+    const diagnostic = latestAdmFileReadDiagnostic(read);
     const lines = splitAdmText(read.text ?? "");
     if (!read.ok || !looksLikeAdmText(lines)) {
       return {
         file: null,
-        error: read.downloadError ?? read.seekError ?? "ADM file exists on Nitrado but could not be read as admin log text.",
+        error: diagnostic?.message ?? read.downloadError ?? read.seekError ?? "ADM file exists on Nitrado but could not be read as admin log text.",
+        diagnostic,
       };
     }
 
@@ -7363,9 +7501,10 @@ async function readSpecificAdmFileForBackfill(
         readableRouteUsed: read.readMethod === "seek" ? "file_server_seek" : "file_server_download_fallback",
       },
       error: null,
+      diagnostic,
     };
   } catch (error) {
-    return { file: null, error: safeSyncErrorMessage(error) };
+    return { file: null, error: safeSyncErrorMessage(error), diagnostic: null };
   }
 }
 
@@ -7384,6 +7523,7 @@ async function retryUnreadableAdmFileStatesForServer(
   options: {
     handledFilenames: string[];
     limit: number;
+    onlyLatest?: boolean;
   },
 ): Promise<{
   createdJobs: AdmImportJobProgressResult[];
@@ -7393,6 +7533,7 @@ async function retryUnreadableAdmFileStatesForServer(
   await markExpiredUnreadableAdmFilesFailed(env, scope);
   const db = requireDb(env);
   const cutoff = new Date(Date.now() - ADM_UNREADABLE_RETRY_AFTER_MS).toISOString();
+  const orderBy = options.onlyLatest ? "adm_file DESC" : "adm_file ASC";
   const rows = await db
     .prepare(
       `SELECT adm_file, adm_path, retry_count, last_checked_at, last_error
@@ -7402,7 +7543,7 @@ async function retryUnreadableAdmFileStatesForServer(
          AND status = 'unreadable'
          AND COALESCE(retry_count, 0) < ?
          AND (last_checked_at IS NULL OR last_checked_at <= ?)
-       ORDER BY adm_file ASC
+       ORDER BY ${orderBy}
        LIMIT ?`,
     )
     .bind(scope.linkedServerId, scope.nitradoServiceId, ADM_UNREADABLE_RETRY_LIMIT, cutoff, Math.max(1, options.limit))
@@ -7485,6 +7626,7 @@ async function retryUnreadableAdmFileStatesForServer(
         parserSkippedLines: report.skippedDeadHitLines,
         lastLineProcessed: 0,
         message: null,
+        diagnostic: read.diagnostic,
       });
       createdJobs.push(jobRow ? toAdmImportJobProgress(jobRow) : created);
       continue;
@@ -7500,6 +7642,7 @@ async function retryUnreadableAdmFileStatesForServer(
       insertedKills: 0,
       parserSkippedLines: 0,
       message: error,
+      diagnostic: read.diagnostic,
     });
     if (Number(row.retry_count ?? 0) + 1 >= ADM_UNREADABLE_RETRY_LIMIT) {
       await markAdmFileFailedUnreadable(env, scope, filename, error);
@@ -7508,6 +7651,64 @@ async function retryUnreadableAdmFileStatesForServer(
 
   await markExpiredUnreadableAdmFilesFailed(env, scope);
   return { createdJobs, readableFiles, readErrorsByFilename };
+}
+
+export async function retryUnreadableAdmFilesForService(
+  env: Env,
+  options: {
+    serviceId: string;
+    limit?: number;
+    onlyLatest?: boolean;
+  },
+) {
+  await ensureAdmSyncSchema(env);
+  const serviceId = String(options.serviceId ?? "").trim();
+  if (!serviceId) throw new Error("Nitrado service id is required");
+  const linkedServer = await getLinkedServerForAdmImportByServiceId(env, serviceId);
+  if (!linkedServer) throw new Error("No linked server found for that Nitrado service id");
+  const scope = verifyAdmServerScope(linkedServer, crypto.randomUUID());
+  const handledFilenames = await getHandledAdmFilenames(env, scope.linkedServerId, scope.nitradoServiceId);
+  const beforeRows = await requireDb(env)
+    .prepare(
+      `SELECT adm_file
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND source_service_id = ?
+         AND status = 'unreadable'
+       ORDER BY adm_file ${options.onlyLatest ? "DESC" : "ASC"}
+       LIMIT ?`,
+    )
+    .bind(scope.linkedServerId, scope.nitradoServiceId, Math.max(1, Math.min(25, Math.trunc(Number(options.limit ?? 5) || 5))))
+    .all<{ adm_file: string }>();
+  const result = await retryUnreadableAdmFileStatesForServer(env, linkedServer, scope, {
+    handledFilenames,
+    limit: Math.max(1, Math.min(25, Math.trunc(Number(options.limit ?? 5) || 5))),
+    onlyLatest: options.onlyLatest,
+  });
+  const readable = result.readableFiles.length;
+  const stillUnreadable = result.readErrorsByFilename.size;
+  return {
+    ok: true,
+    serviceId,
+    linkedServerId: scope.linkedServerId,
+    retried: (beforeRows.results ?? []).length,
+    readable,
+    stillUnreadable,
+    queued: result.createdJobs.length,
+    queuedJobs: result.createdJobs,
+    details: [
+      ...result.readableFiles.map((file) => ({
+        filename: file.name,
+        status: "queued",
+        lineCount: file.lines.length,
+      })),
+      ...[...result.readErrorsByFilename.entries()].map(([filename, error]) => ({
+        filename,
+        status: "still_unreadable",
+        error,
+      })),
+    ],
+  };
 }
 
 async function markExpiredUnreadableAdmFilesFailed(env: Env, scope: AdmSyncContext) {
@@ -7850,8 +8051,34 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     parser_skipped_lines INTEGER DEFAULT 0,
     retry_count INTEGER DEFAULT 0,
     last_error TEXT,
+    last_http_status INTEGER,
+    last_http_status_text TEXT,
+    last_endpoint_kind TEXT,
+    last_method TEXT,
+    last_response_excerpt TEXT,
+    last_diagnostic_at TEXT,
     ignored_at TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS nitrado_file_read_attempts (
+    id TEXT PRIMARY KEY,
+    server_id TEXT,
+    service_id TEXT NOT NULL,
+    file_name TEXT,
+    file_path TEXT,
+    method TEXT NOT NULL,
+    endpoint_kind TEXT NOT NULL,
+    attempt_number INTEGER DEFAULT 1,
+    status TEXT NOT NULL,
+    http_status INTEGER,
+    http_status_text TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    response_excerpt TEXT,
+    response_headers_json TEXT,
+    duration_ms INTEGER,
+    request_url_redacted TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS adm_import_jobs (
     id TEXT PRIMARY KEY,
@@ -7991,6 +8218,12 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_adm_sync_file_state_server_file ON adm_sync_file_state(linked_server_id, source_service_id, adm_file)",
   "CREATE INDEX IF NOT EXISTS idx_adm_sync_file_state_status ON adm_sync_file_state(status)",
   "CREATE INDEX IF NOT EXISTS idx_adm_sync_file_state_checked ON adm_sync_file_state(last_checked_at)",
+  "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_service_id ON nitrado_file_read_attempts(service_id)",
+  "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_server_id ON nitrado_file_read_attempts(server_id)",
+  "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_file_name ON nitrado_file_read_attempts(file_name)",
+  "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_status ON nitrado_file_read_attempts(status)",
+  "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_http_status ON nitrado_file_read_attempts(http_status)",
+  "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_created_at ON nitrado_file_read_attempts(created_at)",
   "CREATE INDEX IF NOT EXISTS idx_adm_import_jobs_server ON adm_import_jobs(server_id, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_adm_import_jobs_status ON adm_import_jobs(status, updated_at)",
   "CREATE INDEX IF NOT EXISTS idx_adm_raw_events_linked_server_id ON adm_raw_events(linked_server_id)",

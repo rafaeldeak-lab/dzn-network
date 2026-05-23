@@ -1,4 +1,15 @@
 import { mockNitradoServices } from "./mock";
+import {
+  classifyFetchError,
+  errorCodeForHttpStatus,
+  humanNitradoReadError,
+  recordNitradoFileReadAttempt,
+  sanitizeHeaders,
+  sanitizeResponseExcerpt,
+  type NitradoFileReadAttemptPayload,
+  type NitradoFileReadDiagnosticsContext,
+  type NitradoFileReadEndpointKind,
+} from "./nitrado-diagnostics";
 import type { NitradoService } from "./types";
 
 const NITRADO_API = "https://api.nitrado.net";
@@ -41,6 +52,8 @@ type AdmReadOptions = {
   maxFiles?: number;
   lookbackFiles?: number;
   fullDownloadFallback?: boolean;
+  diagnostics?: NitradoFileReadDiagnosticsContext;
+  timeoutMs?: number;
 };
 
 type NitradoRawService = {
@@ -98,6 +111,24 @@ type GameSpecificLogDetails = {
 type SafeApiStatus = "OK" | "401" | "403" | "404" | "429" | "error";
 type SampleFetchStatus = SafeApiStatus | "not_attempted";
 
+type AdmSampleResult = {
+  sample: string | null;
+  status: SafeApiStatus;
+  downloadTokenCreated: boolean;
+  tokenUrlReceived: boolean;
+  sampleFetchAttempted: boolean;
+  sampleFetchStatus: SampleFetchStatus;
+  sampleReadSucceeded: boolean;
+  responseShape: AdmApiResponseShape;
+  errorMessageSafe: string | null;
+  endpointKind?: NitradoFileReadEndpointKind | null;
+  diagnosticStatus?: NitradoFileReadAttemptPayload["status"] | null;
+  errorCode?: string | null;
+  responseExcerpt?: string | null;
+  httpStatusCode?: number | null;
+  httpStatusText?: string | null;
+};
+
 type AdmApiResponseShape = {
   hasData: boolean;
   hasToken: boolean;
@@ -136,8 +167,13 @@ export type AdmReadAttempt = {
   pathVariantLabel: string | null;
   requestUrlPathOnly: string;
   httpStatusCode: number | null;
+  httpStatusText?: string | null;
   responseContentType: string | null;
   status: SafeApiStatus;
+  endpointKind?: NitradoFileReadEndpointKind | null;
+  diagnosticStatus?: NitradoFileReadAttemptPayload["status"] | null;
+  errorCode?: string | null;
+  responseExcerpt?: string | null;
   responseShape: AdmApiResponseShape;
   errorMessageSafe: string | null;
   downloadTokenCreated: boolean;
@@ -1780,6 +1816,70 @@ function summarizeAdmFileTextReadFailure(read: AdmFileTextFallbackResult) {
   return read.downloadError ?? read.seekError ?? pathError ?? "Nitrado did not return readable DayZ ADM text for this file.";
 }
 
+export function latestAdmFileReadDiagnostic(read: AdmFileTextFallbackResult) {
+  const attempts = [...read.readAttempts].reverse();
+  const diagnostic = attempts.find((attempt) => attempt.errorCode || attempt.diagnosticStatus || attempt.httpStatusCode || attempt.responseExcerpt)
+    ?? attempts.find((attempt) => attempt.errorMessageSafe)
+    ?? null;
+  if (!diagnostic) return null;
+  return {
+    httpStatus: diagnostic.httpStatusCode ?? null,
+    httpStatusText: diagnostic.httpStatusText ?? null,
+    endpointKind: diagnostic.endpointKind ?? (diagnostic.method === "seek" ? "nitrado_seek" : "nitrado_download"),
+    method: diagnostic.method,
+    status: diagnostic.diagnosticStatus ?? (diagnostic.status === "OK" && diagnostic.success ? "success" : "unreadable"),
+    errorCode: diagnostic.errorCode ?? null,
+    responseExcerpt: diagnostic.responseExcerpt ?? null,
+    message: humanNitradoReadError({
+      method: diagnostic.method,
+      endpointKind: diagnostic.endpointKind,
+      status: diagnostic.diagnosticStatus,
+      httpStatus: diagnostic.httpStatusCode,
+      errorCode: diagnostic.errorCode,
+      errorMessage: diagnostic.errorMessageSafe,
+    }),
+  };
+}
+
+function diagnosticContextForRead(options: AdmReadOptions, serviceId: string, file: string) {
+  const base = options.diagnostics;
+  if (!base) return null;
+  return {
+    ...base,
+    serviceId,
+    filePath: file,
+    fileName: base.fileName ?? filenameFromPath(file),
+  };
+}
+
+function filenameFromPath(value: string | null | undefined) {
+  return value ? value.split("/").filter(Boolean).at(-1) ?? null : null;
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, Math.min(30000, timeoutMs)));
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function recordReadDiagnostic(
+  context: NitradoFileReadDiagnosticsContext | null,
+  payload: Omit<NitradoFileReadAttemptPayload, "serviceId" | "serverId" | "fileName" | "filePath">,
+) {
+  if (!context) return;
+  await recordNitradoFileReadAttempt(context.db, {
+    serviceId: context.serviceId,
+    serverId: context.serverId ?? null,
+    fileName: context.fileName ?? filenameFromPath(context.filePath ?? null),
+    filePath: context.filePath ?? null,
+    ...payload,
+  });
+}
+
 async function readNitradoFileViaSeek(
   token: string,
   serviceId: string,
@@ -1794,21 +1894,48 @@ async function readNitradoFileViaSeek(
     readAttempts?.push(createReadAttempt(file, "seek", "error", {
       pathVariantLabel,
       requestUrlPathOnly,
+      endpointKind: "nitrado_seek",
+      diagnosticStatus: "unreadable",
+      errorCode: "NITRADO_UNSAFE_PATH",
       errorMessageSafe: "Skipped unsafe or placeholder path",
     }));
     return createSampleResult(null, "error", false, "error", false, "Skipped unsafe or placeholder path");
   }
 
+  const diagnosticContext = diagnosticContextForRead(options, serviceId, file);
+  const startedAt = Date.now();
   try {
     const url = new URL(`${NITRADO_API}${requestUrlPathOnly}`);
-    const response = await fetch(url, { headers: nitradoHeaders(token) });
+    const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token) }, options.timeoutMs ?? 12000);
+    const durationMs = Date.now() - startedAt;
     const responseContentType = response.headers.get("content-type");
     if (!response.ok) {
       const status = safeResponseStatus(response);
+      const bodyText = await response.text().catch(() => "");
+      const responseExcerpt = sanitizeResponseExcerpt(bodyText);
+      const errorCode = errorCodeForHttpStatus(response.status);
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "seek",
+        endpointKind: "nitrado_seek",
+        status: "non_ok_response",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        errorCode,
+        errorMessage: safeFileApiError(status),
+        responseExcerpt,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
       readAttempts?.push(createReadAttempt(file, "seek", status, {
         pathVariantLabel,
         requestUrlPathOnly,
         httpStatusCode: response.status,
+        httpStatusText: response.statusText,
+        endpointKind: "nitrado_seek",
+        diagnosticStatus: "non_ok_response",
+        errorCode,
+        responseExcerpt,
         responseContentType,
         errorMessageSafe: safeFileApiError(status),
       }));
@@ -1819,10 +1946,23 @@ async function readNitradoFileViaSeek(
     if (bodyText && (!payload || containsDayZAdminLogMarkers(bodyText))) {
       const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
       const direct = createSampleResult(bodyText.slice(0, maxBytes), "OK", false, "OK", true, null);
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "seek",
+        endpointKind: "nitrado_seek",
+        status: direct.sample ? "success" : "empty_body",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
       readAttempts?.push(createReadAttempt(file, "seek", "OK", {
         pathVariantLabel,
         requestUrlPathOnly,
         httpStatusCode: response.status,
+        httpStatusText: response.statusText,
+        endpointKind: "nitrado_seek",
+        diagnosticStatus: direct.sample ? "success" : "empty_body",
         responseContentType,
         responseShape: emptyResponseShape(),
         errorMessageSafe: null,
@@ -1834,11 +1974,26 @@ async function readNitradoFileViaSeek(
       }));
       return direct;
     }
+    await recordReadDiagnostic(diagnosticContext, {
+      method: "seek",
+      endpointKind: "nitrado_seek",
+      status: "success",
+      httpStatus: response.status,
+      httpStatusText: response.statusText,
+      responseHeadersJson: sanitizeHeaders(response.headers),
+      durationMs,
+      requestUrlRedacted: url.toString(),
+    });
     const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "seek", sample.status, {
       pathVariantLabel,
       requestUrlPathOnly,
-      httpStatusCode: response.status,
+      httpStatusCode: sample.httpStatusCode ?? response.status,
+      httpStatusText: sample.httpStatusText ?? response.statusText,
+      endpointKind: sample.endpointKind ?? "nitrado_seek",
+      diagnosticStatus: sample.diagnosticStatus ?? (sample.sample !== null ? "success" : "unreadable"),
+      errorCode: sample.errorCode ?? null,
+      responseExcerpt: sample.responseExcerpt ?? null,
       responseContentType,
       responseShape: sample.responseShape,
       errorMessageSafe: sample.errorMessageSafe,
@@ -1849,13 +2004,27 @@ async function readNitradoFileViaSeek(
       sampleReadSucceeded: sample.sample !== null,
     }));
     return sample;
-  } catch {
+  } catch (error) {
+    const classified = classifyFetchError(error);
+    await recordReadDiagnostic(diagnosticContext, {
+      method: "seek",
+      endpointKind: "nitrado_seek",
+      status: classified.status,
+      httpStatus: null,
+      errorCode: classified.errorCode,
+      errorMessage: classified.errorMessage,
+      durationMs: Date.now() - startedAt,
+      requestUrlRedacted: `${NITRADO_API}${requestUrlPathOnly}`,
+    });
     readAttempts?.push(createReadAttempt(file, "seek", "error", {
       pathVariantLabel,
       requestUrlPathOnly,
-      errorMessageSafe: "Nitrado seek request failed",
+      endpointKind: "nitrado_seek",
+      diagnosticStatus: classified.status,
+      errorCode: classified.errorCode,
+      errorMessageSafe: classified.errorCode === "FETCH_TIMEOUT" ? "Nitrado seek fetch threw: timeout" : "Nitrado seek request failed",
     }));
-    return createSampleResult(null, "error", false, "error", false, "Nitrado seek request failed");
+    return createSampleResult(null, "error", false, "error", false, classified.errorCode === "FETCH_TIMEOUT" ? "Nitrado seek fetch threw: timeout" : "Nitrado seek request failed");
   }
 }
 
@@ -1873,21 +2042,48 @@ async function readNitradoFileViaDownload(
     readAttempts?.push(createReadAttempt(file, "download", "error", {
       pathVariantLabel,
       requestUrlPathOnly,
+      endpointKind: "nitrado_download",
+      diagnosticStatus: "unreadable",
+      errorCode: "NITRADO_UNSAFE_PATH",
       errorMessageSafe: "Skipped unsafe or placeholder path",
     }));
     return createSampleResult(null, "error", false, "error", false, "Skipped unsafe or placeholder path");
   }
 
+  const diagnosticContext = diagnosticContextForRead(options, serviceId, file);
+  const startedAt = Date.now();
   try {
     const url = new URL(`${NITRADO_API}${requestUrlPathOnly}`);
-    const response = await fetch(url, { headers: nitradoHeaders(token) });
+    const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token) }, options.timeoutMs ?? 12000);
+    const durationMs = Date.now() - startedAt;
     const responseContentType = response.headers.get("content-type");
     if (!response.ok) {
       const status = safeResponseStatus(response);
+      const bodyText = await response.text().catch(() => "");
+      const responseExcerpt = sanitizeResponseExcerpt(bodyText);
+      const errorCode = errorCodeForHttpStatus(response.status, "NITRADO_FILE_REQUEST_FAILED");
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "download",
+        endpointKind: "nitrado_download",
+        status: "non_ok_response",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        errorCode,
+        errorMessage: safeFileApiError(status),
+        responseExcerpt,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
       readAttempts?.push(createReadAttempt(file, "download", status, {
         pathVariantLabel,
         requestUrlPathOnly,
         httpStatusCode: response.status,
+        httpStatusText: response.statusText,
+        endpointKind: "nitrado_download",
+        diagnosticStatus: "non_ok_response",
+        errorCode,
+        responseExcerpt,
         responseContentType,
         errorMessageSafe: safeFileApiError(status),
       }));
@@ -1898,10 +2094,23 @@ async function readNitradoFileViaDownload(
     if (bodyText && (!payload || containsDayZAdminLogMarkers(bodyText))) {
       const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
       const direct = createSampleResult(bodyText.slice(0, maxBytes), "OK", false, "OK", true, null);
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "download",
+        endpointKind: "nitrado_download",
+        status: direct.sample ? "success" : "empty_body",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
       readAttempts?.push(createReadAttempt(file, "download", "OK", {
         pathVariantLabel,
         requestUrlPathOnly,
         httpStatusCode: response.status,
+        httpStatusText: response.statusText,
+        endpointKind: "nitrado_download",
+        diagnosticStatus: direct.sample ? "success" : "empty_body",
         responseContentType,
         responseShape: emptyResponseShape(),
         errorMessageSafe: null,
@@ -1913,11 +2122,26 @@ async function readNitradoFileViaDownload(
       }));
       return direct;
     }
+    await recordReadDiagnostic(diagnosticContext, {
+      method: "download",
+      endpointKind: "nitrado_download",
+      status: "success",
+      httpStatus: response.status,
+      httpStatusText: response.statusText,
+      responseHeadersJson: sanitizeHeaders(response.headers),
+      durationMs,
+      requestUrlRedacted: url.toString(),
+    });
     const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "download", sample.status, {
       pathVariantLabel,
       requestUrlPathOnly,
-      httpStatusCode: response.status,
+      httpStatusCode: sample.httpStatusCode ?? response.status,
+      httpStatusText: sample.httpStatusText ?? response.statusText,
+      endpointKind: sample.endpointKind ?? "nitrado_download",
+      diagnosticStatus: sample.diagnosticStatus ?? (sample.sample !== null ? "success" : "unreadable"),
+      errorCode: sample.errorCode ?? null,
+      responseExcerpt: sample.responseExcerpt ?? null,
       responseContentType,
       responseShape: sample.responseShape,
       errorMessageSafe: sample.errorMessageSafe,
@@ -1928,13 +2152,27 @@ async function readNitradoFileViaDownload(
       sampleReadSucceeded: sample.sample !== null,
     }));
     return sample;
-  } catch {
+  } catch (error) {
+    const classified = classifyFetchError(error);
+    await recordReadDiagnostic(diagnosticContext, {
+      method: "download",
+      endpointKind: "nitrado_download",
+      status: classified.status,
+      httpStatus: null,
+      errorCode: classified.errorCode,
+      errorMessage: classified.errorMessage,
+      durationMs: Date.now() - startedAt,
+      requestUrlRedacted: `${NITRADO_API}${requestUrlPathOnly}`,
+    });
     readAttempts?.push(createReadAttempt(file, "download", "error", {
       pathVariantLabel,
       requestUrlPathOnly,
-      errorMessageSafe: "Nitrado download request failed",
+      endpointKind: "nitrado_download",
+      diagnosticStatus: classified.status,
+      errorCode: classified.errorCode,
+      errorMessageSafe: classified.errorCode === "FETCH_TIMEOUT" ? "Nitrado download fetch threw: timeout" : "Nitrado download request failed",
     }));
-    return createSampleResult(null, "error", false, "error", false, "Nitrado download request failed");
+    return createSampleResult(null, "error", false, "error", false, classified.errorCode === "FETCH_TIMEOUT" ? "Nitrado download fetch threw: timeout" : "Nitrado download request failed");
   }
 }
 
@@ -2213,7 +2451,7 @@ function redactServiceIdInPath(path: string) {
   return path.replace(/\/services\/[^/]+/i, "/services/{serviceId}");
 }
 
-async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string, options: AdmReadOptions = {}) {
+async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string, options: AdmReadOptions = {}): Promise<AdmSampleResult> {
   const responseShape = describeFileTokenResponseShape(payload);
   const token = extractDownloadToken(payload);
   if (!token) {
@@ -2246,17 +2484,17 @@ async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string, 
   }
 
   const mode = options.mode ?? "sample";
-  const sampleAttempts = [
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: true, offsetCount: true, authorizationToken: null, mode }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: true, authorizationToken: nitradoToken, mode }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: true, authorizationToken: null, mode }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: false, authorizationToken: nitradoToken, mode }),
-    () => fetchTokenizedFileSampleUrl(token, { tokenQuery: false, offsetCount: false, authorizationToken: null, mode }),
+  const sampleAttempts: Array<{ tokenQuery: boolean; offsetCount: boolean; authorizationToken: string | null; mode: AdmReadMode }> = [
+    { tokenQuery: true, offsetCount: true, authorizationToken: null, mode },
+    { tokenQuery: false, offsetCount: true, authorizationToken: nitradoToken, mode },
+    { tokenQuery: false, offsetCount: true, authorizationToken: null, mode },
+    { tokenQuery: false, offsetCount: false, authorizationToken: nitradoToken, mode },
+    { tokenQuery: false, offsetCount: false, authorizationToken: null, mode },
   ];
 
   let lastResult = createSampleResult(null, "error", true, "error", true, "Tokenized sample fetch failed");
-  for (const attempt of sampleAttempts) {
-    const result = await attempt();
+  for (let index = 0; index < sampleAttempts.length; index += 1) {
+    const result = await fetchTokenizedFileSampleUrl(token, sampleAttempts[index], options, index + 1);
     lastResult = result;
     if (result.sample !== null) {
       return {
@@ -2284,11 +2522,15 @@ async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string, 
 async function fetchTokenizedFileSampleUrl(
   token: DownloadTokenDescriptor,
   options: { tokenQuery: boolean; offsetCount: boolean; authorizationToken: string | null; mode: AdmReadMode },
-) {
+  readOptions: AdmReadOptions = {},
+  attemptNumber = 1,
+): Promise<AdmSampleResult> {
   if (!token.url) {
     return createSampleResult(null, "error", true, "not_attempted", false, "Download token response did not include a usable URL");
   }
 
+  const diagnosticContext = readOptions.diagnostics ?? null;
+  const startedAt = Date.now();
   try {
     const url = new URL(token.url);
     if (options.tokenQuery && token.token) url.searchParams.set("token", token.token);
@@ -2297,20 +2539,92 @@ async function fetchTokenizedFileSampleUrl(
       url.searchParams.set("count", String(options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES));
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: options.authorizationToken ? { authorization: `Bearer ${options.authorizationToken}` } : undefined,
-    });
+    }, readOptions.timeoutMs ?? 12000);
+    const durationMs = Date.now() - startedAt;
     const status = safeResponseStatus(response);
     if (!response.ok) {
-      return createSampleResult(null, status, true, status, true, "Tokenized sample fetch failed");
+      const bodyText = await response.text().catch(() => "");
+      const responseExcerpt = sanitizeResponseExcerpt(bodyText);
+      const errorCode = errorCodeForHttpStatus(response.status, "TOKENIZED_NON_OK_RESPONSE");
+      await recordReadDiagnostic(diagnosticContext, {
+        method: options.mode === "full" ? "tokenized_download" : "tokenized_sample",
+        endpointKind: "tokenized_url",
+        attemptNumber,
+        status: "non_ok_response",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        errorCode,
+        errorMessage: "Tokenized sample fetch failed",
+        responseExcerpt,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
+      return {
+        ...createSampleResult(null, status, true, status, true, "Tokenized sample fetch failed"),
+        endpointKind: "tokenized_url",
+        diagnosticStatus: "non_ok_response",
+        errorCode,
+        responseExcerpt,
+        httpStatusCode: response.status,
+        httpStatusText: response.statusText,
+      };
     }
     const text = await response.text();
     const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
+    const sample = text.slice(0, maxBytes);
+    const empty = sample.length === 0;
+    await recordReadDiagnostic(diagnosticContext, {
+      method: options.mode === "full" ? "tokenized_download" : "tokenized_sample",
+      endpointKind: "tokenized_url",
+      attemptNumber,
+      status: empty ? "empty_body" : "success",
+      httpStatus: response.status,
+      httpStatusText: response.statusText,
+      errorCode: empty ? "TOKENIZED_EMPTY_BODY" : null,
+      responseHeadersJson: sanitizeHeaders(response.headers),
+      durationMs,
+      requestUrlRedacted: url.toString(),
+    });
+    if (empty) {
+      return {
+        ...createSampleResult(null, "OK", true, "OK", true, "Tokenized URL returned empty body"),
+        endpointKind: "tokenized_url",
+        diagnosticStatus: "empty_body",
+        errorCode: "TOKENIZED_EMPTY_BODY",
+        httpStatusCode: response.status,
+        httpStatusText: response.statusText,
+      };
+    }
     return {
-      ...createSampleResult(text.slice(0, maxBytes), "OK", true, "OK", true, null),
+      ...createSampleResult(sample, "OK", true, "OK", true, null),
+      endpointKind: "tokenized_url",
+      diagnosticStatus: "success",
+      errorCode: null,
+      httpStatusCode: response.status,
+      httpStatusText: response.statusText,
     };
-  } catch {
-    return createSampleResult(null, "error", true, "error", true, "Tokenized sample fetch failed");
+  } catch (error) {
+    const classified = classifyFetchError(error);
+    await recordReadDiagnostic(diagnosticContext, {
+      method: options.mode === "full" ? "tokenized_download" : "tokenized_sample",
+      endpointKind: "tokenized_url",
+      attemptNumber,
+      status: classified.status,
+      httpStatus: null,
+      errorCode: classified.errorCode,
+      errorMessage: classified.errorMessage,
+      durationMs: Date.now() - startedAt,
+      requestUrlRedacted: token.url,
+    });
+    return {
+      ...createSampleResult(null, "error", true, "error", true, classified.errorCode === "FETCH_TIMEOUT" ? "Tokenized URL fetch threw: timeout" : "Tokenized sample fetch failed"),
+      endpointKind: "tokenized_url",
+      diagnosticStatus: classified.status,
+      errorCode: classified.errorCode,
+    };
   }
 }
 
@@ -2323,7 +2637,7 @@ function createSampleResult(
   errorMessageSafe: string | null,
   responseShape: AdmApiResponseShape = emptyResponseShape(),
   tokenUrlReceived = downloadTokenCreated,
-) {
+): AdmSampleResult {
   return {
     sample,
     status,
@@ -2349,8 +2663,13 @@ function createReadAttempt(
     pathVariantLabel: values.pathVariantLabel ?? null,
     requestUrlPathOnly: values.requestUrlPathOnly ?? "",
     httpStatusCode: values.httpStatusCode ?? null,
+    httpStatusText: values.httpStatusText ?? null,
     responseContentType: values.responseContentType ?? null,
     status,
+    endpointKind: values.endpointKind ?? null,
+    diagnosticStatus: values.diagnosticStatus ?? null,
+    errorCode: values.errorCode ?? null,
+    responseExcerpt: values.responseExcerpt ?? null,
     responseShape: values.responseShape ?? emptyResponseShape(),
     errorMessageSafe: values.errorMessageSafe ?? null,
     downloadTokenCreated: values.downloadTokenCreated ?? false,
