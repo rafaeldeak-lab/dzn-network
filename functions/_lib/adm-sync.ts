@@ -65,6 +65,8 @@ export type AdmSyncContext = {
 type AdmSyncState = {
   latest_adm_file: string | null;
   latest_adm_path: string | null;
+  latest_adm_status: string | null;
+  latest_adm_next_retry_at: string | null;
   last_processed_file: string | null;
   last_processed_line: number | null;
   last_processed_offset: number | null;
@@ -1812,10 +1814,12 @@ const ADM_UNREADABLE_RETRY_LIMIT = 5;
 const ADM_UNREADABLE_RETRY_AFTER_MS = 15 * 60 * 1000;
 const DEFAULT_ADM_MAX_FILES_PER_INVOCATION = 1;
 const DEFAULT_ADM_MAX_UNREADABLE_RETRIES_PER_INVOCATION = 1;
-const DEFAULT_ADM_MAX_READ_ATTEMPTS_PER_FILE = 1;
+const DEFAULT_ADM_MAX_READ_ATTEMPTS_PER_FILE = 2;
 const DEFAULT_ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE = 1;
-const DEFAULT_ADM_MAX_CHUNKED_READ_CHUNKS = 4;
-const DEFAULT_ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION = 8;
+const DEFAULT_ADM_MAX_CHUNKED_READ_CHUNKS = 8;
+const DEFAULT_ADM_MAX_IMPORT_LINES_PER_INVOCATION = 300;
+const DEFAULT_ADM_MAX_D1_WRITE_BATCHES_PER_INVOCATION = 10;
+const DEFAULT_ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION = 10;
 const MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN = 10;
 
 function hasRawPlayerKillLine(line: string) {
@@ -2589,7 +2593,7 @@ export async function importAdmFilesForServer(
 
 const MANUAL_ADM_IMPORT_CHUNK_SIZE = 25;
 const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
-const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 10;
+const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = DEFAULT_ADM_MAX_IMPORT_LINES_PER_INVOCATION;
 const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
 
@@ -2599,6 +2603,8 @@ type AdmInvocationBudget = {
   maxReadAttemptsPerFile: number;
   maxTokenizedAttemptsPerFile: number;
   maxChunkedReadChunks: number;
+  maxImportLinesPerInvocation: number;
+  maxD1WriteBatchesPerInvocation: number;
   diagnosticRows: {
     maxRows: number;
     rowsRecorded: number;
@@ -2612,6 +2618,8 @@ function getAdmInvocationBudget(env: Env): AdmInvocationBudget {
     maxReadAttemptsPerFile: readAdmBudgetInt(env, "ADM_MAX_READ_ATTEMPTS_PER_FILE", DEFAULT_ADM_MAX_READ_ATTEMPTS_PER_FILE, 1, 6),
     maxTokenizedAttemptsPerFile: readAdmBudgetInt(env, "ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE", DEFAULT_ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE, 1, 5),
     maxChunkedReadChunks: readAdmBudgetInt(env, "ADM_MAX_CHUNKED_READ_CHUNKS", DEFAULT_ADM_MAX_CHUNKED_READ_CHUNKS, 1, 12),
+    maxImportLinesPerInvocation: readAdmBudgetInt(env, "ADM_MAX_IMPORT_LINES_PER_INVOCATION", DEFAULT_ADM_MAX_IMPORT_LINES_PER_INVOCATION, 25, 1000),
+    maxD1WriteBatchesPerInvocation: readAdmBudgetInt(env, "ADM_MAX_D1_WRITE_BATCHES_PER_INVOCATION", DEFAULT_ADM_MAX_D1_WRITE_BATCHES_PER_INVOCATION, 1, 50),
     diagnosticRows: {
       maxRows: readAdmBudgetInt(env, "ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION", DEFAULT_ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION, 0, 100),
       rowsRecorded: 0,
@@ -5450,6 +5458,8 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
   subscription_status: string | null;
   latest_adm_file: string | null;
   latest_adm_path: string | null;
+  latest_adm_status: string | null;
+  latest_adm_next_retry_at: string | null;
   last_processed_file: string | null;
   last_processed_line: number | null;
   last_processed_offset: number | null;
@@ -5476,12 +5486,17 @@ export async function runAdmWorkerSyncTick(
     cron?: string | null;
     cursorKey?: string;
     maxLinesPerServer?: number;
+    linkedServerId?: string | null;
+    force?: boolean;
   } = {},
 ): Promise<AdmWorkerSyncTickResult> {
   admSchemaEnsureSkipDepth += 1;
   try {
     const budget = getAdmInvocationBudget(env);
-    const selected = await selectAdmWorkerServer(env, options.cursorKey ?? "last_adm_linked_server_id");
+    const selected = await selectAdmWorkerServer(env, options.cursorKey ?? "last_adm_linked_server_id", {
+      linkedServerId: options.linkedServerId,
+      force: options.force,
+    });
     const metadata = emptyScheduledMetadataSyncResult();
     if (!selected) {
       return admWorkerResult({
@@ -5503,6 +5518,23 @@ export async function runAdmWorkerSyncTick(
     }
 
     const preferLatestAfterImportWork = Boolean(pendingJobs && (pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0));
+    const latestBackoffActive = isAdmUnreadableBackoffActive(selected.latest_adm_status, selected.latest_adm_next_retry_at)
+      && options.force !== true
+      && !preferLatestAfterImportWork;
+    const latestFileCandidates = latestBackoffActive
+      ? []
+      : [
+          selected.latest_adm_file,
+          fileNameFromPath(selected.latest_adm_path),
+          fileNameFromPath(selected.adm_path),
+        ];
+    const latestPathCandidates = latestBackoffActive
+      ? []
+      : [
+          selected.latest_adm_path,
+          selected.adm_path,
+        ];
+
     const directFileName = firstString(
       ...(preferLatestAfterImportWork
         ? [
@@ -5514,10 +5546,8 @@ export async function runAdmWorkerSyncTick(
           ]
         : [
             selected.target_adm_file,
-            selected.latest_adm_file,
             fileNameFromPath(selected.target_adm_path),
-            fileNameFromPath(selected.latest_adm_path),
-            fileNameFromPath(selected.adm_path),
+            ...latestFileCandidates,
           ]),
     );
     const directPath = firstString(
@@ -5530,8 +5560,7 @@ export async function runAdmWorkerSyncTick(
           ]
         : [
             selected.target_adm_path,
-            selected.latest_adm_path,
-            selected.adm_path,
+            ...latestPathCandidates,
             directFileName ? `dayzps/config/${directFileName}` : null,
           ]),
     );
@@ -5543,7 +5572,9 @@ export async function runAdmWorkerSyncTick(
         selectedLinkedServerId: selected.id,
         selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
         pendingJobs,
-        message: pendingJobs
+        message: latestBackoffActive
+          ? `Latest ADM ${selected.latest_adm_file} is unreadable; retry is scheduled for ${selected.latest_adm_next_retry_at}. Worker advanced to the next server.`
+          : pendingJobs
           ? `Processed active ADM import work for ${selected.id}; no known latest ADM filename/path is available for direct re-read.`
           : "Selected ADM server has no known ADM filename/path yet; broad discovery is deferred to a separate run.",
         skippedNotDue: 1,
@@ -5707,7 +5738,7 @@ export async function runAdmWorkerSyncTick(
         filename: directFileName,
         admText: lines.join("\n"),
         source: SCHEDULED_ADM_IMPORT_SOURCE,
-        chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+        chunkSize: budget.maxImportLinesPerInvocation,
       });
     await recordAdmImportJobProgressInSyncState(env, {
       id: job.job_id,
@@ -5767,8 +5798,10 @@ export async function runAdmWorkerSyncTick(
   }
 }
 
-async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWorkerSelectedServer | null> {
+async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { linkedServerId?: string | null; force?: boolean } = {}): Promise<AdmWorkerSelectedServer | null> {
   const now = new Date().toISOString();
+  const linkedServerId = options.linkedServerId ?? null;
+  const force = options.force === true ? 1 : 0;
   const row = await requireDb(env)
     .prepare(
       `WITH cursor AS (
@@ -5803,6 +5836,22 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
              ORDER BY latest_state.adm_file DESC
              LIMIT 1
            ), adm_sync_state.latest_adm_path) AS latest_adm_path,
+           (
+             SELECT status
+             FROM adm_sync_file_state latest_state
+             WHERE latest_state.linked_server_id = linked_servers.id
+               AND latest_state.ignored_at IS NULL
+             ORDER BY latest_state.adm_file DESC
+             LIMIT 1
+           ) AS latest_adm_status,
+           (
+             SELECT next_retry_at
+             FROM adm_sync_file_state latest_state
+             WHERE latest_state.linked_server_id = linked_servers.id
+               AND latest_state.ignored_at IS NULL
+             ORDER BY latest_state.adm_file DESC
+             LIMIT 1
+           ) AS latest_adm_next_retry_at,
            adm_sync_state.last_processed_file,
            adm_sync_state.last_processed_line,
            adm_sync_state.last_processed_offset,
@@ -5813,6 +5862,11 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
                AND adm_sync_file_state.status IN ('discovered', 'unreadable')
                AND adm_sync_file_state.ignored_at IS NULL
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
+               AND (
+                 adm_sync_file_state.status != 'unreadable'
+                 OR adm_sync_file_state.next_retry_at IS NULL
+                 OR adm_sync_file_state.next_retry_at <= ?
+               )
                AND NOT EXISTS (
                  SELECT 1
                  FROM adm_import_jobs completed_or_active
@@ -5830,6 +5884,11 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
                AND adm_sync_file_state.status IN ('discovered', 'unreadable')
                AND adm_sync_file_state.ignored_at IS NULL
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
+               AND (
+                 adm_sync_file_state.status != 'unreadable'
+                 OR adm_sync_file_state.next_retry_at IS NULL
+                 OR adm_sync_file_state.next_retry_at <= ?
+               )
                AND NOT EXISTS (
                  SELECT 1
                  FROM adm_import_jobs completed_or_active
@@ -5869,7 +5928,10 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
            AND lower(server_subscriptions.status) IN ('active', 'trialing')
            AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND (? IS NULL OR linked_servers.id = ?)
            AND (
+             ? = 1
+             OR
              COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
              OR COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
              OR EXISTS (
@@ -5885,13 +5947,22 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string): Promise<AdmWo
        SELECT *
        FROM eligible
        ORDER BY
+         CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END,
+         CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END,
          CASE WHEN id > COALESCE((SELECT value FROM cursor), '') THEN 0 ELSE 1 END,
          id ASC
        LIMIT 1`,
     )
-    .bind(cursorKey, SCHEDULED_ADM_IMPORT_SOURCE, now, now, SCHEDULED_ADM_IMPORT_SOURCE)
+    .bind(cursorKey, now, now, SCHEDULED_ADM_IMPORT_SOURCE, linkedServerId, linkedServerId, force, now, now, SCHEDULED_ADM_IMPORT_SOURCE)
     .first<AdmWorkerSelectedServer>();
   return row ?? null;
+}
+
+function isAdmUnreadableBackoffActive(status: string | null | undefined, nextRetryAt: string | null | undefined) {
+  if (String(status ?? "").toLowerCase() !== "unreadable") return false;
+  if (!nextRetryAt) return false;
+  const retryAt = Date.parse(nextRetryAt);
+  return Number.isFinite(retryAt) && retryAt > Date.now();
 }
 
 async function updateAdmWorkerCursor(env: Env, cursorKey: string, linkedServerId: string) {
@@ -6328,6 +6399,7 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["last_method", "TEXT"],
     ["last_response_excerpt", "TEXT"],
     ["last_diagnostic_at", "TEXT"],
+    ["next_retry_at", "TEXT"],
   ]);
   await ensureMissingColumns(db, "adm_raw_events", [
     ["source_service_id", "TEXT"],
@@ -6589,6 +6661,12 @@ async function recordAdmFileAttempt(
 ) {
   const db = requireDb(env);
   const now = new Date().toISOString();
+  const currentRetryCount = values.status === "unreadable"
+    ? await getAdmFileRetryCount(db, context, file.name).catch(() => 0)
+    : 0;
+  const nextRetryAt = values.status === "unreadable"
+    ? new Date(Date.now() + getAdmUnreadableBackoffMs(currentRetryCount + 1)).toISOString()
+    : null;
   const diagnostic = values.diagnostic
     ?? (values.status === "unreadable" ? await getLatestNitradoFileReadAttemptForState(db, context, file.name).catch(() => null) : null);
   await db
@@ -6599,8 +6677,8 @@ async function recordAdmFileAttempt(
         last_line_processed, raw_kill_lines_found, parsed_kill_lines_found,
         inserted_kills, parser_skipped_lines, retry_count, last_error,
         last_http_status, last_http_status_text, last_endpoint_kind, last_method,
-        last_response_excerpt, last_diagnostic_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        last_response_excerpt, last_diagnostic_at, next_retry_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(linked_server_id, source_service_id, adm_file) DO UPDATE SET
         adm_path = COALESCE(excluded.adm_path, adm_sync_file_state.adm_path),
         status = CASE
@@ -6620,6 +6698,11 @@ async function recordAdmFileAttempt(
         retry_count = CASE
           WHEN excluded.status = 'unreadable' THEN COALESCE(adm_sync_file_state.retry_count, 0) + 1
           ELSE COALESCE(adm_sync_file_state.retry_count, 0)
+        END,
+        next_retry_at = CASE
+          WHEN excluded.status = 'unreadable' THEN excluded.next_retry_at
+          WHEN excluded.status IN ('queued', 'processed', 'partial', 'failed_unreadable') THEN NULL
+          ELSE adm_sync_file_state.next_retry_at
         END,
         last_error = CASE
           WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'failed_unreadable') THEN adm_sync_file_state.last_error
@@ -6658,9 +6741,32 @@ async function recordAdmFileAttempt(
       diagnostic?.method ?? null,
       diagnostic?.responseExcerpt ?? null,
       diagnostic ? now : null,
+      nextRetryAt,
       now,
     )
     .run();
+}
+
+function getAdmUnreadableBackoffMs(retryAttempt: number) {
+  if (retryAttempt <= 1) return 5 * 60 * 1000;
+  if (retryAttempt === 2) return 15 * 60 * 1000;
+  if (retryAttempt === 3) return 30 * 60 * 1000;
+  return Math.min(6 * 60 * 60 * 1000, 60 * 60 * 1000);
+}
+
+async function getAdmFileRetryCount(db: D1Database, context: AdmSyncContext, filename: string) {
+  const row = await db
+    .prepare(
+      `SELECT retry_count
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND source_service_id = ?
+         AND adm_file = ?
+       LIMIT 1`,
+    )
+    .bind(context.linkedServerId, context.nitradoServiceId, filename)
+    .first<{ retry_count: number | null }>();
+  return Number(row?.retry_count ?? 0);
 }
 
 async function getLatestNitradoFileReadAttemptForState(db: D1Database, context: AdmSyncContext, filename: string) {
@@ -8115,6 +8221,7 @@ type UnreadableAdmFileRetryRow = {
   adm_path: string | null;
   retry_count: number | null;
   last_checked_at: string | null;
+  next_retry_at: string | null;
   last_error: string | null;
 };
 
@@ -8145,11 +8252,15 @@ async function retryUnreadableAdmFileStatesForServer(
          AND source_service_id = ?
          AND status = 'unreadable'
          AND COALESCE(retry_count, 0) < ?
-         AND (last_checked_at IS NULL OR last_checked_at <= ?)
+         AND (
+           next_retry_at IS NULL
+           OR next_retry_at <= ?
+           OR (last_checked_at IS NULL OR last_checked_at <= ?)
+         )
        ORDER BY ${orderBy}
        LIMIT ?`,
     )
-    .bind(scope.linkedServerId, scope.nitradoServiceId, ADM_UNREADABLE_RETRY_LIMIT, cutoff, Math.max(1, options.limit))
+    .bind(scope.linkedServerId, scope.nitradoServiceId, ADM_UNREADABLE_RETRY_LIMIT, new Date().toISOString(), cutoff, Math.max(1, options.limit))
     .all<UnreadableAdmFileRetryRow>();
 
   const handled = new Set(options.handledFilenames.map(normalizeAdmFilenameKey).filter(Boolean));
@@ -8321,6 +8432,7 @@ async function markExpiredUnreadableAdmFilesFailed(env: Env, scope: AdmSyncConte
       `UPDATE adm_sync_file_state
        SET status = 'failed_unreadable',
            last_error = COALESCE(last_error, ?),
+           next_retry_at = NULL,
            updated_at = ?
        WHERE linked_server_id = ?
          AND source_service_id = ?
@@ -8343,6 +8455,7 @@ async function markAdmFileFailedUnreadable(env: Env, scope: AdmSyncContext, file
       `UPDATE adm_sync_file_state
        SET status = 'failed_unreadable',
            last_error = ?,
+           next_retry_at = NULL,
            updated_at = ?
        WHERE linked_server_id = ?
          AND source_service_id = ?
@@ -8661,6 +8774,7 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_method TEXT,
     last_response_excerpt TEXT,
     last_diagnostic_at TEXT,
+    next_retry_at TEXT,
     ignored_at TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,
@@ -8822,6 +8936,7 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_adm_sync_file_state_server_file ON adm_sync_file_state(linked_server_id, source_service_id, adm_file)",
   "CREATE INDEX IF NOT EXISTS idx_adm_sync_file_state_status ON adm_sync_file_state(status)",
   "CREATE INDEX IF NOT EXISTS idx_adm_sync_file_state_checked ON adm_sync_file_state(last_checked_at)",
+  "CREATE INDEX IF NOT EXISTS idx_adm_sync_file_state_retry ON adm_sync_file_state(status, next_retry_at)",
   "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_service_id ON nitrado_file_read_attempts(service_id)",
   "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_server_id ON nitrado_file_read_attempts(server_id)",
   "CREATE INDEX IF NOT EXISTS idx_nitrado_file_read_attempts_file_name ON nitrado_file_read_attempts(file_name)",

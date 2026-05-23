@@ -32,7 +32,7 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, forceProcessLatestAdm, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing, updateServerSettings } from "./api";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing, updateServerSettings } from "./api";
 import { getServerCategoryOption, isServerCategoryValue, SERVER_CATEGORY_OPTIONS } from "./server-category-options";
 import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
@@ -2123,22 +2123,22 @@ function ServerDashboard({
   async function forceProcessLatestAdmNow() {
     await runDashboardAction({
       actionKey: "force-process-latest-adm",
-      title: "Force Processing Latest ADM",
-      steps: ["Discovering latest ADM", "Creating or attaching import job", "Processing first chunks", "Continuing in background", "Refreshing dashboard"],
+      title: "Running ADM Auto-Sync",
+      steps: ["Selecting one safe ADM sync unit", "Reading Nitrado ADM content", "Queueing or resuming import job", "Refreshing dashboard"],
       refreshAfterSuccess: ["sync", "dashboard-health", "public-cache"],
       major: true,
       run: async (action) => {
         setForceLatestAdmRunning(true);
         setActionMessage("");
         try {
-          action.setStep(1, "Discovering latest readable ADM.");
-          const response = await forceProcessLatestAdm(server.id);
+          action.setStep(1, "Selecting this server for a tiny Worker-style sync run.");
+          const response = await runScopedAdmAutoSyncNow(server.id);
           if ("ok" in response && response.ok === false) {
             throw new Error(response.message);
           }
           setLastSyncResult(response);
           setForceLatestAdmResult(response);
-          action.setStep(3, response.job ? `${response.job.filename} chunk ${normalizeChunkProgress(response.job).displayCurrentChunk}/${normalizeChunkProgress(response.job).totalChunks}` : "Latest ADM processed.", 72);
+          action.setStep(3, response.job ? `${response.job.filename} chunk ${normalizeChunkProgress(response.job).displayCurrentChunk}/${normalizeChunkProgress(response.job).totalChunks}` : getManualSyncMessage(response), 72);
           if (response.job) updateAdmChunkDashboardActionProgress(response.job.filename, response.job);
           await refreshDashboardAfterManualAdmImport();
           return response;
@@ -2871,7 +2871,7 @@ function ServerDashboard({
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${forceLatestAdmRunning ? "animate-spin" : ""}`} />
-                    {dashboardActionKey === "force-process-latest-adm" || forceLatestAdmRunning ? "Running..." : "Force Process Latest ADM Now"}
+                    {dashboardActionKey === "force-process-latest-adm" || forceLatestAdmRunning ? "Running..." : "Run Auto-Sync Now"}
                   </button>
                   <button
                     type="button"
@@ -2981,7 +2981,7 @@ function ServerDashboard({
                 <div className="mt-4 rounded-lg border border-emerald-300/18 bg-emerald-400/8 p-3">
                   <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <p className="text-xs font-black uppercase text-emerald-100">Force Process Latest ADM Result</p>
+                      <p className="text-xs font-black uppercase text-emerald-100">Auto-Sync Result</p>
                       <p className="mt-1 text-sm font-bold leading-6 text-emerald-50">{getManualSyncMessage(forceLatestAdmResult)}</p>
                     </div>
                     <SmallBadge tone={forceLatestAdmResult.status === "completed" ? "emerald" : "orange"}>{formatSyncStatus(forceLatestAdmResult.status)}</SmallBadge>
@@ -3295,6 +3295,7 @@ function SyncHealthSummaryPanel({
         <MiniInfo label="Latest readable file" value={dashboardHealth?.sync.newest_readable_adm_filename ?? syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
         <MiniInfo label="Latest unreadable file" value={latestUnreadableFile ?? "None"} />
         <MiniInfo label="Latest classified error" value={classifyDashboardAdmError(latestError)} />
+        <MiniInfo label="Next ADM read retry" value={dashboardHealth?.sync.latest_read_issue?.next_retry_at ? formatDashboardDate(dashboardHealth.sync.latest_read_issue.next_retry_at) : "Next eligible sync"} />
         <MiniInfo label="Queued backfill files" value={String(dashboardHealth?.sync.backfill_status.queued_jobs_count ?? syncStatus?.adm_backfill_status.queued_files.length ?? 0)} />
         <MiniInfo label="Unreadable queue" value={String(dashboardHealth?.sync.backfill_status.unreadable_files_count ?? syncStatus?.adm_backfill_status.unreadable_files.length ?? syncStatus?.unreadable_files_queued ?? 0)} />
       </div>
@@ -5016,6 +5017,11 @@ function AutomaticAdmImportJobPanel({ syncStatus, dashboardHealth }: { syncStatu
   const report = syncStatus?.last_adm_import_report ?? null;
   const readFailed = ["adm_file_unreadable", "latest_adm_unreadable"].includes(String(syncStatus?.last_sync_status ?? dashboardHealth?.sync.status ?? "").toLowerCase());
   const backfillActive = Boolean(syncStatus?.adm_backfill_status?.active_job || syncStatus?.adm_backfill_status?.queued_files?.length || dashboardHealth?.sync.backfill_status.active_file || dashboardHealth?.sync.backfill_status.queued_jobs_count);
+  const readFailureMessage = formatDashboardAdmReadMessage(dashboardHealth?.sync.last_error ?? syncStatus?.last_adm_discovery_error ?? syncStatus?.last_sync_message ?? null)
+    ?? dashboardHealth?.sync.last_error
+    ?? syncStatus?.last_adm_discovery_error
+    ?? syncStatus?.last_sync_message
+    ?? null;
   const jobProgress = job ? getSafeAdmChunkProgressPercent(job) : null;
   const nextAction = job
     ? job.status === "failed_retryable"
@@ -5053,7 +5059,7 @@ function AutomaticAdmImportJobPanel({ syncStatus, dashboardHealth }: { syncStatu
         </div>
       ) : null}
       <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold leading-5 text-zinc-300">
-        {readFailed && !backfillActive ? syncStatus?.last_adm_discovery_error ?? syncStatus?.last_sync_message ?? nextAction : nextAction}
+        {readFailed && !backfillActive ? readFailureMessage ?? nextAction : nextAction}
       </p>
       {!job ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -7421,7 +7427,9 @@ function getManualSyncMessage(result: AdmSyncRunResult) {
     return "Server restart detected. Waiting for Nitrado to publish the next ADM log.";
   }
   if (["adm_file_unreadable", "latest_adm_unreadable"].includes(result.status)) {
-    return "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.";
+    return result.message
+      ? formatDashboardAdmReadMessage(result.message) ?? result.message
+      : "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.";
   }
   if (result.status === "delayed_after_restart") {
     return "Nitrado has not published a readable ADM log yet. This can take 5-45 minutes after restart.";
@@ -8137,10 +8145,11 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
   }
 
   if (["adm_file_unreadable", "latest_adm_unreadable"].includes(normalizedStatus)) {
+    const explicitReadMessage = formatDashboardAdmReadMessage(currentMessage);
     return {
       status: "pending" as const,
-      title: "Latest ADM Not Readable Yet",
-      message: "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.",
+      title: explicitReadMessage ? "Nitrado ADM Read Blocked" : "Latest ADM Not Readable Yet",
+      message: explicitReadMessage ?? "Latest ADM file found but not readable yet. DZN will retry on the next scheduled check.",
       detail: latestSuccessTime
         ? `The last successful feed sync remains active from ${formatDashboardDate(latestSuccessTime)}.`
         : "The last successful feed sync remains active when available.",
@@ -8214,6 +8223,24 @@ function getSyncHealth(runs: AdmSyncStatus["recent_sync_runs"], currentStatus: s
     nextAction: "Continue syncing after fresh ADM activity",
     latestSuccessTime,
   };
+}
+
+function formatDashboardAdmReadMessage(message: string | null | undefined) {
+  const text = String(message ?? "").trim();
+  if (!text) return null;
+  const httpMatch = text.match(/HTTP\s+(\d{3})/i);
+  if (httpMatch) {
+    const status = Number(httpMatch[1]);
+    if (status >= 500 && status <= 504) return `Nitrado file service returned HTTP ${status} for ADM file reads. Auto-sync will retry.`;
+    if (status === 429) return "Nitrado rate-limited ADM file reads with HTTP 429. Auto-sync will retry.";
+    if (status === 401 || status === 403) return `Nitrado returned HTTP ${status} for ADM file reads. Reconnect Nitrado or check file permissions.`;
+    if (status === 404) return "Nitrado listed the ADM file but returned HTTP 404 when DZN tried to read it. Auto-sync will continue with other eligible files.";
+  }
+  if (/NITRADO_UPSTREAM_DOWN/i.test(text)) return "Nitrado file service returned an upstream error for ADM file reads. Auto-sync will retry.";
+  if (/WORKER_SUBREQUEST_LIMIT/i.test(text)) return "Cloudflare Worker budget was reached before ADM file read completed. Auto-sync will continue in the next small batch.";
+  if (/FETCH_TIMEOUT/i.test(text)) return "Nitrado ADM file read timed out. Auto-sync will retry.";
+  if (/TOKENIZED_EMPTY_BODY/i.test(text)) return "Nitrado returned an empty ADM download body. Auto-sync will retry.";
+  return null;
 }
 
 function getProcessedPercent(syncStatus: AdmSyncStatus | null) {

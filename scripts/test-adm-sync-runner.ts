@@ -189,10 +189,13 @@ assert.equal(isCronAuthorized(new Request("https://dzn.test/api/sync/adm/run", {
 
 const dashboardApi = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(dashboardApi.includes("/api/sync/adm/run"), true);
+assert.equal(dashboardApi.includes("/api/servers/${encodeURIComponent(linkedServerId)}/adm/auto-sync-now"), true);
 const dashboardUi = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardUi.includes("No ADM File"), false);
 assert.equal(dashboardUi.includes("Latest ADM Not Readable Yet"), true);
 assert.equal(dashboardUi.includes("Latest ADM file found but not readable yet. DZN will retry on the next scheduled check."), true);
+assert.equal(dashboardUi.includes("Run Auto-Sync Now"), true);
+assert.equal(dashboardUi.includes("Auto-Sync Result"), true);
 assert.equal(dashboardUi.includes("Server restart detected. Waiting for Nitrado to publish the next ADM log."), true);
 assert.equal(dashboardUi.includes("Check Nitrado Log Settings"), true);
 assert.equal(dashboardUi.includes("Nitrado log settings verified automatically"), true);

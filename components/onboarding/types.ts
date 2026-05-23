@@ -1270,6 +1270,18 @@ export type DashboardHealthResult = {
       unreadable_files_count: number;
       next_action: string;
     };
+    latest_read_issue: {
+      file_name: string | null;
+      status: string | null;
+      retry_count: number;
+      next_retry_at: string | null;
+      last_http_status: number | null;
+      last_endpoint_kind: string | null;
+      last_method: string | null;
+      last_error: string | null;
+      last_diagnostic_at: string | null;
+      last_checked_at: string | null;
+    } | null;
     newest_available_adm_filename: string | null;
     newest_readable_adm_filename: string | null;
     last_processed_adm_filename: string | null;

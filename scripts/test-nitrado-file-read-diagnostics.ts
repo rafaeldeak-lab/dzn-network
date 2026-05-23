@@ -132,6 +132,11 @@ async function main() {
   assert.ok(!migration.includes("drop table"));
   assert.ok(!migration.includes("truncate"));
   assert.ok(!migration.includes("delete from player_profiles"));
+  const backoffMigration = readFileSync("migrations/0035_adm_file_retry_backoff.sql", "utf8").toLowerCase();
+  assert.ok(backoffMigration.includes("next_retry_at"));
+  assert.ok(!backoffMigration.includes("drop table"));
+  assert.ok(!backoffMigration.includes("truncate"));
+  assert.ok(!backoffMigration.includes("delete from player_profiles"));
 
   const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
   const diagnosticsSource = readFileSync("functions/_lib/nitrado-diagnostics.ts", "utf8");
@@ -152,11 +157,19 @@ async function main() {
   assert.ok(admSyncSource.includes("ADM_MAX_READ_ATTEMPTS_PER_FILE"));
   assert.ok(admSyncSource.includes("ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE"));
   assert.ok(admSyncSource.includes("ADM_MAX_CHUNKED_READ_CHUNKS"));
+  assert.ok(admSyncSource.includes("ADM_MAX_IMPORT_LINES_PER_INVOCATION"));
+  assert.ok(admSyncSource.includes("ADM_MAX_D1_WRITE_BATCHES_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("per-invocation safety budget"));
+  assert.ok(admSyncSource.includes("next_retry_at"));
+  assert.ok(admSyncSource.includes("getAdmUnreadableBackoffMs"));
+  assert.ok(admSyncSource.includes("isAdmUnreadableBackoffActive"));
+  assert.ok(admSyncSource.includes("latest_adm_next_retry_at"));
+  assert.ok(admSyncSource.includes("Latest ADM ${selected.latest_adm_file} is unreadable; retry is scheduled"));
   assert.ok(admSyncSource.includes("completed_or_active"));
   assert.ok(admSyncSource.includes("completed_or_active.filename = adm_sync_file_state.adm_file"));
   assert.ok(admSyncSource.includes("completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')"));
+  assert.ok(admSyncSource.includes("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END"));
   assert.ok(admSyncSource.includes("ADM file ${directFileName} is already imported; Worker advanced to the next server."));
   assert.ok(admSyncSource.includes("await updateAdmWorkerCursor(env, options.cursorKey ?? \"last_adm_linked_server_id\", selected.id).catch(() => null);"));
   assert.ok(admSyncSource.includes("stateLatestAdmFile"));

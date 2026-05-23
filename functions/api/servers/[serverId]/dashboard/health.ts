@@ -95,6 +95,19 @@ type CronRow = {
   created_at: string | null;
 };
 
+type AdmFileReadIssueRow = {
+  adm_file: string | null;
+  status: string | null;
+  retry_count: number | null;
+  next_retry_at: string | null;
+  last_http_status: number | null;
+  last_endpoint_kind: string | null;
+  last_method: string | null;
+  last_error: string | null;
+  last_diagnostic_at: string | null;
+  last_checked_at: string | null;
+};
+
 export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   try {
     const linkedServerId = sanitizeId(params.serverId);
@@ -113,7 +126,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     await ensureAdmSyncSchema(env);
     const db = requireDb(env);
     const now = new Date().toISOString();
-    const [server, stats, recentEvents, activeJob, queuedJobs, completedToday, fileState, cronRows] = await Promise.all([
+    const [server, stats, recentEvents, activeJob, queuedJobs, completedToday, fileState, latestReadIssue, cronRows] = await Promise.all([
       db.prepare(
         `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.public_slug,
                 linked_servers.nitrado_service_id, linked_servers.display_name,
@@ -222,6 +235,15 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
          WHERE linked_server_id = ?`,
       ).bind(linkedServerId).first<{ missing_count: number | null; oldest_missing_file: string | null; newest_missing_file: string | null; unreadable_count: number | null }>().catch(() => null),
       db.prepare(
+        `SELECT adm_file, status, retry_count, next_retry_at, last_http_status,
+                last_endpoint_kind, last_method, last_error, last_diagnostic_at, last_checked_at
+         FROM adm_sync_file_state
+         WHERE linked_server_id = ?
+           AND status IN ('unreadable', 'failed_unreadable')
+         ORDER BY COALESCE(last_checked_at, updated_at, first_seen_at) DESC
+         LIMIT 1`,
+      ).bind(linkedServerId).first<AdmFileReadIssueRow>().catch(() => null),
+      db.prepare(
         `SELECT job_type, status, source, created_at
          FROM automation_cron_runs
          WHERE source = 'cloudflare'
@@ -254,7 +276,9 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
           ? "ADM Sync Active"
           : "Waiting for Nitrado";
     const admNitradoReadFailure = numberOrZero(server.consecutive_failed_adm_reads) >= 3;
-    const admNitradoReadFailureMessage = "DZN cannot read your latest ADM file from Nitrado. Check that Admin Log is enabled, Reduce Log Output is disabled, and Log Playerlist is enabled in your Nitrado settings.";
+    const admReadStatusMessage = formatAdmReadIssueMessage(latestReadIssue, server.last_sync_message);
+    const admNitradoReadFailureMessage = admReadStatusMessage
+      ?? "DZN cannot read your latest ADM file from Nitrado. Check that Admin Log is enabled, Reduce Log Output is disabled, and Log Playerlist is enabled in your Nitrado settings.";
     const warnings = [
       ...(!cron.adm_recent ? ["adm_cron_stale"] : []),
       ...(fileState && numberOrZero(fileState.missing_count) > 0 ? ["adm_backfill_missing"] : []),
@@ -320,13 +344,25 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
               ? `Backfill ${numberOrZero(fileState?.missing_count)} missing ADM file${numberOrZero(fileState?.missing_count) === 1 ? "" : "s"}`
               : "ADM backfill caught up",
         },
+        latest_read_issue: latestReadIssue ? {
+          file_name: latestReadIssue.adm_file,
+          status: latestReadIssue.status,
+          retry_count: numberOrZero(latestReadIssue.retry_count),
+          next_retry_at: latestReadIssue.next_retry_at,
+          last_http_status: numberOrNull(latestReadIssue.last_http_status),
+          last_endpoint_kind: latestReadIssue.last_endpoint_kind,
+          last_method: latestReadIssue.last_method,
+          last_error: sanitize(latestReadIssue.last_error),
+          last_diagnostic_at: latestReadIssue.last_diagnostic_at,
+          last_checked_at: latestReadIssue.last_checked_at,
+        } : null,
         newest_available_adm_filename: server.newest_available_adm_filename,
         newest_readable_adm_filename: server.newest_readable_adm_filename,
         last_processed_adm_filename: server.last_processed_adm_filename ?? server.latest_adm_file,
         last_successful_sync: server.last_successful_sync_at ?? server.last_sync_at,
         next_adm_discovery_due_at: server.next_adm_discovery_due_at,
         next_adm_processing_due_at: server.next_adm_pull_due_at,
-        last_error: sanitize(server.last_adm_discovery_error ?? server.last_sync_message),
+        last_error: sanitize(admReadStatusMessage ?? server.last_adm_discovery_error ?? server.last_sync_message),
         consecutive_failed_adm_reads: numberOrZero(server.consecutive_failed_adm_reads),
         adm_nitrado_read_failure: admNitradoReadFailure,
         adm_nitrado_read_failure_message: admNitradoReadFailure ? admNitradoReadFailureMessage : null,
@@ -470,6 +506,28 @@ function setupProgress(input: { hasGuild: boolean; hasService: boolean; hasAdm: 
     percent: Math.round((completed / checks.length) * 100),
     checks: checks.map(([label, done]) => ({ label, done })),
   };
+}
+
+function formatAdmReadIssueMessage(issue: AdmFileReadIssueRow | null, fallback: string | null | undefined) {
+  const status = numberOrNull(issue?.last_http_status);
+  const retrySuffix = issue?.next_retry_at ? ` Retry scheduled for ${issue.next_retry_at}.` : " Auto-sync will retry.";
+  if (status && status >= 500 && status <= 504) {
+    return `Nitrado file service returned HTTP ${status} for ADM file reads.${retrySuffix}`;
+  }
+  if (status === 429) {
+    return `Nitrado rate-limited ADM file reads with HTTP 429.${retrySuffix}`;
+  }
+  if (status === 401 || status === 403) {
+    return `Nitrado returned HTTP ${status} for ADM file reads. Reconnect Nitrado or check file permissions.`;
+  }
+  if (status === 404) {
+    return `Nitrado listed an ADM file but returned HTTP 404 when DZN tried to read it. DZN will skip it and continue with other eligible files.`;
+  }
+  const message = sanitize(issue?.last_error ?? fallback ?? "");
+  if (/WORKER_SUBREQUEST_LIMIT/i.test(message)) return "Cloudflare Worker subrequest budget was reached before ADM file read completed. Auto-sync will continue in the next small batch.";
+  if (/FETCH_TIMEOUT/i.test(message)) return `Nitrado ADM file read timed out.${retrySuffix}`;
+  if (/TOKENIZED_EMPTY_BODY/i.test(message)) return `Nitrado tokenized ADM download returned an empty body.${retrySuffix}`;
+  return message || null;
 }
 
 function numberOrZero(value: unknown) {
