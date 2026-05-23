@@ -489,6 +489,7 @@ function ServerDashboard({
   const [admImportTotalsDelta, setAdmImportTotalsDelta] = useState<DashboardTotalsDelta | null>(null);
   const [forceLatestAdmRunning, setForceLatestAdmRunning] = useState(false);
   const [forceLatestAdmResult, setForceLatestAdmResult] = useState<AdmSyncRunResult | null>(null);
+  const [admAutoSyncTargetFile, setAdmAutoSyncTargetFile] = useState("");
   const [admBackfillRunning, setAdmBackfillRunning] = useState(false);
   const [admBackfillResult, setAdmBackfillResult] = useState<AdmBackfillPlanResult | null>(null);
   const [admAutomationStatus, setAdmAutomationStatus] = useState<AdmAutomationStatusResult | null>(null);
@@ -2132,7 +2133,7 @@ function ServerDashboard({
         setActionMessage("");
         try {
           action.setStep(1, "Selecting this server for a tiny Worker-style sync run.");
-          const response = await runScopedAdmAutoSyncNow(server.id);
+          const response = await runScopedAdmAutoSyncNow(server.id, buildAdmAutoSyncTargetPayload(admAutoSyncTargetFile));
           if ("ok" in response && response.ok === false) {
             throw new Error(response.message);
           }
@@ -2843,8 +2844,17 @@ function ServerDashboard({
             />
 
             <DashboardPanel className="p-4">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 <PanelHeader icon={<DatabaseZap className={`h-5 w-5 ${refreshingSyncData ? "animate-pulse" : ""}`} />} title="Sync Engine Status" />
+                <label className="flex min-w-0 flex-1 flex-col gap-1 xl:max-w-md">
+                  <span className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Optional exact ADM filename</span>
+                  <input
+                    value={admAutoSyncTargetFile}
+                    onChange={(event) => setAdmAutoSyncTargetFile(event.target.value)}
+                    placeholder="DayZServer_PS4_x64_2026-05-23_22-02-05.ADM"
+                    className="min-h-10 rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-xs font-bold text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-300/55"
+                  />
+                </label>
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
@@ -2987,6 +2997,9 @@ function ServerDashboard({
                     <SmallBadge tone={forceLatestAdmResult.status === "completed" ? "emerald" : "orange"}>{formatSyncStatus(forceLatestAdmResult.status)}</SmallBadge>
                   </div>
                   <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                    <MiniInfo label="Attempted File" value={String((forceLatestAdmResult as AdmSyncRunResult & { attempted_file?: string | null; selected_adm_file?: string | null }).attempted_file ?? forceLatestAdmResult.latestAdmFile ?? (forceLatestAdmResult as AdmSyncRunResult & { selected_adm_file?: string | null }).selected_adm_file ?? "Latest known ADM")} />
+                    <MiniInfo label="HTTP Status" value={String((forceLatestAdmResult as AdmSyncRunResult & { latest_http_status?: number | null }).latest_http_status ?? "None")} />
+                    <MiniInfo label="Endpoint" value={String((forceLatestAdmResult as AdmSyncRunResult & { latest_endpoint_kind?: string | null }).latest_endpoint_kind ?? "Not reached")} />
                     <MiniInfo label="Lines Read" value={String(forceLatestAdmResult.linesRead ?? 0)} />
                     <MiniInfo label="Lines Processed" value={String(forceLatestAdmResult.linesProcessed ?? 0)} />
                     <MiniInfo label="Events Created" value={String(forceLatestAdmResult.eventsCreated ?? 0)} />
@@ -3316,6 +3329,18 @@ function SyncHealthSummaryPanel({
       </div>
     </DashboardPanel>
   );
+}
+
+function buildAdmAutoSyncTargetPayload(value: string) {
+  const raw = value.trim();
+  if (!raw) return undefined;
+  const fileName = raw.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? "";
+  if (!/^DayZServer_[A-Za-z0-9_-]+\.ADM$/i.test(fileName)) return undefined;
+  return {
+    mode: "target_file" as const,
+    fileName,
+    filePath: `dayzps/config/${fileName}`,
+  };
 }
 
 function ServerCategoryReminderBanner({ onOpenSettings }: { onOpenSettings: () => void }) {
