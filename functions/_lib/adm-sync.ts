@@ -3053,6 +3053,7 @@ export async function processPendingAdmImportJobs(
     maxChunksPerJob?: number;
     maxRuntimeMs?: number;
     source?: string;
+    linkedServerId?: string | null;
   } = {},
 ): Promise<PendingAdmImportJobsResult> {
   await ensureAdmSyncSchema(env);
@@ -3066,11 +3067,12 @@ export async function processPendingAdmImportJobs(
     .prepare(
       `SELECT * FROM adm_import_jobs
        WHERE source = ?
+         AND (? IS NULL OR server_id = ?)
          AND status IN ('queued', 'processing', 'parsing', 'writing', 'failed_retryable', 'rebuilding')
        ORDER BY created_at ASC
        LIMIT ?`,
     )
-    .bind(source, maxJobs * 3)
+    .bind(source, options.linkedServerId ?? null, options.linkedServerId ?? null, maxJobs * 3)
     .all<AdmImportJobRow>();
 
   const results: AdmImportJobProgressResult[] = [];
@@ -3112,6 +3114,7 @@ export async function processAdmImportJobsUntilBudget(
     maxChunksPerJob?: number;
     maxRuntimeMs?: number;
     source?: string;
+    linkedServerId?: string | null;
   } = {},
 ): Promise<PendingAdmImportJobsResult> {
   return processPendingAdmImportJobs(env, options);
@@ -5436,6 +5439,7 @@ export async function runScheduledAdmSync(
     minSyncIntervalMs?: number;
     refreshMetadata?: boolean;
     assumeSchemaReady?: boolean;
+    linkedServerId?: string | null;
   } = {},
 ): Promise<ScheduledAdmSyncResult> {
   const skipSchemaEnsures = options.assumeSchemaReady === true && !isMockNitrado(env.MOCK_NITRADO);
@@ -5455,9 +5459,10 @@ export async function runScheduledAdmSync(
     maxJobs: maxServers,
     maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
     maxRuntimeMs: 5_000,
+    linkedServerId: options.linkedServerId ?? null,
   });
   const processedActiveImportWork = pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0;
-  const discoveryServers = processedActiveImportWork ? [] : await getDueAdmDiscoveryAutomationServers(env, maxServers);
+  const discoveryServers = processedActiveImportWork ? [] : await getDueAdmDiscoveryAutomationServers(env, maxServers, options.linkedServerId ?? null);
   const discoveryResults = new Map<string, AdmDiscoveryResult>();
   let discoveryProcessed = 0;
   let skippedUnreadable = 0;
@@ -5495,7 +5500,7 @@ export async function runScheduledAdmSync(
     }
   }
 
-  const eligibleServers = processedActiveImportWork || discoveryProcessed > 0 ? [] : await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs);
+  const eligibleServers = processedActiveImportWork || discoveryProcessed > 0 ? [] : await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs, options.linkedServerId ?? null);
   let succeeded = 0;
   let failed = 0;
   let unavailable = 0;

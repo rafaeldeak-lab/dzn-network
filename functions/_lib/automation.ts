@@ -454,7 +454,7 @@ export async function recordStatusCheckResult(env: Env, values: {
     .run();
 }
 
-export async function getDueAdmAutomationServers(env: Env, maxServers: number, minSyncIntervalMs: number): Promise<AutomationSyncServer[]> {
+export async function getDueAdmAutomationServers(env: Env, maxServers: number, minSyncIntervalMs: number, linkedServerId?: string | null): Promise<AutomationSyncServer[]> {
   await ensureAutomationRowsForLinkedServers(env);
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
@@ -478,6 +478,7 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
+         AND (? IS NULL OR linked_servers.id = ?)
          AND lower(server_subscriptions.status) IN ('active', 'trialing')
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
          AND COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
@@ -489,12 +490,12 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
        ORDER BY server_sync_state.next_adm_pull_due_at ASC, linked_servers.updated_at DESC
        LIMIT ?`,
     )
-    .bind(now, minSyncIntervalMs, maxServers)
+    .bind(linkedServerId ?? null, linkedServerId ?? null, now, minSyncIntervalMs, maxServers)
     .all<AutomationSyncServer>();
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
 
-export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: number): Promise<AutomationSyncServer[]> {
+export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: number, linkedServerId?: string | null): Promise<AutomationSyncServer[]> {
   await ensureAutomationRowsForLinkedServers(env);
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
@@ -517,6 +518,7 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
+         AND (? IS NULL OR linked_servers.id = ?)
          AND lower(server_subscriptions.status) IN ('active', 'trialing')
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
          AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
@@ -524,7 +526,7 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
        ORDER BY server_sync_state.next_adm_discovery_due_at ASC, linked_servers.updated_at DESC
        LIMIT ?`,
     )
-    .bind(now, maxServers)
+    .bind(linkedServerId ?? null, linkedServerId ?? null, now, maxServers)
     .all<AutomationSyncServer>();
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }

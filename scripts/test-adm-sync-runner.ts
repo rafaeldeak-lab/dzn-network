@@ -160,7 +160,8 @@ assert.equal(admSyncSource.includes("force: triggerType === \"manual\" || trigge
 assert.equal(admSyncSource.includes("softFail: true"), true);
 assert.equal(admSyncSource.includes("refreshLivePlayerCountsForActiveServers"), true);
 assert.equal(admSyncSource.includes("metadata,"), true);
-assert.equal(endpointSource.includes("refreshMetadata: false"), true);
+assert.equal(endpointSource.includes("dzn-adm-sync-worker"), true);
+assert.equal(endpointSource.includes("does not call Nitrado"), true);
 assert.equal(admSyncSource.includes("runAdmDiscoveryForLinkedServer"), true);
 assert.equal(admSyncSource.includes("readMode: \"sample\""), true);
 assert.equal(admSyncSource.includes("discovery_due_count"), true);
@@ -219,85 +220,20 @@ async function runEndpointTests() {
     },
     body: "{}",
   }), env), {
-    runScheduled: async () => ({
-      ok: true,
-      processed: 1,
-      succeeded: 1,
-      failed: 0,
-      unavailable: 0,
-      skipped: 0,
-      discovery_due_count: 1,
-      discovery_processed_count: 1,
-      processing_due_count: 1,
-      processing_processed_count: 1,
-      skipped_not_due: 0,
-      skipped_locked: 0,
-      skipped_unreadable: 0,
-      waiting_after_restart_count: 0,
-      latest_adm_unreadable_count: 0,
-      new_adm_readable_count: 1,
-      new_data_found_count: 1,
-      pending_import_jobs_processed: 0,
-      pending_import_chunks_processed: 0,
-      pending_import_jobs_completed: 0,
-      cron: null,
-      maxServers: 25,
-      maxLinesPerServer: 50000,
-      metadata: {
-        processed: 2,
-        succeeded: 2,
-        failed: 0,
-        skipped: 0,
-        updated_player_counts: 1,
-        results: [],
-      },
-    }),
     runManual: async () => admSyncResult("manual-not-called"),
     resolveUser: async () => null,
   });
   assert.equal(scheduledResponse.status, 200);
-  const scheduledJson = await scheduledResponse.json() as { processed: number; metadata: { updated_player_counts: number } };
-  assert.equal(scheduledJson.processed, 1);
-  assert.equal(scheduledJson.metadata.updated_player_counts, 1);
+  const scheduledJson = await scheduledResponse.json() as { ok: boolean; delegated: boolean; worker: string };
+  assert.equal(scheduledJson.ok, true);
+  assert.equal(scheduledJson.delegated, true);
+  assert.equal(scheduledJson.worker, "dzn-adm-sync-worker");
 
   const unauthorizedResponse = await handleAdmSyncRun(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
     method: "POST",
     headers: { "x-dzn-cron-secret": "wrong" },
     body: "{}",
   }), env), {
-    runScheduled: async () => ({
-      ok: true,
-      processed: 0,
-      succeeded: 0,
-      failed: 0,
-      unavailable: 0,
-      skipped: 0,
-      discovery_due_count: 0,
-      discovery_processed_count: 0,
-      processing_due_count: 0,
-      processing_processed_count: 0,
-      skipped_not_due: 0,
-      skipped_locked: 0,
-      skipped_unreadable: 0,
-      waiting_after_restart_count: 0,
-      latest_adm_unreadable_count: 0,
-      new_adm_readable_count: 0,
-      new_data_found_count: 0,
-      pending_import_jobs_processed: 0,
-      pending_import_chunks_processed: 0,
-      pending_import_jobs_completed: 0,
-      cron: null,
-      maxServers: 25,
-      maxLinesPerServer: 50000,
-      metadata: {
-        processed: 0,
-        succeeded: 0,
-        failed: 0,
-        skipped: 0,
-        updated_player_counts: 0,
-        results: [],
-      },
-    }),
     runManual: async () => admSyncResult("manual-not-called"),
     resolveUser: async () => null,
   });
@@ -308,39 +244,6 @@ async function runEndpointTests() {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ linked_server_id: "server-12345678" }),
   }), env), {
-    runScheduled: async () => ({
-      ok: true,
-      processed: 0,
-      succeeded: 0,
-      failed: 0,
-      unavailable: 0,
-      skipped: 0,
-      discovery_due_count: 0,
-      discovery_processed_count: 0,
-      processing_due_count: 0,
-      processing_processed_count: 0,
-      skipped_not_due: 0,
-      skipped_locked: 0,
-      skipped_unreadable: 0,
-      waiting_after_restart_count: 0,
-      latest_adm_unreadable_count: 0,
-      new_adm_readable_count: 0,
-      new_data_found_count: 0,
-      pending_import_jobs_processed: 0,
-      pending_import_chunks_processed: 0,
-      pending_import_jobs_completed: 0,
-      cron: null,
-      maxServers: 25,
-      maxLinesPerServer: 50000,
-      metadata: {
-        processed: 0,
-        succeeded: 0,
-        failed: 0,
-        skipped: 0,
-        updated_player_counts: 0,
-        results: [],
-      },
-    }),
     runManual: async (_env, userId, linkedServerId) => admSyncResult(`${userId}:${linkedServerId}`),
     resolveUser: async () => ({
       id: "user-1",

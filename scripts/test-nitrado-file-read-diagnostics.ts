@@ -136,6 +136,7 @@ async function main() {
   const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
   const diagnosticsSource = readFileSync("functions/_lib/nitrado-diagnostics.ts", "utf8");
   const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
+  const workerSource = readFileSync("workers/adm-sync-worker.ts", "utf8");
   const workflowSource = readFileSync(".github/workflows/dzn-nitrado-diagnostics.yml", "utf8");
   assert.ok(nitradoSource.includes("TOKENIZED_EMPTY_BODY"));
   assert.ok(nitradoSource.includes("recordNitradoFileReadAttempt"));
@@ -153,6 +154,11 @@ async function main() {
   assert.ok(admSyncSource.includes("ADM_MAX_CHUNKED_READ_CHUNKS"));
   assert.ok(admSyncSource.includes("ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("per-invocation safety budget"));
+  assert.ok(workerSource.includes("runScheduledAdmSync"));
+  assert.ok(workerSource.includes("selectNextAdmLinkedServerForWorker"));
+  assert.ok(workerSource.includes("adm_worker_state"));
+  assert.ok(workerSource.includes("selected_linked_server_id"));
+  assert.ok(!workerSource.includes('path: "/api/sync/adm/run"'));
   assert.ok(workflowSource.includes("workflow_dispatch"));
   assert.ok(workflowSource.includes("/api/debug/nitrado-file-read"));
   assert.ok(workflowSource.includes("/api/sync/adm/retry-unreadable"));

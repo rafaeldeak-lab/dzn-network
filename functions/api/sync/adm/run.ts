@@ -1,4 +1,4 @@
-import { runAdmSync, runScheduledAdmSync } from "../../../_lib/adm-sync";
+import { runAdmSync } from "../../../_lib/adm-sync";
 import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
 import { DZN_CRON_SECRET_HEADER, isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
 import { ensureMockUser, getSessionUser, SESSION_COOKIE } from "../../../_lib/db";
@@ -15,13 +15,11 @@ type AdmSyncRunBody = {
 };
 
 type AdmSyncRunHandlers = {
-  runScheduled: typeof runScheduledAdmSync;
   runManual: typeof runAdmSync;
   resolveUser: typeof resolveUser;
 };
 
 const DEFAULT_HANDLERS: AdmSyncRunHandlers = {
-  runScheduled: runScheduledAdmSync,
   runManual: runAdmSync,
   resolveUser,
 };
@@ -55,20 +53,11 @@ export async function handleAdmSyncRun(
     const body = await readJson<AdmSyncRunBody>(request);
     const source = normalizeAutomationCronSource(body.source, body.cron);
     const startedAt = new Date().toISOString();
-    let result: Awaited<ReturnType<typeof runScheduledAdmSync>>;
     try {
-      result = await handlers.runScheduled(env, {
-        cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
-        maxServers: sanitizePositiveInteger(body.max_servers, 25),
-        maxLinesPerServer: sanitizePositiveInteger(body.max_lines_per_server, 50000),
-        minSyncIntervalMs: 0,
-        refreshMetadata: false,
-        assumeSchemaReady: true,
-      });
-      await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
-        processedCount: result.processing_processed_count,
-        skippedCount: result.skipped + result.skipped_not_due + result.skipped_locked + result.skipped_unreadable,
-        failedCount: result.failed,
+      await safeRecordCronRun(env, source, "success", startedAt, undefined, {
+        processedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
       });
     } catch (error) {
       await safeRecordCronRun(env, source, "failed", startedAt, error);
@@ -80,15 +69,17 @@ export async function handleAdmSyncRun(
         source,
       }, { status: 500 });
     }
-    console.log("DZN ADM SYNC POST ENDPOINT FIXED");
-    console.log("DZN RELIABLE ADM AUTO SYNC READY", {
-      processed: result.processed,
-      succeeded: result.succeeded,
-      failed: result.failed,
-      unavailable: result.unavailable,
-      metadata: result.metadata,
+    console.log("DZN ADM SYNC PAGES ENDPOINT DELEGATED TO WORKER", {
+      source,
+      max_servers_requested: sanitizePositiveInteger(body.max_servers, 25),
     });
-    return json({ ...result, source });
+    return json({
+      ok: true,
+      source,
+      delegated: true,
+      worker: "dzn-adm-sync-worker",
+      message: "Scheduled ADM sync runs directly inside dzn-adm-sync-worker. This Pages endpoint records the trigger only and does not call Nitrado.",
+    });
   }
 
   if (request.headers.has(DZN_CRON_SECRET_HEADER)) {

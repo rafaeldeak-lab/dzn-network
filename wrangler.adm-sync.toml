@@ -2,12 +2,21 @@ name = "dzn-adm-sync-worker"
 main = "workers/adm-sync-worker.ts"
 compatibility_date = "2026-05-13"
 
+[limits]
+subrequests = 1000
+
 [triggers]
 crons = ["* * * * *"]
 
 [vars]
 MOCK_NITRADO = "false"
 DZN_APP_URL = "https://dzn-network.pages.dev"
+ADM_MAX_FILES_PER_INVOCATION = "1"
+ADM_MAX_UNREADABLE_RETRIES_PER_INVOCATION = "1"
+ADM_MAX_READ_ATTEMPTS_PER_FILE = "1"
+ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE = "1"
+ADM_MAX_CHUNKED_READ_CHUNKS = "4"
+ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION = "8"
 
 [[d1_databases]]
 binding = "DB"

@@ -199,8 +199,13 @@ assert.equal(workerSource.includes("env.DZN_APP_URL"), true);
 assert.equal(workerSource.includes("x-dzn-cron-secret"), true);
 assert.equal(workerSource.includes("env.SYNC_CRON_SECRET"), false);
 assert.equal(workerSource.includes("source: \"cloudflare\""), true);
-assert.equal(workerSource.indexOf("/api/sync/metadata/run") < workerSource.indexOf("/api/sync/adm/run"), true);
-assert.equal(workerSource.indexOf("/api/sync/adm/run") < workerSource.indexOf("/api/sync/discord-posts/run"), true);
+assert.equal(workerSource.includes("runScheduledAdmSync"), true);
+assert.equal(workerSource.includes("selectNextAdmLinkedServerForWorker"), true);
+assert.equal(workerSource.includes("selected_linked_server_id"), true);
+assert.equal(workerSource.includes("/api/sync/adm/run"), false);
+assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));"), true);
+assert.equal(workerSource.includes("results.push(await runDirectAdmSync(env, options));"), true);
+assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[1], baseUrl, secret, options));"), true);
 
 const cronAuthSource = readFileSync("functions/_lib/cron-auth.ts", "utf8");
 assert.equal(cronAuthSource.includes("env.DZN_CRON_SECRET || null"), true);
