@@ -286,12 +286,47 @@ export async function runScopedAdmAutoSyncNow(
   linkedServerId: string,
   payload?: { mode: "target_file"; fileName: string; filePath: string },
 ) {
-  return request<(AdmSyncRunResult & { ok?: true; worker_hot_path?: boolean; recoverable?: boolean; selected_adm_file?: string | null }) | { ok: false; error_code: string; message: string; details?: unknown }>(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/auto-sync-now`, {
+  const response = await fetch(`/api/servers/${encodeURIComponent(linkedServerId)}/adm/auto-sync-now`, {
     method: "POST",
     cache: "no-store",
+    credentials: "include",
     headers: payload ? { "content-type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
   });
+  const responseBody = await response.text();
+  const parsed = parseJsonBody(responseBody);
+  if (!response.ok) {
+    if (isStructuredAdmAutoSyncResponse(parsed)) {
+      return parsed as (AdmSyncRunResult & {
+        ok?: true;
+        worker_hot_path?: boolean;
+        recoverable?: boolean;
+        selected_adm_file?: string | null;
+        syncStatus?: string | null;
+        errorCode?: string | null;
+        upstreamHttpStatus?: number | null;
+      });
+    }
+    const error = parsed && typeof parsed === "object" ? parsed as { error?: string; message?: string; error_code?: string } : null;
+    throw new Error(error?.message || error?.error || error?.error_code || `Request failed: ${response.status}`);
+  }
+  if (parsed && typeof parsed === "object") {
+    return parsed as (AdmSyncRunResult & {
+      ok?: true;
+      worker_hot_path?: boolean;
+      recoverable?: boolean;
+      selected_adm_file?: string | null;
+      syncStatus?: string | null;
+      errorCode?: string | null;
+      upstreamHttpStatus?: number | null;
+    }) | { ok: false; error_code: string; message: string; details?: unknown };
+  }
+  return {
+    ok: false,
+    error_code: "invalid_json_response",
+    message: response.ok ? "The ADM auto-sync endpoint returned an invalid JSON response." : `Request failed: ${response.status}`,
+    details: responseBody,
+  };
 }
 
 export async function backfillMissingAdm(linkedServerId: string) {
@@ -543,6 +578,12 @@ function parseJsonBody(value: string) {
   } catch {
     return null;
   }
+}
+
+function isStructuredAdmAutoSyncResponse(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return record.recoverable === true || typeof record.syncStatus === "string" || typeof record.errorCode === "string" || typeof record.upstreamHttpStatus === "number";
 }
 
 export type DeletionResponse = {

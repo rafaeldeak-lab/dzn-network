@@ -195,11 +195,19 @@ const dashboardApi = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(dashboardApi.includes("/api/sync/adm/run"), true);
 assert.equal(dashboardApi.includes("/api/servers/${encodeURIComponent(linkedServerId)}/adm/auto-sync-now"), true);
 assert.equal(dashboardApi.includes("mode: \"target_file\""), true);
+assert.equal(dashboardApi.includes("isStructuredAdmAutoSyncResponse"), true);
+assert.equal(dashboardApi.includes("upstreamHttpStatus"), true);
+assert.equal(dashboardApi.includes("recoverable === true"), true);
 const scopedAutoSyncEndpointSource = readFileSync("functions/api/servers/[serverId]/adm/auto-sync-now.ts", "utf8");
 assert.equal(scopedAutoSyncEndpointSource.includes("parseTargetFilePayload"), true);
 assert.equal(scopedAutoSyncEndpointSource.includes("NITRADO_UPSTREAM_DOWN"), true);
 assert.equal(scopedAutoSyncEndpointSource.includes("dayzps/config/${fileName}"), true);
 assert.equal(scopedAutoSyncEndpointSource.includes("latest_read_issue"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("appHttpStatus: 200"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("upstreamHttpStatus"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("invalid_adm_filename"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("invalid_adm_file_path"), true);
+assert.equal(scopedAutoSyncEndpointSource.includes("worker_subrequest_limit"), true);
 const dashboardHealthSource = readFileSync("functions/api/servers/[serverId]/dashboard/health.ts", "utf8");
 assert.equal(dashboardHealthSource.includes("nitrado_file_read_attempts"), true);
 assert.equal(dashboardHealthSource.includes("normalizeLatestReadTruth"), true);
@@ -219,6 +227,11 @@ assert.equal(dashboardUi.includes("Feed last updated"), true);
 assert.equal(dashboardUi.includes("getDashboardSyncStatusBanner"), true);
 assert.equal(dashboardUi.includes("latest_completed_import"), true);
 assert.equal(dashboardUi.includes("last_attempted_adm_read"), true);
+assert.equal(dashboardUi.includes("Optional exact ADM filename"), true);
+assert.equal(dashboardUi.includes("getAdmAutoSyncResultBadge"), true);
+assert.equal(dashboardUi.includes("Attempted File"), true);
+assert.equal(dashboardUi.includes("HTTP Status"), true);
+assert.equal(dashboardUi.includes("ADM file path must be the filename or dayzps/config/<filename>."), true);
 
 Promise.all([
   runEndpointTests(),

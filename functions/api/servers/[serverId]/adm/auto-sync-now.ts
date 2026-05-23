@@ -1,4 +1,4 @@
-import { ensureAdmSyncSchema, runAdmWorkerSyncTick } from "../../../../_lib/adm-sync";
+import { runAdmWorkerSyncTick } from "../../../../_lib/adm-sync";
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
@@ -21,7 +21,7 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
 
     const payload = await readJsonBody(request);
     const target = parseTargetFilePayload(payload);
-    await ensureAdmSyncSchema(env);
+    if (target.errorCode) return autoSyncError(400, target.errorCode, target.message ?? "Invalid ADM auto-sync payload.");
     const result = await runAdmWorkerSyncTick(env, {
       linkedServerId,
       force: true,
@@ -33,7 +33,8 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
     const latestReadIssue = await getLatestScopedReadIssue(env, linkedServerId, target.fileName ?? result.selected_adm_file);
     const status = classifyScopedAutoSyncStatus(result, latestReadIssue);
     const message = formatScopedAutoSyncMessage(status, target.fileName ?? result.selected_adm_file, latestReadIssue, result.message);
-    const recoverable = status !== "auth_error" && status !== "auto_sync_failed";
+    const errorCode = errorCodeForScopedStatus(status, latestReadIssue);
+    const recoverable = isRecoverableScopedStatus(status);
     const now = new Date().toISOString();
 
     return json({
@@ -41,8 +42,15 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
       ok: true,
       source: "owner_scoped_auto_sync",
       recoverable,
+      appHttpStatus: 200,
       status,
       syncStatus: status,
+      errorCode,
+      upstreamHttpStatus: latestReadIssue?.last_http_status ?? null,
+      method: latestReadIssue?.last_method ?? null,
+      endpointKind: latestReadIssue?.last_endpoint_kind ?? null,
+      fileName: target.fileName ?? result.selected_adm_file,
+      filePath: target.filePath ?? result.selected_adm_path,
       message,
       attempted_file: target.fileName ?? result.selected_adm_file,
       attempted_path: target.filePath ?? result.selected_adm_path,
@@ -73,12 +81,38 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
       skippedDuplicateLines: 0,
       syncDurationMs: 0,
     }, {
+      status: 200,
       headers: {
         "cache-control": "private, no-store, no-cache, must-revalidate",
         vary: "Cookie",
       },
     });
   } catch (error) {
+    const recoverable = recoverableAutoSyncException(error);
+    if (recoverable) {
+      return json({
+        ok: true,
+        source: "owner_scoped_auto_sync",
+        recoverable: true,
+        appHttpStatus: 200,
+        status: recoverable.syncStatus,
+        syncStatus: recoverable.syncStatus,
+        errorCode: recoverable.errorCode,
+        upstreamHttpStatus: recoverable.upstreamHttpStatus,
+        method: null,
+        endpointKind: null,
+        fileName: null,
+        filePath: null,
+        message: recoverable.message,
+        nextRetryAt: null,
+      }, {
+        status: 200,
+        headers: {
+          "cache-control": "private, no-store, no-cache, must-revalidate",
+          vary: "Cookie",
+        },
+      });
+    }
     return autoSyncError(500, "auto_sync_now_failed", "Unable to run scoped ADM auto-sync.", {
       error: error instanceof Error ? error.message : String(error),
       stack: isDebugRequest(request) && error instanceof Error ? error.stack : undefined,
@@ -106,6 +140,13 @@ type ScopedReadIssue = {
   last_error: string | null;
   last_diagnostic_at: string | null;
   last_checked_at: string | null;
+};
+
+type TargetFilePayload = {
+  fileName: string | null;
+  filePath: string | null;
+  errorCode?: string;
+  message?: string;
 };
 
 async function getLatestScopedReadIssue(env: Env, linkedServerId: string, fileName: string | null): Promise<ScopedReadIssue | null> {
@@ -190,9 +231,10 @@ function classifyScopedAutoSyncStatus(
   const httpStatus = Number(issue?.last_http_status ?? 0);
   const error = String(issue?.last_error ?? result.message ?? "").toUpperCase();
   if (httpStatus === 401 || httpStatus === 403 || error.includes("NITRADO_UNAUTHORIZED") || error.includes("NITRADO_FORBIDDEN")) return "auth_error";
-  if (httpStatus === 404 || error.includes("NITRADO_FILE_NOT_FOUND")) return "file_not_found";
+  if (httpStatus === 404 || error.includes("NITRADO_FILE_NOT_FOUND")) return "file_missing_or_rotated";
   if (httpStatus === 429 || error.includes("NITRADO_RATE_LIMITED")) return "nitrado_rate_limited";
   if ([500, 502, 503, 504].includes(httpStatus) || error.includes("NITRADO_UPSTREAM_DOWN")) return "nitrado_upstream_down";
+  if (error.includes("WORKER_SUBREQUEST_LIMIT")) return "worker_subrequest_limit";
   if (result.latest_adm_unreadable_count > 0 || issue) return "latest_adm_unreadable";
   return result.failed > 0 ? "auto_sync_failed" : "no_new_adm";
 }
@@ -204,18 +246,28 @@ function formatScopedAutoSyncMessage(status: string, fileName: string | null, is
   if (status === "processed") return `ADM import work continued for ${name}.`;
   if (status === "nitrado_upstream_down") return `Nitrado file service returned HTTP ${issue?.last_http_status ?? 500} for ${name}.${retry}`;
   if (status === "nitrado_rate_limited") return `Nitrado rate-limited ADM reads for ${name}.${retry}`;
-  if (status === "file_not_found") return "Nitrado listed the ADM file but the API could not read it. It may have rotated or not be available to API download yet.";
+  if (status === "file_missing_or_rotated") return "Nitrado could not read that exact ADM path. It may have rotated or not be API-readable yet.";
   if (status === "auth_error") return "Nitrado rejected ADM file access for this server. Re-link the Nitrado token or check service permissions.";
+  if (status === "worker_subrequest_limit") return "Cloudflare reached the controlled ADM sync subrequest budget. Auto-sync will continue in the next small batch.";
   if (status === "latest_adm_unreadable") return `${name} is not readable from Nitrado yet.${retry}`;
   return fallback;
 }
 
-function parseTargetFilePayload(payload: unknown) {
+function parseTargetFilePayload(payload: unknown): TargetFilePayload {
   if (!payload || typeof payload !== "object") return { fileName: null, filePath: null };
   const record = payload as Record<string, unknown>;
-  if (record.mode !== "target_file") return { fileName: null, filePath: null };
-  const fileName = sanitizeAdmFileName(record.fileName);
-  const filePath = fileName ? sanitizeAdmFilePath(record.filePath, fileName) : null;
+  if (record.mode == null) return { fileName: null, filePath: null };
+  if (record.mode !== "target_file") {
+    return { fileName: null, filePath: null, errorCode: "invalid_mode", message: "Invalid ADM auto-sync mode." };
+  }
+  const fileName = sanitizeAdmFileName(record.fileName ?? record.filePath);
+  if (!fileName) {
+    return { fileName: null, filePath: null, errorCode: "invalid_adm_filename", message: "Enter a valid .ADM filename." };
+  }
+  const filePath = sanitizeAdmFilePath(record.filePath, fileName);
+  if (!filePath) {
+    return { fileName: null, filePath: null, errorCode: "invalid_adm_file_path", message: "ADM file path must be the filename or dayzps/config/<filename>." };
+  }
   return { fileName, filePath };
 }
 
@@ -231,6 +283,7 @@ async function readJsonBody(request: Request) {
 
 function sanitizeAdmFileName(value: unknown) {
   if (typeof value !== "string") return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || value.includes("..") || /[\u0000-\u001f]/.test(value)) return null;
   const filename = value.trim().replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? "";
   if (!/^DayZServer_[A-Za-z0-9_-]+\.ADM$/i.test(filename)) return null;
   return filename;
@@ -239,8 +292,64 @@ function sanitizeAdmFileName(value: unknown) {
 function sanitizeAdmFilePath(value: unknown, fileName: string) {
   const expected = `dayzps/config/${fileName}`;
   if (typeof value !== "string") return expected;
-  const path = value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
-  return path.toLowerCase() === expected.toLowerCase() ? path : expected;
+  const raw = value.trim().replace(/\\/g, "/");
+  if (!raw) return expected;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || raw.includes("..") || /[\u0000-\u001f]/.test(raw)) return null;
+  const path = raw.replace(/^\/+/, "");
+  if (path.split("/").some((part) => !part)) return null;
+  if (path.toLowerCase() === fileName.toLowerCase()) return expected;
+  return path.toLowerCase() === expected.toLowerCase() ? expected : null;
+}
+
+function errorCodeForScopedStatus(status: string, issue: ScopedReadIssue | null) {
+  if (status === "nitrado_upstream_down") return "NITRADO_UPSTREAM_DOWN";
+  if (status === "nitrado_rate_limited") return "NITRADO_RATE_LIMITED";
+  if (status === "file_missing_or_rotated") return "NITRADO_FILE_NOT_FOUND";
+  if (status === "auth_error") return issue?.last_http_status === 401 ? "NITRADO_UNAUTHORIZED" : "NITRADO_FORBIDDEN";
+  if (status === "worker_subrequest_limit") return "WORKER_SUBREQUEST_LIMIT";
+  if (status === "latest_adm_unreadable") return issue?.last_error ?? "ADM_FILE_UNREADABLE";
+  if (status === "auto_sync_failed") return "AUTO_SYNC_FAILED";
+  return null;
+}
+
+function isRecoverableScopedStatus(status: string) {
+  return [
+    "queued",
+    "processed",
+    "nitrado_upstream_down",
+    "latest_adm_unreadable",
+    "waiting_for_nitrado",
+    "no_new_adm",
+    "partial_budget_reached",
+    "nitrado_rate_limited",
+    "file_missing_or_rotated",
+    "target_file_unreadable",
+    "duplicate_skipped",
+    "completed_no_new_events",
+    "worker_subrequest_limit",
+  ].includes(status);
+}
+
+function recoverableAutoSyncException(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/Too many subrequests|subrequest limit|single Worker invocation/i.test(message)) {
+    return {
+      syncStatus: "worker_subrequest_limit",
+      errorCode: "WORKER_SUBREQUEST_LIMIT",
+      upstreamHttpStatus: null,
+      message: "Cloudflare reached the controlled ADM sync subrequest budget. Auto-sync will continue in the next small batch.",
+    };
+  }
+  if (/NITRADO_UPSTREAM_DOWN|HTTP\s+5\d\d/i.test(message)) {
+    const match = /HTTP\s+(5\d\d)/i.exec(message);
+    return {
+      syncStatus: "nitrado_upstream_down",
+      errorCode: "NITRADO_UPSTREAM_DOWN",
+      upstreamHttpStatus: match ? Number(match[1]) : 500,
+      message: "Nitrado file service returned an upstream error for this ADM file. Auto-sync will retry.",
+    };
+  }
+  return null;
 }
 
 function sanitizeLinkedServerId(value: unknown) {

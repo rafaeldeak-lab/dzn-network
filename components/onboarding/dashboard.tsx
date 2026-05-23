@@ -2133,16 +2133,19 @@ function ServerDashboard({
         setActionMessage("");
         try {
           action.setStep(1, "Selecting this server for a tiny Worker-style sync run.");
-          const response = await runScopedAdmAutoSyncNow(server.id, buildAdmAutoSyncTargetPayload(admAutoSyncTargetFile));
+          const target = buildAdmAutoSyncTargetPayload(admAutoSyncTargetFile);
+          if (target.error) throw new Error(target.error);
+          const response = await runScopedAdmAutoSyncNow(server.id, target.payload);
           if ("ok" in response && response.ok === false) {
             throw new Error(response.message);
           }
-          setLastSyncResult(response);
-          setForceLatestAdmResult(response);
-          action.setStep(3, response.job ? `${response.job.filename} chunk ${normalizeChunkProgress(response.job).displayCurrentChunk}/${normalizeChunkProgress(response.job).totalChunks}` : getManualSyncMessage(response), 72);
-          if (response.job) updateAdmChunkDashboardActionProgress(response.job.filename, response.job);
+          const syncResponse = response as AdmSyncRunResult;
+          setLastSyncResult(syncResponse);
+          setForceLatestAdmResult(syncResponse);
+          action.setStep(3, syncResponse.job ? `${syncResponse.job.filename} chunk ${normalizeChunkProgress(syncResponse.job).displayCurrentChunk}/${normalizeChunkProgress(syncResponse.job).totalChunks}` : getManualSyncMessage(syncResponse), 72);
+          if (syncResponse.job) updateAdmChunkDashboardActionProgress(syncResponse.job.filename, syncResponse.job);
           await refreshDashboardAfterManualAdmImport();
-          return response;
+          return syncResponse;
         } finally {
           setForceLatestAdmRunning(false);
         }
@@ -2844,18 +2847,10 @@ function ServerDashboard({
             />
 
             <DashboardPanel className="p-4">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                <PanelHeader icon={<DatabaseZap className={`h-5 w-5 ${refreshingSyncData ? "animate-pulse" : ""}`} />} title="Sync Engine Status" />
-                <label className="flex min-w-0 flex-1 flex-col gap-1 xl:max-w-md">
-                  <span className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Optional exact ADM filename</span>
-                  <input
-                    value={admAutoSyncTargetFile}
-                    onChange={(event) => setAdmAutoSyncTargetFile(event.target.value)}
-                    placeholder="DayZServer_PS4_x64_2026-05-23_22-02-05.ADM"
-                    className="min-h-10 rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-xs font-bold text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-300/55"
-                  />
-                </label>
-                <div className="flex flex-wrap justify-end gap-2">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <PanelHeader icon={<DatabaseZap className={`h-5 w-5 ${refreshingSyncData ? "animate-pulse" : ""}`} />} title="Sync Engine Status" />
+                  <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
                   <button
                     type="button"
                     disabled={checkingAdmFileDiscovery || isDashboardActionActive}
@@ -2901,7 +2896,20 @@ function ServerDashboard({
                     <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
                     {dashboardActionKey === "refresh-status" || manualRefreshing ? "Running..." : "Refresh Status"}
                   </button>
+                  </div>
                 </div>
+                <label className="flex w-full max-w-3xl flex-col gap-1">
+                  <span className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Optional exact ADM filename</span>
+                  <input
+                    value={admAutoSyncTargetFile}
+                    onChange={(event) => setAdmAutoSyncTargetFile(event.target.value)}
+                    placeholder="DayZServer_PS4_x64_2026-05-23_22-02-05.ADM"
+                    className="min-h-10 w-full rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-xs font-bold text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-300/55"
+                  />
+                  <span className="text-[11px] font-semibold leading-5 text-zinc-500">
+                    Enter a filename or dayzps/config path. DZN will never use this as an external URL.
+                  </span>
+                </label>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 <MiniInfo label="Auto-refresh" value="On (15s)" />
@@ -2994,12 +3002,12 @@ function ServerDashboard({
                       <p className="text-xs font-black uppercase text-emerald-100">Auto-Sync Result</p>
                       <p className="mt-1 text-sm font-bold leading-6 text-emerald-50">{getManualSyncMessage(forceLatestAdmResult)}</p>
                     </div>
-                    <SmallBadge tone={forceLatestAdmResult.status === "completed" ? "emerald" : "orange"}>{formatSyncStatus(forceLatestAdmResult.status)}</SmallBadge>
+                    <SmallBadge tone={getAdmAutoSyncResultBadge(forceLatestAdmResult).tone}>{getAdmAutoSyncResultBadge(forceLatestAdmResult).label}</SmallBadge>
                   </div>
                   <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
                     <MiniInfo label="Attempted File" value={String((forceLatestAdmResult as AdmSyncRunResult & { attempted_file?: string | null; selected_adm_file?: string | null }).attempted_file ?? forceLatestAdmResult.latestAdmFile ?? (forceLatestAdmResult as AdmSyncRunResult & { selected_adm_file?: string | null }).selected_adm_file ?? "Latest known ADM")} />
-                    <MiniInfo label="HTTP Status" value={String((forceLatestAdmResult as AdmSyncRunResult & { latest_http_status?: number | null }).latest_http_status ?? "None")} />
-                    <MiniInfo label="Endpoint" value={String((forceLatestAdmResult as AdmSyncRunResult & { latest_endpoint_kind?: string | null }).latest_endpoint_kind ?? "Not reached")} />
+                    <MiniInfo label="HTTP Status" value={String((forceLatestAdmResult as AdmSyncRunResult & { latest_http_status?: number | null; upstreamHttpStatus?: number | null }).latest_http_status ?? (forceLatestAdmResult as AdmSyncRunResult & { upstreamHttpStatus?: number | null }).upstreamHttpStatus ?? "None")} />
+                    <MiniInfo label="Endpoint" value={String((forceLatestAdmResult as AdmSyncRunResult & { latest_endpoint_kind?: string | null; endpointKind?: string | null }).latest_endpoint_kind ?? (forceLatestAdmResult as AdmSyncRunResult & { endpointKind?: string | null }).endpointKind ?? "Not reached")} />
                     <MiniInfo label="Lines Read" value={String(forceLatestAdmResult.linesRead ?? 0)} />
                     <MiniInfo label="Lines Processed" value={String(forceLatestAdmResult.linesProcessed ?? 0)} />
                     <MiniInfo label="Events Created" value={String(forceLatestAdmResult.eventsCreated ?? 0)} />
@@ -3331,15 +3339,49 @@ function SyncHealthSummaryPanel({
   );
 }
 
-function buildAdmAutoSyncTargetPayload(value: string) {
+function getAdmAutoSyncResultBadge(result: AdmSyncRunResult): { label: string; tone: "emerald" | "orange" | "cyan" | "zinc" } {
+  const record = result as AdmSyncRunResult & { recoverable?: boolean; syncStatus?: string | null; errorCode?: string | null };
+  const status = record.syncStatus ?? result.status;
+  if (["completed", "processed", "queued", "adm_import_job_queued", "processing_in_chunks"].includes(status)) {
+    return { label: formatSyncStatus(status), tone: "emerald" };
+  }
+  if (status === "nitrado_upstream_down" || record.errorCode === "NITRADO_UPSTREAM_DOWN") {
+    return { label: "Waiting on Nitrado", tone: "orange" };
+  }
+  if (status === "worker_subrequest_limit") {
+    return { label: "Retry Scheduled", tone: "cyan" };
+  }
+  if (record.recoverable || ["latest_adm_unreadable", "nitrado_rate_limited", "file_missing_or_rotated", "no_new_adm"].includes(status)) {
+    return { label: "Recoverable", tone: "orange" };
+  }
+  return { label: formatSyncStatus(status), tone: result.status === "completed" ? "emerald" : "orange" };
+}
+
+function buildAdmAutoSyncTargetPayload(value: string): {
+  payload?: { mode: "target_file"; fileName: string; filePath: string };
+  error?: string;
+} {
   const raw = value.trim();
-  if (!raw) return undefined;
-  const fileName = raw.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? "";
-  if (!/^DayZServer_[A-Za-z0-9_-]+\.ADM$/i.test(fileName)) return undefined;
+  if (!raw) return {};
+  const normalized = raw.replace(/\\/g, "/");
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized) || normalized.includes("..") || /[\u0000-\u001f]/.test(normalized)) {
+    return { error: "Enter a filename or dayzps/config path, not a URL or traversal path." };
+  }
+  const parts = normalized.replace(/^\/+/, "").split("/");
+  if (parts.some((part) => !part)) return { error: "ADM file path contains an empty path segment." };
+  const fileName = parts.at(-1) ?? "";
+  if (!/^DayZServer_[A-Za-z0-9_-]+\.ADM$/i.test(fileName)) return { error: "Enter a valid DayZServer .ADM filename." };
+  const expectedPath = `dayzps/config/${fileName}`;
+  const path = parts.length === 1 ? expectedPath : parts.join("/");
+  if (path.toLowerCase() !== expectedPath.toLowerCase()) {
+    return { error: "ADM file path must be the filename or dayzps/config/<filename>." };
+  }
   return {
-    mode: "target_file" as const,
-    fileName,
-    filePath: `dayzps/config/${fileName}`,
+    payload: {
+      mode: "target_file" as const,
+      fileName,
+      filePath: expectedPath,
+    },
   };
 }
 
