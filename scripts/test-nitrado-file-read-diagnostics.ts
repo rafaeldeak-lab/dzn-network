@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { buildAdmBackfillPlan } from "../functions/_lib/adm-sync";
+import { fetchWithTimeout } from "../functions/_lib/nitrado";
 import {
   classifyFetchError,
   errorCodeForHttpStatus,
@@ -59,6 +60,20 @@ async function main() {
   assert.equal(fetchThrew.errorCode, "FETCH_THREW");
   assert.ok(!fetchThrew.errorMessage.includes("should-not-leak"));
 
+  const workerLimit = classifyFetchError(new Error("Too many subrequests by single Worker invocation"));
+  assert.equal(workerLimit.status, "fetch_threw");
+  assert.equal(workerLimit.errorCode, "WORKER_SUBREQUEST_LIMIT");
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), { once: true });
+  })) as typeof fetch;
+  try {
+    await assert.rejects(() => fetchWithTimeout("https://api.nitrado.net/test", {}, 1), /aborted/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
   const excerpt = sanitizeResponseExcerpt(`error access_token=${"x".repeat(100)} body`);
   assert.ok(!excerpt?.includes("x".repeat(80)));
 
@@ -80,6 +95,23 @@ async function main() {
   assert.equal(recorded[9], 503);
   assert.equal(recorded[11], "NITRADO_UPSTREAM_DOWN");
   assert.ok(!String(recorded[16]).includes("secret"));
+
+  await recordNitradoFileReadAttempt(fakeDb as unknown as D1Database, {
+    serviceId: "17428528",
+    fileName: "DayZServer.ADM",
+    method: "download",
+    endpointKind: "nitrado_download",
+    status: "redirect_response",
+    httpStatus: 302,
+    errorCode: "NITRADO_DOWNLOAD_REDIRECT",
+    responseExcerpt: "Location: https://files.nitrado.net/path?token=super-secret-token&signature=signed",
+    requestUrlRedacted: "https://api.nitrado.net/services/17428528/gameservers/file_server/download?file=DayZServer.ADM",
+  });
+  const redirectRecorded = fakeDb.binds[1];
+  assert.equal(redirectRecorded[8], "redirect_response");
+  assert.equal(redirectRecorded[9], 302);
+  assert.equal(redirectRecorded[11], "NITRADO_DOWNLOAD_REDIRECT");
+  assert.ok(!String(redirectRecorded[13]).includes("super-secret-token"));
 
   const plan = buildAdmBackfillPlan({
     files: [
@@ -103,9 +135,28 @@ async function main() {
 
   const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
   const diagnosticsSource = readFileSync("functions/_lib/nitrado-diagnostics.ts", "utf8");
+  const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
+  const workflowSource = readFileSync(".github/workflows/dzn-nitrado-diagnostics.yml", "utf8");
   assert.ok(nitradoSource.includes("TOKENIZED_EMPTY_BODY"));
   assert.ok(nitradoSource.includes("recordNitradoFileReadAttempt"));
+  assert.ok(nitradoSource.includes('redirect: "manual"'));
+  assert.ok(nitradoSource.includes("redirect_response"));
+  assert.ok(nitradoSource.includes("seek_probe"));
+  assert.ok(nitradoSource.includes("readNitradoFileViaSeekChunked"));
+  assert.ok(nitradoSource.includes("summarizeAdmFileReadOutcomes"));
   assert.ok(diagnosticsSource.includes("NITRADO_UPSTREAM_DOWN"));
+  assert.ok(diagnosticsSource.includes("WORKER_SUBREQUEST_LIMIT"));
+  assert.ok(admSyncSource.includes("ADM_MAX_FILES_PER_INVOCATION"));
+  assert.ok(admSyncSource.includes("ADM_MAX_UNREADABLE_RETRIES_PER_INVOCATION"));
+  assert.ok(admSyncSource.includes("ADM_MAX_READ_ATTEMPTS_PER_FILE"));
+  assert.ok(admSyncSource.includes("ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE"));
+  assert.ok(admSyncSource.includes("ADM_MAX_CHUNKED_READ_CHUNKS"));
+  assert.ok(admSyncSource.includes("ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION"));
+  assert.ok(admSyncSource.includes("per-invocation safety budget"));
+  assert.ok(workflowSource.includes("workflow_dispatch"));
+  assert.ok(workflowSource.includes("/api/debug/nitrado-file-read"));
+  assert.ok(workflowSource.includes("/api/sync/adm/retry-unreadable"));
+  assert.ok(!workflowSource.includes("echo \"$DZN_CRON_SECRET\""));
 
   console.log("Nitrado file-read diagnostics tests passed.");
 }

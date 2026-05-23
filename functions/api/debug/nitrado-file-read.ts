@@ -54,12 +54,19 @@ export const onRequestPost: PagesFunction = async (context) => {
       options: {
         mode: "full",
         fullDownloadFallback: true,
+        maxPathVariants: 1,
+        maxTokenizedAttempts: 1,
+        maxChunkedReadChunks: 4,
         diagnostics: {
           db,
           serverId: linkedServer.id,
           serviceId,
           fileName: filename,
           filePath,
+          budget: {
+            maxRows: 8,
+            rowsRecorded: 0,
+          },
         },
       },
     });

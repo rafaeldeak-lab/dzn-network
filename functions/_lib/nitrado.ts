@@ -5,6 +5,7 @@ import {
   humanNitradoReadError,
   recordNitradoFileReadAttempt,
   sanitizeHeaders,
+  sanitizeNitradoUrl,
   sanitizeResponseExcerpt,
   type NitradoFileReadAttemptPayload,
   type NitradoFileReadDiagnosticsContext,
@@ -42,7 +43,13 @@ const EXACT_ADM_LIST_DIRS = [
 ];
 const EXACT_ADM_SEARCH_TERMS = [undefined, ".ADM", ".adm", "DayZServer", "DAYZSERVER"];
 const ADM_SAMPLE_BYTES = 4096;
+const ADM_SEEK_PROBE_BYTES = 64 * 1024;
+const ADM_SEEK_CHUNK_BYTES = 512 * 1024;
+const ADM_MAX_SEEK_CHUNKS = 12;
 const ADM_FULL_READ_BYTES = 20 * 1024 * 1024;
+const ADM_DEFAULT_READ_PATH_VARIANTS = 4;
+const ADM_DEBUG_READ_PATH_VARIANTS = 6;
+const ADM_TOKENIZED_ATTEMPTS_DEFAULT = 1;
 type AdmReadMode = "sample" | "full";
 type AdmReadOptions = {
   mode?: AdmReadMode;
@@ -54,6 +61,15 @@ type AdmReadOptions = {
   fullDownloadFallback?: boolean;
   diagnostics?: NitradoFileReadDiagnosticsContext;
   timeoutMs?: number;
+  maxPathVariants?: number;
+  seekProbe?: boolean;
+  chunkedSeekFallback?: boolean;
+  seekOffsetBytes?: number;
+  seekLengthBytes?: number;
+  seekDiagnosticMethod?: "seek" | "seek_probe" | "seek_chunk";
+  recordSuccessDiagnostics?: boolean;
+  maxTokenizedAttempts?: number;
+  maxChunkedReadChunks?: number;
 };
 
 type NitradoRawService = {
@@ -164,6 +180,7 @@ export type AdmListAttempt = {
 export type AdmReadAttempt = {
   path: string;
   method: "seek" | "download";
+  diagnosticMethod?: NitradoFileReadAttemptPayload["method"] | null;
   pathVariantLabel: string | null;
   requestUrlPathOnly: string;
   httpStatusCode: number | null;
@@ -698,6 +715,8 @@ export async function debugNitradoAdmFileDiscovery(
           ...options,
           mode: "sample",
           fullDownloadFallback: true,
+          maxPathVariants: Math.min(options.maxPathVariants ?? 1, 1),
+          maxTokenizedAttempts: Math.min(options.maxTokenizedAttempts ?? 1, 1),
         },
       });
       readAttempts.push(...readResult.readAttempts);
@@ -1522,7 +1541,12 @@ async function runNitradoLogAccessDiagnosticsInternal(
 
   const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
   const selectedGameSpecificLogs = withPreferredAdmFile(gameSpecificLogs, options.preferredAdmFileName, options.preferredAdmPath);
-  const pathVariants = buildAdmReadPathVariants(selectedGameSpecificLogs);
+  const selectedAdmPath = selectedGameSpecificLogs.selectedAdmFile?.path ?? selectedGameSpecificLogs.selectedAdmFile?.name ?? "";
+  const pathVariants = limitAdmReadPathVariants(
+    buildAdmReadPathVariants(selectedGameSpecificLogs),
+    selectedAdmPath,
+    options.maxPathVariants ?? 1,
+  );
   const pathVariantLabels = createPathVariantLabelMap(pathVariants);
   const testedPathVariants = pathVariants.map((variant) => maskNitradoUsernameInPath(variant.path, selectedGameSpecificLogs.username));
 
@@ -1575,6 +1599,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
       readablePath = variant.path;
       routeRecommendation = "/services/{serviceId}/gameservers/file_server/download";
     }
+    if (hasWorkerSubrequestLimitAttempt(downloadAttempts)) break;
 
     const seekAttempts: AdmReadAttempt[] = [];
     const seek = await readNitradoFileViaSeek(token, serviceId, variant.path, seekAttempts, pathVariantLabels, options);
@@ -1587,6 +1612,7 @@ async function runNitradoLogAccessDiagnosticsInternal(
       readablePath = variant.path;
       routeRecommendation = "/services/{serviceId}/gameservers/file_server/seek";
     }
+    if (hasWorkerSubrequestLimitAttempt(seekAttempts)) break;
 
     const stat = await statNitradoFile(token, serviceId, variant.path, pathVariantLabels);
     attempts.push(logAccessAttemptFromStat(`L stat ${variant.label}`, stat, selectedGameSpecificLogs.username));
@@ -1638,12 +1664,14 @@ async function readNitradoFileSample(
   pathVariantLabels?: Map<string, string>,
   options: AdmReadOptions = {},
 ) {
+  const attemptStart = readAttempts?.length ?? 0;
   if (options.mode === "full") {
     const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels, {
       ...options,
       mode: "full",
     });
     if (download.sample !== null) return download;
+    if (readAttempts && hasWorkerSubrequestLimitAttempt(readAttempts, attemptStart)) return download;
     return readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels, {
       ...options,
       mode: "sample",
@@ -1655,6 +1683,7 @@ async function readNitradoFileSample(
     mode: "sample",
   });
   if (seek.sample !== null) return seek;
+  if (readAttempts && hasWorkerSubrequestLimitAttempt(readAttempts, attemptStart)) return seek;
   if (options.fullDownloadFallback === false) return seek;
 
   const download = await readNitradoFileViaDownload(token, serviceId, file, readAttempts, pathVariantLabels, {
@@ -1663,6 +1692,74 @@ async function readNitradoFileSample(
   });
   if (download.sample !== null) return download;
   return download.errorMessageSafe ? download : seek;
+}
+
+function limitAdmReadPathVariants(variants: AdmPathVariant[], manualPath: string, maxPathVariants: number | undefined) {
+  const max = Math.max(1, Math.min(ADM_DEBUG_READ_PATH_VARIANTS, Math.trunc(Number(maxPathVariants ?? ADM_DEFAULT_READ_PATH_VARIANTS) || ADM_DEFAULT_READ_PATH_VARIANTS)));
+  const manual = normalizeRemotePath(manualPath);
+  const fileName = manual.split("/").filter(Boolean).at(-1) ?? manual;
+  const labelPriority = new Map([
+    ["dayzps-config", 0],
+    ["original", manual.includes("/") ? 0 : 1],
+    ["slash-dayzps-config", 2],
+    ["config", 3],
+    ["filename", 4],
+    ["slash-config", 5],
+    ["slash-filename", 6],
+  ]);
+  return [...variants]
+    .sort((a, b) => {
+      const aPath = normalizeRemotePath(a.path);
+      const bPath = normalizeRemotePath(b.path);
+      const aExact = manual.includes("/") && aPath === manual ? 0 : 1;
+      const bExact = manual.includes("/") && bPath === manual ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      const aFile = aPath.split("/").filter(Boolean).at(-1) === fileName ? 0 : 1;
+      const bFile = bPath.split("/").filter(Boolean).at(-1) === fileName ? 0 : 1;
+      if (aFile !== bFile) return aFile - bFile;
+      const aPriority = labelPriority.get(a.label) ?? 99;
+      const bPriority = labelPriority.get(b.label) ?? 99;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return a.label.localeCompare(b.label);
+    })
+    .slice(0, max);
+}
+
+async function readNitradoFileViaSeekChunked(
+  token: string,
+  serviceId: string,
+  file: string,
+  readAttempts: AdmReadAttempt[],
+  pathVariantLabels: Map<string, string>,
+  options: AdmReadOptions,
+) {
+  const maxBytes = Math.max(ADM_SEEK_CHUNK_BYTES, Math.min(ADM_FULL_READ_BYTES, Math.trunc(Number(options.seekLengthBytes ?? ADM_FULL_READ_BYTES) || ADM_FULL_READ_BYTES)));
+  const configuredMaxChunks = Math.trunc(Number(options.maxChunkedReadChunks ?? ADM_MAX_SEEK_CHUNKS) || ADM_MAX_SEEK_CHUNKS);
+  const maxChunks = Math.max(1, Math.min(ADM_MAX_SEEK_CHUNKS, configuredMaxChunks, Math.ceil(maxBytes / ADM_SEEK_CHUNK_BYTES)));
+  let combined = "";
+  let lastFailure: AdmSampleResult | null = null;
+
+  for (let index = 0; index < maxChunks; index += 1) {
+    const chunk = await readNitradoFileViaSeek(token, serviceId, file, readAttempts, pathVariantLabels, {
+      ...options,
+      mode: "full",
+      seekDiagnosticMethod: "seek_chunk",
+      seekOffsetBytes: index * ADM_SEEK_CHUNK_BYTES,
+      seekLengthBytes: ADM_SEEK_CHUNK_BYTES,
+      recordSuccessDiagnostics: false,
+    });
+    if (!chunk.sample) {
+      lastFailure = chunk;
+      break;
+    }
+    combined += chunk.sample;
+    if (chunk.sample.length < ADM_SEEK_CHUNK_BYTES || combined.length >= maxBytes) break;
+  }
+
+  if (combined.length > 0) {
+    return createSampleResult(combined.slice(0, maxBytes), "OK", false, "OK", true, null);
+  }
+  return lastFailure ?? createSampleResult(null, "error", false, "error", false, "Chunked seek did not return ADM text");
 }
 
 export async function readAdmFileTextWithFallback(params: {
@@ -1684,7 +1781,11 @@ export async function readAdmFileTextWithFallback(params: {
     selectedAdmFile: { name: fileName, path: originalPath, type: "file" },
     logContextPaths: originalPath ? [originalPath] : [],
   };
-  const variants = buildAdmReadPathVariants(details, originalPath);
+  const variants = limitAdmReadPathVariants(
+    buildAdmReadPathVariants(details, originalPath),
+    originalPath,
+    params.options?.maxPathVariants,
+  );
   const labels = createPathVariantLabelMap(variants);
   const readAttempts: AdmReadAttempt[] = [];
   const mode = params.options?.mode ?? "full";
@@ -1693,27 +1794,104 @@ export async function readAdmFileTextWithFallback(params: {
   const attemptedPaths: AdmFileTextReadPathAttempt[] = [];
 
   for (const variant of variants) {
-    const seek = await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
-      ...params.options,
-      mode: mode === "full" ? "full" : "sample",
-    });
-    if (seek.sample && containsDayZAdminLogMarkers(seek.sample)) {
-      return {
-        ok: true,
-        text: seek.sample,
-        selectedPath: variant.path,
-        readMethod: "seek",
-        seekAttempted: true,
-        seekOk: true,
-        seekError: undefined,
-        downloadAttempted: false,
-        downloadOk: false,
-        downloadError: undefined,
-        attemptedPaths: [],
-        readAttempts,
-      };
+    const variantAttemptStart = readAttempts.length;
+    const probeFirst = mode === "full" && params.options?.seekProbe !== false;
+    const seek = probeFirst
+      ? await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
+          ...params.options,
+          mode: "sample",
+          seekDiagnosticMethod: "seek_probe",
+          seekLengthBytes: ADM_SEEK_PROBE_BYTES,
+        })
+      : await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
+          ...params.options,
+          mode: mode === "full" ? "full" : "sample",
+        });
+
+    if (hasWorkerSubrequestLimitAttempt(readAttempts, variantAttemptStart)) {
+      seekError = "Cloudflare Worker subrequest limit reached before ADM file read could complete";
+      break;
     }
-    if (seek.errorMessageSafe) seekError = seek.errorMessageSafe;
+
+    if (seek.sample && containsDayZAdminLogMarkers(seek.sample)) {
+      if (mode !== "full") {
+        return {
+          ok: true,
+          text: seek.sample,
+          selectedPath: variant.path,
+          readMethod: "seek",
+          seekAttempted: true,
+          seekOk: true,
+          seekError: undefined,
+          downloadAttempted: false,
+          downloadOk: false,
+          downloadError: undefined,
+          attemptedPaths: [],
+          readAttempts,
+        };
+      }
+
+      const fullSeek = probeFirst
+        ? await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
+            ...params.options,
+            mode: "full",
+            seekDiagnosticMethod: "seek",
+            seekLengthBytes: ADM_FULL_READ_BYTES,
+          })
+        : seek;
+      if (fullSeek.sample && containsDayZAdminLogMarkers(fullSeek.sample)) {
+        return {
+          ok: true,
+          text: fullSeek.sample,
+          selectedPath: variant.path,
+          readMethod: "seek",
+          seekAttempted: true,
+          seekOk: true,
+          seekError: undefined,
+          downloadAttempted: false,
+          downloadOk: false,
+          downloadError: undefined,
+          attemptedPaths: [],
+          readAttempts,
+        };
+      }
+      if (hasWorkerSubrequestLimitAttempt(readAttempts, variantAttemptStart)) {
+        seekError = "Cloudflare Worker subrequest limit reached during ADM seek read";
+        break;
+      }
+      if (fullSeek.errorMessageSafe) {
+        seekError = `NITRADO_SEEK_FULL_READ_FAILED_AFTER_PROBE: ${fullSeek.errorMessageSafe}`;
+      }
+
+      if (params.options?.chunkedSeekFallback !== false) {
+        const chunkedSeek = await readNitradoFileViaSeekChunked(params.token, params.serviceId, variant.path, readAttempts, labels, params.options ?? {});
+        if (chunkedSeek.sample && containsDayZAdminLogMarkers(chunkedSeek.sample)) {
+          return {
+            ok: true,
+            text: chunkedSeek.sample,
+            selectedPath: variant.path,
+            readMethod: "seek",
+            seekAttempted: true,
+            seekOk: true,
+            seekError: undefined,
+            downloadAttempted: false,
+            downloadOk: false,
+            downloadError: undefined,
+            attemptedPaths: [],
+            readAttempts,
+          };
+        }
+        if (hasWorkerSubrequestLimitAttempt(readAttempts, variantAttemptStart)) {
+          seekError = "Cloudflare Worker subrequest limit reached during ADM chunked seek read";
+          break;
+        }
+        if (chunkedSeek.errorMessageSafe) {
+          seekError = `NITRADO_SEEK_FULL_READ_FAILED_AFTER_PROBE: ${chunkedSeek.errorMessageSafe}`;
+        }
+      }
+    } else if (seek.errorMessageSafe) {
+      seekError = seek.errorMessageSafe;
+    }
 
     if (params.options?.fullDownloadFallback === false) continue;
 
@@ -1746,6 +1924,10 @@ export async function readAdmFileTextWithFallback(params: {
       };
     }
     if (download.errorMessageSafe) downloadError = download.errorMessageSafe;
+    if (hasWorkerSubrequestLimitAttempt(readAttempts, variantAttemptStart)) {
+      downloadError = "Cloudflare Worker subrequest limit reached during ADM download fallback";
+      break;
+    }
   }
 
   return {
@@ -1822,16 +2004,17 @@ export function latestAdmFileReadDiagnostic(read: AdmFileTextFallbackResult) {
     ?? attempts.find((attempt) => attempt.errorMessageSafe)
     ?? null;
   if (!diagnostic) return null;
+  const method = diagnostic.diagnosticMethod ?? diagnostic.method;
   return {
     httpStatus: diagnostic.httpStatusCode ?? null,
     httpStatusText: diagnostic.httpStatusText ?? null,
     endpointKind: diagnostic.endpointKind ?? (diagnostic.method === "seek" ? "nitrado_seek" : "nitrado_download"),
-    method: diagnostic.method,
+    method,
     status: diagnostic.diagnosticStatus ?? (diagnostic.status === "OK" && diagnostic.success ? "success" : "unreadable"),
     errorCode: diagnostic.errorCode ?? null,
     responseExcerpt: diagnostic.responseExcerpt ?? null,
     message: humanNitradoReadError({
-      method: diagnostic.method,
+      method,
       endpointKind: diagnostic.endpointKind,
       status: diagnostic.diagnosticStatus,
       httpStatus: diagnostic.httpStatusCode,
@@ -1839,6 +2022,33 @@ export function latestAdmFileReadDiagnostic(read: AdmFileTextFallbackResult) {
       errorMessage: diagnostic.errorMessageSafe,
     }),
   };
+}
+
+export function summarizeAdmFileReadOutcomes(read: AdmFileTextFallbackResult) {
+  const attempts = read.readAttempts;
+  const seekAttempts = attempts.filter((attempt) => attempt.method === "seek");
+  const downloadAttempts = attempts.filter((attempt) => attempt.method === "download");
+  const tokenizedAttempts = attempts.filter((attempt) => attempt.endpointKind === "tokenized_url");
+  const lastSeek = seekAttempts.at(-1) ?? null;
+  const lastDownload = downloadAttempts.at(-1) ?? null;
+  const lastTokenized = tokenizedAttempts.at(-1) ?? null;
+  const parts = [
+    lastSeek ? `seek ${formatReadOutcome(lastSeek)}` : "seek not_attempted",
+    lastDownload ? `download ${formatReadOutcome(lastDownload)}` : "download not_attempted",
+    lastTokenized ? `tokenized ${formatReadOutcome(lastTokenized)}` : "no tokenized URL reached",
+  ];
+  return parts.join("; ");
+}
+
+function formatReadOutcome(attempt: AdmReadAttempt) {
+  const status = attempt.diagnosticStatus ?? (attempt.success ? "success" : attempt.status);
+  const code = attempt.errorCode ?? (attempt.httpStatusCode ? `HTTP_${attempt.httpStatusCode}` : null);
+  const message = attempt.errorMessageSafe ? ` (${attempt.errorMessageSafe})` : "";
+  return `${status}${code ? `/${code}` : ""}${message}`;
+}
+
+function hasWorkerSubrequestLimitAttempt(attempts: AdmReadAttempt[], fromIndex = 0) {
+  return attempts.slice(fromIndex).some((attempt) => attempt.errorCode === "WORKER_SUBREQUEST_LIMIT");
 }
 
 function diagnosticContextForRead(options: AdmReadOptions, serviceId: string, file: string) {
@@ -1856,9 +2066,9 @@ function filenameFromPath(value: string | null | undefined) {
   return value ? value.split("/").filter(Boolean).at(-1) ?? null : null;
 }
 
-async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(1000, Math.min(30000, timeoutMs)));
+  const timer = setTimeout(() => controller.abort("DZN_NITRADO_FETCH_TIMEOUT"), Math.max(1000, Math.min(30000, timeoutMs)));
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
@@ -1871,6 +2081,12 @@ async function recordReadDiagnostic(
   payload: Omit<NitradoFileReadAttemptPayload, "serviceId" | "serverId" | "fileName" | "filePath">,
 ) {
   if (!context) return;
+  const maxRows = Math.max(0, Math.trunc(Number(context.budget?.maxRows ?? Number.POSITIVE_INFINITY)));
+  if (Number.isFinite(maxRows)) {
+    const recorded = Math.max(0, Math.trunc(Number(context.budget?.rowsRecorded ?? 0)));
+    if (recorded >= maxRows) return;
+    if (context.budget) context.budget.rowsRecorded = recorded + 1;
+  }
   await recordNitradoFileReadAttempt(context.db, {
     serviceId: context.serviceId,
     serverId: context.serverId ?? null,
@@ -1889,9 +2105,14 @@ async function readNitradoFileViaSeek(
   options: AdmReadOptions = {},
 ) {
   const pathVariantLabel = getPathVariantLabel(pathVariantLabels, file);
-  const requestUrlPathOnly = buildRequestUrlPathOnly(serviceId, "seek", file);
+  const seekMethod = options.seekDiagnosticMethod ?? "seek";
+  const seekOffset = Math.max(0, Math.trunc(Number(options.seekOffsetBytes ?? 0) || 0));
+  const defaultSeekLength = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
+  const seekLength = Math.max(1, Math.min(ADM_FULL_READ_BYTES, Math.trunc(Number(options.seekLengthBytes ?? defaultSeekLength) || defaultSeekLength)));
+  const requestUrlPathOnly = buildSeekRequestUrlPathOnly(serviceId, file, seekOffset, seekLength);
   if (isUnsafeRemotePathForRequest(file)) {
     readAttempts?.push(createReadAttempt(file, "seek", "error", {
+      diagnosticMethod: seekMethod,
       pathVariantLabel,
       requestUrlPathOnly,
       endpointKind: "nitrado_seek",
@@ -1906,7 +2127,7 @@ async function readNitradoFileViaSeek(
   const startedAt = Date.now();
   try {
     const url = new URL(`${NITRADO_API}${requestUrlPathOnly}`);
-    const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token) }, options.timeoutMs ?? 12000);
+    const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token), redirect: "manual" }, options.timeoutMs ?? 12000);
     const durationMs = Date.now() - startedAt;
     const responseContentType = response.headers.get("content-type");
     if (!response.ok) {
@@ -1915,7 +2136,7 @@ async function readNitradoFileViaSeek(
       const responseExcerpt = sanitizeResponseExcerpt(bodyText);
       const errorCode = errorCodeForHttpStatus(response.status);
       await recordReadDiagnostic(diagnosticContext, {
-        method: "seek",
+        method: seekMethod,
         endpointKind: "nitrado_seek",
         status: "non_ok_response",
         httpStatus: response.status,
@@ -1928,6 +2149,7 @@ async function readNitradoFileViaSeek(
         requestUrlRedacted: url.toString(),
       });
       readAttempts?.push(createReadAttempt(file, "seek", status, {
+        diagnosticMethod: seekMethod,
         pathVariantLabel,
         requestUrlPathOnly,
         httpStatusCode: response.status,
@@ -1946,17 +2168,20 @@ async function readNitradoFileViaSeek(
     if (bodyText && (!payload || containsDayZAdminLogMarkers(bodyText))) {
       const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
       const direct = createSampleResult(bodyText.slice(0, maxBytes), "OK", false, "OK", true, null);
-      await recordReadDiagnostic(diagnosticContext, {
-        method: "seek",
-        endpointKind: "nitrado_seek",
-        status: direct.sample ? "success" : "empty_body",
-        httpStatus: response.status,
-        httpStatusText: response.statusText,
-        responseHeadersJson: sanitizeHeaders(response.headers),
-        durationMs,
-        requestUrlRedacted: url.toString(),
-      });
+      if (options.recordSuccessDiagnostics !== false) {
+        await recordReadDiagnostic(diagnosticContext, {
+          method: seekMethod,
+          endpointKind: "nitrado_seek",
+          status: direct.sample ? "success" : "empty_body",
+          httpStatus: response.status,
+          httpStatusText: response.statusText,
+          responseHeadersJson: sanitizeHeaders(response.headers),
+          durationMs,
+          requestUrlRedacted: url.toString(),
+        });
+      }
       readAttempts?.push(createReadAttempt(file, "seek", "OK", {
+        diagnosticMethod: seekMethod,
         pathVariantLabel,
         requestUrlPathOnly,
         httpStatusCode: response.status,
@@ -1974,18 +2199,21 @@ async function readNitradoFileViaSeek(
       }));
       return direct;
     }
-    await recordReadDiagnostic(diagnosticContext, {
-      method: "seek",
-      endpointKind: "nitrado_seek",
-      status: "success",
-      httpStatus: response.status,
-      httpStatusText: response.statusText,
-      responseHeadersJson: sanitizeHeaders(response.headers),
-      durationMs,
-      requestUrlRedacted: url.toString(),
-    });
+    if (options.recordSuccessDiagnostics !== false) {
+      await recordReadDiagnostic(diagnosticContext, {
+        method: seekMethod,
+        endpointKind: "nitrado_seek",
+        status: "success",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
+    }
     const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "seek", sample.status, {
+      diagnosticMethod: seekMethod,
       pathVariantLabel,
       requestUrlPathOnly,
       httpStatusCode: sample.httpStatusCode ?? response.status,
@@ -2007,7 +2235,7 @@ async function readNitradoFileViaSeek(
   } catch (error) {
     const classified = classifyFetchError(error);
     await recordReadDiagnostic(diagnosticContext, {
-      method: "seek",
+      method: seekMethod,
       endpointKind: "nitrado_seek",
       status: classified.status,
       httpStatus: null,
@@ -2017,6 +2245,7 @@ async function readNitradoFileViaSeek(
       requestUrlRedacted: `${NITRADO_API}${requestUrlPathOnly}`,
     });
     readAttempts?.push(createReadAttempt(file, "seek", "error", {
+      diagnosticMethod: seekMethod,
       pathVariantLabel,
       requestUrlPathOnly,
       endpointKind: "nitrado_seek",
@@ -2054,9 +2283,67 @@ async function readNitradoFileViaDownload(
   const startedAt = Date.now();
   try {
     const url = new URL(`${NITRADO_API}${requestUrlPathOnly}`);
-    const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token) }, options.timeoutMs ?? 12000);
+    const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token), redirect: "manual" }, options.timeoutMs ?? 12000);
     const durationMs = Date.now() - startedAt;
     const responseContentType = response.headers.get("content-type");
+    if ([301, 302, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      const responseExcerpt = location ? `Location: ${sanitizeNitradoUrl(location)}` : "Redirect response did not include a Location header.";
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "download",
+        endpointKind: "nitrado_download",
+        status: "redirect_response",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        errorCode: "NITRADO_DOWNLOAD_REDIRECT",
+        errorMessage: "Nitrado download endpoint returned a tokenized redirect.",
+        responseExcerpt,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
+      if (!location) {
+        readAttempts?.push(createReadAttempt(file, "download", "error", {
+          pathVariantLabel,
+          requestUrlPathOnly,
+          httpStatusCode: response.status,
+          httpStatusText: response.statusText,
+          endpointKind: "nitrado_download",
+          diagnosticStatus: "redirect_response",
+          errorCode: "NITRADO_DOWNLOAD_REDIRECT",
+          responseExcerpt,
+          responseContentType,
+          errorMessageSafe: "Nitrado download redirected without a tokenized file URL",
+        }));
+        return createSampleResult(null, "error", false, "not_attempted", false, "Nitrado download redirected without a tokenized file URL");
+      }
+
+      const sample = await fetchTokenizedFileSample({ url: location, token: null }, token, options);
+      readAttempts?.push(createReadAttempt(file, "download", sample.status, {
+        pathVariantLabel,
+        requestUrlPathOnly,
+        httpStatusCode: sample.httpStatusCode ?? response.status,
+        httpStatusText: sample.httpStatusText ?? response.statusText,
+        endpointKind: sample.endpointKind ?? "tokenized_url",
+        diagnosticStatus: sample.diagnosticStatus ?? (sample.sample !== null ? "success" : "redirect_response"),
+        errorCode: sample.errorCode ?? "NITRADO_DOWNLOAD_REDIRECT",
+        responseExcerpt: sample.responseExcerpt ?? responseExcerpt,
+        responseContentType,
+        responseShape: sample.responseShape,
+        errorMessageSafe: sample.sample !== null ? null : sample.errorMessageSafe ?? "Nitrado download redirected but tokenized file fetch failed",
+        downloadTokenCreated: true,
+        tokenUrlReceived: true,
+        sampleFetchAttempted: sample.sampleFetchAttempted,
+        sampleFetchStatus: sample.sampleFetchStatus,
+        sampleReadSucceeded: sample.sample !== null,
+      }));
+      return sample.sample !== null
+        ? sample
+        : {
+            ...sample,
+            errorMessageSafe: sample.errorMessageSafe ?? "Nitrado download redirected but tokenized file fetch failed",
+          };
+    }
     if (!response.ok) {
       const status = safeResponseStatus(response);
       const bodyText = await response.text().catch(() => "");
@@ -2094,16 +2381,18 @@ async function readNitradoFileViaDownload(
     if (bodyText && (!payload || containsDayZAdminLogMarkers(bodyText))) {
       const maxBytes = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
       const direct = createSampleResult(bodyText.slice(0, maxBytes), "OK", false, "OK", true, null);
-      await recordReadDiagnostic(diagnosticContext, {
-        method: "download",
-        endpointKind: "nitrado_download",
-        status: direct.sample ? "success" : "empty_body",
-        httpStatus: response.status,
-        httpStatusText: response.statusText,
-        responseHeadersJson: sanitizeHeaders(response.headers),
-        durationMs,
-        requestUrlRedacted: url.toString(),
-      });
+      if (options.recordSuccessDiagnostics !== false) {
+        await recordReadDiagnostic(diagnosticContext, {
+          method: "download",
+          endpointKind: "nitrado_download",
+          status: direct.sample ? "success" : "empty_body",
+          httpStatus: response.status,
+          httpStatusText: response.statusText,
+          responseHeadersJson: sanitizeHeaders(response.headers),
+          durationMs,
+          requestUrlRedacted: url.toString(),
+        });
+      }
       readAttempts?.push(createReadAttempt(file, "download", "OK", {
         pathVariantLabel,
         requestUrlPathOnly,
@@ -2122,16 +2411,18 @@ async function readNitradoFileViaDownload(
       }));
       return direct;
     }
-    await recordReadDiagnostic(diagnosticContext, {
-      method: "download",
-      endpointKind: "nitrado_download",
-      status: "success",
-      httpStatus: response.status,
-      httpStatusText: response.statusText,
-      responseHeadersJson: sanitizeHeaders(response.headers),
-      durationMs,
-      requestUrlRedacted: url.toString(),
-    });
+    if (options.recordSuccessDiagnostics !== false) {
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "download",
+        endpointKind: "nitrado_download",
+        status: "success",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
+    }
     const sample = await fetchTokenizedFileSample(payload, token, options);
     readAttempts?.push(createReadAttempt(file, "download", sample.status, {
       pathVariantLabel,
@@ -2491,10 +2782,11 @@ async function fetchTokenizedFileSample(payload: unknown, nitradoToken: string, 
     { tokenQuery: false, offsetCount: false, authorizationToken: nitradoToken, mode },
     { tokenQuery: false, offsetCount: false, authorizationToken: null, mode },
   ];
+  const cappedAttempts = sampleAttempts.slice(0, Math.max(1, Math.min(sampleAttempts.length, Math.trunc(Number(options.maxTokenizedAttempts ?? ADM_TOKENIZED_ATTEMPTS_DEFAULT) || ADM_TOKENIZED_ATTEMPTS_DEFAULT))));
 
   let lastResult = createSampleResult(null, "error", true, "error", true, "Tokenized sample fetch failed");
-  for (let index = 0; index < sampleAttempts.length; index += 1) {
-    const result = await fetchTokenizedFileSampleUrl(token, sampleAttempts[index], options, index + 1);
+  for (let index = 0; index < cappedAttempts.length; index += 1) {
+    const result = await fetchTokenizedFileSampleUrl(token, cappedAttempts[index], options, index + 1);
     lastResult = result;
     if (result.sample !== null) {
       return {
@@ -2660,6 +2952,7 @@ function createReadAttempt(
   return {
     path,
     method,
+    diagnosticMethod: values.diagnosticMethod ?? null,
     pathVariantLabel: values.pathVariantLabel ?? null,
     requestUrlPathOnly: values.requestUrlPathOnly ?? "",
     httpStatusCode: values.httpStatusCode ?? null,
@@ -2759,9 +3052,17 @@ function buildRequestUrlPathOnly(serviceId: string, method: "download" | "seek" 
     return `${base}?file=${encodedPath}`;
   }
   if (method === "seek") {
-    return `${base}?file=${encodedPath}&offset=0&length=${ADM_SAMPLE_BYTES}&mode=raw`;
+    return buildSeekRequestUrlPathOnly(serviceId, path, 0, ADM_SAMPLE_BYTES);
   }
   return `${base}?files[]=${encodedPath}`;
+}
+
+function buildSeekRequestUrlPathOnly(serviceId: string, path: string, offset: number, length: number) {
+  const base = `/services/${encodeURIComponent(serviceId)}/gameservers/file_server/seek`;
+  const encodedPath = encodeNitradoFileQueryPath(path);
+  const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+  const safeLength = Math.max(1, Math.min(ADM_FULL_READ_BYTES, Math.trunc(Number(length) || ADM_SAMPLE_BYTES)));
+  return `${base}?file=${encodedPath}&offset=${safeOffset}&length=${safeLength}&mode=raw`;
 }
 
 function buildSafeRequestUrlPathOnly(method: "download" | "seek" | "stat", redactedPath: string) {

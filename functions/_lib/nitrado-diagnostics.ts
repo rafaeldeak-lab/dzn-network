@@ -1,8 +1,9 @@
-export type NitradoFileReadMethod = "seek" | "download" | "tokenized_download" | "tokenized_sample";
+export type NitradoFileReadMethod = "seek" | "seek_probe" | "seek_chunk" | "download" | "tokenized_download" | "tokenized_sample";
 export type NitradoFileReadEndpointKind = "nitrado_seek" | "nitrado_download" | "tokenized_url";
 export type NitradoFileReadStatus =
   | "success"
   | "non_ok_response"
+  | "redirect_response"
   | "fetch_threw"
   | "timeout"
   | "empty_body"
@@ -33,6 +34,10 @@ export type NitradoFileReadDiagnosticsContext = {
   serviceId: string;
   fileName?: string | null;
   filePath?: string | null;
+  budget?: {
+    maxRows?: number;
+    rowsRecorded?: number;
+  };
 };
 
 const SECRET_QUERY_KEYS = new Set([
@@ -121,6 +126,9 @@ export function classifyFetchError(error: unknown) {
   const rawMessage = error instanceof Error ? error.message : String(error ?? "fetch failed");
   const message = sanitizeResponseExcerpt(rawMessage, 500) ?? "fetch failed";
   const lower = `${name} ${message}`.toLowerCase();
+  if (lower.includes("too many subrequests")) {
+    return { status: "fetch_threw" as const, errorCode: "WORKER_SUBREQUEST_LIMIT", errorMessage: message };
+  }
   if (name === "AbortError" || lower.includes("timeout") || lower.includes("timed out") || lower.includes("aborted")) {
     return { status: "timeout" as const, errorCode: "FETCH_TIMEOUT", errorMessage: message };
   }
@@ -187,12 +195,18 @@ export function humanNitradoReadError(values: {
 }) {
   const method = values.method === "seek"
     ? "Nitrado seek"
+    : values.method === "seek_probe"
+      ? "Nitrado seek probe"
+      : values.method === "seek_chunk"
+        ? "Nitrado seek chunk"
     : values.method === "download"
       ? "Nitrado download"
       : values.method?.startsWith("tokenized")
         ? "Tokenized download"
         : "Nitrado file read";
   if (values.httpStatus) return `${method} returned HTTP ${values.httpStatus}`;
+  if (values.errorCode === "WORKER_SUBREQUEST_LIMIT") return `${method} failed: Cloudflare Worker subrequest limit reached`;
+  if (values.errorCode === "NITRADO_DOWNLOAD_REDIRECT") return `${method} returned a tokenized redirect`;
   if (values.status === "timeout" || values.errorCode === "FETCH_TIMEOUT") return `${method} fetch threw: timeout`;
   if (values.status === "empty_body" || values.errorCode === "TOKENIZED_EMPTY_BODY") return `${method} returned empty body`;
   if (values.errorMessage) return `${method} failed: ${values.errorMessage}`;

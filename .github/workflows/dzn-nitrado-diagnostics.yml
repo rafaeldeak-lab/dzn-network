@@ -1,0 +1,86 @@
+name: DZN Nitrado ADM Diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      serviceId:
+        description: "Nitrado service id to diagnose"
+        required: true
+        type: string
+      filePath:
+        description: "ADM file path to read"
+        required: true
+        type: string
+      retryUnreadable:
+        description: "Also retry unreadable ADM files for this service"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      limit:
+        description: "Unreadable retry limit"
+        required: false
+        default: "5"
+        type: string
+
+jobs:
+  nitrado-adm-diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run production Nitrado ADM diagnostic
+        env:
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          SERVICE_ID: ${{ inputs.serviceId }}
+          FILE_PATH: ${{ inputs.filePath }}
+          RETRY_UNREADABLE: ${{ inputs.retryUnreadable }}
+          RETRY_LIMIT: ${{ inputs.limit }}
+        run: |
+          if [ -z "$DZN_CRON_SECRET" ]; then
+            echo "DZN_CRON_SECRET is not configured."
+            exit 1
+          fi
+
+          APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
+
+          python - <<'PY' > diagnostic-payload.json
+          import json, os
+          print(json.dumps({
+            "serviceId": os.environ["SERVICE_ID"],
+            "filePath": os.environ["FILE_PATH"],
+          }))
+          PY
+
+          echo "Running sanitized Nitrado file-read diagnostic for service ${SERVICE_ID}."
+          curl --fail-with-body --silent --show-error \
+            -X POST "${APP_URL}/api/debug/nitrado-file-read" \
+            -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
+            -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data @diagnostic-payload.json
+
+          if [ "$RETRY_UNREADABLE" = "true" ]; then
+            python - <<'PY' > retry-payload.json
+            import json, os
+            try:
+              limit = int(os.environ.get("RETRY_LIMIT") or "5")
+            except ValueError:
+              limit = 5
+            print(json.dumps({
+              "serviceId": os.environ["SERVICE_ID"],
+              "limit": max(1, min(limit, 10)),
+              "onlyLatest": False,
+            }))
+            PY
+
+            echo ""
+            echo "Retrying unreadable ADM files for service ${SERVICE_ID}."
+            curl --fail-with-body --silent --show-error \
+              -X POST "${APP_URL}/api/sync/adm/retry-unreadable" \
+              -H "x-dzn-cron-secret: ${DZN_CRON_SECRET}" \
+              -H "Authorization: Bearer ${DZN_CRON_SECRET}" \
+              -H "Content-Type: application/json" \
+              --data @retry-payload.json
+          fi

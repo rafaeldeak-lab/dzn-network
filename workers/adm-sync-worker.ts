@@ -29,7 +29,7 @@ const CRON_ENDPOINTS: CronEndpoint[] = [
   {
     label: "adm",
     path: "/api/sync/adm/run",
-    body: { source: "cloudflare", cron: "cloudflare-worker", max_servers: 1, max_lines_per_server: 50000 },
+    body: { source: "cloudflare", cron: "cloudflare-worker", max_servers: 1, max_lines_per_server: 15000 },
   },
   {
     label: "discord-posts",
@@ -78,7 +78,10 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
   }
 
   const baseUrl = appBaseUrl(env);
-  const results = await Promise.all(CRON_ENDPOINTS.map((endpoint) => runCronEndpoint(endpoint, baseUrl, secret, options)));
+  const results = [];
+  for (const endpoint of CRON_ENDPOINTS) {
+    results.push(await runCronEndpoint(endpoint, baseUrl, secret, options));
+  }
 
   console.log("DZN CLOUDFLARE WORKER CRON TICK COMPLETE", {
     ok: results.every((result) => result.ok),

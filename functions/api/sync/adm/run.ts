@@ -55,7 +55,6 @@ export async function handleAdmSyncRun(
     const body = await readJson<AdmSyncRunBody>(request);
     const source = normalizeAutomationCronSource(body.source, body.cron);
     const startedAt = new Date().toISOString();
-    await safeRecordCronRun(env, source, "started", startedAt);
     let result: Awaited<ReturnType<typeof runScheduledAdmSync>>;
     try {
       result = await handlers.runScheduled(env, {

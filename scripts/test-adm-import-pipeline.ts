@@ -146,7 +146,7 @@ async function main() {
   const packageSource = readFileSync("package.json", "utf8");
   assert.match(packageSource, /"check:adm-backfill": "tsx scripts\/check-adm-backfill\.ts"/);
   assert.match(packageSource, /"check:adm-automation": "tsx scripts\/check-adm-automation\.ts"/);
-  assert.match(admSyncSource, /SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 5/);
+  assert.match(admSyncSource, /SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1/);
   assert.match(admSyncSource, /processAdmImportJobsUntilBudget/);
   assert.match(admSyncSource, /already_processed/);
   assert.match(admSyncSource, /chunk_count_mismatch/);

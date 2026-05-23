@@ -16,6 +16,7 @@ import {
   mockAdmLogDetection,
   mockNitradoLogAccessDiagnostics,
   readAdmFileTextWithFallback,
+  summarizeAdmFileReadOutcomes,
   type NitradoDiscoveredAdmFile,
   type NitradoReadableAdmFile,
   type NitradoLogAccessDiagnostics,
@@ -1806,7 +1807,12 @@ function getAdmBackfillReadLimit(planKey: PlanKey | string | null | undefined) {
 
 const ADM_UNREADABLE_RETRY_LIMIT = 5;
 const ADM_UNREADABLE_RETRY_AFTER_MS = 15 * 60 * 1000;
-const SCHEDULED_ADM_UNREADABLE_RETRY_FILES_PER_RUN = 5;
+const DEFAULT_ADM_MAX_FILES_PER_INVOCATION = 1;
+const DEFAULT_ADM_MAX_UNREADABLE_RETRIES_PER_INVOCATION = 1;
+const DEFAULT_ADM_MAX_READ_ATTEMPTS_PER_FILE = 1;
+const DEFAULT_ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE = 1;
+const DEFAULT_ADM_MAX_CHUNKED_READ_CHUNKS = 4;
+const DEFAULT_ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION = 8;
 const MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN = 10;
 
 function hasRawPlayerKillLine(line: string) {
@@ -2581,8 +2587,41 @@ export async function importAdmFilesForServer(
 const MANUAL_ADM_IMPORT_CHUNK_SIZE = 25;
 const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 10;
-const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 5;
+const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
+
+type AdmInvocationBudget = {
+  maxFilesPerInvocation: number;
+  maxUnreadableRetriesPerInvocation: number;
+  maxReadAttemptsPerFile: number;
+  maxTokenizedAttemptsPerFile: number;
+  maxChunkedReadChunks: number;
+  diagnosticRows: {
+    maxRows: number;
+    rowsRecorded: number;
+  };
+};
+
+function getAdmInvocationBudget(env: Env): AdmInvocationBudget {
+  return {
+    maxFilesPerInvocation: readAdmBudgetInt(env, "ADM_MAX_FILES_PER_INVOCATION", DEFAULT_ADM_MAX_FILES_PER_INVOCATION, 1, 12),
+    maxUnreadableRetriesPerInvocation: readAdmBudgetInt(env, "ADM_MAX_UNREADABLE_RETRIES_PER_INVOCATION", DEFAULT_ADM_MAX_UNREADABLE_RETRIES_PER_INVOCATION, 0, 10),
+    maxReadAttemptsPerFile: readAdmBudgetInt(env, "ADM_MAX_READ_ATTEMPTS_PER_FILE", DEFAULT_ADM_MAX_READ_ATTEMPTS_PER_FILE, 1, 6),
+    maxTokenizedAttemptsPerFile: readAdmBudgetInt(env, "ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE", DEFAULT_ADM_MAX_TOKENIZED_ATTEMPTS_PER_FILE, 1, 5),
+    maxChunkedReadChunks: readAdmBudgetInt(env, "ADM_MAX_CHUNKED_READ_CHUNKS", DEFAULT_ADM_MAX_CHUNKED_READ_CHUNKS, 1, 12),
+    diagnosticRows: {
+      maxRows: readAdmBudgetInt(env, "ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION", DEFAULT_ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION, 0, 100),
+      rowsRecorded: 0,
+    },
+  };
+}
+
+function readAdmBudgetInt(env: Env, key: string, fallback: number, min: number, max: number) {
+  const value = (env as unknown as Record<string, unknown>)[key];
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
+}
 let admSchemaEnsureSkipDepth = 0;
 
 type AdmImportJobRow = {
@@ -3098,6 +3137,7 @@ export async function planAdmBackfillJobsForServer(
   if (!linkedServer || linkedServer.user_id !== userId) throw new Error("No linked server found");
   const scope = verifyAdmServerScope(linkedServer, crypto.randomUUID());
   const scheduledBudgeted = options.scheduledBudgeted === true;
+  const admBudget = getAdmInvocationBudget(env);
   if (!options.skipMetadataRefresh) {
     await refreshNitradoServerMetadata(env, {
       linkedServerId: scope.linkedServerId,
@@ -3115,8 +3155,9 @@ export async function planAdmBackfillJobsForServer(
     readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: scheduledBudgeted ? 5 : getAdmBackfillReadLimit(linkedServer.plan_key),
+    maxFiles: scheduledBudgeted ? admBudget.maxFilesPerInvocation : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
     lookbackFiles: scheduledBudgeted ? 10 : 12,
+    budget: admBudget,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
 
@@ -3134,7 +3175,8 @@ export async function planAdmBackfillJobsForServer(
   }
   const retryPromotion = await retryUnreadableAdmFileStatesForServer(env, linkedServer, scope, {
     handledFilenames,
-    limit: scheduledBudgeted ? SCHEDULED_ADM_UNREADABLE_RETRY_FILES_PER_RUN : MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN,
+    limit: scheduledBudgeted ? admBudget.maxUnreadableRetriesPerInvocation : Math.min(MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN, admBudget.maxUnreadableRetriesPerInvocation),
+    budget: admBudget,
   });
   readableFiles.push(...retryPromotion.readableFiles);
   const readErrorByName = new Map<string, string | null>();
@@ -3177,7 +3219,7 @@ export async function planAdmBackfillJobsForServer(
     for (const filename of exactReadNames) {
       const candidate = batch.candidates.find((file) => normalizeAdmFilenameKey(file.name) === normalizeAdmFilenameKey(filename));
       if (!candidate) continue;
-      const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate);
+      const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate, admBudget);
       if (read.file) {
         readableFiles.push(read.file);
         readableByName.set(normalizeAdmFilenameKey(read.file.name), read.file);
@@ -3269,8 +3311,12 @@ export async function planAdmBackfillJobsForServer(
   const latestUnreadableDiagnostic = latestUnreadable
     ? readDiagnosticByName.get(normalizeAdmFilenameKey(latestUnreadable.filename)) ?? null
     : null;
-  const syncSummary = plan.unreadableFiles.length
-    ? `ADM sync discovered ${batch.filesFound} files; ${readableFiles.length} readable; ${plan.unreadableFiles.length} unreadable; ${createdJobs.length} queued; latest unreadable ${latestUnreadable?.filename ?? "unknown"} ${latestUnreadableDiagnostic?.httpStatus ? `HTTP ${latestUnreadableDiagnostic.httpStatus}` : latestUnreadableDiagnostic?.endpointKind ?? latestUnreadable?.error ?? "read failed"}.`
+  const budgetPaused = batch.filesFound > admBudget.maxFilesPerInvocation || plan.missingFiles.length > createdJobs.length + plan.unreadableFiles.length;
+  const budgetMessage = budgetPaused
+    ? "ADM sync paused after reaching per-invocation safety budget; remaining files will continue next run."
+    : null;
+  const syncSummary = plan.unreadableFiles.length || budgetMessage
+    ? `ADM sync discovered ${batch.filesFound} files; ${readableFiles.length} readable; ${plan.unreadableFiles.length} unreadable; ${createdJobs.length} queued; diagnostics ${admBudget.diagnosticRows.rowsRecorded}/${admBudget.diagnosticRows.maxRows}.${latestUnreadable ? ` Latest unreadable ${latestUnreadable.filename} ${latestUnreadableDiagnostic?.httpStatus ? `HTTP ${latestUnreadableDiagnostic.httpStatus}` : latestUnreadableDiagnostic?.errorCode ?? latestUnreadableDiagnostic?.endpointKind ?? latestUnreadable.error ?? "read failed"}.` : ""}${budgetMessage ? ` ${budgetMessage}` : ""}`
     : null;
   const message = syncSummary ? `${baseMessage} ${syncSummary}` : baseMessage;
 
@@ -5408,7 +5454,7 @@ export async function runScheduledAdmSync(
   const pendingJobs = await processAdmImportJobsUntilBudget(env, {
     maxJobs: maxServers,
     maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
-    maxRuntimeMs: 20_000,
+    maxRuntimeMs: 5_000,
   });
   const processedActiveImportWork = pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0;
   const discoveryServers = processedActiveImportWork ? [] : await getDueAdmDiscoveryAutomationServers(env, maxServers);
@@ -5449,7 +5495,7 @@ export async function runScheduledAdmSync(
     }
   }
 
-  const eligibleServers = processedActiveImportWork ? [] : await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs);
+  const eligibleServers = processedActiveImportWork || discoveryProcessed > 0 ? [] : await getDueAdmAutomationServers(env, maxServers, minSyncIntervalMs);
   let succeeded = 0;
   let failed = 0;
   let unavailable = 0;
@@ -7384,6 +7430,7 @@ async function getReadableAdmFilesForLinkedServer(
     preferredAdmPath?: string | null;
     maxFiles?: number;
     lookbackFiles?: number;
+    budget?: AdmInvocationBudget;
   } = {},
 ): Promise<{ files: ReadableAdmFileForSync[]; candidates: DiscoveredAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; apiStatus: string; message: string; readErrors: string[]; readError: string | null }> {
   const isMock = options.isMock ?? isMockNitrado(env.MOCK_NITRADO);
@@ -7430,10 +7477,14 @@ async function getReadableAdmFilesForLinkedServer(
     preferredAdmPath: options.preferredAdmPath ?? linkedServer.adm_path,
     maxFiles: options.maxFiles,
     lookbackFiles: options.lookbackFiles,
+    maxPathVariants: options.readMode === "full" ? options.budget?.maxReadAttemptsPerFile ?? 4 : 1,
+    maxTokenizedAttempts: options.budget?.maxTokenizedAttemptsPerFile ?? (options.readMode === "full" ? 2 : 1),
+    maxChunkedReadChunks: options.budget?.maxChunkedReadChunks,
     diagnostics: {
       db: requireDb(env),
       serverId: linkedServer.id,
       serviceId: linkedServer.nitrado_service_id,
+      budget: options.budget?.diagnosticRows,
     },
   });
 
@@ -7455,6 +7506,7 @@ async function readSpecificAdmFileForBackfill(
   env: Env,
   linkedServer: SyncLinkedServer,
   candidate: DiscoveredAdmFileForSync,
+  budget: AdmInvocationBudget = getAdmInvocationBudget(env),
 ): Promise<{
   file: ReadableAdmFileForSync | null;
   error: string | null;
@@ -7474,21 +7526,26 @@ async function readSpecificAdmFileForBackfill(
       options: {
         mode: "full",
         fullDownloadFallback: true,
+        maxPathVariants: Math.min(1, budget.maxReadAttemptsPerFile),
+        maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
+        maxChunkedReadChunks: budget.maxChunkedReadChunks,
         diagnostics: {
           db: requireDb(env),
           serverId: linkedServer.id,
           serviceId: linkedServer.nitrado_service_id,
           fileName: candidate.name,
           filePath: candidate.path ?? candidate.name,
+          budget: budget.diagnosticRows,
         },
       },
     });
     const diagnostic = latestAdmFileReadDiagnostic(read);
     const lines = splitAdmText(read.text ?? "");
     if (!read.ok || !looksLikeAdmText(lines)) {
+      const outcomeSummary = summarizeAdmFileReadOutcomes(read);
       return {
         file: null,
-        error: diagnostic?.message ?? read.downloadError ?? read.seekError ?? "ADM file exists on Nitrado but could not be read as admin log text.",
+        error: `${candidate.name} unreadable: ${outcomeSummary}.`,
         diagnostic,
       };
     }
@@ -7524,6 +7581,7 @@ async function retryUnreadableAdmFileStatesForServer(
     handledFilenames: string[];
     limit: number;
     onlyLatest?: boolean;
+    budget?: AdmInvocationBudget;
   },
 ): Promise<{
   createdJobs: AdmImportJobProgressResult[];
@@ -7550,6 +7608,7 @@ async function retryUnreadableAdmFileStatesForServer(
     .all<UnreadableAdmFileRetryRow>();
 
   const handled = new Set(options.handledFilenames.map(normalizeAdmFilenameKey).filter(Boolean));
+  const budget = options.budget ?? getAdmInvocationBudget(env);
   const createdJobs: AdmImportJobProgressResult[] = [];
   const readableFiles: ReadableAdmFileForSync[] = [];
   const readErrorsByFilename = new Map<string, string | null>();
@@ -7593,7 +7652,7 @@ async function retryUnreadableAdmFileStatesForServer(
       continue;
     }
 
-    const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate);
+    const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate, budget);
     if (read.file?.lines.length) {
       readableFiles.push(read.file);
       await resetAdmReadFailureCounter(env, scope.linkedServerId);
