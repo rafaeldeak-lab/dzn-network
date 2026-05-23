@@ -103,7 +103,7 @@ includesAll(landing, [
   "latestRequestId",
   "fetchJsonWithRetry<HomeStatsResponse>",
   "HOME_STATS_LAST_GOOD_MAX_AGE_MS",
-  "Network stats could not be loaded right now.",
+  "Waiting for live data from the first synced ADM.",
   "payload.data && !payload.totals ? payload.data : payload",
   "dataPending ? \"Awaiting live data\"",
   "Waiting for first synced ADM",

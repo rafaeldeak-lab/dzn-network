@@ -513,7 +513,7 @@ assert.equal(homepageSource.includes("function useHomepageAuth"), true);
 assert.equal(homepageSource.includes("Homepage Auth Debug"), true);
 assert.equal(homepageSource.includes("DZN HOMEPAGE AUTH STATE ALIGNED"), true);
 assert.equal(homepageSource.includes("Live stats temporarily unavailable"), false);
-assert.equal(homepageSource.includes("Network stats could not be loaded right now."), true);
+assert.equal(homepageSource.includes("Waiting for live data from the first synced ADM."), true);
 assert.equal(homepageSource.includes("Network stats syncing. Latest server data is being refreshed."), false);
 assert.equal(homepageSource.includes("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED"), true);
 assert.equal(homepageSource.includes("DZN LOGGED OUT CTA CLEANUP COMPLETE"), true);
