@@ -874,6 +874,7 @@ function ServerDashboard({
   );
   const shouldShowLiveRefreshWarning = Boolean(liveRefreshWarning && !hasDashboardDataToDisplay);
   const dashboardStatDetail = preferLastKnownStats && isOlderThanMs(cachedDashboardStats?.generated_at, LAST_KNOWN_STAT_LABEL_THRESHOLD_MS) ? "Last known" : "Total";
+  const dashboardStatPendingDetail = getDashboardStatPendingDetail(effectiveSyncStatus);
   const publicCacheFlags = effectivePublicCacheDebug?.problem_flags ?? [];
   const publicCacheStale = publicCacheFlags.some((flag) => [
     "public_cache_missing",
@@ -2676,6 +2677,11 @@ function ServerDashboard({
                 {tags.length ? tags.slice(0, 6).map((tag) => <TagPill key={tag}>{tag}</TagPill>) : <span className="text-sm text-zinc-400">No tags selected</span>}
                 {tags.length > 6 ? <TagPill>+{tags.length - 6}</TagPill> : null}
               </div>
+              {normalizedServerCategory ? (
+                <Link href="/events/create" className="mt-4 inline-flex items-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/16 px-3 py-2 text-[10px] font-black uppercase text-violet-50 transition hover:bg-violet-500/26">
+                  Create Event <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              ) : null}
             </div>
           </div>
         </DashboardPanel>
@@ -2704,11 +2710,11 @@ function ServerDashboard({
       </section>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
         <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Players Online" value={playerSlotsLabel} detail={playerCountFreshnessDetail} tone="cyan" />
-        <DashboardStatTile icon={<Crosshair className="h-5 w-5" />} label="Kills" value={formatNullableDashboardNumber(dashboardStatValues.kills)} detail={dashboardStatValues.kills === null ? "Loading" : dashboardStatDetail} tone="red" />
-        <DashboardStatTile icon={<AlertTriangle className="h-5 w-5" />} label="Deaths" value={formatNullableDashboardNumber(dashboardStatValues.deaths)} detail={dashboardStatValues.deaths === null ? "Loading" : dashboardStatDetail} tone="orange" />
-        <DashboardStatTile icon={<ArrowRight className="h-5 w-5" />} label="Joins" value={formatNullableDashboardNumber(dashboardStatValues.joins)} detail={dashboardStatValues.joins === null ? "Loading" : dashboardStatDetail} tone="emerald" />
-        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Disconnects" value={formatNullableDashboardNumber(dashboardStatValues.disconnects)} detail={dashboardStatValues.disconnects === null ? "Loading" : dashboardStatDetail} tone="zinc" />
-        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Unique Players" value={formatNullableDashboardNumber(dashboardStatValues.uniquePlayers)} detail={dashboardStatValues.uniquePlayers === null ? "Loading" : dashboardStatDetail} tone="violet" />
+        <DashboardStatTile icon={<Crosshair className="h-5 w-5" />} label="Kills" value={formatNullableDashboardNumber(dashboardStatValues.kills)} detail={dashboardStatValues.kills === null ? dashboardStatPendingDetail : dashboardStatDetail} tone="red" />
+        <DashboardStatTile icon={<AlertTriangle className="h-5 w-5" />} label="Deaths" value={formatNullableDashboardNumber(dashboardStatValues.deaths)} detail={dashboardStatValues.deaths === null ? dashboardStatPendingDetail : dashboardStatDetail} tone="orange" />
+        <DashboardStatTile icon={<ArrowRight className="h-5 w-5" />} label="Joins" value={formatNullableDashboardNumber(dashboardStatValues.joins)} detail={dashboardStatValues.joins === null ? dashboardStatPendingDetail : dashboardStatDetail} tone="emerald" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Disconnects" value={formatNullableDashboardNumber(dashboardStatValues.disconnects)} detail={dashboardStatValues.disconnects === null ? dashboardStatPendingDetail : dashboardStatDetail} tone="zinc" />
+        <DashboardStatTile icon={<Users className="h-5 w-5" />} label="Unique Players" value={formatNullableDashboardNumber(dashboardStatValues.uniquePlayers)} detail={dashboardStatValues.uniquePlayers === null ? dashboardStatPendingDetail : dashboardStatDetail} tone="violet" />
         <DashboardStatTile icon={<Gauge className="h-5 w-5" />} label="Server Score" value={scoreLabel} detail="Score" tone="violet" />
         <DashboardStatTile icon={<BarChart3 className="h-5 w-5" />} label="Global Rank" value={globalRankLabel} detail="Rank" tone="orange" />
       </section>
@@ -3087,8 +3093,17 @@ function ServerDashboard({
           ) : null}
 
           {activeTab === "sync-health" ? (
-          <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
-            <DashboardPanel className="p-4">
+          <div className="grid gap-5">
+            <SyncHealthSummaryPanel
+              syncStatus={effectiveSyncData}
+              dashboardHealth={effectiveDashboardHealth}
+              healthTitle={syncHealth.title}
+              healthStatus={syncHealth.status}
+              latestError={effectiveDashboardHealth?.sync.last_error ?? effectiveSyncData?.last_adm_discovery_error ?? effectiveSyncData?.last_sync_message ?? null}
+              nextScheduledSync={nextScheduledSync}
+            />
+            <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+              <DashboardPanel className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <PanelHeader icon={<Activity className="h-5 w-5" />} title="Recent Synced Events" />
                 <SmallBadge tone={recentFeedBadge.tone}>{recentFeedBadge.label}</SmallBadge>
@@ -3107,11 +3122,12 @@ function ServerDashboard({
                   </div>
                 )}
               </div>
-            </DashboardPanel>
+              </DashboardPanel>
 
-            <DashboardPanel className="p-4">
+              <DashboardPanel className="p-4">
               <SyncRunsHistory runs={syncRuns} latestSuccessTime={syncHealth.latestSuccessTime} onClearFailedRuns={clearFailedRuns} clearingFailedRuns={clearingFailedRuns} />
-            </DashboardPanel>
+              </DashboardPanel>
+            </div>
           </div>
           ) : null}
         </div>
@@ -3237,6 +3253,52 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
     <section className={`glass-surface animated-border rounded-lg ${className}`}>
       <div className="relative z-10">{children}</div>
     </section>
+  );
+}
+
+function SyncHealthSummaryPanel({
+  syncStatus,
+  dashboardHealth,
+  healthTitle,
+  healthStatus,
+  latestError,
+  nextScheduledSync,
+}: {
+  syncStatus: AdmSyncStatus | null;
+  dashboardHealth: DashboardHealthResult | null;
+  healthTitle: string;
+  healthStatus: "active" | "pending" | "error";
+  latestError: string | null;
+  nextScheduledSync: string;
+}) {
+  const tone = healthStatus === "error" ? "orange" : healthStatus === "pending" ? "orange" : "emerald";
+  const latestUnreadableFile = dashboardHealth?.sync.newest_available_adm_filename && dashboardHealth.sync.newest_available_adm_filename !== dashboardHealth.sync.newest_readable_adm_filename
+    ? dashboardHealth.sync.newest_available_adm_filename
+    : syncStatus?.newest_available_adm_filename && syncStatus.newest_available_adm_filename !== syncStatus.newest_readable_adm_filename
+      ? syncStatus.newest_available_adm_filename
+      : null;
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Sync Health Summary" />
+          <p className="mt-2 text-sm leading-6 text-zinc-300">
+            {healthTitle}. ADM reads are retried in small batches so a waiting or unreadable Nitrado file does not block the dashboard.
+          </p>
+        </div>
+        <SmallBadge tone={tone}>{healthTitle}</SmallBadge>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="Last successful ADM import" value={dashboardHealth?.sync.last_successful_sync ? formatDashboardDate(dashboardHealth.sync.last_successful_sync) : syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced yet"} />
+        <MiniInfo label="Last attempted ADM read" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : dashboardHealth?.cron.adm?.created_at ? formatDashboardDate(dashboardHealth.cron.adm.created_at) : "Not checked yet"} />
+        <MiniInfo label="Next scheduled sync" value={dashboardHealth?.sync.next_adm_processing_due_at ? formatDashboardDate(dashboardHealth.sync.next_adm_processing_due_at) : nextScheduledSync} />
+        <MiniInfo label="Latest readable file" value={dashboardHealth?.sync.newest_readable_adm_filename ?? syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
+        <MiniInfo label="Latest unreadable file" value={latestUnreadableFile ?? "None"} />
+        <MiniInfo label="Latest classified error" value={classifyDashboardAdmError(latestError)} />
+        <MiniInfo label="Queued backfill files" value={String(dashboardHealth?.sync.backfill_status.queued_jobs_count ?? syncStatus?.adm_backfill_status.queued_files.length ?? 0)} />
+        <MiniInfo label="Unreadable queue" value={String(dashboardHealth?.sync.backfill_status.unreadable_files_count ?? syncStatus?.adm_backfill_status.unreadable_files.length ?? syncStatus?.unreadable_files_queued ?? 0)} />
+      </div>
+    </DashboardPanel>
   );
 }
 
@@ -7918,6 +7980,15 @@ function getOverviewAdmSyncStatus(currentStatus: string, hasActiveJob: boolean, 
   return "Waiting for Nitrado";
 }
 
+function getDashboardStatPendingDetail(currentStatus: string) {
+  const normalizedStatus = currentStatus.toLowerCase();
+  if (["adm_file_unreadable", "latest_adm_unreadable", "read_pending", "nitrado_file_unavailable"].includes(normalizedStatus)) return "Waiting for readable ADM";
+  if (["adm_not_generated_yet", "waiting_after_restart", "delayed_after_restart", "no_adm_file"].includes(normalizedStatus)) return "Waiting for next ADM";
+  if (["completed", "no_new_lines", "no_new_log_available", "no_supported_events"].includes(normalizedStatus)) return "No synced data yet";
+  if (["nitrado_down", "nitrado_rate_limited", "nitrado_error", "worker_subrequest_limit", "fetch_timeout", "fetch_threw"].includes(normalizedStatus)) return "Retrying sync";
+  return "Awaiting synced data";
+}
+
 function getRecentFeedBadge(recentEventsAreMock: boolean, currentStatus: string): { label: string; tone: "emerald" | "orange" | "zinc" } {
   if (recentEventsAreMock) return { label: "Mock Sync Data", tone: "orange" };
   const normalizedStatus = currentStatus.toLowerCase();
@@ -8301,6 +8372,21 @@ function formatSyncStatus(value: string) {
   if (value === "active") return "Active";
   if (value === "not_started") return "Not Started";
   return value.replace(/_/g, " ");
+}
+
+function classifyDashboardAdmError(value: string | null) {
+  const text = String(value ?? "").trim();
+  if (!text) return "None";
+  if (/worker_subrequest_limit|too many subrequests|subrequest limit/i.test(text)) return "WORKER_SUBREQUEST_LIMIT";
+  if (/rate.?limit|429/i.test(text)) return "NITRADO_RATE_LIMITED";
+  if (/upstream|503|502|504|500/i.test(text)) return "NITRADO_UPSTREAM_DOWN";
+  if (/timeout|fetch_timeout/i.test(text)) return "FETCH_TIMEOUT";
+  if (/fetch_threw|fetch threw/i.test(text)) return "FETCH_THREW";
+  if (/tokenized.*empty|empty body/i.test(text)) return "TOKENIZED_EMPTY_BODY";
+  if (/401|unauthor/i.test(text)) return "NITRADO_UNAUTHORIZED";
+  if (/403|forbidden/i.test(text)) return "NITRADO_FORBIDDEN";
+  if (/404|not found/i.test(text)) return "NITRADO_FILE_NOT_FOUND";
+  return text.length > 64 ? `${text.slice(0, 61)}...` : text;
 }
 
 function formatSyncTrigger(value: string | null | undefined) {

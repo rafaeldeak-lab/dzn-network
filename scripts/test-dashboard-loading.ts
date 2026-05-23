@@ -105,10 +105,11 @@ includesAll(landing, [
   "HOME_STATS_LAST_GOOD_MAX_AGE_MS",
   "Network stats could not be loaded right now.",
   "payload.data && !payload.totals ? payload.data : payload",
-  "dataPending ? \"Loading\"",
-  "Loading live network data...",
+  "dataPending ? \"Awaiting live data\"",
+  "Waiting for first synced ADM",
 ]);
 assert.equal(landing.includes("dataPending ? \"Refreshing\""), false, "Homepage must not render Refreshing as every stat-card value.");
+assert.equal(landing.includes("dataPending ? \"Loading\""), false, "Homepage stat cards must not render generic Loading as every stat-card value.");
 assert.equal(landing.includes("setData(emptyHomeStats"), false, "Homepage refresh failures must not reset stats to empty defaults.");
 assert.equal(landing.includes("Live refresh recovering. Showing last known data."), false, "Homepage must not show stale-data warning when valid data is visible.");
 assert.equal(landing.includes("Network stats refresh failed. Showing last known values."), false, "Homepage refresh failures with visible data should stay silent.");

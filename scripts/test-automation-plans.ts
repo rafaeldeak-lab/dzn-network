@@ -187,6 +187,11 @@ assert.equal(workflowSource.includes("- cron: \"*/5 * * * *\""), true);
 assert.equal(workflowSource.includes("x-dzn-cron-secret"), true);
 assert.equal(workflowSource.includes("LEGACY_SYNC_CRON_SECRET"), false);
 assert.equal(workflowSource.includes("\"source\":\"github-backup\""), true);
+assert.equal(workflowSource.includes("call_dzn \"ADM sync trigger\""), true);
+assert.equal(workflowSource.includes("GITHUB_STEP_SUMMARY"), true);
+assert.equal(workflowSource.includes("partial_budget_reached"), true);
+assert.equal(workflowSource.includes("latest_adm_unreadable"), true);
+assert.equal(workflowSource.includes("--fail-with-body"), false, "Recoverable waiting/unreadable sync states must not fail the backup workflow through curl --fail.");
 assert.equal(workflowSource.indexOf("/api/sync/metadata/run") < workflowSource.indexOf("/api/sync/adm/run"), true);
 assert.equal(workflowSource.indexOf("/api/sync/adm/run") < workflowSource.indexOf("/api/sync/discord-posts/run"), true);
 

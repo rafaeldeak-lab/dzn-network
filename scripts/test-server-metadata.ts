@@ -75,7 +75,8 @@ const metadataCallIndex = workflowSource.indexOf("/api/sync/metadata/run");
 const admCallIndex = workflowSource.indexOf("/api/sync/adm/run");
 assert.equal(metadataCallIndex >= 0, true);
 assert.equal(admCallIndex > metadataCallIndex, true);
-assert.equal(workflowSource.includes("curl --fail-with-body"), true);
+assert.equal(workflowSource.includes("curl --fail-with-body"), false);
+assert.equal(workflowSource.includes("call_dzn \"Metadata sync\""), true);
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Player Count Freshness"), true);
 assert.equal(dashboardSource.includes("formatDashboardPlayerSlots"), true);
@@ -87,7 +88,7 @@ const networkOverviewBlock = homepageSource.slice(
   homepageSource.indexOf("function NetworkOverview"),
   homepageSource.indexOf("function NetworkPulse"),
 );
-assert.equal(homepageSource.includes("value: dataPending ? \"Loading\" : formatNumber(playersOnline)"), true);
+assert.equal(homepageSource.includes("value: dataPending ? \"Awaiting live data\" : formatNumber(playersOnline)"), true);
 assert.equal(homepageSource.includes("DZN HOMEPAGE PLAYERS ONLINE ONLY"), true);
 assert.equal(homepageSource.includes("Live across connected servers"), true);
 assert.equal(homepageSource.includes("total slots"), false);

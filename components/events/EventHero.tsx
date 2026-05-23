@@ -22,7 +22,7 @@ export function EventHero({ event, detail = false }: { event?: CompetitiveEvent 
               <span className="rounded-md border border-rose-300/25 bg-rose-400/10 px-3 py-2">TOP 10 TEASER</span>
             </div>
           </div>
-          <Link href="/dashboard" className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/40 bg-violet-500/22 px-5 py-3 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(124,58,237,0.26)] transition hover:bg-violet-500/32">
+          <Link href="/events/create" className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/40 bg-violet-500/22 px-5 py-3 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(124,58,237,0.26)] transition hover:bg-violet-500/32">
             <Plus className="h-4 w-4" />
             Create Event
           </Link>

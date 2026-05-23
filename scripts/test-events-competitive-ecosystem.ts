@@ -53,6 +53,7 @@ assert.equal(/DROP\s+TABLE|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE\s+player_profile
 const eventsLib = source("functions/_lib/events.ts");
 includesAll(eventsLib, [
   "ensureCompetitiveEventsSchema",
+  "createCompetitiveEvent",
   "joinCompetitiveEvent",
   "createCategorySafeMatchmaking",
   "normalizeServerCategory",
@@ -64,7 +65,12 @@ includesAll(eventsLib, [
   "resolveEventStatusFilter",
   "NO_CATEGORY",
   "Set your server category before joining events.",
+  "Set your server category before creating events.",
+  "Event creation is a Pro/Partner feature.",
+  "Only same-category servers can register.",
   "assertSameServerCategory(primary, opponent)",
+  "sanitizePlainText",
+  "makeUniqueEventSlug",
 ]);
 
 const joinRoute = source("functions/api/events/[slug]/join.ts");
@@ -75,9 +81,12 @@ const matchmakingRoute = source("functions/api/events/matchmaking.ts");
 includesAll(matchmakingRoute, ["createCategorySafeMatchmaking", "opponent_server_id", "event_slug"]);
 const eventsRoute = source("functions/api/events.ts");
 includesAll(eventsRoute, ["getEventsListPayload", "full", "category", "status", "type"]);
+const eventCreateRoute = source("functions/api/events/create.ts");
+includesAll(eventCreateRoute, ["createCompetitiveEvent", "getSessionUser", "hosting_server_id"]);
 
 for (const route of [
   "app/events/page.tsx",
+  "app/events/create/page.tsx",
   "app/events/tournaments/page.tsx",
   "app/events/[slug]/page.tsx",
   "app/events/[slug]/bracket/page.tsx",
@@ -111,11 +120,17 @@ const detailUi = source("components/events/events-platform.tsx");
 includesAll(detailUi, [
   "SAME CATEGORY ONLY",
   "Cross-server matching is an exclusive Pro/Partner platform feature.",
+  "EventCreatePage",
+  "CREATE EVENT",
+  "Set your server category before creating an event.",
+  "The event category is locked to the selected hosting server.",
+  "/api/events/create",
   "eventMatchesStatusFilter",
   "Demo data shown until live events are created",
   "Deathmatch can only fight Deathmatch",
   "ServerCategoryBadge",
 ]);
+assert.equal(source("components/events/EventHero.tsx").includes('href="/events/create"'), true, "Create Event CTA must route to /events/create.");
 assert.equal(source("components/events/EventTabs.tsx").includes("/events/tournaments?status=active"), true, "Active tab must use the active status alias.");
 assert.equal(source("components/events/ChallengeBattleCard.tsx").includes("Cross-server matching is an exclusive Pro/Partner platform feature."), false, "Challenge cards should not repeat the full premium lock sentence.");
 assert.equal(source("components/events/PremiumLockedCard.tsx").includes("PRO / PARTNER FEATURE"), true);
@@ -126,6 +141,7 @@ assert.equal(existsSync("functions/api/servers/[serverId]/ctf/matchmaking.ts"), 
 assert.equal(source("functions/api/leaderboards.ts").includes("./public/leaderboards"), true, "Existing /api/leaderboards alias must still work.");
 assert.equal(source("components/dzn/dzn-landing-page.tsx").includes('{ label: "Events", href: "/events" }'), true, "Top nav Events link must open the Events Hub.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to join events and matchmaking."), true, "Dashboard must remind owners to set a server category.");
+assert.equal(source("components/onboarding/dashboard.tsx").includes('href="/events/create"'), true, "Dashboard must expose event creation after category selection.");
 assert.equal(source("components/onboarding/setup-wizard.tsx").includes("Server Category"), true, "Onboarding must expose server category selection.");
 
 void main();

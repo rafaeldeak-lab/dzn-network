@@ -2,16 +2,21 @@
 
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   BarChart3,
+  CalendarDays,
+  CheckCircle2,
   Crown,
   Filter,
   Flag,
   Home,
   LayoutDashboard,
+  LockKeyhole,
+  Plus,
   Search,
   Server,
+  ShieldCheck,
   Swords,
   Trophy,
 } from "lucide-react";
@@ -48,6 +53,44 @@ import { TournamentTable } from "./TournamentTable";
 type LoadState = "loading" | "loaded" | "stale";
 type TournamentStatusFilter = "all" | "upcoming" | "active" | "completed" | string;
 
+type AuthServer = {
+  id: string;
+  server_name?: string | null;
+  display_name?: string | null;
+  hostname?: string | null;
+  nitrado_service_name?: string | null;
+  server_category?: string | null;
+  status?: string | null;
+};
+
+type AuthPayload = {
+  authenticated: boolean;
+  linkedServer?: AuthServer | null;
+  linkedServers?: AuthServer[];
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  deathmatch: "Deathmatch",
+  pvp: "PvP",
+  pve: "PvE",
+  pvp_pve: "PvP / PvE",
+  hardcore: "Hardcore",
+  roleplay: "Roleplay",
+  faction_wars: "Faction Wars",
+  vanilla: "Vanilla",
+  modded: "Modded",
+};
+
+const EVENT_TYPE_OPTIONS = [
+  ["capture_the_flag", "Capture The Flag"],
+  ["community_cup", "Community Cup"],
+  ["bot_tournament", "Bot Tournament"],
+  ["faction_wars", "Faction Wars"],
+  ["seasonal_wars", "Seasonal Wars"],
+  ["kill_race", "Kill Race"],
+  ["survival_challenge", "Survival Challenge"],
+] as const;
+
 function eventMatchesStatusFilter(eventStatus: string, status: TournamentStatusFilter) {
   const normalized = String(status || "all").toLowerCase();
   const event = String(eventStatus || "").toLowerCase();
@@ -65,6 +108,227 @@ function filterEventsForView(events: EventsPayload["events"], filters: { status?
     const categoryOk = !filters.category || filters.category === "all" || event.category === filters.category;
     return statusOk && typeOk && categoryOk;
   });
+}
+
+export function EventCreatePage() {
+  const router = useRouter();
+  const [auth, setAuth] = useState<AuthPayload | null>(null);
+  const [authState, setAuthState] = useState<LoadState>("loading");
+  const [selectedServerId, setSelectedServerId] = useState("");
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+    event_type: "capture_the_flag",
+    starts_at: "",
+    ends_at: "",
+    server_limit: "16",
+    team_limit: "16",
+    status: "registration_open",
+    tournament_channel_id: "",
+    rules: "",
+    rewards: "",
+    visibility: "public",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<{ tone: "error" | "success" | "info"; text: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchJsonWithRetry<AuthPayload>("/api/auth/me", {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+      timeoutMs: 10_000,
+      retries: 1,
+    })
+      .then((payload) => {
+        if (!active) return;
+        setAuth(payload);
+        const servers = payload.linkedServers?.length ? payload.linkedServers : payload.linkedServer ? [payload.linkedServer] : [];
+        setSelectedServerId((current) => current || servers[0]?.id || "");
+        setAuthState("loaded");
+      })
+      .catch(() => {
+        if (!active) return;
+        setAuth({ authenticated: false, linkedServers: [] });
+        setAuthState("stale");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const servers = useMemo(() => auth?.linkedServers?.length ? auth.linkedServers : auth?.linkedServer ? [auth.linkedServer] : [], [auth]);
+  const selectedServer = servers.find((server) => server.id === selectedServerId) ?? servers[0] ?? null;
+  const selectedCategory = normalizeClientCategory(selectedServer?.server_category);
+  const canSubmit = Boolean(auth?.authenticated && selectedServer && selectedCategory && form.name.trim().length >= 3 && !submitting);
+
+  const updateField = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!auth?.authenticated) {
+      setMessage({ tone: "error", text: "Log in with Discord before creating an event." });
+      return;
+    }
+    if (!selectedServer) {
+      setMessage({ tone: "error", text: "Connect a server before creating an event." });
+      return;
+    }
+    if (!selectedCategory) {
+      setMessage({ tone: "error", text: "Set your server category before creating an event." });
+      return;
+    }
+    setSubmitting(true);
+    setMessage({ tone: "info", text: "Creating category-locked event..." });
+    try {
+      const payload = await fetchJsonWithRetry<{ ok: boolean; event_slug?: string; message?: string; error?: string }>(
+        "/api/events/create",
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          timeoutMs: 12_000,
+          body: JSON.stringify({
+            ...form,
+            hosting_server_id: selectedServer.id,
+            server_limit: Number(form.server_limit),
+            team_limit: Number(form.team_limit),
+          }),
+        },
+      );
+      if (!payload.ok || !payload.event_slug) throw new Error(payload.message ?? payload.error ?? "Event could not be created.");
+      setMessage({ tone: "success", text: payload.message ?? "Event created." });
+      router.push(`/events/${payload.event_slug}`);
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Event could not be created." });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <EventsShell>
+      <HeaderLine
+        title="CREATE EVENT"
+        subtitle="Build a same-category tournament, challenge, or battle card for your verified DayZ community."
+        action={<EventActionLink href="/events">Events Hub</EventActionLink>}
+      />
+      <EventTabs active="CTF Tournaments" />
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <form onSubmit={submit} className="space-y-5 rounded-xl border border-white/10 bg-white/[0.035] p-5 shadow-[0_30px_110px_rgba(0,0,0,0.32)]">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Event Name">
+              <input value={form.name} onChange={(event) => updateField("name", event.target.value)} className={eventInputClass()} maxLength={90} placeholder="NukeTown Friday Kill Race" />
+            </Field>
+            <Field label="Event Type">
+              <select value={form.event_type} onChange={(event) => updateField("event_type", event.target.value)} className={eventInputClass()}>
+                {EVENT_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </Field>
+          </div>
+          <Field label="Hosting Server">
+            <select value={selectedServerId} onChange={(event) => setSelectedServerId(event.target.value)} className={eventInputClass()} disabled={authState === "loading"}>
+              {servers.length ? servers.map((server) => (
+                <option key={server.id} value={server.id}>{serverDisplayLabel(server)}</option>
+              )) : <option value="">No connected servers found</option>}
+            </select>
+          </Field>
+          <div className="rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <ShieldCheck className="h-5 w-5 text-cyan-100" />
+              <span className="text-xs font-black uppercase text-cyan-50">Same Category Lock</span>
+              {selectedCategory ? <ServerCategoryBadge category={selectedCategory} label={CATEGORY_LABELS[selectedCategory]} /> : <span className="rounded-md border border-amber-300/35 bg-amber-400/12 px-2.5 py-1 text-[10px] font-black uppercase text-amber-100">Set category first</span>}
+            </div>
+            <p className="mt-3 text-sm leading-6 text-zinc-300">
+              The event category is locked to the selected hosting server. Only servers in the same category can register for this event.
+            </p>
+          </div>
+          <Field label="Description">
+            <textarea value={form.description} onChange={(event) => updateField("description", event.target.value)} className={`${eventInputClass()} min-h-24 resize-y`} maxLength={500} placeholder="Short public event description." />
+          </Field>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Start Date">
+              <input type="datetime-local" value={form.starts_at} onChange={(event) => updateField("starts_at", event.target.value)} className={eventInputClass()} />
+            </Field>
+            <Field label="End Date">
+              <input type="datetime-local" value={form.ends_at} onChange={(event) => updateField("ends_at", event.target.value)} className={eventInputClass()} />
+            </Field>
+            <Field label="Max Servers / Teams">
+              <input type="number" min={2} max={128} value={form.server_limit} onChange={(event) => {
+                updateField("server_limit", event.target.value);
+                updateField("team_limit", event.target.value);
+              }} className={eventInputClass()} />
+            </Field>
+            <Field label="Registration Status">
+              <select value={form.status} onChange={(event) => updateField("status", event.target.value)} className={eventInputClass()}>
+                <option value="registration_open">Registration Open</option>
+                <option value="upcoming">Upcoming</option>
+                <option value="standby">Standby</option>
+              </select>
+            </Field>
+            <Field label="Tournament Channel ID">
+              <input value={form.tournament_channel_id} onChange={(event) => updateField("tournament_channel_id", event.target.value)} className={eventInputClass()} placeholder="Optional Discord channel ID" />
+            </Field>
+            <Field label="Visibility">
+              <select value={form.visibility} onChange={(event) => updateField("visibility", event.target.value)} className={eventInputClass()}>
+                <option value="public">Public</option>
+                <option value="unlisted">Unlisted</option>
+                <option value="private">Private</option>
+              </select>
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Rules">
+              <textarea value={form.rules} onChange={(event) => updateField("rules", event.target.value)} className={`${eventInputClass()} min-h-32 resize-y`} maxLength={4000} placeholder="Roster rules, scoring, anti-alt notes, and dispute policy." />
+            </Field>
+            <Field label="Rewards">
+              <textarea value={form.rewards} onChange={(event) => updateField("rewards", event.target.value)} className={`${eventInputClass()} min-h-32 resize-y`} maxLength={2000} placeholder="Champion badges, featured placement, credits, or community rewards." />
+            </Field>
+          </div>
+          {message ? (
+            <div className={cn(
+              "rounded-lg border px-4 py-3 text-sm font-bold",
+              message.tone === "error" && "border-rose-300/25 bg-rose-500/10 text-rose-100",
+              message.tone === "success" && "border-emerald-300/25 bg-emerald-500/10 text-emerald-100",
+              message.tone === "info" && "border-cyan-300/25 bg-cyan-500/10 text-cyan-100",
+            )}>{message.text}</div>
+          ) : null}
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/24 px-5 py-3 text-xs font-black uppercase text-white shadow-[0_0_28px_rgba(124,58,237,0.24)] transition hover:bg-violet-500/34 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {submitting ? <CheckCircle2 className="h-4 w-4 animate-pulse" /> : <Plus className="h-4 w-4" />}
+            {submitting ? "Creating Event..." : "Create Event"}
+          </button>
+        </form>
+        <aside className="space-y-5">
+          <PremiumLockedCard title="PRO / PARTNER EVENT TOOL" message="Event creation and cross-server matching use your existing Pro/Partner entitlement. Free users keep teaser access." />
+          <InfoPanel title="Creation Safeties" rows={[
+            ["Category", selectedCategory ? `${CATEGORY_LABELS[selectedCategory]} only` : "Set category first"],
+            ["Telemetry", "Reads existing ADM aggregates only"],
+            ["Registration", "Same-category guard enforced by API"],
+            ["Stats", "No historical player data is changed"],
+          ]} />
+          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+            <h2 className="flex items-center gap-2 text-sm font-black uppercase text-white"><CalendarDays className="h-4 w-4 text-violet-200" />Owner checklist</h2>
+            {[
+              "Select the hosting server.",
+              "Confirm its server category.",
+              "Set the event window.",
+              "Publish rules and rewards.",
+            ].map((item) => (
+              <div key={item} className="mt-3 flex items-center gap-2 text-sm text-zinc-300">
+                <LockKeyhole className="h-3.5 w-3.5 text-cyan-200" />
+                {item}
+              </div>
+            ))}
+          </div>
+        </aside>
+      </div>
+    </EventsShell>
+  );
 }
 
 export function EventsHubPage() {
@@ -131,7 +395,7 @@ export function EventsTournamentsPage() {
   const visibleEvents = useMemo(() => filterEventsForView(data.events, { status, type, category }), [category, data.events, status, type]);
   return (
     <EventsShell>
-      <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<EventActionLink href="/events">Events Hub</EventActionLink>} />
+      <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">Events Hub</EventActionLink><EventActionLink href="/events/create">Create Event</EventActionLink></div>} />
       <EventTabs active={status === "active" || status === "live" ? "Active" : status === "completed" || status === "ended" ? "Completed" : status === "upcoming" ? "Upcoming" : "CTF Tournaments"} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
@@ -243,7 +507,7 @@ export function EventsChallengesPage() {
   const { data, loadState } = useEventsPayload("/api/events?type=kill_race&limit=24", fallback);
   return (
     <EventsShell>
-      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<EventActionLink href="/events">All Events</EventActionLink>} />
+      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/create">Create Event</EventActionLink></div>} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
@@ -280,6 +544,37 @@ export function ServerEventsPage({ slug: slugProp }: { slug?: string } = {}) {
       <ServerEventProfile profile={data} />
     </EventsShell>
   );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-[10px] font-black uppercase tracking-normal text-zinc-500">{label}</span>
+      <div className="mt-2">{children}</div>
+    </label>
+  );
+}
+
+function eventInputClass() {
+  return "w-full rounded-lg border border-white/10 bg-black/36 px-3 py-3 text-sm font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/50 focus:bg-black/48";
+}
+
+function serverDisplayLabel(server: AuthServer) {
+  return server.display_name || server.hostname || server.server_name || server.nitrado_service_name || `Server ${server.id}`;
+}
+
+function normalizeClientCategory(value: unknown) {
+  const raw = String(value ?? "").trim().toLowerCase().replace(/[\s/-]+/g, "_");
+  if (!raw) return null;
+  if (["deathmatch", "dm", "death_match"].includes(raw)) return "deathmatch";
+  if (["pvp", "pvp_only"].includes(raw)) return "pvp";
+  if (["pve", "pve_only"].includes(raw)) return "pve";
+  if (["pvp_pve", "pvpve", "mixed"].includes(raw)) return "pvp_pve";
+  if (["hardcore", "hc"].includes(raw)) return "hardcore";
+  if (["roleplay", "rp"].includes(raw)) return "roleplay";
+  if (["faction_wars", "factions"].includes(raw)) return "faction_wars";
+  if (["vanilla", "modded"].includes(raw)) return raw;
+  return null;
 }
 
 function EventsShell({ children }: { children: ReactNode }) {

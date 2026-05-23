@@ -154,6 +154,24 @@ type EventListOptions = {
   limit?: number;
 };
 
+type CreateCompetitiveEventInput = {
+  name?: string | null;
+  description?: string | null;
+  event_type?: string | null;
+  hosting_server_id?: string | null;
+  server_id?: string | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  server_limit?: number | string | null;
+  team_limit?: number | string | null;
+  status?: string | null;
+  registration_status?: string | null;
+  tournament_channel_id?: string | null;
+  rules?: string | null;
+  rewards?: string | null;
+  visibility?: string | null;
+};
+
 export async function ensureCompetitiveEventsSchema(env: Env) {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
@@ -280,6 +298,107 @@ export async function getEventDetailPayload(env: Env, viewer: SessionUser | null
       value: normalizedEvent.category,
       label: normalizedEvent.category_label,
     },
+  };
+}
+
+export async function createCompetitiveEvent(env: Env, viewer: SessionUser | null, input: CreateCompetitiveEventInput) {
+  if (!viewer) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to create events." };
+  await ensureCompetitiveEventsSchema(env);
+  const server = await fetchOwnedServer(env, viewer, input.hosting_server_id ?? input.server_id);
+  if (!server) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
+  const category = normalizeServerCategoryFromRecord(server);
+  if (!category) {
+    return { ok: false, status: 409, error: "NO_CATEGORY", message: "Set your server category before creating events." };
+  }
+  if (!serverHasEventEntitlement(server)) {
+    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Event creation is a Pro/Partner feature." };
+  }
+
+  const name = sanitizePlainText(input.name, 90);
+  if (name.length < 3) return { ok: false, status: 400, error: "INVALID_NAME", message: "Event name must be at least 3 characters." };
+
+  const eventType = normalizeEventType(input.event_type) ?? "community_cup";
+  const status = normalizeEventStatus(input.status ?? input.registration_status) ?? "registration_open";
+  if (!["registration_open", "upcoming", "standby"].includes(status)) {
+    return { ok: false, status: 400, error: "INVALID_STATUS", message: "New events must start as registration open, upcoming, or standby." };
+  }
+  const visibility = normalizeVisibility(input.visibility);
+  const startsAt = sanitizeDateTime(input.starts_at);
+  const endsAt = sanitizeDateTime(input.ends_at);
+  if (startsAt && endsAt && Date.parse(endsAt) <= Date.parse(startsAt)) {
+    return { ok: false, status: 400, error: "INVALID_DATE_RANGE", message: "End date must be after the start date." };
+  }
+  const serverLimit = sanitizePositiveRange(input.server_limit, 16, 2, 128);
+  const teamLimit = sanitizePositiveRange(input.team_limit, serverLimit, 2, 128);
+  const rules = sanitizePlainText(input.rules, 4000);
+  const rewards = sanitizePlainText(input.rewards, 2000);
+  const description = sanitizePlainText(input.description, 500);
+  const db = requireDb(env);
+  const slug = await makeUniqueEventSlug(env, cleanSlug(name) || "dzn-event");
+  const eventId = crypto.randomUUID();
+  const registrationId = crypto.randomUUID();
+
+  await db
+    .prepare(
+      `INSERT INTO competitive_events (
+        id, name, slug, description, category, event_type, status, visibility, premium_tier,
+        server_limit, team_limit, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    )
+    .bind(
+      eventId,
+      name,
+      slug,
+      description || null,
+      category,
+      eventType,
+      status,
+      visibility,
+      "pro",
+      serverLimit,
+      teamLimit,
+      startsAt,
+      endsAt,
+      viewer.id,
+      rules || "Same-category only. DZN dedupe and server-scope rules apply.",
+      rewards || null,
+    )
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, seed, registered_at)
+       VALUES (?, ?, ?, ?, 1, 1, CURRENT_TIMESTAMP)`,
+    )
+    .bind(registrationId, eventId, server.id, category)
+    .run();
+  await db
+    .prepare(
+      `UPDATE linked_servers
+       SET competitive_enabled = 1,
+           server_category = COALESCE(server_category, ?),
+           last_event_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(category, server.id)
+    .run();
+  await insertEventActivity(env, eventId, server.id, "event_created", `${serverDisplayName(server)} created ${name}.`, {
+    category,
+    event_type: eventType,
+    visibility,
+    strict_same_category: true,
+    tournament_channel_configured: Boolean(sanitizeDiscordSnowflake(input.tournament_channel_id)),
+  });
+
+  return {
+    ok: true,
+    status: 200,
+    event_slug: slug,
+    event_id: eventId,
+    registration_id: registrationId,
+    category,
+    category_label: getServerCategoryLabel(category),
+    message: "Event created. Only same-category servers can register.",
   };
 }
 
@@ -900,9 +1019,51 @@ function cleanSlug(value: unknown) {
   return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 96);
 }
 
+async function makeUniqueEventSlug(env: Env, baseSlug: string) {
+  const db = requireDb(env);
+  const cleanBase = cleanSlug(baseSlug) || "dzn-event";
+  for (let index = 0; index < 20; index += 1) {
+    const candidate = index === 0 ? cleanBase : `${cleanBase}-${index + 1}`;
+    const existing = await db.prepare("SELECT id FROM competitive_events WHERE slug = ? LIMIT 1").bind(candidate).first<{ id: string }>();
+    if (!existing) return candidate;
+  }
+  return `${cleanBase}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
 function cleanIdentifier(value: unknown) {
   const text = String(value ?? "").trim();
   return /^[a-zA-Z0-9_-]{3,96}$/.test(text) ? text : null;
+}
+
+function sanitizePlainText(value: unknown, maxLength: number) {
+  return String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/[^\S\r\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function sanitizeDateTime(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function sanitizePositiveRange(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) && parsed >= min ? Math.min(parsed, max) : fallback;
+}
+
+function normalizeVisibility(value: unknown) {
+  const text = String(value ?? "public").trim().toLowerCase();
+  return ["public", "private", "unlisted"].includes(text) ? text : "public";
+}
+
+function sanitizeDiscordSnowflake(value: unknown) {
+  const text = String(value ?? "").trim();
+  return /^\d{16,24}$/.test(text) ? text : null;
 }
 
 function isActiveSubscription(value: unknown) {

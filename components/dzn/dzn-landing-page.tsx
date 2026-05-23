@@ -1134,7 +1134,7 @@ function TopServersPanel({ rows, locked = false, dataPending = false }: { rows: 
         <div className="dzn-top-servers-rows">
           {rows.length === 0 ? (
             <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-              {dataPending ? "Loading live network data..." : "No ranked servers yet."}
+              {dataPending ? "Awaiting live data" : "No ranked servers yet."}
             </div>
           ) : rows.slice(0, 3).map((row) => {
             const rowContent = (
@@ -1188,7 +1188,7 @@ function RecentActivityPanel({ rows, dataPending = false }: { rows: ActivityPane
       <div className="dzn-recent-activity-list">
         {rows.length === 0 ? (
           <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-            {dataPending ? "Loading live network data..." : "No recent activity yet."}
+            {dataPending ? "Waiting for first synced ADM" : "No recent activity yet."}
           </div>
         ) : rows.slice(0, 4).map((row, index) => {
           const Icon = row.icon;
@@ -1234,9 +1234,9 @@ function LiveMapPanel({ homeStats, dataPending = false }: { homeStats: HomeStats
         <DznOperationalGlobe nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
-        <MiniMetric label="Sync Active" value={dataPending ? "Loading" : formatNumber(homeStats.syncHealth.active)} />
-        <MiniMetric label="Pending" value={dataPending ? "Loading" : formatNumber(homeStats.syncHealth.pending)} />
-        <MiniMetric label="Events" value={dataPending ? "Loading" : formatNumber(homeStats.totals.recentEventsCount)} />
+        <MiniMetric label="Sync Active" value={dataPending ? "Pending" : formatNumber(homeStats.syncHealth.active)} />
+        <MiniMetric label="Pending" value={dataPending ? "Pending" : formatNumber(homeStats.syncHealth.pending)} />
+        <MiniMetric label="Events" value={dataPending ? "No events yet" : formatNumber(homeStats.totals.recentEventsCount)} />
       </div>
     </div>
   );
@@ -1373,26 +1373,26 @@ function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeSt
     {
       icon: Users,
       label: "Players Online",
-      value: dataPending ? "Loading" : formatNumber(playersOnline),
+      value: dataPending ? "Awaiting live data" : formatNumber(playersOnline),
       detail: "Live across connected servers",
       theme: "players",
     },
     {
       icon: Server,
       label: "Servers Linked",
-      value: dataPending ? "Loading" : formatNumber(homeStats.totals.serversLinked),
+      value: dataPending ? "Awaiting live data" : formatNumber(homeStats.totals.serversLinked),
       theme: "servers",
     },
     {
       icon: Crosshair,
       label: "Kills",
-      value: dataPending ? "Loading" : formatNumber(homeStats.totals.killsTracked),
+      value: dataPending ? "Awaiting live data" : formatNumber(homeStats.totals.killsTracked),
       theme: "kills",
     },
     {
       icon: Trophy,
       label: "Longest Kill",
-      value: dataPending ? "Loading" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "Awaiting data",
+      value: dataPending ? "Awaiting live data" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "Awaiting data",
       theme: "longest",
     },
   ];
@@ -1439,14 +1439,14 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
     {
       icon: Wifi,
       eyebrow: "Active Servers",
-      value: dataPending ? "Loading" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
+      value: dataPending ? "Awaiting live data" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
       detail: "Live and online right now",
       theme: "active",
     },
     {
       icon: Activity,
       eyebrow: "Events",
-      value: dataPending ? "Loading" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
+      value: dataPending ? "No events yet" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
       detail: "Tracked across the network",
       theme: "events",
     },

@@ -21,42 +21,80 @@ jobs:
           fi
           APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
 
-          curl --fail-with-body --silent --show-error \
-            -X POST "${APP_URL}/api/sync/metadata/run" \
-            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            --data '{"source":"github-backup","cron":"github-actions","max_servers":25}'
+          {
+            echo "## DZN ADM Sync backup trigger"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          curl --fail-with-body --silent --show-error \
-            -X POST "${APP_URL}/api/sync/adm/run" \
-            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            --data '{"source":"github-backup","cron":"github-actions","max_servers":1,"max_lines_per_server":50000}'
+          call_dzn() {
+            local name="$1"
+            local path="$2"
+            local payload="$3"
+            local body_file
+            body_file="$(mktemp)"
+            local curl_exit=0
+            local http_code
+            http_code="$(curl --silent --show-error --max-time 45 \
+              --output "$body_file" \
+              --write-out "%{http_code}" \
+              -X POST "${APP_URL}${path}" \
+              -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
+              -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
+              -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+              -H "Content-Type: application/json" \
+              --data "${payload}")" || curl_exit=$?
+            local body
+            body="$(cat "$body_file")"
+            rm -f "$body_file"
+            if [ "$curl_exit" -ne 0 ]; then
+              echo "${name}: curl failed with exit ${curl_exit}."
+              exit "$curl_exit"
+            fi
+            node - "$name" "$http_code" "$body" <<'NODE'
+          const fs = require("node:fs");
+          const [name, codeText, body] = process.argv.slice(2);
+          const code = Number(codeText);
+          let parsed = null;
+          try {
+            parsed = body ? JSON.parse(body) : {};
+          } catch (error) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${name}: HTTP ${code} invalid JSON response\n`);
+            process.exit(2);
+          }
+          const status = parsed.status || parsed.last_sync_status || parsed.sync_status || parsed.message || (parsed.delegated ? "delegated_to_worker" : "completed");
+          const processed = parsed.processed ?? parsed.processedCount ?? parsed.processed_count ?? 0;
+          const queued = parsed.queued ?? parsed.queuedCount ?? parsed.queued_count ?? 0;
+          const unreadable = parsed.unreadable ?? parsed.skippedUnreadable ?? parsed.skipped_unreadable ?? 0;
+          const failed = parsed.failed ?? parsed.failedCount ?? parsed.failed_count ?? 0;
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `- ${name}: HTTP ${code}; status=${status}; processed=${processed}; queued=${queued}; unreadable=${unreadable}; failed=${failed}\n`,
+          );
+          console.log(`${name}: HTTP ${code}; status=${status}; processed=${processed}; queued=${queued}; unreadable=${unreadable}; failed=${failed}`);
+          if (code === 401 || code === 403 || code === 404 || code >= 500 || code < 200 || code >= 300) {
+            process.exit(1);
+          }
+          const recoverable = new Set([
+            "no_new_adm",
+            "waiting_for_nitrado",
+            "latest_adm_unreadable",
+            "partial_budget_reached",
+            "worker_subrequest_limit",
+            "nitrado_rate_limited",
+            "nitrado_upstream_down",
+            "delegated_to_worker",
+            "processed",
+            "queued",
+            "completed",
+          ]);
+          if (parsed.ok === false && !recoverable.has(String(status))) {
+            process.exit(3);
+          }
+          NODE
+          }
 
-          curl --fail-with-body --silent --show-error \
-            -X POST "${APP_URL}/api/sync/public-snapshots/run" \
-            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            --data '{"source":"github-backup","cron":"github-actions"}'
-
-          curl --fail-with-body --silent --show-error \
-            -X POST "${APP_URL}/api/sync/discord-posts/run" \
-            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            --data '{"source":"github-backup","cron":"github-actions","max_jobs":25}'
-
-          curl --fail-with-body --silent --show-error \
-            -X POST "${APP_URL}/api/sync/ctf-scorecards/run" \
-            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            --data '{"source":"github-backup","cron":"github-actions"}'
+          call_dzn "Metadata sync" "/api/sync/metadata/run" '{"source":"github-backup","cron":"github-actions","max_servers":25}'
+          call_dzn "ADM sync trigger" "/api/sync/adm/run" '{"source":"github-backup","cron":"github-actions","max_servers":1,"max_lines_per_server":50000}'
+          call_dzn "Public snapshots" "/api/sync/public-snapshots/run" '{"source":"github-backup","cron":"github-actions"}'
+          call_dzn "Discord posts" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"github-actions","max_jobs":25}'
+          call_dzn "CTF scorecards" "/api/sync/ctf-scorecards/run" '{"source":"github-backup","cron":"github-actions"}'
