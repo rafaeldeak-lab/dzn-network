@@ -2,9 +2,6 @@ name = "dzn-adm-sync-worker"
 main = "workers/adm-sync-worker.ts"
 compatibility_date = "2026-05-13"
 
-[limits]
-subrequests = 1000
-
 [triggers]
 crons = ["* * * * *"]
 
