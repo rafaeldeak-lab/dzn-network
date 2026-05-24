@@ -198,7 +198,8 @@ assert.equal(workflowSource.includes("no_new_log_available"), true);
 assert.equal(workflowSource.includes("adm_backfill_caught_up"), true);
 assert.equal(workflowSource.includes("adm_backfill_queued"), true);
 assert.equal(workflowSource.includes("--fail-with-body"), false, "Recoverable waiting/unreadable sync states must not fail the backup workflow through curl --fail.");
-assert.equal(workflowSource.indexOf("/api/sync/metadata/run") < workflowSource.indexOf("/api/sync/adm/run"), true);
+assert.equal(workflowSource.includes("Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow"), true);
+assert.equal(workflowSource.includes("/api/sync/metadata/run"), false);
 assert.equal(workflowSource.indexOf("/api/sync/adm/run") < workflowSource.indexOf("/api/sync/discord-posts/run"), true);
 
 const workerConfigSource = readFileSync("wrangler.adm-sync.toml", "utf8");

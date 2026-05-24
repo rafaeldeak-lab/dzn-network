@@ -10,7 +10,7 @@ jobs:
   adm-sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger scheduled metadata and ADM sync
+      - name: Trigger scheduled ADM backup sync
         env:
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
@@ -113,7 +113,8 @@ jobs:
           NODE
           }
 
-          call_dzn "Metadata sync" "/api/sync/metadata/run" '{"source":"github-backup","cron":"github-actions","max_servers":25}'
+          echo "- Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow"
           call_dzn "ADM sync trigger" "/api/sync/adm/run" '{"source":"github-backup","cron":"github-actions","max_servers":1,"max_lines_per_server":50000}'
           call_dzn "Public snapshots" "/api/sync/public-snapshots/run" '{"source":"github-backup","cron":"github-actions"}'
           call_dzn "Discord posts" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"github-actions","max_jobs":25}'

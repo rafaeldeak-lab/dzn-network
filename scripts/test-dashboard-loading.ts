@@ -176,8 +176,8 @@ includesAll(publicSnapshotRun, [
 ]);
 
 const workflow = source(".github/workflows/dzn-adm-sync.yml");
-assert.equal(workflow.indexOf("/api/sync/metadata/run") < workflow.indexOf("/api/sync/adm/run"), true, "Metadata sync must run before ADM sync.");
 assert.equal(workflow.indexOf("/api/sync/adm/run") < workflow.indexOf("/api/sync/public-snapshots/run"), true, "Public snapshots must prewarm after ADM sync.");
+assert.equal(workflow.includes("Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow"), true);
 includesAll(workflow, [
   "/api/sync/public-snapshots/run",
   "Authorization: Bearer ${CRON_SECRET}",
