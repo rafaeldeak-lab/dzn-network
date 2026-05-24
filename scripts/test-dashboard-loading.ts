@@ -176,12 +176,12 @@ includesAll(publicSnapshotRun, [
 ]);
 
 const workflow = source(".github/workflows/dzn-adm-sync.yml");
-assert.equal(workflow.indexOf("/api/sync/adm/run") < workflow.indexOf("/api/sync/public-snapshots/run"), true, "Public snapshots must prewarm after ADM sync.");
 assert.equal(workflow.includes("Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow"), true);
+assert.equal(workflow.includes("Public snapshots: skipped; status=handled by public snapshot prewarm outside ADM backup workflow"), true);
 includesAll(workflow, [
-  "/api/sync/public-snapshots/run",
   "Authorization: Bearer ${CRON_SECRET}",
 ]);
+assert.equal(workflow.includes("/api/sync/public-snapshots/run"), false, "The ADM backup workflow must not block on public snapshot prewarm.");
 
 const packageSource = source("package.json");
 assert.equal(packageSource.includes("\"prewarm:public\": \"tsx scripts/prewarm-public-snapshots.ts\""), true);

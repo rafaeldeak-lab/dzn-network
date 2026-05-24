@@ -200,7 +200,12 @@ assert.equal(workflowSource.includes("adm_backfill_queued"), true);
 assert.equal(workflowSource.includes("--fail-with-body"), false, "Recoverable waiting/unreadable sync states must not fail the backup workflow through curl --fail.");
 assert.equal(workflowSource.includes("Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow"), true);
 assert.equal(workflowSource.includes("/api/sync/metadata/run"), false);
-assert.equal(workflowSource.indexOf("/api/sync/adm/run") < workflowSource.indexOf("/api/sync/discord-posts/run"), true);
+assert.equal(workflowSource.includes("Public snapshots: skipped; status=handled by public snapshot prewarm outside ADM backup workflow"), true);
+assert.equal(workflowSource.includes("Discord posts: skipped; status=handled by Discord dispatcher cadence outside ADM backup workflow"), true);
+assert.equal(workflowSource.includes("CTF scorecards: skipped; status=handled by CTF scorecard cadence outside ADM backup workflow"), true);
+assert.equal(workflowSource.includes("/api/sync/public-snapshots/run"), false);
+assert.equal(workflowSource.includes("/api/sync/discord-posts/run"), false);
+assert.equal(workflowSource.includes("/api/sync/ctf-scorecards/run"), false);
 
 const workerConfigSource = readFileSync("wrangler.adm-sync.toml", "utf8");
 assert.equal(workerConfigSource.includes("crons = [\"* * * * *\"]"), true);

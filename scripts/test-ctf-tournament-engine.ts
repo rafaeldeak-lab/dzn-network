@@ -60,8 +60,8 @@ assert.equal(onboardingSave.includes("tournamentChannelId"), true);
 assert.equal(onboardingSave.includes("botAccessToken"), true);
 
 const workflow = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
-assert.equal(workflow.includes("/api/sync/ctf-scorecards/run"), true);
-assert.equal(workflow.indexOf("/api/sync/discord-posts/run") < workflow.indexOf("/api/sync/ctf-scorecards/run"), true);
+assert.equal(workflow.includes("CTF scorecards: skipped; status=handled by CTF scorecard cadence outside ADM backup workflow"), true);
+assert.equal(workflow.includes("/api/sync/ctf-scorecards/run"), false);
 
 const packageSource = readFileSync("package.json", "utf8");
 assert.equal(packageSource.includes("\"test:ctf-tournament-engine\": \"tsx scripts/test-ctf-tournament-engine.ts\""), true);

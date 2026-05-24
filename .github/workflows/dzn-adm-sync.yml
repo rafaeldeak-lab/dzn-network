@@ -116,9 +116,12 @@ jobs:
           echo "- Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow" >> "$GITHUB_STEP_SUMMARY"
           echo "Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow"
           call_dzn "ADM sync trigger" "/api/sync/adm/run" '{"source":"github-backup","cron":"github-actions","max_servers":1,"max_lines_per_server":50000}'
-          call_dzn "Public snapshots" "/api/sync/public-snapshots/run" '{"source":"github-backup","cron":"github-actions"}'
-          call_dzn "Discord posts" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"github-actions","max_jobs":25}'
-          call_dzn "CTF scorecards" "/api/sync/ctf-scorecards/run" '{"source":"github-backup","cron":"github-actions"}'
+          echo "- Public snapshots: skipped; status=handled by public snapshot prewarm outside ADM backup workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "Public snapshots: skipped; status=handled by public snapshot prewarm outside ADM backup workflow"
+          echo "- Discord posts: skipped; status=handled by Discord dispatcher cadence outside ADM backup workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "Discord posts: skipped; status=handled by Discord dispatcher cadence outside ADM backup workflow"
+          echo "- CTF scorecards: skipped; status=handled by CTF scorecard cadence outside ADM backup workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "CTF scorecards: skipped; status=handled by CTF scorecard cadence outside ADM backup workflow"
 
           {
             echo ""

@@ -56,7 +56,13 @@ assert.equal(workflowSource.includes("Authorization: Bearer ${CRON_SECRET}"), tr
 assert.equal(workflowSource.includes("Cron auth failed. Check GitHub secret name/header against DZN endpoint auth helper."), true);
 assert.equal(workflowSource.includes("code === 401 || code === 403"), true);
 assert.equal(workflowSource.includes("Metadata sync: skipped; status=handled by dedicated metadata cadence outside ADM backup workflow"), true);
+assert.equal(workflowSource.includes("Public snapshots: skipped; status=handled by public snapshot prewarm outside ADM backup workflow"), true);
+assert.equal(workflowSource.includes("Discord posts: skipped; status=handled by Discord dispatcher cadence outside ADM backup workflow"), true);
+assert.equal(workflowSource.includes("CTF scorecards: skipped; status=handled by CTF scorecard cadence outside ADM backup workflow"), true);
 assert.equal(workflowSource.includes("/api/sync/metadata/run"), false);
+assert.equal(workflowSource.includes("/api/sync/public-snapshots/run"), false);
+assert.equal(workflowSource.includes("/api/sync/discord-posts/run"), false);
+assert.equal(workflowSource.includes("/api/sync/ctf-scorecards/run"), false);
 assert.equal(workflowSource.includes("partial_budget_reached"), true);
 assert.equal(workflowSource.includes("latest_adm_unreadable"), true);
 assert.equal(workflowSource.includes("nitrado_upstream_down"), true);
