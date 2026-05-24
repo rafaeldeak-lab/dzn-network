@@ -1,16 +1,13 @@
-name: DZN ADM Sync
+name: DZN ADM Worker Manual Trigger
 
 on:
-  schedule:
-    # Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only.
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
   adm-sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger scheduled ADM backup sync
+      - name: Trigger ADM Worker manual backup sync
         env:
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
@@ -26,7 +23,7 @@ jobs:
           APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
 
           {
-            echo "## DZN ADM Sync backup trigger"
+            echo "## DZN ADM Worker manual trigger"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -367,25 +367,23 @@ Primary automation trigger:
 - `wrangler.adm-sync.toml`
 - Schedule: `* * * * *`
 
-Worker calls:
+Worker runs:
 
 ```text
-POST ${DZN_APP_URL}/api/sync/metadata/run
-POST ${DZN_APP_URL}/api/sync/adm/run
-POST ${DZN_APP_URL}/api/sync/discord-posts/run
+ADM discovery/read/import directly inside dzn-adm-sync-worker
 ```
 
 Security:
 
 - Header: `x-dzn-cron-secret`
 - Env var: `DZN_CRON_SECRET`
-- `DZN_CRON_SECRET` must be set in both Cloudflare Pages and this Worker. If it is missing from the Worker, scheduled ticks exit before calling the Pages endpoints and no `cloudflare` rows appear in `automation_cron_runs`.
+- The Worker requires its own runtime secrets and D1 binding. If required Worker secrets or bindings are missing, scheduled ticks exit before updating sync state and no `cloudflare` rows appear in `automation_cron_runs`.
 
 Cron heartbeat:
 
 - Each protected sync endpoint records an `automation_cron_runs` row after auth succeeds.
 - Rows include `source`, `job_type`, `started_at`, `finished_at`, `duration_ms`, `processed_count`, `skipped_count`, `failed_count`, `status`, and `error_message`.
-- Sync Health shows the latest Cloudflare check-in, GitHub backup check-in, metadata run, ADM run, and Discord dispatcher run.
+- Sync Health shows the latest Cloudflare check-in, manual GitHub trigger check-in when present, metadata run, ADM run, and Discord dispatcher run.
 - `npm run check:cron-production` checks production rows and fails when no Cloudflare row exists in the last 5 minutes.
 
 Important:
@@ -396,32 +394,31 @@ Important:
 - ADM remains limited to 10 minutes minimum.
 - The worker should not force every server to sync every minute.
 
-## G. GitHub Actions Backup
+## G. GitHub Actions Manual Backup
 
-Backup trigger:
+Manual trigger:
 
 - `.github/workflows/dzn-adm-sync.yml`
-- Schedule: every 5 minutes
+- Schedule: none
 
 Purpose:
 
-- Backup/repair only.
+- Manual backup/health trigger only.
 - Cloudflare Worker Cron is primary.
 
 Calls:
 
 ```text
-POST /api/sync/metadata/run
 POST /api/sync/adm/run
-POST /api/sync/discord-posts/run
 ```
 
 Security:
 
 - Header: `x-dzn-cron-secret`
 - Secret: GitHub `DZN_CRON_SECRET`
+- Fallback secret: GitHub `SYNC_CRON_SECRET`
 
-GitHub backup should create `github-backup` source rows in `automation_cron_runs`. If no rows appear for more than 15 minutes, the dashboard warns but Cloudflare remains the primary automation path.
+GitHub manual backup triggers may create `github-backup` source rows in `automation_cron_runs`. The absence of scheduled GitHub rows is expected; Cloudflare remains the primary automation path.
 
 ## H. Stripe / Billing Plan Effects
 

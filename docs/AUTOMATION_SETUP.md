@@ -22,14 +22,17 @@ DZN_CRON_SECRET=the-same-long-random-secret
 DZN_APP_URL=https://dzn-network.pages.dev
 ```
 
-The Worker runs every minute and calls the Pages sync endpoints. The backend decides which servers are actually due, so Starter/Pro/Network servers are not pulled every minute.
+The Worker runs every minute and executes the ADM sync path directly with its own D1 binding and subrequest budget. The backend decides which servers are actually due, so Starter/Pro/Network servers are not pulled every minute.
 
-## 3. GitHub backup cron
+## 3. GitHub manual backup trigger
 
-Set this GitHub Actions secret:
+GitHub Actions is not the primary automatic ADM sync runner. Normal automatic ADM sync runs through the Cloudflare ADM Worker scheduled trigger.
+
+Set only these GitHub Actions secrets if you need to run the manual health/backup workflows:
 
 ```text
 DZN_CRON_SECRET=the-same-long-random-secret
+SYNC_CRON_SECRET=legacy-fallback-secret-if-needed
 ```
 
 Optional repository variable:
@@ -38,7 +41,7 @@ Optional repository variable:
 DZN_APP_URL=https://dzn-network.pages.dev
 ```
 
-Cloudflare Worker Cron is the primary 1-minute trigger. GitHub Actions is backup only and runs every 5 minutes.
+The DZN ADM GitHub workflow is manual-only. Do not add Cloudflare runtime secrets such as Discord, Stripe, session, token encryption, or Nitrado tokens to GitHub unless a specific workflow explicitly requires them.
 
 ## 4. Stripe environment variables
 

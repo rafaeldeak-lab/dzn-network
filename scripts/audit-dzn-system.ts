@@ -186,13 +186,12 @@ function auditCronConfig() {
   checkFile("workers/adm-sync-worker.ts", "Cloudflare Worker cron");
   checkFile("wrangler.adm-sync.toml", "Worker Wrangler config");
   checkIncludes("wrangler.adm-sync.toml", "crons = [\"* * * * *\"]", "Worker 1-minute schedule");
-  for (const endpoint of ["/api/sync/metadata/run", "/api/sync/adm/run", "/api/sync/discord-posts/run"]) {
-    checkIncludes("workers/adm-sync-worker.ts", endpoint, `Worker calls ${endpoint}`);
-  }
+  checkIncludes("workers/adm-sync-worker.ts", "runAdmWorkerSyncTick", "Worker runs ADM sync directly");
+  checkIncludes("workers/adm-sync-worker.ts", "runDirectAdmSync", "Worker uses direct ADM sync path");
   checkIncludes("workers/adm-sync-worker.ts", "x-dzn-cron-secret", "Worker sends cron secret header");
   checkIncludes("workers/adm-sync-worker.ts", "DZN_CRON_SECRET", "Worker reads DZN_CRON_SECRET");
-  checkIncludes(".github/workflows/dzn-adm-sync.yml", "Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only.", "GitHub backup comment");
-  checkIncludes(".github/workflows/dzn-adm-sync.yml", "- cron: \"*/5 * * * *\"", "GitHub backup cadence");
+  checkIncludes(".github/workflows/dzn-adm-sync.yml", "name: DZN ADM Worker Manual Trigger", "GitHub ADM workflow is clearly manual");
+  checkIncludes(".github/workflows/dzn-adm-sync.yml", "workflow_dispatch:", "GitHub ADM workflow manual trigger");
   checkIncludes(".github/workflows/dzn-adm-sync.yml", "x-dzn-cron-secret", "GitHub sends cron secret header");
 }
 

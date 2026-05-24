@@ -182,8 +182,10 @@ assert.equal(syncLockStartedMigrationSource.includes("status_sync_started_at"), 
 assert.equal(syncLockStartedMigrationSource.includes("adm_sync_started_at"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
-assert.equal(workflowSource.includes("Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only."), true);
-assert.equal(workflowSource.includes("- cron: \"*/5 * * * *\""), true);
+assert.equal(workflowSource.includes("name: DZN ADM Worker Manual Trigger"), true);
+assert.equal(workflowSource.includes("workflow_dispatch:"), true);
+assert.equal(workflowSource.includes("schedule:"), false);
+assert.equal(workflowSource.includes("- cron:"), false);
 assert.equal(workflowSource.includes("x-dzn-cron-secret"), true);
 assert.equal(workflowSource.includes("LEGACY_SYNC_CRON_SECRET"), false);
 assert.equal(workflowSource.includes("\"source\":\"github-backup\""), true);
@@ -298,7 +300,7 @@ assert.equal(syncMapDoc.includes("Admin Log: Enabled"), true);
 assert.equal(syncMapDoc.includes("DZN attempts to verify these automatically"), true);
 assert.equal(syncMapDoc.includes("Discord Auto-Post Dispatcher"), true);
 assert.equal(syncMapDoc.includes("Cloudflare Worker Cron"), true);
-assert.equal(syncMapDoc.includes("GitHub Actions Backup"), true);
+assert.equal(syncMapDoc.includes("GitHub Actions Manual Backup"), true);
 assert.equal(syncMapDoc.includes("Partner | Every 1 minute"), true);
 assert.equal(syncMapDoc.includes("ADM remains limited to 10 minutes minimum"), true);
 

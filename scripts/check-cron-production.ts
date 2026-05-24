@@ -152,9 +152,8 @@ async function main() {
   if (cloudflareAge !== null && cloudflareAge <= 5) pass("Cloudflare cron check-in", formatRow(latestCloudflare));
   else fail("Cloudflare cron check-in", `No cloudflare row in the last 5 minutes. Latest: ${formatRow(latestCloudflare)}`);
 
-  const githubAge = ageMinutes(latestGithub?.created_at);
-  if (githubAge !== null && githubAge <= 15) pass("GitHub backup cron check-in", formatRow(latestGithub));
-  else warn("GitHub backup cron check-in", `No github-backup row in the last 15 minutes. Latest: ${formatRow(latestGithub)}`);
+  if (latestGithub) pass("GitHub manual backup check-in", formatRow(latestGithub));
+  else pass("GitHub manual backup check-in", "No github-backup row found. This is expected unless a manual workflow was run.");
 
   for (const [label, row] of [
     ["metadata", latestMetadata],

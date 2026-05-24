@@ -58,6 +58,7 @@ The schema lives in `migrations/`.
 ## ADM Sync Worker
 
 Automatic ADM sync runs from a separate Cloudflare Worker because Pages Functions do not run cron triggers.
+GitHub Actions is not required for normal automatic ADM sync. The DZN ADM GitHub workflow is manual-only and exists as a backup/health trigger for `/api/sync/adm/run`; do not re-enable scheduled GitHub ADM sync unless intentionally using GitHub as a backup runner.
 
 Worker config:
 
@@ -67,7 +68,7 @@ name = "dzn-adm-sync-worker"
 main = "workers/adm-sync-worker.ts"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 ```
 
 Before deploying the Worker, set the same Nitrado token encryption secret on the Worker:

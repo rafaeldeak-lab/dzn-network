@@ -89,8 +89,10 @@ assert.equal(workerSource.includes("/api/sync/metadata/run"), false);
 assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
-assert.equal(workflowSource.includes("- cron: \"*/5 * * * *\""), true);
-assert.equal(workflowSource.includes("Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only."), true);
+assert.equal(workflowSource.includes("name: DZN ADM Worker Manual Trigger"), true);
+assert.equal(workflowSource.includes("workflow_dispatch:"), true);
+assert.equal(workflowSource.includes("schedule:"), false);
+assert.equal(workflowSource.includes("- cron:"), false);
 assert.equal(workflowSource.includes("x-dzn-cron-secret"), true);
 assert.equal(workflowSource.includes("SYNC_CRON_SECRET"), true);
 assert.equal(workflowSource.includes("DZN_CRON_SECRET"), true);

@@ -24,9 +24,9 @@ This is a planning note for the ADM sync engine.
 ## Phase 3 Implemented
 
 - `workers/adm-sync-worker.ts` runs the shared ADM sync helper from a standalone Cloudflare Worker.
-- The Worker cron trigger is configured in `wrangler.adm-sync.toml` as `*/5 * * * *`, so scheduled sync is intended to run every five minutes.
-- Scheduled runs process up to 10 eligible live linked servers per invocation.
-- Each scheduled server sync processes up to 1,000 new ADM lines per run.
+- The Worker cron trigger is configured in `wrangler.adm-sync.toml` as `* * * * *`, so scheduled sync can run every minute.
+- Scheduled runs process one small eligible ADM sync unit per invocation.
+- Each scheduled import processes a capped line batch and resumes on the next Worker run when needed.
 - Servers synced less than two minutes ago are skipped to avoid duplicate work and unnecessary Nitrado API calls.
 - Each server sync is isolated so one failed server does not stop the rest of the scheduled run.
 - Manual and scheduled sync executions are recorded in `sync_runs` for owner dashboard visibility.
