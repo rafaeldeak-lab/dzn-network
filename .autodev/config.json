@@ -1,0 +1,21 @@
+{
+  "mode": "pr_only",
+  "allowDirectMainPush": false,
+  "allowAutoMergeLowRisk": false,
+  "maxFixAttemptsPerRun": 3,
+  "maxRuntimeMinutes": 45,
+  "maxChangedFilesPerRun": 25,
+  "maxTokensHint": "bounded",
+  "productionUrl": "https://dzn-network.pages.dev",
+  "deployPreviewRequired": true,
+  "watchAdmCycles": true,
+  "watchMinutesAfterDeploy": 90,
+  "riskGates": {
+    "blockAuthChanges": true,
+    "blockBillingChanges": true,
+    "blockDestructiveMigrations": true,
+    "blockSecretChanges": true,
+    "blockAdmParserRewrite": true,
+    "blockWorkerCronChanges": true
+  }
+}

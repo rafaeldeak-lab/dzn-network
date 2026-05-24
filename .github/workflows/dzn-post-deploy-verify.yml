@@ -1,0 +1,53 @@
+name: DZN Post-Deploy Verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  post-deploy-verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Wait for Cloudflare Pages propagation
+        run: sleep 45
+      - name: Production smoke
+        id: smoke
+        continue-on-error: true
+        env:
+          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+        run: npm run autodev:production-smoke
+      - name: ADM health snapshot
+        id: adm
+        continue-on-error: true
+        env:
+          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+          AUTODEV_WATCH_MINUTES: "0"
+        run: npm run autodev:adm-watch
+      - name: Upload AutoDev reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: autodev-post-deploy-reports
+          path: .autodev/reports
+      - name: Create or update issue on failure
+        if: always() && (steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: npm run autodev:create-issue
+      - name: Fail if production verification failed
+        if: steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure'
+        run: exit 1

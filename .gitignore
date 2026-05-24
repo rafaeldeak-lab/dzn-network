@@ -81,6 +81,7 @@ web_modules/
 .next
 out
 .wrangler/
+.autodev/reports/
 
 # Nuxt.js build / generate output
 .nuxt

@@ -1,0 +1,43 @@
+name: DZN AutoDev Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+jobs:
+  autodev-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run AutoDev audit
+        id: audit
+        continue-on-error: true
+        run: npm run autodev:audit
+      - name: Run AutoDev quality gate
+        id: quality
+        continue-on-error: true
+        run: npm run autodev:quality
+      - name: Upload AutoDev reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: autodev-audit-reports
+          path: .autodev/reports
+      - name: Create or update issue on failure
+        if: always() && (steps.audit.outcome == 'failure' || steps.quality.outcome == 'failure')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: npm run autodev:create-issue
+      - name: Fail if gates failed
+        if: steps.audit.outcome == 'failure' || steps.quality.outcome == 'failure'
+        run: exit 1

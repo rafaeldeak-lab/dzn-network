@@ -1,4 +1,3 @@
-import { retryUnreadableAdmFilesForService } from "../../../_lib/adm-sync";
 import { requireCronSecret } from "../../../_lib/cron-auth";
 import { json, readJson } from "../../../_lib/http";
 import type { PagesFunction } from "../../../_lib/types";
@@ -20,6 +19,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   }
 
   try {
+    const { retryUnreadableAdmFilesForService } = await import("../../../_lib/adm-sync");
     const result = await retryUnreadableAdmFilesForService(env, {
       serviceId,
       limit: sanitizeLimit(body.limit),

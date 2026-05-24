@@ -1,0 +1,50 @@
+name: DZN ADM Cycle Watch
+
+on:
+  workflow_dispatch:
+    inputs:
+      watchMinutes:
+        description: "Minutes to watch ADM state"
+        required: false
+        default: "90"
+        type: string
+  schedule:
+    - cron: "23 */3 * * *"
+
+jobs:
+  adm-cycle-watch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Watch ADM cycle
+        id: adm-watch
+        continue-on-error: true
+        env:
+          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+          AUTODEV_WATCH_MINUTES: ${{ inputs.watchMinutes || '90' }}
+        run: npm run autodev:adm-watch
+      - name: Upload AutoDev reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: autodev-adm-cycle-watch-reports
+          path: .autodev/reports
+      - name: Create or update issue on failure
+        if: always() && steps.adm-watch.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: npm run autodev:create-issue
+      - name: Fail if ADM watch failed
+        if: steps.adm-watch.outcome == 'failure'
+        run: exit 1
