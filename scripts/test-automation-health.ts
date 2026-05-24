@@ -93,7 +93,8 @@ assert.equal(workflowSource.includes("- cron: \"*/5 * * * *\""), true);
 assert.equal(workflowSource.includes("Cloudflare Worker Cron is the primary 1-minute automation trigger. GitHub Actions is backup only."), true);
 assert.equal(workflowSource.includes("x-dzn-cron-secret"), true);
 assert.equal(workflowSource.includes("SYNC_CRON_SECRET"), true);
-assert.equal(workflowSource.includes("DZN_CRON_SECRET"), false);
+assert.equal(workflowSource.includes("DZN_CRON_SECRET"), true);
+assert.equal(workflowSource.includes('CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"'), true);
 assert.equal(workflowSource.includes("https://dzn-network.pages.dev"), true);
 
 const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");

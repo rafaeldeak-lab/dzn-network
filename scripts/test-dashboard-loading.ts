@@ -180,7 +180,7 @@ assert.equal(workflow.indexOf("/api/sync/metadata/run") < workflow.indexOf("/api
 assert.equal(workflow.indexOf("/api/sync/adm/run") < workflow.indexOf("/api/sync/public-snapshots/run"), true, "Public snapshots must prewarm after ADM sync.");
 includesAll(workflow, [
   "/api/sync/public-snapshots/run",
-  "Authorization: Bearer ${SYNC_CRON_SECRET}",
+  "Authorization: Bearer ${CRON_SECRET}",
 ]);
 
 const packageSource = source("package.json");

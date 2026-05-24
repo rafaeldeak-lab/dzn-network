@@ -31,6 +31,7 @@ jobs:
     steps:
       - name: Run production Nitrado ADM diagnostic
         env:
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           DZN_APP_URL: ${{ vars.DZN_APP_URL }}
           SERVICE_ID: ${{ inputs.serviceId }}
@@ -38,8 +39,11 @@ jobs:
           RETRY_UNREADABLE: ${{ inputs.retryUnreadable }}
           RETRY_LIMIT: ${{ inputs.limit }}
         run: |
-          if [ -z "$SYNC_CRON_SECRET" ]; then
-            echo "SYNC_CRON_SECRET is not configured."
+          set -euo pipefail
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET"
             exit 1
           fi
 
@@ -56,9 +60,10 @@ jobs:
           echo "Running sanitized Nitrado file-read diagnostic for service ${SERVICE_ID}."
           curl --fail-with-body --silent --show-error \
             -X POST "${APP_URL}/api/debug/nitrado-file-read" \
-            -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            -H "x-dzn-cron-secret: ${CRON_SECRET}" \
+            -H "x-sync-cron-secret: ${CRON_SECRET}" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --data @diagnostic-payload.json
 
@@ -80,9 +85,10 @@ jobs:
             echo "Retrying unreadable ADM files for service ${SERVICE_ID}."
             curl --fail-with-body --silent --show-error \
               -X POST "${APP_URL}/api/sync/adm/retry-unreadable" \
-              -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-              -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-              -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+              -H "x-dzn-cron-secret: ${CRON_SECRET}" \
+              -H "x-sync-cron-secret: ${CRON_SECRET}" \
+              -H "x-cron-secret: ${CRON_SECRET}" \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
               -H "Content-Type: application/json" \
               --data @retry-payload.json
           fi

@@ -2,6 +2,7 @@ import type { Env } from "./types";
 
 export const DZN_CRON_SECRET_HEADER = "x-dzn-cron-secret";
 export const SYNC_CRON_SECRET_HEADER = "x-sync-cron-secret";
+export const GENERIC_CRON_SECRET_HEADER = "x-cron-secret";
 
 export function requireCronSecret(request: Request, env: Env): Response | null {
   if (isCronSecretAuthorized(request, env)) return null;
@@ -20,7 +21,7 @@ export function isCronSecretAuthorized(request: Request, env: Env) {
   if (!expected) return false;
   const authorization = request.headers.get("authorization");
   const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
-  const provided = request.headers.get(DZN_CRON_SECRET_HEADER) ?? request.headers.get(SYNC_CRON_SECRET_HEADER) ?? bearer;
+  const provided = request.headers.get(DZN_CRON_SECRET_HEADER) ?? request.headers.get(SYNC_CRON_SECRET_HEADER) ?? request.headers.get(GENERIC_CRON_SECRET_HEADER) ?? bearer;
   if (!provided) return false;
   return timingSafeEqual(provided, expected);
 }

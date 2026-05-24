@@ -12,11 +12,15 @@ jobs:
     steps:
       - name: Trigger scheduled metadata and ADM sync
         env:
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           DZN_APP_URL: ${{ vars.DZN_APP_URL }}
         run: |
-          if [ -z "$SYNC_CRON_SECRET" ]; then
-            echo "SYNC_CRON_SECRET is not configured."
+          set -euo pipefail
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET"
             exit 1
           fi
           APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
@@ -38,9 +42,10 @@ jobs:
               --output "$body_file" \
               --write-out "%{http_code}" \
               -X POST "${APP_URL}${path}" \
-              -H "x-dzn-cron-secret: ${SYNC_CRON_SECRET}" \
-              -H "x-sync-cron-secret: ${SYNC_CRON_SECRET}" \
-              -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+              -H "x-dzn-cron-secret: ${CRON_SECRET}" \
+              -H "x-sync-cron-secret: ${CRON_SECRET}" \
+              -H "x-cron-secret: ${CRON_SECRET}" \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
               -H "Content-Type: application/json" \
               --data "${payload}")" || curl_exit=$?
             local body
@@ -71,7 +76,16 @@ jobs:
             `- ${name}: HTTP ${code}; status=${status}; processed=${processed}; queued=${queued}; unreadable=${unreadable}; failed=${failed}\n`,
           );
           console.log(`${name}: HTTP ${code}; status=${status}; processed=${processed}; queued=${queued}; unreadable=${unreadable}; failed=${failed}`);
-          if (code === 401 || code === 403 || code === 404 || code >= 500 || code < 200 || code >= 300) {
+          if (code === 401 || code === 403) {
+            fs.appendFileSync(
+              process.env.GITHUB_STEP_SUMMARY,
+              `- Overall: failed\n- Reason: Cron auth failed. Check GitHub secret name/header against DZN endpoint auth helper.\n`,
+            );
+            console.error("Cron auth failed. Check GitHub secret name/header against DZN endpoint auth helper.");
+            process.exit(1);
+          }
+          if (code === 404 || code >= 500 || code < 200 || code >= 300) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Overall: failed\n- Reason: Endpoint or application failure.\n`);
             process.exit(1);
           }
           const recoverable = new Set([
@@ -104,3 +118,8 @@ jobs:
           call_dzn "Public snapshots" "/api/sync/public-snapshots/run" '{"source":"github-backup","cron":"github-actions"}'
           call_dzn "Discord posts" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"github-actions","max_jobs":25}'
           call_dzn "CTF scorecards" "/api/sync/ctf-scorecards/run" '{"source":"github-backup","cron":"github-actions"}'
+
+          {
+            echo ""
+            echo "Overall: success"
+          } >> "$GITHUB_STEP_SUMMARY"
