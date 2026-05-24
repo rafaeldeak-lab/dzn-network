@@ -887,6 +887,7 @@ function ServerDashboard({
   const activeDashboardAction = isActiveDashboardActionStatus(dashboardAction?.status) ? dashboardAction : null;
   const isDashboardActionActive = Boolean(activeDashboardAction);
   const dashboardActionKey = activeDashboardAction?.actionKey ?? null;
+  const showInternalSyncSupportTools = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DZN_SUPPORT_MODE === "true";
 
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
@@ -2623,7 +2624,7 @@ function ServerDashboard({
         </header>
         <div className="space-y-5 px-4 py-5 sm:px-5 xl:px-6">
       <ActionProgressPanel action={dashboardAction} onDismiss={clearDashboardAction} />
-      {!normalizedServerCategory ? (
+      {activeTab !== "sync-health" && !normalizedServerCategory ? (
         <ServerCategoryReminderBanner onOpenSettings={() => setActiveTab("settings-danger")} />
       ) : null}
       {activeTab === "overview" ? (
@@ -2789,9 +2790,33 @@ function ServerDashboard({
       ) : null}
 
       {activeTab !== "overview" ? (
-      <section className={`grid gap-5 ${activeTab === "sync-health" || activeTab === "public-listing" ? "xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]" : ""}`}>
+      <section className={`grid gap-5 ${activeTab === "public-listing" ? "xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]" : ""}`}>
         <div className={activeTab === "billing" || activeTab === "settings-danger" ? "hidden" : "grid gap-5"}>
           {activeTab === "sync-health" ? (
+          <AutoSyncDashboard
+            server={server}
+            serverDisplayName={serverDisplayName}
+            serverCategoryLabel={serverCategoryLabel}
+            effectiveServerMode={effectiveServerMode}
+            playerSlotsLabel={playerSlotsLabel}
+            playerCountStatusLabel={playerCountStatusLabel}
+            playerCountCheckedLabel={playerCountCheckedLabel}
+            playerCountFreshnessDetail={playerCountFreshnessDetail}
+            latestAdmFile={latestAdmFile}
+            dashboardHealth={effectiveDashboardHealth}
+            syncStatus={effectiveSyncData}
+            syncHealth={syncHealth}
+            stats={dashboardStatValues}
+            recentEvents={effectiveRecentEvents}
+            syncRuns={syncRuns}
+            refreshing={refreshingSyncData || manualRefreshing}
+            onRefresh={() => void refreshNow()}
+            publicProfileHref={server.public_slug ? publicServerProfileHref(server.public_slug) : null}
+            onOpenSettings={() => setActiveTab("settings-danger")}
+          />
+          ) : null}
+
+          {activeTab === "sync-health" && showInternalSyncSupportTools ? (
           <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
             <DashboardPanel className="p-4">
               <PanelHeader icon={<Server className="h-5 w-5" />} title="Server Overview" />
@@ -2806,9 +2831,9 @@ function ServerDashboard({
                 <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
                 <CompactRow label="Player Count Freshness" value={`${playerCountStatusLabel} · ${playerCountCheckedLabel}`} />
                 <CompactRow label="Live Count Detail" value={playerCountFreshnessDetail} />
-                <CompactRow label="Metadata Last Checked" value={server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "Not checked"} />
+                <CompactRow label="Metadata Last Checked" value={server.metadata_last_checked_at ? formatRelativeTime(String(server.metadata_last_checked_at)) : "Not checked"} />
                 <CompactRow label="Latest ADM File" value={latestAdmFile} />
-                <CompactRow label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(server.adm_last_checked_at) : "Not checked"} />
+                <CompactRow label="Last ADM Check" value={server.adm_last_checked_at ? formatDashboardDate(String(server.adm_last_checked_at)) : "Not checked"} />
                 <CompactRow label="Next Scheduled Sync" value={nextScheduledSync} />
                 <CompactRow label="Global Rank" value={globalRankLabel} />
                 <CompactRow label="Server Score" value={scoreLabel} />
@@ -2916,24 +2941,24 @@ function ServerDashboard({
                 <MiniInfo label="Last Refreshed" value={lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "Starting..."} />
                 <MiniInfo label="Status" value={syncHealth.status === "error" ? "Needs Action" : formatSyncStatus(effectiveSyncStatus)} />
                 <MiniInfo label="ADM Discovery" value={admDiscoveryInterval ? `Checks for new ADM files every ${admDiscoveryInterval} minutes` : "Plan loading"} />
-                <MiniInfo label="Last Discovery Check" value={syncStatus?.last_adm_discovery_check_at ? formatDashboardDate(syncStatus.last_adm_discovery_check_at) : "Not checked"} />
-                <MiniInfo label="Next Discovery Check" value={syncStatus?.next_adm_discovery_due_at ? formatDashboardDate(syncStatus.next_adm_discovery_due_at) : "Not scheduled"} />
+                <MiniInfo label="Last Discovery Check" value={syncStatus?.last_adm_discovery_check_at ? formatDashboardDate(String(syncStatus?.last_adm_discovery_check_at)) : "Not checked"} />
+                <MiniInfo label="Next Discovery Check" value={syncStatus?.next_adm_discovery_due_at ? formatDashboardDate(String(syncStatus?.next_adm_discovery_due_at)) : "Not scheduled"} />
                 <MiniInfo label="Discovery Status" value={formatSyncStatus(syncStatus?.adm_discovery_status ?? effectiveSyncStatus)} />
                 <MiniInfo label="Observed ADM Cadence" value={formatAdmCadence(syncStatus?.observed_adm_cadence_minutes)} />
-                <MiniInfo label="Last ADM Event" value={syncStatus?.last_useful_adm_event_at ? formatCompactDate(syncStatus.last_useful_adm_event_at) : "No useful event yet"} />
-                <MiniInfo label="Last PlayerList" value={syncStatus?.last_playerlist_at ? formatCompactDate(syncStatus.last_playerlist_at) : "No PlayerList yet"} />
-                <MiniInfo label="Next Expected ADM Update" value={syncStatus?.next_expected_adm_update_at ? `around ${formatCompactDate(syncStatus.next_expected_adm_update_at)}` : "Waiting for cadence"} />
+                <MiniInfo label="Last ADM Event" value={syncStatus?.last_useful_adm_event_at ? formatCompactDate(String(syncStatus?.last_useful_adm_event_at)) : "No useful event yet"} />
+                <MiniInfo label="Last PlayerList" value={syncStatus?.last_playerlist_at ? formatCompactDate(String(syncStatus?.last_playerlist_at)) : "No PlayerList yet"} />
+                <MiniInfo label="Next Expected ADM Update" value={syncStatus?.next_expected_adm_update_at ? `around ${formatCompactDate(String(syncStatus?.next_expected_adm_update_at))}` : "Waiting for cadence"} />
                 <MiniInfo label="First ADM After Restart" value={formatFirstAdmAfterRestart(syncStatus)} />
-                <MiniInfo label="First Useful Line After Restart" value={syncStatus?.first_useful_adm_line_after_restart_at ? formatDashboardDate(syncStatus.first_useful_adm_line_after_restart_at) : "Waiting"} />
+                <MiniInfo label="First Useful Line After Restart" value={syncStatus?.first_useful_adm_line_after_restart_at ? formatDashboardDate(String(syncStatus?.first_useful_adm_line_after_restart_at)) : "Waiting"} />
                 <MiniInfo label="ADM Processing" value={admProcessingInterval ? `Processes readable ADM data every ${admProcessingInterval} minutes` : "Plan loading"} />
-                <MiniInfo label="Next Processing Check" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(syncStatus.next_adm_pull_due_at) : "Not scheduled"} />
+                <MiniInfo label="Next Processing Check" value={syncStatus?.next_adm_pull_due_at ? formatDashboardDate(String(syncStatus?.next_adm_pull_due_at)) : "Not scheduled"} />
                 <MiniInfo label="Latest File Readable" value={latestAdmReadable} />
                 <MiniInfo label="ADM Health" value={syncStatus?.adm_health_label ?? "Delayed"} />
                 <MiniInfo label="Chunk Import Job" value={formatActiveAdmImportJob(syncStatus?.active_adm_import_job ?? null)} />
-                <MiniInfo label="Last Checked" value={syncStatus?.last_sync_at ? formatDashboardDate(syncStatus.last_sync_at) : "Not checked"} />
-                <MiniInfo label="Last Successful Feed Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(syncStatus.last_successful_sync_at) : "Not synced"} />
-                <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(syncStatus.last_scheduled_sync_at) : "Not synced"} />
-                <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(syncStatus.last_manual_sync_at) : "Not synced"} />
+                <MiniInfo label="Last Checked" value={syncStatus?.last_sync_at ? formatDashboardDate(String(syncStatus?.last_sync_at)) : "Not checked"} />
+                <MiniInfo label="Last Successful Feed Sync" value={syncStatus?.last_successful_sync_at ? formatDashboardDate(String(syncStatus?.last_successful_sync_at)) : "Not synced"} />
+                <MiniInfo label="Last Scheduled Sync" value={syncStatus?.last_scheduled_sync_at ? formatDashboardDate(String(syncStatus?.last_scheduled_sync_at)) : "Not synced"} />
+                <MiniInfo label="Last Manual Sync" value={syncStatus?.last_manual_sync_at ? formatDashboardDate(String(syncStatus?.last_manual_sync_at)) : "Not synced"} />
                 <MiniInfo label="Last Sync Trigger" value={formatSyncTrigger(syncStatus?.last_sync_trigger)} />
                 <MiniInfo label="Next Action" value={syncHealth.status === "error" ? syncHealth.nextAction : "Continue syncing after fresh ADM activity"} />
               </div>
@@ -3113,7 +3138,7 @@ function ServerDashboard({
           />
           ) : null}
 
-          {activeTab === "sync-health" ? (
+          {activeTab === "sync-health" && showInternalSyncSupportTools ? (
           <div className="grid gap-5">
             <SyncHealthSummaryPanel
               syncStatus={effectiveSyncData}
@@ -3153,7 +3178,7 @@ function ServerDashboard({
           ) : null}
         </div>
 
-        <aside className={activeTab === "discord-posts" ? "hidden" : "grid content-start gap-5"}>
+        <aside className={activeTab === "discord-posts" || activeTab === "sync-health" ? "hidden" : "grid content-start gap-5"}>
           {activeTab === "billing" ? (
           <BillingPlanPanel billing={effectiveBillingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBillingWithAction} />
           ) : null}
@@ -6612,6 +6637,364 @@ function MiniInfo({ label, value }: { label: string; value: string }) {
   );
 }
 
+type OwnerAutoSyncState = {
+  variant: "healthy" | "waiting" | "upstream" | "attention" | "importing";
+  heroTitle: string;
+  heroMessage: string;
+  statusLabel: string;
+  latestAdmState: string;
+  latestClassifiedError: string | null;
+  latestErrorMessage: string;
+  manualActionRequired: boolean;
+  queueStatus: string;
+  nextAction: string;
+};
+
+type AutoSyncDashboardProps = {
+  server: LinkedServer;
+  serverDisplayName: string;
+  serverCategoryLabel: string;
+  effectiveServerMode: string | null | undefined;
+  playerSlotsLabel: string;
+  playerCountStatusLabel: string;
+  playerCountCheckedLabel: string;
+  playerCountFreshnessDetail: string;
+  latestAdmFile: string;
+  dashboardHealth: DashboardHealthResult | null;
+  syncStatus: AdmSyncStatus | null;
+  syncHealth: ReturnType<typeof getSyncHealth>;
+  stats: {
+    kills: number | null;
+    deaths: number | null;
+    joins: number | null;
+    disconnects: number | null;
+    uniquePlayers: number | null;
+    score: string | number | null;
+  };
+  recentEvents: AdmRecentSyncEvent[];
+  syncRuns: AdmSyncStatus["recent_sync_runs"];
+  refreshing: boolean;
+  onRefresh: () => void;
+  publicProfileHref: string | null;
+  onOpenSettings: () => void;
+};
+
+function AutoSyncDashboard({
+  server,
+  serverDisplayName,
+  serverCategoryLabel,
+  effectiveServerMode,
+  playerSlotsLabel,
+  playerCountStatusLabel,
+  playerCountCheckedLabel,
+  playerCountFreshnessDetail,
+  latestAdmFile,
+  dashboardHealth,
+  syncStatus,
+  syncHealth,
+  stats,
+  recentEvents,
+  syncRuns,
+  refreshing,
+  onRefresh,
+  publicProfileHref,
+  onOpenSettings,
+}: AutoSyncDashboardProps) {
+  const state = getOwnerAdmAutoStatus(dashboardHealth, syncStatus, syncHealth);
+
+  return (
+    <div className="grid gap-5">
+      <AutoSyncHero state={state} refreshing={refreshing} onRefresh={onRefresh} publicProfileHref={publicProfileHref} onOpenSettings={onOpenSettings} />
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <ServerOverviewAutoCard
+          server={server}
+          serverDisplayName={serverDisplayName}
+          serverCategoryLabel={serverCategoryLabel}
+          effectiveServerMode={effectiveServerMode}
+          playerSlotsLabel={playerSlotsLabel}
+          playerCountStatusLabel={playerCountStatusLabel}
+          playerCountCheckedLabel={playerCountCheckedLabel}
+          playerCountFreshnessDetail={playerCountFreshnessDetail}
+        />
+        <AutomationStatusGrid state={state} dashboardHealth={dashboardHealth} syncStatus={syncStatus} latestAdmFile={latestAdmFile} />
+      </section>
+      <ImportantAutoHealth state={state} dashboardHealth={dashboardHealth} syncStatus={syncStatus} />
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
+        <LiveSyncStats stats={stats} />
+        <RecentSyncedEventsPanel events={recentEvents} state={state} />
+      </section>
+      <RecentSyncRunsPanel runs={syncRuns} />
+    </div>
+  );
+}
+
+function AutoSyncHero({
+  state,
+  refreshing,
+  onRefresh,
+  publicProfileHref,
+  onOpenSettings,
+}: {
+  state: OwnerAutoSyncState;
+  refreshing: boolean;
+  onRefresh: () => void;
+  publicProfileHref: string | null;
+  onOpenSettings: () => void;
+}) {
+  const tone = getAutoSyncTone(state.variant);
+  return (
+    <DashboardPanel className={`overflow-hidden ${tone.panelBorder} p-0`}>
+      <div className={`relative p-5 sm:p-6 ${tone.heroBg}`}>
+        <div className="absolute right-8 top-6 h-28 w-28 rounded-full bg-cyan-300/10 blur-3xl" />
+        <div className="absolute right-24 bottom-0 h-24 w-40 rounded-full bg-violet-400/10 blur-3xl" />
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex gap-4">
+            <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-xl border ${tone.iconBorder} ${tone.iconBg} ${tone.iconText}`}>
+              {state.variant === "attention" ? <AlertTriangle className="h-7 w-7" /> : state.variant === "importing" ? <DatabaseZap className="h-7 w-7" /> : <ShieldCheck className="h-7 w-7" />}
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-3xl font-black tracking-normal text-white">{state.heroTitle}</h1>
+                <SmallBadge tone={tone.badgeTone}>{state.statusLabel}</SmallBadge>
+                {!state.manualActionRequired ? <SmallBadge tone="cyan">No manual action required</SmallBadge> : null}
+              </div>
+              <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-zinc-200">{state.heroMessage}</p>
+              <p className="mt-2 text-xs font-bold leading-5 text-zinc-400">DZN automatically discovers, retries, and imports ADM data without manual action.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={onRefresh} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55">
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              Refresh Status
+            </button>
+            {publicProfileHref ? (
+              <Link href={publicProfileHref} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-100 transition hover:border-white/20">
+                View Public Page
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
+            ) : null}
+            <button type="button" onClick={onOpenSettings} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-100 transition hover:border-white/20">
+              Server Settings
+              <Settings className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function ServerOverviewAutoCard({
+  server,
+  serverDisplayName,
+  serverCategoryLabel,
+  effectiveServerMode,
+  playerSlotsLabel,
+  playerCountStatusLabel,
+  playerCountCheckedLabel,
+  playerCountFreshnessDetail,
+}: {
+  server: LinkedServer;
+  serverDisplayName: string;
+  serverCategoryLabel: string;
+  effectiveServerMode: string | null | undefined;
+  playerSlotsLabel: string;
+  playerCountStatusLabel: string;
+  playerCountCheckedLabel: string;
+  playerCountFreshnessDetail: string;
+}) {
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex items-center justify-between gap-3">
+        <PanelHeader icon={<Server className="h-5 w-5" />} title="Server Overview" />
+        <SmallBadge tone="cyan">Nitrado Logs: Monitoring</SmallBadge>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <MiniInfo label="Server Name" value={serverDisplayName} />
+        <MiniInfo label="Service ID" value={server.nitrado_service_id ?? "Not linked"} />
+        <MiniInfo label="Server Type" value={serverCategoryLabel !== "Not set" ? serverCategoryLabel : formatStatusLabel(String(effectiveServerMode ?? "Unknown"))} />
+        <MiniInfo label="Game" value={server.game ?? "dayzps"} />
+        <MiniInfo label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
+        <MiniInfo label="Player Slots" value={playerSlotsLabel} />
+        <MiniInfo label="Player Count Freshness" value={`${playerCountStatusLabel} / ${playerCountCheckedLabel}`} />
+        <MiniInfo label="Latest Server Check" value={server.metadata_last_checked_at ? formatRelativeTime(String(server.metadata_last_checked_at)) : "Waiting for first check"} />
+      </div>
+      <p className="mt-4 rounded-lg border border-cyan-300/15 bg-cyan-400/8 px-3 py-3 text-xs font-bold leading-5 text-cyan-50">
+        {playerCountFreshnessDetail}
+      </p>
+    </DashboardPanel>
+  );
+}
+
+function AutomationStatusGrid({
+  state,
+  dashboardHealth,
+  syncStatus,
+  latestAdmFile,
+}: {
+  state: OwnerAutoSyncState;
+  dashboardHealth: DashboardHealthResult | null;
+  syncStatus: AdmSyncStatus | null;
+  latestAdmFile: string;
+}) {
+  const lastImport = dashboardHealth?.sync.latest_completed_import?.completed_at
+    ?? dashboardHealth?.sync.last_successful_sync
+    ?? syncStatus?.last_successful_sync_at
+    ?? null;
+  const lastAttempt = dashboardHealth?.sync.last_attempted_adm_read
+    ?? syncStatus?.last_adm_discovery_check_at
+    ?? syncStatus?.last_sync_at
+    ?? null;
+  const nextDiscovery = dashboardHealth?.sync.next_adm_discovery_due_at ?? syncStatus?.next_adm_discovery_due_at ?? null;
+  const nextProcessing = dashboardHealth?.sync.next_adm_processing_due_at ?? syncStatus?.next_adm_pull_due_at ?? null;
+
+  return (
+    <DashboardPanel className="p-4">
+      <PanelHeader icon={<RefreshCw className="h-5 w-5" />} title="Automation Status" />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <MiniInfo label="Sync Status" value={state.statusLabel} />
+        <MiniInfo label="Latest ADM State" value={state.latestAdmState || latestAdmFile || "Waiting for ADM"} />
+        <MiniInfo label="Last Successful Import" value={lastImport ? formatDashboardDate(lastImport) : "Not synced yet"} />
+        <MiniInfo label="Last Attempted Read" value={lastAttempt ? formatDashboardDate(lastAttempt) : "Not checked yet"} />
+        <MiniInfo label="Next Discovery Check" value={nextDiscovery ? formatDashboardDate(nextDiscovery) : "Scheduling automatically"} />
+        <MiniInfo label="Next Processing Check" value={nextProcessing ? formatDashboardDate(nextProcessing) : "Scheduling automatically"} />
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function ImportantAutoHealth({
+  state,
+  dashboardHealth,
+  syncStatus,
+}: {
+  state: OwnerAutoSyncState;
+  dashboardHealth: DashboardHealthResult | null;
+  syncStatus: AdmSyncStatus | null;
+}) {
+  const discoveryInterval = dashboardHealth?.plan_limits.adm_discovery_interval_minutes;
+  const processingInterval = dashboardHealth?.plan_limits.adm_processing_interval_minutes;
+  const activeJob = dashboardHealth?.sync.active_job ?? syncStatus?.active_adm_import_job ?? null;
+  const queuedCount = dashboardHealth?.sync.backfill_status.queued_jobs_count ?? 0;
+  const queueStatus = activeJob
+    ? "Importing"
+    : queuedCount > 0
+      ? "Import queued"
+      : state.queueStatus;
+
+  return (
+    <DashboardPanel className="p-4">
+      <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Important Auto Health" />
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <AutoHealthSignal label="ADM Discovery" value="Running" detail={discoveryInterval ? `Every ${discoveryInterval} minutes` : "Automatic cadence"} tone="cyan" />
+        <AutoHealthSignal label="ADM Processing" value="Running" detail={processingInterval ? `Every ${processingInterval} minutes` : "Automatic cadence"} tone="emerald" />
+        <AutoHealthSignal label="Backoff Protection" value="Enabled" detail="Auto retry active" tone="emerald" />
+        <AutoHealthSignal label="Latest Classified Error" value={state.latestClassifiedError ?? "None"} detail={state.latestErrorMessage} tone={state.manualActionRequired ? "orange" : state.latestClassifiedError ? "cyan" : "zinc"} />
+        <AutoHealthSignal label="Retry Mode" value="Automatic" detail="DZN retries unreadable ADM files automatically" tone="cyan" />
+        <AutoHealthSignal label="Queue Status" value={queueStatus} detail={state.nextAction} tone={activeJob ? "emerald" : "zinc"} />
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function AutoHealthSignal({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "emerald" | "orange" | "cyan" | "zinc" }) {
+  const color = {
+    emerald: "border-emerald-300/18 bg-emerald-400/8 text-emerald-50",
+    orange: "border-orange-300/20 bg-orange-400/10 text-orange-50",
+    cyan: "border-cyan-300/18 bg-cyan-400/8 text-cyan-50",
+    zinc: "border-white/10 bg-black/24 text-zinc-100",
+  }[tone];
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${color}`}>
+      <p className="text-[10px] font-black uppercase opacity-70">{label}</p>
+      <p className="mt-1 break-words text-base font-black">{value}</p>
+      <p className="mt-1 text-xs font-bold leading-5 text-zinc-400">{detail}</p>
+    </div>
+  );
+}
+
+function LiveSyncStats({ stats }: { stats: AutoSyncDashboardProps["stats"] }) {
+  const items = [
+    ["Kills", stats.kills, <Crosshair key="kills" className="h-4 w-4" />],
+    ["Deaths", stats.deaths, <AlertTriangle key="deaths" className="h-4 w-4" />],
+    ["Joins", stats.joins, <ArrowRight key="joins" className="h-4 w-4" />],
+    ["Disconnects", stats.disconnects, <LogOut key="disconnects" className="h-4 w-4" />],
+    ["Unique Players", stats.uniquePlayers, <Users key="players" className="h-4 w-4" />],
+  ] as const;
+  return (
+    <DashboardPanel className="p-4">
+      <PanelHeader icon={<BarChart3 className="h-5 w-5" />} title="Live Sync Stats" />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {items.map(([label, value, icon]) => (
+          <div key={label} className="rounded-lg border border-white/10 bg-black/24 px-3 py-3">
+            <div className="flex items-center gap-2 text-zinc-400">
+              {icon}
+              <p className="text-[10px] font-black uppercase">{label}</p>
+            </div>
+            <p className="mt-2 text-2xl font-black text-white">{formatAutoStatValue(value)}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-xs font-bold leading-5 text-zinc-400">
+        Stats update after each successful ADM sync.
+      </p>
+    </DashboardPanel>
+  );
+}
+
+function RecentSyncedEventsPanel({ events, state }: { events: AdmRecentSyncEvent[]; state: OwnerAutoSyncState }) {
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex items-center justify-between gap-3">
+        <PanelHeader icon={<Activity className="h-5 w-5" />} title="Recent Synced Events" />
+        <SmallBadge tone={events.length ? "emerald" : "zinc"}>{events.length ? "Live feed" : "Awaiting data"}</SmallBadge>
+      </div>
+      <div className="mt-4 grid max-h-[430px] gap-2 overflow-auto pr-1">
+        {events.length ? (
+          events.slice(0, 8).map((event, index) => <RecentSyncEventRow key={`${event.source}-${event.created_at ?? index}-${event.event_type}`} event={event} />)
+        ) : (
+          <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold leading-6 text-zinc-300">
+            {state.variant === "waiting" || state.variant === "upstream"
+              ? "Waiting for Nitrado to provide the next readable ADM."
+              : "Events will appear after the first readable ADM sync."}
+          </div>
+        )}
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function RecentSyncRunsPanel({ runs }: { runs: AdmSyncStatus["recent_sync_runs"] }) {
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex items-center justify-between gap-3">
+        <PanelHeader icon={<ListChecks className="h-5 w-5" />} title="Recent Sync Runs" />
+        <span className="text-[10px] font-black uppercase text-zinc-500">Last 5</span>
+      </div>
+      <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
+        {runs.length ? (
+          runs.slice(0, 5).map((run) => (
+            <div key={run.id} className="grid min-w-[640px] grid-cols-[1.1fr_0.9fr_0.8fr_0.7fr_0.7fr] items-center gap-3 border-b border-white/10 bg-black/20 px-3 py-3 text-xs last:border-b-0">
+              <div>
+                <SmallBadge tone={isFailedRun(run) ? "orange" : isSuccessfulRun(run) ? "emerald" : "zinc"}>{formatSyncStatus(run.status)}</SmallBadge>
+                <p className="mt-2 line-clamp-2 text-[11px] font-bold leading-5 text-zinc-400">{run.message ?? "Sync run recorded"}</p>
+              </div>
+              <HistoryCell label="Started" value={formatCompactDate(run.started_at ?? run.created_at)} />
+              <HistoryCell label="Duration" value={formatDuration(run.duration_ms)} />
+              <HistoryCell label="Lines Read" value={String(run.lines_read)} />
+              <HistoryCell label="Events" value={String(run.events_created)} />
+            </div>
+          ))
+        ) : (
+          <div className="bg-white/[0.03] px-3 py-3 text-sm font-bold text-zinc-400">
+            Recent automatic runs will appear after the Worker records its next sync pass.
+          </div>
+        )}
+      </div>
+    </DashboardPanel>
+  );
+}
+
 function LastSyncDetails({
   open,
   onToggle,
@@ -8323,6 +8706,225 @@ function formatDashboardAdmReadMessage(message: string | null | undefined) {
   if (/FETCH_TIMEOUT/i.test(text)) return "Nitrado ADM file read timed out. Auto-sync will retry.";
   if (/TOKENIZED_EMPTY_BODY/i.test(text)) return "Nitrado returned an empty ADM download body. Auto-sync will retry.";
   return null;
+}
+
+function getOwnerAdmAutoStatus(
+  dashboardHealth: DashboardHealthResult | null,
+  syncStatus: AdmSyncStatus | null,
+  syncHealth: ReturnType<typeof getSyncHealth>,
+): OwnerAutoSyncState {
+  const activeJob = dashboardHealth?.sync.active_job ?? syncStatus?.active_adm_import_job ?? null;
+  const statusText = String(dashboardHealth?.sync.status ?? syncStatus?.last_sync_status ?? syncHealth.status ?? "").toLowerCase();
+  const errorSource = [
+    dashboardHealth?.sync.latest_classified_error,
+    dashboardHealth?.sync.last_error,
+    dashboardHealth?.sync.latest_http_status ? `HTTP ${dashboardHealth.sync.latest_http_status}` : null,
+    syncStatus?.last_adm_discovery_error,
+    syncStatus?.last_sync_message,
+  ].filter(Boolean).join(" ");
+  const classifiedError = formatAdmErrorCode(errorSource || dashboardHealth?.sync.latest_classified_error || null);
+  const latestErrorMessage = formatAdmError(classifiedError, dashboardHealth?.sync.latest_http_status ?? null);
+  const manualActionRequired = classifiedError === "NITRADO_UNAUTHORIZED" || classifiedError === "NITRADO_FORBIDDEN";
+  const lastSuccessfulImport = dashboardHealth?.sync.latest_completed_import?.completed_at ?? dashboardHealth?.sync.last_successful_sync ?? syncStatus?.last_successful_sync_at ?? null;
+  const hasStats = Boolean((dashboardHealth?.stats.kills ?? 0) > 0 || (dashboardHealth?.stats.joins ?? 0) > 0 || (dashboardHealth?.stats.unique_players ?? 0) > 0 || (syncStatus?.total_kills ?? 0) > 0 || (syncStatus?.total_joins ?? 0) > 0);
+  const latestAdmState = formatLatestAdmState(dashboardHealth, syncStatus, classifiedError);
+  const queueStatus = formatAutoQueueStatus(dashboardHealth, syncStatus, classifiedError);
+
+  if (activeJob) {
+    return {
+      variant: "importing",
+      heroTitle: "IMPORTING ADM DATA",
+      heroMessage: `DZN is processing ${activeJob.filename || "the latest readable ADM file"} automatically.`,
+      statusLabel: "Importing",
+      latestAdmState,
+      latestClassifiedError: classifiedError,
+      latestErrorMessage,
+      manualActionRequired: false,
+      queueStatus,
+      nextAction: "Continue automatic import",
+    };
+  }
+
+  if (manualActionRequired) {
+    return {
+      variant: "attention",
+      heroTitle: "NITRADO CONNECTION NEEDS ATTENTION",
+      heroMessage: latestErrorMessage,
+      statusLabel: "Needs Attention",
+      latestAdmState,
+      latestClassifiedError: classifiedError,
+      latestErrorMessage,
+      manualActionRequired: true,
+      queueStatus,
+      nextAction: formatAdmNextAction(classifiedError),
+    };
+  }
+
+  if (classifiedError === "NITRADO_UPSTREAM_DOWN" || classifiedError === "NITRADO_RATE_LIMITED" || classifiedError === "WORKER_SUBREQUEST_LIMIT" || classifiedError === "FETCH_TIMEOUT" || classifiedError === "FETCH_THREW" || classifiedError === "TOKENIZED_EMPTY_BODY") {
+    return {
+      variant: "upstream",
+      heroTitle: "NITRADO FILE SERVICE WAITING",
+      heroMessage: latestErrorMessage,
+      statusLabel: classifiedError === "NITRADO_RATE_LIMITED" ? "Retrying" : "Waiting",
+      latestAdmState,
+      latestClassifiedError: classifiedError,
+      latestErrorMessage,
+      manualActionRequired: false,
+      queueStatus,
+      nextAction: formatAdmNextAction(classifiedError),
+    };
+  }
+
+  if (classifiedError === "NITRADO_FILE_NOT_FOUND" || /unreadable|waiting|read_pending|no_new|no_adm|delayed|pending/.test(statusText)) {
+    return {
+      variant: "waiting",
+      heroTitle: "WAITING FOR READABLE ADM",
+      heroMessage: classifiedError === "NITRADO_FILE_NOT_FOUND"
+        ? latestErrorMessage
+        : "DZN is monitoring Nitrado. The next readable ADM will import automatically.",
+      statusLabel: "Waiting",
+      latestAdmState,
+      latestClassifiedError: classifiedError,
+      latestErrorMessage,
+      manualActionRequired: false,
+      queueStatus,
+      nextAction: "DZN will retry automatically",
+    };
+  }
+
+  return {
+    variant: "healthy",
+    heroTitle: "AUTO SYNC ACTIVE",
+    heroMessage: lastSuccessfulImport || hasStats
+      ? "DZN is monitoring Nitrado and importing readable ADM files automatically."
+      : "DZN is ready and waiting for the first readable ADM file.",
+    statusLabel: lastSuccessfulImport || hasStats ? "Healthy" : "Monitoring",
+    latestAdmState,
+    latestClassifiedError: classifiedError,
+    latestErrorMessage,
+    manualActionRequired: false,
+    queueStatus,
+    nextAction: "Continue automatic monitoring",
+  };
+}
+
+function formatAdmErrorCode(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  if (!text || text.toLowerCase() === "null") return null;
+  const classified = classifyDashboardAdmError(text);
+  if (classified) return classified;
+  if (/latest_adm_unreadable|adm_file_unreadable/i.test(text)) return "LATEST_ADM_UNREADABLE";
+  if (/no_new_adm|no_new_log|no_new_lines/i.test(text)) return "NO_NEW_ADM";
+  if (/importing|processing|queued/i.test(text)) return "IMPORTING";
+  if (/completed|processed|success/i.test(text)) return "COMPLETED";
+  return text.length > 64 ? text.slice(0, 64) : text;
+}
+
+function formatAdmError(code: string | null, httpStatus: number | null) {
+  const status = httpStatus ? ` HTTP ${httpStatus}` : "";
+  switch (code) {
+    case "NITRADO_UPSTREAM_DOWN":
+      return `Nitrado returned an upstream error${status} for ADM reads. DZN will retry automatically.`;
+    case "NITRADO_RATE_LIMITED":
+      return "Nitrado rate limited ADM reads. DZN is backing off and will retry automatically.";
+    case "NITRADO_UNAUTHORIZED":
+      return "DZN cannot access your Nitrado files. Reconnect Nitrado from server settings.";
+    case "NITRADO_FORBIDDEN":
+      return "Your token works for metadata but not file reads. Reconnect Nitrado or check service access.";
+    case "NITRADO_FILE_NOT_FOUND":
+      return "The ADM file was listed but is no longer readable. DZN will continue with the next available ADM.";
+    case "LATEST_ADM_UNREADABLE":
+      return "DZN found the latest ADM but Nitrado has not made it readable yet. Auto-sync will retry.";
+    case "NO_NEW_ADM":
+      return "No new ADM file is available yet. DZN will keep monitoring.";
+    case "IMPORTING":
+      return "DZN is processing readable ADM data automatically.";
+    case "COMPLETED":
+      return "Latest readable ADM data was imported successfully.";
+    case "WORKER_SUBREQUEST_LIMIT":
+      return "The automatic sync budget was reached. DZN paused safely and will continue in the next small run.";
+    case "FETCH_TIMEOUT":
+      return "Nitrado ADM file read timed out. DZN will retry automatically.";
+    case "FETCH_THREW":
+      return "The ADM read request could not complete. DZN will retry automatically.";
+    case "TOKENIZED_EMPTY_BODY":
+      return "Nitrado returned an empty ADM download body. DZN will retry automatically.";
+    default:
+      return code ? formatStatusLabel(code) : "No classified ADM read issue detected.";
+  }
+}
+
+function formatAdmNextAction(code: string | null) {
+  if (code === "NITRADO_UNAUTHORIZED" || code === "NITRADO_FORBIDDEN") return "Reconnect Nitrado from server settings";
+  if (code === "NITRADO_RATE_LIMITED") return "Backoff active / automatic retry scheduled";
+  if (code) return "DZN will retry automatically";
+  return "No manual action required";
+}
+
+function formatLatestAdmState(dashboardHealth: DashboardHealthResult | null, syncStatus: AdmSyncStatus | null, code: string | null) {
+  if (dashboardHealth?.sync.active_job || syncStatus?.active_adm_import_job) return "Importing ADM data";
+  if (code === "NITRADO_UPSTREAM_DOWN") return "Nitrado file service unavailable";
+  if (code === "NITRADO_RATE_LIMITED") return "Retry scheduled";
+  if (code === "NITRADO_UNAUTHORIZED" || code === "NITRADO_FORBIDDEN") return "Connection needs attention";
+  if (code === "NITRADO_FILE_NOT_FOUND") return "ADM file unavailable";
+  if (code === "LATEST_ADM_UNREADABLE") return "Latest ADM not readable yet";
+  if (dashboardHealth?.sync.latest_completed_import || dashboardHealth?.sync.last_successful_sync || syncStatus?.last_successful_sync_at) return "ADM imported";
+  if (dashboardHealth?.sync.newest_available_adm_filename || syncStatus?.newest_available_adm_filename) return "Waiting for readable ADM";
+  return "Waiting for ADM";
+}
+
+function formatAutoQueueStatus(dashboardHealth: DashboardHealthResult | null, syncStatus: AdmSyncStatus | null, code: string | null) {
+  if (dashboardHealth?.sync.active_job || syncStatus?.active_adm_import_job) return "Importing";
+  const queued = dashboardHealth?.sync.backfill_status.queued_jobs_count ?? syncStatus?.adm_backfill_status.queued_files.length ?? 0;
+  if (queued > 0) return "Import queued";
+  if (code === "NITRADO_UPSTREAM_DOWN" || code === "NITRADO_RATE_LIMITED" || code === "LATEST_ADM_UNREADABLE") return "Retrying";
+  if (code === "NITRADO_UNAUTHORIZED" || code === "NITRADO_FORBIDDEN") return "Needs attention";
+  return "Waiting";
+}
+
+function getAutoSyncTone(variant: OwnerAutoSyncState["variant"]) {
+  if (variant === "attention") {
+    return {
+      panelBorder: "border-orange-300/25",
+      heroBg: "bg-gradient-to-br from-orange-500/14 via-[#0a0d18] to-[#050814]",
+      iconBorder: "border-orange-300/25",
+      iconBg: "bg-orange-400/10",
+      iconText: "text-orange-100",
+      badgeTone: "orange" as const,
+    };
+  }
+  if (variant === "importing") {
+    return {
+      panelBorder: "border-emerald-300/25",
+      heroBg: "bg-gradient-to-br from-emerald-400/14 via-[#0a0d18] to-[#050814]",
+      iconBorder: "border-emerald-300/25",
+      iconBg: "bg-emerald-400/10",
+      iconText: "text-emerald-100",
+      badgeTone: "emerald" as const,
+    };
+  }
+  if (variant === "upstream" || variant === "waiting") {
+    return {
+      panelBorder: "border-cyan-300/25",
+      heroBg: "bg-gradient-to-br from-cyan-400/14 via-[#0a0d18] to-[#050814]",
+      iconBorder: "border-cyan-300/25",
+      iconBg: "bg-cyan-400/10",
+      iconText: "text-cyan-100",
+      badgeTone: "cyan" as const,
+    };
+  }
+  return {
+    panelBorder: "border-emerald-300/25",
+    heroBg: "bg-gradient-to-br from-emerald-400/14 via-[#0a0d18] to-[#050814]",
+    iconBorder: "border-emerald-300/25",
+    iconBg: "bg-emerald-400/10",
+    iconText: "text-emerald-100",
+    badgeTone: "emerald" as const,
+  };
+}
+
+function formatAutoStatValue(value: number | null) {
+  return value === null ? "Awaiting first sync" : value.toLocaleString();
 }
 
 function getProcessedPercent(syncStatus: AdmSyncStatus | null) {

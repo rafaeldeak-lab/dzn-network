@@ -315,8 +315,11 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
           : "Waiting for Nitrado";
     const admNitradoReadFailure = numberOrZero(server.consecutive_failed_adm_reads) >= 3;
     const admReadStatusMessage = formatAdmReadIssueMessage(latestReadTruth, server.last_sync_message);
+    const latestClassifiedError = classifyAdmReadIssue(latestReadTruth, server.last_sync_message);
+    const canonicalError = canonicalAdmErrorCode(latestClassifiedError);
+    const latestHttpStatus = numberOrNull(latestReadTruth?.last_http_status);
     const admNitradoReadFailureMessage = admReadStatusMessage
-      ?? "DZN cannot read your latest ADM file from Nitrado. Check that Admin Log is enabled, Reduce Log Output is disabled, and Log Playerlist is enabled in your Nitrado settings.";
+      ?? "DZN found the latest ADM but Nitrado has not made it readable yet. Auto-sync will retry automatically.";
     const warnings = [
       ...(!cron.adm_recent ? ["adm_cron_stale"] : []),
       ...(fileState && numberOrZero(fileState.missing_count) > 0 ? ["adm_backfill_missing"] : []),
@@ -361,6 +364,23 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         unique_players: statsSnapshot.unique_players,
         score,
       },
+      autoSync: {
+        overallStatus: ownerAutoSyncStatus(activeJobSnapshot, canonicalError, server, statsSnapshot),
+        headline: ownerAutoSyncHeadline(activeJobSnapshot, canonicalError, server, statsSnapshot),
+        message: ownerAutoSyncMessage(activeJobSnapshot, canonicalError, latestHttpStatus, admReadStatusMessage),
+        latestAdmState: ownerLatestAdmState(activeJobSnapshot, canonicalError, server, latestCompletedImport),
+        latestAdmFile: server.newest_available_adm_filename ?? server.latest_adm_file ?? latestReadTruth?.adm_file ?? null,
+        lastSuccessfulImportAt: latestCompletedImport?.completed_at ?? latestCompletedImport?.updated_at ?? server.last_successful_sync_at ?? null,
+        lastAttemptedReadAt: latestReadTruth?.last_diagnostic_at ?? latestReadTruth?.last_checked_at ?? server.last_sync_at ?? null,
+        nextDiscoveryAt: server.next_adm_discovery_due_at,
+        nextProcessingAt: server.next_adm_pull_due_at,
+        latestClassifiedError: canonicalError,
+        upstreamHttpStatus: latestHttpStatus,
+        retryMode: "automatic",
+        backoffEnabled: true,
+        queueStatus: activeJobSnapshot ? "importing" : numberOrZero(queuedJobs?.count) > 0 ? "import_queued" : canonicalError ? "retrying" : "waiting",
+        manualActionRequired: canonicalError === "NITRADO_UNAUTHORIZED" || canonicalError === "NITRADO_FORBIDDEN",
+      },
       recent_events_count: events.length,
       latest_event_at: latestEventAt(events),
       latest_events: events,
@@ -396,8 +416,8 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         } : null,
         last_attempted_adm_read: latestReadTruth?.last_diagnostic_at ?? latestReadTruth?.last_checked_at ?? server.last_sync_at ?? null,
         latest_unreadable_file: latestReadTruth?.adm_file ?? null,
-        latest_classified_error: classifyAdmReadIssue(latestReadTruth, server.last_sync_message),
-        latest_http_status: numberOrNull(latestReadTruth?.last_http_status),
+        latest_classified_error: latestClassifiedError,
+        latest_http_status: latestHttpStatus,
         latest_endpoint_kind: latestReadTruth?.last_endpoint_kind ?? null,
         latest_method: latestReadTruth?.last_method ?? null,
         latest_completed_import: latestCompletedImport ? {
@@ -615,6 +635,59 @@ function formatAdmReadIssueMessage(issue: AdmFileReadIssueRow | null, fallback: 
   if (/FETCH_TIMEOUT/i.test(message)) return `Nitrado ADM file read timed out.${retrySuffix}`;
   if (/TOKENIZED_EMPTY_BODY/i.test(message)) return `Nitrado tokenized ADM download returned an empty body.${retrySuffix}`;
   return message || null;
+}
+
+function canonicalAdmErrorCode(value: string | null) {
+  const text = String(value ?? "");
+  if (/NITRADO_UPSTREAM_DOWN|HTTP\s+5\d\d/i.test(text)) return "NITRADO_UPSTREAM_DOWN";
+  if (/NITRADO_RATE_LIMITED|HTTP\s+429/i.test(text)) return "NITRADO_RATE_LIMITED";
+  if (/NITRADO_UNAUTHORIZED|HTTP\s+401/i.test(text)) return "NITRADO_UNAUTHORIZED";
+  if (/NITRADO_FORBIDDEN|HTTP\s+403/i.test(text)) return "NITRADO_FORBIDDEN";
+  if (/NITRADO_FILE_NOT_FOUND|HTTP\s+404/i.test(text)) return "NITRADO_FILE_NOT_FOUND";
+  if (/WORKER_SUBREQUEST_LIMIT/i.test(text)) return "WORKER_SUBREQUEST_LIMIT";
+  if (/FETCH_TIMEOUT/i.test(text)) return "FETCH_TIMEOUT";
+  if (/FETCH_THREW/i.test(text)) return "FETCH_THREW";
+  if (/TOKENIZED_EMPTY_BODY/i.test(text)) return "TOKENIZED_EMPTY_BODY";
+  return text.trim() || null;
+}
+
+function ownerAutoSyncStatus(activeJob: ReturnType<typeof normalizeJob> | null, code: string | null, server: ServerRow, stats: ReturnType<typeof statsFromRow>) {
+  if (activeJob) return "importing";
+  if (code === "NITRADO_UNAUTHORIZED" || code === "NITRADO_FORBIDDEN") return "needs_attention";
+  if (code === "NITRADO_UPSTREAM_DOWN" || code === "NITRADO_RATE_LIMITED" || code === "FETCH_TIMEOUT" || code === "FETCH_THREW" || code === "TOKENIZED_EMPTY_BODY" || code === "WORKER_SUBREQUEST_LIMIT") return "waiting_for_nitrado";
+  if (server.last_processed_adm_filename || stats.kills > 0 || stats.joins > 0 || stats.unique_players > 0) return "healthy";
+  return "waiting_for_nitrado";
+}
+
+function ownerAutoSyncHeadline(activeJob: ReturnType<typeof normalizeJob> | null, code: string | null, server: ServerRow, stats: ReturnType<typeof statsFromRow>) {
+  const status = ownerAutoSyncStatus(activeJob, code, server, stats);
+  if (status === "importing") return "Importing ADM data";
+  if (status === "needs_attention") return "Nitrado connection needs attention";
+  if (code === "NITRADO_UPSTREAM_DOWN") return "Nitrado file service waiting";
+  if (status === "waiting_for_nitrado") return "Waiting for readable ADM";
+  return "Auto sync active";
+}
+
+function ownerAutoSyncMessage(activeJob: ReturnType<typeof normalizeJob> | null, code: string | null, httpStatus: number | null, readMessage: string | null) {
+  if (activeJob) return `DZN is processing ${activeJob.filename || "the latest readable ADM file"} automatically.`;
+  if (readMessage) return readMessage;
+  if (code === "NITRADO_UPSTREAM_DOWN") return `Nitrado returned an upstream error${httpStatus ? ` HTTP ${httpStatus}` : ""} for ADM reads. DZN will retry automatically.`;
+  if (code === "NITRADO_RATE_LIMITED") return "Nitrado rate limited ADM reads. DZN is backing off and will retry automatically.";
+  if (code === "NITRADO_UNAUTHORIZED") return "DZN cannot access your Nitrado files. Reconnect Nitrado from server settings.";
+  if (code === "NITRADO_FORBIDDEN") return "Your token works for metadata but not file reads. Reconnect Nitrado or check service access.";
+  if (code === "NITRADO_FILE_NOT_FOUND") return "The ADM file was listed but is no longer readable. DZN will continue with the next available ADM.";
+  return "DZN automatically discovers, retries, and imports ADM data without manual action.";
+}
+
+function ownerLatestAdmState(activeJob: ReturnType<typeof normalizeJob> | null, code: string | null, server: ServerRow, latestCompletedImport: CompletedImportRow | null) {
+  if (activeJob) return "importing";
+  if (code === "NITRADO_UPSTREAM_DOWN") return "nitrado_file_service_unavailable";
+  if (code === "NITRADO_RATE_LIMITED") return "retry_scheduled";
+  if (code === "NITRADO_UNAUTHORIZED" || code === "NITRADO_FORBIDDEN") return "needs_attention";
+  if (code === "NITRADO_FILE_NOT_FOUND") return "file_missing_or_rotated";
+  if (latestCompletedImport || server.last_successful_sync_at || server.last_processed_adm_filename) return "adm_imported";
+  if (server.newest_available_adm_filename || server.latest_adm_file) return "latest_adm_unreadable";
+  return "waiting_for_adm";
 }
 
 function numberOrZero(value: unknown) {

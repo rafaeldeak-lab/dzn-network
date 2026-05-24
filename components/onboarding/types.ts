@@ -1253,6 +1253,23 @@ export type DashboardHealthResult = {
     unique_players: number;
     score: number;
   };
+  autoSync?: {
+    overallStatus: string;
+    headline: string;
+    message: string;
+    latestAdmState: string;
+    latestAdmFile: string | null;
+    lastSuccessfulImportAt: string | null;
+    lastAttemptedReadAt: string | null;
+    nextDiscoveryAt: string | null;
+    nextProcessingAt: string | null;
+    latestClassifiedError: string | null;
+    upstreamHttpStatus: number | null;
+    retryMode: "automatic" | string;
+    backoffEnabled: boolean;
+    queueStatus: string;
+    manualActionRequired: boolean;
+  };
   recent_events_count: number;
   latest_event_at: string | null;
   latest_events: AdmRecentSyncEvent[];
