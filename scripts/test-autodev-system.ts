@@ -8,16 +8,26 @@ function read(path: string) {
 
 const config = JSON.parse(read(".autodev/config.json"));
 assert.equal(config.mode, "pr_only");
+assert.equal(config.scope, "adm_tracking_only");
+assert.equal(config.admOnly.enabled, true);
 assert.equal(config.allowDirectMainPush, false);
 assert.equal(config.allowAutoMergeLowRisk, false);
+assert.equal(config.allowCodexHighRiskFixes, false);
 assert.equal(config.maxFixAttemptsPerRun, 3);
-assert.equal(config.maxChangedFilesPerRun <= 25, true);
+assert.equal(config.maxChangedFilesPerRun <= 20, true);
 
-assert.equal(classifyPath("functions/api/auth/me.ts").risk, "high");
-assert.equal(classifyPath("functions/api/billing/checkout.ts").risk, "high");
-assert.equal(classifyPath("functions/_lib/crypto.ts", "TOKEN_ENCRYPTION_KEY").risk, "high");
-assert.equal(classifyPath("migrations/9999_test.sql", "DROP TABLE player_profiles;").risk, "high");
+assert.equal(classifyPath("functions/api/auth/me.ts").risk, "blocked");
+assert.equal(classifyPath("functions/api/billing/checkout.ts").risk, "blocked");
+assert.equal(classifyPath("functions/api/stripe/webhook.ts").risk, "blocked");
+assert.equal(classifyPath("functions/_lib/discord.ts").risk, "blocked");
+assert.equal(classifyPath("app/events/page.tsx").risk, "blocked");
+assert.equal(classifyPath("functions/_lib/crypto.ts", "TOKEN_ENCRYPTION_KEY").risk, "blocked");
+assert.equal(classifyPath("migrations/9999_test.sql", "DROP TABLE player_profiles;").risk, "blocked");
 assert.equal(classifyPath("docs/CODEX_AUTODEV.md").risk, "low");
+assert.equal(classifyPath("scripts/test-nitrado-file-read-diagnostics.ts").risk, "low");
+assert.equal(classifyPath("functions/_lib/adm-sync.ts", "UPDATE player_profiles SET kills = kills + 1").risk, "high");
+assert.equal(classifyPath("migrations/9999_adm.sql", "ALTER TABLE adm_sync_file_state ADD COLUMN next_retry_at TEXT;").risk, "medium");
+assert.equal(classifyPath("migrations/9999_billing.sql", "ALTER TABLE subscriptions ADD COLUMN test TEXT;").risk, "blocked");
 
 assert.deepEqual(detectDestructiveMigration("DROP TABLE player_profiles;", "migrations/9999.sql").length > 0, true);
 assert.deepEqual(detectDestructiveMigration("DELETE FROM player_profiles;", "migrations/9999.sql").length > 0, true);
@@ -37,6 +47,9 @@ for (const secret of ["DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBH
 }
 assert.equal(read(".github/workflows/dzn-adm-sync.yml").includes("schedule:"), false);
 assert.equal(read(".github/workflows/dzn-adm-sync.yml").includes("workflow_dispatch:"), true);
+for (const workflowName of ["DZN ADM AutoDev Audit", "DZN ADM Post Deploy Verify", "DZN ADM Cycle Watch", "DZN ADM Codex Safe Fix", "DZN ADM Worker Manual Trigger", "DZN Nitrado ADM Diagnostics"]) {
+  assert.equal(workflowText.includes(`name: ${workflowName}`), true, `${workflowName} must exist`);
+}
 assert.equal(read("README.md").includes("Automatic ADM sync runs from a separate Cloudflare Worker"), true);
 assert.equal(read("wrangler.adm-sync.toml").includes('name = "dzn-adm-sync-worker"'), true);
 assert.equal(read("wrangler.adm-sync.toml").includes("crons ="), true);
@@ -49,13 +62,21 @@ assert.equal(productionSmoke.includes("Protected endpoint must return 401"), tru
 const admWatch = read("scripts/autodev/adm-cycle-watch.ts");
 assert.equal(admWatch.includes("classifyRecoverableProductionStatus"), true);
 assert.equal(admWatch.includes("result.status === 401 || result.status === 403"), true);
+assert.equal(admWatch.toLowerCase().includes("stripe"), false);
+assert.equal(admWatch.toLowerCase().includes("billing"), false);
 
 const proposeFix = read("scripts/autodev/propose-fix.ts");
 assert.equal(proposeFix.includes("AUTODEV_ENABLE_PROPOSE_FIX"), true);
 assert.equal(proposeFix.includes("disabled by default"), true);
 
+const pickSafeIssue = read("scripts/autodev/pick-safe-issue.ts");
+assert.equal(pickSafeIssue.includes('"adm-tracking"'), true);
+assert.equal(pickSafeIssue.includes('"autodev-safe-fix"'), true);
+assert.equal(pickSafeIssue.includes('"billing"'), true);
+assert.equal(pickSafeIssue.includes('"discord-oauth"'), true);
+
 const scripts = JSON.parse(read("package.json")).scripts;
-for (const script of ["autodev:audit", "autodev:quality", "autodev:production-smoke", "autodev:adm-watch", "autodev:create-issue", "autodev:risk", "test:autodev"]) {
+for (const script of ["autodev:audit", "autodev:quality", "autodev:production-smoke", "autodev:adm-watch", "autodev:create-issue", "autodev:risk", "autodev:pick-safe-issue", "test:autodev", "test:autodev-codex"]) {
   assert.equal(typeof scripts[script], "string", `${script} must exist`);
 }
 

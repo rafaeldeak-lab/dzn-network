@@ -1,5 +1,11 @@
 # DZN Secrets Matrix
 
+## AutoDev scope
+
+DZN AutoDev is ADM-only. It exists to keep ADM tracking, Nitrado log reading, file-read diagnostics, import jobs, retry/backoff, Sync Health, and ADM production verification reliable.
+
+It does not manage billing, user accounts, Discord OAuth, subscriptions, Stripe, unrelated server settings, unrelated Events/Tournaments, or public marketing features.
+
 ## GitHub Actions secrets
 
 GitHub Actions should only contain secrets needed by GitHub workflows.
@@ -11,6 +17,9 @@ Current allowed GitHub Actions secrets:
 
 - `SYNC_CRON_SECRET`
   Legacy/fallback cron secret for manual GitHub workflows.
+
+- `OPENAI_API_KEY`
+  Only if the ADM Codex Safe Fix workflow is explicitly enabled.
 
 Do not copy all Cloudflare runtime secrets into GitHub.
 

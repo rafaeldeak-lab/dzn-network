@@ -3,13 +3,16 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import path from "node:path";
 
 export type AutoDevMode = "review_only" | "pr_only" | "auto_merge_low_risk" | "production_guarded";
-export type RiskLevel = "low" | "medium" | "high";
+export type RiskLevel = "low" | "medium" | "high" | "blocked";
 export type CheckStatus = "pass" | "warn" | "fail" | "skip";
 
 export type AutoDevConfig = {
   mode: AutoDevMode;
+  scope?: "adm_tracking_only";
   allowDirectMainPush: boolean;
   allowAutoMergeLowRisk: boolean;
+  allowCodexSafeFixes?: boolean;
+  allowCodexHighRiskFixes?: boolean;
   maxFixAttemptsPerRun: number;
   maxRuntimeMinutes: number;
   maxChangedFilesPerRun: number;
@@ -18,6 +21,19 @@ export type AutoDevConfig = {
   deployPreviewRequired: boolean;
   watchAdmCycles: boolean;
   watchMinutesAfterDeploy: number;
+  admOnly?: {
+    enabled: boolean;
+    allowedSystems: string[];
+    blockedSystems: string[];
+  };
+  codex?: {
+    enabled: boolean;
+    issueLabelsRequired: string[];
+    issueLabelsBlocked: string[];
+    openPullRequestOnly: boolean;
+    directPushToMain: boolean;
+    autoMerge: boolean;
+  };
   riskGates: Record<string, boolean>;
 };
 
@@ -155,6 +171,7 @@ export function gitChangedFiles() {
 }
 
 export function maxRisk(levels: RiskLevel[]): RiskLevel {
+  if (levels.includes("blocked")) return "blocked";
   if (levels.includes("high")) return "high";
   if (levels.includes("medium")) return "medium";
   return "low";

@@ -14,7 +14,8 @@ async function request(path: string, init?: RequestInit) {
         ...(init?.headers ?? {}),
       },
     });
-    return { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: await response.text().catch(() => "") };
+    const body = await response.text().catch(() => "");
+    return { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: body.slice(0, 2000) };
   } catch (error) {
     return { ok: false, status: 0, durationMs: Date.now() - startedAt, body: error instanceof Error ? error.message : String(error) };
   }
@@ -22,14 +23,24 @@ async function request(path: string, init?: RequestInit) {
 
 async function main() {
   const checks: AutoDevCheck[] = [];
-  for (const path of ["/", "/dashboard", "/events", "/events/tournaments", "/events/challenges", "/events/create"]) {
+  const routeScope: Record<string, "adm" | "sanity-out-of-scope"> = {
+    "/": "adm",
+    "/dashboard": "adm",
+    "/events": "sanity-out-of-scope",
+  };
+  for (const path of Object.keys(routeScope)) {
     const result = await request(path);
     checks.push(result.ok && result.status === 200
-      ? pass(`GET ${path}`, "Route returned 200.", result)
-      : fail(`GET ${path}`, `Expected 200, got ${result.status}.`, result, "high"));
+      ? pass(`GET ${path}`, routeScope[path] === "adm" ? "ADM-facing route returned 200." : "Route sanity check returned 200; failures are out-of-scope unless caused by ADM shared code.", result)
+      : fail(`GET ${path}`, routeScope[path] === "adm" ? `Expected 200, got ${result.status}.` : `Route sanity check failed with ${result.status}; mark out-of-scope unless tied to ADM code.`, result, routeScope[path] === "adm" ? "high" : "medium"));
   }
 
-  for (const path of ["/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run"]) {
+  const home = await request("/");
+  checks.push(!/Network stats could not be loaded right now/i.test(home.body)
+    ? pass("homepage first-sync copy", "Homepage does not show the scary generic network failure copy in the initial HTML.", { status: home.status })
+    : fail("homepage first-sync copy", "Homepage shows scary generic network failure copy while ADM may simply be awaiting first sync.", { status: home.status }, "medium"));
+
+  for (const path of ["/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run", "/api/autodev/adm-health"]) {
     const result = await request(path, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
     checks.push(result.ok && result.status === 401
       ? pass(`POST ${path} unauthenticated`, "Protected endpoint returned 401.", { status: result.status })
@@ -37,8 +48,8 @@ async function main() {
   }
 
   const report = makeReport("production-smoke", checks, [
-    "If a public route fails, inspect Cloudflare Pages deployment.",
-    "If a protected endpoint returns 200 unauthenticated, stop and fix auth immediately.",
+    "AutoDev production smoke is ADM-scoped; non-ADM route failures are reported but not auto-fixed.",
+    "If a protected ADM endpoint returns 200 unauthenticated, stop and fix auth immediately.",
   ]);
   writeReport("production-smoke", report);
   if (!report.ok) process.exit(1);

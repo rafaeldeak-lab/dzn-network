@@ -19,3 +19,34 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Flag any removal of same-category matchmaking enforcement as P0.
 - Flag any Worker change that may exceed Cloudflare subrequest limits as P1.
 - Require tests for all API behavior changes.
+
+## ADM-only AutoDev rules
+
+DZN AutoDev is scoped only to ADM tracking automation.
+
+Allowed:
+- ADM discovery
+- Nitrado ADM file read diagnostics
+- unreadable retry/backoff
+- ADM Worker health
+- ADM import jobs
+- ADM Sync Health dashboard display
+- ADM production smoke
+- ADM cycle watching
+- ADM tests/docs
+
+Forbidden:
+- billing
+- Stripe
+- Discord OAuth
+- sessions
+- account management
+- subscriptions
+- unrelated Events/Tournaments
+- server-owner private settings
+- destructive migrations
+- player_stats creation
+- player_profiles reset/delete
+- secrets handling unless explicitly human-reviewed
+
+Codex must refuse out-of-scope fixes and create/report an issue instead.

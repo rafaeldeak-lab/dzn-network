@@ -1,0 +1,68 @@
+name: DZN ADM Codex Safe Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  adm-codex-safe-fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Pick safe ADM issue
+        run: npm run autodev:pick-safe-issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+      - name: Write ADM-only Codex prompt
+        run: |
+          mkdir -p .autodev/reports
+          cat > .autodev/reports/codex-safe-fix-prompt.md <<'PROMPT'
+          # DZN ADM Codex Safe Fix Prompt
+
+          You are only allowed to fix ADM tracking automation issues.
+
+          Allowed systems:
+          - ADM discovery
+          - ADM Worker cron status
+          - Nitrado ADM file read diagnostics
+          - unreadable retry/backoff
+          - ADM import jobs
+          - ADM sync health dashboard
+          - ADM production smoke
+          - ADM cycle watch
+          - ADM-only tests/docs
+
+          Forbidden systems:
+          - billing
+          - Stripe
+          - Discord OAuth
+          - sessions
+          - account management
+          - subscriptions
+          - unrelated Events/Tournaments
+          - server-owner private data
+          - token secrets
+          - destructive migrations
+
+          If the selected issue requires forbidden systems:
+          - do not modify code
+          - comment that human review is required
+          - exit
+
+          Codex must make the smallest ADM-only fix, add/update tests, never push main, open PR only, and never auto-merge.
+          PROMPT
+      - name: Upload ADM Codex prompt/report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adm-codex-safe-fix-reports
+          path: .autodev/reports

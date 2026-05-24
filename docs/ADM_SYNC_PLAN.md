@@ -1,5 +1,11 @@
 # ADM Sync Plan
 
+## AutoDev Boundary
+
+DZN AutoDev is ADM-only. It exists to keep ADM tracking, Nitrado file reads, unreadable retry/backoff, ADM import jobs, parser/import counters, Sync Health display, Worker monitoring, and production reset-cycle verification reliable.
+
+AutoDev must not manage billing, Discord OAuth, subscriptions, Stripe, user accounts, unrelated server settings, unrelated Events/Tournaments, or public marketing features. Those systems require separate human review and are outside ADM AutoDev safe-fix scope.
+
 This is a planning note for the ADM sync engine.
 
 ## Phase 1 Implemented

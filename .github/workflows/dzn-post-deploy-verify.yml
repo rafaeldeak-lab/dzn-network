@@ -1,4 +1,4 @@
-name: DZN Post-Deploy Verify
+name: DZN ADM Post Deploy Verify
 
 on:
   workflow_dispatch:

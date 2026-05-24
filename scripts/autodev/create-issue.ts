@@ -30,11 +30,14 @@ async function main() {
   const [owner, repo] = repository.split("/");
   const primary = failingReports[0];
   const signature = makeSignature(failingReports);
-  const title = `[AutoDev] ${primary.reportName}: ${primary.summary}`.slice(0, 180);
+  const admScoped = failingReports.some(isAdmTrackingReport);
+  const title = `${admScoped ? "[AutoDev][ADM]" : "[AutoDev][Out of Scope]"} ${primary.reportName}: ${primary.summary}`.slice(0, 180);
+  const labels = buildLabels(failingReports, admScoped);
   const body = [
     `Detected at: ${new Date().toISOString()}`,
-    `Affected system: ${primary.reportName}`,
+    `Affected system: ${admScoped ? inferAdmCategory(failingReports) : "out-of-scope"}`,
     `Risk level: ${primary.riskLevel}`,
+    `AutoDev scope: adm_tracking_only`,
     `Signature: \`${signature}\``,
     runUrl ? `Workflow run: ${runUrl}` : null,
     "",
@@ -50,20 +53,25 @@ async function main() {
     "",
     ...Array.from(new Set(failingReports.flatMap((report) => report.suggestedNextActions))).map((action) => `- ${action}`),
     "",
+    admScoped
+      ? "This issue is ADM tracking scoped. Codex Safe Fix may only act if it also has `autodev-safe-fix` and `low-risk` labels."
+      : "This finding is outside ADM tracking automation scope. Do not run AutoDev/Codex safe fixes for it; human review is required.",
+    "",
     "## Safety Classification",
     "",
-    primary.riskLevel === "high" ? "High-risk. Human/Codex review required. Do not auto-merge." : primary.riskLevel === "medium" ? "Medium-risk. Create PR only." : "Low-risk if all gates pass.",
+    primary.riskLevel === "blocked" ? "Blocked by ADM-only scope. Human review required; do not run AutoDev safe fixes."
+      : primary.riskLevel === "high" ? "High-risk. Human/Codex review required. Do not auto-merge."
+        : primary.riskLevel === "medium" ? "Medium-risk. Create PR only." : "Low-risk if all gates pass.",
   ].filter(Boolean).join("\n");
 
   const existing = await findExistingIssue(owner, repo, signature);
   if (existing) {
     await github(`/repos/${owner}/${repo}/issues/${existing.number}`, {
       method: "PATCH",
-      body: JSON.stringify({ title, body }),
+      body: JSON.stringify({ title, body, labels }),
     });
     checks.push(pass("update issue", `Updated existing AutoDev issue #${existing.number}.`, { number: existing.number }));
   } else {
-    const labels = ["autodev", primary.riskLevel === "high" ? "high-risk" : primary.riskLevel === "medium" ? "needs-human-review" : "production"];
     const created = await github(`/repos/${owner}/${repo}/issues`, {
       method: "POST",
       body: JSON.stringify({ title, body, labels }),
@@ -113,6 +121,33 @@ function makeSignature(reports: AutoDevReport[]) {
     .join(";")
     .replace(/[^a-zA-Z0-9:|;._-]/g, "_")
     .slice(0, 180);
+}
+
+function isAdmTrackingReport(report: AutoDevReport) {
+  const text = `${report.reportName}\n${report.summary}\n${report.failures?.map((failure) => `${failure.name} ${failure.message}`).join("\n")}`;
+  return /\b(adm|nitrado|sync health|worker|file read|import job|cycle watch|protected endpoint)\b/i.test(text);
+}
+
+function inferAdmCategory(reports: AutoDevReport[]) {
+  const text = reports.map((report) => `${report.reportName}\n${report.failures?.map((failure) => `${failure.name} ${failure.message}`).join("\n")}`).join("\n");
+  if (/worker|heartbeat/i.test(text)) return "adm-worker";
+  if (/import/i.test(text)) return "adm-import";
+  if (/nitrado|file read|unreadable/i.test(text)) return "nitrado-file-read";
+  if (/dashboard|sync health/i.test(text)) return "sync-health-dashboard";
+  if (/cycle watch/i.test(text)) return "adm-cycle-watch";
+  if (/production-smoke|protected endpoint/i.test(text)) return "adm-production-smoke";
+  return "adm-sync";
+}
+
+function buildLabels(reports: AutoDevReport[], admScoped: boolean) {
+  const risk = reports.some((report) => report.riskLevel === "blocked" || report.riskLevel === "high") ? "high-risk"
+    : reports.some((report) => report.riskLevel === "medium") ? "medium-risk"
+      : "low-risk";
+  if (!admScoped) return ["autodev", "out-of-scope", "needs-human-review"];
+  const labels = ["autodev", "adm-tracking", inferAdmCategory(reports), risk];
+  if (risk === "low-risk") labels.push("autodev-safe-fix");
+  else labels.push("needs-human-review");
+  return Array.from(new Set(labels));
 }
 
 main().catch((error) => {

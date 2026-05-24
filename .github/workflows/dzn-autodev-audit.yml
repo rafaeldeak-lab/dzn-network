@@ -1,4 +1,4 @@
-name: DZN AutoDev Audit
+name: DZN ADM AutoDev Audit
 
 on:
   workflow_dispatch:
