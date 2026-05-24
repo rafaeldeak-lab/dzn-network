@@ -48,6 +48,7 @@ for (const required of [
   "Live Sync Stats",
   "Recent Synced Events",
   "Recent Sync Runs",
+  "AutomaticAdmImportJobPanel",
   "DZN automatically discovers, retries, and imports ADM data without manual action.",
   "No manual action required",
   "DZN retries unreadable ADM files automatically",

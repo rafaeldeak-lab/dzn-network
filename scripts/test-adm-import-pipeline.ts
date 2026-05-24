@@ -148,6 +148,12 @@ async function main() {
   assert.match(packageSource, /"check:adm-automation": "tsx scripts\/check-adm-automation\.ts"/);
   assert.match(admSyncSource, /SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1/);
   assert.match(admSyncSource, /processAdmImportJobsUntilBudget/);
+  assert.match(admSyncSource, /pendingJobWorkCompleted/);
+  assert.match(admSyncSource, /planAdmBackfillJobsForServer\(env, selected\.user_id, selected\.id/);
+  assert.match(admSyncSource, /processImmediately: false/);
+  assert.match(admSyncSource, /lastProcessedFile = rowCompleted \? row\.filename : existingState\?\.last_processed_file/);
+  assert.match(admSyncSource, /row\.source === SCHEDULED_ADM_IMPORT_SOURCE \? "scheduled_chunked_import" : "manual_chunked_import"/);
+  assert.match(admSyncSource, /type = values\.source === SCHEDULED_ADM_IMPORT_SOURCE/);
   assert.match(admSyncSource, /already_processed/);
   assert.match(admSyncSource, /chunk_count_mismatch/);
   assert.match(admSyncSource, /cancelAdmImportLineJobForServer/);
@@ -747,6 +753,8 @@ async function main() {
   assert.equal(firstProgress?.status, "queued");
   assert.equal(firstProgress?.current_line, 30);
   assert.notEqual(firstProgress?.current_line, largeFixtureLines.length);
+  assert.notEqual(scheduledJobDb.admSyncState.get(linkedServerId)?.last_processed_file, largeFixtureName);
+  assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.last_sync_status, "processing_in_chunks");
   let scheduledLoops = 0;
   let scheduledPending = firstScheduledTick;
   while (scheduledPending.completedJobs === 0 && scheduledLoops < 400) {
@@ -765,6 +773,9 @@ async function main() {
   assert.equal(scheduledJobDb.serverStats.get(linkedServerId)?.total_kills, 216);
   assert.equal(scheduledJobDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
   assert.equal(scheduledJobDb.automationJobs.length > 0, true);
+  assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.last_processed_file, largeFixtureName);
+  assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.cursor_recovery_reason, "scheduled_chunked_import");
+  assert.equal(JSON.parse(String(scheduledJobDb.syncRuns.at(-1)?.message ?? "{}")).type, "scheduled_adm_import");
 
   assert.equal(isAdmFileNewerThan("DayZServer_PS4_x64_2026-05-20_13-02-00.ADM", largeFixtureName), true);
   assert.equal(isAdmFileNewerThan(largeFixtureName, largeFixtureName), false);

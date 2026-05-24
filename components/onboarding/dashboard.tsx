@@ -5132,10 +5132,10 @@ function AutomaticAdmImportJobPanel({ syncStatus, dashboardHealth }: { syncStatu
   const jobProgress = job ? getSafeAdmChunkProgressPercent(job) : null;
   const nextAction = job
     ? job.status === "failed_retryable"
-      ? "Cron will retry the stalled chunk job automatically, or an owner can use Continue Import to resume it now."
-      : "Dashboard Continue Import can actively process chunks now. Cron remains the background backup."
+      ? "Worker cron will retry the stalled chunk job automatically on the next safe run."
+      : "Worker cron is processing this ADM in scheduled chunks. No manual action is required."
     : readFailed && !backfillActive
-      ? "Retry Nitrado ADM download on the next discovery or processing run."
+      ? "DZN will retry the Nitrado ADM download automatically on the next discovery or processing run."
       : "Wait for the next Nitrado ADM file after reset.";
   return (
     <div className="mt-4 rounded-lg border border-cyan-300/15 bg-cyan-400/8 p-3">
@@ -6719,6 +6719,7 @@ function AutoSyncDashboard({
         <AutomationStatusGrid state={state} dashboardHealth={dashboardHealth} syncStatus={syncStatus} latestAdmFile={latestAdmFile} />
       </section>
       <ImportantAutoHealth state={state} dashboardHealth={dashboardHealth} syncStatus={syncStatus} />
+      <AutomaticAdmImportJobPanel syncStatus={syncStatus} dashboardHealth={dashboardHealth} />
       <section className="grid gap-5 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
         <LiveSyncStats stats={stats} />
         <RecentSyncedEventsPanel events={recentEvents} state={state} />

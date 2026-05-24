@@ -2029,9 +2029,13 @@ function buildAdmImportSyncRunMessage(values: {
   failedWrites: number;
   importedAt: string;
 }) {
-  if (values.source !== "manual_paste" && values.source !== "manual_upload") return "Fixture ADM import completed.";
+  const type = values.source === SCHEDULED_ADM_IMPORT_SOURCE
+    ? "scheduled_adm_import"
+    : values.source === "manual_paste" || values.source === "manual_file_upload" || values.source === "manual_upload"
+      ? "manual_adm_import"
+      : "adm_import";
   return JSON.stringify({
-    type: "manual_adm_import",
+    type,
     filename: values.filename,
     imported_at: values.importedAt,
     source: values.source,
@@ -3902,6 +3906,10 @@ async function finalizeAdmImportJob(
   const initialWarningCount = warnings.length;
   const totalLines = Number(row.total_lines ?? 0);
   const chunkStats = getNormalizedAdmJobChunkStats(row);
+  const isScheduledNitradoImport = row.source === SCHEDULED_ADM_IMPORT_SOURCE;
+  const importRoute = isScheduledNitradoImport ? "scheduled_chunked_import" : "manual_chunked_import";
+  const importMessagePrefix = isScheduledNitradoImport ? "Scheduled ADM import" : "Manual ADM import";
+  const importCursorReason = isScheduledNitradoImport ? "scheduled_chunked_import" : "manual_chunked_import";
 
   try {
     await rebuildServerStats(env, row.server_id);
@@ -4010,7 +4018,7 @@ async function finalizeAdmImportJob(
       lastProcessedLine: totalLines,
       lastProcessedOffset: lines ? calculateAdmLineOffset(lines, lines.length) : totalLines,
       status: "completed",
-      message: `Manual ADM import completed in ${row.total_chunks} chunk${Number(row.total_chunks) === 1 ? "" : "s"}. Kill events inserted: ${row.written_kills}.`,
+      message: `${importMessagePrefix} completed in ${row.total_chunks} chunk${Number(row.total_chunks) === 1 ? "" : "s"}. Kill events inserted: ${row.written_kills}.`,
       lastSyncAt: now,
       linesRead: totalLines,
       linesProcessed: totalLines,
@@ -4022,7 +4030,7 @@ async function finalizeAdmImportJob(
       unknownLines: 0,
       duplicateLines: Number(row.duplicate_skips ?? 0),
       syncDurationMs: 0,
-      readableRoute: "manual_chunked_import",
+      readableRoute: importRoute,
       rawKillLinesFound: fullReport.rawKilledByLinesFound,
       parsedKillLinesFound: fullReport.parsedPvpKills,
       parserSkippedLines: fullReport.skippedDeadHitLines,
@@ -4035,7 +4043,7 @@ async function finalizeAdmImportJob(
       lastCursorValidationError: null,
       lastCursorValidationAt: now,
       cursorRecoveryStrategy: null,
-      cursorRecoveryReason: "manual_chunked_import",
+      cursorRecoveryReason: importCursorReason,
     });
     await recordAdmFileAttempt(env, withAdmFile(verifyAdmServerScope(server, row.id), row.filename), {
       name: row.filename,
@@ -4297,16 +4305,26 @@ async function recordAdmImportJobProgressInSyncState(
   const now = new Date().toISOString();
   const progressStatus = status === "failed_retryable" ? "processing_in_chunks" : status;
   const rowCompleted = row.status === "completed" || row.status === "completed_with_warnings";
+  const existingState = await getSyncState(env, row.server_id).catch(() => null);
+  const latestAdmFile = existingState?.latest_adm_file && compareAdmFileNamesChronological(existingState.latest_adm_file, row.filename) >= 0
+    ? existingState.latest_adm_file
+    : row.filename;
+  const latestAdmPath = latestAdmFile === row.filename
+    ? row.filename
+    : existingState?.latest_adm_path ?? row.filename;
+  const lastProcessedFile = rowCompleted ? row.filename : existingState?.last_processed_file ?? null;
+  const lastProcessedLine = rowCompleted ? Number(row.current_line ?? row.total_lines ?? 0) : Number(existingState?.last_processed_line ?? 0);
+  const lastProcessedOffset = rowCompleted ? Number(row.current_line ?? row.total_lines ?? 0) : Number(existingState?.last_processed_offset ?? 0);
   const progressMessage = message ?? (rowCompleted
     ? `ADM chunk import completed for ${row.filename}.`
     : `Processing latest ADM in chunks. File: ${row.filename}. Progress: chunk ${Math.min(Number(row.chunks_processed ?? 0) + 1, Number(row.total_chunks ?? 1))}/${Number(row.total_chunks ?? 1)}. Parsed kills so far: ${Number(row.parsed_kills ?? 0)}. Written kills so far: ${Number(row.written_kills ?? 0)}. Duplicates skipped: ${Number(row.duplicate_skips ?? 0)}. Next chunk on next cron tick.`);
   await upsertSyncState(env, row.server_id, {
-    latestAdmFile: row.filename,
-    latestAdmPath: row.filename,
+    latestAdmFile,
+    latestAdmPath,
     sourceServiceId: row.source_service_id ?? "scheduled-nitrado",
-    lastProcessedFile: row.filename,
-    lastProcessedLine: Number(row.current_line ?? 0),
-    lastProcessedOffset: Number(row.current_line ?? 0),
+    lastProcessedFile,
+    lastProcessedLine,
+    lastProcessedOffset,
     status: progressStatus,
     message: progressMessage,
     lastSyncAt: now,
@@ -4326,6 +4344,13 @@ async function recordAdmImportJobProgressInSyncState(
     parserSkippedLines: 0,
     unreadableFilesQueued: 0,
     newestUnprocessedAdmFile: rowCompleted ? null : row.filename,
+    lastCursorValidationStatus: existingState?.last_cursor_validation_status ?? (rowCompleted ? "new_file" : null),
+    lastCursorValidationError: existingState?.last_cursor_validation_error ?? null,
+    lastCursorValidationAt: existingState?.last_cursor_validation_at ?? null,
+    cursorRecoveryStrategy: existingState?.cursor_recovery_strategy ?? null,
+    cursorRecoveryReason: existingState?.cursor_recovery_reason ?? (rowCompleted
+      ? row.source === SCHEDULED_ADM_IMPORT_SOURCE ? "scheduled_chunked_import" : "manual_chunked_import"
+      : null),
   });
 }
 
@@ -4401,12 +4426,12 @@ function scheduledJobResultFromProgress(
 
 async function recoverStaleAdmImportJobs(env: Env, source: string) {
   const now = new Date().toISOString();
-  const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   await requireDb(env)
     .prepare(
       `UPDATE adm_import_jobs SET
         status = 'failed_retryable',
-        error_message = COALESCE(error_message, 'Scheduled ADM import job stalled for more than 5 minutes. Cron or dashboard Continue Import can retry it automatically.'),
+        error_message = COALESCE(error_message, 'Scheduled ADM import job stalled for more than 10 minutes. Worker cron will retry it automatically.'),
         updated_at = ?
        WHERE source = ?
          AND status IN ('processing', 'parsing', 'writing', 'rebuilding')
@@ -5524,7 +5549,54 @@ export async function runAdmWorkerSyncTick(
       });
     }
 
-    const preferLatestAfterImportWork = Boolean(pendingJobs && (pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0));
+    const pendingJobWorkCompleted = Boolean(pendingJobs && (pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0 || pendingJobs.completedJobs > 0));
+    if (pendingJobWorkCompleted && !explicitTargetFileName) {
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      const latestJob = pendingJobs?.results.at(-1) ?? null;
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedAdmFile: latestJob?.filename ?? selected.target_adm_file ?? selected.latest_adm_file,
+        selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+        pendingJobs,
+        message: latestJob && isCompletedAdmImportJobStatus(latestJob.status)
+          ? `Completed scheduled ADM chunk import for ${latestJob.filename}. Next Worker tick will discover or queue the next ADM file.`
+          : latestJob
+            ? `Processed scheduled ADM import chunk ${latestJob.display_current_chunk ?? latestJob.chunks_processed}/${latestJob.total_chunks} for ${latestJob.filename}. Next chunk continues automatically on the next Worker tick.`
+            : "Processed scheduled ADM import work. Next Worker tick will continue automatic discovery or import.",
+      });
+    }
+
+    if (!explicitTargetFileName) {
+      const discoveryPlan = await planAdmBackfillJobsForServer(env, selected.user_id, selected.id, {
+        triggerType: "scheduled_worker",
+        chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
+        processImmediately: false,
+        maxJobsToCreate: Math.max(1, Math.min(budget.maxFilesPerInvocation, getAdmBackfillQueueLimit(selected.plan_key))),
+        scheduledBudgeted: true,
+        skipMetadataRefresh: true,
+      });
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      const selectedJob = discoveryPlan.active_job ?? discoveryPlan.created_jobs[0] ?? null;
+      const selectedFile = selectedJob?.filename ?? discoveryPlan.newest_available_adm_file ?? selected.target_adm_file ?? selected.latest_adm_file;
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedAdmFile: selectedFile,
+        selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+        pendingJobs,
+        succeeded: discoveryPlan.created_jobs.length > 0 || Boolean(discoveryPlan.active_job) ? 1 : 0,
+        unavailable: discoveryPlan.status === "latest_adm_unreadable" ? 1 : 0,
+        skippedUnreadable: discoveryPlan.unreadable_files.length,
+        latestAdmUnreadableCount: discoveryPlan.status === "latest_adm_unreadable" ? 1 : 0,
+        newAdmReadableCount: discoveryPlan.created_jobs.length,
+        processingProcessed: selectedJob ? 1 : 0,
+        skippedNotDue: discoveryPlan.status === "adm_backfill_caught_up" ? 1 : 0,
+        message: discoveryPlan.message,
+      });
+    }
+
+    const preferLatestAfterImportWork = false;
     const latestBackoffActive = isAdmUnreadableBackoffActive(selected.latest_adm_status, selected.latest_adm_next_retry_at)
       && options.force !== true
       && !preferLatestAfterImportWork;
@@ -8010,7 +8082,7 @@ function mapSyncRunSummary(row: AdmSyncRunSummary): AdmSyncRunSummary {
     id: row.id,
     trigger_type: row.trigger_type,
     status: row.status,
-    message: row.message,
+    message: formatAdmSyncRunSummaryMessage(row.message) ?? row.message,
     lines_read: numberOrZero(row.lines_read),
     lines_processed: numberOrZero(row.lines_processed),
     events_created: numberOrZero(row.events_created),
@@ -8020,6 +8092,26 @@ function mapSyncRunSummary(row: AdmSyncRunSummary): AdmSyncRunSummary {
     duration_ms: row.duration_ms === null || row.duration_ms === undefined ? null : numberOrZero(row.duration_ms),
     created_at: row.created_at,
   };
+}
+
+function formatAdmSyncRunSummaryMessage(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const type = String(parsed.type ?? "");
+    if (type !== "scheduled_adm_import" && type !== "manual_adm_import" && type !== "adm_import") return null;
+    const filename = typeof parsed.filename === "string" && parsed.filename.trim() ? parsed.filename : "ADM file";
+    const rawLines = numberOrZero(parsed.raw_lines);
+    const writtenKills = numberOrZero(parsed.written_kills);
+    const joins = numberOrZero(parsed.joins);
+    const disconnects = numberOrZero(parsed.disconnects);
+    const playerlistSnapshots = numberOrZero(parsed.playerlist_snapshots);
+    const duplicateSkips = numberOrZero(parsed.duplicate_skips);
+    const prefix = type === "scheduled_adm_import" ? "Scheduled ADM import completed" : "ADM import completed";
+    return `${prefix} for ${filename}. Lines read: ${rawLines}. Kills: ${writtenKills}. Joins: ${joins}. Disconnects: ${disconnects}. PlayerList snapshots: ${playerlistSnapshots}. Duplicates skipped: ${duplicateSkips}.`;
+  } catch {
+    return null;
+  }
 }
 
 function getReadableAdmLines(samplePreview: string | null) {
