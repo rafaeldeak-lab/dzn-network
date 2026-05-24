@@ -62,6 +62,8 @@ assert.equal(productionSmoke.includes("Protected endpoint must return 401"), tru
 const admWatch = read("scripts/autodev/adm-cycle-watch.ts");
 assert.equal(admWatch.includes("classifyRecoverableProductionStatus"), true);
 assert.equal(admWatch.includes("result.status === 401 || result.status === 403"), true);
+assert.equal(admWatch.includes("Recoverable: Nitrado upstream ADM read blocked; auto retry scheduled or tracked."), true);
+assert.equal(admWatch.includes("isStuckImportJob"), true);
 assert.equal(admWatch.toLowerCase().includes("stripe"), false);
 assert.equal(admWatch.toLowerCase().includes("billing"), false);
 
@@ -81,9 +83,16 @@ for (const script of ["autodev:audit", "autodev:quality", "autodev:production-sm
 }
 
 assert.equal(read("scripts/test-auto-sync-dashboard-ui.ts").includes("Check ADM Files"), true);
-assert.equal(read("functions/api/autodev/adm-health.ts").includes("requireCronSecret"), true);
-assert.equal(read("functions/api/autodev/adm-health.ts").includes("SELECT access_token"), false);
-assert.equal(read("functions/api/autodev/adm-health.ts").includes("raw signed"), false);
+const admHealth = read("functions/api/autodev/adm-health.ts");
+assert.equal(admHealth.includes("requireCronSecret"), true);
+assert.equal(admHealth.includes("last_successful_sync_at"), false);
+assert.equal(admHealth.includes("safeFirst"), true);
+assert.equal(admHealth.includes("safeAll"), true);
+assert.equal(admHealth.includes("scope: \"adm_tracking_only\""), true);
+assert.equal(admHealth.includes("NITRADO_UPSTREAM_DOWN"), true);
+assert.equal(admHealth.includes("manualActionRequired"), true);
+assert.equal(admHealth.includes("SELECT access_token"), false);
+assert.equal(admHealth.includes("raw signed"), false);
 assert.equal(existsSync(".autodev/config.json"), true);
 assert.equal(existsSync("docs/CODEX_AUTODEV.md"), true);
 assert.equal(existsSync(".github/workflows/dzn-autodev-audit.yml"), true);

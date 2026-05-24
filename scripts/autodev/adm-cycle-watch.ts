@@ -11,15 +11,24 @@ type AdmHealthService = {
   serviceId: string | null;
   lastSyncStatus: string | null;
   latestClassifiedError: string | null;
+  latestHttpStatus?: number | null;
+  nextRetryAt?: string | null;
+  recoverable?: boolean;
+  manualActionRequired?: boolean;
   importJobStatus: string | null;
   lastSuccessfulImportAt: string | null;
   lastProcessedFile: string | null;
+  activeImportJob?: { updatedAt?: string | null; status?: string | null } | null;
 };
 
 type AdmHealthSnapshot = {
   ok?: boolean;
+  status?: string;
+  summary?: { workerHeartbeatFresh?: boolean; fatalIssues?: number; recoverableIssues?: number };
   worker?: { heartbeat?: { created_at?: string | null } | null };
   services?: AdmHealthService[];
+  warnings?: string[];
+  fatalErrors?: string[];
 };
 
 async function poll() {
@@ -68,6 +77,11 @@ async function main() {
       fatal = true;
       break;
     }
+    if (result.status >= 500) {
+      checks.push(fail("adm health response", `Expected ADM health 200 JSON, got ${result.status}.`, result, "high"));
+      fatal = true;
+      break;
+    }
     if (result.status !== 200 || !result.json?.ok) {
       checks.push(fail("adm health response", `Expected ADM health 200 JSON, got ${result.status}.`, result, "high"));
       fatal = true;
@@ -87,13 +101,27 @@ async function main() {
 
     for (const service of result.json.services ?? []) {
       const status = String(service.lastSyncStatus ?? service.latestClassifiedError ?? "").toLowerCase();
-      if (["nitrado_unauthorized", "nitrado_forbidden"].includes(String(service.latestClassifiedError ?? "").toLowerCase())) {
+      const classifiedError = String(service.latestClassifiedError ?? "").toLowerCase();
+      if (service.manualActionRequired || ["nitrado_unauthorized", "nitrado_forbidden"].includes(classifiedError)) {
         checks.push(fail(`service ${service.serviceId} auth`, "ADM health shows an auth/file permission issue.", service, "high"));
         fatal = true;
         continue;
       }
-      if (classifyRecoverableProductionStatus(status) || classifyRecoverableProductionStatus(service.latestClassifiedError)) {
-        checks.push(pass(`service ${service.serviceId} recoverable`, "Service is in a recoverable automatic ADM state.", service));
+      if (service.activeImportJob && isStuckImportJob(service.activeImportJob.updatedAt)) {
+        checks.push(fail(`service ${service.serviceId} import job stuck`, "Automatic ADM import job has not updated within the threshold.", service.activeImportJob, "high"));
+        fatal = true;
+        continue;
+      }
+      if (service.recoverable || classifyRecoverableProductionStatus(status) || classifyRecoverableProductionStatus(service.latestClassifiedError)) {
+        const hasUpstreamReadBlock = classifiedError === "nitrado_upstream_down" || service.latestHttpStatus === 500 || service.latestHttpStatus === 503;
+        const hasRetryEvidence = Boolean(service.nextRetryAt) || service.recoverable === true || /latest_adm_unreadable|nitrado_upstream_down|nitrado_rate_limited/.test(status);
+        checks.push(pass(
+          `service ${service.serviceId} recoverable`,
+          hasUpstreamReadBlock && hasRetryEvidence
+            ? "Recoverable: Nitrado upstream ADM read blocked; auto retry scheduled or tracked."
+            : "Service is in a recoverable automatic ADM state.",
+          service,
+        ));
       } else if (service.importJobStatus && /queued|processing|parsing|writing|rebuilding/i.test(service.importJobStatus)) {
         checks.push(pass(`service ${service.serviceId} import`, "Service has active automatic import work.", service));
       } else if (service.lastSuccessfulImportAt || service.lastProcessedFile) {
@@ -115,6 +143,11 @@ async function main() {
   ]);
   writeReport("adm-cycle-watch", { ...report, snapshots });
   if (!report.ok) process.exit(1);
+}
+
+function isStuckImportJob(updatedAt: string | null | undefined) {
+  const time = Date.parse(String(updatedAt ?? ""));
+  return Number.isFinite(time) && Date.now() - time > 30 * 60 * 1000;
 }
 
 main().catch((error) => {

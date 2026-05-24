@@ -1237,7 +1237,7 @@ function ServerDashboard({
         if (!refreshed) action.setWarning("Refresh partially failed. Last-known data remains visible.");
         return refreshed;
       },
-      successSummary: () => "Dashboard sync status refreshed. Use Run Manual Sync to process ADM log lines now.",
+      successSummary: () => "Dashboard sync status refreshed. DZN will continue ADM discovery and imports automatically.",
     });
   }
 
@@ -2775,7 +2775,6 @@ function ServerDashboard({
               <ActionLink href="/leaderboards" icon={<Crosshair className="h-4 w-4" />} label="View Kill Feed" />
               <button type="button" onClick={() => setActiveTab("public-listing")} className="inline-flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm font-bold text-zinc-100">Edit Server <ArrowRight className="h-4 w-4" /></button>
               <button type="button" disabled={refreshingServerInfo || isDashboardActionActive} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 disabled:opacity-55">{dashboardActionKey === "refresh-server-info" ? "Running..." : "Refresh Server Info"} <RefreshCw className={`h-4 w-4 ${refreshingServerInfo || dashboardActionKey === "refresh-server-info" ? "animate-spin" : ""}`} /></button>
-              <button type="button" disabled={syncing || isDashboardActionActive} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 disabled:opacity-55">{dashboardActionKey === "run-manual-sync" ? "Running..." : "Run Manual Sync"} <RefreshCw className={`h-4 w-4 ${syncing || dashboardActionKey === "run-manual-sync" ? "animate-spin" : ""}`} /></button>
             </div>
           </DashboardPanel>
           <DashboardPanel className="p-4">
@@ -2920,6 +2919,15 @@ function ServerDashboard({
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "animate-spin" : ""}`} />
                     {dashboardActionKey === "refresh-status" || manualRefreshing ? "Running..." : "Refresh Status"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={syncing || isDashboardActionActive}
+                    onClick={runSync}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-zinc-300/20 bg-zinc-400/10 px-3 py-2 text-xs font-black uppercase text-zinc-100 transition hover:border-zinc-300/45 hover:bg-zinc-400/18 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                    {dashboardActionKey === "run-manual-sync" || syncing ? "Running..." : "Run Manual Sync"}
                   </button>
                   </div>
                 </div>
@@ -3210,10 +3218,6 @@ function ServerDashboard({
               <ActionLink href="/setup" icon={<Settings className="h-4 w-4" />} label="Edit Server" />
               <ActionLink href="/setup" icon={<Gauge className="h-4 w-4" />} label="Server Settings" />
               <ActionLink href="/setup#review-test" icon={<LifeBuoy className="h-4 w-4" />} label="Setup Guide" />
-              <button type="button" disabled={syncing || isDashboardActionActive} onClick={runSync} className="inline-flex items-center justify-between rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-left text-sm font-bold text-cyan-50 transition hover:border-cyan-300/45 hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:opacity-55">
-                <span>{dashboardActionKey === "run-manual-sync" || syncing ? "Running..." : "Run Manual Sync"}</span>
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-              </button>
               <button type="button" disabled={refreshingServerInfo || isDashboardActionActive} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55">
                 <span>{dashboardActionKey === "refresh-server-info" || refreshingServerInfo ? "Running..." : "Refresh Server Info"}</span>
                 <RefreshCw className={`h-4 w-4 ${refreshingServerInfo ? "animate-spin" : ""}`} />
@@ -8398,7 +8402,7 @@ function getSyncBanner(values: {
 
   return {
     title: "Stats Sync Not Started",
-    message: "Run a manual sync after ADM activity appears in your latest server log.",
+    message: "DZN is waiting for the first readable ADM and will import it automatically.",
     detail: null,
     className: "border-white/10 bg-white/[0.04]",
   };
@@ -8488,8 +8492,8 @@ function getRecentFeedStatus(syncStatus: AdmSyncStatus | null, currentStatus: st
     const job = syncStatus?.active_adm_import_job;
     return {
       message: job
-        ? `Processing ${job.filename} in chunks (${job.display_current_chunk ?? job.chunks_processed}/${job.total_chunks}). Continue Import can keep it moving now.`
-        : "Processing latest ADM in chunks. Continue Import can keep it moving now.",
+        ? `Processing ${job.filename} in chunks (${job.display_current_chunk ?? job.chunks_processed}/${job.total_chunks}). Worker cron will continue automatically.`
+        : "Processing latest ADM in chunks. Worker cron will continue automatically.",
       className: "border-emerald-300/15 bg-emerald-400/8 text-emerald-50",
     };
   }

@@ -15,7 +15,6 @@ type ServiceRow = {
   last_sync_status: string | null;
   last_sync_message: string | null;
   last_sync_at: string | null;
-  last_successful_sync_at: string | null;
 };
 
 type FileStateRow = {
@@ -32,7 +31,18 @@ type FileStateRow = {
 
 type ImportJobRow = {
   filename: string | null;
+  source: string | null;
   status: string | null;
+  current_line: number | null;
+  total_lines: number | null;
+  chunks_processed: number | null;
+  total_chunks: number | null;
+  parsed_kills: number | null;
+  written_kills: number | null;
+  duplicate_skips: number | null;
+  joins: number | null;
+  disconnects: number | null;
+  playerlist_snapshots: number | null;
   updated_at: string | null;
   completed_at: string | null;
 };
@@ -45,6 +55,34 @@ type DiagnosticRow = {
   created_at: string | null;
 };
 
+type WorkerHeartbeatRow = {
+  job_type?: string | null;
+  status?: string | null;
+  source?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  key?: string | null;
+};
+
+const RECOVERABLE_STATUSES = new Set([
+  "no_new_adm",
+  "no_new_log_available",
+  "waiting_for_nitrado",
+  "latest_adm_unreadable",
+  "nitrado_upstream_down",
+  "nitrado_rate_limited",
+  "file_missing_or_rotated",
+  "partial_budget_reached",
+  "no_active_import_job",
+  "awaiting_first_sync",
+  "no_health_snapshot_yet",
+  "adm_backfill_caught_up",
+  "processing_in_chunks",
+  "adm_import_job_queued",
+]);
+
+const ATTENTION_ERRORS = new Set(["NITRADO_UNAUTHORIZED", "NITRADO_FORBIDDEN"]);
+
 export const onRequestGet: PagesFunction = handleAdmHealth;
 export const onRequestPost: PagesFunction = handleAdmHealth;
 export const onRequestPut: PagesFunction = () => methodNotAllowed();
@@ -55,9 +93,26 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
 
-  const db = requireDb(env);
-  const now = new Date().toISOString();
-  const services = await db.prepare(
+  const generatedAt = new Date().toISOString();
+  let db: D1Database;
+  try {
+    db = requireDb(env);
+  } catch (error) {
+    return json({
+      ok: false,
+      scope: "adm_tracking_only",
+      generatedAt,
+      status: "fatal_error",
+      summary: emptySummary(false),
+      services: [],
+      warnings: [],
+      fatalErrors: [sanitize(error instanceof Error ? error.message : "Database binding is missing.")],
+    }, { status: 500 });
+  }
+
+  const warnings: string[] = [];
+  const fatalErrors: string[] = [];
+  const servicesResult = await safeAll<ServiceRow>(warnings, "linked ADM services", db.prepare(
     `SELECT linked_servers.id,
             linked_servers.display_name,
             linked_servers.hostname,
@@ -68,68 +123,120 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
             adm_sync_state.last_processed_file,
             adm_sync_state.last_sync_status,
             adm_sync_state.last_sync_message,
-            adm_sync_state.last_sync_at,
-            adm_sync_state.last_successful_sync_at
+            adm_sync_state.last_sync_at
      FROM linked_servers
      LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
      WHERE linked_servers.nitrado_service_id IS NOT NULL
+       AND linked_servers.nitrado_service_id <> ''
      ORDER BY linked_servers.created_at DESC
      LIMIT 50`,
-  ).all<ServiceRow>();
+  ));
 
-  const workerHeartbeat = await db.prepare(
-    `SELECT job_type, status, source, created_at
-     FROM automation_cron_runs
-     WHERE job_type = 'adm'
-     ORDER BY created_at DESC
-     LIMIT 1`,
-  ).first<{ job_type: string | null; status: string | null; source: string | null; created_at: string | null }>().catch(() => null);
+  const [cronHeartbeat, workerCursor] = await Promise.all([
+    safeFirst<WorkerHeartbeatRow>(warnings, "ADM cron heartbeat", db.prepare(
+      `SELECT job_type, status, source, created_at
+       FROM automation_cron_runs
+       WHERE job_type = 'adm'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )),
+    safeFirst<WorkerHeartbeatRow>(warnings, "ADM Worker cursor heartbeat", db.prepare(
+      `SELECT key, value AS source, updated_at
+       FROM adm_worker_state
+       WHERE key IN ('last_adm_linked_server_id', 'last_automation_lock_recovery_at')
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+    )),
+  ]);
 
-  const rows = await Promise.all((services.results ?? []).map(async (service) => {
-    const [fileState, importJob, diagnostic, eventCount] = await Promise.all([
-      db.prepare(
+  const workerHeartbeatAt = newestIso(cronHeartbeat?.created_at, workerCursor?.updated_at);
+  const workerHeartbeat = workerHeartbeatAt ? {
+    job_type: "adm",
+    status: cronHeartbeat?.status ?? "observed",
+    source: cronHeartbeat?.source ?? workerCursor?.key ?? "adm_worker_state",
+    created_at: workerHeartbeatAt,
+  } : null;
+
+  const services = await Promise.all((servicesResult.results ?? []).map(async (service) => {
+    const [fileState, importJob, lastSuccessfulJob, diagnostic, lastSyncRun, eventCount] = await Promise.all([
+      safeFirst<FileStateRow>(warnings, `file state ${service.id}`, db.prepare(
         `SELECT adm_file, status, retry_count, next_retry_at, last_http_status,
                 last_error, last_endpoint_kind, last_method, updated_at
          FROM adm_sync_file_state
          WHERE linked_server_id = ?
          ORDER BY COALESCE(last_diagnostic_at, last_checked_at, updated_at, first_seen_at) DESC
          LIMIT 1`,
-      ).bind(service.id).first<FileStateRow>().catch(() => null),
-      db.prepare(
-        `SELECT filename, status, updated_at, completed_at
+      ).bind(service.id)),
+      safeFirst<ImportJobRow>(warnings, `latest import job ${service.id}`, db.prepare(
+        `SELECT filename, source, status, current_line, total_lines, chunks_processed, total_chunks,
+                parsed_kills, written_kills, duplicate_skips, joins, disconnects, playerlist_snapshots,
+                updated_at, completed_at
          FROM adm_import_jobs
          WHERE server_id = ?
          ORDER BY COALESCE(updated_at, created_at) DESC
          LIMIT 1`,
-      ).bind(service.id).first<ImportJobRow>().catch(() => null),
-      db.prepare(
+      ).bind(service.id)),
+      safeFirst<ImportJobRow>(warnings, `last successful import job ${service.id}`, db.prepare(
+        `SELECT filename, source, status, current_line, total_lines, chunks_processed, total_chunks,
+                parsed_kills, written_kills, duplicate_skips, joins, disconnects, playerlist_snapshots,
+                updated_at, completed_at
+         FROM adm_import_jobs
+         WHERE server_id = ?
+           AND status IN ('completed', 'completed_with_warnings', 'completed_no_new_events', 'duplicate_skipped')
+         ORDER BY COALESCE(completed_at, updated_at, created_at) DESC
+         LIMIT 1`,
+      ).bind(service.id)),
+      safeFirst<DiagnosticRow>(warnings, `latest diagnostic ${service.id}`, db.prepare(
         `SELECT file_name, status, http_status, error_code, created_at
          FROM nitrado_file_read_attempts
          WHERE server_id = ? OR service_id = ?
          ORDER BY created_at DESC
          LIMIT 1`,
-      ).bind(service.id, service.nitrado_service_id ?? "").first<DiagnosticRow>().catch(() => null),
-      db.prepare(
+      ).bind(service.id, service.nitrado_service_id ?? "")),
+      safeFirst<{ finished_at: string | null; status: string | null }>(warnings, `last sync run ${service.id}`, db.prepare(
+        `SELECT finished_at, status
+         FROM sync_runs
+         WHERE linked_server_id = ?
+           AND lower(COALESCE(status, '')) IN ('completed', 'completed_with_warnings', 'completed_no_new_events', 'duplicate_skipped', 'idle', 'no_new_lines', 'no_supported_events')
+         ORDER BY COALESCE(finished_at, started_at, created_at) DESC
+         LIMIT 1`,
+      ).bind(service.id)),
+      safeFirst<{ count: number | null }>(warnings, `recent ADM events ${service.id}`, db.prepare(
         `SELECT
            (SELECT COUNT(*) FROM kill_events WHERE linked_server_id = ?) +
            (SELECT COUNT(*) FROM player_events WHERE linked_server_id = ?) AS count`,
-      ).bind(service.id, service.id).first<{ count: number | null }>().catch(() => ({ count: 0 })),
+      ).bind(service.id, service.id)),
     ]);
 
     const latestClassifiedError = canonicalError(diagnostic?.error_code ?? fileState?.last_error ?? service.last_sync_message);
+    const latestStatus = normalizeStatus(service.last_sync_status ?? latestClassifiedError ?? fileState?.status ?? importJob?.status ?? "awaiting_first_sync");
+    const manualActionRequired = ATTENTION_ERRORS.has(latestClassifiedError ?? "") || /unauthorized|forbidden|auth_error/i.test(latestStatus);
+    const recoverable = !manualActionRequired && (
+      RECOVERABLE_STATUSES.has(latestStatus)
+      || isRecoverableError(latestClassifiedError)
+      || Boolean(fileState?.next_retry_at)
+      || Boolean(lastSuccessfulJob?.completed_at || lastSyncRun?.finished_at)
+    );
+    const activeImportJob = importJob && isActiveImportStatus(importJob.status) ? summarizeJob(importJob) : null;
+
     return {
-      serverName: service.display_name ?? service.hostname ?? service.server_name ?? service.nitrado_service_name ?? "DZN Server",
-      serverId: service.id,
       serviceId: service.nitrado_service_id,
+      serverId: service.id,
+      serverName: service.display_name ?? service.hostname ?? service.server_name ?? service.nitrado_service_name ?? "DZN Server",
       latestAdmFile: service.latest_adm_file ?? diagnostic?.file_name ?? fileState?.adm_file ?? null,
       lastProcessedFile: service.last_processed_file,
-      lastSyncStatus: service.last_sync_status,
+      lastSyncStatus: service.last_sync_status ?? latestStatus,
       latestClassifiedError,
       latestHttpStatus: diagnostic?.http_status ?? fileState?.last_http_status ?? null,
+      latestEndpointKind: fileState?.last_endpoint_kind ?? null,
+      latestMethod: fileState?.last_method ?? null,
       nextRetryAt: fileState?.next_retry_at ?? null,
-      lastSuccessfulImportAt: service.last_successful_sync_at ?? importJob?.completed_at ?? null,
-      importJobStatus: importJob?.status ?? null,
+      activeImportJob,
+      lastSuccessfulImportAt: lastSuccessfulJob?.completed_at ?? lastSyncRun?.finished_at ?? null,
+      importJobStatus: importJob?.status ?? "no_active_import_job",
       recentEventCount: Number(eventCount?.count ?? 0),
+      recoverable,
+      manualActionRequired,
       workerHeartbeat,
       lastSyncMessage: sanitize(service.last_sync_message),
       latestFileState: fileState ? {
@@ -146,15 +253,132 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
     };
   }));
 
+  if (services.length === 0) warnings.push("No linked ADM services found");
+  const activeImportJobs = services.filter((service) => service.activeImportJob).length;
+  const recoverableIssues = services.filter((service) => service.recoverable && (service.latestClassifiedError || isRecoverableStatus(service.lastSyncStatus))).length;
+  const fatalIssues = services.filter((service) => service.manualActionRequired).length + fatalErrors.length;
+  const status = fatalIssues > 0
+    ? "needs_attention"
+    : services.length === 0
+      ? "awaiting_first_sync"
+      : recoverableIssues > 0
+        ? "recoverable"
+        : activeImportJobs > 0
+          ? "importing"
+          : "healthy";
+
   return json({
     ok: true,
-    generatedAt: now,
+    scope: "adm_tracking_only",
+    generatedAt,
+    status,
+    summary: {
+      servicesChecked: services.length,
+      workerHeartbeatFresh: isWorkerHeartbeatFresh(workerHeartbeatAt),
+      activeImportJobs,
+      recoverableIssues,
+      fatalIssues,
+    },
     worker: {
       name: "dzn-adm-sync-worker",
       heartbeat: workerHeartbeat,
     },
-    services: rows,
+    services,
+    warnings: warnings.map(sanitize),
+    fatalErrors,
   });
+}
+
+async function safeAll<T>(warnings: string[], label: string, statement: D1PreparedStatement) {
+  try {
+    return await statement.all<T>();
+  } catch (error) {
+    warnings.push(`${label}: ${sanitize(error instanceof Error ? error.message : String(error))}`);
+    return { results: [] as T[], success: false, meta: undefined };
+  }
+}
+
+async function safeFirst<T>(warnings: string[], label: string, statement: D1PreparedStatement) {
+  try {
+    return await statement.first<T>();
+  } catch (error) {
+    warnings.push(`${label}: ${sanitize(error instanceof Error ? error.message : String(error))}`);
+    return null;
+  }
+}
+
+function summarizeJob(job: ImportJobRow) {
+  return {
+    filename: job.filename,
+    source: job.source,
+    status: job.status,
+    currentLine: Number(job.current_line ?? 0),
+    totalLines: Number(job.total_lines ?? 0),
+    chunksProcessed: Number(job.chunks_processed ?? 0),
+    totalChunks: Number(job.total_chunks ?? 0),
+    parsedKills: Number(job.parsed_kills ?? 0),
+    writtenKills: Number(job.written_kills ?? 0),
+    duplicateSkips: Number(job.duplicate_skips ?? 0),
+    joins: Number(job.joins ?? 0),
+    disconnects: Number(job.disconnects ?? 0),
+    playerlistSnapshots: Number(job.playerlist_snapshots ?? 0),
+    updatedAt: job.updated_at,
+    completedAt: job.completed_at,
+  };
+}
+
+function isActiveImportStatus(status: string | null | undefined) {
+  return /queued|processing|parsing|writing|rebuilding|failed_retryable/i.test(String(status ?? ""));
+}
+
+function isRecoverableStatus(value: string | null | undefined) {
+  return RECOVERABLE_STATUSES.has(normalizeStatus(value));
+}
+
+function isRecoverableError(value: string | null | undefined) {
+  const text = String(value ?? "").toUpperCase();
+  return [
+    "NITRADO_UPSTREAM_DOWN",
+    "NITRADO_RATE_LIMITED",
+    "NITRADO_FILE_NOT_FOUND",
+    "WORKER_SUBREQUEST_LIMIT",
+    "FETCH_TIMEOUT",
+    "FETCH_THREW",
+    "TOKENIZED_EMPTY_BODY",
+  ].includes(text);
+}
+
+function isWorkerHeartbeatFresh(value: string | null) {
+  if (!value) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && Date.now() - time <= 20 * 60 * 1000;
+}
+
+function newestIso(...values: Array<string | null | undefined>) {
+  let best: string | null = null;
+  let bestTime = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    const time = Date.parse(String(value ?? ""));
+    if (Number.isFinite(time) && time > bestTime) {
+      bestTime = time;
+      best = String(value);
+    }
+  }
+  return best;
+}
+
+function emptySummary(workerHeartbeatFresh: boolean) {
+  return {
+    servicesChecked: 0,
+    workerHeartbeatFresh,
+    activeImportJobs: 0,
+    recoverableIssues: 0,
+    fatalIssues: 1,
+  };
+}
+
+function normalizeStatus(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase() || "awaiting_first_sync";
 }
 
 function canonicalError(value: string | null | undefined) {
@@ -163,7 +387,7 @@ function canonicalError(value: string | null | undefined) {
   if (/NITRADO_RATE_LIMITED|HTTP\s+429/i.test(text)) return "NITRADO_RATE_LIMITED";
   if (/NITRADO_UNAUTHORIZED|HTTP\s+401/i.test(text)) return "NITRADO_UNAUTHORIZED";
   if (/NITRADO_FORBIDDEN|HTTP\s+403/i.test(text)) return "NITRADO_FORBIDDEN";
-  if (/NITRADO_FILE_NOT_FOUND|HTTP\s+404/i.test(text)) return "NITRADO_FILE_NOT_FOUND";
+  if (/NITRADO_FILE_NOT_FOUND|FILE_MISSING_OR_ROTATED|HTTP\s+404/i.test(text)) return "NITRADO_FILE_NOT_FOUND";
   if (/WORKER_SUBREQUEST_LIMIT/i.test(text)) return "WORKER_SUBREQUEST_LIMIT";
   if (/FETCH_TIMEOUT/i.test(text)) return "FETCH_TIMEOUT";
   if (/FETCH_THREW/i.test(text)) return "FETCH_THREW";

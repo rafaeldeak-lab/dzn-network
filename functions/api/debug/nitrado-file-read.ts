@@ -1,8 +1,6 @@
-import { decryptToken } from "../../_lib/crypto";
 import { requireCronSecret } from "../../_lib/cron-auth";
 import { requireDb } from "../../_lib/db";
 import { json, readJson } from "../../_lib/http";
-import { latestAdmFileReadDiagnostic, readAdmFileTextWithFallback } from "../../_lib/nitrado";
 import { sanitizeResponseExcerpt } from "../../_lib/nitrado-diagnostics";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -44,6 +42,7 @@ export const onRequestPost: PagesFunction = async (context) => {
 
   try {
     const token = await getNitradoTokenForDebug(context.env, linkedServer.id, linkedServer.user_id);
+    const { latestAdmFileReadDiagnostic, readAdmFileTextWithFallback } = await import("../../_lib/nitrado");
     const startedAt = new Date(Date.now() - 1000).toISOString();
     const filename = filePath.split("/").filter(Boolean).at(-1) ?? filePath;
     const read = await readAdmFileTextWithFallback({
@@ -164,6 +163,7 @@ async function resolveLinkedServer(env: Env, serviceId: string, serverId?: strin
 
 async function getNitradoTokenForDebug(env: Env, linkedServerId: string, userId: string) {
   if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
+  const { decryptToken } = await import("../../_lib/crypto");
   const row = await requireDb(env)
     .prepare(
       `SELECT encrypted_token, token_iv, token_auth_tag

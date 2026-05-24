@@ -28,9 +28,17 @@ for (const forbidden of [
   "Previous Import Attempts",
   "Import Diagnostics",
   "Run Auto-Sync Now",
+  "Run Manual Sync",
 ]) {
   assert.equal(autoSurface.includes(forbidden), false, `Owner Auto Sync surface must not render ${forbidden}`);
 }
+
+const overviewQuickActionsStart = dashboardSource.indexOf('title="Quick Actions"');
+const overviewQuickActionsEnd = dashboardSource.indexOf('title="Sync Health"', overviewQuickActionsStart);
+assert.notEqual(overviewQuickActionsStart, -1, "Overview Quick Actions panel must exist");
+assert.notEqual(overviewQuickActionsEnd, -1, "Overview Sync Health panel must exist after Quick Actions");
+const overviewQuickActions = dashboardSource.slice(overviewQuickActionsStart, overviewQuickActionsEnd);
+assert.equal(overviewQuickActions.includes("Run Manual Sync"), false, "Normal owner overview must not render Run Manual Sync");
 
 for (const required of [
   "AUTO SYNC ACTIVE",
