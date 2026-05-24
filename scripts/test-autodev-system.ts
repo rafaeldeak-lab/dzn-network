@@ -93,6 +93,8 @@ assert.equal(admHealth.includes("NITRADO_UPSTREAM_DOWN"), true);
 assert.equal(admHealth.includes("manualActionRequired"), true);
 assert.equal(admHealth.includes("SELECT access_token"), false);
 assert.equal(admHealth.includes("raw signed"), false);
+const dashboardHealth = read("functions/api/servers/[serverId]/dashboard/health.ts");
+assert.equal(dashboardHealth.includes("adm_sync_state.last_successful_sync_at"), false);
 assert.equal(existsSync(".autodev/config.json"), true);
 assert.equal(existsSync("docs/CODEX_AUTODEV.md"), true);
 assert.equal(existsSync(".github/workflows/dzn-autodev-audit.yml"), true);

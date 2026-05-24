@@ -36,7 +36,7 @@ type ServerRow = {
   last_processed_adm_filename: string | null;
   last_sync_status: string | null;
   last_sync_at: string | null;
-  last_successful_sync_at: string | null;
+  last_successful_sync_at?: string | null;
   last_sync_message: string | null;
   consecutive_failed_adm_reads: number | null;
 };
@@ -168,7 +168,6 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
                 adm_sync_state.last_processed_file AS last_processed_adm_filename,
                 adm_sync_state.last_sync_status,
                 adm_sync_state.last_sync_at,
-                adm_sync_state.last_successful_sync_at,
                 adm_sync_state.last_sync_message,
                 adm_sync_state.consecutive_failed_adm_reads
          FROM linked_servers
