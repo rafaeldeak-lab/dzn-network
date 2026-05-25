@@ -804,6 +804,37 @@ async function main() {
   assert.equal(repeatedScheduledCreate.job?.current_line, 0);
   assert.equal(repeatedScheduledCreate.job?.chunks_processed, 0);
 
+  const scheduledTailDb = new MemoryD1();
+  const scheduledTailFirst = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  const scheduledTailRow = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
+  assert.ok(scheduledTailRow);
+  const scheduledTailLines = String(scheduledTailRow.adm_text ?? "").split(/\r?\n/).filter(Boolean);
+  scheduledTailRow.status = "completed";
+  scheduledTailRow.current_line = 2;
+  scheduledTailRow.total_lines = 2;
+  scheduledTailRow.chunk_size = 2;
+  scheduledTailRow.total_chunks = 1;
+  scheduledTailRow.chunks_processed = 1;
+  scheduledTailRow.adm_text = scheduledTailLines.slice(0, 2).join("\n");
+  scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
+  const scheduledTailGrowth = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(scheduledTailGrowth.status, "adm_import_job_queued");
+  assert.equal(scheduledTailGrowth.duplicateExistingJob, true);
+  assert.equal(scheduledTailGrowth.job?.job_id, scheduledTailFirst.job?.job_id);
+  assert.equal(scheduledTailGrowth.job?.current_line, 2);
+  assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
+  assert.equal(scheduledTailDb.admImportJobs.size, 1);
+
   const scheduledDuplicateDb = new MemoryD1();
   const mockAdmName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
   scheduledDuplicateDb.admSyncState.set(linkedServerId, {
@@ -811,8 +842,8 @@ async function main() {
     latest_adm_file: mockAdmName,
     latest_adm_path: mockAdmName,
     last_processed_file: mockAdmName,
-    last_processed_line: 14,
-    last_processed_offset: 14,
+    last_processed_line: 15,
+    last_processed_offset: 15,
     last_sync_status: "completed",
     last_sync_message: "Manual import completed.",
     last_sync_at: "2026-05-20T12:00:00.000Z",
@@ -823,7 +854,7 @@ async function main() {
     linkedServerId,
     { processImmediately: false },
   );
-  assert.equal(scheduledDuplicate.status, "no_new_lines");
+  assert.equal(scheduledDuplicate.status, "caught_up_waiting_for_growth");
   assert.equal(scheduledDuplicate.job, null);
   assert.equal(scheduledDuplicateDb.admImportJobs.size, 0);
 
@@ -846,8 +877,10 @@ async function main() {
     linkedServerId,
     { processImmediately: false },
   );
-  assert.equal(manualCompletedScheduledDuplicate.status, "no_new_lines");
-  assert.equal(manualCompletedDedupeDb.admImportJobs.size, 0);
+  assert.equal(manualCompletedScheduledDuplicate.status, "adm_import_job_queued");
+  assert.equal(manualCompletedScheduledDuplicate.job?.source, "scheduled_nitrado");
+  assert.equal(manualCompletedScheduledDuplicate.job?.current_line, 3);
+  assert.equal(manualCompletedDedupeDb.admImportJobs.size, 1);
 
   const newerAfterCompletedDb = new MemoryD1();
   newerAfterCompletedDb.admSyncState.set(linkedServerId, {
@@ -1516,6 +1549,25 @@ class MemoryStatement {
       row.status = "rebuilding";
       row.updated_at = this.values[0];
       return changed(1);
+    }
+    if (q.includes("update adm_import_jobs set") && q.includes("adm_text = ?") && q.includes("total_lines = ?")) {
+      const row = this.db.admImportJobs.get(String(this.values[8]));
+      if (!row) return changed(0);
+      row.status = this.values[0];
+      row.adm_text = this.values[1];
+      row.total_lines = Number(this.values[2] ?? row.total_lines);
+      row.current_line = Number(this.values[3] ?? row.current_line);
+      row.chunk_size = Number(this.values[4] ?? row.chunk_size);
+      row.total_chunks = Number(this.values[5] ?? row.total_chunks);
+      row.chunks_processed = Number(this.values[6] ?? row.chunks_processed);
+      row.completed_at = null;
+      row.error_message = null;
+      row.failed_chunk_index = null;
+      row.updated_at = this.values[7];
+      return changed(1);
+    }
+    if (q.includes("update adm_import_jobs set adm_text = ''")) {
+      return changed(0);
     }
     if (q.startsWith("update adm_import_jobs set status = 'queued'") && q.includes("failed_chunk_index = null") && !q.includes("parsed_kills") && !q.includes("current_line")) {
       const row = this.db.admImportJobs.get(String(this.values[1]));

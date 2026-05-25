@@ -487,6 +487,9 @@ export type ManualAdmImportHistoryItem = {
 
 export type AdmSyncStatusCode =
   | "completed"
+  | "caught_up_waiting_for_growth"
+  | "completed_closed"
+  | "completed_empty"
   | "no_new_lines"
   | "no_supported_events"
   | "checking"
@@ -514,6 +517,7 @@ export type AdmSyncStatusCode =
   | "parser_error"
   | "write_error"
   | "read_pending"
+  | "partial_budget_reached"
   | "not_started"
   | "active"
   | "idle"
@@ -1550,7 +1554,7 @@ function getUnavailableAdmMessage(status: AdmSyncStatusCode) {
 function getAdmHealthLabel(status: string | null | undefined) {
   const normalized = String(status ?? "").toLowerCase();
   if (["processing_in_chunks", "adm_import_job_queued", "adm_backfill_queued"].includes(normalized)) return "ADM Sync Active";
-  if (normalized === "adm_backfill_caught_up") return "Healthy";
+  if (normalized === "adm_backfill_caught_up" || normalized === "caught_up_waiting_for_growth") return "Healthy";
   if (["completed", "no_new_lines", "no_supported_events", "new_data_found", "no_new_log_available", "active", "idle"].includes(normalized)) return "Healthy";
   if (["adm_not_generated_yet", "no_adm_file", "waiting_after_restart"].includes(normalized)) return "Waiting for ADM";
   if (["adm_file_unreadable", "latest_adm_unreadable", "nitrado_file_unavailable"].includes(normalized)) return "ADM temporarily unreadable";
@@ -1566,6 +1570,7 @@ function getAdmRecoveryAction(status: string | null | undefined, unreadableQueue
   const normalized = String(status ?? "").toLowerCase();
   if (["processing_in_chunks", "adm_import_job_queued", "adm_backfill_queued"].includes(normalized)) return "Processing ADM backfill in chunks. DZN will continue on the next cron tick.";
   if (normalized === "adm_backfill_caught_up") return "ADM backfill is caught up. DZN is waiting for the next Nitrado reset file.";
+  if (normalized === "caught_up_waiting_for_growth") return "DZN is caught up on the current ADM file and will import new lines automatically as Nitrado appends them.";
   if (normalized === "nitrado_auth_invalid") return "Reconnect or refresh the server owner's Nitrado token/service permission.";
   if (normalized === "nitrado_down") return "Nitrado is unavailable. DZN will retry automatically.";
   if (normalized === "nitrado_rate_limited") return "Nitrado throttled requests. DZN will retry on the next scheduled run.";
@@ -1603,6 +1608,9 @@ export function normalizeAdmSyncStateMachineStatus(status: string | null | undef
     "adm_import_job_queued",
     "adm_backfill_queued",
     "adm_backfill_caught_up",
+    "caught_up_waiting_for_growth",
+    "completed_closed",
+    "completed_empty",
     "no_new_log_available",
     "latest_adm_unreadable",
     "delayed_after_restart",
@@ -2679,6 +2687,15 @@ type AdmImportJobRow = {
   completed_at: string | null;
 };
 
+type ScheduledAdmTailJobResult = {
+  status: "created" | "extended" | "active" | "caught_up" | "skipped";
+  job: AdmImportJobProgressResult | null;
+  duplicateExistingJob: boolean;
+  importedLineCount: number;
+  lineCount: number;
+  message: string;
+};
+
 type AdmChunkWriteResult = {
   rawLines: number;
   rawKilledByLinesFound: number;
@@ -3079,6 +3096,7 @@ export async function processPendingAdmImportJobs(
   const deadline = Date.now() + Math.max(1000, maxRuntimeMs - 1000);
   const source = options.source ?? SCHEDULED_ADM_IMPORT_SOURCE;
   await recoverStaleAdmImportJobs(env, source);
+  await cleanupExpiredAdmImportJobText(env, source).catch(() => null);
   const rows = await requireDb(env)
     .prepare(
       `SELECT * FROM adm_import_jobs
@@ -3292,23 +3310,31 @@ export async function planAdmBackfillJobsForServer(
   }
 
   const createdJobs: AdmImportJobProgressResult[] = [...retryPromotion.createdJobs];
+  const newestReadableTail = newestReadable ? readableByName.get(normalizeAdmFilenameKey(newestReadable.name)) ?? newestReadable : null;
+  if (newestReadableTail) {
+    const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
+      scope,
+      file: newestReadableTail,
+      chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+      allowNewJob: false,
+      onlyIfExistingProgress: true,
+    });
+    if ((tailJob.status === "extended" || tailJob.status === "active") && tailJob.job) {
+      createdJobs.push(tailJob.job);
+    }
+  }
   for (const filename of plan.createFiles) {
     const readable = readableByName.get(normalizeAdmFilenameKey(filename));
     if (!readable?.lines.length) continue;
     const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, filename);
     if (existingJob) continue;
-    const created = await createAdmImportJobForServer(env, {
-      linkedServerId: scope.linkedServerId,
-      filename,
-      admText: readable.lines.join("\n"),
-      source: SCHEDULED_ADM_IMPORT_SOURCE,
+    const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
+      scope,
+      file: readable,
       chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+      allowNewJob: true,
     });
-    const row = await getAdmImportJob(env, scope.linkedServerId, created.job_id);
-    if (row) {
-      await recordAdmImportJobProgressInSyncState(env, row, "adm_backfill_queued", `Queued ADM backfill job for ${filename}. ${plan.nextAction}`);
-    }
-    createdJobs.push(row ? toAdmImportJobProgress(row) : created);
+    if (tailJob.job) createdJobs.push(tailJob.job);
   }
 
   let activeJobRow = await getActiveAdmImportJob(env, scope.linkedServerId);
@@ -3453,6 +3479,30 @@ export async function createScheduledAdmImportJobForServer(
 
   if (!newestAvailableIsNew && newestAvailable?.name) {
     const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, newestAvailable.name);
+    const readableTail = findReadableAdmFileByName(batch.files, newestAvailable.name);
+    if (readableTail) {
+      const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
+        scope,
+        file: readableTail,
+        chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+        allowNewJob: true,
+      });
+      if (tailJob.status === "extended" || tailJob.status === "created" || tailJob.status === "active") {
+        return {
+          ok: true,
+          status: tailJob.status === "active" ? "processing_in_chunks" : "adm_import_job_queued",
+          message: tailJob.message,
+          job: tailJob.job,
+          duplicateExistingJob: tailJob.duplicateExistingJob,
+          latestAdmFile: newestAvailable.name,
+          latestAdmTimestamp: timestampIso(newestAvailable.timestamp ?? extractAdmTimestampScore(newestAvailable.name)),
+          newestAvailableAdmFile: newestAvailable.name,
+          newestAvailableAdmTimestamp: timestampIso(newestAvailable.timestamp ?? extractAdmTimestampScore(newestAvailable.name)),
+          newestReadableAdmFile: readableTail.name,
+          newestReadableAdmTimestamp: timestampIso(extractAdmTimestampScore(readableTail.name)),
+        };
+      }
+    }
     const progress = existingJob ? toAdmImportJobProgress(existingJob) : null;
     await upsertSyncState(env, scope.linkedServerId, {
       latestAdmFile: newestAvailable.name,
@@ -3461,8 +3511,8 @@ export async function createScheduledAdmImportJobForServer(
       lastProcessedFile: existingState?.last_processed_file ?? completedCursorFile,
       lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
       lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
-      status: "no_new_lines",
-      message: `ADM file ${newestAvailable.name} is already imported. Scheduled sync is waiting for the next reset ADM file.`,
+      status: "caught_up_waiting_for_growth",
+      message: `ADM file ${newestAvailable.name} is already imported through its latest known line. DZN will keep tailing it automatically until the next reset ADM appears.`,
       lastSyncAt: now,
       linesRead: Number(existingState?.last_lines_read ?? 0),
       linesProcessed: Number(existingState?.last_lines_processed ?? 0),
@@ -3483,8 +3533,8 @@ export async function createScheduledAdmImportJobForServer(
     });
     return {
       ok: true,
-      status: "no_new_lines",
-      message: `ADM file ${newestAvailable.name} is already imported.`,
+      status: "caught_up_waiting_for_growth",
+      message: `ADM file ${newestAvailable.name} is caught up and waiting for growth.`,
       job: progress,
       duplicateExistingJob: Boolean(progress),
       latestAdmFile: newestAvailable.name,
@@ -3558,6 +3608,27 @@ export async function createScheduledAdmImportJobForServer(
 
   const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, selected.name);
   if (existingJob) {
+    const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
+      scope,
+      file: selected,
+      chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+      allowNewJob: true,
+    });
+    if (tailJob.status === "extended" || tailJob.status === "created" || tailJob.status === "active") {
+      return {
+        ok: true,
+        status: tailJob.status === "active" ? "processing_in_chunks" : "adm_import_job_queued",
+        message: tailJob.message,
+        job: tailJob.job,
+        duplicateExistingJob: tailJob.duplicateExistingJob,
+        latestAdmFile: selected.name,
+        latestAdmTimestamp: timestampIso(extractAdmTimestampScore(selected.name)),
+        newestAvailableAdmFile: newestAvailable?.name ?? selected.name,
+        newestAvailableAdmTimestamp: timestampIso(newestAvailable?.timestamp ?? extractAdmTimestampScore(selected.name)),
+        newestReadableAdmFile: selected.name,
+        newestReadableAdmTimestamp: timestampIso(extractAdmTimestampScore(selected.name)),
+      };
+    }
     const progress = toAdmImportJobProgress(existingJob);
     const completed = isCompletedAdmImportJobStatus(progress.status);
     if (completed || existingJob.source !== SCHEDULED_ADM_IMPORT_SOURCE || !existingJob.adm_text) {
@@ -4219,6 +4290,340 @@ async function getAdmImportJobsForServer(env: Env, linkedServerId: string) {
   return rows.results ?? [];
 }
 
+async function createOrExtendScheduledAdmTailJobForReadableFile(
+  env: Env,
+  input: {
+    scope: AdmSyncContext;
+    file: ReadableAdmFileForSync;
+    chunkSize: number;
+    allowNewJob: boolean;
+    onlyIfExistingProgress?: boolean;
+  },
+): Promise<ScheduledAdmTailJobResult> {
+  const filename = sanitizeManualAdmFilename(input.file.name);
+  const lines = input.file.lines;
+  if (!filename || !lines.length || !looksLikeAdmText(lines)) {
+    return {
+      status: "skipped",
+      job: null,
+      duplicateExistingJob: false,
+      importedLineCount: 0,
+      lineCount: lines.length,
+      message: "Readable ADM text was empty or did not look like a DayZ admin log.",
+    };
+  }
+
+  const existingJob = await getAdmImportJobForFilename(env, input.scope.linkedServerId, filename);
+  const existingImportedLineCount = existingJob
+    ? Math.max(Number(existingJob.current_line ?? 0), isCompletedAdmImportJobStatus(existingJob.status) ? Number(existingJob.total_lines ?? 0) : 0)
+    : 0;
+  const storedImportedLineCount = await getImportedLineCountForAdmFile(env, input.scope, filename).catch(() => 0);
+  const importedLineCount = clampCursorLine(Math.max(existingImportedLineCount, storedImportedLineCount), lines.length);
+
+  if (existingJob && isActiveAdmImportJobStatus(existingJob.status)) {
+    if (existingJob.source === SCHEDULED_ADM_IMPORT_SOURCE && lines.length > Number(existingJob.total_lines ?? 0)) {
+      await updateScheduledAdmImportJobTailText(env, existingJob, {
+        lines,
+        chunkSize: input.chunkSize,
+        currentLine: clampCursorLine(Number(existingJob.current_line ?? 0), lines.length),
+        status: "queued",
+      });
+      const updated = await getAdmImportJob(env, input.scope.linkedServerId, existingJob.id);
+      const progress = updated ? toAdmImportJobProgress(updated) : toAdmImportJobProgress(existingJob);
+      await recordAdmFileAttempt(env, input.scope, {
+        name: filename,
+        path: input.file.path,
+        timestamp: extractAdmTimestampScore(filename),
+      }, {
+        status: "queued",
+        lineCount: lines.length,
+        rawKillLinesFound: lines.filter(hasRawPlayerKillLine).length,
+        parsedKillLinesFound: Number(updated?.parsed_kills ?? existingJob.parsed_kills ?? 0),
+        insertedKills: Number(updated?.written_kills ?? existingJob.written_kills ?? 0),
+        parserSkippedLines: 0,
+        lastLineProcessed: Number(updated?.current_line ?? existingJob.current_line ?? 0),
+        message: `ADM file ${filename} grew while an automatic import job was active. DZN extended the scheduled job to ${lines.length} lines.`,
+      });
+      return {
+        status: "extended",
+        job: progress,
+        duplicateExistingJob: true,
+        importedLineCount: Number(progress.current_line ?? 0),
+        lineCount: lines.length,
+        message: `Extended active scheduled ADM job for ${filename} to ${lines.length} lines.`,
+      };
+    }
+
+    await recordAdmFileAttempt(env, input.scope, {
+      name: filename,
+      path: input.file.path,
+      timestamp: extractAdmTimestampScore(filename),
+    }, {
+      status: "queued",
+      lineCount: Math.max(lines.length, Number(existingJob.total_lines ?? 0)),
+      rawKillLinesFound: Number(existingJob.raw_kill_lines_found ?? 0),
+      parsedKillLinesFound: Number(existingJob.parsed_kills ?? 0),
+      insertedKills: Number(existingJob.written_kills ?? 0),
+      parserSkippedLines: 0,
+      lastLineProcessed: Number(existingJob.current_line ?? 0),
+      message: `ADM file ${filename} already has an active automatic import job.`,
+    });
+    return {
+      status: "active",
+      job: toAdmImportJobProgress(existingJob),
+      duplicateExistingJob: true,
+      importedLineCount: Number(existingJob.current_line ?? 0),
+      lineCount: Math.max(lines.length, Number(existingJob.total_lines ?? 0)),
+      message: `ADM file ${filename} already has an active automatic import job.`,
+    };
+  }
+
+  if (input.onlyIfExistingProgress === true && importedLineCount <= 0 && !existingJob) {
+    return {
+      status: "skipped",
+      job: null,
+      duplicateExistingJob: false,
+      importedLineCount,
+      lineCount: lines.length,
+      message: `ADM file ${filename} has no existing cursor; normal discovery will decide whether to queue it.`,
+    };
+  }
+
+  if (lines.length <= importedLineCount) {
+    await recordAdmFileAttempt(env, input.scope, {
+      name: filename,
+      path: input.file.path,
+      timestamp: extractAdmTimestampScore(filename),
+    }, {
+      status: "caught_up_waiting_for_growth",
+      lineCount: lines.length,
+      rawKillLinesFound: Number(existingJob?.raw_kill_lines_found ?? existingJob?.parsed_kills ?? lines.filter(hasRawPlayerKillLine).length),
+      parsedKillLinesFound: Number(existingJob?.parsed_kills ?? 0),
+      insertedKills: Number(existingJob?.written_kills ?? 0),
+      parserSkippedLines: 0,
+      lastLineProcessed: importedLineCount,
+      message: `ADM file ${filename} is caught up at ${importedLineCount} lines. DZN will keep checking for growth automatically.`,
+    });
+    await upsertSyncState(env, input.scope.linkedServerId, {
+      latestAdmFile: filename,
+      latestAdmPath: input.file.path ?? filename,
+      sourceServiceId: input.scope.nitradoServiceId,
+      lastProcessedFile: filename,
+      lastProcessedLine: importedLineCount,
+      lastProcessedOffset: importedLineCount,
+      status: "caught_up_waiting_for_growth",
+      message: `ADM file ${filename} is caught up at ${importedLineCount} lines. DZN will keep tailing it automatically.`,
+      lastSyncAt: new Date().toISOString(),
+      linesRead: lines.length,
+      linesProcessed: importedLineCount,
+      rawEventsStored: Number(existingJob?.raw_events ?? 0),
+      playerEventsStored: Number(existingJob?.player_events ?? 0),
+      killEventsStored: Number(existingJob?.written_kills ?? 0),
+      eventsCreated: Number(existingJob?.player_events ?? 0) + Number(existingJob?.written_kills ?? 0),
+      killsCreated: Number(existingJob?.written_kills ?? 0),
+      unknownLines: 0,
+      duplicateLines: Number(existingJob?.duplicate_skips ?? 0),
+      syncDurationMs: 0,
+      readableRoute: "scheduled_adm_tail",
+      rawKillLinesFound: Number(existingJob?.raw_kill_lines_found ?? lines.filter(hasRawPlayerKillLine).length),
+      parsedKillLinesFound: Number(existingJob?.parsed_kills ?? 0),
+      parserSkippedLines: 0,
+      unreadableFilesQueued: 0,
+      newestUnprocessedAdmFile: null,
+    });
+    return {
+      status: "caught_up",
+      job: existingJob ? toAdmImportJobProgress(existingJob) : null,
+      duplicateExistingJob: Boolean(existingJob),
+      importedLineCount,
+      lineCount: lines.length,
+      message: `ADM file ${filename} is caught up and waiting for growth.`,
+    };
+  }
+
+  if (!input.allowNewJob && !existingJob && importedLineCount <= 0) {
+    return {
+      status: "skipped",
+      job: null,
+      duplicateExistingJob: false,
+      importedLineCount,
+      lineCount: lines.length,
+      message: `ADM file ${filename} was readable, but new job creation was not allowed for this path.`,
+    };
+  }
+
+  if (existingJob && isCompletedAdmImportJobStatus(existingJob.status) && existingJob.source === SCHEDULED_ADM_IMPORT_SOURCE) {
+    await updateScheduledAdmImportJobTailText(env, existingJob, {
+      lines,
+      chunkSize: input.chunkSize,
+      currentLine: importedLineCount,
+      status: "queued",
+    });
+    const updated = await getAdmImportJob(env, input.scope.linkedServerId, existingJob.id);
+    const progress = updated ? toAdmImportJobProgress(updated) : toAdmImportJobProgress(existingJob);
+    await recordAdmFileAttempt(env, input.scope, {
+      name: filename,
+      path: input.file.path,
+      timestamp: extractAdmTimestampScore(filename),
+    }, {
+      status: "queued",
+      lineCount: lines.length,
+      rawKillLinesFound: lines.filter(hasRawPlayerKillLine).length,
+      parsedKillLinesFound: Number(updated?.parsed_kills ?? existingJob.parsed_kills ?? 0),
+      insertedKills: Number(updated?.written_kills ?? existingJob.written_kills ?? 0),
+      parserSkippedLines: 0,
+      lastLineProcessed: importedLineCount,
+      message: `ADM file ${filename} grew from ${importedLineCount} to ${lines.length} lines. DZN reopened the scheduled import job for the new tail.`,
+    });
+    await recordAdmImportJobProgressInSyncState(env, updated ?? existingJob, "adm_import_job_queued", `ADM file ${filename} grew by ${lines.length - importedLineCount} lines. Scheduled tail import queued automatically.`);
+    return {
+      status: "extended",
+      job: progress,
+      duplicateExistingJob: true,
+      importedLineCount,
+      lineCount: lines.length,
+      message: `Extended completed scheduled ADM job for ${filename} to import ${lines.length - importedLineCount} new lines.`,
+    };
+  }
+
+  const created = await createAdmImportJobForServer(env, {
+    linkedServerId: input.scope.linkedServerId,
+    filename,
+    admText: lines.join("\n"),
+    source: SCHEDULED_ADM_IMPORT_SOURCE,
+    chunkSize: input.chunkSize,
+  });
+  let row = await getAdmImportJob(env, input.scope.linkedServerId, created.job_id);
+  if (row && importedLineCount > 0) {
+    await updateScheduledAdmImportJobTailText(env, row, {
+      lines,
+      chunkSize: input.chunkSize,
+      currentLine: importedLineCount,
+      status: "queued",
+    });
+    row = await getAdmImportJob(env, input.scope.linkedServerId, created.job_id);
+  }
+  const progress = row ? toAdmImportJobProgress(row) : created;
+  await recordAdmFileAttempt(env, input.scope, {
+    name: filename,
+    path: input.file.path,
+    timestamp: extractAdmTimestampScore(filename),
+  }, {
+    status: "queued",
+    lineCount: lines.length,
+    rawKillLinesFound: lines.filter(hasRawPlayerKillLine).length,
+    parsedKillLinesFound: 0,
+    insertedKills: 0,
+    parserSkippedLines: 0,
+    lastLineProcessed: importedLineCount,
+    message: importedLineCount > 0
+      ? `Queued scheduled ADM tail import for ${filename}; ${lines.length - importedLineCount} new lines will be imported.`
+      : `Queued scheduled ADM chunk import for ${filename}.`,
+  });
+  if (row) {
+    await recordAdmImportJobProgressInSyncState(env, row, "adm_import_job_queued", importedLineCount > 0
+      ? `Queued scheduled ADM tail import for ${filename}; ${lines.length - importedLineCount} new lines will be imported.`
+      : `Queued scheduled ADM chunk import for ${filename}.`);
+  }
+  return {
+    status: importedLineCount > 0 ? "extended" : "created",
+    job: progress,
+    duplicateExistingJob: false,
+    importedLineCount,
+    lineCount: lines.length,
+    message: importedLineCount > 0
+      ? `Queued scheduled ADM tail import for ${filename}; ${lines.length - importedLineCount} new lines will be imported.`
+      : `Queued scheduled ADM chunk import for ${filename}.`,
+  };
+}
+
+async function updateScheduledAdmImportJobTailText(
+  env: Env,
+  row: AdmImportJobRow,
+  values: {
+    lines: string[];
+    chunkSize: number;
+    currentLine: number;
+    status: "queued";
+  },
+) {
+  const totalLines = values.lines.length;
+  const chunkSize = Math.max(1, Math.trunc(values.chunkSize));
+  const currentLine = clampCursorLine(values.currentLine, totalLines);
+  const totalChunks = Math.max(1, Math.ceil(Math.max(totalLines, 1) / chunkSize));
+  const chunksProcessed = currentLine >= totalLines && totalLines > 0
+    ? totalChunks
+    : Math.max(0, Math.ceil(currentLine / chunkSize));
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_import_jobs SET
+        status = ?,
+        adm_text = ?,
+        total_lines = ?,
+        current_line = ?,
+        chunk_size = ?,
+        total_chunks = ?,
+        chunks_processed = ?,
+        completed_at = NULL,
+        error_message = NULL,
+        failed_chunk_index = NULL,
+        updated_at = ?
+       WHERE id = ? AND server_id = ?`,
+    )
+    .bind(
+      values.status,
+      values.lines.join("\n"),
+      totalLines,
+      currentLine,
+      chunkSize,
+      totalChunks,
+      chunksProcessed,
+      new Date().toISOString(),
+      row.id,
+      row.server_id,
+    )
+    .run();
+}
+
+async function getImportedLineCountForAdmFile(env: Env, scope: AdmSyncContext, filename: string) {
+  const db = requireDb(env);
+  const [fileState, syncState] = await Promise.all([
+    db
+      .prepare(
+        `SELECT line_count, last_line_processed, imported_line_count, cursor_line, status
+         FROM adm_sync_file_state
+         WHERE linked_server_id = ?
+           AND source_service_id = ?
+           AND adm_file = ?
+         LIMIT 1`,
+      )
+      .bind(scope.linkedServerId, scope.nitradoServiceId, filename)
+      .first<{
+        line_count: number | null;
+        last_line_processed: number | null;
+        imported_line_count?: number | null;
+        cursor_line?: number | null;
+        status: string | null;
+      }>()
+      .catch(() => null),
+    getSyncState(env, scope.linkedServerId).catch(() => null),
+  ]);
+  const fromFileState = Math.max(
+    Number(fileState?.last_line_processed ?? 0),
+    Number(fileState?.imported_line_count ?? 0),
+    Number(fileState?.cursor_line ?? 0),
+    isCompletedAdmFileStateStatus(fileState?.status) ? Number(fileState?.line_count ?? 0) : 0,
+  );
+  const fromSyncState = normalizeAdmFilenameKey(syncState?.last_processed_file) === normalizeAdmFilenameKey(filename)
+    ? Number(syncState?.last_processed_line ?? 0)
+    : 0;
+  return Math.max(0, fromFileState, fromSyncState);
+}
+
+function isCompletedAdmFileStateStatus(status: string | null | undefined) {
+  return ["processed", "caught_up_waiting_for_growth", "completed_empty", "completed_closed"].includes(String(status ?? "").toLowerCase());
+}
+
 async function getActiveAdmImportJob(env: Env, linkedServerId: string) {
   return await requireDb(env)
     .prepare(
@@ -4438,6 +4843,23 @@ async function recoverStaleAdmImportJobs(env: Env, source: string) {
          AND COALESCE(updated_at, created_at) < ?`,
     )
     .bind(now, source, cutoff)
+    .run();
+}
+
+async function cleanupExpiredAdmImportJobText(env: Env, source: string) {
+  const cutoff = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_import_jobs
+       SET adm_text = '',
+           updated_at = ?
+       WHERE source = ?
+         AND status IN ('completed', 'completed_with_warnings', 'cancelled')
+         AND completed_at IS NOT NULL
+         AND completed_at < ?
+         AND adm_text != ''`,
+    )
+    .bind(new Date().toISOString(), source, cutoff)
     .run();
 }
 
@@ -5775,6 +6197,31 @@ export async function runAdmWorkerSyncTick(
     await resetAdmReadFailureCounter(env, selected.id);
     const existingJob = await getAdmImportJobForFilename(env, selected.id, directFileName);
     if (existingJob) {
+      const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
+        scope,
+        file: {
+          name: directFileName,
+          path: discoveredFile.path,
+          lines,
+          readableRouteUsed: read.readMethod === "seek" ? "file_server_seek" : "file_server_download_fallback",
+        },
+        chunkSize: budget.maxImportLinesPerInvocation,
+        allowNewJob: true,
+      });
+      if (tailJob.status === "extended" || tailJob.status === "created" || tailJob.status === "active") {
+        await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id);
+        return admWorkerResult({
+          metadata,
+          selectedLinkedServerId: selected.id,
+          selectedAdmFile: directFileName,
+          selectedAdmPath: discoveredFile.path,
+          pendingJobs,
+          succeeded: tailJob.status === "active" ? 0 : 1,
+          newAdmReadableCount: tailJob.status === "active" ? 0 : 1,
+          processingProcessed: 1,
+          message: tailJob.message,
+        });
+      }
       const progress = toAdmImportJobProgress(existingJob);
       const completed = isCompletedAdmImportJobStatus(progress.status);
       if (completed || existingJob.source !== SCHEDULED_ADM_IMPORT_SOURCE || !existingJob.adm_text) {
@@ -6504,6 +6951,15 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["last_response_excerpt", "TEXT"],
     ["last_diagnostic_at", "TEXT"],
     ["next_retry_at", "TEXT"],
+    ["file_timestamp", "TEXT"],
+    ["latest_known_line_count", "INTEGER DEFAULT 0"],
+    ["imported_line_count", "INTEGER DEFAULT 0"],
+    ["cursor_line", "INTEGER DEFAULT 0"],
+    ["last_seen_at", "TEXT"],
+    ["last_read_at", "TEXT"],
+    ["last_growth_at", "TEXT"],
+    ["completed_at", "TEXT"],
+    ["closed_at", "TEXT"],
   ]);
   await ensureMissingColumns(db, "adm_raw_events", [
     ["source_service_id", "TEXT"],
@@ -6746,7 +7202,7 @@ async function recordAdmFileAttempt(
   context: AdmSyncContext,
   file: DiscoveredAdmFileForSync,
   values: {
-    status: "discovered" | "unreadable" | "queued" | "failed_unreadable" | "parser_error" | "write_error" | "processed" | "partial";
+    status: "discovered" | "unreadable" | "queued" | "failed_unreadable" | "parser_error" | "write_error" | "processed" | "partial" | "caught_up_waiting_for_growth" | "completed_empty" | "completed_closed";
     lineCount: number;
     rawKillLinesFound: number;
     parsedKillLinesFound: number;
@@ -6773,6 +7229,11 @@ async function recordAdmFileAttempt(
     : null;
   const diagnostic = values.diagnostic
     ?? (values.status === "unreadable" ? await getLatestNitradoFileReadAttemptForState(db, context, file.name).catch(() => null) : null);
+  const fileTimestamp = timestampIso(file.timestamp ?? extractAdmTimestampScore(file.name));
+  const importedLineCount = Math.max(0, Math.trunc(Number(values.lastLineProcessed ?? (values.status === "processed" || values.status === "completed_empty" || values.status === "completed_closed" ? values.lineCount : 0))));
+  const readAt = ["queued", "processed", "partial", "caught_up_waiting_for_growth", "completed_empty", "completed_closed"].includes(values.status) ? now : null;
+  const completedAt = ["processed", "completed_empty", "completed_closed"].includes(values.status) ? now : null;
+  const closedAt = ["completed_empty", "completed_closed"].includes(values.status) ? now : null;
   await db
     .prepare(
       `INSERT INTO adm_sync_file_state (
@@ -6781,13 +7242,15 @@ async function recordAdmFileAttempt(
         last_line_processed, raw_kill_lines_found, parsed_kill_lines_found,
         inserted_kills, parser_skipped_lines, retry_count, last_error,
         last_http_status, last_http_status_text, last_endpoint_kind, last_method,
-        last_response_excerpt, last_diagnostic_at, next_retry_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        last_response_excerpt, last_diagnostic_at, next_retry_at,
+        file_timestamp, latest_known_line_count, imported_line_count, cursor_line,
+        last_seen_at, last_read_at, last_growth_at, completed_at, closed_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(linked_server_id, source_service_id, adm_file) DO UPDATE SET
         adm_path = COALESCE(excluded.adm_path, adm_sync_file_state.adm_path),
         status = CASE
           WHEN adm_sync_file_state.ignored_at IS NOT NULL THEN adm_sync_file_state.status
-          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'processed', 'partial', 'failed_unreadable') THEN adm_sync_file_state.status
+          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'processed', 'partial', 'failed_unreadable', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed') THEN adm_sync_file_state.status
           ELSE excluded.status
         END,
         last_checked_at = excluded.last_checked_at,
@@ -6795,6 +7258,19 @@ async function recordAdmFileAttempt(
         processed_at = COALESCE(excluded.processed_at, adm_sync_file_state.processed_at),
         line_count = MAX(COALESCE(adm_sync_file_state.line_count, 0), excluded.line_count),
         last_line_processed = MAX(COALESCE(adm_sync_file_state.last_line_processed, 0), excluded.last_line_processed),
+        file_timestamp = COALESCE(excluded.file_timestamp, adm_sync_file_state.file_timestamp),
+        latest_known_line_count = MAX(COALESCE(adm_sync_file_state.latest_known_line_count, 0), excluded.latest_known_line_count),
+        imported_line_count = MAX(COALESCE(adm_sync_file_state.imported_line_count, 0), excluded.imported_line_count),
+        cursor_line = MAX(COALESCE(adm_sync_file_state.cursor_line, 0), excluded.cursor_line),
+        last_seen_at = excluded.last_seen_at,
+        last_read_at = COALESCE(excluded.last_read_at, adm_sync_file_state.last_read_at),
+        last_growth_at = CASE
+          WHEN excluded.latest_known_line_count > COALESCE(adm_sync_file_state.latest_known_line_count, adm_sync_file_state.line_count, 0)
+          THEN excluded.last_growth_at
+          ELSE adm_sync_file_state.last_growth_at
+        END,
+        completed_at = COALESCE(excluded.completed_at, adm_sync_file_state.completed_at),
+        closed_at = COALESCE(excluded.closed_at, adm_sync_file_state.closed_at),
         raw_kill_lines_found = excluded.raw_kill_lines_found,
         parsed_kill_lines_found = excluded.parsed_kill_lines_found,
         inserted_kills = excluded.inserted_kills,
@@ -6805,7 +7281,7 @@ async function recordAdmFileAttempt(
         END,
         next_retry_at = CASE
           WHEN excluded.status = 'unreadable' THEN excluded.next_retry_at
-          WHEN excluded.status IN ('queued', 'processed', 'partial', 'failed_unreadable') THEN NULL
+          WHEN excluded.status IN ('queued', 'processed', 'partial', 'failed_unreadable', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed') THEN NULL
           ELSE adm_sync_file_state.next_retry_at
         END,
         last_error = CASE
@@ -6846,6 +7322,15 @@ async function recordAdmFileAttempt(
       diagnostic?.responseExcerpt ?? null,
       diagnostic ? now : null,
       nextRetryAt,
+      fileTimestamp,
+      values.lineCount,
+      importedLineCount,
+      importedLineCount,
+      now,
+      readAt,
+      now,
+      completedAt,
+      closedAt,
       now,
     )
     .run();
@@ -8436,38 +8921,13 @@ async function retryUnreadableAdmFileStatesForServer(
     if (read.file?.lines.length) {
       readableFiles.push(read.file);
       await resetAdmReadFailureCounter(env, scope.linkedServerId);
-      const report = buildAdmImportDebugReport(read.file.lines, {
-        admFileName: read.file.name,
-        cursorStart: 0,
-        cursorEnd: read.file.lines.length,
-      });
-      const created = await createAdmImportJobForServer(env, {
-        linkedServerId: scope.linkedServerId,
-        filename: read.file.name,
-        admText: read.file.lines.join("\n"),
-        source: SCHEDULED_ADM_IMPORT_SOURCE,
+      const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
+        scope,
+        file: read.file,
         chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+        allowNewJob: true,
       });
-      const jobRow = await getAdmImportJob(env, scope.linkedServerId, created.job_id);
-      if (jobRow) {
-        await recordAdmImportJobProgressInSyncState(env, jobRow, "adm_backfill_queued", `Re-read unreadable ADM file ${read.file.name} and queued it for scheduled import.`);
-      }
-      await recordAdmFileAttempt(env, scope, {
-        name: read.file.name,
-        path: read.file.path,
-        timestamp: extractAdmTimestampScore(read.file.name),
-      }, {
-        status: "queued",
-        lineCount: read.file.lines.length,
-        rawKillLinesFound: report.rawKilledByLinesFound,
-        parsedKillLinesFound: report.parsedPvpKills,
-        insertedKills: 0,
-        parserSkippedLines: report.skippedDeadHitLines,
-        lastLineProcessed: 0,
-        message: null,
-        diagnostic: read.diagnostic,
-      });
-      createdJobs.push(jobRow ? toAdmImportJobProgress(jobRow) : created);
+      if (tailJob.job) createdJobs.push(tailJob.job);
       continue;
     }
 
@@ -8899,6 +9359,15 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
     last_response_excerpt TEXT,
     last_diagnostic_at TEXT,
     next_retry_at TEXT,
+    file_timestamp TEXT,
+    latest_known_line_count INTEGER DEFAULT 0,
+    imported_line_count INTEGER DEFAULT 0,
+    cursor_line INTEGER DEFAULT 0,
+    last_seen_at TEXT,
+    last_read_at TEXT,
+    last_growth_at TEXT,
+    completed_at TEXT,
+    closed_at TEXT,
     ignored_at TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`,
