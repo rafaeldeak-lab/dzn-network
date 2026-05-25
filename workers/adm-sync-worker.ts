@@ -37,6 +37,16 @@ const CRON_ENDPOINTS: CronEndpoint[] = [
   },
 ];
 
+type AdmWorkerHeartbeatFinish = {
+  status: "success" | "recoverable" | "partial_budget_reached" | "fatal_error";
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  selectedServiceId?: string | null;
+  selectedServerId?: string | null;
+  action: string;
+  recoverable: boolean;
+};
+
 export async function scheduled(
   event: WorkerScheduledController,
   env: Env,
@@ -70,27 +80,52 @@ export async function fetch(request: Request, env: Env, _ctx?: WorkerExecutionCo
 }
 
 export async function runAutomationCron(env: Env, options: { cron: string | null; scheduledTime: number }) {
+  await safeWriteAdmWorkerHeartbeatStarted(env).catch(() => null);
   const secret = getCronSecret(env);
   if (!secret) {
     console.warn("DZN AUTOMATION CRON SECRET MISSING");
+    await safeWriteAdmWorkerHeartbeatFinished(env, {
+      status: "fatal_error",
+      errorCode: "DZN_CRON_SECRET_MISSING",
+      errorMessage: "DZN cron secret is not configured for ADM Worker tick.",
+      action: "scheduled_tick_secret_missing",
+      recoverable: false,
+    }).catch(() => null);
     return { ok: false, error: "DZN_CRON_SECRET is not configured", results: [] };
   }
 
-  const baseUrl = appBaseUrl(env);
-  const results = [];
-  results.push(await runDirectAdmSync(env, options));
-  await runHourlyPostAdmMaintenance(env).catch((error) => {
-    console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
-      message: error instanceof Error ? error.message : "Unknown maintenance error",
+  try {
+    const baseUrl = appBaseUrl(env);
+    const results = [];
+    results.push(await runDirectAdmSync(env, options));
+    await runHourlyPostAdmMaintenance(env).catch((error) => {
+      console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
+        message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "Unknown maintenance error",
+      });
     });
-  });
-  results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));
+    results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));
 
-  console.log("DZN CLOUDFLARE WORKER CRON TICK COMPLETE", {
-    ok: results.every((result) => result.ok),
-    endpoints: results.map((result) => ({ label: result.label, status: result.status, ok: result.ok })),
-  });
-  return { ok: results.every((result) => result.ok), results };
+    const heartbeat = classifyHeartbeatFromResults(results);
+    await safeWriteAdmWorkerHeartbeatFinished(env, heartbeat).catch(() => null);
+
+    console.log("DZN CLOUDFLARE WORKER CRON TICK COMPLETE", {
+      ok: results.every((result) => result.ok),
+      endpoints: results.map((result) => ({ label: result.label, status: result.status, ok: result.ok })),
+      heartbeatStatus: heartbeat.status,
+      heartbeatErrorCode: heartbeat.errorCode ?? null,
+    });
+    return { ok: results.every((result) => result.ok), results };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ADM Worker tick failed";
+    await safeWriteAdmWorkerHeartbeatFinished(env, {
+      status: "fatal_error",
+      errorCode: "ADM_WORKER_TICK_FAILED",
+      errorMessage: message,
+      action: "scheduled_tick_failed",
+      recoverable: false,
+    }).catch(() => null);
+    throw error;
+  }
 }
 
 async function runDirectAdmSync(env: Env, options: { cron: string | null; scheduledTime: number }) {
@@ -135,6 +170,173 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
       },
     };
   }
+}
+
+async function safeWriteAdmWorkerHeartbeatStarted(env: Env) {
+  const now = new Date().toISOString();
+  try {
+    await requireDb(env)
+      .prepare(
+        `INSERT INTO adm_worker_heartbeat (
+           id, worker_name, last_started_at, last_status, last_action, last_recoverable, run_count, updated_at
+         )
+         VALUES (?, ?, ?, 'running', 'scheduled_tick_started', 0, 1, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           worker_name = excluded.worker_name,
+           last_started_at = excluded.last_started_at,
+           last_status = excluded.last_status,
+           last_action = excluded.last_action,
+           last_recoverable = 0,
+           run_count = COALESCE(adm_worker_heartbeat.run_count, 0) + 1,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(WORKER_NAME, WORKER_NAME, now, now)
+      .run();
+  } catch (error) {
+    console.warn("DZN ADM WORKER HEARTBEAT START SKIPPED", {
+      message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "heartbeat start failed",
+    });
+  }
+}
+
+async function safeWriteAdmWorkerHeartbeatFinished(env: Env, heartbeat: AdmWorkerHeartbeatFinish) {
+  const now = new Date().toISOString();
+  try {
+    await requireDb(env)
+      .prepare(
+        `INSERT INTO adm_worker_heartbeat (
+           id, worker_name, last_finished_at, last_status, last_error_code, last_error_message,
+           last_selected_service_id, last_selected_server_id, last_action, last_recoverable,
+           run_count, updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           worker_name = excluded.worker_name,
+           last_finished_at = excluded.last_finished_at,
+           last_status = excluded.last_status,
+           last_error_code = excluded.last_error_code,
+           last_error_message = excluded.last_error_message,
+           last_selected_service_id = excluded.last_selected_service_id,
+           last_selected_server_id = excluded.last_selected_server_id,
+           last_action = excluded.last_action,
+           last_recoverable = excluded.last_recoverable,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        WORKER_NAME,
+        WORKER_NAME,
+        now,
+        heartbeat.status,
+        heartbeat.errorCode ?? null,
+        sanitizeHeartbeatMessage(heartbeat.errorMessage),
+        heartbeat.selectedServiceId ?? null,
+        heartbeat.selectedServerId ?? null,
+        heartbeat.action,
+        heartbeat.recoverable ? 1 : 0,
+        now,
+      )
+      .run();
+  } catch (error) {
+    console.warn("DZN ADM WORKER HEARTBEAT FINISH SKIPPED", {
+      message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "heartbeat finish failed",
+    });
+  }
+}
+
+function classifyHeartbeatFromResults(results: Array<{ label: string; status: number; ok: boolean; body: unknown }>): AdmWorkerHeartbeatFinish {
+  const adm = results.find((result) => result.label === "adm") ?? null;
+  const body = isRecord(adm?.body) ? adm.body : {};
+  const message = sanitizeHeartbeatMessage(body.message ?? body.error ?? null);
+  const selectedServerId = typeof body.selected_linked_server_id === "string" ? body.selected_linked_server_id : null;
+  const selectedServiceId = typeof body.selected_service_id === "string" ? body.selected_service_id : null;
+  const errorCode = classifyHeartbeatErrorCode(body, message);
+  const recoverable = isRecoverableHeartbeatError(errorCode)
+    || Number(body.unavailable ?? 0) > 0
+    || Number(body.latest_adm_unreadable_count ?? 0) > 0
+    || Number(body.skipped_unreadable ?? 0) > 0;
+
+  if (!adm || adm.status >= 500 || (adm.ok === false && !recoverable)) {
+    return {
+      status: "fatal_error",
+      errorCode: errorCode ?? "ADM_WORKER_TICK_FAILED",
+      errorMessage: message || "ADM Worker tick failed before completing automatic sync.",
+      selectedServerId,
+      selectedServiceId,
+      action: "scheduled_tick_failed",
+      recoverable: false,
+    };
+  }
+
+  if (errorCode === "WORKER_SUBREQUEST_LIMIT") {
+    return {
+      status: "partial_budget_reached",
+      errorCode,
+      errorMessage: message || "Cloudflare Worker budget was reached; DZN will continue on the next tick.",
+      selectedServerId,
+      selectedServiceId,
+      action: "scheduled_tick_partial_budget",
+      recoverable: true,
+    };
+  }
+
+  if (recoverable) {
+    return {
+      status: "recoverable",
+      errorCode: errorCode ?? "latest_adm_unreadable",
+      errorMessage: message || "ADM Worker tick completed with a recoverable ADM read state.",
+      selectedServerId,
+      selectedServiceId,
+      action: "scheduled_tick_recoverable",
+      recoverable: true,
+    };
+  }
+
+  return {
+    status: "success",
+    errorCode: null,
+    errorMessage: null,
+    selectedServerId,
+    selectedServiceId,
+    action: "scheduled_tick_finished",
+    recoverable: false,
+  };
+}
+
+function classifyHeartbeatErrorCode(body: Record<string, unknown>, message: string | null) {
+  const combined = `${body.last_error_code ?? ""} ${body.errorCode ?? ""} ${body.status ?? ""} ${message ?? ""}`;
+  if (/WORKER_SUBREQUEST_LIMIT|subrequest/i.test(combined)) return "WORKER_SUBREQUEST_LIMIT";
+  if (/NITRADO_RATE_LIMITED|HTTP\s*429|rate limit/i.test(combined)) return "NITRADO_RATE_LIMITED";
+  if (/NITRADO_UPSTREAM_DOWN|HTTP\s*50[0234]|upstream/i.test(combined)) return "NITRADO_UPSTREAM_DOWN";
+  if (/NITRADO_FILE_NOT_FOUND|FILE_MISSING_OR_ROTATED|HTTP\s*404/i.test(combined)) return "file_missing_or_rotated";
+  if (/latest_adm_unreadable|adm.*unreadable|not readable/i.test(combined)) return "latest_adm_unreadable";
+  if (/no_new_adm|backfill caught up|no due ADM/i.test(combined)) return "no_new_adm";
+  return null;
+}
+
+function isRecoverableHeartbeatError(errorCode: string | null) {
+  return [
+    "NITRADO_UPSTREAM_DOWN",
+    "NITRADO_RATE_LIMITED",
+    "WORKER_SUBREQUEST_LIMIT",
+    "file_missing_or_rotated",
+    "latest_adm_unreadable",
+    "no_new_adm",
+    "waiting_for_nitrado",
+    "partial_budget_reached",
+  ].includes(String(errorCode ?? ""));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sanitizeHeartbeatMessage(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/(token|access_token|signature|sig|secret|key)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 500);
 }
 
 async function runHourlyPostAdmMaintenance(env: Env) {

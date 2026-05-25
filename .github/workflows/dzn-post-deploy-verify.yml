@@ -26,6 +26,8 @@ jobs:
         continue-on-error: true
         env:
           DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: npm run autodev:production-smoke
       - name: ADM health snapshot
         id: adm

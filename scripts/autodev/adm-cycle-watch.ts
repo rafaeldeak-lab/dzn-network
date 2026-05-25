@@ -25,7 +25,16 @@ type AdmHealthSnapshot = {
   ok?: boolean;
   status?: string;
   summary?: { workerHeartbeatFresh?: boolean; fatalIssues?: number; recoverableIssues?: number };
-  worker?: { heartbeat?: { created_at?: string | null } | null };
+  worker?: {
+    heartbeat?: { created_at?: string | null } | null;
+    updatedAt?: string | null;
+    heartbeatAgeSeconds?: number | null;
+    heartbeatFresh?: boolean;
+    heartbeatState?: "fresh" | "warning" | "stale" | "missing";
+    lastStatus?: string | null;
+    lastErrorCode?: string | null;
+    lastRecoverable?: boolean;
+  };
   services?: AdmHealthService[];
   warnings?: string[];
   fatalErrors?: string[];
@@ -88,13 +97,25 @@ async function main() {
       break;
     }
     lastSnapshot = result.json;
-    const heartbeatAt = Date.parse(result.json.worker?.heartbeat?.created_at ?? "");
-    if (!Number.isFinite(heartbeatAt)) {
-      checks.push(warn("worker heartbeat", "No ADM Worker heartbeat found yet.", result.json.worker, "medium"));
-    } else if (Date.now() - heartbeatAt > 20 * 60 * 1000) {
+    if (result.json.worker?.lastStatus === "fatal_error" && result.json.worker.lastRecoverable !== true) {
+      checks.push(fail("worker heartbeat fatal", "ADM Worker heartbeat reports a fatal Worker status.", result.json.worker, "high"));
+      fatal = true;
+      break;
+    }
+
+    const heartbeatAgeSeconds = typeof result.json.worker?.heartbeatAgeSeconds === "number"
+      ? result.json.worker.heartbeatAgeSeconds
+      : heartbeatAgeSecondsFrom(result.json.worker?.updatedAt ?? result.json.worker?.heartbeat?.created_at ?? null);
+    if (heartbeatAgeSeconds === null || result.json.worker?.heartbeatState === "missing") {
+      checks.push(fail("worker heartbeat missing", "No ADM Worker heartbeat row was found.", result.json.worker, "high"));
+      fatal = true;
+      break;
+    } else if (heartbeatAgeSeconds > 15 * 60 || result.json.worker?.heartbeatState === "stale") {
       checks.push(fail("worker heartbeat stale", "ADM Worker heartbeat is stale beyond threshold.", result.json.worker, "high"));
       fatal = true;
       break;
+    } else if (heartbeatAgeSeconds > 10 * 60 || result.json.worker?.heartbeatState === "warning") {
+      checks.push(warn("worker heartbeat aging", "ADM Worker heartbeat is older than 10 minutes but not yet stale.", result.json.worker, "medium"));
     } else {
       checks.push(pass("worker heartbeat", "ADM Worker heartbeat is fresh.", result.json.worker));
     }
@@ -118,7 +139,7 @@ async function main() {
         checks.push(pass(
           `service ${service.serviceId} recoverable`,
           hasUpstreamReadBlock && hasRetryEvidence
-            ? "Recoverable: Nitrado upstream ADM read blocked; auto retry scheduled or tracked."
+            ? "ADM Worker heartbeat fresh. Current ADM state is recoverable: NITRADO_UPSTREAM_DOWN. Retry/backoff is active."
             : "Service is in a recoverable automatic ADM state.",
           service,
         ));
@@ -148,6 +169,12 @@ async function main() {
 function isStuckImportJob(updatedAt: string | null | undefined) {
   const time = Date.parse(String(updatedAt ?? ""));
   return Number.isFinite(time) && Date.now() - time > 30 * 60 * 1000;
+}
+
+function heartbeatAgeSecondsFrom(value: string | null) {
+  const time = Date.parse(String(value ?? ""));
+  if (!Number.isFinite(time)) return null;
+  return Math.max(0, Math.floor((Date.now() - time) / 1000));
 }
 
 main().catch((error) => {

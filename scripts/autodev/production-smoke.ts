@@ -1,7 +1,8 @@
-import { fail, loadConfig, makeReport, pass, writeReport, type AutoDevCheck } from "./lib";
+import { fail, loadConfig, makeReport, pass, skip, writeReport, type AutoDevCheck } from "./lib";
 
 const config = loadConfig();
 const baseUrl = (process.env.DZN_APP_URL || config.productionUrl).replace(/\/$/, "");
+const cronSecret = process.env.DZN_CRON_SECRET || process.env.SYNC_CRON_SECRET || "";
 
 async function request(path: string, init?: RequestInit) {
   const startedAt = Date.now();
@@ -47,12 +48,54 @@ async function main() {
       : fail(`POST ${path} unauthenticated`, `Protected endpoint must return 401, got ${result.status}.`, result, "high"));
   }
 
+  if (cronSecret) {
+    const result = await request("/api/autodev/adm-health", {
+      method: "POST",
+      body: "{}",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${cronSecret}`,
+        "x-dzn-cron-secret": cronSecret,
+        "x-sync-cron-secret": cronSecret,
+        "x-cron-secret": cronSecret,
+      },
+    });
+    const json = parseJson(result.body);
+    if (!result.ok || result.status >= 500) {
+      checks.push(fail("ADM health authenticated", `ADM health endpoint failed with ${result.status}.`, result, "high"));
+    } else if (result.status === 401 || result.status === 403) {
+      checks.push(fail("ADM health authenticated", `ADM health auth failed with ${result.status}.`, { status: result.status }, "high"));
+    } else if (result.status !== 200 || !json?.ok) {
+      checks.push(fail("ADM health authenticated", `Expected ADM health 200 JSON, got ${result.status}.`, result, "high"));
+    } else if (json.worker?.heartbeatState === "stale" || Number(json.worker?.heartbeatAgeSeconds ?? 0) > 15 * 60) {
+      checks.push(fail("ADM Worker heartbeat", "ADM Worker heartbeat is stale beyond threshold.", json.worker, "high"));
+    } else if (json.worker?.heartbeatState === "missing") {
+      checks.push(fail("ADM Worker heartbeat", "ADM Worker heartbeat is missing.", json.worker, "high"));
+    } else {
+      checks.push(pass("ADM health authenticated", "ADM health returned protected JSON; recoverable Nitrado states do not fail production smoke.", {
+        status: json.status,
+        worker: json.worker,
+        summary: json.summary,
+      }));
+    }
+  } else {
+    checks.push(skip("ADM health authenticated", "Cron secret not present; authenticated ADM health is covered by post-deploy ADM cycle watch."));
+  }
+
   const report = makeReport("production-smoke", checks, [
     "AutoDev production smoke is ADM-scoped; non-ADM route failures are reported but not auto-fixed.",
     "If a protected ADM endpoint returns 200 unauthenticated, stop and fix auth immediately.",
   ]);
   writeReport("production-smoke", report);
   if (!report.ok) process.exit(1);
+}
+
+function parseJson(value: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 main().catch((error) => {

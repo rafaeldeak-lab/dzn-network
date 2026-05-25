@@ -56,12 +56,37 @@ type DiagnosticRow = {
 };
 
 type WorkerHeartbeatRow = {
-  job_type?: string | null;
-  status?: string | null;
-  source?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  key?: string | null;
+  worker_name: string | null;
+  last_started_at: string | null;
+  last_finished_at: string | null;
+  last_status: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  last_selected_service_id: string | null;
+  last_selected_server_id: string | null;
+  last_action: string | null;
+  last_recoverable: number | null;
+  run_count: number | null;
+  updated_at: string | null;
+};
+
+type FormattedWorkerHeartbeat = {
+  name: string;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastStatus: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSelectedServiceId: string | null;
+  lastSelectedServerId: string | null;
+  lastAction: string | null;
+  lastRecoverable: boolean;
+  runCount: number;
+  updatedAt: string | null;
+  heartbeatAgeSeconds: number | null;
+  heartbeatFresh: boolean;
+  heartbeatState: "fresh" | "warning" | "stale" | "missing";
+  heartbeat: { created_at: string | null } | null;
 };
 
 const RECOVERABLE_STATUSES = new Set([
@@ -132,30 +157,26 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
      LIMIT 50`,
   ));
 
-  const [cronHeartbeat, workerCursor] = await Promise.all([
-    safeFirst<WorkerHeartbeatRow>(warnings, "ADM cron heartbeat", db.prepare(
-      `SELECT job_type, status, source, created_at
-       FROM automation_cron_runs
-       WHERE job_type = 'adm'
-       ORDER BY created_at DESC
-       LIMIT 1`,
-    )),
-    safeFirst<WorkerHeartbeatRow>(warnings, "ADM Worker cursor heartbeat", db.prepare(
-      `SELECT key, value AS source, updated_at
-       FROM adm_worker_state
-       WHERE key IN ('last_adm_linked_server_id', 'last_automation_lock_recovery_at')
-       ORDER BY updated_at DESC
-       LIMIT 1`,
-    )),
-  ]);
-
-  const workerHeartbeatAt = newestIso(cronHeartbeat?.created_at, workerCursor?.updated_at);
-  const workerHeartbeat = workerHeartbeatAt ? {
-    job_type: "adm",
-    status: cronHeartbeat?.status ?? "observed",
-    source: cronHeartbeat?.source ?? workerCursor?.key ?? "adm_worker_state",
-    created_at: workerHeartbeatAt,
-  } : null;
+  const heartbeatRow = await safeFirst<WorkerHeartbeatRow>(warnings, "ADM Worker heartbeat", db.prepare(
+    `SELECT worker_name, last_started_at, last_finished_at, last_status, last_error_code,
+            last_error_message, last_selected_service_id, last_selected_server_id,
+            last_action, last_recoverable, run_count, updated_at
+     FROM adm_worker_heartbeat
+     WHERE worker_name = 'dzn-adm-sync-worker'
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+  ));
+  const workerHeartbeat = formatWorkerHeartbeat(heartbeatRow);
+  if (!heartbeatRow) {
+    fatalErrors.push("ADM Worker heartbeat missing.");
+  } else if (workerHeartbeat.heartbeatState === "stale") {
+    fatalErrors.push(`ADM Worker heartbeat stale: last update was ${workerHeartbeat.heartbeatAgeSeconds ?? "unknown"} seconds ago.`);
+  } else if (workerHeartbeat.heartbeatState === "warning") {
+    warnings.push(`ADM Worker heartbeat is older than 10 minutes: ${workerHeartbeat.heartbeatAgeSeconds ?? "unknown"} seconds.`);
+  }
+  if (workerHeartbeat.lastStatus === "fatal_error") {
+    fatalErrors.push(`ADM Worker reported fatal_error${workerHeartbeat.lastErrorCode ? ` (${workerHeartbeat.lastErrorCode})` : ""}.`);
+  }
 
   const services = await Promise.all((servicesResult.results ?? []).map(async (service) => {
     const [fileState, importJob, lastSuccessfulJob, diagnostic, lastSyncRun, eventCount] = await Promise.all([
@@ -258,7 +279,11 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
   const recoverableIssues = services.filter((service) => service.recoverable && (service.latestClassifiedError || isRecoverableStatus(service.lastSyncStatus))).length;
   const fatalIssues = services.filter((service) => service.manualActionRequired).length + fatalErrors.length;
   const status = fatalIssues > 0
-    ? "needs_attention"
+    ? workerHeartbeat.heartbeatState === "missing"
+      ? "worker_heartbeat_missing"
+      : workerHeartbeat.heartbeatState === "stale"
+        ? "worker_heartbeat_stale"
+        : "needs_attention"
     : services.length === 0
       ? "awaiting_first_sync"
       : recoverableIssues > 0
@@ -274,15 +299,12 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
     status,
     summary: {
       servicesChecked: services.length,
-      workerHeartbeatFresh: isWorkerHeartbeatFresh(workerHeartbeatAt),
+      workerHeartbeatFresh: workerHeartbeat.heartbeatFresh,
       activeImportJobs,
       recoverableIssues,
       fatalIssues,
     },
-    worker: {
-      name: "dzn-adm-sync-worker",
-      heartbeat: workerHeartbeat,
-    },
+    worker: workerHeartbeat,
     services,
     warnings: warnings.map(sanitize),
     fatalErrors,
@@ -348,23 +370,43 @@ function isRecoverableError(value: string | null | undefined) {
   ].includes(text);
 }
 
-function isWorkerHeartbeatFresh(value: string | null) {
-  if (!value) return false;
-  const time = Date.parse(value);
-  return Number.isFinite(time) && Date.now() - time <= 20 * 60 * 1000;
+function formatWorkerHeartbeat(row: WorkerHeartbeatRow | null): FormattedWorkerHeartbeat {
+  const updatedAt = row?.updated_at ?? null;
+  const heartbeatAgeSeconds = heartbeatAgeSecondsFor(updatedAt);
+  const heartbeatState = !row
+    ? "missing"
+    : heartbeatAgeSeconds === null
+      ? "missing"
+      : heartbeatAgeSeconds <= 10 * 60
+        ? "fresh"
+        : heartbeatAgeSeconds <= 15 * 60
+          ? "warning"
+          : "stale";
+  return {
+    name: row?.worker_name ?? "dzn-adm-sync-worker",
+    lastStartedAt: row?.last_started_at ?? null,
+    lastFinishedAt: row?.last_finished_at ?? null,
+    lastStatus: row?.last_status ?? null,
+    lastErrorCode: sanitize(row?.last_error_code),
+    lastErrorMessage: sanitize(row?.last_error_message),
+    lastSelectedServiceId: row?.last_selected_service_id ?? null,
+    lastSelectedServerId: row?.last_selected_server_id ?? null,
+    lastAction: row?.last_action ?? null,
+    lastRecoverable: Number(row?.last_recoverable ?? 0) === 1,
+    runCount: Number(row?.run_count ?? 0),
+    updatedAt,
+    heartbeatAgeSeconds,
+    heartbeatFresh: heartbeatState === "fresh",
+    heartbeatState,
+    heartbeat: updatedAt ? { created_at: updatedAt } : null,
+  };
 }
 
-function newestIso(...values: Array<string | null | undefined>) {
-  let best: string | null = null;
-  let bestTime = Number.NEGATIVE_INFINITY;
-  for (const value of values) {
-    const time = Date.parse(String(value ?? ""));
-    if (Number.isFinite(time) && time > bestTime) {
-      bestTime = time;
-      best = String(value);
-    }
-  }
-  return best;
+function heartbeatAgeSecondsFor(value: string | null) {
+  if (!value) return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return null;
+  return Math.max(0, Math.floor((Date.now() - time) / 1000));
 }
 
 function emptySummary(workerHeartbeatFresh: boolean) {
