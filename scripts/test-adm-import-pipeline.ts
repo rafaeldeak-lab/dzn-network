@@ -151,6 +151,9 @@ async function main() {
   assert.match(admSyncSource, /pendingJobWorkCompleted/);
   assert.match(admSyncSource, /planAdmBackfillJobsForServer\(env, selected\.user_id, selected\.id/);
   assert.match(admSyncSource, /processImmediately: false/);
+  assert.match(admSyncSource, /prioritizedLiveCurrentJobKey/);
+  assert.match(admSyncSource, /currentFileMaxPathVariants/);
+  assert.match(admSyncSource, /trySeekWithoutRaw/);
   assert.match(admSyncSource, /lastProcessedFile = rowCompleted \? row\.filename : existingState\?\.last_processed_file/);
   assert.match(admSyncSource, /row\.source === SCHEDULED_ADM_IMPORT_SOURCE \? "scheduled_chunked_import" : "manual_chunked_import"/);
   assert.match(admSyncSource, /type = values\.source === SCHEDULED_ADM_IMPORT_SOURCE/);

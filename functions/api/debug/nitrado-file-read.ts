@@ -17,8 +17,11 @@ type DiagnosticAttemptRow = {
   status: string;
   http_status: number | null;
   http_status_text: string | null;
+  response_content_type: string | null;
   error_code: string | null;
   error_message: string | null;
+  response_excerpt: string | null;
+  request_url_redacted: string | null;
   duration_ms: number | null;
   created_at: string | null;
 };
@@ -53,7 +56,9 @@ export const onRequestPost: PagesFunction = async (context) => {
       options: {
         mode: "full",
         fullDownloadFallback: true,
-        maxPathVariants: 1,
+        maxPathVariants: 4,
+        currentFileMaxPathVariants: 4,
+        trySeekWithoutRaw: true,
         maxTokenizedAttempts: 1,
         maxChunkedReadChunks: 4,
         diagnostics: {
@@ -73,7 +78,8 @@ export const onRequestPost: PagesFunction = async (context) => {
     const attempts = await db
       .prepare(
         `SELECT method, endpoint_kind, attempt_number, status, http_status, http_status_text,
-                error_code, error_message, duration_ms, created_at
+                response_content_type, error_code, error_message, response_excerpt,
+                request_url_redacted, duration_ms, created_at
          FROM nitrado_file_read_attempts
          WHERE service_id = ?
            AND (file_name = ? OR file_path = ?)
@@ -138,8 +144,11 @@ function formatAttempt(row: DiagnosticAttemptRow) {
     status: row.status,
     httpStatus: row.http_status,
     httpStatusText: row.http_status_text,
+    responseContentType: row.response_content_type,
     errorCode: row.error_code,
     errorMessage: row.error_message,
+    responseExcerpt: row.response_excerpt,
+    requestUrlRedacted: row.request_url_redacted,
     durationMs: row.duration_ms,
     createdAt: row.created_at,
   };

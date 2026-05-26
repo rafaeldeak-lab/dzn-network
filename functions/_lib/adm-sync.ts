@@ -3198,6 +3198,8 @@ export async function planAdmBackfillJobsForServer(
     directPreferredFirst: true,
     maxListDirs: scheduledBudgeted ? 2 : 8,
     maxListSearches: scheduledBudgeted ? 1 : 3,
+    currentFileMaxPathVariants: scheduledBudgeted ? Math.max(4, admBudget.maxReadAttemptsPerFile) : 6,
+    trySeekWithoutRaw: true,
     budget: admBudget,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
@@ -3252,9 +3254,14 @@ export async function planAdmBackfillJobsForServer(
       maxJobsToCreate,
     });
     const exactReadLimit = Math.max(1, Math.min(3, Math.trunc(Number(maxJobsToCreate))));
+    const newestAvailableKey = normalizeAdmFilenameKey(newestAvailable?.name);
+    const prioritizedMissingFiles = [
+      ...preliminaryPlan.missingFiles.filter((filename) => normalizeAdmFilenameKey(filename) === newestAvailableKey),
+      ...preliminaryPlan.missingFiles.filter((filename) => normalizeAdmFilenameKey(filename) !== newestAvailableKey),
+    ];
     const exactReadNames = preliminaryPlan.activeJobFilename
       ? []
-      : preliminaryPlan.missingFiles
+      : prioritizedMissingFiles
         .filter((filename) => !readableByName.has(normalizeAdmFilenameKey(filename)))
         .slice(0, exactReadLimit);
     for (const filename of exactReadNames) {
@@ -3323,7 +3330,24 @@ export async function planAdmBackfillJobsForServer(
       createdJobs.push(tailJob.job);
     }
   }
+  const prioritizedLiveCurrentJobKey = normalizeAdmFilenameKey(newestAvailable?.name);
+  if (scheduledBudgeted && !plan.activeJobFilename && prioritizedLiveCurrentJobKey) {
+    const liveCurrent = readableByName.get(prioritizedLiveCurrentJobKey);
+    if (liveCurrent && plan.createFiles.some((filename) => normalizeAdmFilenameKey(filename) === prioritizedLiveCurrentJobKey)) {
+      const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, liveCurrent.name);
+      if (!existingJob) {
+        const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
+          scope,
+          file: liveCurrent,
+          chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
+          allowNewJob: true,
+        });
+        if (tailJob.job) createdJobs.push(tailJob.job);
+      }
+    }
+  }
   for (const filename of plan.createFiles) {
+    if (scheduledBudgeted && normalizeAdmFilenameKey(filename) === prioritizedLiveCurrentJobKey) continue;
     const readable = readableByName.get(normalizeAdmFilenameKey(filename));
     if (!readable?.lines.length) continue;
     const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, filename);
@@ -3459,6 +3483,8 @@ export async function createScheduledAdmImportJobForServer(
     directPreferredFirst: true,
     maxListDirs: 4,
     maxListSearches: 2,
+    currentFileMaxPathVariants: 6,
+    trySeekWithoutRaw: true,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
   const newestAvailable = selectNewestDiscoveredAdmFile(batch.candidates);
@@ -6108,7 +6134,9 @@ export async function runAdmWorkerSyncTick(
       options: {
         mode: "full",
         fullDownloadFallback: true,
-        maxPathVariants: explicitTargetFileName ? 2 : Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+        maxPathVariants: explicitTargetFileName ? 4 : Math.max(4, budget.maxReadAttemptsPerFile),
+        currentFileMaxPathVariants: explicitTargetFileName ? 4 : Math.max(4, budget.maxReadAttemptsPerFile),
+        trySeekWithoutRaw: true,
         maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
         maxChunkedReadChunks: budget.maxChunkedReadChunks,
         diagnostics: {
@@ -6407,7 +6435,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                    AND completed_or_active.filename = adm_sync_file_state.adm_file
                    AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
                )
-             ORDER BY adm_sync_file_state.adm_file ASC
+             ORDER BY adm_sync_file_state.adm_file DESC
              LIMIT 1
            ) AS target_adm_file,
            (
@@ -6429,7 +6457,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                    AND completed_or_active.filename = adm_sync_file_state.adm_file
                    AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
                )
-             ORDER BY adm_sync_file_state.adm_file ASC
+             ORDER BY adm_sync_file_state.adm_file DESC
              LIMIT 1
            ) AS target_adm_path,
            (
@@ -8687,6 +8715,8 @@ async function getReadableAdmFilesForLinkedServer(
     directPreferredFirst?: boolean;
     maxListDirs?: number;
     maxListSearches?: number;
+    currentFileMaxPathVariants?: number;
+    trySeekWithoutRaw?: boolean;
     budget?: AdmInvocationBudget;
   } = {},
 ): Promise<{ files: ReadableAdmFileForSync[]; candidates: DiscoveredAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; apiStatus: string; message: string; readErrors: string[]; readError: string | null }> {
@@ -8737,6 +8767,8 @@ async function getReadableAdmFilesForLinkedServer(
     directPreferredFirst: options.directPreferredFirst,
     maxListDirs: options.maxListDirs,
     maxListSearches: options.maxListSearches,
+    currentFileMaxPathVariants: options.currentFileMaxPathVariants,
+    trySeekWithoutRaw: options.trySeekWithoutRaw,
     maxPathVariants: options.readMode === "full" ? options.budget?.maxReadAttemptsPerFile ?? 4 : 1,
     maxTokenizedAttempts: options.budget?.maxTokenizedAttemptsPerFile ?? (options.readMode === "full" ? 2 : 1),
     maxChunkedReadChunks: options.budget?.maxChunkedReadChunks,
@@ -8786,7 +8818,9 @@ async function readSpecificAdmFileForBackfill(
       options: {
         mode: "full",
         fullDownloadFallback: true,
-        maxPathVariants: Math.min(1, budget.maxReadAttemptsPerFile),
+        maxPathVariants: Math.max(4, budget.maxReadAttemptsPerFile),
+        currentFileMaxPathVariants: Math.max(4, budget.maxReadAttemptsPerFile),
+        trySeekWithoutRaw: true,
         maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
         maxChunkedReadChunks: budget.maxChunkedReadChunks,
         diagnostics: {

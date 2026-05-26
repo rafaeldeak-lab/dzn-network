@@ -89,6 +89,14 @@ assert.deepEqual(admFilesChronological, [
   "DayZServer_PS4_x64_2026-05-17_17-01-42.ADM",
   "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
 ]);
+const may26AdmFiles = [
+  "DayZServer_PS4_x64_2026-05-26_04-02-17.ADM",
+  "DayZServer_PS4_x64_2026-05-26_05-01-51.ADM",
+  "DayZServer_PS4_x64_2026-05-26_06-01-40.ADM",
+  "DayZServer_PS4_x64_2026-05-26_07-02-39.ADM",
+];
+assert.equal(parseNitradoAdmFilenameTimestamp(may26AdmFiles[0]), Date.UTC(2026, 4, 26, 4, 2, 17));
+assert.deepEqual([...may26AdmFiles].sort(compareAdmFileNamesChronological), may26AdmFiles);
 assert.equal(compareAdmFileNamesChronological(
   "DayZServer_PS4_x64_2026-05-17_18-02-25.ADM",
   "DayZServer_PS4_x64_2026-05-17_17-01-42.ADM",
@@ -398,6 +406,52 @@ async function runNitradoReadFallbackTests() {
       seekFails: true,
       downloadSucceeds: true,
       admText,
+      acceptedDownloadPath: `games/gameserver-unit/noftp/dayzps/config/${latestAdm}`,
+    });
+    const noftpRead = await readAdmFileTextWithFallback({
+      token: "unit-token",
+      serviceId: "17428528",
+      fileName: latestAdm,
+      originalPath: admPath,
+      username: "gameserver-unit",
+      options: { mode: "full", maxPathVariants: 4 },
+    });
+    assert.equal(noftpRead.ok, true);
+    assert.equal(noftpRead.selectedPath, `games/gameserver-unit/noftp/dayzps/config/${latestAdm}`);
+
+    const noftpBatch = await fetchReadableNitradoAdmFiles("unit-token", "17428528", {
+      mode: "sample",
+      maxFiles: 1,
+      maxPathVariants: 1,
+      currentFileMaxPathVariants: 4,
+    });
+    assert.equal(noftpBatch.files.some((file) => file.name === latestAdm), true);
+    assert.equal(noftpBatch.files[0]?.path, `games/gameserver-unit/noftp/dayzps/config/${latestAdm}`);
+
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: [admPath],
+      seekFails: true,
+      seekSucceedsWithoutRaw: true,
+      downloadSucceeds: false,
+      admText,
+    });
+    const noRawSeekRead = await readAdmFileTextWithFallback({
+      token: "unit-token",
+      serviceId: "17428528",
+      fileName: latestAdm,
+      originalPath: admPath,
+      username: "gameserver-unit",
+      options: { mode: "full", trySeekWithoutRaw: true },
+    });
+    assert.equal(noRawSeekRead.ok, true);
+    assert.equal(noRawSeekRead.readMethod, "seek");
+    assert.equal(noRawSeekRead.readAttempts.some((attempt) => attempt.diagnosticMethod === "seek_no_raw" && attempt.sampleReadSucceeded), true);
+
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: [admPath],
+      seekFails: true,
+      downloadSucceeds: true,
+      admText,
       directDownloadText: true,
     });
     const directTextRead = await readAdmFileTextWithFallback({
@@ -443,8 +497,10 @@ async function runNitradoReadFallbackTests() {
 function mockNitradoFetch(options: {
   logFiles: string[];
   seekFails: boolean;
+  seekSucceedsWithoutRaw?: boolean;
   downloadSucceeds: boolean;
   admText: string;
+  acceptedSeekPath?: string;
   acceptedDownloadPath?: string;
   directDownloadText?: boolean;
 }): typeof fetch {
@@ -468,6 +524,16 @@ function mockNitradoFetch(options: {
       return jsonResponse({ data: { entries: [] } });
     }
     if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/seek")) {
+      const requestedPath = url.searchParams.get("file") ?? "";
+      const rawMode = url.searchParams.get("mode") === "raw";
+      const acceptedPath = options.acceptedSeekPath ?? null;
+      const pathAccepted = acceptedPath ? requestedPath === acceptedPath : requestedPath.includes("/");
+      if (options.seekSucceedsWithoutRaw && !rawMode && pathAccepted) {
+        return new Response(options.admText, {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        });
+      }
       if (options.seekFails) throw new Error("seek unavailable");
       return jsonResponse({ data: { url: "https://files.dzn.test/adm-download", token: "secret-download-token" } });
     }

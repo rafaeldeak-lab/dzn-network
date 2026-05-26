@@ -67,9 +67,12 @@ type AdmReadOptions = {
   maxListSearches?: number;
   seekProbe?: boolean;
   chunkedSeekFallback?: boolean;
+  currentFileMaxPathVariants?: number;
+  trySeekWithoutRaw?: boolean;
   seekOffsetBytes?: number;
   seekLengthBytes?: number;
-  seekDiagnosticMethod?: "seek" | "seek_probe" | "seek_chunk";
+  seekDiagnosticMethod?: "seek" | "seek_probe" | "seek_chunk" | "seek_no_raw";
+  seekRawMode?: boolean;
   recordSuccessDiagnostics?: boolean;
   maxTokenizedAttempts?: number;
   maxChunkedReadChunks?: number;
@@ -577,6 +580,7 @@ export async function fetchReadableNitradoAdmFiles(
       }, {
         ...options,
         fullDownloadFallback: options.fullDownloadFallback ?? true,
+        maxPathVariants: options.currentFileMaxPathVariants ?? options.maxPathVariants,
       });
       if (readable.file) directFiles.push(readable.file);
       else if (readable.error) directErrors.push(`${candidate.name}: ${readable.error}`);
@@ -663,8 +667,15 @@ export async function fetchReadableNitradoAdmFiles(
   const files: NitradoReadableAdmFile[] = [];
   const readErrors: string[] = [];
   for (const candidate of readCandidates) {
+    const candidateIsNewest = sameAdmEntry(candidate, newest);
     const readable = await readNitradoAdmCandidate(token, serviceId, candidate, gameSpecificLogs, {
       ...options,
+      maxPathVariants: candidateIsNewest
+        ? Math.max(
+            Math.trunc(Number(options.maxPathVariants ?? 1) || 1),
+            Math.trunc(Number(options.currentFileMaxPathVariants ?? options.maxPathVariants ?? 1) || 1),
+          )
+        : options.maxPathVariants,
       fullDownloadFallback: options.mode === "full" || sameAdmEntry(candidate, newest),
     });
     if (readable.file) files.push(readable.file);
@@ -1764,11 +1775,23 @@ function limitAdmReadPathVariants(variants: AdmPathVariant[], manualPath: string
   const labelPriority = new Map([
     ["dayzps-config", 0],
     ["original", manual.includes("/") ? 0 : 1],
-    ["slash-dayzps-config", 2],
-    ["config", 3],
-    ["filename", 4],
-    ["slash-config", 5],
-    ["slash-filename", 6],
+    ["slash-dayzps-config", 1],
+    ["games-noftp-dayzps-config", 2],
+    ["slash-games-noftp-dayzps-config", 3],
+    ["games-ftproot-dayzps-config", 4],
+    ["slash-games-ftproot-dayzps-config", 5],
+    ["config", 6],
+    ["filename", 7],
+    ["slash-config", 8],
+    ["slash-filename", 9],
+    ["games-noftp-config", 10],
+    ["slash-games-noftp-config", 11],
+    ["games-ftproot-config", 12],
+    ["slash-games-ftproot-config", 13],
+    ["games-noftp-filename", 14],
+    ["slash-games-noftp-filename", 15],
+    ["games-ftproot-filename", 16],
+    ["slash-games-ftproot-filename", 17],
   ]);
   return [...variants]
     .sort((a, b) => {
@@ -1954,6 +1977,39 @@ export async function readAdmFileTextWithFallback(params: {
       }
     } else if (seek.errorMessageSafe) {
       seekError = seek.errorMessageSafe;
+    }
+
+    if (params.options?.trySeekWithoutRaw === true) {
+      const noRawSeek = await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
+        ...params.options,
+        mode: mode === "full" ? "full" : "sample",
+        seekDiagnosticMethod: "seek_no_raw",
+        seekRawMode: false,
+        seekLengthBytes: mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES,
+      });
+      if (noRawSeek.sample && containsDayZAdminLogMarkers(noRawSeek.sample)) {
+        return {
+          ok: true,
+          text: noRawSeek.sample,
+          selectedPath: variant.path,
+          readMethod: "seek",
+          seekAttempted: true,
+          seekOk: true,
+          seekError: undefined,
+          downloadAttempted: false,
+          downloadOk: false,
+          downloadError: undefined,
+          attemptedPaths: [],
+          readAttempts,
+        };
+      }
+      if (noRawSeek.errorMessageSafe) {
+        seekError = noRawSeek.errorMessageSafe;
+      }
+      if (hasWorkerSubrequestLimitAttempt(readAttempts, variantAttemptStart)) {
+        seekError = "Cloudflare Worker subrequest limit reached during ADM seek without raw mode";
+        break;
+      }
     }
 
     if (params.options?.fullDownloadFallback === false) continue;
@@ -2169,10 +2225,11 @@ async function readNitradoFileViaSeek(
 ) {
   const pathVariantLabel = getPathVariantLabel(pathVariantLabels, file);
   const seekMethod = options.seekDiagnosticMethod ?? "seek";
+  const includeRawMode = options.seekRawMode !== false;
   const seekOffset = Math.max(0, Math.trunc(Number(options.seekOffsetBytes ?? 0) || 0));
   const defaultSeekLength = options.mode === "full" ? ADM_FULL_READ_BYTES : ADM_SAMPLE_BYTES;
   const seekLength = Math.max(1, Math.min(ADM_FULL_READ_BYTES, Math.trunc(Number(options.seekLengthBytes ?? defaultSeekLength) || defaultSeekLength)));
-  const requestUrlPathOnly = buildSeekRequestUrlPathOnly(serviceId, file, seekOffset, seekLength);
+  const requestUrlPathOnly = buildSeekRequestUrlPathOnly(serviceId, file, seekOffset, seekLength, includeRawMode);
   if (isUnsafeRemotePathForRequest(file)) {
     readAttempts?.push(createReadAttempt(file, "seek", "error", {
       diagnosticMethod: seekMethod,
@@ -3120,12 +3177,12 @@ function buildRequestUrlPathOnly(serviceId: string, method: "download" | "seek" 
   return `${base}?files[]=${encodedPath}`;
 }
 
-function buildSeekRequestUrlPathOnly(serviceId: string, path: string, offset: number, length: number) {
+function buildSeekRequestUrlPathOnly(serviceId: string, path: string, offset: number, length: number, includeRawMode = true) {
   const base = `/services/${encodeURIComponent(serviceId)}/gameservers/file_server/seek`;
   const encodedPath = encodeNitradoFileQueryPath(path);
   const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
   const safeLength = Math.max(1, Math.min(ADM_FULL_READ_BYTES, Math.trunc(Number(length) || ADM_SAMPLE_BYTES)));
-  return `${base}?file=${encodedPath}&offset=${safeOffset}&length=${safeLength}&mode=raw`;
+  return `${base}?file=${encodedPath}&offset=${safeOffset}&length=${safeLength}${includeRawMode ? "&mode=raw" : ""}`;
 }
 
 function buildSafeRequestUrlPathOnly(method: "download" | "seek" | "stat", redactedPath: string) {

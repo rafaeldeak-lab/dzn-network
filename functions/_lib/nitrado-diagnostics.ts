@@ -1,4 +1,11 @@
-export type NitradoFileReadMethod = "seek" | "seek_probe" | "seek_chunk" | "download" | "tokenized_download" | "tokenized_sample";
+export type NitradoFileReadMethod =
+  | "seek"
+  | "seek_probe"
+  | "seek_chunk"
+  | "seek_no_raw"
+  | "download"
+  | "tokenized_download"
+  | "tokenized_sample";
 export type NitradoFileReadEndpointKind = "nitrado_seek" | "nitrado_download" | "tokenized_url";
 export type NitradoFileReadStatus =
   | "success"
