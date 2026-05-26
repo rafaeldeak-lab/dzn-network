@@ -3198,7 +3198,7 @@ export async function planAdmBackfillJobsForServer(
     directPreferredFirst: true,
     maxListDirs: scheduledBudgeted ? 2 : 8,
     maxListSearches: scheduledBudgeted ? 1 : 3,
-    currentFileMaxPathVariants: scheduledBudgeted ? Math.max(4, admBudget.maxReadAttemptsPerFile) : 6,
+    currentFileMaxPathVariants: scheduledBudgeted ? Math.max(1, Math.min(2, admBudget.maxReadAttemptsPerFile)) : 6,
     trySeekWithoutRaw: true,
     budget: admBudget,
   });
@@ -6134,8 +6134,8 @@ export async function runAdmWorkerSyncTick(
       options: {
         mode: "full",
         fullDownloadFallback: true,
-        maxPathVariants: explicitTargetFileName ? 4 : Math.max(4, budget.maxReadAttemptsPerFile),
-        currentFileMaxPathVariants: explicitTargetFileName ? 4 : Math.max(4, budget.maxReadAttemptsPerFile),
+        maxPathVariants: explicitTargetFileName ? 2 : Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+        currentFileMaxPathVariants: explicitTargetFileName ? 2 : Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
         trySeekWithoutRaw: true,
         maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
         maxChunkedReadChunks: budget.maxChunkedReadChunks,
@@ -8818,8 +8818,8 @@ async function readSpecificAdmFileForBackfill(
       options: {
         mode: "full",
         fullDownloadFallback: true,
-        maxPathVariants: Math.max(4, budget.maxReadAttemptsPerFile),
-        currentFileMaxPathVariants: Math.max(4, budget.maxReadAttemptsPerFile),
+        maxPathVariants: Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+        currentFileMaxPathVariants: Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
         trySeekWithoutRaw: true,
         maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
         maxChunkedReadChunks: budget.maxChunkedReadChunks,
