@@ -1257,6 +1257,7 @@ export type DashboardHealthResult = {
     overallStatus: string;
     headline: string;
     message: string;
+    admSource?: string | null;
     latestAdmState: string;
     latestAdmFile: string | null;
     lastSuccessfulImportAt: string | null;
@@ -1305,6 +1306,7 @@ export type DashboardHealthResult = {
     latest_http_status?: number | null;
     latest_endpoint_kind?: string | null;
     latest_method?: string | null;
+    adm_source?: string | null;
     latest_completed_import?: {
       id: string | null;
       filename: string | null;

@@ -367,6 +367,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         overallStatus: ownerAutoSyncStatus(activeJobSnapshot, canonicalError, server, statsSnapshot),
         headline: ownerAutoSyncHeadline(activeJobSnapshot, canonicalError, server, statsSnapshot),
         message: ownerAutoSyncMessage(activeJobSnapshot, canonicalError, latestHttpStatus, admReadStatusMessage),
+        admSource: ownerAdmSource(latestReadTruth, activeJobSnapshot),
         latestAdmState: ownerLatestAdmState(activeJobSnapshot, canonicalError, server, latestCompletedImport),
         latestAdmFile: server.newest_available_adm_filename ?? server.latest_adm_file ?? latestReadTruth?.adm_file ?? null,
         lastSuccessfulImportAt: latestCompletedImport?.completed_at ?? latestCompletedImport?.updated_at ?? server.last_successful_sync_at ?? null,
@@ -419,6 +420,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         latest_http_status: latestHttpStatus,
         latest_endpoint_kind: latestReadTruth?.last_endpoint_kind ?? null,
         latest_method: latestReadTruth?.last_method ?? null,
+        adm_source: ownerAdmSource(latestReadTruth, activeJobSnapshot),
         latest_completed_import: latestCompletedImport ? {
           id: latestCompletedImport.id,
           filename: latestCompletedImport.filename,
@@ -676,6 +678,13 @@ function ownerAutoSyncMessage(activeJob: ReturnType<typeof normalizeJob> | null,
   if (code === "NITRADO_FORBIDDEN") return "Your token works for metadata but not file reads. Reconnect Nitrado or check service access.";
   if (code === "NITRADO_FILE_NOT_FOUND") return "The ADM file was listed but is no longer readable. DZN will continue with the next available ADM.";
   return "DZN automatically discovers, retries, and imports ADM data without manual action.";
+}
+
+function ownerAdmSource(issue: AdmFileReadIssueRow | null, activeJob: ReturnType<typeof normalizeJob> | null) {
+  if (issue?.last_endpoint_kind === "nitrado_admin_logs" || issue?.last_method === "admin_logs") return "Nitrado Admin Logs";
+  if (issue?.last_endpoint_kind === "nitrado_seek" || issue?.last_endpoint_kind === "nitrado_download" || issue?.last_endpoint_kind === "tokenized_url") return "Nitrado File Server fallback";
+  if (activeJob?.source === "scheduled_nitrado") return "Scheduled Nitrado ADM import";
+  return "Automatic ADM tracking";
 }
 
 function ownerLatestAdmState(activeJob: ReturnType<typeof normalizeJob> | null, code: string | null, server: ServerRow, latestCompletedImport: CompletedImportRow | null) {

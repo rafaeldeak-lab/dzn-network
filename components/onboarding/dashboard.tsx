@@ -6852,12 +6852,14 @@ function AutomationStatusGrid({
     ?? null;
   const nextDiscovery = dashboardHealth?.sync.next_adm_discovery_due_at ?? syncStatus?.next_adm_discovery_due_at ?? null;
   const nextProcessing = dashboardHealth?.sync.next_adm_processing_due_at ?? syncStatus?.next_adm_pull_due_at ?? null;
+  const admSource = dashboardHealth?.autoSync?.admSource ?? dashboardHealth?.sync.adm_source ?? formatAdmSourceLabel(syncStatus?.last_readable_route ?? null);
 
   return (
     <DashboardPanel className="p-4">
       <PanelHeader icon={<RefreshCw className="h-5 w-5" />} title="Automation Status" />
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <MiniInfo label="Sync Status" value={state.statusLabel} />
+        <MiniInfo label="ADM Source" value={admSource} />
         <MiniInfo label="Latest ADM State" value={state.latestAdmState || latestAdmFile || "Waiting for ADM"} />
         <MiniInfo label="Last Successful Import" value={lastImport ? formatDashboardDate(lastImport) : "Not synced yet"} />
         <MiniInfo label="Last Attempted Read" value={lastAttempt ? formatDashboardDate(lastAttempt) : "Not checked yet"} />
@@ -6866,6 +6868,13 @@ function AutomationStatusGrid({
       </div>
     </DashboardPanel>
   );
+}
+
+function formatAdmSourceLabel(value: string | null) {
+  if (/admin_logs/i.test(String(value ?? ""))) return "Nitrado Admin Logs";
+  if (/file_server|download|seek|tokenized/i.test(String(value ?? ""))) return "Nitrado File Server fallback";
+  if (/scheduled/i.test(String(value ?? ""))) return "Scheduled Nitrado ADM import";
+  return "Automatic ADM tracking";
 }
 
 function ImportantAutoHealth({
