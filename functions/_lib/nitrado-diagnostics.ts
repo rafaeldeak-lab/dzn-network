@@ -1,4 +1,5 @@
 export type NitradoFileReadMethod =
+  | "admin_logs"
   | "seek"
   | "seek_probe"
   | "seek_chunk"
@@ -6,7 +7,7 @@ export type NitradoFileReadMethod =
   | "download"
   | "tokenized_download"
   | "tokenized_sample";
-export type NitradoFileReadEndpointKind = "nitrado_seek" | "nitrado_download" | "tokenized_url";
+export type NitradoFileReadEndpointKind = "nitrado_admin_logs" | "nitrado_seek" | "nitrado_download" | "tokenized_url";
 export type NitradoFileReadStatus =
   | "success"
   | "non_ok_response"
@@ -202,6 +203,8 @@ export function humanNitradoReadError(values: {
 }) {
   const method = values.method === "seek"
     ? "Nitrado seek"
+    : values.method === "admin_logs"
+      ? "Nitrado admin logs"
     : values.method === "seek_probe"
       ? "Nitrado seek probe"
       : values.method === "seek_chunk"

@@ -863,7 +863,7 @@ export async function runAdmSync(
     previousLatestAdmFile: existingState?.latest_adm_file ?? null,
   });
   await recordDiscoveredAdmFiles(env, initialScope, discoveredAdmFiles);
-  if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath) {
+  if ((admLog?.admFileExists || readable.lines.length) && latestAdmPath && !isAdminLogsCurrentAdmPath(latestAdmPath)) {
     await saveServerAdmPath(env, initialScope.linkedServerId, latestAdmPath.replace(/^\/+/, ""));
   }
   const scope = withAdmFile(initialScope, latestAdmFile);
@@ -3206,7 +3206,7 @@ export async function planAdmBackfillJobsForServer(
 
   const newestAvailable = selectNewestDiscoveredAdmFile(batch.candidates);
   const newestReadable = selectNewestReadableAdmFile(batch.files);
-  if (newestAvailable?.path) {
+  if (newestAvailable?.path && !isAdminLogsCurrentAdmPath(newestAvailable.path)) {
     await saveServerAdmPath(env, scope.linkedServerId, newestAvailable.path.replace(/^\/+/, ""));
   }
 
@@ -3216,11 +3216,18 @@ export async function planAdmBackfillJobsForServer(
   if (readableFiles.length > 0) {
     await resetAdmReadFailureCounter(env, scope.linkedServerId);
   }
-  const retryPromotion = await retryUnreadableAdmFileStatesForServer(env, linkedServer, scope, {
-    handledFilenames,
-    limit: scheduledBudgeted ? admBudget.maxUnreadableRetriesPerInvocation : Math.min(MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN, admBudget.maxUnreadableRetriesPerInvocation),
-    budget: admBudget,
-  });
+  const hasAdminLogsReadable = readableFiles.some((file) => file.readableRouteUsed === "nitrado_admin_logs");
+  const retryPromotion = hasAdminLogsReadable
+    ? {
+        createdJobs: [] as AdmImportJobProgressResult[],
+        readableFiles: [] as NitradoReadableAdmFile[],
+        readErrorsByFilename: new Map<string, string | null>(),
+      }
+    : await retryUnreadableAdmFileStatesForServer(env, linkedServer, scope, {
+        handledFilenames,
+        limit: scheduledBudgeted ? admBudget.maxUnreadableRetriesPerInvocation : Math.min(MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN, admBudget.maxUnreadableRetriesPerInvocation),
+        budget: admBudget,
+      });
   readableFiles.push(...retryPromotion.readableFiles);
   const readErrorByName = new Map<string, string | null>();
   const readDiagnosticByName = new Map<string, NonNullable<ReturnType<typeof latestAdmFileReadDiagnostic>>>();
@@ -3499,7 +3506,7 @@ export async function createScheduledAdmImportJobForServer(
     : null;
   const now = new Date().toISOString();
 
-  if (newestAvailable?.path) {
+  if (newestAvailable?.path && !isAdminLogsCurrentAdmPath(newestAvailable.path)) {
     await saveServerAdmPath(env, scope.linkedServerId, newestAvailable.path.replace(/^\/+/, ""));
   }
 
@@ -9132,6 +9139,10 @@ function mockAdmLines() {
 
 function fileNameFromPath(path: string | null) {
   return path ? path.split("/").filter(Boolean).at(-1) ?? null : null;
+}
+
+function isAdminLogsCurrentAdmPath(path: string | null | undefined) {
+  return /^admin_logs\/current\//i.test(String(path ?? "").replace(/^\/+/, ""));
 }
 
 async function stableSyncId(prefix: string, linkedServerId: string, admFile: string | null, lineNumber: number, suffix = "") {

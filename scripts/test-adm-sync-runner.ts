@@ -17,6 +17,7 @@ import {
   fetchReadableNitradoAdmFiles,
   parseNitradoAdmFilenameTimestamp,
   readAdmFileTextWithFallback,
+  readNitradoAdminLogs,
 } from "../functions/_lib/nitrado";
 import { handleAdmSyncRun, isCronAuthorized, onRequestGet, onRequestOptions } from "../functions/api/sync/adm/run";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -241,10 +242,7 @@ assert.equal(dashboardUi.includes("Attempted File"), true);
 assert.equal(dashboardUi.includes("HTTP Status"), true);
 assert.equal(dashboardUi.includes("ADM file path must be the filename or dayzps/config/<filename>."), true);
 
-Promise.all([
-  runEndpointTests(),
-  runNitradoReadFallbackTests(),
-])
+runAdmSyncRunnerTests()
   .then(() => {
     console.log("ADM sync runner tests passed.");
   })
@@ -252,6 +250,12 @@ Promise.all([
     console.error(error);
     process.exit(1);
   });
+
+async function runAdmSyncRunnerTests() {
+  await runEndpointTests();
+  await runNitradoAdminLogsTests();
+  await runNitradoReadFallbackTests();
+}
 
 async function runEndpointTests() {
   const scheduledResponse = await handleAdmSyncRun(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
@@ -319,6 +323,72 @@ function makeContext(request: Request, testEnv: Env): PagesContext {
     next: async () => new Response(null, { status: 404 }),
     data: {},
   };
+}
+
+async function runNitradoAdminLogsTests() {
+  const may26Text = [
+    "******************************************************************************",
+    "AdminLog started on 2026-05-26 at 07:02:39",
+    "07:03:01 | Player \"Miguel_gls15\" (id=N0EdVAsEZ49dRUtvQnfNtSMGGd6fMWIkGMFfxszjsjM= pos=<6435.7, 8100.1, 333.0>) is connecting",
+    "07:03:02 | Player \"Miguel_gls15\" (id=N0EdVAsEZ49dRUtvQnfNtSMGGd6fMWIkGMFfxszjsjM= pos=<6435.7, 8100.1, 333.0>) is connected",
+    "07:13:02 | Player \"Miguel_gls15\" (id=N0EdVAsEZ49dRUtvQnfNtSMGGd6fMWIkGMFfxszjsjM= pos=<6435.7, 8100.1, 333.0>) has been disconnected",
+  ].join("\n");
+  const shapes = [
+    { admin_logs: may26Text },
+    { logs: may26Text },
+    { data: { admin_logs: may26Text } },
+    { data: { logs: may26Text.split("\n") } },
+    { logs: may26Text.split("\n").map((message) => ({ message })) },
+  ];
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const payload of shapes) {
+      globalThis.fetch = mockNitradoFetch({
+        logFiles: [],
+        seekFails: true,
+        downloadSucceeds: false,
+        admText: may26Text,
+        adminLogsPayload: payload,
+      });
+      const result = await readNitradoAdminLogs("18765761", "unit-token");
+      assert.equal(result.ok, true);
+      assert.equal(result.source, "admin_logs");
+      assert.equal(result.inferredAdmFileName, "DayZServer_PS4_x64_2026-05-26_07-02-39.ADM");
+      assert.equal(result.latestStartedAt, "2026-05-26T07:02:39.000Z");
+      assert.equal(result.entries.some((line) => line.includes("Miguel_gls15")), true);
+    }
+
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: [],
+      seekFails: true,
+      downloadSucceeds: false,
+      admText: may26Text,
+      adminLogsPayload: { unexpected: { nested: "not an ADM log" } },
+    });
+    const unknown = await readNitradoAdminLogs("18765761", "unit-token");
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.errorCode, "NITRADO_ADMIN_LOGS_NO_ADM_TEXT");
+
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: ["dayzps/config/DayZServer_PS4_x64_2026-05-26_07-02-39.ADM"],
+      seekFails: true,
+      downloadSucceeds: false,
+      admText: may26Text,
+      adminLogsPayload: { admin_logs: may26Text },
+    });
+    const batch = await fetchReadableNitradoAdmFiles("unit-token", "18765761", {
+      mode: "sample",
+      maxFiles: 1,
+      previousLatestAdmFileName: "DayZServer_PS4_x64_2026-05-26_06-01-40.ADM",
+    });
+    assert.equal(batch.files.length, 1);
+    assert.equal(batch.files[0]?.name, "DayZServer_PS4_x64_2026-05-26_07-02-39.ADM");
+    assert.equal(batch.files[0]?.path, "admin_logs/current/DayZServer_PS4_x64_2026-05-26_07-02-39.ADM");
+    assert.equal(batch.files[0]?.readableRouteUsed, "nitrado_admin_logs");
+    assert.equal(batch.readErrors.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 async function runNitradoReadFallbackTests() {
@@ -503,9 +573,21 @@ function mockNitradoFetch(options: {
   acceptedSeekPath?: string;
   acceptedDownloadPath?: string;
   directDownloadText?: boolean;
+  adminLogsPayload?: unknown;
+  adminLogsStatus?: number;
 }): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+    if (url.hostname === "api.nitrado.net" && url.pathname.endsWith("/gameservers/admin_logs")) {
+      const status = options.adminLogsStatus ?? (options.adminLogsPayload === undefined ? 404 : 200);
+      if (typeof options.adminLogsPayload === "string") {
+        return new Response(options.adminLogsPayload, {
+          status,
+          headers: { "content-type": "text/plain" },
+        });
+      }
+      return jsonResponse(options.adminLogsPayload ?? { error: "admin logs unavailable" }, status);
+    }
     if (url.hostname === "api.nitrado.net" && url.pathname.endsWith("/gameservers") && !url.pathname.includes("file_server")) {
       return jsonResponse({
         data: {

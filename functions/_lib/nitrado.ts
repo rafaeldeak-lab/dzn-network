@@ -76,6 +76,7 @@ type AdmReadOptions = {
   recordSuccessDiagnostics?: boolean;
   maxTokenizedAttempts?: number;
   maxChunkedReadChunks?: number;
+  adminLogsFirst?: boolean;
 };
 
 type NitradoRawService = {
@@ -385,6 +386,21 @@ export type NitradoReadableAdmFileBatch = {
   readError: string | null;
 };
 
+export type NitradoAdminLogsResult = {
+  ok: boolean;
+  source: "admin_logs";
+  httpStatus: number | null;
+  contentType: string | null;
+  rawShape: string;
+  logText: string | null;
+  entries: string[];
+  latestStartedAt: string | null;
+  inferredAdmFileName: string | null;
+  lineCount: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
+
 export type NitradoAdmDiscoveryCandidateDebug = {
   name: string;
   path: string;
@@ -558,6 +574,155 @@ export async function fetchReadableNitradoAdmLines(
   return runNitradoLogAccessDiagnosticsInternal(token, serviceId, options);
 }
 
+export async function readNitradoAdminLogs(
+  serviceId: string,
+  token: string,
+  options: Pick<AdmReadOptions, "diagnostics" | "timeoutMs" | "recordSuccessDiagnostics"> = {},
+): Promise<NitradoAdminLogsResult> {
+  const url = new URL(`${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers/admin_logs`);
+  const diagnosticContext = options.diagnostics
+    ? {
+        ...options.diagnostics,
+        serviceId,
+        fileName: options.diagnostics.fileName ?? "admin_logs",
+        filePath: options.diagnostics.filePath ?? "admin_logs/current",
+      }
+    : null;
+  const startedAt = Date.now();
+  try {
+    const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token), redirect: "manual" }, options.timeoutMs ?? 12000);
+    const durationMs = Date.now() - startedAt;
+    const contentType = response.headers.get("content-type");
+    const bodyText = await response.text().catch(() => "");
+    const payload = parseJsonText(bodyText, contentType);
+    const rawShape = describeAdminLogsShape(payload, bodyText);
+
+    if (!response.ok) {
+      const errorCode = errorCodeForHttpStatus(response.status, "NITRADO_ADMIN_LOGS_NON_OK_RESPONSE");
+      const message = `Nitrado admin logs returned HTTP ${response.status}`;
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "admin_logs",
+        endpointKind: "nitrado_admin_logs",
+        status: "non_ok_response",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        errorCode,
+        errorMessage: message,
+        responseExcerpt: sanitizeResponseExcerpt(bodyText, 300),
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
+      return {
+        ok: false,
+        source: "admin_logs",
+        httpStatus: response.status,
+        contentType,
+        rawShape,
+        logText: null,
+        entries: [],
+        latestStartedAt: null,
+        inferredAdmFileName: null,
+        lineCount: 0,
+        errorCode,
+        errorMessage: message,
+      };
+    }
+
+    const normalized = normalizeAdminLogsPayload(payload, bodyText, contentType);
+    if (!normalized.logText || !containsAdmLookingAdminLogText(normalized.logText)) {
+      const errorCode = normalized.logText ? "NITRADO_ADMIN_LOGS_NO_ADM_TEXT" : "NITRADO_ADMIN_LOGS_EMPTY_BODY";
+      const message = normalized.logText
+        ? "Nitrado admin logs response did not contain ADM-looking text."
+        : "Nitrado admin logs response did not contain recognized log text.";
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "admin_logs",
+        endpointKind: "nitrado_admin_logs",
+        status: normalized.logText ? "unreadable" : "empty_body",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        errorCode,
+        errorMessage: message,
+        responseExcerpt: sanitizeResponseExcerpt(bodyText, 300),
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
+      return {
+        ok: false,
+        source: "admin_logs",
+        httpStatus: response.status,
+        contentType,
+        rawShape,
+        logText: normalized.logText,
+        entries: normalized.entries,
+        latestStartedAt: null,
+        inferredAdmFileName: null,
+        lineCount: normalized.entries.length,
+        errorCode,
+        errorMessage: message,
+      };
+    }
+
+    const latestStartedAt = findLatestAdminLogStartedAt(normalized.logText);
+    const inferredAdmFileName = latestStartedAt ? admFilenameFromAdminLogStartedAt(latestStartedAt) : null;
+    if (options.recordSuccessDiagnostics !== false) {
+      await recordReadDiagnostic(diagnosticContext, {
+        method: "admin_logs",
+        endpointKind: "nitrado_admin_logs",
+        status: normalized.entries.length ? "success" : "empty_body",
+        httpStatus: response.status,
+        httpStatusText: response.statusText,
+        responseExcerpt: sanitizeResponseExcerpt(normalized.logText, 300),
+        responseHeadersJson: sanitizeHeaders(response.headers),
+        durationMs,
+        requestUrlRedacted: url.toString(),
+      });
+    }
+
+    return {
+      ok: true,
+      source: "admin_logs",
+      httpStatus: response.status,
+      contentType,
+      rawShape,
+      logText: normalized.logText,
+      entries: normalized.entries,
+      latestStartedAt,
+      inferredAdmFileName,
+      lineCount: normalized.entries.length,
+      errorCode: null,
+      errorMessage: null,
+    };
+  } catch (error) {
+    const classified = classifyFetchError(error);
+    await recordReadDiagnostic(diagnosticContext, {
+      method: "admin_logs",
+      endpointKind: "nitrado_admin_logs",
+      status: classified.status,
+      httpStatus: null,
+      errorCode: classified.errorCode,
+      errorMessage: classified.errorMessage,
+      durationMs: Date.now() - startedAt,
+      requestUrlRedacted: url.toString(),
+    });
+    return {
+      ok: false,
+      source: "admin_logs",
+      httpStatus: null,
+      contentType: null,
+      rawShape: "fetch_error",
+      logText: null,
+      entries: [],
+      latestStartedAt: null,
+      inferredAdmFileName: null,
+      lineCount: 0,
+      errorCode: classified.errorCode,
+      errorMessage: classified.errorMessage,
+    };
+  }
+}
+
 export async function fetchReadableNitradoAdmFiles(
   token: string,
   serviceId: string,
@@ -565,6 +730,48 @@ export async function fetchReadableNitradoAdmFiles(
 ): Promise<NitradoReadableAdmFileBatch> {
   const lastCheckedAt = new Date().toISOString();
   const preferredEntries = buildPreferredAdmEntries(options.preferredAdmFileName, options.preferredAdmPath);
+  const adminLogsErrors: string[] = [];
+  if (options.adminLogsFirst !== false && !options.preferredAdmFileName) {
+    const adminLogs = await readNitradoAdminLogs(serviceId, token, {
+      diagnostics: options.diagnostics
+        ? {
+            ...options.diagnostics,
+            fileName: options.diagnostics.fileName ?? "admin_logs",
+            filePath: options.diagnostics.filePath ?? "admin_logs/current",
+          }
+        : undefined,
+      timeoutMs: options.timeoutMs,
+      recordSuccessDiagnostics: options.recordSuccessDiagnostics,
+    });
+    if (adminLogs.ok && adminLogs.logText && adminLogs.inferredAdmFileName) {
+      const inferredPath = `admin_logs/current/${adminLogs.inferredAdmFileName}`;
+      const timestamp = parseAdmTimestamp(adminLogs.inferredAdmFileName);
+      return {
+        files: [{
+          name: adminLogs.inferredAdmFileName,
+          path: inferredPath,
+          lines: adminLogs.entries.length ? adminLogs.entries : splitAdmLines(adminLogs.logText),
+          readableRouteUsed: "nitrado_admin_logs",
+        }],
+        candidates: [{
+          name: adminLogs.inferredAdmFileName,
+          path: inferredPath,
+          timestamp,
+          modifiedAt: adminLogs.latestStartedAt,
+        }],
+        filesFound: 1,
+        newestAdmFileName: adminLogs.inferredAdmFileName,
+        previousLatestAdmFileName: options.previousLatestAdmFileName ?? null,
+        lastCheckedAt,
+        apiStatus: "OK",
+        readErrors: [],
+        readError: null,
+      };
+    }
+    if (adminLogs.errorCode || adminLogs.errorMessage) {
+      adminLogsErrors.push(`admin_logs: ${adminLogs.errorCode ?? adminLogs.errorMessage}`);
+    }
+  }
   if (options.directPreferredFirst !== false && preferredEntries.length) {
     const directFiles: NitradoReadableAdmFile[] = [];
     const directErrors: string[] = [];
@@ -709,7 +916,7 @@ export async function fetchReadableNitradoAdmFiles(
     }
   }
 
-  const uniqueReadErrors = dedupeStrings(readErrors).slice(0, 8);
+  const uniqueReadErrors = dedupeStrings(files.length ? readErrors : [...adminLogsErrors, ...readErrors]).slice(0, 8);
   return {
     files,
     candidates: allEntries.map((entry) => ({
@@ -2829,6 +3036,114 @@ function extractAdmLinesFromPayload(payload: unknown, bodyText: string) {
   const candidates = [...collectSafeStrings(payload, 300), bodyText];
   const lines = candidates.flatMap(splitAdmLines);
   return dedupeStrings(lines.filter((line) => containsDayZAdminLogMarkers(line) || /^\d{2}:\d{2}:\d{2}\s*\|/.test(line))).slice(0, 5000);
+}
+
+function normalizeAdminLogsPayload(payload: unknown, bodyText: string, contentType: string | null) {
+  const textFromPayload = adminLogsValueToText(payload);
+  const directText = !textFromPayload && (!contentType || !/json/i.test(contentType)) ? bodyText : null;
+  const logText = textFromPayload ?? directText ?? null;
+  const entries = splitAdmLines(logText);
+  return {
+    logText,
+    entries,
+  };
+}
+
+function adminLogsValueToText(value: unknown, depth = 0): string | null {
+  if (depth > 8 || value === null || value === undefined) return null;
+  if (typeof value === "string" || typeof value === "number") {
+    const text = String(value).trim();
+    return text ? text : null;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => adminLogsValueToText(entry, depth + 1))
+      .filter((entry): entry is string => Boolean(entry && entry.trim()));
+    return parts.length ? parts.join("\n") : null;
+  }
+  if (!isRecord(value)) return null;
+
+  const preferredKeys = [
+    "admin_logs",
+    "adminLogs",
+    "logs",
+    "log",
+    "current_log",
+    "currentLog",
+    "content",
+    "contents",
+    "message",
+    "text",
+    "value",
+    "data",
+  ];
+  for (const key of preferredKeys) {
+    if (!(key in value)) continue;
+    const candidate = adminLogsValueToText(value[key], depth + 1);
+    if (candidate && containsAdmLookingAdminLogText(candidate)) return candidate;
+  }
+  for (const key of preferredKeys) {
+    if (!(key in value)) continue;
+    const candidate = adminLogsValueToText(value[key], depth + 1);
+    if (candidate) return candidate;
+  }
+
+  let best: string | null = null;
+  for (const [key, child] of Object.entries(value)) {
+    if (isSensitiveKey(key) || isSensitiveResponseKey(key)) continue;
+    const candidate = adminLogsValueToText(child, depth + 1);
+    if (!candidate) continue;
+    if (containsAdmLookingAdminLogText(candidate)) return candidate;
+    if (!best || candidate.length > best.length) best = candidate;
+  }
+  return best;
+}
+
+function containsAdmLookingAdminLogText(value: string | null | undefined) {
+  if (!value) return false;
+  if (containsAdminLogStarted(value)) return true;
+  return splitAdmLines(value).some((line) => containsDayZAdminLogMarkers(line) || /^\d{2}:\d{2}:\d{2}\s*\|/.test(line));
+}
+
+function describeAdminLogsShape(payload: unknown, bodyText: string) {
+  if (payload === null || payload === undefined) return bodyText.trim() ? "text" : "empty";
+  if (Array.isArray(payload)) return `array(${payload.length})`;
+  if (typeof payload !== "object") return typeof payload;
+  const keys = Object.keys(payload).filter((key) => !isSensitiveKey(key) && !isSensitiveResponseKey(key)).slice(0, 12);
+  const data = isRecord(payload) && isRecord(payload.data)
+    ? Object.keys(payload.data).filter((key) => !isSensitiveKey(key) && !isSensitiveResponseKey(key)).slice(0, 12)
+    : [];
+  return data.length ? `object(${keys.join(",")}); data(${data.join(",")})` : `object(${keys.join(",")})`;
+}
+
+function findLatestAdminLogStartedAt(value: string) {
+  const matches = [...value.matchAll(/AdminLog started on\s+(\d{4})-(\d{2})-(\d{2})\s+at\s+(\d{2}):(\d{2}):(\d{2})/gi)];
+  let latest = 0;
+  for (const match of matches) {
+    const timestamp = Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6]),
+    );
+    if (Number.isFinite(timestamp) && timestamp > latest) latest = timestamp;
+  }
+  return latest ? new Date(latest).toISOString() : null;
+}
+
+function admFilenameFromAdminLogStartedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (part: number) => String(part).padStart(2, "0");
+  const y = date.getUTCFullYear();
+  const mo = pad(date.getUTCMonth() + 1);
+  const d = pad(date.getUTCDate());
+  const h = pad(date.getUTCHours());
+  const mi = pad(date.getUTCMinutes());
+  const s = pad(date.getUTCSeconds());
+  return `DayZServer_PS4_x64_${y}-${mo}-${d}_${h}-${mi}-${s}.ADM`;
 }
 
 function splitAdmLines(value: string | null | undefined) {

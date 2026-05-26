@@ -113,6 +113,23 @@ async function main() {
   assert.equal(redirectRecorded[11], "NITRADO_DOWNLOAD_REDIRECT");
   assert.ok(!String(redirectRecorded[13]).includes("super-secret-token"));
 
+  await recordNitradoFileReadAttempt(fakeDb as unknown as D1Database, {
+    serviceId: "18765761",
+    fileName: "admin_logs",
+    filePath: "admin_logs/current",
+    method: "admin_logs",
+    endpointKind: "nitrado_admin_logs",
+    status: "success",
+    httpStatus: 200,
+    responseExcerpt: "AdminLog started on 2026-05-26 at 07:02:39",
+    requestUrlRedacted: "https://api.nitrado.net/services/18765761/gameservers/admin_logs",
+  });
+  const adminLogsRecorded = fakeDb.binds[2];
+  assert.equal(adminLogsRecorded[6], "nitrado_admin_logs");
+  assert.equal(adminLogsRecorded[7], 1);
+  assert.equal(adminLogsRecorded[8], "success");
+  assert.equal(adminLogsRecorded[9], 200);
+
   const plan = buildAdmBackfillPlan({
     files: [
       { name: "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM", readable: false, readError: "Nitrado download returned HTTP 503" },
@@ -144,6 +161,8 @@ async function main() {
   const workerSource = readFileSync("workers/adm-sync-worker.ts", "utf8");
   const workflowSource = readFileSync(".github/workflows/dzn-nitrado-diagnostics.yml", "utf8");
   assert.ok(nitradoSource.includes("TOKENIZED_EMPTY_BODY"));
+  assert.ok(nitradoSource.includes("readNitradoAdminLogs"));
+  assert.ok(nitradoSource.includes("/gameservers/admin_logs"));
   assert.ok(nitradoSource.includes("recordNitradoFileReadAttempt"));
   assert.ok(nitradoSource.includes('redirect: "manual"'));
   assert.ok(nitradoSource.includes("redirect_response"));
@@ -151,6 +170,7 @@ async function main() {
   assert.ok(nitradoSource.includes("readNitradoFileViaSeekChunked"));
   assert.ok(nitradoSource.includes("summarizeAdmFileReadOutcomes"));
   assert.ok(diagnosticsSource.includes("NITRADO_UPSTREAM_DOWN"));
+  assert.ok(diagnosticsSource.includes("nitrado_admin_logs"));
   assert.ok(diagnosticsSource.includes("WORKER_SUBREQUEST_LIMIT"));
   assert.ok(admSyncSource.includes("ADM_MAX_FILES_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("ADM_MAX_UNREADABLE_RETRIES_PER_INVOCATION"));
