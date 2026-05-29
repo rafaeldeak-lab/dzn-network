@@ -199,6 +199,7 @@ async function main() {
   assert.ok(admSyncSource.includes("ADM_MAX_D1_WRITE_BATCHES_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("getActiveNitradoRateLimit"));
+  assert.ok(admSyncSource.includes("directPreferredFirst: scheduledBudgeted ? false : true"));
   assert.ok(admSyncSource.includes("scheduledBudgeted ? false : true"));
   assert.ok(admSyncSource.includes("maxReadAttemptsPerFile: scheduledBudgeted"));
   assert.ok(admSyncSource.includes("onlyLatest: scheduledBudgeted"));
