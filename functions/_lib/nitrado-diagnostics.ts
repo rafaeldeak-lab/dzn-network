@@ -17,6 +17,19 @@ export type NitradoFileReadStatus =
   | "empty_body"
   | "unreadable";
 
+export type NitradoLiveSourceName =
+  | "admin_logs"
+  | "gameserver_details_log_files_noftp_download"
+  | "gameserver_details_log_files_noftp_seek_raw"
+  | "gameserver_details_log_files_noftp_seek_no_raw"
+  | "file_server_relative_download"
+  | "file_server_relative_seek_raw"
+  | "file_server_relative_seek_no_raw"
+  | "file_server_leading_slash_download"
+  | "file_server_leading_slash_seek_raw"
+  | "file_server_leading_slash_seek_no_raw"
+  | "tokenized_download";
+
 export type NitradoFileReadAttemptPayload = {
   serverId?: string | null;
   serviceId: string;
@@ -46,6 +59,14 @@ export type NitradoFileReadDiagnosticsContext = {
     maxRows?: number;
     rowsRecorded?: number;
   };
+};
+
+export type NitradoSourceBackoff = {
+  active: boolean;
+  sourceName: NitradoLiveSourceName;
+  retryAt: string | null;
+  errorCode: string | null;
+  message: string | null;
 };
 
 const SECRET_QUERY_KEYS = new Set([
@@ -184,6 +205,7 @@ export async function recordNitradoFileReadAttempt(db: D1Database | null | undef
         sanitizeNitradoUrl(payload.requestUrlRedacted) ?? null,
       )
       .run();
+    await recordNitradoLiveSourceState(db, payload);
   } catch (error) {
     console.warn("DZN NITRADO FILE READ DIAGNOSTIC RECORD SKIPPED", {
       serviceId: payload.serviceId,
@@ -191,6 +213,109 @@ export async function recordNitradoFileReadAttempt(db: D1Database | null | undef
       message: error instanceof Error ? error.message : "record failed",
     });
   }
+}
+
+export async function getNitradoReadSourceBackoff(
+  db: D1Database | null | undefined,
+  serviceId: string,
+  sourceName: NitradoLiveSourceName,
+  nowIso = new Date().toISOString(),
+): Promise<NitradoSourceBackoff> {
+  if (!db) return { active: false, sourceName, retryAt: null, errorCode: null, message: null };
+  const nowMs = Date.parse(nowIso);
+  try {
+    const rateLimit = await db
+      .prepare(
+        `SELECT rate_limited_until
+         FROM nitrado_rate_limits
+         WHERE service_id = ?
+         LIMIT 1`,
+      )
+      .bind(serviceId)
+      .first<{ rate_limited_until: string | null }>();
+    if (isFutureIso(rateLimit?.rate_limited_until, nowMs)) {
+      return {
+        active: true,
+        sourceName,
+        retryAt: rateLimit?.rate_limited_until ?? null,
+        errorCode: "NITRADO_RATE_LIMITED",
+        message: `Nitrado rate limited ADM reads. DZN will retry after ${rateLimit?.rate_limited_until}.`,
+      };
+    }
+
+    const source = await db
+      .prepare(
+        `SELECT next_test_at, last_error_code
+         FROM adm_live_source_state
+         WHERE service_id = ? AND source_name = ?
+         LIMIT 1`,
+      )
+      .bind(serviceId, sourceName)
+      .first<{ next_test_at: string | null; last_error_code: string | null }>();
+    if (isFutureIso(source?.next_test_at, nowMs)) {
+      return {
+        active: true,
+        sourceName,
+        retryAt: source?.next_test_at ?? null,
+        errorCode: source?.last_error_code ?? "NITRADO_SOURCE_BACKOFF_ACTIVE",
+        message: `${sourceName} is in ADM read backoff until ${source?.next_test_at}.`,
+      };
+    }
+  } catch {
+    return { active: false, sourceName, retryAt: null, errorCode: null, message: null };
+  }
+  return { active: false, sourceName, retryAt: null, errorCode: null, message: null };
+}
+
+export async function getActiveNitradoRateLimit(
+  db: D1Database | null | undefined,
+  serviceId: string,
+  nowIso = new Date().toISOString(),
+) {
+  if (!db) return null;
+  try {
+    const row = await db
+      .prepare(
+        `SELECT service_id, rate_limited_until, last_rate_limit_at, rate_limit_count,
+                last_rate_limit_method, last_rate_limit_endpoint
+         FROM nitrado_rate_limits
+         WHERE service_id = ?
+         LIMIT 1`,
+      )
+      .bind(serviceId)
+      .first<{
+        service_id: string;
+        rate_limited_until: string | null;
+        last_rate_limit_at: string | null;
+        rate_limit_count: number | null;
+        last_rate_limit_method: string | null;
+        last_rate_limit_endpoint: string | null;
+      }>();
+    if (!row || !isFutureIso(row.rate_limited_until, Date.parse(nowIso))) return null;
+    return row;
+  } catch {
+    return null;
+  }
+}
+
+export function nitradoLiveSourceNameForRead(values: {
+  method: NitradoFileReadMethod;
+  endpointKind: NitradoFileReadEndpointKind;
+  filePath?: string | null;
+}): NitradoLiveSourceName {
+  if (values.endpointKind === "nitrado_admin_logs" || values.method === "admin_logs") return "admin_logs";
+  if (values.endpointKind === "tokenized_url" || values.method.startsWith("tokenized")) return "tokenized_download";
+  const path = String(values.filePath ?? "").trim();
+  const leadingSlash = path.startsWith("/");
+  const noFtpPath = /(?:^|\/)(?:games|noftp)\//i.test(path);
+  if (values.method === "download") {
+    if (noFtpPath) return "gameserver_details_log_files_noftp_download";
+    return leadingSlash ? "file_server_leading_slash_download" : "file_server_relative_download";
+  }
+  const noRaw = values.method === "seek_no_raw";
+  if (noFtpPath) return noRaw ? "gameserver_details_log_files_noftp_seek_no_raw" : "gameserver_details_log_files_noftp_seek_raw";
+  if (leadingSlash) return noRaw ? "file_server_leading_slash_seek_no_raw" : "file_server_leading_slash_seek_raw";
+  return noRaw ? "file_server_relative_seek_no_raw" : "file_server_relative_seek_raw";
 }
 
 export function humanNitradoReadError(values: {
@@ -244,4 +369,119 @@ function safeDecodeURIComponent(value: string) {
 
 function filenameFromPath(value: string | null) {
   return value ? value.split("/").filter(Boolean).at(-1) ?? null : null;
+}
+
+async function recordNitradoLiveSourceState(db: D1Database, payload: NitradoFileReadAttemptPayload) {
+  const sourceName = nitradoLiveSourceNameForRead({
+    method: payload.method,
+    endpointKind: payload.endpointKind,
+    filePath: payload.filePath,
+  });
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const works = payload.status === "success" && (!payload.httpStatus || (payload.httpStatus >= 200 && payload.httpStatus < 300));
+  let rateLimitedUntil: string | null = null;
+
+  if (payload.httpStatus === 429 || payload.errorCode === "NITRADO_RATE_LIMITED") {
+    const previous = await db
+      .prepare("SELECT rate_limit_count FROM nitrado_rate_limits WHERE service_id = ? LIMIT 1")
+      .bind(payload.serviceId)
+      .first<{ rate_limit_count: number | null }>()
+      .catch(() => null);
+    const count = Math.max(0, Number(previous?.rate_limit_count ?? 0)) + 1;
+    rateLimitedUntil = addMinutes(now, rateLimitBackoffMinutes(count));
+    await db
+      .prepare(
+        `INSERT INTO nitrado_rate_limits (
+           service_id, rate_limited_until, last_rate_limit_at, rate_limit_count,
+           last_rate_limit_method, last_rate_limit_endpoint, updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(service_id) DO UPDATE SET
+           rate_limited_until = excluded.rate_limited_until,
+           last_rate_limit_at = excluded.last_rate_limit_at,
+           rate_limit_count = excluded.rate_limit_count,
+           last_rate_limit_method = excluded.last_rate_limit_method,
+           last_rate_limit_endpoint = excluded.last_rate_limit_endpoint,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(payload.serviceId, rateLimitedUntil, nowIso, count, payload.method, payload.endpointKind, nowIso)
+      .run()
+      .catch(() => null);
+  } else if (works) {
+    await db
+      .prepare(
+        `INSERT INTO nitrado_rate_limits (service_id, rate_limited_until, updated_at)
+         VALUES (?, NULL, ?)
+         ON CONFLICT(service_id) DO UPDATE SET
+           rate_limited_until = NULL,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(payload.serviceId, nowIso)
+      .run()
+      .catch(() => null);
+  }
+
+  const nextTestAt = works ? nowIso : rateLimitedUntil ?? addMinutes(now, sourceBackoffMinutes(payload));
+  await db
+    .prepare(
+      `INSERT INTO adm_live_source_state (
+         id, service_id, source_name, last_tested_at, last_status, last_http_status,
+         last_error_code, last_response_excerpt, works, preferred, next_test_at, updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(service_id, source_name) DO UPDATE SET
+         last_tested_at = excluded.last_tested_at,
+         last_status = excluded.last_status,
+         last_http_status = excluded.last_http_status,
+         last_error_code = excluded.last_error_code,
+         last_response_excerpt = excluded.last_response_excerpt,
+         works = excluded.works,
+         preferred = CASE WHEN excluded.works = 1 THEN 1 ELSE adm_live_source_state.preferred END,
+         next_test_at = excluded.next_test_at,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      payload.serviceId,
+      sourceName,
+      nowIso,
+      payload.status,
+      payload.httpStatus ?? null,
+      payload.errorCode ?? null,
+      sanitizeResponseExcerpt(payload.responseExcerpt, 500),
+      works ? 1 : 0,
+      works ? 1 : 0,
+      nextTestAt,
+      nowIso,
+    )
+    .run()
+    .catch(() => null);
+}
+
+function sourceBackoffMinutes(payload: NitradoFileReadAttemptPayload) {
+  if (payload.endpointKind === "nitrado_admin_logs" && payload.errorCode === "NITRADO_ADMIN_LOGS_NO_ADM_TEXT") return 5;
+  if (payload.httpStatus === 404 || payload.errorCode === "NITRADO_FILE_NOT_FOUND") return 60;
+  if (payload.httpStatus && payload.httpStatus >= 500 && payload.httpStatus <= 504) return 30;
+  if (payload.status === "timeout" || payload.errorCode === "FETCH_TIMEOUT") return 15;
+  if (payload.status === "fetch_threw" || payload.errorCode === "FETCH_THREW") return 15;
+  if (payload.status === "empty_body") return 10;
+  return 15;
+}
+
+function rateLimitBackoffMinutes(count: number) {
+  if (count <= 1) return 15;
+  if (count === 2) return 30;
+  if (count === 3) return 60;
+  return Math.min(360, 60 * Math.max(1, count - 2));
+}
+
+function addMinutes(value: Date, minutes: number) {
+  return new Date(value.getTime() + Math.max(1, Math.trunc(minutes)) * 60_000).toISOString();
+}
+
+function isFutureIso(value: string | null | undefined, nowMs: number) {
+  if (!value) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && Number.isFinite(nowMs) && timestamp > nowMs;
 }

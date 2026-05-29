@@ -2,7 +2,9 @@ import { mockNitradoServices } from "./mock";
 import {
   classifyFetchError,
   errorCodeForHttpStatus,
+  getNitradoReadSourceBackoff,
   humanNitradoReadError,
+  nitradoLiveSourceNameForRead,
   recordNitradoFileReadAttempt,
   sanitizeHeaders,
   sanitizeNitradoUrl,
@@ -77,6 +79,8 @@ type AdmReadOptions = {
   maxTokenizedAttempts?: number;
   maxChunkedReadChunks?: number;
   adminLogsFirst?: boolean;
+  broadLogFallback?: boolean;
+  maxReadAttemptsPerFile?: number;
 };
 
 type NitradoRawService = {
@@ -590,6 +594,23 @@ export async function readNitradoAdminLogs(
     : null;
   const startedAt = Date.now();
   try {
+    const sourceBackoff = await getNitradoReadSourceBackoff(diagnosticContext?.db, serviceId, "admin_logs");
+    if (sourceBackoff.active) {
+      return {
+        ok: false,
+        source: "admin_logs",
+        httpStatus: null,
+        contentType: null,
+        rawShape: "source_backoff",
+        logText: null,
+        entries: [],
+        latestStartedAt: null,
+        inferredAdmFileName: null,
+        lineCount: 0,
+        errorCode: sourceBackoff.errorCode ?? "NITRADO_SOURCE_BACKOFF_ACTIVE",
+        errorMessage: sourceBackoff.message ?? "Nitrado admin logs source is in backoff.",
+      };
+    }
     const response = await fetchWithTimeout(url, { headers: nitradoHeaders(token), redirect: "manual" }, options.timeoutMs ?? 12000);
     const durationMs = Date.now() - startedAt;
     const contentType = response.headers.get("content-type");
@@ -889,7 +910,7 @@ export async function fetchReadableNitradoAdmFiles(
     else if (readable.error) readErrors.push(`${candidate.name}: ${readable.error}`);
   }
 
-  if (!files.length && newest) {
+  if (!files.length && newest && options.broadLogFallback !== false) {
     const fallback = await runNitradoLogAccessDiagnosticsInternal(token, serviceId, {
       ...options,
       preferredAdmFileName: newest.name,
@@ -2082,11 +2103,16 @@ export async function readAdmFileTextWithFallback(params: {
   const labels = createPathVariantLabelMap(variants);
   const readAttempts: AdmReadAttempt[] = [];
   const mode = params.options?.mode ?? "full";
+  const maxReadAttempts = Math.max(1, Math.min(12, Math.trunc(Number(params.options?.maxReadAttemptsPerFile ?? 12) || 12)));
   let seekError: string | undefined;
   let downloadError: string | undefined;
   const attemptedPaths: AdmFileTextReadPathAttempt[] = [];
 
   for (const variant of variants) {
+    if (readAttempts.length >= maxReadAttempts) {
+      seekError = "ADM read attempt budget reached; DZN will continue on a later Worker tick.";
+      break;
+    }
     const variantAttemptStart = readAttempts.length;
     const probeFirst = mode === "full" && params.options?.seekProbe !== false;
     const seek = probeFirst
@@ -2125,12 +2151,14 @@ export async function readAdmFileTextWithFallback(params: {
       }
 
       const fullSeek = probeFirst
-        ? await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
+        ? readAttempts.length < maxReadAttempts
+          ? await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
             ...params.options,
             mode: "full",
             seekDiagnosticMethod: "seek",
             seekLengthBytes: ADM_FULL_READ_BYTES,
           })
+          : createSampleResult(null, "error", false, "not_attempted", false, "ADM read attempt budget reached")
         : seek;
       if (fullSeek.sample && containsDayZAdminLogMarkers(fullSeek.sample)) {
         return {
@@ -2157,6 +2185,10 @@ export async function readAdmFileTextWithFallback(params: {
       }
 
       if (params.options?.chunkedSeekFallback !== false) {
+        if (readAttempts.length >= maxReadAttempts) {
+          seekError = "ADM read attempt budget reached during ADM chunked seek fallback";
+          break;
+        }
         const chunkedSeek = await readNitradoFileViaSeekChunked(params.token, params.serviceId, variant.path, readAttempts, labels, params.options ?? {});
         if (chunkedSeek.sample && containsDayZAdminLogMarkers(chunkedSeek.sample)) {
           return {
@@ -2187,6 +2219,10 @@ export async function readAdmFileTextWithFallback(params: {
     }
 
     if (params.options?.trySeekWithoutRaw === true) {
+      if (readAttempts.length >= maxReadAttempts) {
+        seekError = "ADM read attempt budget reached before seek without raw mode.";
+        break;
+      }
       const noRawSeek = await readNitradoFileViaSeek(params.token, params.serviceId, variant.path, readAttempts, labels, {
         ...params.options,
         mode: mode === "full" ? "full" : "sample",
@@ -2220,6 +2256,10 @@ export async function readAdmFileTextWithFallback(params: {
     }
 
     if (params.options?.fullDownloadFallback === false) continue;
+    if (readAttempts.length >= maxReadAttempts) {
+      downloadError = "ADM read attempt budget reached before download fallback.";
+      break;
+    }
 
     const download = await readNitradoFileViaDownload(params.token, params.serviceId, variant.path, readAttempts, labels, {
       ...params.options,
@@ -2451,6 +2491,21 @@ async function readNitradoFileViaSeek(
   }
 
   const diagnosticContext = diagnosticContextForRead(options, serviceId, file);
+  const sourceName = nitradoLiveSourceNameForRead({ method: seekMethod, endpointKind: "nitrado_seek", filePath: file });
+  const sourceBackoff = await getNitradoReadSourceBackoff(diagnosticContext?.db, serviceId, sourceName);
+  if (sourceBackoff.active) {
+    const safeStatus: SafeApiStatus = sourceBackoff.errorCode === "NITRADO_RATE_LIMITED" ? "429" : "error";
+    readAttempts?.push(createReadAttempt(file, "seek", safeStatus, {
+      diagnosticMethod: seekMethod,
+      pathVariantLabel,
+      requestUrlPathOnly,
+      endpointKind: "nitrado_seek",
+      diagnosticStatus: "unreadable",
+      errorCode: sourceBackoff.errorCode ?? "NITRADO_SOURCE_BACKOFF_ACTIVE",
+      errorMessageSafe: sourceBackoff.message ?? `${sourceName} is in ADM read backoff`,
+    }));
+    return createSampleResult(null, safeStatus, false, "not_attempted", false, sourceBackoff.message ?? `${sourceName} is in ADM read backoff`);
+  }
   const startedAt = Date.now();
   try {
     const url = new URL(`${NITRADO_API}${requestUrlPathOnly}`);
@@ -2607,6 +2662,20 @@ async function readNitradoFileViaDownload(
   }
 
   const diagnosticContext = diagnosticContextForRead(options, serviceId, file);
+  const sourceName = nitradoLiveSourceNameForRead({ method: "download", endpointKind: "nitrado_download", filePath: file });
+  const sourceBackoff = await getNitradoReadSourceBackoff(diagnosticContext?.db, serviceId, sourceName);
+  if (sourceBackoff.active) {
+    const safeStatus: SafeApiStatus = sourceBackoff.errorCode === "NITRADO_RATE_LIMITED" ? "429" : "error";
+    readAttempts?.push(createReadAttempt(file, "download", safeStatus, {
+      pathVariantLabel,
+      requestUrlPathOnly,
+      endpointKind: "nitrado_download",
+      diagnosticStatus: "unreadable",
+      errorCode: sourceBackoff.errorCode ?? "NITRADO_SOURCE_BACKOFF_ACTIVE",
+      errorMessageSafe: sourceBackoff.message ?? `${sourceName} is in ADM read backoff`,
+    }));
+    return createSampleResult(null, safeStatus, false, "not_attempted", false, sourceBackoff.message ?? `${sourceName} is in ADM read backoff`);
+  }
   const startedAt = Date.now();
   try {
     const url = new URL(`${NITRADO_API}${requestUrlPathOnly}`);

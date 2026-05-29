@@ -90,7 +90,8 @@ async function main() {
     errorCode: errorCodeForHttpStatus(503),
     requestUrlRedacted: "https://api.nitrado.net/services/17428528/gameservers/file_server/download?file=dayzps/config/DayZServer.ADM&token=secret",
   });
-  const recorded = fakeDb.binds[0];
+  const readAttemptBinds = () => fakeDb.binds.filter((bind) => bind.length >= 17);
+  const recorded = readAttemptBinds()[0];
   assert.equal(recorded[8], "non_ok_response");
   assert.equal(recorded[9], 503);
   assert.equal(recorded[11], "NITRADO_UPSTREAM_DOWN");
@@ -107,7 +108,7 @@ async function main() {
     responseExcerpt: "Location: https://files.nitrado.net/path?token=super-secret-token&signature=signed",
     requestUrlRedacted: "https://api.nitrado.net/services/17428528/gameservers/file_server/download?file=DayZServer.ADM",
   });
-  const redirectRecorded = fakeDb.binds[1];
+  const redirectRecorded = readAttemptBinds()[1];
   assert.equal(redirectRecorded[8], "redirect_response");
   assert.equal(redirectRecorded[9], 302);
   assert.equal(redirectRecorded[11], "NITRADO_DOWNLOAD_REDIRECT");
@@ -124,7 +125,7 @@ async function main() {
     responseExcerpt: "AdminLog started on 2026-05-26 at 07:02:39",
     requestUrlRedacted: "https://api.nitrado.net/services/18765761/gameservers/admin_logs",
   });
-  const adminLogsRecorded = fakeDb.binds[2];
+  const adminLogsRecorded = readAttemptBinds()[2];
   assert.equal(adminLogsRecorded[6], "nitrado_admin_logs");
   assert.equal(adminLogsRecorded[7], 1);
   assert.equal(adminLogsRecorded[8], "success");
@@ -154,6 +155,13 @@ async function main() {
   assert.ok(!backoffMigration.includes("drop table"));
   assert.ok(!backoffMigration.includes("truncate"));
   assert.ok(!backoffMigration.includes("delete from player_profiles"));
+  const sourceMatrixMigration = readFileSync("migrations/0038_adm_live_source_rate_limits.sql", "utf8").toLowerCase();
+  assert.ok(sourceMatrixMigration.includes("nitrado_rate_limits"));
+  assert.ok(sourceMatrixMigration.includes("adm_live_source_state"));
+  assert.ok(sourceMatrixMigration.includes("rate_limited_until"));
+  assert.ok(!sourceMatrixMigration.includes("drop table"));
+  assert.ok(!sourceMatrixMigration.includes("truncate"));
+  assert.ok(!sourceMatrixMigration.includes("delete from player_profiles"));
 
   const nitradoSource = readFileSync("functions/_lib/nitrado.ts", "utf8");
   const diagnosticsSource = readFileSync("functions/_lib/nitrado-diagnostics.ts", "utf8");
@@ -163,6 +171,9 @@ async function main() {
   assert.ok(nitradoSource.includes("TOKENIZED_EMPTY_BODY"));
   assert.ok(nitradoSource.includes("readNitradoAdminLogs"));
   assert.ok(nitradoSource.includes("/gameservers/admin_logs"));
+  assert.ok(nitradoSource.includes("getNitradoReadSourceBackoff"));
+  assert.ok(nitradoSource.includes("maxReadAttemptsPerFile"));
+  assert.ok(nitradoSource.includes("broadLogFallback !== false"));
   assert.ok(nitradoSource.includes("recordNitradoFileReadAttempt"));
   assert.ok(nitradoSource.includes('redirect: "manual"'));
   assert.ok(nitradoSource.includes("redirect_response"));
@@ -170,6 +181,13 @@ async function main() {
   assert.ok(nitradoSource.includes("readNitradoFileViaSeekChunked"));
   assert.ok(nitradoSource.includes("summarizeAdmFileReadOutcomes"));
   assert.ok(diagnosticsSource.includes("NITRADO_UPSTREAM_DOWN"));
+  assert.ok(diagnosticsSource.includes("NITRADO_RATE_LIMITED"));
+  assert.ok(diagnosticsSource.includes("nitrado_rate_limits"));
+  assert.ok(diagnosticsSource.includes("adm_live_source_state"));
+  assert.ok(diagnosticsSource.includes("getNitradoReadSourceBackoff"));
+  assert.ok(diagnosticsSource.includes("getActiveNitradoRateLimit"));
+  assert.ok(diagnosticsSource.includes("rateLimitBackoffMinutes"));
+  assert.ok(diagnosticsSource.includes("gameserver_details_log_files_noftp_download"));
   assert.ok(diagnosticsSource.includes("nitrado_admin_logs"));
   assert.ok(diagnosticsSource.includes("WORKER_SUBREQUEST_LIMIT"));
   assert.ok(admSyncSource.includes("ADM_MAX_FILES_PER_INVOCATION"));
@@ -180,6 +198,11 @@ async function main() {
   assert.ok(admSyncSource.includes("ADM_MAX_IMPORT_LINES_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("ADM_MAX_D1_WRITE_BATCHES_PER_INVOCATION"));
   assert.ok(admSyncSource.includes("ADM_MAX_DIAGNOSTIC_ROWS_PER_INVOCATION"));
+  assert.ok(admSyncSource.includes("getActiveNitradoRateLimit"));
+  assert.ok(admSyncSource.includes("scheduledBudgeted ? false : true"));
+  assert.ok(admSyncSource.includes("maxReadAttemptsPerFile: scheduledBudgeted"));
+  assert.ok(admSyncSource.includes("onlyLatest: scheduledBudgeted"));
+  assert.ok(admSyncSource.includes("recordAdmPullResult(env, {"));
   assert.ok(admSyncSource.includes("per-invocation safety budget"));
   assert.ok(admSyncSource.includes("next_retry_at"));
   assert.ok(admSyncSource.includes("getAdmUnreadableBackoffMs"));

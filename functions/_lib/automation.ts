@@ -602,7 +602,7 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
         last_restart_detected_source = CASE WHEN ? THEN 'adm_filename' ELSE last_restart_detected_source END,
         last_restart_detected_at = CASE WHEN ? THEN ? ELSE last_restart_detected_at END,
         adm_status = CASE
-          WHEN ? IN ('new_adm_detected', 'new_adm_readable', 'waiting_after_restart', 'latest_adm_unreadable', 'delayed_after_restart', 'no_new_log_available', 'adm_backfill_queued', 'adm_backfill_caught_up', 'caught_up_waiting_for_growth', 'completed_closed', 'completed_empty')
+          WHEN ? IN ('new_adm_detected', 'new_adm_readable', 'waiting_after_restart', 'latest_adm_unreadable', 'delayed_after_restart', 'no_new_log_available', 'adm_backfill_queued', 'adm_backfill_caught_up', 'caught_up_waiting_for_growth', 'completed_closed', 'completed_empty', 'nitrado_rate_limited')
           THEN ?
           ELSE adm_status
         END,
@@ -1683,7 +1683,7 @@ function normalizeAdmAutomationStatus(value: string, context: { latestAdmFile?: 
   }
   if (normalized === "adm_file_unreadable") return "latest_adm_unreadable";
   if (normalized === "waiting_after_restart" || normalized === "delayed_after_restart" || normalized === "latest_adm_unreadable") return normalized;
-  if (normalized === "new_adm_detected" || normalized === "new_adm_readable" || normalized === "new_data_found" || normalized === "no_new_log_available" || normalized === "adm_backfill_queued" || normalized === "adm_backfill_caught_up" || normalized === "caught_up_waiting_for_growth" || normalized === "completed_closed" || normalized === "completed_empty") return normalized;
+  if (normalized === "new_adm_detected" || normalized === "new_adm_readable" || normalized === "new_data_found" || normalized === "no_new_log_available" || normalized === "adm_backfill_queued" || normalized === "adm_backfill_caught_up" || normalized === "caught_up_waiting_for_growth" || normalized === "completed_closed" || normalized === "completed_empty" || normalized === "nitrado_rate_limited") return normalized;
   return normalized;
 }
 
