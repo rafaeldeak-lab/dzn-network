@@ -853,6 +853,7 @@ export async function fetchReadableNitradoAdmFiles(
   }
   const serviceProbe = await probeNitradoEndpoint(token, "A gameserver details", `/services/${encodeURIComponent(serviceId)}/gameservers`);
   const gameSpecificLogs = extractGameSpecificLogDetails(serviceProbe.payload);
+  await recordGameSpecificLogFilesEvidence(options.diagnostics, serviceId, serviceProbe, gameSpecificLogs);
   const searchDirs = await buildAdmSearchDirs(token, serviceId, options.maxListDirs);
   const listAttempts: AdmListAttempt[] = [];
   const listedEntries: NitradoFileEntry[] = [];
@@ -894,6 +895,49 @@ export async function fetchReadableNitradoAdmFiles(
 
   const files: NitradoReadableAdmFile[] = [];
   const readErrors: string[] = [];
+  const noFtpCurrent = newest && gameSpecificLogs.username
+    ? await readNewestAdmViaNoFtpDownload(token, serviceId, newest, gameSpecificLogs, options)
+    : null;
+  if (noFtpCurrent?.file) {
+    files.push(noFtpCurrent.file);
+    return {
+      files,
+      candidates: allEntries.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        timestamp: timestampScore(entry),
+        modifiedAt: entry.modified ?? null,
+      })),
+      filesFound: allEntries.length,
+      newestAdmFileName: newest?.name ?? null,
+      previousLatestAdmFileName,
+      lastCheckedAt,
+      apiStatus: "OK",
+      readErrors: [],
+      readError: null,
+    };
+  }
+  if (noFtpCurrent?.error) {
+    readErrors.push(`${newest?.name ?? "ADM"}: ${noFtpCurrent.error}`);
+    if (noFtpCurrent.rateLimited) {
+      return {
+        files: [],
+        candidates: allEntries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          timestamp: timestampScore(entry),
+          modifiedAt: entry.modified ?? null,
+        })),
+        filesFound: allEntries.length,
+        newestAdmFileName: newest?.name ?? null,
+        previousLatestAdmFileName,
+        lastCheckedAt,
+        apiStatus: "429",
+        readErrors: dedupeStrings([...adminLogsErrors, ...readErrors]).slice(0, 8),
+        readError: dedupeStrings([...adminLogsErrors, ...readErrors])[0] ?? null,
+      };
+    }
+  }
   for (const candidate of readCandidates) {
     const candidateIsNewest = sameAdmEntry(candidate, newest);
     const readable = await readNitradoAdmCandidate(token, serviceId, candidate, gameSpecificLogs, {
@@ -2356,6 +2400,53 @@ async function readNitradoAdmCandidate(
         : "/services/{serviceId}/gameservers/file_server/download",
     },
     error: null,
+  };
+}
+
+async function readNewestAdmViaNoFtpDownload(
+  token: string,
+  serviceId: string,
+  newest: NitradoFileEntry,
+  details: GameSpecificLogDetails,
+  options: AdmReadOptions,
+): Promise<{ file: NitradoReadableAdmFile | null; error: string | null; rateLimited: boolean }> {
+  const paths = buildNoFtpDownloadCandidates(details, newest).slice(0, 3);
+  if (!paths.length) return { file: null, error: null, rateLimited: false };
+  const labels = new Map(paths.map((path, index) => [path, `gameserver_details_log_files_noftp_${index + 1}`]));
+  const readAttempts: AdmReadAttempt[] = [];
+  const errors: string[] = [];
+  for (const path of paths) {
+    const download = await readNitradoFileViaDownload(token, serviceId, path, readAttempts, labels, {
+      ...options,
+      mode: "full",
+      maxTokenizedAttempts: Math.max(1, Math.min(1, Number(options.maxTokenizedAttempts ?? 1) || 1)),
+    });
+    const latestAttempt = readAttempts.at(-1);
+    if (download.sample && containsDayZAdminLogMarkers(download.sample)) {
+      return {
+        file: {
+          name: newest.name,
+          path,
+          lines: splitAdmLines(download.sample),
+          readableRouteUsed: "gameserver_details_log_files_noftp",
+        },
+        error: null,
+        rateLimited: false,
+      };
+    }
+    if (latestAttempt?.httpStatusCode === 429 || latestAttempt?.errorCode === "NITRADO_RATE_LIMITED") {
+      return {
+        file: null,
+        error: `${path}: Nitrado returned HTTP 429 for gameserver details noftp download.`,
+        rateLimited: true,
+      };
+    }
+    errors.push(`${path}: ${download.errorMessageSafe ?? latestAttempt?.errorMessageSafe ?? "Nitrado noftp download did not return ADM text"}`);
+  }
+  return {
+    file: null,
+    error: errors.length ? `gameserver details noftp source failed. ${errors.join(" ")}` : null,
+    rateLimited: false,
   };
 }
 
@@ -3973,6 +4064,88 @@ function extractGameSpecificLogDetails(payload: unknown): GameSpecificLogDetails
     selectedAdmFile,
     logContextPaths,
   };
+}
+
+async function recordGameSpecificLogFilesEvidence(
+  diagnosticContext: NitradoFileReadDiagnosticsContext | undefined,
+  serviceId: string,
+  serviceProbe: Awaited<ReturnType<typeof probeNitradoEndpoint>>,
+  details: GameSpecificLogDetails,
+) {
+  if (!diagnosticContext?.db) return;
+  const gameserver = findRecordByKey(serviceProbe.payload, "gameserver");
+  const gameSpecific = gameserver && isRecord(gameserver.game_specific) ? gameserver.game_specific : null;
+  const httpStatus = serviceProbe.attempt.httpStatusCode ?? null;
+  const gameSpecificKeys = gameSpecific ? Object.keys(gameSpecific).filter(isSafeDiagnosticKey).slice(0, 24) : [];
+  const game = gameserver ? stringValue(gameserver.game).slice(0, 80) || null : null;
+  const folderShort = gameserver ? stringValue(gameserver.folder_short).slice(0, 80) || null : null;
+  const excerpt = JSON.stringify({
+    usernamePresent: details.usernameFound,
+    game,
+    folderShort,
+    gameSpecificKeys,
+    logFilesPresent: details.logFilesFound,
+    logFilesCount: details.logFilesReturned,
+    admLogFiles: details.admLogFiles.slice(0, 8).map((entry) => ({
+      fileName: entry.name,
+      rawEntryShape: "string",
+      pathCandidate: maskNitradoUsernameInPath(entry.path, details.username),
+      timestamp: timestampIso(timestampScore(entry)),
+    })),
+  });
+  await recordNitradoFileReadAttempt(diagnosticContext.db, {
+    serverId: diagnosticContext.serverId ?? null,
+    serviceId,
+    fileName: "game_specific.log_files",
+    filePath: "gameserver_details/game_specific.log_files",
+    method: "game_details",
+    endpointKind: "nitrado_gameserver_details",
+    status: httpStatus && httpStatus >= 200 && httpStatus < 300 && details.admLogFiles.length > 0 ? "success" : httpStatus && httpStatus >= 400 ? "non_ok_response" : "unreadable",
+    httpStatus,
+    httpStatusText: serviceProbe.attempt.status,
+    errorCode: httpStatus && httpStatus >= 400
+      ? errorCodeForHttpStatus(httpStatus)
+      : details.admLogFiles.length > 0
+        ? null
+        : details.logFilesFound
+          ? "NITRADO_GAME_DETAILS_NO_ADM_LOG_FILES"
+          : "NITRADO_GAME_DETAILS_LOG_FILES_MISSING",
+    errorMessage: details.admLogFiles.length > 0
+      ? null
+      : details.logFilesFound
+        ? "Nitrado gameserver details returned game_specific.log_files, but no ADM files were present."
+        : "Nitrado gameserver details did not include game_specific.log_files.",
+    responseExcerpt: excerpt,
+    requestUrlRedacted: `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers`,
+  });
+}
+
+function isSafeDiagnosticKey(value: string) {
+  return !/(token|secret|password|auth|key)/i.test(value);
+}
+
+function buildNoFtpDownloadCandidates(details: GameSpecificLogDetails, newest: NitradoFileEntry) {
+  if (!details.username) return [];
+  const fileName = newest.name;
+  const exactGameSpecific = details.admLogFiles.find((entry) => normalizeAdmName(entry.name) === normalizeAdmName(fileName));
+  const rawPath = exactGameSpecific?.path ?? newest.path;
+  const normalizedRawPath = normalizeRemotePath(rawPath);
+  const paths: string[] = [];
+  if (/^\/?games\/[^/]+\/noftp\//i.test(normalizedRawPath)) {
+    paths.push(normalizedRawPath);
+  }
+  if (exactGameSpecific?.path) {
+    paths.push(`games/${details.username}/noftp/${normalizeRemotePath(exactGameSpecific.path)}`);
+  }
+  paths.push(`games/${details.username}/noftp/dayzps/config/${fileName}`);
+  if (normalizedRawPath && !/^\/?games\//i.test(normalizedRawPath)) {
+    paths.push(`games/${details.username}/noftp/${normalizedRawPath}`);
+  }
+  return dedupeStrings(paths).filter((path) => !isUnsafeRemotePathForRequest(path));
+}
+
+function normalizeAdmName(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function buildAdmReadPathVariants(details: GameSpecificLogDetails, manualPath?: string | null): AdmPathVariant[] {

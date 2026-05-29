@@ -1,4 +1,5 @@
 export type NitradoFileReadMethod =
+  | "game_details"
   | "admin_logs"
   | "seek"
   | "seek_probe"
@@ -7,7 +8,7 @@ export type NitradoFileReadMethod =
   | "download"
   | "tokenized_download"
   | "tokenized_sample";
-export type NitradoFileReadEndpointKind = "nitrado_admin_logs" | "nitrado_seek" | "nitrado_download" | "tokenized_url";
+export type NitradoFileReadEndpointKind = "nitrado_gameserver_details" | "nitrado_admin_logs" | "nitrado_seek" | "nitrado_download" | "tokenized_url";
 export type NitradoFileReadStatus =
   | "success"
   | "non_ok_response"
@@ -18,6 +19,7 @@ export type NitradoFileReadStatus =
   | "unreadable";
 
 export type NitradoLiveSourceName =
+  | "gameserver_details_log_files"
   | "admin_logs"
   | "gameserver_details_log_files_noftp_download"
   | "gameserver_details_log_files_noftp_seek_raw"
@@ -303,6 +305,7 @@ export function nitradoLiveSourceNameForRead(values: {
   endpointKind: NitradoFileReadEndpointKind;
   filePath?: string | null;
 }): NitradoLiveSourceName {
+  if (values.endpointKind === "nitrado_gameserver_details" || values.method === "game_details") return "gameserver_details_log_files";
   if (values.endpointKind === "nitrado_admin_logs" || values.method === "admin_logs") return "admin_logs";
   if (values.endpointKind === "tokenized_url" || values.method.startsWith("tokenized")) return "tokenized_download";
   const path = String(values.filePath ?? "").trim();
