@@ -111,15 +111,23 @@ function sqlString(value: string) {
 }
 
 function d1<T>(sql: string): T[] {
-  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-  const result = spawnSync(npx, ["wrangler", "d1", "execute", "dzn_network_db", "--remote", "--json", "--command", sql], {
+  const compactSql = sql.replace(/\s+/g, " ").trim();
+  const result = spawnSync(process.execPath, ["node_modules/wrangler/bin/wrangler.js", "d1", "execute", "dzn_network_db", "--remote", "--json", "--command", compactSql], {
     encoding: "utf8",
     cwd: process.cwd(),
   });
-  if (result.status !== 0) {
-    throw new Error(`wrangler d1 execute failed: ${safeText(result.stderr || result.stdout)}`);
+  if (result.error) {
+    throw new Error(`wrangler d1 execute failed to start: ${safeText(result.error.message)}`);
   }
-  const parsed = JSON.parse(result.stdout) as Array<{ results?: T[]; success?: boolean }>;
+  if (result.status !== 0) {
+    throw new Error(`wrangler d1 execute failed: ${safeText(result.stderr || result.stdout || "no output")}`);
+  }
+  const jsonStart = result.stdout.indexOf("[");
+  const jsonEnd = result.stdout.lastIndexOf("]");
+  if (jsonStart < 0 || jsonEnd < jsonStart) {
+    throw new Error(`wrangler d1 execute did not return JSON: ${safeText(result.stdout)}`);
+  }
+  const parsed = JSON.parse(result.stdout.slice(jsonStart, jsonEnd + 1)) as Array<{ results?: T[]; success?: boolean }>;
   if (!Array.isArray(parsed) || parsed.some((entry) => entry.success === false)) {
     throw new Error("wrangler d1 execute returned an unsuccessful response.");
   }
@@ -294,8 +302,8 @@ async function verifyFromAdmHealth() {
   }
 }
 
-function safeText(value: string) {
-  return value.replace(/\s+/g, " ").replace(/[A-Za-z0-9._~+/=-]{80,}/g, "REDACTED").slice(0, 500);
+function safeText(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, " ").replace(/[A-Za-z0-9._~+/=-]{80,}/g, "REDACTED").slice(0, 500);
 }
 
 function report() {
@@ -331,11 +339,11 @@ async function main() {
   let linkedServers: LinkedServerRow[];
   try {
     linkedServers = d1<LinkedServerRow>(`
-    SELECT linked_servers.id,
-           linked_servers.display_name,
-           linked_servers.hostname,
-           linked_servers.server_name,
-           linked_servers.nitrado_service_id,
+    SELECT linked_servers.id AS id,
+           linked_servers.display_name AS display_name,
+           linked_servers.hostname AS hostname,
+           linked_servers.server_name AS server_name,
+           linked_servers.nitrado_service_id AS nitrado_service_id,
            server_subscriptions.plan_key,
            server_subscriptions.status AS subscription_status,
            linked_servers.current_players,
@@ -373,14 +381,17 @@ async function main() {
     WHERE source_service_id IN (${inClause})
       AND ignored_at IS NULL
     ORDER BY source_service_id, adm_file DESC
-    LIMIT 80
+    LIMIT 500
   `);
+  const linkedServerIds = linkedServers
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
   const jobs = d1<JobRow>(`
     SELECT server_id, source_service_id, filename, source, status, current_line, total_lines,
            chunks_processed, total_chunks, parsed_kills, written_kills, joins, disconnects,
            playerlist_snapshots, updated_at, completed_at
     FROM adm_import_jobs
-    WHERE source_service_id IN (${inClause}) OR server_id IN (${linkedServers.map((row) => sqlString(row.id)).join(", ") || "''"})
+    WHERE source_service_id IN (${inClause}) OR server_id IN (${linkedServerIds.map(sqlString).join(", ") || "''"})
     ORDER BY COALESCE(updated_at, created_at) DESC
     LIMIT 80
   `);
@@ -494,7 +505,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  fail("verify:adm-live exception", error instanceof Error ? error.message : String(error));
+  fail("verify:adm-live exception", error instanceof Error ? (error.stack ?? error.message) : String(error));
   report();
   process.exit(1);
 });
