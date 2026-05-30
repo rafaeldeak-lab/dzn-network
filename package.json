@@ -56,6 +56,7 @@
     "audit:system": "tsx scripts/audit-dzn-system.ts",
     "audit:adm-sync": "tsx scripts/audit-adm-sync.ts",
     "compare:pandora-tracking": "tsx scripts/compare-pandora-dzn-tracking.ts",
+    "verify:adm-live": "tsx scripts/verify-production-adm-live.ts",
     "check:adm-automation": "tsx scripts/check-adm-automation.ts",
     "check:adm-backfill": "tsx scripts/check-adm-backfill.ts",
     "check:automation-live": "tsx scripts/check-automation-live.ts",

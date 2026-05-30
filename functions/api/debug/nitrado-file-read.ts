@@ -1,7 +1,6 @@
 import { requireCronSecret } from "../../_lib/cron-auth";
 import { requireDb } from "../../_lib/db";
 import { json, readJson } from "../../_lib/http";
-import { sanitizeResponseExcerpt } from "../../_lib/nitrado-diagnostics";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type DebugNitradoFileReadBody = {
@@ -196,4 +195,12 @@ function sanitizeFilePath(value: unknown) {
   const text = String(value ?? "").trim();
   if (!text || text.length > 500 || !/\.adm$/i.test(text) || text.includes("\0")) return null;
   return text.replace(/^\/+/, "");
+}
+
+function sanitizeResponseExcerpt(value: unknown, maxLength = 500) {
+  return String(value ?? "")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, "Bearer REDACTED")
+    .replace(/(token|access_token|authorization|signature|sig|secret|key)=([^&\s]+)/gi, "$1=REDACTED")
+    .replace(/[A-Za-z0-9._~+/=-]{80,}/g, "REDACTED")
+    .slice(0, maxLength);
 }

@@ -2779,8 +2779,8 @@ function ServerDashboard({
           </DashboardPanel>
           <DashboardPanel className="p-4">
             <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Sync Health" />
-            <p className={`mt-3 text-sm font-black ${syncHealth.status === "error" ? "text-amber-100" : "text-emerald-100"}`}>{syncHealth.status === "error" ? syncHealth.title : "All systems operational"}</p>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">{syncHealth.status === "error" ? syncHealth.nextAction : "Status, ADM, and Discord automation are tracked in Sync Health."}</p>
+            <p className={`mt-3 text-sm font-black ${syncHealth.status === "error" ? "text-amber-100" : "text-emerald-100"}`}>{syncHealth.title}</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">{syncHealth.status === "error" ? syncHealth.nextAction : syncHealth.message}</p>
             <button type="button" onClick={() => setActiveTab("sync-health")} className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100">View Details</button>
           </DashboardPanel>
         </div>
@@ -6871,6 +6871,7 @@ function AutomationStatusGrid({
 }
 
 function formatAdmSourceLabel(value: string | null) {
+  if (/noftp|gameserver_details_log_files/i.test(String(value ?? ""))) return "Nitrado Log Files";
   if (/admin_logs/i.test(String(value ?? ""))) return "Nitrado Admin Logs";
   if (/file_server|download|seek|tokenized/i.test(String(value ?? ""))) return "Nitrado File Server fallback";
   if (/scheduled/i.test(String(value ?? ""))) return "Scheduled Nitrado ADM import";

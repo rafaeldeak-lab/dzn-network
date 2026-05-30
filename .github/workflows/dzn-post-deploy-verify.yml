@@ -38,6 +38,14 @@ jobs:
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           AUTODEV_WATCH_MINUTES: "0"
         run: npm run autodev:adm-watch
+      - name: ADM live import evidence
+        id: adm-live
+        continue-on-error: true
+        env:
+          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+        run: npm run verify:adm-live
       - name: Upload AutoDev reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -45,11 +53,11 @@ jobs:
           name: autodev-post-deploy-reports
           path: .autodev/reports
       - name: Create or update issue on failure
-        if: always() && (steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure')
+        if: always() && (steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure' || steps.adm-live.outcome == 'failure')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: npm run autodev:create-issue
       - name: Fail if production verification failed
-        if: steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure'
+        if: steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure' || steps.adm-live.outcome == 'failure'
         run: exit 1

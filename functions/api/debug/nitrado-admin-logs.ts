@@ -1,8 +1,6 @@
 import { requireCronSecret } from "../../_lib/cron-auth";
 import { requireDb } from "../../_lib/db";
 import { json, readJson } from "../../_lib/http";
-import { readNitradoAdminLogs } from "../../_lib/nitrado";
-import { sanitizeResponseExcerpt } from "../../_lib/nitrado-diagnostics";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type DebugNitradoAdminLogsBody = {
@@ -28,6 +26,7 @@ export const onRequestPost: PagesFunction = async (context) => {
 
   try {
     const token = await getNitradoTokenForDebug(context.env, linkedServer.id, linkedServer.user_id);
+    const { readNitradoAdminLogs } = await import("../../_lib/nitrado");
     const result = await readNitradoAdminLogs(serviceId, token, {
       diagnostics: {
         db,
@@ -120,4 +119,12 @@ async function getNitradoTokenForDebug(env: Env, linkedServerId: string, userId:
 function sanitizeServiceId(value: unknown) {
   const text = String(value ?? "").trim();
   return /^[0-9]{4,20}$/.test(text) ? text : null;
+}
+
+function sanitizeResponseExcerpt(value: unknown, maxLength = 500) {
+  return String(value ?? "")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, "Bearer REDACTED")
+    .replace(/(token|access_token|authorization|signature|sig|secret|key)=([^&\s]+)/gi, "$1=REDACTED")
+    .replace(/[A-Za-z0-9._~+/=-]{80,}/g, "REDACTED")
+    .slice(0, maxLength);
 }

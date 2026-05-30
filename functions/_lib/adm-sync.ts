@@ -4064,18 +4064,28 @@ async function finalizeAdmImportJob(
   const totalLines = Number(row.total_lines ?? 0);
   const chunkStats = getNormalizedAdmJobChunkStats(row);
   const isScheduledNitradoImport = row.source === SCHEDULED_ADM_IMPORT_SOURCE;
-  const importRoute = isScheduledNitradoImport ? "scheduled_chunked_import" : "manual_chunked_import";
+  const importRoute = isScheduledNitradoImport
+    ? await getAdmImportReadableRoute(env, row.server_id, row.filename, "scheduled_chunked_import")
+    : "manual_chunked_import";
   const importMessagePrefix = isScheduledNitradoImport ? "Scheduled ADM import" : "Manual ADM import";
   const importCursorReason = isScheduledNitradoImport ? "scheduled_chunked_import" : "manual_chunked_import";
+  const statAffectingWrites = Number(row.written_kills ?? 0)
+    + Number(row.player_events ?? 0)
+    + Number(row.joins ?? 0)
+    + Number(row.disconnects ?? 0)
+    + Number(row.deaths ?? 0);
+  const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || statAffectingWrites > 0;
 
-  try {
-    await rebuildServerStats(env, row.server_id);
-    await rebuildServerBuildStats(env, row.server_id);
-  } catch (error) {
-    warnings.push(`${row.filename}: Stats rebuild failed after ADM rows were written. ${safeSyncErrorMessage(error)}`);
+  if (shouldRefreshDerivedOutputs) {
+    try {
+      await withManualAdmPhaseTimeout(rebuildServerStats(env, row.server_id), "server stats rebuild", 6000);
+      await withManualAdmPhaseTimeout(rebuildServerBuildStats(env, row.server_id), "server build stats rebuild", 6000);
+    } catch (error) {
+      warnings.push(`${row.filename}: Stats rebuild failed after ADM rows were written. ${safeSyncErrorMessage(error)}`);
+    }
   }
 
-  if (server.guild_id) {
+  if (server.guild_id && shouldRefreshDerivedOutputs) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: server.guild_id,
@@ -4091,7 +4101,7 @@ async function finalizeAdmImportJob(
     }
   }
 
-  if (server.guild_id && isActiveSubscriptionStatus(server.subscription_status) && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || Number(row.raw_events ?? 0) > 0)) {
+  if (server.guild_id && isActiveSubscriptionStatus(server.subscription_status) && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0))) {
     try {
       discordQueuesCreated = await withManualAdmPhaseTimeout(queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
         "leaderboard_embed",
@@ -4787,6 +4797,31 @@ function findReadErrorForAdmFile(readErrors: string[], filename: string) {
   return readErrors.find((error) => normalizeAdmFilenameKey(error.split(":")[0]) === key) ?? null;
 }
 
+async function getAdmImportReadableRoute(env: Env, linkedServerId: string, filename: string, fallback: string) {
+  const fileState = await requireDb(env)
+    .prepare(
+      `SELECT adm_path, last_endpoint_kind, last_method
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ? AND adm_file = ?
+       ORDER BY COALESCE(last_readable_at, last_read_at, last_checked_at, updated_at, first_seen_at) DESC
+       LIMIT 1`,
+    )
+    .bind(linkedServerId, filename)
+    .first<{ adm_path: string | null; last_endpoint_kind: string | null; last_method: string | null }>()
+    .catch(() => null);
+  const path = String(fileState?.adm_path ?? "");
+  const endpoint = String(fileState?.last_endpoint_kind ?? "");
+  const method = String(fileState?.last_method ?? "");
+  if (/\/noftp\//i.test(path) || /gameserver_details/i.test(endpoint) || /game_details/i.test(method)) {
+    return "gameserver_details_log_files_noftp_download";
+  }
+  if (/admin_logs/i.test(`${endpoint} ${method} ${path}`)) return "nitrado_admin_logs";
+  if (/tokenized/i.test(endpoint)) return "tokenized_download";
+  if (/seek/i.test(`${endpoint} ${method}`)) return "file_server_seek";
+  if (/download/i.test(`${endpoint} ${method}`)) return "file_server_download_fallback";
+  return fallback;
+}
+
 async function recordAdmImportJobProgressInSyncState(
   env: Env,
   row: AdmImportJobRow,
@@ -4806,6 +4841,9 @@ async function recordAdmImportJobProgressInSyncState(
   const lastProcessedFile = rowCompleted ? row.filename : existingState?.last_processed_file ?? null;
   const lastProcessedLine = rowCompleted ? Number(row.current_line ?? row.total_lines ?? 0) : Number(existingState?.last_processed_line ?? 0);
   const lastProcessedOffset = rowCompleted ? Number(row.current_line ?? row.total_lines ?? 0) : Number(existingState?.last_processed_offset ?? 0);
+  const readableRoute = row.source === SCHEDULED_ADM_IMPORT_SOURCE
+    ? await getAdmImportReadableRoute(env, row.server_id, row.filename, "scheduled_chunked_import")
+    : "manual_chunked_import";
   const progressMessage = message ?? (rowCompleted
     ? `ADM chunk import completed for ${row.filename}.`
     : `Processing latest ADM in chunks. File: ${row.filename}. Progress: chunk ${Math.min(Number(row.chunks_processed ?? 0) + 1, Number(row.total_chunks ?? 1))}/${Number(row.total_chunks ?? 1)}. Parsed kills so far: ${Number(row.parsed_kills ?? 0)}. Written kills so far: ${Number(row.written_kills ?? 0)}. Duplicates skipped: ${Number(row.duplicate_skips ?? 0)}. Next chunk on next cron tick.`);
@@ -4829,7 +4867,7 @@ async function recordAdmImportJobProgressInSyncState(
     unknownLines: 0,
     duplicateLines: Number(row.duplicate_skips ?? 0),
     syncDurationMs: 0,
-    readableRoute: row.source === SCHEDULED_ADM_IMPORT_SOURCE ? "scheduled_chunked_import" : "manual_chunked_import",
+    readableRoute,
     rawKillLinesFound: Number(row.raw_kill_lines_found ?? 0),
     parsedKillLinesFound: Number(row.parsed_kills ?? 0),
     parserSkippedLines: 0,
@@ -5989,6 +6027,11 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
   guild_id: string;
   plan_key: string | null;
   subscription_status: string | null;
+  current_players: number | null;
+  max_players: number | null;
+  player_count_status: string | null;
+  player_count_last_checked_at: string | null;
+  metadata_last_checked_at: string | null;
   latest_adm_file: string | null;
   latest_adm_path: string | null;
   latest_adm_status: string | null;
@@ -5999,6 +6042,11 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
   target_adm_file: string | null;
   target_adm_path: string | null;
   active_import_jobs: number | null;
+  metadata_stale: number | null;
+  last_worker_selected_at: string | null;
+  next_worker_due_at: string | null;
+  selected_count: number | null;
+  last_selection_reason: string | null;
   encrypted_token: string | null;
   token_iv: string | null;
   token_auth_tag: string | null;
@@ -6007,6 +6055,7 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
 export type AdmWorkerSyncTickResult = ScheduledAdmSyncResult & {
   worker_hot_path: true;
   selected_linked_server_id: string | null;
+  selected_service_id: string | null;
   selected_adm_file: string | null;
   selected_adm_path: string | null;
   pre_read_d1_queries_estimate: number;
@@ -6046,6 +6095,14 @@ export async function runAdmWorkerSyncTick(
     }
 
     const activeImportJobs = Number(selected.active_import_jobs ?? 0);
+    const selectionReason = activeImportJobs > 0
+      ? "active_import_job"
+      : Number(selected.metadata_stale ?? 0) === 1
+        ? "stale_metadata"
+        : selected.target_adm_file
+          ? "target_adm_file"
+          : "due_discovery";
+    await recordAdmWorkerServiceSelection(env, selected, selectionReason).catch(() => null);
     let pendingJobs: PendingAdmImportJobsResult | undefined;
     if (activeImportJobs > 0 && !explicitTargetFileName) {
       pendingJobs = await processAdmImportJobsUntilBudget(env, {
@@ -6064,6 +6121,7 @@ export async function runAdmWorkerSyncTick(
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
         selectedAdmFile: latestJob?.filename ?? selected.target_adm_file ?? selected.latest_adm_file,
         selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
         pendingJobs,
@@ -6076,6 +6134,14 @@ export async function runAdmWorkerSyncTick(
     }
 
     if (!explicitTargetFileName) {
+      if (isAdmWorkerMetadataStale(selected)) {
+        await refreshNitradoServerMetadata(env, {
+          linkedServerId: selected.id,
+          userId: selected.user_id,
+          force: true,
+          softFail: true,
+        }).catch(() => null);
+      }
       const discoveryPlan = await planAdmBackfillJobsForServer(env, selected.user_id, selected.id, {
         triggerType: "scheduled_worker",
         chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
@@ -6090,6 +6156,7 @@ export async function runAdmWorkerSyncTick(
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
         selectedAdmFile: selectedFile,
         selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
         pendingJobs,
@@ -6159,6 +6226,7 @@ export async function runAdmWorkerSyncTick(
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
         selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
         selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
         pendingJobs,
@@ -6177,6 +6245,7 @@ export async function runAdmWorkerSyncTick(
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
         selectedAdmFile: directFileName,
         selectedAdmPath: directPath ?? `dayzps/config/${directFileName}`,
         pendingJobs,
@@ -6272,6 +6341,7 @@ export async function runAdmWorkerSyncTick(
       return admWorkerResult({
         metadata,
         selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
         selectedAdmFile: directFileName,
         selectedAdmPath: discoveredFile.path,
         pendingJobs,
@@ -6301,6 +6371,7 @@ export async function runAdmWorkerSyncTick(
         return admWorkerResult({
           metadata,
           selectedLinkedServerId: selected.id,
+          selectedServiceId: selected.nitrado_service_id,
           selectedAdmFile: directFileName,
           selectedAdmPath: discoveredFile.path,
           pendingJobs,
@@ -6330,6 +6401,7 @@ export async function runAdmWorkerSyncTick(
         return admWorkerResult({
           metadata,
           selectedLinkedServerId: selected.id,
+          selectedServiceId: selected.nitrado_service_id,
           selectedAdmFile: directFileName,
           selectedAdmPath: discoveredFile.path,
           pendingJobs,
@@ -6404,6 +6476,7 @@ export async function runAdmWorkerSyncTick(
     return admWorkerResult({
       metadata,
       selectedLinkedServerId: selected.id,
+      selectedServiceId: selected.nitrado_service_id,
       selectedAdmFile: directFileName,
       selectedAdmPath: discoveredFile.path,
       pendingJobs,
@@ -6421,6 +6494,7 @@ export async function runAdmWorkerSyncTick(
 
 async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { linkedServerId?: string | null; force?: boolean } = {}): Promise<AdmWorkerSelectedServer | null> {
   const now = new Date().toISOString();
+  const metadataStaleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const linkedServerId = options.linkedServerId ?? null;
   const force = options.force === true ? 1 : 0;
   const row = await requireDb(env)
@@ -6438,9 +6512,25 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
            linked_servers.display_name,
            linked_servers.hostname,
            linked_servers.nitrado_service_name,
+           linked_servers.current_players,
+           linked_servers.max_players,
+           linked_servers.player_count_status,
+           linked_servers.player_count_last_checked_at,
+           linked_servers.metadata_last_checked_at,
            server_log_config.adm_path,
            server_subscriptions.plan_key,
            server_subscriptions.status AS subscription_status,
+           worker_selection.last_worker_selected_at,
+           worker_selection.next_worker_due_at,
+           worker_selection.selected_count,
+           worker_selection.last_selection_reason,
+           CASE
+             WHEN linked_servers.metadata_last_checked_at IS NULL
+               OR linked_servers.metadata_last_checked_at <= ?
+               OR linked_servers.player_count_last_checked_at IS NULL
+               OR linked_servers.player_count_last_checked_at <= ?
+             THEN 1 ELSE 0
+           END AS metadata_stale,
            COALESCE((
              SELECT adm_file
              FROM adm_sync_file_state latest_state
@@ -6535,6 +6625,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
          JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
          LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
          LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+         LEFT JOIN adm_worker_selection_state worker_selection ON worker_selection.linked_server_id = linked_servers.id
          LEFT JOIN nitrado_connections ON nitrado_connections.id = (
            SELECT id
            FROM nitrado_connections latest_connection
@@ -6555,6 +6646,10 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
              OR
              COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
              OR COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
+             OR linked_servers.metadata_last_checked_at IS NULL
+             OR linked_servers.metadata_last_checked_at <= ?
+             OR linked_servers.player_count_last_checked_at IS NULL
+             OR linked_servers.player_count_last_checked_at <= ?
              OR EXISTS (
                SELECT 1
                FROM adm_import_jobs
@@ -6569,14 +6664,66 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
        FROM eligible
        ORDER BY
          CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END,
+         CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END,
          CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END,
+         CASE WHEN last_worker_selected_at IS NULL THEN 0 ELSE 1 END,
+         COALESCE(last_worker_selected_at, '1970-01-01T00:00:00.000Z') ASC,
          CASE WHEN id > COALESCE((SELECT value FROM cursor), '') THEN 0 ELSE 1 END,
          id ASC
        LIMIT 1`,
     )
-    .bind(cursorKey, now, now, SCHEDULED_ADM_IMPORT_SOURCE, linkedServerId, linkedServerId, force, now, now, SCHEDULED_ADM_IMPORT_SOURCE)
+    .bind(
+      cursorKey,
+      metadataStaleBefore,
+      metadataStaleBefore,
+      now,
+      now,
+      SCHEDULED_ADM_IMPORT_SOURCE,
+      linkedServerId,
+      linkedServerId,
+      force,
+      now,
+      now,
+      metadataStaleBefore,
+      metadataStaleBefore,
+      SCHEDULED_ADM_IMPORT_SOURCE,
+    )
     .first<AdmWorkerSelectedServer>();
   return row ?? null;
+}
+
+function isAdmWorkerMetadataStale(selected: AdmWorkerSelectedServer) {
+  if (Number(selected.metadata_stale ?? 0) === 1) return true;
+  const staleAfterMs = 10 * 60 * 1000;
+  return isIsoOlderThan(selected.metadata_last_checked_at, staleAfterMs) || isIsoOlderThan(selected.player_count_last_checked_at, staleAfterMs);
+}
+
+function isIsoOlderThan(value: string | null | undefined, ageMs: number) {
+  const time = Date.parse(String(value ?? ""));
+  return !Number.isFinite(time) || Date.now() - time > ageMs;
+}
+
+async function recordAdmWorkerServiceSelection(env: Env, selected: AdmWorkerSelectedServer, reason: string) {
+  if (!selected.nitrado_service_id) return;
+  const now = new Date().toISOString();
+  const nextDue = new Date(Date.now() + (reason === "active_import_job" || Number(selected.current_players ?? 0) > 0 ? 3 : 10) * 60 * 1000).toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO adm_worker_selection_state (
+         service_id, linked_server_id, last_worker_selected_at, next_worker_due_at,
+         selected_count, last_selection_reason, updated_at
+       )
+       VALUES (?, ?, ?, ?, 1, ?, ?)
+       ON CONFLICT(service_id) DO UPDATE SET
+         linked_server_id = excluded.linked_server_id,
+         last_worker_selected_at = excluded.last_worker_selected_at,
+         next_worker_due_at = excluded.next_worker_due_at,
+         selected_count = COALESCE(adm_worker_selection_state.selected_count, 0) + 1,
+         last_selection_reason = excluded.last_selection_reason,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(selected.nitrado_service_id, selected.id, now, nextDue, reason, now)
+    .run();
 }
 
 function isAdmUnreadableBackoffActive(status: string | null | undefined, nextRetryAt: string | null | undefined) {
@@ -6600,6 +6747,7 @@ async function updateAdmWorkerCursor(env: Env, cursorKey: string, linkedServerId
 function admWorkerResult(values: {
   metadata: ScheduledMetadataSyncResult;
   selectedLinkedServerId?: string | null;
+  selectedServiceId?: string | null;
   selectedAdmFile?: string | null;
   selectedAdmPath?: string | null;
   pendingJobs?: PendingAdmImportJobsResult;
@@ -6624,6 +6772,7 @@ function admWorkerResult(values: {
     ok: true,
     worker_hot_path: true,
     selected_linked_server_id: values.selectedLinkedServerId ?? null,
+    selected_service_id: values.selectedServiceId ?? null,
     selected_adm_file: values.selectedAdmFile ?? null,
     selected_adm_path: values.selectedAdmPath ?? null,
     pre_read_d1_queries_estimate: values.selectedLinkedServerId ? 1 : 1,
@@ -9539,6 +9688,19 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
    ON adm_live_source_state(service_id, next_test_at)`,
   `CREATE INDEX IF NOT EXISTS idx_nitrado_rate_limits_until
    ON nitrado_rate_limits(rate_limited_until)`,
+  `CREATE TABLE IF NOT EXISTS adm_worker_selection_state (
+    service_id TEXT PRIMARY KEY,
+    linked_server_id TEXT NOT NULL,
+    last_worker_selected_at TEXT,
+    next_worker_due_at TEXT,
+    selected_count INTEGER DEFAULT 0,
+    last_selection_reason TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_adm_worker_selection_state_linked_server
+   ON adm_worker_selection_state(linked_server_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_adm_worker_selection_state_selected
+   ON adm_worker_selection_state(last_worker_selected_at)`,
   `CREATE TABLE IF NOT EXISTS adm_import_jobs (
     id TEXT PRIMARY KEY,
     server_id TEXT NOT NULL,

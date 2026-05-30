@@ -10,6 +10,14 @@ type ServiceRow = {
   server_name: string | null;
   nitrado_service_name: string | null;
   nitrado_service_id: string | null;
+  current_players?: number | null;
+  max_players?: number | null;
+  player_count_last_checked_at?: string | null;
+  metadata_last_checked_at?: string | null;
+  last_worker_selected_at?: string | null;
+  next_worker_due_at?: string | null;
+  selected_count?: number | null;
+  last_selection_reason?: string | null;
   latest_adm_file: string | null;
   last_processed_file: string | null;
   last_sync_status: string | null;
@@ -20,6 +28,12 @@ type ServiceRow = {
 type FileStateRow = {
   adm_file: string | null;
   status: string | null;
+  line_count?: number | null;
+  latest_known_line_count?: number | null;
+  imported_line_count?: number | null;
+  cursor_line?: number | null;
+  last_read_at?: string | null;
+  last_growth_at?: string | null;
   retry_count: number | null;
   next_retry_at: string | null;
   last_http_status: number | null;
@@ -53,6 +67,17 @@ type DiagnosticRow = {
   http_status: number | null;
   error_code: string | null;
   created_at: string | null;
+};
+
+type SourceStateRow = {
+  source_name: string | null;
+  last_tested_at: string | null;
+  last_status: string | null;
+  last_http_status: number | null;
+  last_error_code: string | null;
+  works: number | null;
+  preferred: number | null;
+  next_test_at: string | null;
 };
 
 type WorkerHeartbeatRow = {
@@ -144,6 +169,14 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
             linked_servers.server_name,
             linked_servers.nitrado_service_name,
             linked_servers.nitrado_service_id,
+            linked_servers.current_players,
+            linked_servers.max_players,
+            linked_servers.player_count_last_checked_at,
+            linked_servers.metadata_last_checked_at,
+            worker_selection.last_worker_selected_at,
+            worker_selection.next_worker_due_at,
+            worker_selection.selected_count,
+            worker_selection.last_selection_reason,
             adm_sync_state.latest_adm_file,
             adm_sync_state.last_processed_file,
             adm_sync_state.last_sync_status,
@@ -151,6 +184,7 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
             adm_sync_state.last_sync_at
      FROM linked_servers
      LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+     LEFT JOIN adm_worker_selection_state worker_selection ON worker_selection.linked_server_id = linked_servers.id
      WHERE linked_servers.nitrado_service_id IS NOT NULL
        AND linked_servers.nitrado_service_id <> ''
      ORDER BY linked_servers.created_at DESC
@@ -179,9 +213,10 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
   }
 
   const services = await Promise.all((servicesResult.results ?? []).map(async (service) => {
-    const [fileState, importJob, lastSuccessfulJob, diagnostic, lastSyncRun, eventCount] = await Promise.all([
+    const [fileState, importJob, lastSuccessfulJob, diagnostic, lastSyncRun, eventCount, sourceMatrix] = await Promise.all([
       safeFirst<FileStateRow>(warnings, `file state ${service.id}`, db.prepare(
-        `SELECT adm_file, status, retry_count, next_retry_at, last_http_status,
+        `SELECT adm_file, status, line_count, latest_known_line_count, imported_line_count,
+                cursor_line, last_read_at, last_growth_at, retry_count, next_retry_at, last_http_status,
                 last_error, last_endpoint_kind, last_method, updated_at
          FROM adm_sync_file_state
          WHERE linked_server_id = ?
@@ -227,6 +262,14 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
            (SELECT COUNT(*) FROM kill_events WHERE linked_server_id = ?) +
            (SELECT COUNT(*) FROM player_events WHERE linked_server_id = ?) AS count`,
       ).bind(service.id, service.id)),
+      safeAll<SourceStateRow>(warnings, `live source matrix ${service.id}`, db.prepare(
+        `SELECT source_name, last_tested_at, last_status, last_http_status,
+                last_error_code, works, preferred, next_test_at
+         FROM adm_live_source_state
+         WHERE service_id = ?
+         ORDER BY preferred DESC, works DESC, COALESCE(last_tested_at, updated_at) DESC
+         LIMIT 12`,
+      ).bind(service.nitrado_service_id ?? "")),
     ]);
 
     const latestClassifiedError = canonicalError(diagnostic?.error_code ?? fileState?.last_error ?? service.last_sync_message);
@@ -244,6 +287,14 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
       serviceId: service.nitrado_service_id,
       serverId: service.id,
       serverName: service.display_name ?? service.hostname ?? service.server_name ?? service.nitrado_service_name ?? "DZN Server",
+      currentPlayers: Number(service.current_players ?? 0),
+      maxPlayers: Number(service.max_players ?? 0),
+      playerCountLastCheckedAt: service.player_count_last_checked_at ?? null,
+      metadataLastCheckedAt: service.metadata_last_checked_at ?? null,
+      lastWorkerSelectedAt: service.last_worker_selected_at ?? null,
+      nextWorkerDueAt: service.next_worker_due_at ?? null,
+      workerSelectedCount: Number(service.selected_count ?? 0),
+      lastSelectionReason: service.last_selection_reason ?? null,
       latestAdmFile: service.latest_adm_file ?? diagnostic?.file_name ?? fileState?.adm_file ?? null,
       lastProcessedFile: service.last_processed_file,
       lastSyncStatus: service.last_sync_status ?? latestStatus,
@@ -259,10 +310,26 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
       recoverable,
       manualActionRequired,
       workerHeartbeat,
+      sourceMatrix: (sourceMatrix.results ?? []).map((source) => ({
+        sourceName: source.source_name,
+        lastTestedAt: source.last_tested_at,
+        lastStatus: source.last_status,
+        lastHttpStatus: source.last_http_status,
+        lastErrorCode: source.last_error_code,
+        works: Number(source.works ?? 0) === 1,
+        preferred: Number(source.preferred ?? 0) === 1,
+        nextTestAt: source.next_test_at,
+      })),
       lastSyncMessage: sanitize(service.last_sync_message),
       latestFileState: fileState ? {
         fileName: fileState.adm_file,
         status: fileState.status,
+        lineCount: Number(fileState.line_count ?? 0),
+        latestKnownLineCount: Number(fileState.latest_known_line_count ?? 0),
+        importedLineCount: Number(fileState.imported_line_count ?? 0),
+        cursorLine: Number(fileState.cursor_line ?? 0),
+        lastReadAt: fileState.last_read_at,
+        lastGrowthAt: fileState.last_growth_at,
         retryCount: Number(fileState.retry_count ?? 0),
         nextRetryAt: fileState.next_retry_at,
         lastHttpStatus: fileState.last_http_status,

@@ -97,6 +97,7 @@ type CronRow = {
 
 type AdmFileReadIssueRow = {
   adm_file: string | null;
+  file_path?: string | null;
   status: string | null;
   retry_count: number | null;
   next_retry_at: string | null;
@@ -110,6 +111,7 @@ type AdmFileReadIssueRow = {
 
 type NitradoFileReadDiagnosticRow = {
   file_name: string | null;
+  file_path: string | null;
   method: string | null;
   endpoint_kind: string | null;
   status: string | null;
@@ -254,7 +256,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
          WHERE linked_server_id = ?`,
       ).bind(linkedServerId).first<{ missing_count: number | null; oldest_missing_file: string | null; newest_missing_file: string | null; unreadable_count: number | null }>().catch(() => null),
       db.prepare(
-        `SELECT adm_file, status, retry_count, next_retry_at, last_http_status,
+        `SELECT adm_file, adm_path AS file_path, status, retry_count, next_retry_at, last_http_status,
                 last_endpoint_kind, last_method, last_error, last_diagnostic_at, last_checked_at
          FROM adm_sync_file_state
          WHERE linked_server_id = ?
@@ -274,7 +276,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     if (!server) return dashboardHealthError(404, "server_not_found", "Server not found.");
     const [latestDiagnostic, latestCompletedImport] = await Promise.all([
       db.prepare(
-        `SELECT file_name, method, endpoint_kind, status, http_status, error_code, error_message, created_at
+        `SELECT file_name, file_path, method, endpoint_kind, status, http_status, error_code, error_message, created_at
          FROM nitrado_file_read_attempts
          WHERE (server_id = ? OR service_id = ?)
          ORDER BY created_at DESC
@@ -587,6 +589,7 @@ function normalizeLatestReadTruth(issue: AdmFileReadIssueRow | null, diagnostic:
   if (diagnostic && (!issue || (Number.isFinite(diagnosticTime) && (!Number.isFinite(issueTime) || diagnosticTime >= issueTime)))) {
     return {
       adm_file: diagnostic.file_name,
+      file_path: diagnostic.file_path,
       status: diagnostic.status,
       retry_count: issue?.retry_count ?? 0,
       next_retry_at: issue?.next_retry_at ?? null,
@@ -681,6 +684,8 @@ function ownerAutoSyncMessage(activeJob: ReturnType<typeof normalizeJob> | null,
 }
 
 function ownerAdmSource(issue: AdmFileReadIssueRow | null, activeJob: ReturnType<typeof normalizeJob> | null) {
+  const sourceText = `${issue?.last_endpoint_kind ?? ""} ${issue?.last_method ?? ""} ${issue?.file_path ?? ""}`;
+  if (/noftp|gameserver_details_log_files/i.test(sourceText)) return "Nitrado Log Files";
   if (issue?.last_endpoint_kind === "nitrado_admin_logs" || issue?.last_method === "admin_logs") return "Nitrado Admin Logs";
   if (issue?.last_endpoint_kind === "nitrado_seek" || issue?.last_endpoint_kind === "nitrado_download" || issue?.last_endpoint_kind === "tokenized_url") return "Nitrado File Server fallback";
   if (activeJob?.source === "scheduled_nitrado") return "Scheduled Nitrado ADM import";

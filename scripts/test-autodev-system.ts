@@ -83,7 +83,7 @@ assert.equal(pickSafeIssue.includes('"billing"'), true);
 assert.equal(pickSafeIssue.includes('"discord-oauth"'), true);
 
 const scripts = JSON.parse(read("package.json")).scripts;
-for (const script of ["autodev:audit", "autodev:quality", "autodev:production-smoke", "autodev:adm-watch", "autodev:create-issue", "autodev:risk", "autodev:pick-safe-issue", "test:autodev", "test:autodev-codex"]) {
+for (const script of ["autodev:audit", "autodev:quality", "autodev:production-smoke", "autodev:adm-watch", "autodev:create-issue", "autodev:risk", "autodev:pick-safe-issue", "verify:adm-live", "test:autodev", "test:autodev-codex"]) {
   assert.equal(typeof scripts[script], "string", `${script} must exist`);
 }
 
@@ -118,5 +118,8 @@ assert.equal(existsSync("docs/CODEX_AUTODEV.md"), true);
 assert.equal(existsSync(".github/workflows/dzn-autodev-audit.yml"), true);
 assert.equal(existsSync(".github/workflows/dzn-post-deploy-verify.yml"), true);
 assert.equal(existsSync(".github/workflows/dzn-adm-cycle-watch.yml"), true);
+const admLiveVerify = read("scripts/verify-production-adm-live.ts");
+assert.equal(admLiveVerify.includes("gameserver_details_log_files_noftp_download"), true);
+assert.equal(admLiveVerify.includes("ADM Worker has not selected this service within 30 minutes"), true);
 
 console.log("AutoDev system tests passed.");
