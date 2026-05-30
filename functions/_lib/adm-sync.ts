@@ -3383,22 +3383,27 @@ export async function planAdmBackfillJobsForServer(
     .filter((job) => isCompletedAdmImportJobStatus(job.status))
     .map((job) => job.filename);
   const rateLimited = batch.apiStatus === "429" || /rate limited/i.test(`${batch.readError ?? ""} ${batch.message ?? ""}`);
+  const activeJobForStatus = activeJob && isActiveAdmImportJobStatus(activeJob.status) ? activeJob : null;
+  const completedActiveJob = activeJob && isCompletedAdmImportJobStatus(activeJob.status) ? activeJob : null;
+  const missingNewestAvailable = plan.missingFiles.some((filename) => normalizeAdmFilenameKey(filename) === normalizeAdmFilenameKey(newestAvailable?.name));
   const status = rateLimited
     ? "nitrado_rate_limited"
-    : activeJob || createdJobs.length
+    : activeJobForStatus || createdJobs.length
       ? "adm_backfill_queued"
-      : plan.missingFiles.length
+      : plan.missingFiles.length && missingNewestAvailable
         ? "latest_adm_unreadable"
         : "adm_backfill_caught_up";
   const ok = true;
   const baseMessage = rateLimited
     ? batch.readError ?? batch.message ?? "Nitrado rate limited ADM reads. DZN is backing off and will retry automatically."
-    : activeJob
-      ? `ADM backfill is processing ${activeJob.filename} chunk ${Math.min(activeJob.total_chunks, activeJob.chunks_processed + 1)}/${activeJob.total_chunks}.`
+    : activeJobForStatus
+      ? `ADM backfill is processing ${activeJobForStatus.filename} chunk ${Math.min(activeJobForStatus.total_chunks, activeJobForStatus.chunks_processed + 1)}/${activeJobForStatus.total_chunks}.`
       : createdJobs.length
         ? `Queued ${createdJobs.length} missing ADM file${createdJobs.length === 1 ? "" : "s"} for scheduled backfill.`
-        : plan.missingFiles.length
-          ? `Missing ADM files are unreadable or already queued. ${plan.nextAction}`
+        : plan.missingFiles.length && missingNewestAvailable
+          ? `Current ADM is unreadable or already queued. ${plan.nextAction}`
+          : plan.missingFiles.length
+            ? "Current ADM is caught up; older unreadable backfill files will retry without blocking live tracking."
           : "ADM backfill is caught up.";
   const latestUnreadable = plan.unreadableFiles.at(-1) ?? null;
   const latestUnreadableDiagnostic = latestUnreadable
@@ -3421,8 +3426,8 @@ export async function planAdmBackfillJobsForServer(
     latestAdmFile: newestAvailable?.name ?? existingState?.latest_adm_file ?? null,
     latestAdmPath: newestAvailable?.path ?? preferredAdmPath,
     sourceServiceId: scope.nitradoServiceId,
-    lastProcessedFile: existingState?.last_processed_file ?? null,
-    lastProcessedLine: Number(existingState?.last_processed_line ?? 0),
+    lastProcessedFile: completedActiveJob?.filename ?? existingState?.last_processed_file ?? null,
+    lastProcessedLine: completedActiveJob?.current_line ?? Number(existingState?.last_processed_line ?? 0),
     lastProcessedOffset: Number(existingState?.last_processed_offset ?? 0),
     status,
     message,
