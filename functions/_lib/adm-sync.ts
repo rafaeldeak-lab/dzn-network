@@ -3098,16 +3098,23 @@ export async function processPendingAdmImportJobs(
   const source = options.source ?? SCHEDULED_ADM_IMPORT_SOURCE;
   await recoverStaleAdmImportJobs(env, source);
   await cleanupExpiredAdmImportJobText(env, source).catch(() => null);
+  const activeStaleCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const rows = await requireDb(env)
     .prepare(
       `SELECT * FROM adm_import_jobs
        WHERE source = ?
          AND (? IS NULL OR server_id = ?)
-         AND status IN ('queued', 'processing', 'parsing', 'writing', 'failed_retryable', 'rebuilding')
+         AND (
+           status IN ('queued', 'failed_retryable')
+           OR (
+             status IN ('processing', 'parsing', 'writing', 'rebuilding')
+             AND COALESCE(updated_at, created_at) < ?
+           )
+         )
        ORDER BY created_at ASC
        LIMIT ?`,
     )
-    .bind(source, options.linkedServerId ?? null, options.linkedServerId ?? null, maxJobs * 3)
+    .bind(source, options.linkedServerId ?? null, options.linkedServerId ?? null, activeStaleCutoff, maxJobs * 3)
     .all<AdmImportJobRow>();
 
   const results: AdmImportJobProgressResult[] = [];
@@ -4945,6 +4952,11 @@ async function recoverStaleAdmImportJobs(env: Env, source: string) {
       `UPDATE adm_import_jobs SET
         status = 'failed_retryable',
         error_message = COALESCE(error_message, 'Scheduled ADM import job stalled for more than 10 minutes. Worker cron will retry it automatically.'),
+        chunk_size = CASE
+          WHEN COALESCE(chunk_size, 0) > 50 THEN 50
+          WHEN COALESCE(chunk_size, 0) > 25 THEN 25
+          ELSE chunk_size
+        END,
         updated_at = ?
        WHERE source = ?
          AND status IN ('processing', 'parsing', 'writing', 'rebuilding')

@@ -153,6 +153,9 @@ async function main() {
   assert.match(admSyncSource, /processImmediately: false/);
   assert.equal(admSyncSource.includes("prioritizedLiveCurrentJobKey"), false);
   assert.match(admSyncSource, /preliminaryPlan\.missingFiles/);
+  assert.match(admSyncSource, /status IN \('queued', 'failed_retryable'\)/);
+  assert.match(admSyncSource, /COALESCE\(updated_at, created_at\) < \?/);
+  assert.match(admSyncSource, /chunk_size = CASE/);
   assert.match(admSyncSource, /currentFileMaxPathVariants/);
   assert.match(admSyncSource, /trySeekWithoutRaw/);
   assert.match(admSyncSource, /lastProcessedFile = rowCompleted \? row\.filename : existingState\?\.last_processed_file/);
@@ -729,7 +732,7 @@ async function main() {
     filename: largeFixtureName,
     admText: largeFixtureText,
     source: "scheduled_nitrado",
-    chunkSize: 10,
+    chunkSize: 100,
   });
   const cancelledJob = await cancelAdmImportLineJobForServer(makeEnv(cancelJobDb), {
     linkedServerId,
@@ -943,7 +946,9 @@ async function main() {
   const recoveredStaleScheduled = await processPendingAdmImportJobs(makeEnv(staleScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(recoveredStaleScheduled.processedJobs, 1);
   assert.equal(recoveredStaleScheduled.chunksProcessed, 1);
-  assert.equal(staleScheduledDb.admImportJobs.get(staleScheduledJob.job_id)?.current_line, 10);
+  const recoveredStaleRow = staleScheduledDb.admImportJobs.get(staleScheduledJob.job_id);
+  assert.equal(Number(recoveredStaleRow?.chunk_size ?? 0) <= 50, true);
+  assert.equal(recoveredStaleRow?.current_line, recoveredStaleRow?.chunk_size);
 
   const duplicateLargeManual = await importChunkedAdmText(makeEnv(scheduledJobDb), linkedServerId, largeFixtureName, largeFixtureText, { chunkSize: 10 });
   assert.equal(duplicateLargeManual.file_result?.parsed_kills, 216);
@@ -1541,6 +1546,7 @@ class MemoryStatement {
         ) {
           row.status = "failed_retryable";
           row.error_message = row.error_message ?? "Scheduled ADM import job stalled for more than 5 minutes. Cron or dashboard Continue Import can retry it automatically.";
+          row.chunk_size = Number(row.chunk_size ?? 0) > 50 ? 50 : Number(row.chunk_size ?? 0) > 25 ? 25 : row.chunk_size;
           row.updated_at = this.values[0];
           changes += 1;
         }
@@ -1791,9 +1797,18 @@ class MemoryStatement {
     if (q.startsWith("pragma table_info")) return { results: [] };
     if (q.includes("from adm_import_jobs")) {
       const source = String(this.values[0] ?? "");
-      const limit = Number(this.values[1] ?? 5);
+      const linkedServerFilter = this.values[1] === null || this.values[1] === undefined ? null : String(this.values[1]);
+      const activeStaleCutoff = this.values.length >= 5 ? String(this.values[3] ?? "") : null;
+      const limit = Number(this.values.length >= 5 ? this.values[4] : this.values[1] ?? 5);
       const rows = Array.from(this.db.admImportJobs.values())
-        .filter((row) => row.source === source && ["queued", "processing", "parsing", "writing", "failed_retryable", "rebuilding"].includes(String(row.status)))
+        .filter((row) => {
+          if (row.source !== source) return false;
+          if (linkedServerFilter && row.server_id !== linkedServerFilter) return false;
+          if (["queued", "failed_retryable"].includes(String(row.status))) return true;
+          if (!["processing", "parsing", "writing", "rebuilding"].includes(String(row.status))) return false;
+          if (!activeStaleCutoff) return true;
+          return String(row.updated_at ?? row.created_at ?? "") < activeStaleCutoff;
+        })
         .sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")))
         .slice(0, limit);
       return { results: rows as T[] };
