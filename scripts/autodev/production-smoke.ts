@@ -16,9 +16,10 @@ async function request(path: string, init?: RequestInit) {
       },
     });
     const body = await response.text().catch(() => "");
-    return { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: body.slice(0, 2000) };
+    return { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: body.slice(0, 2000), fullBody: body };
   } catch (error) {
-    return { ok: false, status: 0, durationMs: Date.now() - startedAt, body: error instanceof Error ? error.message : String(error) };
+    const body = error instanceof Error ? error.message : String(error);
+    return { ok: false, status: 0, durationMs: Date.now() - startedAt, body, fullBody: body };
   }
 }
 
@@ -42,7 +43,7 @@ async function main() {
     : fail("homepage first-sync copy", "Homepage shows scary generic network failure copy while ADM may simply be awaiting first sync.", { status: home.status }, "medium"));
 
   const homeStats = await request("/api/public/home-stats");
-  const homeStatsJson = parseJson(homeStats.body);
+  const homeStatsJson = parseJson(homeStats.fullBody);
   const homeStatsHasAdmEvidence = hasAdmHomeStatsEvidence(homeStatsJson);
   checks.push(homeStats.ok && homeStats.status === 200 && homeStatsJson?.ok && homeStatsJson.source !== "empty_no_cache" && homeStatsHasAdmEvidence
     ? pass("public home-stats ADM snapshot", "Public home-stats returns last-known ADM data or a valid snapshot.", {
