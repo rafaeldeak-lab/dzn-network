@@ -1,5 +1,4 @@
 import { requireCronSecret } from "../../_lib/cron-auth";
-import { requireDb } from "../../_lib/db";
 import { json, readJson } from "../../_lib/http";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -36,7 +35,7 @@ export const onRequestPost: PagesFunction = async (context) => {
     return json({ ok: false, error: "invalid_request", message: "serviceId and filePath are required." }, { status: 400 });
   }
 
-  const db = requireDb(context.env);
+  const db = await requireAuthenticatedDb(context.env);
   const linkedServer = await resolveLinkedServer(context.env, serviceId, body.serverId);
   if (!linkedServer) {
     return json({ ok: false, error: "server_not_found", message: "No linked server found for that Nitrado service id." }, { status: 404 });
@@ -125,15 +124,16 @@ export const onRequestPost: PagesFunction = async (context) => {
   }
 };
 
-export const onRequestOptions: PagesFunction = () => new Response(null, {
-  status: 204,
-  headers: { Allow: "POST, OPTIONS" },
-});
+export const onRequestOptions: PagesFunction = ({ request, env }) => {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return new Response(null, {
+    status: 204,
+    headers: { Allow: "POST, OPTIONS" },
+  });
+};
 
-export const onRequestGet: PagesFunction = () => json(
-  { error: "Method not allowed", allowed: ["POST"] },
-  { status: 405, headers: { Allow: "POST" } },
-);
+export const onRequestGet: PagesFunction = (context) => authenticatedMethodNotAllowed(context);
 
 function formatAttempt(row: DiagnosticAttemptRow) {
   return {
@@ -154,7 +154,7 @@ function formatAttempt(row: DiagnosticAttemptRow) {
 }
 
 async function resolveLinkedServer(env: Env, serviceId: string, serverId?: string | null) {
-  const db = requireDb(env);
+  const db = await requireAuthenticatedDb(env);
   return db
     .prepare(
       `SELECT id, user_id, nitrado_service_id
@@ -172,7 +172,8 @@ async function resolveLinkedServer(env: Env, serviceId: string, serverId?: strin
 async function getNitradoTokenForDebug(env: Env, linkedServerId: string, userId: string) {
   if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
   const { decryptToken } = await import("../../_lib/crypto");
-  const row = await requireDb(env)
+  const db = await requireAuthenticatedDb(env);
+  const row = await db
     .prepare(
       `SELECT encrypted_token, token_iv, token_auth_tag
        FROM nitrado_connections
@@ -184,6 +185,20 @@ async function getNitradoTokenForDebug(env: Env, linkedServerId: string, userId:
     .first<{ encrypted_token: string; token_iv: string; token_auth_tag: string }>();
   if (!row) throw new Error("No Nitrado token found for this linked server");
   return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+}
+
+async function requireAuthenticatedDb(env: Env) {
+  const { requireDb } = await import("../../_lib/db");
+  return requireDb(env);
+}
+
+function authenticatedMethodNotAllowed({ request, env }: Parameters<PagesFunction>[0]) {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return json(
+    { error: "Method not allowed", allowed: ["POST"] },
+    { status: 405, headers: { Allow: "POST" } },
+  );
 }
 
 function sanitizeServiceId(value: unknown) {

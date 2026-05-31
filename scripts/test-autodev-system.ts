@@ -55,6 +55,7 @@ assert.equal(read("wrangler.adm-sync.toml").includes('name = "dzn-adm-sync-worke
 assert.equal(read("wrangler.adm-sync.toml").includes("crons ="), true);
 
 const productionSmoke = read("scripts/autodev/production-smoke.ts");
+assert.equal(productionSmoke.includes("/api/debug/nitrado-admin-logs"), true);
 assert.equal(productionSmoke.includes("/api/debug/nitrado-file-read"), true);
 assert.equal(productionSmoke.includes("result.status === 401"), true);
 assert.equal(productionSmoke.includes("Protected endpoint must return 401"), true);

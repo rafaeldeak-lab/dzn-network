@@ -1,7 +1,6 @@
 import { requireCronSecret } from "../../_lib/cron-auth";
-import { requireDb } from "../../_lib/db";
-import { json, methodNotAllowed } from "../../_lib/http";
-import type { PagesFunction } from "../../_lib/types";
+import { json } from "../../_lib/http";
+import type { Env, PagesFunction } from "../../_lib/types";
 
 type ServiceRow = {
   id: string;
@@ -135,9 +134,13 @@ const ATTENTION_ERRORS = new Set(["NITRADO_UNAUTHORIZED", "NITRADO_FORBIDDEN"]);
 
 export const onRequestGet: PagesFunction = handleAdmHealth;
 export const onRequestPost: PagesFunction = handleAdmHealth;
-export const onRequestPut: PagesFunction = () => methodNotAllowed();
-export const onRequestDelete: PagesFunction = () => methodNotAllowed();
-export const onRequestOptions: PagesFunction = () => new Response(null, { status: 204, headers: { Allow: "GET, POST, OPTIONS" } });
+export const onRequestPut: PagesFunction = (context) => authenticatedMethodNotAllowed(context);
+export const onRequestDelete: PagesFunction = (context) => authenticatedMethodNotAllowed(context);
+export const onRequestOptions: PagesFunction = ({ request, env }) => {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return new Response(null, { status: 204, headers: { Allow: "GET, POST, OPTIONS" } });
+};
 
 async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
   const unauthorized = requireCronSecret(request, env);
@@ -146,7 +149,7 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
   const generatedAt = new Date().toISOString();
   let db: D1Database;
   try {
-    db = requireDb(env);
+    db = await requireAuthenticatedDb(env);
   } catch (error) {
     return json({
       ok: false,
@@ -377,6 +380,17 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
     warnings: warnings.map(sanitize),
     fatalErrors,
   });
+}
+
+async function requireAuthenticatedDb(env: Env) {
+  const { requireDb } = await import("../../_lib/db");
+  return requireDb(env);
+}
+
+function authenticatedMethodNotAllowed({ request, env }: Parameters<PagesFunction>[0]) {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return json({ error: "Method not allowed" }, { status: 405 });
 }
 
 async function safeAll<T>(warnings: string[], label: string, statement: D1PreparedStatement) {

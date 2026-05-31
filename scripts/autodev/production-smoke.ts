@@ -53,7 +53,7 @@ async function main() {
     })
     : fail("public home-stats ADM snapshot", `Expected public home-stats 200 JSON with non-empty source, got HTTP ${homeStats.status}.`, homeStats, "medium"));
 
-  for (const path of ["/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run", "/api/autodev/adm-health"]) {
+  for (const path of ["/api/debug/nitrado-admin-logs", "/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run", "/api/autodev/adm-health"]) {
     const result = await request(path, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
     checks.push(result.ok && result.status === 401
       ? pass(`POST ${path} unauthenticated`, "Protected endpoint returned 401.", { status: result.status })

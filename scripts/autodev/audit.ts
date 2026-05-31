@@ -60,7 +60,7 @@ for (const manualLabel of ["Check ADM Files", "Verify ADM Automation", "Backfill
 check(fileExists("functions/_lib/nitrado-diagnostics.ts"), "ADM diagnostics helper", "Nitrado diagnostics helper exists.", "Nitrado diagnostics helper missing.", "high");
 check(fileExists("functions/api/autodev/adm-health.ts"), "ADM health endpoint", "ADM health endpoint exists.", "ADM health endpoint missing.", "high");
 check(/latestClassifiedError|latestHttpStatus|importJobStatus/.test(readText("functions/api/autodev/adm-health.ts")), "ADM health summary shape", "ADM health endpoint exposes sanitized AutoDev summary fields.", "ADM health endpoint must expose ADM sync summary fields.", "medium");
-for (const endpoint of ["functions/api/debug/nitrado-file-read.ts", "functions/api/sync/adm/retry-unreadable.ts", "functions/api/sync/adm/run.ts", "functions/api/autodev/adm-health.ts"]) {
+for (const endpoint of ["functions/api/debug/nitrado-admin-logs.ts", "functions/api/debug/nitrado-file-read.ts", "functions/api/sync/adm/retry-unreadable.ts", "functions/api/sync/adm/run.ts", "functions/api/autodev/adm-health.ts"]) {
   check(readText(endpoint).includes("requireCronSecret") || readText(endpoint).includes("isCronAuthorized"), `${endpoint} protected`, `${endpoint} uses cron auth.`, `${endpoint} is missing cron auth.`, "high");
 }
 

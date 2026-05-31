@@ -36,15 +36,23 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   }
 };
 
-export const onRequestOptions: PagesFunction = () => new Response(null, {
-  status: 204,
-  headers: { Allow: "POST, OPTIONS" },
-});
+export const onRequestOptions: PagesFunction = ({ request, env }) => {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return new Response(null, {
+    status: 204,
+    headers: { Allow: "POST, OPTIONS" },
+  });
+};
 
-export const onRequestGet: PagesFunction = () => json(
-  { error: "Method not allowed", allowed: ["POST"] },
-  { status: 405, headers: { Allow: "POST" } },
-);
+export const onRequestGet: PagesFunction = ({ request, env }) => {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return json(
+    { error: "Method not allowed", allowed: ["POST"] },
+    { status: 405, headers: { Allow: "POST" } },
+  );
+};
 
 function sanitizeServiceId(value: unknown) {
   const text = String(value ?? "").trim();

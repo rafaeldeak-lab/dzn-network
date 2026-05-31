@@ -1,9 +1,5 @@
-import { runAdmSync } from "../../../_lib/adm-sync";
-import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
 import { DZN_CRON_SECRET_HEADER, isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
-import { ensureMockUser, getSessionUser, SESSION_COOKIE } from "../../../_lib/db";
 import { json, readJson } from "../../../_lib/http";
-import { isMockAuth } from "../../../_lib/mock";
 import type { Env, PagesContext, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type AdmSyncRunBody = {
@@ -14,34 +10,49 @@ type AdmSyncRunBody = {
   max_lines_per_server?: number;
 };
 
+type AutomationCronSource = "cloudflare" | "github-backup" | "manual";
+
 type AdmSyncRunHandlers = {
-  runManual: typeof runAdmSync;
+  runManual: (
+    env: Env,
+    userId: string,
+    linkedServerId: string | null,
+    options: { triggerType: "manual"; maxLinesPerRun: number },
+  ) => Promise<unknown>;
   resolveUser: typeof resolveUser;
 };
 
 const DEFAULT_HANDLERS: AdmSyncRunHandlers = {
-  runManual: runAdmSync,
+  runManual: runManualAdmSync,
   resolveUser,
 };
 
 export const onRequestPost: PagesFunction = (context) => handleAdmSyncRun(context);
 
-export const onRequestOptions: PagesFunction = () => new Response(null, {
-  status: 204,
-  headers: {
-    Allow: "POST, OPTIONS",
-  },
-});
-
-export const onRequestGet: PagesFunction = () => json(
-  { error: "Method not allowed", allowed: ["POST"] },
-  {
-    status: 405,
+export const onRequestOptions: PagesFunction = ({ request, env }) => {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return new Response(null, {
+    status: 204,
     headers: {
-      Allow: "POST",
+      Allow: "POST, OPTIONS",
     },
-  },
-);
+  });
+};
+
+export const onRequestGet: PagesFunction = ({ request, env }) => {
+  const unauthorized = requireCronSecret(request, env);
+  if (unauthorized) return unauthorized;
+  return json(
+    { error: "Method not allowed", allowed: ["POST"] },
+    {
+      status: 405,
+      headers: {
+        Allow: "POST",
+      },
+    },
+  );
+};
 
 export async function handleAdmSyncRun(
   { request, env }: PagesContext,
@@ -51,6 +62,7 @@ export async function handleAdmSyncRun(
     const unauthorized = requireCronSecret(request, env);
     if (unauthorized) return unauthorized;
     const body = await readJson<AdmSyncRunBody>(request);
+    const { normalizeAutomationCronSource } = await import("../../../_lib/automation");
     const source = normalizeAutomationCronSource(body.source, body.cron);
     const startedAt = new Date().toISOString();
     try {
@@ -111,11 +123,27 @@ export function isCronAuthorized(request: Request, env: Env) {
   return isCronSecretAuthorized(request, env);
 }
 
+const SESSION_COOKIE = "dzn_session";
+
 function requestHasSessionCookie(request: Request) {
   return request.headers.get("cookie")?.split(";").some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`)) ?? false;
 }
 
+async function runManualAdmSync(
+  env: Env,
+  userId: string,
+  linkedServerId: string | null,
+  options: { triggerType: "manual"; maxLinesPerRun: number },
+) {
+  const { runAdmSync } = await import("../../../_lib/adm-sync");
+  return runAdmSync(env, userId, linkedServerId, options);
+}
+
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
+  const [{ ensureMockUser, getSessionUser }, { isMockAuth }] = await Promise.all([
+    import("../../../_lib/db"),
+    import("../../../_lib/mock"),
+  ]);
   const user = await getSessionUser(env, request);
   if (user || !isMockAuth(env.MOCK_AUTH)) return user;
 
@@ -139,7 +167,7 @@ function sanitizePositiveInteger(value: unknown, fallback: number) {
 
 async function safeRecordCronRun(
   env: Env,
-  source: ReturnType<typeof normalizeAutomationCronSource>,
+  source: AutomationCronSource,
   status: "started" | "success" | "failed" | "partial",
   startedAt: string,
   error?: unknown,
@@ -147,6 +175,7 @@ async function safeRecordCronRun(
 ) {
   const finishedAt = new Date().toISOString();
   try {
+    const { recordAutomationCronRun } = await import("../../../_lib/automation");
     await recordAutomationCronRun(env, {
       source,
       jobType: "adm",

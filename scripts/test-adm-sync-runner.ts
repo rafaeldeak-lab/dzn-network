@@ -309,14 +309,26 @@ async function runEndpointTests() {
   const getResponse = await onRequestGet(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
     method: "GET",
   }), env));
-  assert.equal(getResponse.status, 405);
-  assert.equal(getResponse.headers.get("allow"), "POST");
+  assert.equal(getResponse.status, 401);
+
+  const authenticatedGetResponse = await onRequestGet(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
+    method: "GET",
+    headers: { "x-dzn-cron-secret": "unit-test-secret" },
+  }), env));
+  assert.equal(authenticatedGetResponse.status, 405);
+  assert.equal(authenticatedGetResponse.headers.get("allow"), "POST");
 
   const optionsResponse = await onRequestOptions(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
     method: "OPTIONS",
   }), env));
-  assert.equal(optionsResponse.status, 204);
-  assert.equal(optionsResponse.headers.get("allow"), "POST, OPTIONS");
+  assert.equal(optionsResponse.status, 401);
+
+  const authenticatedOptionsResponse = await onRequestOptions(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
+    method: "OPTIONS",
+    headers: { "x-dzn-cron-secret": "unit-test-secret" },
+  }), env));
+  assert.equal(authenticatedOptionsResponse.status, 204);
+  assert.equal(authenticatedOptionsResponse.headers.get("allow"), "POST, OPTIONS");
 }
 
 function makeContext(request: Request, testEnv: Env): PagesContext {

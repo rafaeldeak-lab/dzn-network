@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { isCronSecretAuthorized, requireCronSecret } from "../functions/_lib/cron-auth";
-import type { Env } from "../functions/_lib/types";
+import { onRequestPost as admHealthPost } from "../functions/api/autodev/adm-health";
+import { onRequestPost as nitradoAdminLogsPost } from "../functions/api/debug/nitrado-admin-logs";
+import { onRequestPost as nitradoFileReadPost } from "../functions/api/debug/nitrado-file-read";
+import { handleAdmSyncRun } from "../functions/api/sync/adm/run";
+import { onRequestPost as retryUnreadablePost } from "../functions/api/sync/adm/retry-unreadable";
+import type { Env, PagesContext } from "../functions/_lib/types";
 
 const dznEnv = { DZN_CRON_SECRET: "unit-test-secret" } as Env;
 const syncEnv = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
@@ -37,11 +42,25 @@ for (const file of [
   "functions/api/sync/public-snapshots/run.ts",
   "functions/api/sync/discord-posts/run.ts",
   "functions/api/sync/ctf-scorecards/run.ts",
+  "functions/api/debug/nitrado-admin-logs.ts",
   "functions/api/debug/nitrado-file-read.ts",
   "functions/api/sync/adm/retry-unreadable.ts",
+  "functions/api/autodev/adm-health.ts",
 ]) {
   const source = readFileSync(file, "utf8");
   assert.equal(source.includes("requireCronSecret"), true, `${file} should use shared cron auth`);
+}
+
+for (const file of [
+  "functions/api/debug/nitrado-admin-logs.ts",
+  "functions/api/debug/nitrado-file-read.ts",
+  "functions/api/sync/adm/retry-unreadable.ts",
+  "functions/api/sync/adm/run.ts",
+  "functions/api/autodev/adm-health.ts",
+]) {
+  const source = readFileSync(file, "utf8");
+  const firstImportBlock = source.slice(0, source.indexOf("type ") > 0 ? source.indexOf("type ") : source.indexOf("export "));
+  assert.equal(/from\s+["'][^"']*_lib\/(?:adm-sync|automation|db|nitrado|nitrado-diagnostics|mock)["']/.test(firstImportBlock), false, `${file} should not import heavy ADM/Nitrado/DB modules before auth`);
 }
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
@@ -83,4 +102,47 @@ assert.equal(diagnosticsWorkflowSource.includes("Authorization: Bearer ${CRON_SE
 assert.equal(diagnosticsWorkflowSource.includes("?cron_secret="), false);
 assert.equal(diagnosticsWorkflowSource.includes("echo \"$CRON_SECRET\""), false);
 
-console.log("Cron auth contract tests passed.");
+runProtectedEndpointShortCircuitTests()
+  .then(() => {
+    console.log("Cron auth contract tests passed.");
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+
+async function runProtectedEndpointShortCircuitTests() {
+  const env = {} as Env;
+  const endpoints: Array<[string, (context: PagesContext) => Promise<Response> | Response]> = [
+    ["/api/debug/nitrado-admin-logs", nitradoAdminLogsPost],
+    ["/api/debug/nitrado-file-read", nitradoFileReadPost],
+    ["/api/sync/adm/retry-unreadable", retryUnreadablePost],
+    ["/api/autodev/adm-health", admHealthPost],
+  ];
+  for (const [path, handler] of endpoints) {
+    const response = await handler(makeContext(new Request(`https://dzn.test${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    }), env));
+    assert.equal(response.status, 401, `${path} should return 401 before touching DB/Nitrado modules`);
+  }
+
+  const admRunResponse = await handleAdmSyncRun(makeContext(new Request("https://dzn.test/api/sync/adm/run", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }), env));
+  assert.equal(admRunResponse.status, 401, "/api/sync/adm/run should return 401 before touching DB/Nitrado modules");
+}
+
+function makeContext(request: Request, testEnv: Env): PagesContext {
+  return {
+    request,
+    env: testEnv,
+    params: {},
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  };
+}
