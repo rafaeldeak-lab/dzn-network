@@ -17,6 +17,7 @@ import {
   processAdmImportJobLineChunk,
   processNextAdmImportJobChunk,
   previewManualAdmText,
+  processRecentAdmBuildReparse,
   startAdmImportLineJobForServer,
   type AdmSyncContext,
   buildAdmBackfillPlan,
@@ -881,6 +882,67 @@ async function main() {
   await rebuildServerBuildStats(makeEnv(buildScheduledDb), linkedServerId);
   assert.equal(buildScheduledDb.serverBuildStats.has(linkedServerId), true);
 
+  const buildReparseDb = new MemoryD1();
+  const reparseFileName = "DayZServer_PS4_x64_2026-05-31_22-01-00.ADM";
+  const reparseLines = [
+    "AdminLog started on 2026-05-31 at 22:01:00",
+    '22:02:00 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) placed Barrel<Barrel_Red>',
+    '22:02:01 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) placed Barrel<Barrel_Blue>',
+    '22:02:02 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) placed Barrel<Barrel_Yellow>',
+    '22:02:03 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) placed Sea Chest<SeaChest>',
+    '22:02:04 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) placed Wooden Crate<WoodenCrate>',
+    '22:02:05 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>)Built wall_platform on Fence with Hatchet',
+    '22:02:06 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) Built wall_platform on Fence with Hatchet',
+    '22:02:07 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) has raised Flag_Zagorky on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+    '22:02:08 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) has lowered Flag_Zagorky on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+    '22:02:09 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>) performed EmoteSitA',
+    '22:02:10 | Player "Builder" (id=BUILD_ID pos=<22.4, 7891.5, 303.1>)[HP: 97.5775] hit by Infected into Torso(1) for 2.4225 damage (MeleeInfectedLong)',
+    "22:02:11 | ##### PlayerList log: 1 players",
+  ];
+  const reparseCreatedAt = new Date().toISOString();
+  for (const [index, rawLine] of reparseLines.entries()) {
+    buildReparseDb.admRawEvents.push({
+      id: `raw-reparse-${index + 1}`,
+      linked_server_id: linkedServerId,
+      source_service_id: nitradoServiceId,
+      adm_file: reparseFileName,
+      source_adm_file: reparseFileName,
+      line_number: index + 1,
+      source_line_number: index + 1,
+      raw_line: rawLine,
+      event_type: "unknown",
+      created_at: reparseCreatedAt,
+    });
+  }
+  const reparseResult = await processRecentAdmBuildReparse(makeEnv(buildReparseDb), { maxFiles: 1, maxRawLines: 50 });
+  assert.equal(reparseResult.ok, true);
+  assert.equal(reparseResult.rawLinesScanned, reparseLines.length);
+  assert.equal(reparseResult.buildEventsFound, 9);
+  assert.equal(reparseResult.buildEventsAdded, 9);
+  assert.deepEqual(countBy(buildReparseDb.buildEvents, "event_type"), {
+    placed: 5,
+    built: 2,
+    flag_raised: 1,
+    flag_lowered: 1,
+  });
+  assert.deepEqual(buildReparseDb.buildEvents.filter((event) => event.event_type === "placed").map((event) => event.placed_class), [
+    "barrel_red",
+    "barrel_blue",
+    "barrel_yellow",
+    "seachest",
+    "woodencrate",
+  ]);
+  assert.equal(buildReparseDb.buildEvents.filter((event) => event.build_part === "wall_platform").length, 2);
+  assert.equal(buildReparseDb.killEvents.length, 0);
+  assert.equal(buildReparseDb.playerEvents.length, 0);
+  assert.equal(buildReparseDb.serverBuildStats.get(linkedServerId)?.structures_built, 2);
+  assert.equal(buildReparseDb.serverBuildStats.get(linkedServerId)?.storage_items_placed, 5);
+  assert.equal(buildReparseDb.serverBuildStats.get(linkedServerId)?.build_score, 35);
+  assert.equal(buildReparseDb.serverPublicCache.has(guildId), true);
+  const duplicateReparse = await processRecentAdmBuildReparse(makeEnv(buildReparseDb), { maxFiles: 1, maxRawLines: 50 });
+  assert.equal(duplicateReparse.buildEventsAdded, 0);
+  assert.equal(buildReparseDb.buildEvents.length, 9);
+
   assert.equal(isAdmFileNewerThan("DayZServer_PS4_x64_2026-05-20_13-02-00.ADM", largeFixtureName), true);
   assert.equal(isAdmFileNewerThan(largeFixtureName, largeFixtureName), false);
   assert.equal(isAdmFileNewerThan("DayZServer_PS4_x64_2026-05-19_16-01-55.ADM", largeFixtureName), false);
@@ -1352,6 +1414,7 @@ class MemoryD1 {
   buildEvents: MemoryRow[] = [];
   serverStats = new Map<string, MemoryRow>();
   serverBuildStats = new Map<string, MemoryRow>();
+  admBuildReparseState = new Map<string, MemoryRow>();
   syncRuns: MemoryRow[] = [];
   admSyncState = new Map<string, MemoryRow>();
   serverPublicCache = new Map<string, MemoryRow>();
@@ -1368,6 +1431,7 @@ class MemoryD1 {
     nitrado_service_name: "Fixture Service",
     adm_path: null,
     plan_key: "partner",
+    status: "live",
     subscription_status: "active",
   }]]);
   failKillInsertAfter: number | null;
@@ -1398,6 +1462,51 @@ class MemoryStatement {
     const q = normalizeSql(this.query);
     if (isSchemaQuery(q)) return changed(0);
     if (q.startsWith("update adm_raw_events") || q.startsWith("update player_events") || q.startsWith("update kill_events") || q.startsWith("update player_profiles") || q.startsWith("update server_stats") || q.startsWith("update adm_sync_state") || q.startsWith("update sync_runs")) return changed(0);
+    if (q.includes("insert into adm_build_reparse_state")) {
+      const row = {
+        id: this.values[0],
+        linked_server_id: this.values[1],
+        source_service_id: this.values[2],
+        adm_file: this.values[3],
+        build_parser_version: this.values[4],
+        status: "processing",
+        last_line_processed: Number(this.values[5] ?? 0),
+        raw_lines_scanned: 0,
+        build_events_found: 0,
+        build_events_added: 0,
+        last_error: null,
+        created_at: this.values[6],
+        updated_at: this.values[7],
+      };
+      const existing = [...this.db.admBuildReparseState.values()].find((state) =>
+        state.linked_server_id === row.linked_server_id &&
+        state.source_service_id === row.source_service_id &&
+        state.adm_file === row.adm_file &&
+        state.build_parser_version === row.build_parser_version
+      );
+      if (existing) {
+        existing.status = "processing";
+        existing.last_line_processed = Math.max(Number(existing.last_line_processed ?? 0), Number(row.last_line_processed ?? 0));
+        existing.last_error = null;
+        existing.updated_at = row.updated_at;
+      } else {
+        this.db.admBuildReparseState.set(String(row.id), row);
+      }
+      return changed(1);
+    }
+    if (q.startsWith("update adm_build_reparse_state set")) {
+      const row = this.db.admBuildReparseState.get(String(this.values[8]));
+      if (!row) return changed(0);
+      row.status = this.values[0];
+      row.last_line_processed = Math.max(Number(row.last_line_processed ?? 0), Number(this.values[1] ?? 0));
+      row.raw_lines_scanned = Number(row.raw_lines_scanned ?? 0) + Number(this.values[2] ?? 0);
+      row.build_events_found = Number(row.build_events_found ?? 0) + Number(this.values[3] ?? 0);
+      row.build_events_added = Number(row.build_events_added ?? 0) + Number(this.values[4] ?? 0);
+      row.last_build_reparse_at = this.values[5];
+      row.last_error = this.values[6];
+      row.updated_at = this.values[7];
+      return changed(1);
+    }
     if (q.includes("insert or ignore into adm_raw_events")) return this.insertIgnore(this.db.admRawEvents, {
       id: this.values[0],
       linked_server_id: this.values[1],
@@ -1469,6 +1578,11 @@ class MemoryStatement {
       player_id: this.values[3],
       player_name: this.values[4],
       event_type: this.values[5],
+      build_part: this.values[6],
+      target_object: this.values[7],
+      tool: this.values[8],
+      placed_object: this.values[9],
+      placed_class: this.values[10],
       source_adm_file: this.values[14],
       source_line_number: this.values[15],
       occurred_at: this.values[16],
@@ -1525,7 +1639,18 @@ class MemoryStatement {
       return changed(1);
     }
     if (q.includes("insert into server_build_stats")) {
-      this.db.serverBuildStats.set(String(this.values[0]), { linked_server_id: this.values[0] });
+      this.db.serverBuildStats.set(String(this.values[0]), {
+        linked_server_id: this.values[0],
+        nitrado_service_id: this.values[1],
+        structures_built: Number(this.values[2] ?? 0),
+        build_items_placed: Number(this.values[3] ?? 0),
+        storage_items_placed: Number(this.values[4] ?? 0),
+        traps_placed: Number(this.values[5] ?? 0),
+        build_score: Number(this.values[6] ?? 0),
+        top_builder_name: this.values[7],
+        top_builder_count: Number(this.values[8] ?? 0),
+        last_build_at: this.values[9],
+      });
       return changed(1);
     }
     if (q.includes("insert into adm_sync_state")) {
@@ -1817,6 +1942,61 @@ class MemoryStatement {
       const row = this.db.admImportJobs.get(String(this.values[0]));
       return (row && row.server_id === this.values[1] ? row : null) as T | null;
     }
+    if (q.includes("from adm_build_reparse_state state")) {
+      const parserVersion = String(this.values[0] ?? "");
+      const rows = [...this.db.admBuildReparseState.values()]
+        .filter((row) => row.build_parser_version === parserVersion && ["queued", "processing", "failed_retryable"].includes(String(row.status)))
+        .sort((a, b) => String(a.updated_at ?? "").localeCompare(String(b.updated_at ?? "")));
+      const row = rows[0];
+      if (!row) return null;
+      const server = this.db.linkedServers.get(String(row.linked_server_id));
+      return ({
+        ...row,
+        server_name: server?.display_name ?? server?.hostname ?? server?.server_name ?? server?.nitrado_service_name ?? null,
+      } as T);
+    }
+    if (q.includes("from adm_raw_events raw") && q.includes("left join adm_build_reparse_state")) {
+      const parserVersion = String(this.values[0] ?? "");
+      const cutoff = String(this.values[1] ?? "");
+      const candidates = this.db.admRawEvents
+        .filter((raw) => String(raw.created_at ?? "9999") >= cutoff)
+        .map((raw) => {
+          const server = this.db.linkedServers.get(String(raw.linked_server_id));
+          const sourceServiceId = raw.source_service_id ?? server?.nitrado_service_id ?? null;
+          const admFile = raw.source_adm_file ?? raw.adm_file ?? null;
+          const state = [...this.db.admBuildReparseState.values()].find((existing) =>
+            existing.linked_server_id === raw.linked_server_id &&
+            existing.source_service_id === sourceServiceId &&
+            existing.adm_file === admFile &&
+            existing.build_parser_version === parserVersion
+          );
+          return { raw, server, sourceServiceId, admFile, state };
+        })
+        .filter(({ raw, server, sourceServiceId, admFile, state }) =>
+          Boolean(sourceServiceId && admFile) &&
+          String(server?.status ?? "").toLowerCase() === "live" &&
+          !(server?.merged_into_server_id) &&
+          state?.status !== "completed" &&
+          raw.linked_server_id
+        );
+      const grouped = new Map<string, MemoryRow & { last_raw_at: string }>();
+      for (const { raw, server, sourceServiceId, admFile } of candidates) {
+        const key = `${raw.linked_server_id}:${sourceServiceId}:${admFile}`;
+        const lastRawAt = String(raw.created_at ?? "");
+        const existing = grouped.get(key);
+        if (existing && String(existing.last_raw_at ?? "").localeCompare(lastRawAt) >= 0) continue;
+        grouped.set(key, {
+          linked_server_id: String(raw.linked_server_id),
+          source_service_id: String(sourceServiceId),
+          adm_file: String(admFile),
+          last_line_processed: 0,
+          server_name: String(server?.display_name ?? server?.hostname ?? server?.server_name ?? server?.nitrado_service_name ?? "Fixture Server"),
+          last_raw_at: lastRawAt,
+        });
+      }
+      const row = [...grouped.values()].sort((a, b) => String(a.last_raw_at).localeCompare(String(b.last_raw_at)))[0];
+      return (row ?? null) as T | null;
+    }
     if (q.includes("from adm_sync_state") && q.includes("select *")) return (this.db.admSyncState.get(String(this.values[0])) ?? null) as T | null;
     if (q.includes("select last_import_report_json from adm_sync_state")) return ({ last_import_report_json: this.db.admSyncState.get(String(this.values[0]))?.last_import_report_json ?? null } as T);
     if (q.includes("from linked_servers") && q.includes("server_subscriptions.plan_key")) return (this.db.linkedServers.get(String(this.values[0])) ?? null) as T | null;
@@ -1824,6 +2004,7 @@ class MemoryStatement {
       const row = this.db.linkedServers.get(String(this.values[0]));
       return (row && row.user_id === this.values[1] ? row : null) as T | null;
     }
+    if (q.includes("select guild_id, plan_key") && q.includes("from linked_servers")) return (this.db.linkedServers.get(String(this.values[0])) ?? null) as T | null;
     if (q.includes("select nitrado_service_id from linked_servers")) return (this.db.linkedServers.get(String(this.values[0])) ?? { nitrado_service_id: null }) as T;
     if (q.includes("from player_profiles") && q.includes("player_id = ?")) {
       return (this.db.playerProfiles.find((profile) => profile.linked_server_id === this.values[0] && profile.player_id === this.values[1]) ?? null) as T | null;
@@ -1851,6 +2032,14 @@ class MemoryStatement {
       ) ?? null) as T | null;
     }
     if (q.includes("count(*) as count from player_profiles")) return ({ count: this.db.playerProfiles.filter((row) => row.linked_server_id === this.values[0]).length } as T);
+    if (q.includes("count(*) as count from adm_raw_events") && q.includes("source_line_number")) {
+      return ({ count: this.db.admRawEvents.filter((row) =>
+        row.linked_server_id === this.values[0] &&
+        (row.source_service_id ?? this.values[1]) === this.values[2] &&
+        (row.source_adm_file ?? row.adm_file) === this.values[3] &&
+        Number(row.source_line_number ?? row.line_number ?? 0) > Number(this.values[4] ?? 0)
+      ).length } as T);
+    }
     if (q.includes("count(*) as count from adm_raw_events")) return ({ count: this.db.admRawEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
     if (q.includes("count(*) as count from player_events") && q.includes("event_type in")) {
       const deathTypes = new Set(["player_suicide", "player_killed_environment", "player_died_stats"]);
@@ -1864,8 +2053,34 @@ class MemoryStatement {
     if (q.includes("count(*) as count from kill_events")) return ({ count: this.db.killEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
     if (q.includes("max(coalesce(distance")) return ({ distance: maxNumber(this.db.killEvents.filter((row) => row.linked_server_id === this.values[0]).map((row) => Number(row.distance ?? 0))) } as T);
     if (q.includes("select max(coalesce(occurred_at")) return ({ last_event_at: latestTime([...this.db.playerEvents, ...this.db.killEvents, ...this.db.buildEvents].filter((row) => row.linked_server_id === this.values[0] || row.linked_server_id === this.values[1] || row.linked_server_id === this.values[2])) } as T);
-    if (q.includes("sum(case when event_type")) return ({ structures_built: 0, build_items_placed: 0, storage_items_placed: 0, traps_placed: 0, build_score: 0, last_build_at: null } as T);
-    if (q.includes("select player_name, count(*) as count") && q.includes("from build_events")) return null;
+    if (q.includes("sum(case when event_type")) {
+      const rows = this.db.buildEvents.filter((row) => row.linked_server_id === this.values[0]);
+      const structuresBuilt = rows.filter((row) => row.event_type === "built" && isStructurePartForMemory(row.build_part)).length;
+      const buildItemsPlaced = rows.filter((row) => row.event_type === "placed" && ["fencekit", "watchtowerkit", "territoryflagkit", "flagpolekit", "shelterkit"].includes(String(row.placed_class ?? "").toLowerCase())).length;
+      const storageItemsPlaced = rows.filter((row) => row.event_type === "placed" && /^(woodencrate|barrel|seachest|tent|mediumtent|largetent|cartent)/i.test(String(row.placed_class ?? ""))).length;
+      const trapsPlaced = rows.filter((row) => row.event_type === "placed" && ["landminetrap", "beartrap", "tripwiretrap"].includes(String(row.placed_class ?? "").toLowerCase())).length;
+      const buildScore = rows.reduce((score, row) => score + scoreBuildEventForMemory(row), 0);
+      return ({
+        structures_built: structuresBuilt,
+        build_items_placed: buildItemsPlaced,
+        storage_items_placed: storageItemsPlaced,
+        traps_placed: trapsPlaced,
+        build_score: buildScore,
+        last_build_at: latestTime(rows),
+      } as T);
+    }
+    if (q.includes("select player_name, count(*) as count") && q.includes("from build_events")) {
+      const rows = this.db.buildEvents.filter((row) => row.linked_server_id === this.values[0] && ["built", "placed"].includes(String(row.event_type)) && row.player_name);
+      if (!rows.length) return null;
+      const counts = new Map<string, { player_name: string; count: number }>();
+      for (const row of rows) {
+        const key = String(row.player_id ?? row.player_name).toLowerCase();
+        const current = counts.get(key) ?? { player_name: String(row.player_name), count: 0 };
+        current.count += 1;
+        counts.set(key, current);
+      }
+      return ([...counts.values()].sort((a, b) => b.count - a.count)[0] ?? null) as T | null;
+    }
     if (q.includes("from adm_sync_file_state")) return ({ count: 0 } as T);
     return null;
   }
@@ -1873,6 +2088,18 @@ class MemoryStatement {
   async all<T>(): Promise<{ results: T[] }> {
     const q = normalizeSql(this.query);
     if (q.startsWith("pragma table_info")) return { results: [] };
+    if (q.includes("from adm_raw_events") && q.includes("order by coalesce(source_line_number")) {
+      const rows = this.db.admRawEvents
+        .filter((row) =>
+          row.linked_server_id === this.values[0] &&
+          (row.source_service_id ?? this.values[1]) === this.values[2] &&
+          (row.source_adm_file ?? row.adm_file) === this.values[3] &&
+          Number(row.source_line_number ?? row.line_number ?? 0) > Number(this.values[4] ?? 0)
+        )
+        .sort((a, b) => Number(a.source_line_number ?? a.line_number ?? 0) - Number(b.source_line_number ?? b.line_number ?? 0))
+        .slice(0, Number(this.values[5] ?? 100));
+      return { results: rows as T[] };
+    }
     if (q.includes("from adm_import_jobs")) {
       const source = String(this.values[0] ?? "");
       const linkedServerFilter = this.values[1] === null || this.values[1] === undefined ? null : String(this.values[1]);
@@ -1961,6 +2188,41 @@ function maxNumber(values: number[]) {
 function latestTime(rows: MemoryRow[]) {
   const values = rows.map((row) => row.occurred_at ?? row.created_at).filter(Boolean).sort();
   return values.at(-1) ?? null;
+}
+
+function isStructurePartForMemory(value: MemoryValue) {
+  const part = String(value ?? "").toLowerCase();
+  return [
+    "base",
+    "wall_gate",
+    "wall_platform",
+    "level_1_base",
+    "level_1_roof",
+    "level_1_stairs",
+    "level_2_base",
+    "level_2_roof",
+    "level_2_stairs",
+    "level_3_base",
+    "level_3_roof",
+    "level_3_stairs",
+  ].includes(part) || /^wall_(base|wood|metal)_(up|down)$/.test(part) || /^level_[123]_wall_\d+_(base|wood|metal)_(up|down)$/.test(part);
+}
+
+function scoreBuildEventForMemory(row: MemoryRow) {
+  const eventType = String(row.event_type ?? "");
+  const buildPart = String(row.build_part ?? "").toLowerCase();
+  const placedClass = String(row.placed_class ?? "").toLowerCase();
+  if (eventType === "built") {
+    if (buildPart === "wall_gate") return 15;
+    if (buildPart === "base") return 12;
+    if (buildPart.startsWith("wall_metal_")) return 12;
+    return isStructurePartForMemory(buildPart) ? 10 : 0;
+  }
+  if (eventType !== "placed") return 0;
+  if (["fencekit", "watchtowerkit", "territoryflagkit", "flagpolekit", "shelterkit"].includes(placedClass)) return 5;
+  if (/^(woodencrate|barrel|seachest|tent|mediumtent|largetent|cartent)/i.test(placedClass)) return 3;
+  if (["landminetrap", "beartrap", "tripwiretrap", "spotlight", "constructionlight"].includes(placedClass)) return 1;
+  return 0;
 }
 
 main().catch((error) => {

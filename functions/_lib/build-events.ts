@@ -69,6 +69,7 @@ const STRUCTURE_PARTS = new Set([
   "wall_wood_down",
   "wall_metal_up",
   "wall_metal_down",
+  "wall_platform",
   "platform",
   "stairs",
   "roof",

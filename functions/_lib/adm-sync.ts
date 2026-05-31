@@ -63,6 +63,30 @@ export type AdmSyncContext = {
   syncRunId?: string;
 };
 
+export const ADM_BUILD_PARSER_VERSION = "2026-05-31-build-v2";
+
+export type RecentAdmBuildReparseOptions = {
+  retentionDays?: number;
+  maxFiles?: number;
+  maxRawLines?: number;
+  maxRuntimeMs?: number;
+  parserVersion?: string;
+};
+
+export type RecentAdmBuildReparseResult = {
+  ok: boolean;
+  parserVersion: string;
+  filesScanned: number;
+  rawLinesScanned: number;
+  buildEventsFound: number;
+  buildEventsAdded: number;
+  statsRebuilt: number;
+  publicCacheUpdated: number;
+  skipped: number;
+  completedFiles: string[];
+  errors: string[];
+};
+
 type AdmSyncState = {
   latest_adm_file: string | null;
   latest_adm_path: string | null;
@@ -8014,6 +8038,366 @@ async function insertBuildEvent(
   return didMutate(result);
 }
 
+type AdmBuildReparseCandidate = {
+  linked_server_id: string;
+  source_service_id: string | null;
+  adm_file: string | null;
+  last_line_processed: number | null;
+  server_name: string | null;
+};
+
+type AdmBuildReparseRawRow = {
+  raw_line: string | null;
+  source_line_number: number | null;
+  line_number: number | null;
+};
+
+type AdmBuildReparseServer = {
+  guild_id: string | null;
+  plan_key: string | null;
+  display_name: string | null;
+  hostname: string | null;
+  server_name: string | null;
+  nitrado_service_name: string | null;
+};
+
+export async function processRecentAdmBuildReparse(
+  env: Env,
+  options: RecentAdmBuildReparseOptions = {},
+): Promise<RecentAdmBuildReparseResult> {
+  await ensureAdmSyncSchema(env);
+  await ensureBuildEventSchema(env);
+  const db = requireDb(env);
+  const parserVersion = options.parserVersion ?? ADM_BUILD_PARSER_VERSION;
+  const maxFiles = Math.min(clampPositiveInteger(options.maxFiles ?? 1, 1), 3);
+  const maxRawLines = Math.min(clampPositiveInteger(options.maxRawLines ?? 600, 600), 1500);
+  const maxRuntimeMs = Math.max(1000, Math.min(Number(options.maxRuntimeMs ?? 5000), 15000));
+  const retentionDays = Math.max(1, Math.min(Number(options.retentionDays ?? 10), 10));
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const startedAt = Date.now();
+  const result: RecentAdmBuildReparseResult = {
+    ok: true,
+    parserVersion,
+    filesScanned: 0,
+    rawLinesScanned: 0,
+    buildEventsFound: 0,
+    buildEventsAdded: 0,
+    statsRebuilt: 0,
+    publicCacheUpdated: 0,
+    skipped: 0,
+    completedFiles: [],
+    errors: [],
+  };
+
+  for (let fileIndex = 0; fileIndex < maxFiles; fileIndex += 1) {
+    if (Date.now() - startedAt > maxRuntimeMs) break;
+    const candidate = await getNextAdmBuildReparseCandidate(db, parserVersion, cutoff);
+    if (!candidate?.linked_server_id || !candidate.source_service_id || !candidate.adm_file) {
+      result.skipped += 1;
+      break;
+    }
+
+    const stateId = await stableSyncId("adm-build-reparse", candidate.linked_server_id, candidate.adm_file, 0, `${candidate.source_service_id}:${parserVersion}`);
+    const now = new Date().toISOString();
+    const lastProcessed = Math.max(0, Number(candidate.last_line_processed ?? 0) || 0);
+    await upsertAdmBuildReparseStateStarted(db, {
+      id: stateId,
+      linkedServerId: candidate.linked_server_id,
+      sourceServiceId: candidate.source_service_id,
+      admFile: candidate.adm_file,
+      parserVersion,
+      lastLineProcessed: lastProcessed,
+      now,
+    });
+
+    try {
+      const rawRows = await getAdmBuildReparseRawRows(db, {
+        linkedServerId: candidate.linked_server_id,
+        sourceServiceId: candidate.source_service_id,
+        admFile: candidate.adm_file,
+        lastLineProcessed: lastProcessed,
+        limit: maxRawLines,
+      });
+      if (rawRows.length === 0) {
+        await finishAdmBuildReparseState(db, stateId, {
+          status: "completed",
+          lastLineProcessed: lastProcessed,
+          rawLinesScanned: 0,
+          buildEventsFound: 0,
+          buildEventsAdded: 0,
+          error: null,
+        });
+        await rebuildServerBuildStats(env, candidate.linked_server_id);
+        result.statsRebuilt += 1;
+        result.completedFiles.push(candidate.adm_file);
+        continue;
+      }
+
+      const lines = rawRows.map((row) => String(row.raw_line ?? ""));
+      const parsedRows = parseAdmLines(lines, { admDate: getAdmDateFromFilename(candidate.adm_file) ?? undefined });
+      const context: AdmSyncContext = {
+        linkedServerId: candidate.linked_server_id,
+        nitradoServiceId: candidate.source_service_id,
+        serverName: candidate.server_name ?? "DZN Server",
+        admFileName: candidate.adm_file,
+      };
+      let lastLine = lastProcessed;
+      let found = 0;
+      let added = 0;
+      for (let index = 0; index < parsedRows.length; index += 1) {
+        const rawRow = rawRows[index];
+        const lineNumber = Math.max(0, Number(rawRow?.source_line_number ?? rawRow?.line_number ?? lastLine + 1) || lastLine + 1);
+        lastLine = Math.max(lastLine, lineNumber);
+        const parsed = parsedRows[index];
+        if (!parsed || !isParsedBuildEvent(parsed)) continue;
+        found += 1;
+        if (await insertBuildEvent(env, context, lineNumber, parsed)) added += 1;
+      }
+
+      const remaining = await countAdmBuildReparseRemainingRows(db, {
+        linkedServerId: candidate.linked_server_id,
+        sourceServiceId: candidate.source_service_id,
+        admFile: candidate.adm_file,
+        lastLineProcessed: lastLine,
+      });
+      const status = remaining > 0 ? "queued" : "completed";
+      await finishAdmBuildReparseState(db, stateId, {
+        status,
+        lastLineProcessed: lastLine,
+        rawLinesScanned: rawRows.length,
+        buildEventsFound: found,
+        buildEventsAdded: added,
+        error: null,
+      });
+      await rebuildServerBuildStats(env, candidate.linked_server_id);
+      result.filesScanned += 1;
+      result.rawLinesScanned += rawRows.length;
+      result.buildEventsFound += found;
+      result.buildEventsAdded += added;
+      result.statsRebuilt += 1;
+      if (status === "completed") result.completedFiles.push(candidate.adm_file);
+      if (added > 0 || found > 0) {
+        const refreshed = await refreshAdmBuildReparsePublicCache(env, candidate.linked_server_id);
+        if (refreshed) result.publicCacheUpdated += 1;
+      }
+    } catch (error) {
+      const message = safeSyncErrorMessage(error);
+      result.ok = false;
+      result.errors.push(`${candidate.adm_file}: ${message}`);
+      await finishAdmBuildReparseState(db, stateId, {
+        status: "failed_retryable",
+        lastLineProcessed: lastProcessed,
+        rawLinesScanned: 0,
+        buildEventsFound: 0,
+        buildEventsAdded: 0,
+        error: message,
+      });
+    }
+  }
+
+  return result;
+}
+
+async function getNextAdmBuildReparseCandidate(db: D1Database, parserVersion: string, cutoff: string) {
+  const existing = await db
+    .prepare(
+      `SELECT state.linked_server_id, state.source_service_id, state.adm_file, state.last_line_processed,
+              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name
+       FROM adm_build_reparse_state state
+       JOIN linked_servers ON linked_servers.id = state.linked_server_id
+       WHERE state.build_parser_version = ?
+         AND state.status IN ('queued', 'processing', 'failed_retryable')
+         AND lower(COALESCE(linked_servers.status, '')) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY state.updated_at ASC
+       LIMIT 1`,
+    )
+    .bind(parserVersion)
+    .first<AdmBuildReparseCandidate>();
+  if (existing) return existing;
+
+  return await db
+    .prepare(
+      `SELECT raw.linked_server_id,
+              COALESCE(raw.source_service_id, linked_servers.nitrado_service_id) AS source_service_id,
+              COALESCE(raw.source_adm_file, raw.adm_file) AS adm_file,
+              0 AS last_line_processed,
+              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name
+       FROM adm_raw_events raw
+       JOIN linked_servers ON linked_servers.id = raw.linked_server_id
+       LEFT JOIN adm_build_reparse_state state
+         ON state.linked_server_id = raw.linked_server_id
+        AND state.source_service_id = COALESCE(raw.source_service_id, linked_servers.nitrado_service_id)
+        AND state.adm_file = COALESCE(raw.source_adm_file, raw.adm_file)
+        AND state.build_parser_version = ?
+       WHERE raw.created_at >= ?
+         AND COALESCE(raw.source_service_id, linked_servers.nitrado_service_id) IS NOT NULL
+         AND COALESCE(raw.source_adm_file, raw.adm_file) IS NOT NULL
+         AND lower(COALESCE(linked_servers.status, '')) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+         AND COALESCE(state.status, '') != 'completed'
+       GROUP BY raw.linked_server_id, COALESCE(raw.source_service_id, linked_servers.nitrado_service_id), COALESCE(raw.source_adm_file, raw.adm_file)
+       ORDER BY MAX(raw.created_at) ASC
+       LIMIT 1`,
+    )
+    .bind(parserVersion, cutoff)
+    .first<AdmBuildReparseCandidate>();
+}
+
+async function upsertAdmBuildReparseStateStarted(
+  db: D1Database,
+  input: {
+    id: string;
+    linkedServerId: string;
+    sourceServiceId: string;
+    admFile: string;
+    parserVersion: string;
+    lastLineProcessed: number;
+    now: string;
+  },
+) {
+  await db
+    .prepare(
+      `INSERT INTO adm_build_reparse_state (
+        id, linked_server_id, source_service_id, adm_file, build_parser_version,
+        status, last_line_processed, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'processing', ?, ?, ?)
+      ON CONFLICT(linked_server_id, source_service_id, adm_file, build_parser_version) DO UPDATE SET
+        status = 'processing',
+        last_line_processed = MAX(COALESCE(adm_build_reparse_state.last_line_processed, 0), excluded.last_line_processed),
+        updated_at = excluded.updated_at,
+        last_error = NULL`,
+    )
+    .bind(
+      input.id,
+      input.linkedServerId,
+      input.sourceServiceId,
+      input.admFile,
+      input.parserVersion,
+      input.lastLineProcessed,
+      input.now,
+      input.now,
+    )
+    .run();
+}
+
+async function getAdmBuildReparseRawRows(
+  db: D1Database,
+  input: { linkedServerId: string; sourceServiceId: string; admFile: string; lastLineProcessed: number; limit: number },
+) {
+  const result = await db
+    .prepare(
+      `SELECT raw_line, source_line_number, line_number
+       FROM adm_raw_events
+       WHERE linked_server_id = ?
+         AND COALESCE(source_service_id, ?) = ?
+         AND COALESCE(source_adm_file, adm_file) = ?
+         AND COALESCE(source_line_number, line_number, 0) > ?
+       ORDER BY COALESCE(source_line_number, line_number, 0) ASC
+       LIMIT ?`,
+    )
+    .bind(
+      input.linkedServerId,
+      input.sourceServiceId,
+      input.sourceServiceId,
+      input.admFile,
+      input.lastLineProcessed,
+      input.limit,
+    )
+    .all<AdmBuildReparseRawRow>();
+  return result.results ?? [];
+}
+
+async function countAdmBuildReparseRemainingRows(
+  db: D1Database,
+  input: { linkedServerId: string; sourceServiceId: string; admFile: string; lastLineProcessed: number },
+) {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM adm_raw_events
+       WHERE linked_server_id = ?
+         AND COALESCE(source_service_id, ?) = ?
+         AND COALESCE(source_adm_file, adm_file) = ?
+         AND COALESCE(source_line_number, line_number, 0) > ?`,
+    )
+    .bind(
+      input.linkedServerId,
+      input.sourceServiceId,
+      input.sourceServiceId,
+      input.admFile,
+      input.lastLineProcessed,
+    )
+    .first<{ count: number }>();
+  return numberOrZero(row?.count);
+}
+
+async function finishAdmBuildReparseState(
+  db: D1Database,
+  stateId: string,
+  input: {
+    status: "queued" | "completed" | "failed_retryable";
+    lastLineProcessed: number;
+    rawLinesScanned: number;
+    buildEventsFound: number;
+    buildEventsAdded: number;
+    error: string | null;
+  },
+) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE adm_build_reparse_state SET
+        status = ?,
+        last_line_processed = MAX(COALESCE(last_line_processed, 0), ?),
+        raw_lines_scanned = COALESCE(raw_lines_scanned, 0) + ?,
+        build_events_found = COALESCE(build_events_found, 0) + ?,
+        build_events_added = COALESCE(build_events_added, 0) + ?,
+        last_build_reparse_at = ?,
+        last_error = ?,
+        updated_at = ?
+       WHERE id = ?`,
+    )
+    .bind(
+      input.status,
+      input.lastLineProcessed,
+      input.rawLinesScanned,
+      input.buildEventsFound,
+      input.buildEventsAdded,
+      now,
+      input.error,
+      now,
+      stateId,
+    )
+    .run();
+}
+
+async function refreshAdmBuildReparsePublicCache(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const server = await db
+    .prepare(
+      `SELECT guild_id, plan_key, display_name, hostname, server_name, nitrado_service_name
+       FROM linked_servers
+       WHERE id = ?
+       LIMIT 1`,
+    )
+    .bind(linkedServerId)
+    .first<AdmBuildReparseServer>();
+  if (!server?.guild_id) return false;
+  await upsertServerPublicCache(env, {
+    guildId: server.guild_id,
+    planKey: normalizePlanKey(server.plan_key),
+    publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
+    lastAdmUpdateAt: new Date().toISOString(),
+  });
+  return true;
+}
+
+function getAdmDateFromFilename(filename: string | null | undefined) {
+  const match = String(filename ?? "").match(/DayZServer_PS4_x64_(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}-\d{2}\.ADM/i);
+  return match?.[1] ?? null;
+}
+
 async function insertKillEvent(
   env: Env,
   context: AdmSyncContext,
@@ -9789,6 +10173,27 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
    ON adm_worker_selection_state(linked_server_id)`,
   `CREATE INDEX IF NOT EXISTS idx_adm_worker_selection_state_selected
    ON adm_worker_selection_state(last_worker_selected_at)`,
+  `CREATE TABLE IF NOT EXISTS adm_build_reparse_state (
+    id TEXT PRIMARY KEY,
+    linked_server_id TEXT NOT NULL,
+    source_service_id TEXT NOT NULL,
+    adm_file TEXT NOT NULL,
+    build_parser_version TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    last_line_processed INTEGER DEFAULT 0,
+    raw_lines_scanned INTEGER DEFAULT 0,
+    build_events_found INTEGER DEFAULT 0,
+    build_events_added INTEGER DEFAULT 0,
+    last_build_reparse_at TEXT,
+    last_error TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(linked_server_id, source_service_id, adm_file, build_parser_version)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_adm_build_reparse_state_status
+   ON adm_build_reparse_state(status, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_adm_build_reparse_state_file
+   ON adm_build_reparse_state(linked_server_id, source_service_id, adm_file)`,
   `CREATE TABLE IF NOT EXISTS adm_import_jobs (
     id TEXT PRIMARY KEY,
     server_id TEXT NOT NULL,

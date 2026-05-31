@@ -1,5 +1,5 @@
 import type { Env } from "../functions/_lib/types";
-import { runAdmWorkerSyncTick } from "../functions/_lib/adm-sync";
+import { processRecentAdmBuildReparse, runAdmWorkerSyncTick } from "../functions/_lib/adm-sync";
 import {
   normalizeAutomationCronSource,
   recordAutomationCronRun,
@@ -353,6 +353,11 @@ async function runHourlyPostAdmMaintenance(env: Env) {
   if (Number.isFinite(lastRunAt) && Date.now() - lastRunAt < 60 * 60 * 1000) return;
 
   await recoverStuckAutomationLocks(env);
+  await processRecentAdmBuildReparse(env, { maxFiles: 1, maxRawLines: 1200, maxRuntimeMs: 5000 }).catch((error) => {
+    console.warn("DZN ADM WORKER BUILD REPARSE SKIPPED", {
+      message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "build reparse failed",
+    });
+  });
   await db
     .prepare(
       `INSERT INTO adm_worker_state (key, value, updated_at)

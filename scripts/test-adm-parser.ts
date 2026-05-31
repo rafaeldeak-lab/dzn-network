@@ -284,6 +284,57 @@ assert.equal(buildSummary.buildItemsPlaced, 1);
 assert.equal(buildSummary.storageItemsPlaced, 1);
 assert.equal(buildSummary.trapsPlaced, 1);
 
+const extraBuildEdgeLines = [
+  '20:03:00 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Barrel<Barrel_Red>',
+  '20:03:01 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Barrel<Barrel_Blue>',
+  '20:03:02 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Barrel<Barrel_Yellow>',
+  '20:03:03 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Sea Chest<SeaChest>',
+  '20:03:04 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>)Built wall_platform on Fence with Hatchet',
+  '20:03:05 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) Built wall_platform on Fence with Hatchet',
+  '20:03:06 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) has raised Flag_Zagorky on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+  '20:03:07 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) has lowered Flag_Zagorky on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+  '20:03:08 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) performed EmoteSitA',
+  '20:03:09 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>)[HP: 97.5775] hit by Infected into Torso(1) for 2.4225 damage (MeleeInfectedLong)',
+  "20:03:10 | ##### PlayerList log: 1 players",
+];
+const extraBuildEdgeEvents = parseAdmLines(extraBuildEdgeLines, context);
+assert.deepEqual(extraBuildEdgeEvents.map((event) => event.eventType), [
+  "player_placed_object",
+  "player_placed_object",
+  "player_placed_object",
+  "player_placed_object",
+  "player_built_structure",
+  "player_built_structure",
+  "territory_flag_raised",
+  "territory_flag_lowered",
+  "player_performed_action",
+  "player_hit_unknown_attacker",
+  "playerlist_snapshot",
+]);
+const classifiedExtraBuildEdges = extraBuildEdgeEvents.map((event) => classifyParsedBuildEvent(event));
+assert.deepEqual(classifiedExtraBuildEdges.map((event) => event?.eventType ?? null), [
+  "placed",
+  "placed",
+  "placed",
+  "placed",
+  "built",
+  "built",
+  "flag_raised",
+  "flag_lowered",
+  null,
+  null,
+  null,
+]);
+assert.deepEqual(classifiedExtraBuildEdges.slice(0, 4).map((event) => event?.category), ["storage", "storage", "storage", "storage"]);
+assert.deepEqual(classifiedExtraBuildEdges.slice(0, 4).map((event) => event?.placedClass), ["barrel_red", "barrel_blue", "barrel_yellow", "seachest"]);
+assert.equal(extraBuildEdgeEvents[4]?.buildPart, "wall_platform");
+assert.equal(extraBuildEdgeEvents[5]?.buildPart, "wall_platform");
+assert.equal(classifiedExtraBuildEdges[4]?.category, "structure");
+assert.equal(classifiedExtraBuildEdges[5]?.category, "structure");
+assert.equal(classifiedExtraBuildEdges[6]?.placedObject, "Flag_Zagorky");
+assert.equal(classifiedExtraBuildEdges[7]?.placedObject, "Flag_Zagorky");
+assert.equal(classifiedExtraBuildEdges[7]?.score, 0);
+
 const invalidPosition = parseAdmLine(
   '11:43:32 | Player "ExamplePlayer" (id=PLAYER_ID pos=<-340282346638528859811704183484516925440.0, 10326.4, 339.3>) is connected',
   context,
