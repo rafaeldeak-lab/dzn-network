@@ -72,7 +72,7 @@ async function main() {
         "x-cron-secret": cronSecret,
       },
     });
-    const json = parseJson(result.body);
+    const json = parseJson(result.fullBody);
     if (!result.ok || result.status >= 500) {
       checks.push(fail("ADM health authenticated", `ADM health endpoint failed with ${result.status}.`, result, "high"));
     } else if (result.status === 401 || result.status === 403) {

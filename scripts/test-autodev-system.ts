@@ -61,6 +61,7 @@ assert.equal(productionSmoke.includes("result.status === 401"), true);
 assert.equal(productionSmoke.includes("Protected endpoint must return 401"), true);
 assert.equal(productionSmoke.includes("ADM Worker heartbeat is stale beyond threshold."), true);
 assert.equal(productionSmoke.includes("recoverable Nitrado states do not fail production smoke"), true);
+assert.equal(productionSmoke.includes("const json = parseJson(result.fullBody);"), true);
 assert.equal(read(".github/workflows/dzn-post-deploy-verify.yml").includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
 const cycleWatchWorkflow = read(".github/workflows/dzn-adm-cycle-watch.yml");
 const postDeployWorkflow = read(".github/workflows/dzn-post-deploy-verify.yml");
