@@ -2,8 +2,8 @@ import type { ParsedAdmEvent } from "./adm-parser";
 import { requireDb } from "./db";
 import type { Env } from "./types";
 
-export type BuildEventType = "built" | "placed" | "dismantled";
-export type BuildCategory = "structure" | "build_kit" | "storage" | "trap" | "deployable" | "none";
+export type BuildEventType = "built" | "placed" | "dismantled" | "folded" | "flag_raised" | "flag_lowered";
+export type BuildCategory = "structure" | "build_kit" | "storage" | "trap" | "utility" | "territory" | "deployable" | "none";
 
 export type ParsedBuildActivity = {
   eventType: BuildEventType;
@@ -64,11 +64,11 @@ const STRUCTURE_PARTS = new Set([
   "base",
   "wall_base_up",
   "wall_base_down",
+  "wall_gate",
   "wall_wood_up",
   "wall_wood_down",
   "wall_metal_up",
   "wall_metal_down",
-  "wall_gate",
   "platform",
   "stairs",
   "roof",
@@ -80,6 +80,15 @@ const STRUCTURE_PARTS = new Set([
   "watchtower_roof",
   "watchtower_stairs",
   "watchtower_wall",
+  "level_1_base",
+  "level_1_roof",
+  "level_1_stairs",
+  "level_2_base",
+  "level_2_roof",
+  "level_2_stairs",
+  "level_3_base",
+  "level_3_roof",
+  "level_3_stairs",
 ]);
 
 const BUILD_KITS = new Set([
@@ -100,12 +109,13 @@ const STORAGE_CLASSES = [
   "carTent",
 ].map((value) => value.toLowerCase());
 
-const TRAP_CLASSES = new Set(["landminetrap", "beartrap"]);
+const TRAP_CLASSES = new Set(["landminetrap", "beartrap", "tripwiretrap"]);
+const UTILITY_CLASSES = new Set(["spotlight", "constructionlight"]);
 
 export function classifyParsedBuildEvent(parsed: ParsedAdmEvent): ParsedBuildActivity | null {
   if (parsed.eventType === "player_built_structure") {
     const buildPart = normalizeBuildPart(parsed.buildPart);
-    const category = buildPart && STRUCTURE_PARTS.has(buildPart) ? "structure" : "deployable";
+    const category = buildPart && isStructureBuildPart(buildPart) ? "structure" : "deployable";
     return {
       eventType: "built",
       category,
@@ -127,6 +137,32 @@ export function classifyParsedBuildEvent(parsed: ParsedAdmEvent): ParsedBuildAct
       tool: normalizeText(parsed.tool),
       placedObject: null,
       placedClass: null,
+      score: 0,
+    };
+  }
+
+  if (parsed.eventType === "player_folded_structure") {
+    return {
+      eventType: "folded",
+      category: "none",
+      buildPart: normalizeBuildPart(parsed.buildPart ?? parsed.targetObject ?? parsed.objectType),
+      targetObject: normalizeText(parsed.targetObject ?? parsed.objectType),
+      tool: normalizeText(parsed.tool),
+      placedObject: null,
+      placedClass: null,
+      score: 0,
+    };
+  }
+
+  if (parsed.eventType === "territory_flag_raised" || parsed.eventType === "territory_flag_lowered") {
+    return {
+      eventType: parsed.eventType === "territory_flag_raised" ? "flag_raised" : "flag_lowered",
+      category: "territory",
+      buildPart: null,
+      targetObject: normalizeText(parsed.targetObject ?? parsed.objectType),
+      tool: null,
+      placedObject: normalizeText(parsed.placedObject),
+      placedClass: normalizeClass(parsed.placedClass ?? parsed.objectType),
       score: 0,
     };
   }
@@ -217,7 +253,7 @@ export async function rebuildServerBuildStats(env: Env, linkedServerId: string) 
   const totals = await db
     .prepare(
       `SELECT
-        SUM(CASE WHEN event_type = 'built' AND build_part IN (${sqlStringList([...STRUCTURE_PARTS])}) THEN 1 ELSE 0 END) AS structures_built,
+        SUM(CASE WHEN event_type = 'built' AND ${structureBuildPartSql("build_part")} THEN 1 ELSE 0 END) AS structures_built,
         SUM(CASE WHEN event_type = 'placed' AND lower(COALESCE(placed_class, '')) IN (${sqlStringList([...BUILD_KITS])}) THEN 1 ELSE 0 END) AS build_items_placed,
         SUM(CASE WHEN event_type = 'placed' AND ${storageSql("placed_class")} THEN 1 ELSE 0 END) AS storage_items_placed,
         SUM(CASE WHEN event_type = 'placed' AND lower(COALESCE(placed_class, '')) IN (${sqlStringList([...TRAP_CLASSES])}) THEN 1 ELSE 0 END) AS traps_placed,
@@ -226,10 +262,11 @@ export async function rebuildServerBuildStats(env: Env, linkedServerId: string) 
             WHEN event_type = 'built' AND build_part = 'wall_gate' THEN 15
             WHEN event_type = 'built' AND build_part = 'base' THEN 12
             WHEN event_type = 'built' AND build_part LIKE 'wall_metal_%' THEN 12
-            WHEN event_type = 'built' AND build_part IN (${sqlStringList([...STRUCTURE_PARTS])}) THEN 10
+            WHEN event_type = 'built' AND ${structureBuildPartSql("build_part")} THEN 10
             WHEN event_type = 'placed' AND lower(COALESCE(placed_class, '')) IN (${sqlStringList([...BUILD_KITS])}) THEN 5
             WHEN event_type = 'placed' AND ${storageSql("placed_class")} THEN 3
             WHEN event_type = 'placed' AND lower(COALESCE(placed_class, '')) IN (${sqlStringList([...TRAP_CLASSES])}) THEN 1
+            WHEN event_type = 'placed' AND lower(COALESCE(placed_class, '')) IN (${sqlStringList([...UTILITY_CLASSES])}) THEN 1
             ELSE 0
           END
         ) AS build_score,
@@ -342,6 +379,7 @@ function classifyPlacedObject(placedClass: string | null, placedObject: string |
   const lookup = normalizeClass(placedClass ?? placedObject) ?? "";
   if (BUILD_KITS.has(lookup)) return "build_kit";
   if (TRAP_CLASSES.has(lookup)) return "trap";
+  if (UTILITY_CLASSES.has(lookup)) return "utility";
   if (STORAGE_CLASSES.some((prefix) => lookup.startsWith(prefix))) return "storage";
   return "none";
 }
@@ -350,6 +388,7 @@ function scorePlacedObject(category: BuildCategory) {
   if (category === "build_kit") return 5;
   if (category === "storage") return 3;
   if (category === "trap") return 1;
+  if (category === "utility") return 1;
   return 0;
 }
 
@@ -359,8 +398,18 @@ function scoreBuiltPart(part: string | null | undefined) {
   if (normalized === "wall_gate") return 15;
   if (normalized === "base") return 12;
   if (normalized.startsWith("wall_metal_")) return 12;
-  if (STRUCTURE_PARTS.has(normalized)) return 10;
+  if (isStructureBuildPart(normalized)) return 10;
   return 0;
+}
+
+function isStructureBuildPart(value: string | null | undefined) {
+  const normalized = normalizeBuildPart(value);
+  if (!normalized) return false;
+  if (STRUCTURE_PARTS.has(normalized)) return true;
+  if (/^level_[123]_(base|roof|stairs)$/.test(normalized)) return true;
+  if (/^level_[123]_wall_\d+_(base|wood|metal)_(up|down)$/.test(normalized)) return true;
+  if (/^wall_(base|wood|metal)_(up|down)$/.test(normalized)) return true;
+  return false;
 }
 
 function normalizeBuildPart(value: string | null | undefined) {
@@ -388,6 +437,22 @@ function sqlStringList(values: string[]) {
 
 function storageSql(column: string) {
   return `(${STORAGE_CLASSES.map((prefix) => `lower(COALESCE(${column}, '')) LIKE '${prefix.replace(/'/g, "''")}%'`).join(" OR ")})`;
+}
+
+function structureBuildPartSql(column: string) {
+  const normalized = `lower(COALESCE(${column}, ''))`;
+  return `(${[
+    `${normalized} IN (${sqlStringList([...STRUCTURE_PARTS])})`,
+    `${normalized} LIKE 'level_%_base'`,
+    `${normalized} LIKE 'level_%_roof'`,
+    `${normalized} LIKE 'level_%_stairs'`,
+    `${normalized} LIKE 'level_%_wall_%_base_%'`,
+    `${normalized} LIKE 'level_%_wall_%_wood_%'`,
+    `${normalized} LIKE 'level_%_wall_%_metal_%'`,
+    `${normalized} LIKE 'wall_base_%'`,
+    `${normalized} LIKE 'wall_wood_%'`,
+    `${normalized} LIKE 'wall_metal_%'`,
+  ].join(" OR ")})`;
 }
 
 const BUILD_EVENT_SCHEMA_STATEMENTS = [

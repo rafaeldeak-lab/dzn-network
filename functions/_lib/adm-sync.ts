@@ -5741,8 +5741,14 @@ function syncEventLabel(eventType: string, isKill: boolean) {
     built: "Built Structure",
     placed: "Placed Build Item",
     dismantled: "Dismantled",
+    folded: "Folded",
+    flag_raised: "Flag Raised",
+    flag_lowered: "Flag Lowered",
     player_built_structure: "Built Structure",
     player_dismantled_structure: "Dismantled",
+    player_folded_structure: "Folded",
+    territory_flag_raised: "Flag Raised",
+    territory_flag_lowered: "Flag Lowered",
     player_suicide: "Suicide",
     player_hit: "Hit",
     player_hit_explosion: "Hit",
@@ -5791,6 +5797,15 @@ function syncEventDetail(values: {
   }
   if (values.eventType === "dismantled" || values.eventType === "player_dismantled_structure") {
     return `${values.playerName ?? "Unknown"} dismantled ${values.objectType ?? "a structure"}${values.tool ? ` with ${values.tool}` : ""}`;
+  }
+  if (values.eventType === "folded" || values.eventType === "player_folded_structure") {
+    return `${values.playerName ?? "Unknown"} folded ${values.objectType ?? "a structure"}`;
+  }
+  if (values.eventType === "flag_raised" || values.eventType === "territory_flag_raised") {
+    return `${values.playerName ?? "Unknown"} raised ${values.objectType ?? "a territory flag"}`;
+  }
+  if (values.eventType === "flag_lowered" || values.eventType === "territory_flag_lowered") {
+    return `${values.playerName ?? "Unknown"} lowered ${values.objectType ?? "a territory flag"}`;
   }
   if (values.eventType === "player_placed_object") return `${values.playerName ?? "Unknown"} placed ${values.objectType ?? "an object"}`;
   return values.playerName ?? values.victimName ?? null;

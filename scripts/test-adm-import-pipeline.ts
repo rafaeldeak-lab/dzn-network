@@ -21,6 +21,8 @@ import {
   type AdmSyncContext,
   buildAdmBackfillPlan,
 } from "../functions/_lib/adm-sync";
+import { parseAdmLines } from "../functions/_lib/adm-parser";
+import { classifyParsedBuildEvent, rebuildServerBuildStats } from "../functions/_lib/build-events";
 import type { Env } from "../functions/_lib/types";
 
 const fixtureName = "DayZServer_PS4_x64_2026-05-19_16-01-55.ADM";
@@ -805,6 +807,79 @@ async function main() {
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.last_processed_file, largeFixtureName);
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.cursor_recovery_reason, "scheduled_chunked_import");
   assert.equal(JSON.parse(String(scheduledJobDb.syncRuns.at(-1)?.message ?? "{}")).type, "scheduled_adm_import");
+
+  const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
+  const buildFixtureLines = [
+    "AdminLog started on 2026-05-31 at 20:01:53",
+    '20:02:00 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) placed Fence Kit<FenceKit>',
+    '20:02:01 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) placed Watchtower Kit<WatchtowerKit>',
+    '20:02:02 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) placed Wooden Crate<WoodenCrate>',
+    '20:02:03 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) placed Construction Light<Spotlight>',
+    '20:02:04 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) placed Tripwire<TripwireTrap>',
+    '20:02:05 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>)Built base on Fence with Pickaxe',
+    '20:02:06 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>)Built wall_gate on Gate with Pliers',
+    '20:02:07 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>)Built level_3_wall_3_metal_down on Watchtower with Hammer',
+    '20:02:08 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>)Dismantled Upper Wooden Wall from Watchtower with Hatchet',
+    '20:02:09 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) folded Fence',
+    '20:02:10 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) has raised Flag_SSahrani on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+    '20:02:11 | Player "kurux2pa" (id=BUILD_ID pos=<8250.8, 7003.2, 353.2>) has lowered Flag_NSahrani on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+  ];
+  const buildFixtureEvents = parseAdmLines(buildFixtureLines, { admDate: "2026-05-31" }).map((event) => classifyParsedBuildEvent(event)).filter(Boolean);
+  assert.equal(buildFixtureEvents.length, 12);
+  assert.equal(buildFixtureEvents.filter((event) => event?.eventType === "built").length, 3);
+  assert.equal(buildFixtureEvents.filter((event) => event?.eventType === "placed").length, 5);
+  assert.equal(buildFixtureEvents.some((event) => event?.eventType === "folded"), true);
+  assert.equal(buildFixtureEvents.some((event) => event?.eventType === "flag_raised"), true);
+  assert.equal(buildFixtureEvents.some((event) => event?.eventType === "flag_lowered"), true);
+  const buildScheduledDb = new MemoryD1();
+  await createAdmImportJobForServer(makeEnv(buildScheduledDb), {
+    linkedServerId,
+    filename: buildFixtureName,
+    admText: buildFixtureLines.join("\n"),
+    source: "scheduled_nitrado",
+    chunkSize: 4,
+  });
+  let buildScheduledPending = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  let buildScheduledLoops = 0;
+  while (buildScheduledPending.completedJobs === 0 && buildScheduledLoops < 20) {
+    buildScheduledPending = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+    buildScheduledLoops += 1;
+  }
+  assert.equal(buildScheduledPending.completedJobs, 1);
+  assert.equal(buildScheduledDb.buildEvents.length, 12);
+  assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
+    placed: 5,
+    built: 3,
+    dismantled: 1,
+    folded: 1,
+    flag_raised: 1,
+    flag_lowered: 1,
+  });
+  await rebuildServerBuildStats(makeEnv(buildScheduledDb), linkedServerId);
+  assert.equal(buildScheduledDb.serverBuildStats.has(linkedServerId), true);
+  await importReadableAdmLinesIntoDatabase(makeEnv(buildScheduledDb), {
+    context: { ...context, admFileName: buildFixtureName, syncRunId: "build-fixture-duplicate" },
+    lines: buildFixtureLines,
+    guildId,
+    planKey: "partner",
+    updatePublicCache: true,
+    queueDiscordPosts: true,
+  });
+  assert.equal(buildScheduledDb.buildEvents.length, 12);
+  await importReadableAdmLinesIntoDatabase(makeEnv(buildScheduledDb), {
+    context: { ...context, admFileName: "DayZServer_PS4_x64_2026-05-31_21-02-27.ADM", syncRunId: "build-fixture-no-build" },
+    lines: [
+      "AdminLog started on 2026-05-31 at 21:02:27",
+      '21:02:30 | Player "NoBuild" (id=NO_BUILD_ID pos=<1, 2, 3>) is connected',
+    ],
+    guildId,
+    planKey: "partner",
+    updatePublicCache: true,
+    queueDiscordPosts: true,
+  });
+  assert.equal(buildScheduledDb.buildEvents.length, 12);
+  await rebuildServerBuildStats(makeEnv(buildScheduledDb), linkedServerId);
+  assert.equal(buildScheduledDb.serverBuildStats.has(linkedServerId), true);
 
   assert.equal(isAdmFileNewerThan("DayZServer_PS4_x64_2026-05-20_13-02-00.ADM", largeFixtureName), true);
   assert.equal(isAdmFileNewerThan(largeFixtureName, largeFixtureName), false);

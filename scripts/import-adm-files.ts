@@ -993,7 +993,14 @@ function shouldPersistPlayerEvent(event: ParsedAdmEvent) {
   ) return false;
   if (isHitEvent(event)) return false;
   if (event.eventType === "player_killed" && event.isCreditedKill) return false;
-  if (event.eventType === "player_built_structure" || event.eventType === "player_dismantled_structure" || event.eventType === "player_placed_object") {
+  if (
+    event.eventType === "player_built_structure" ||
+    event.eventType === "player_dismantled_structure" ||
+    event.eventType === "player_folded_structure" ||
+    event.eventType === "player_placed_object" ||
+    event.eventType === "territory_flag_raised" ||
+    event.eventType === "territory_flag_lowered"
+  ) {
     return false;
   }
   return true;

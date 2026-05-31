@@ -198,6 +198,17 @@ function fileHasImportEvidence(file: FileStateRow, jobs: JobRow[]) {
   return hasCurrentCursor(file, jobs);
 }
 
+function scheduledJobForFile(file: FileStateRow, jobs: JobRow[]) {
+  return jobs.find((job) => job.filename === file.adm_file && job.source === "scheduled_nitrado") ?? null;
+}
+
+function hasActiveOrderedBackfill(file: FileStateRow, jobs: JobRow[]) {
+  const job = scheduledJobForFile(file, jobs);
+  const status = String(job?.status ?? "").toLowerCase();
+  if (["queued", "processing", "parsing", "writing", "rebuilding", "failed_retryable"].includes(status)) return true;
+  return isFuture(file.next_retry_at);
+}
+
 async function checkProtectedEndpoints() {
   for (const path of ["/api/debug/nitrado-admin-logs", "/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run", "/api/autodev/adm-health"]) {
     try {
@@ -579,6 +590,9 @@ async function main() {
       if (file.adm_file === latestFile.adm_file) return false;
       return !fileHasImportEvidence(file, serviceJobs) && !isFuture(file.next_retry_at);
     });
+    const activeOrderedBackfillFiles = recentFilesAfterLastProcessed
+      .filter((file) => file.adm_file !== latestFile.adm_file)
+      .filter((file) => hasActiveOrderedBackfill(file, serviceJobs));
     if (skippedIntermediateFiles.length) {
       fail(label, "Recent noftp ADM files newer than the last completed import lack job/cursor evidence before the current latest ADM.", skippedIntermediateFiles.map((file) => ({
         file: file.adm_file,
@@ -603,6 +617,20 @@ async function main() {
         importedLineCount: latestFile.imported_line_count,
         jobStatus: currentJob?.status ?? null,
         jobProgress: currentJob ? `${currentJob.current_line ?? 0}/${currentJob.total_lines ?? 0}` : null,
+      });
+    } else if (activeOrderedBackfillFiles.length > 0) {
+      pass(label, `Current newest ADM ${latestFile.adm_file} is waiting behind active ordered recent backfill.`, {
+        currentFileStatus: latestFile.status,
+        activeBackfillFiles: activeOrderedBackfillFiles.map((file) => {
+          const job = scheduledJobForFile(file, serviceJobs);
+          return {
+            file: file.adm_file,
+            fileStatus: file.status,
+            jobStatus: job?.status ?? null,
+            jobProgress: job ? `${job.current_line ?? 0}/${job.total_lines ?? 0}` : null,
+            nextRetryAt: file.next_retry_at,
+          };
+        }),
       });
     } else if (isFuture(latestFile.next_retry_at)) {
       pass(label, `Current ADM read is blocked with retry scheduled for ${latestFile.next_retry_at}.`, {

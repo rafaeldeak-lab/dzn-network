@@ -27,11 +27,14 @@ export type AdmEventType =
   | "player_performed_action"
   | "player_built_structure"
   | "player_dismantled_structure"
+  | "player_folded_structure"
   | "playerlist_snapshot"
   | "playerlist_delimiter"
   | "playerlist_entry"
   | "player_choosing_respawn"
   | "player_placed_object"
+  | "territory_flag_raised"
+  | "territory_flag_lowered"
   | "plain_player_state"
   | "unknown";
 
@@ -59,6 +62,7 @@ export type ParsedAdmEvent = {
   victimPosition: AdmPosition | null;
   killerPosition: AdmPosition | null;
   attackerPosition: AdmPosition | null;
+  objectPosition: AdmPosition | null;
   water: number | null;
   energy: number | null;
   bleedSources: number | null;
@@ -276,8 +280,11 @@ export function classifyAdmEvent(rawLine: string, context: AdmParseContext = {})
   if (/\bcommitted suicide\b/i.test(body)) return "player_suicide";
   if (/\bdied\.?\s+Stats>/i.test(body)) return "player_died_stats";
   if (/\bperformed\b/i.test(body)) return "player_performed_action";
+  if (/\bhas\s+raised\s+\S+\s+on\s+.+?\s+at\s+</i.test(body)) return "territory_flag_raised";
+  if (/\bhas\s+lowered\s+\S+\s+on\s+.+?\s+at\s+</i.test(body)) return "territory_flag_lowered";
   if (/\bBuilt\s+.+?\s+on\s+/i.test(body)) return "player_built_structure";
-  if (/\bDismantled\s+.+?\s+on\s+/i.test(body)) return "player_dismantled_structure";
+  if (/\bDismantled\s+.+?\s+(?:from|on)\s+/i.test(body)) return "player_dismantled_structure";
+  if (/\bfolded\s+.+$/i.test(body)) return "player_folded_structure";
   if (/\bis choosing to respawn\b/i.test(body)) return "player_choosing_respawn";
   if (/\bplaced\b/i.test(body)) return "player_placed_object";
   if (context.inPlayerList && /^Player\s+"/i.test(body)) return "playerlist_entry";
@@ -482,14 +489,37 @@ function parseSinglePlayerEvent(
     };
   }
 
-  if (eventType === "player_built_structure" || eventType === "player_dismantled_structure") {
-    const built = /\b(?:Built|Dismantled)\s+(.+?)\s+on\s+(.+?)(?:\s+with\s+(.+))?$/i.exec(timestamp.body);
+  if (eventType === "player_built_structure") {
+    const built = /\bBuilt\s+(.+?)\s+on\s+(.+?)(?:\s+with\s+(.+))?$/i.exec(timestamp.body);
     return {
       ...base,
       buildPart: built?.[1]?.trim() ?? null,
       targetObject: built?.[2]?.trim() ?? null,
       tool: normaliseWeaponName(built?.[3]) ?? null,
       objectType: built?.[2]?.trim() ?? null,
+    };
+  }
+
+  if (eventType === "player_dismantled_structure") {
+    const dismantled = /\bDismantled\s+(.+?)\s+(?:from|on)\s+(.+?)(?:\s+with\s+(.+))?$/i.exec(timestamp.body);
+    return {
+      ...base,
+      buildPart: dismantled?.[1]?.trim() ?? null,
+      targetObject: dismantled?.[2]?.trim() ?? null,
+      tool: normaliseWeaponName(dismantled?.[3]) ?? null,
+      objectType: dismantled?.[2]?.trim() ?? null,
+    };
+  }
+
+  if (eventType === "player_folded_structure") {
+    const folded = /\bfolded\s+(.+?)$/i.exec(timestamp.body);
+    const foldedObject = folded?.[1]?.trim() ?? null;
+    return {
+      ...base,
+      action: "folded",
+      buildPart: foldedObject,
+      targetObject: foldedObject,
+      objectType: foldedObject,
     };
   }
 
@@ -502,6 +532,22 @@ function parseSinglePlayerEvent(
       objectType: placedClass ?? placedObject,
       placedObject,
       placedClass,
+    };
+  }
+
+  if (eventType === "territory_flag_raised" || eventType === "territory_flag_lowered") {
+    const flag = /\bhas\s+(raised|lowered)\s+(\S+)\s+on\s+(.+?)\s+at\s+(<[^>]+>)/i.exec(timestamp.body);
+    const action = flag?.[1]?.toLowerCase() === "lowered" ? "flag_lowered" : "flag_raised";
+    const flagType = flag?.[2]?.trim() ?? null;
+    const flagObject = flag?.[3]?.trim() ?? null;
+    return {
+      ...base,
+      action,
+      placedObject: flagType,
+      placedClass: flagObject,
+      targetObject: flagObject,
+      objectType: flagObject,
+      objectPosition: flag?.[4] ? parsePosition(flag[4]) : null,
     };
   }
 
@@ -575,6 +621,7 @@ function createBaseEvent(
     victimPosition: overrides.victimPosition ?? null,
     killerPosition: overrides.killerPosition ?? null,
     attackerPosition: overrides.attackerPosition ?? null,
+    objectPosition: overrides.objectPosition ?? null,
     water: overrides.water ?? null,
     energy: overrides.energy ?? null,
     bleedSources: overrides.bleedSources ?? null,

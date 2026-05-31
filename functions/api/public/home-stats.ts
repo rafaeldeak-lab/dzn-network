@@ -62,6 +62,7 @@ type RecentActivityRow = {
   weapon: string | null;
   distance: number | null;
   build_part?: string | null;
+  target_object?: string | null;
   placed_object?: string | null;
   placed_class?: string | null;
   occurred_at: string | null;
@@ -624,6 +625,7 @@ async function getBuildLeaderboardBreakdowns(db: D1Database) {
             WHEN lower(COALESCE(build_events.build_part, '')) LIKE 'watchtower%'
               OR lower(COALESCE(build_events.placed_class, '')) IN ('watchtowerkit')
               OR lower(COALESCE(build_events.placed_object, '')) LIKE '%watchtower%'
+              OR lower(COALESCE(build_events.target_object, '')) = 'watchtower'
             THEN 1 ELSE 0
           END
         ) AS watchtowers_built,
@@ -816,6 +818,7 @@ async function getRecentActivity(db: D1Database) {
            kill_events.weapon,
            kill_events.distance,
            NULL AS build_part,
+           NULL AS target_object,
            NULL AS placed_object,
            NULL AS placed_class,
            kill_events.occurred_at,
@@ -839,6 +842,7 @@ async function getRecentActivity(db: D1Database) {
            NULL AS weapon,
            NULL AS distance,
            NULL AS build_part,
+           NULL AS target_object,
            NULL AS placed_object,
            NULL AS placed_class,
            player_events.occurred_at,
@@ -861,6 +865,7 @@ async function getRecentActivity(db: D1Database) {
            build_events.tool AS weapon,
            NULL AS distance,
            build_events.build_part,
+           build_events.target_object,
            build_events.placed_object,
            build_events.placed_class,
            build_events.occurred_at,
@@ -883,6 +888,7 @@ async function getRecentActivity(db: D1Database) {
            NULL AS weapon,
            NULL AS distance,
            NULL AS build_part,
+           NULL AS target_object,
            NULL AS placed_object,
            NULL AS placed_class,
            COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) AS occurred_at,
@@ -905,6 +911,7 @@ async function getRecentActivity(db: D1Database) {
            NULL AS weapon,
            NULL AS distance,
            NULL AS build_part,
+           NULL AS target_object,
            NULL AS placed_object,
            NULL AS placed_class,
            linked_servers.created_at AS occurred_at,
@@ -1149,6 +1156,9 @@ function activityTitle(row: RecentActivityRow) {
       return `${row.player_name ?? "A player"} placed ${row.placed_object ?? row.placed_class ?? "a build item"}`;
     }
     if (row.event_type === "dismantled") return `${row.player_name ?? "A player"} dismantled a structure`;
+    if (row.event_type === "folded") return `${row.player_name ?? "A player"} folded ${row.target_object ?? row.placed_object ?? "a structure"}`;
+    if (row.event_type === "flag_raised") return `${row.player_name ?? "A player"} raised ${row.placed_class ?? "a territory flag"}`;
+    if (row.event_type === "flag_lowered") return `${row.player_name ?? "A player"} lowered ${row.placed_class ?? "a territory flag"}`;
   }
   if (row.event_type === "player_connected") return `${row.player_name ?? "A player"} connected`;
   if (row.event_type === "player_disconnected") return `${row.player_name ?? "A player"} disconnected`;

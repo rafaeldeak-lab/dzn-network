@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { parseAdmLine, parseAdmLines } from "../functions/_lib/adm-parser";
 import { buildAdmImportDebugReport } from "../functions/_lib/adm-sync";
+import { classifyParsedBuildEvent, summarizeBuildStats } from "../functions/_lib/build-events";
 
 const context = { admDate: "2026-05-14" };
 
@@ -213,6 +214,75 @@ assert.equal(builtGate.eventType, "player_built_structure");
 assert.equal(builtGate.buildPart, "wall_gate");
 assert.equal(builtGate.targetObject, "Gate");
 assert.equal(builtGate.tool, "Pliers");
+
+const buildCoverageLines = [
+  '20:02:00 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Watchtower Kit<WatchtowerKit>',
+  '20:02:01 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Wooden Crate<WoodenCrate>',
+  '20:02:02 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Construction Light<Spotlight>',
+  '20:02:03 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) placed Tripwire<TripwireTrap>',
+  '20:02:04 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>)Built level_1_base on Watchtower with Pickaxe',
+  '20:02:05 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>)Built level_2_wall_2_wood_down on Watchtower with Hatchet',
+  '20:02:06 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>)Built level_3_wall_3_metal_down on Watchtower with Hammer',
+  '20:02:07 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>)Dismantled Upper Wooden Wall from Watchtower with Hatchet',
+  '20:02:08 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>)Dismantled Upper Frame from Watchtower with Hatchet',
+  '20:02:09 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) folded Fence',
+  '20:02:10 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) has raised Flag_SSahrani on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+  '20:02:11 | Player "Builder" (id=BUILDER_ID pos=<22.4, 7891.5, 303.1>) has lowered Flag_NSahrani on TerritoryFlag at <8250.864258, 353.267975, 7003.206543>',
+];
+const buildCoverageEvents = parseAdmLines(buildCoverageLines, context);
+assert.deepEqual(buildCoverageEvents.map((event) => event.eventType), [
+  "player_placed_object",
+  "player_placed_object",
+  "player_placed_object",
+  "player_placed_object",
+  "player_built_structure",
+  "player_built_structure",
+  "player_built_structure",
+  "player_dismantled_structure",
+  "player_dismantled_structure",
+  "player_folded_structure",
+  "territory_flag_raised",
+  "territory_flag_lowered",
+]);
+assert.equal(buildCoverageEvents[2]?.placedObject, "Construction Light");
+assert.equal(buildCoverageEvents[2]?.placedClass, "Spotlight");
+assert.equal(buildCoverageEvents[3]?.placedClass, "TripwireTrap");
+assert.equal(buildCoverageEvents[4]?.buildPart, "level_1_base");
+assert.equal(buildCoverageEvents[5]?.buildPart, "level_2_wall_2_wood_down");
+assert.equal(buildCoverageEvents[6]?.buildPart, "level_3_wall_3_metal_down");
+assert.equal(buildCoverageEvents[7]?.buildPart, "Upper Wooden Wall");
+assert.equal(buildCoverageEvents[7]?.targetObject, "Watchtower");
+assert.equal(buildCoverageEvents[9]?.buildPart, "Fence");
+assert.equal(buildCoverageEvents[10]?.action, "flag_raised");
+assert.equal(buildCoverageEvents[10]?.placedObject, "Flag_SSahrani");
+assert.deepEqual(buildCoverageEvents[10]?.objectPosition, { x: 8250.864258, y: 353.267975, z: 7003.206543 });
+const classifiedBuildCoverage = buildCoverageEvents.map((event) => classifyParsedBuildEvent(event));
+assert.deepEqual(classifiedBuildCoverage.map((event) => event?.eventType), [
+  "placed",
+  "placed",
+  "placed",
+  "placed",
+  "built",
+  "built",
+  "built",
+  "dismantled",
+  "dismantled",
+  "folded",
+  "flag_raised",
+  "flag_lowered",
+]);
+assert.equal(classifiedBuildCoverage[2]?.category, "utility");
+assert.equal(classifiedBuildCoverage[3]?.category, "trap");
+const buildSummary = summarizeBuildStats(classifiedBuildCoverage.filter(Boolean).map((event) => ({
+  eventType: event!.eventType,
+  category: event!.category,
+  buildPart: event!.buildPart,
+  placedClass: event!.placedClass,
+})));
+assert.equal(buildSummary.structuresBuilt, 3);
+assert.equal(buildSummary.buildItemsPlaced, 1);
+assert.equal(buildSummary.storageItemsPlaced, 1);
+assert.equal(buildSummary.trapsPlaced, 1);
 
 const invalidPosition = parseAdmLine(
   '11:43:32 | Player "ExamplePlayer" (id=PLAYER_ID pos=<-340282346638528859811704183484516925440.0, 10326.4, 339.3>) is connected',

@@ -153,11 +153,17 @@ const allowsTelemetryAdmSyncChange =
   source("functions/_lib/adm-sync.ts").includes("PREMIUM_TELEMETRY_SCHEMA_STATEMENTS") &&
   source("functions/_lib/adm-sync.ts").includes("evaluateLogTelemetrySequence") &&
   source("migrations/0031_premium_analytics_telemetry.sql").includes("player_parser_state");
+const allowsAdmBuildParserChange =
+  changedFiles.includes("functions/_lib/build-events.ts") &&
+  source("functions/_lib/adm-parser.ts").includes("territory_flag_raised") &&
+  source("functions/_lib/adm-parser.ts").includes("player_folded_structure") &&
+  source("functions/_lib/build-events.ts").includes("flag_raised") &&
+  source("functions/_lib/build-events.ts").includes("tripwiretrap");
 const forbiddenAdmChanges = changedFiles.filter((file) => [
   "functions/_lib/adm-parser.ts",
   "scripts/import-adm-files.ts",
   "scripts/diagnose-adm-import.ts",
-].includes(file) || (file === "functions/_lib/adm-sync.ts" && !allowsTelemetryAdmSyncChange) || (/^migrations\//.test(file) && /adm/i.test(file)));
+].includes(file) && !allowsAdmBuildParserChange || (file === "functions/_lib/adm-sync.ts" && !allowsTelemetryAdmSyncChange && !allowsAdmBuildParserChange) || (/^migrations\//.test(file) && /adm/i.test(file)));
 assert.deepEqual(forbiddenAdmChanges, [], `ADM reliability files must remain untouched by public loading changes: ${forbiddenAdmChanges.join(", ")}`);
 
 const publicSnapshotRun = source("functions/api/sync/public-snapshots/run.ts");

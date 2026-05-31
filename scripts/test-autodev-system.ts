@@ -145,5 +145,7 @@ assert.equal(admLiveVerify.includes("shouldUseProtectedAdmHealthFallbackBeforeD1
 assert.equal(admLiveVerify.includes("process.env.GITHUB_ACTIONS"), true);
 assert.equal(admLiveVerify.includes("CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID"), true);
 assert.equal(admLiveVerify.includes("Remote D1 query unavailable; using protected ADM health fallback."), true);
+assert.equal(admLiveVerify.includes("hasActiveOrderedBackfill"), true);
+assert.equal(admLiveVerify.includes("waiting behind active ordered recent backfill"), true);
 
 console.log("AutoDev system tests passed.");

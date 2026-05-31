@@ -43,24 +43,47 @@ function url(path: string) {
 }
 
 async function fetchStatus(path: string, init: RequestInit = {}) {
-  try {
-    const response = await fetch(url(path), {
-      redirect: "manual",
-      ...init,
-      headers: {
-        "content-type": "application/json",
-        ...(init.headers ?? {}),
-      },
-    });
-    const text = await response.text().catch(() => "");
-    return { ok: true, response, text };
-  } catch (error) {
-    return {
-      ok: false,
-      response: null,
-      text: error instanceof Error ? error.message : "request failed",
-    };
+  let lastError = "request failed";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url(path), {
+        redirect: "manual",
+        ...init,
+        headers: {
+          "content-type": "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+      const text = await response.text().catch(() => "");
+      if (!isTransientStatus(response.status) || attempt === 3) {
+        return { ok: true, response, text };
+      }
+      lastError = `HTTP ${response.status}: ${safeSnippet(text)}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "request failed";
+      if (attempt === 3) {
+        return {
+          ok: false,
+          response: null,
+          text: lastError,
+        };
+      }
+    }
+    await sleep(1000 * attempt);
   }
+  return {
+    ok: false,
+    response: null,
+    text: lastError,
+  };
+}
+
+function isTransientStatus(status: number) {
+  return status === 502 || status === 503 || status === 504;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function checkPage(path: string, label: string) {
