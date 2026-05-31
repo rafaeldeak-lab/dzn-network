@@ -214,6 +214,8 @@ async function buildPreviewHomeStats(env: Env) {
   const data = emptyHomeStats();
   return {
     ...data,
+    source: "last_known_adm_preview",
+    generated_at: new Date().toISOString(),
     totals: {
       ...data.totals,
       serversLinked,

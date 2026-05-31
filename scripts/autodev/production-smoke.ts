@@ -43,7 +43,8 @@ async function main() {
 
   const homeStats = await request("/api/public/home-stats");
   const homeStatsJson = parseJson(homeStats.body);
-  checks.push(homeStats.ok && homeStats.status === 200 && homeStatsJson?.ok && homeStatsJson.source !== "empty_no_cache"
+  const homeStatsHasAdmEvidence = hasAdmHomeStatsEvidence(homeStatsJson);
+  checks.push(homeStats.ok && homeStats.status === 200 && homeStatsJson?.ok && homeStatsJson.source !== "empty_no_cache" && homeStatsHasAdmEvidence
     ? pass("public home-stats ADM snapshot", "Public home-stats returns last-known ADM data or a valid snapshot.", {
       status: homeStats.status,
       source: homeStatsJson?.source,
@@ -106,6 +107,18 @@ function parseJson(value: string) {
   } catch {
     return null;
   }
+}
+
+function hasAdmHomeStatsEvidence(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const record = value as { totals?: Record<string, unknown>; topServers?: unknown[] };
+  const totals = record.totals ?? {};
+  return Number(totals.statsActiveServers ?? 0) > 0
+    || Number(totals.killsTracked ?? 0) > 0
+    || Number(totals.deathsTracked ?? 0) > 0
+    || Number(totals.joinsTracked ?? 0) > 0
+    || Number(totals.recentEventsCount ?? 0) > 0
+    || (Array.isArray(record.topServers) && record.topServers.length > 0);
 }
 
 main().catch((error) => {
