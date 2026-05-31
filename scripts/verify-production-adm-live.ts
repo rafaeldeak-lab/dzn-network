@@ -134,6 +134,11 @@ function d1<T>(sql: string): T[] {
   return parsed.flatMap((entry) => entry.results ?? []);
 }
 
+function shouldUseProtectedAdmHealthFallbackBeforeD1() {
+  return process.env.GITHUB_ACTIONS === "true"
+    && (!process.env.CLOUDFLARE_API_TOKEN || !process.env.CLOUDFLARE_ACCOUNT_ID);
+}
+
 function parseAdmTimestamp(value: string | null | undefined) {
   const match = String(value ?? "").match(/DayZServer_PS4_x64_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})\.ADM/i);
   if (!match) return null;
@@ -391,6 +396,16 @@ async function main() {
   if (!serviceIds.length) throw new Error("No valid service ids were provided.");
   const inClause = serviceIds.map(sqlString).join(", ");
   let linkedServers: LinkedServerRow[];
+  if (shouldUseProtectedAdmHealthFallbackBeforeD1()) {
+    warn(
+      "production D1 query fallback",
+      "Remote D1 query unavailable; using protected ADM health fallback. CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID are not configured for this GitHub Actions run.",
+    );
+    await verifyFromAdmHealth();
+    await checkProtectedEndpoints();
+    report();
+    return;
+  }
   try {
     linkedServers = d1<LinkedServerRow>(`
     SELECT linked_servers.id AS id,

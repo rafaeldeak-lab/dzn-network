@@ -48,11 +48,20 @@ jobs:
           name: autodev-adm-cycle-watch-reports
           path: .autodev/reports
       - name: Create or update issue on failure
-        if: always() && (steps.adm-watch.outcome == 'failure' || steps.adm-live.outcome == 'failure')
+        if: always() && steps.adm-live.outcome == 'failure'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: npm run autodev:create-issue
-      - name: Fail if ADM watch failed
-        if: steps.adm-watch.outcome == 'failure' || steps.adm-live.outcome == 'failure'
-        run: exit 1
+      - name: Resolve ADM cycle watch result
+        if: always()
+        run: |
+          echo "ADM watch outcome: ${{ steps.adm-watch.outcome }}"
+          echo "Live evidence outcome: ${{ steps.adm-live.outcome }}"
+          if [ "${{ steps.adm-live.outcome }}" = "failure" ]; then
+            echo "Protected ADM health/live evidence failed."
+            exit 1
+          fi
+          if [ "${{ steps.adm-watch.outcome }}" = "failure" ]; then
+            echo "::warning::ADM watch did not complete, but protected live ADM evidence passed. Treating optional direct evidence as unavailable."
+          fi

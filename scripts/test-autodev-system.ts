@@ -62,6 +62,18 @@ assert.equal(productionSmoke.includes("Protected endpoint must return 401"), tru
 assert.equal(productionSmoke.includes("ADM Worker heartbeat is stale beyond threshold."), true);
 assert.equal(productionSmoke.includes("recoverable Nitrado states do not fail production smoke"), true);
 assert.equal(read(".github/workflows/dzn-post-deploy-verify.yml").includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
+const cycleWatchWorkflow = read(".github/workflows/dzn-adm-cycle-watch.yml");
+const postDeployWorkflow = read(".github/workflows/dzn-post-deploy-verify.yml");
+assert.equal(cycleWatchWorkflow.includes("Resolve ADM cycle watch result"), true);
+assert.equal(cycleWatchWorkflow.includes("steps.adm-live.outcome"), true);
+assert.equal(cycleWatchWorkflow.includes("Protected ADM health/live evidence failed."), true);
+assert.equal(cycleWatchWorkflow.includes("optional direct evidence as unavailable"), true);
+assert.equal(cycleWatchWorkflow.includes("if: steps.adm-watch.outcome == 'failure' || steps.adm-live.outcome == 'failure'"), false);
+assert.equal(postDeployWorkflow.includes("Resolve post deploy verification result"), true);
+assert.equal(postDeployWorkflow.includes("steps.adm-live.outcome"), true);
+assert.equal(postDeployWorkflow.includes("Production smoke or protected live ADM evidence failed."), true);
+assert.equal(postDeployWorkflow.includes("optional direct evidence as unavailable"), true);
+assert.equal(postDeployWorkflow.includes("steps.adm.outcome == 'failure' || steps.adm-live.outcome == 'failure'"), false);
 
 const admWatch = read("scripts/autodev/adm-cycle-watch.ts");
 assert.equal(admWatch.includes("classifyRecoverableProductionStatus"), true);
@@ -124,5 +136,9 @@ assert.equal(admLiveVerify.includes("gameserver_details_log_files_noftp_download
 assert.equal(admLiveVerify.includes("ADM Worker has not selected this service within 30 minutes"), true);
 assert.equal(admLiveVerify.includes("public home-stats ADM fallback"), true);
 assert.equal(admLiveVerify.includes("Permanent ADM data exists but public home-stats"), true);
+assert.equal(admLiveVerify.includes("shouldUseProtectedAdmHealthFallbackBeforeD1"), true);
+assert.equal(admLiveVerify.includes("process.env.GITHUB_ACTIONS"), true);
+assert.equal(admLiveVerify.includes("CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID"), true);
+assert.equal(admLiveVerify.includes("Remote D1 query unavailable; using protected ADM health fallback."), true);
 
 console.log("AutoDev system tests passed.");

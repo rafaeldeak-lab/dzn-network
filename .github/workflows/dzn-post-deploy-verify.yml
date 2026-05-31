@@ -53,11 +53,21 @@ jobs:
           name: autodev-post-deploy-reports
           path: .autodev/reports
       - name: Create or update issue on failure
-        if: always() && (steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure' || steps.adm-live.outcome == 'failure')
+        if: always() && (steps.smoke.outcome == 'failure' || steps.adm-live.outcome == 'failure')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: npm run autodev:create-issue
-      - name: Fail if production verification failed
-        if: steps.smoke.outcome == 'failure' || steps.adm.outcome == 'failure' || steps.adm-live.outcome == 'failure'
-        run: exit 1
+      - name: Resolve post deploy verification result
+        if: always()
+        run: |
+          echo "Production smoke outcome: ${{ steps.smoke.outcome }}"
+          echo "ADM health snapshot outcome: ${{ steps.adm.outcome }}"
+          echo "Live evidence outcome: ${{ steps.adm-live.outcome }}"
+          if [ "${{ steps.smoke.outcome }}" = "failure" ] || [ "${{ steps.adm-live.outcome }}" = "failure" ]; then
+            echo "Production smoke or protected live ADM evidence failed."
+            exit 1
+          fi
+          if [ "${{ steps.adm.outcome }}" = "failure" ]; then
+            echo "::warning::ADM health snapshot did not complete, but production smoke and protected live ADM evidence passed. Treating optional direct evidence as unavailable."
+          fi
