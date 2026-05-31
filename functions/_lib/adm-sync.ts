@@ -8236,11 +8236,30 @@ async function getNextAdmBuildReparseCandidate(db: D1Database, parserVersion: st
          AND lower(COALESCE(linked_servers.status, '')) = 'live'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND COALESCE(state.status, '') != 'completed'
+         AND EXISTS (
+           SELECT 1
+           FROM adm_raw_events build_raw
+           WHERE build_raw.created_at >= ?
+             AND build_raw.linked_server_id = raw.linked_server_id
+             AND COALESCE(build_raw.source_service_id, linked_servers.nitrado_service_id) = COALESCE(raw.source_service_id, linked_servers.nitrado_service_id)
+             AND COALESCE(build_raw.source_adm_file, build_raw.adm_file) = COALESCE(raw.source_adm_file, raw.adm_file)
+             AND (
+               build_raw.raw_line LIKE '% placed %<%'
+               OR build_raw.raw_line LIKE '%)Built % on % with %'
+               OR build_raw.raw_line LIKE '%) Built % on % with %'
+               OR build_raw.raw_line LIKE '%)Dismantled % from %'
+               OR build_raw.raw_line LIKE '%) Dismantled % from %'
+               OR build_raw.raw_line LIKE '% folded %'
+               OR build_raw.raw_line LIKE '%has raised Flag_% on TerritoryFlag%'
+               OR build_raw.raw_line LIKE '%has lowered Flag_% on TerritoryFlag%'
+             )
+           LIMIT 1
+         )
        GROUP BY raw.linked_server_id, COALESCE(raw.source_service_id, linked_servers.nitrado_service_id), COALESCE(raw.source_adm_file, raw.adm_file)
        ORDER BY MAX(raw.created_at) ASC
        LIMIT 1`,
     )
-    .bind(parserVersion, cutoff)
+    .bind(parserVersion, cutoff, cutoff)
     .first<AdmBuildReparseCandidate>();
 }
 
