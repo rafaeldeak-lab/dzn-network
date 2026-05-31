@@ -8129,6 +8129,8 @@ export async function processRecentAdmBuildReparse(
         });
         await rebuildServerBuildStats(env, candidate.linked_server_id);
         result.statsRebuilt += 1;
+        const refreshed = await refreshAdmBuildReparsePublicCache(env, candidate.linked_server_id);
+        if (refreshed) result.publicCacheUpdated += 1;
         result.completedFiles.push(candidate.adm_file);
         continue;
       }
@@ -8395,9 +8397,16 @@ async function refreshAdmBuildReparsePublicCache(env: Env, linkedServerId: strin
   const db = requireDb(env);
   const server = await db
     .prepare(
-      `SELECT guild_id, plan_key, display_name, hostname, server_name, nitrado_service_name
+      `SELECT linked_servers.guild_id,
+              server_subscriptions.plan_key,
+              linked_servers.display_name,
+              linked_servers.hostname,
+              linked_servers.server_name,
+              linked_servers.nitrado_service_name
        FROM linked_servers
-       WHERE id = ?
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE linked_servers.id = ?
+       ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC
        LIMIT 1`,
     )
     .bind(linkedServerId)
