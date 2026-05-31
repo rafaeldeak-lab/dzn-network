@@ -515,6 +515,40 @@ async function runNitradoReadFallbackTests() {
     assert.equal(noftpBatch.files.some((file) => file.name === latestAdm), true);
     assert.equal(noftpBatch.files[0]?.path, `games/gameserver-unit/noftp/dayzps/config/${latestAdm}`);
 
+    const resetFiles = [
+      "DayZServer_PS4_x64_2026-05-31_17-01-47.ADM",
+      "DayZServer_PS4_x64_2026-05-31_18-02-38.ADM",
+      "DayZServer_PS4_x64_2026-05-31_19-01-29.ADM",
+    ];
+    const richIntermediateAdm = resetFiles[1];
+    const richIntermediateText = [
+      "AdminLog started on 2026-05-31 at 18:02:38",
+      '18:12:01 | Player "Victim" (DEAD) (id=victim-id pos=<1, 1, 1>) killed by Player "Killer" (id=killer-id pos=<2, 2, 2>) with M4-A1 from 41 meters',
+      '18:12:04 | Player "Victim" (id=victim-id pos=<1, 1, 1>) has been disconnected',
+    ].join("\n");
+    globalThis.fetch = mockNitradoFetch({
+      logFiles: resetFiles.map((name) => `dayzps/config/${name}`),
+      seekFails: true,
+      downloadSucceeds: true,
+      admText: richIntermediateText,
+      acceptedDownloadPath: `games/gameserver-unit/noftp/dayzps/config/${richIntermediateAdm}`,
+      adminLogsPayload: { status: "success", data: { logs: {} } },
+    });
+    const intermediateBatch = await fetchReadableNitradoAdmFiles("unit-token", "18765761", {
+      mode: "full",
+      preferredAdmFileName: richIntermediateAdm,
+      preferredAdmPath: `dayzps/config/${richIntermediateAdm}`,
+      directPreferredFirst: false,
+      adminLogsFirst: false,
+      maxFiles: 1,
+      maxPathVariants: 1,
+      currentFileMaxPathVariants: 1,
+    });
+    assert.equal(intermediateBatch.files[0]?.name, richIntermediateAdm);
+    assert.equal(intermediateBatch.files[0]?.path, `games/gameserver-unit/noftp/dayzps/config/${richIntermediateAdm}`);
+    assert.equal(intermediateBatch.candidates.map((file) => file.name).join(","), resetFiles.join(","));
+    assert.equal(intermediateBatch.files[0]?.lines.some((line) => line.includes("killed by Player")), true);
+
     globalThis.fetch = mockNitradoFetch({
       logFiles: [admPath],
       seekFails: true,

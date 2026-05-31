@@ -169,6 +169,22 @@ function isFuture(value: string | null | undefined) {
   return Number.isFinite(time) && time > Date.now();
 }
 
+async function fetchWithRetry(url: string, init?: RequestInit) {
+  let last: Response | null = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      last = await fetch(url, init);
+    } catch (error) {
+      if (attempt === 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      continue;
+    }
+    if (![502, 503, 504].includes(last.status)) return last;
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+  }
+  return last!;
+}
+
 function hasCurrentCursor(file: FileStateRow | null, jobs: JobRow[]) {
   if (!file) return false;
   const cursor = Math.max(Number(file.cursor_line ?? 0), Number(file.imported_line_count ?? 0), Number(file.line_count ?? 0));
@@ -178,10 +194,14 @@ function hasCurrentCursor(file: FileStateRow | null, jobs: JobRow[]) {
     || ["caught_up_waiting_for_growth", "processed", "queued"].includes(String(file.status ?? ""));
 }
 
+function fileHasImportEvidence(file: FileStateRow, jobs: JobRow[]) {
+  return hasCurrentCursor(file, jobs);
+}
+
 async function checkProtectedEndpoints() {
   for (const path of ["/api/debug/nitrado-admin-logs", "/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run", "/api/autodev/adm-health"]) {
     try {
-      const response = await fetch(`${baseUrl}${path}`, {
+      const response = await fetchWithRetry(`${baseUrl}${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -203,7 +223,7 @@ type PublicJson = Record<string, unknown> & {
 };
 
 async function requestPublicJson(path: string) {
-  const response = await fetch(`${baseUrl}${path}`, { headers: { "user-agent": "dzn-adm-live-verifier" } });
+  const response = await fetchWithRetry(`${baseUrl}${path}`);
   const body = await response.text();
   let json: PublicJson | null = null;
   try {
@@ -278,7 +298,7 @@ type AdmHealth = {
 
 async function fetchAdmHealth() {
   if (!cronSecret) throw new Error("wrangler D1 query failed and no DZN_CRON_SECRET/SYNC_CRON_SECRET is available for ADM health fallback.");
-  const response = await fetch(`${baseUrl}/api/autodev/adm-health`, {
+  const response = await fetchWithRetry(`${baseUrl}/api/autodev/adm-health`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -548,6 +568,31 @@ async function main() {
 
     const serviceJobs = jobs.filter((job) => job.server_id === server.id || job.source_service_id === serviceId);
     const currentJob = serviceJobs.find((job) => job.filename === latestFile.adm_file && job.source === "scheduled_nitrado");
+    const lastProcessedTime = parseAdmTimestamp(server.last_processed_file);
+    const recentFilesAfterLastProcessed = [...serviceFiles]
+      .filter((file) => {
+        const fileTime = parseAdmTimestamp(file.adm_file);
+        return fileTime !== null && (lastProcessedTime === null || fileTime > lastProcessedTime);
+      })
+      .sort((left, right) => newerAdmFile(left.adm_file, right.adm_file));
+    const skippedIntermediateFiles = recentFilesAfterLastProcessed.filter((file) => {
+      if (file.adm_file === latestFile.adm_file) return false;
+      return !fileHasImportEvidence(file, serviceJobs) && !isFuture(file.next_retry_at);
+    });
+    if (skippedIntermediateFiles.length) {
+      fail(label, "Recent noftp ADM files newer than the last completed import lack job/cursor evidence before the current latest ADM.", skippedIntermediateFiles.map((file) => ({
+        file: file.adm_file,
+        status: file.status,
+        cursorLine: file.cursor_line,
+        importedLineCount: file.imported_line_count,
+        latestKnownLineCount: file.latest_known_line_count,
+        nextRetryAt: file.next_retry_at,
+      })));
+    } else if (recentFilesAfterLastProcessed.length > 1) {
+      pass(label, "Recent ADM files after the last processed file have import/cursor evidence or retry state in timestamp order.", {
+        files: recentFilesAfterLastProcessed.map((file) => file.adm_file),
+      });
+    }
     if (serviceJobs.some((job) => job.source === "scheduled_nitrado" && /completed/i.test(job.status)) || Math.max(Number(latestFile.cursor_line ?? 0), Number(latestFile.imported_line_count ?? 0), Number(latestFile.line_count ?? 0)) > 0) {
       permanentAdmDataDetected = true;
     }

@@ -5,22 +5,27 @@ const baseUrl = (process.env.DZN_APP_URL || config.productionUrl).replace(/\/$/,
 const cronSecret = process.env.DZN_CRON_SECRET || process.env.SYNC_CRON_SECRET || "";
 
 async function request(path: string, init?: RequestInit) {
-  const startedAt = Date.now();
-  try {
-    const response = await fetch(`${baseUrl}${path}`, {
-      redirect: "manual",
-      ...init,
-      headers: {
-        "user-agent": "dzn-autodev-production-smoke",
-        ...(init?.headers ?? {}),
-      },
-    });
-    const body = await response.text().catch(() => "");
-    return { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: body.slice(0, 2000), fullBody: body };
-  } catch (error) {
-    const body = error instanceof Error ? error.message : String(error);
-    return { ok: false, status: 0, durationMs: Date.now() - startedAt, body, fullBody: body };
+  let last: { ok: boolean; status: number; durationMs: number; body: string; fullBody: string; attempts: number } | null = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(`${baseUrl}${path}`, {
+        redirect: "manual",
+        ...init,
+        headers: {
+          ...(init?.headers ?? {}),
+        },
+      });
+      const body = await response.text().catch(() => "");
+      last = { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: body.slice(0, 2000), fullBody: body, attempts: attempt };
+    } catch (error) {
+      const body = error instanceof Error ? error.message : String(error);
+      last = { ok: false, status: 0, durationMs: Date.now() - startedAt, body, fullBody: body, attempts: attempt };
+    }
+    if (![0, 502, 503, 504].includes(last.status)) return last;
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
   }
+  return last!;
 }
 
 async function main() {

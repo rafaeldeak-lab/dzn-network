@@ -151,7 +151,8 @@ async function main() {
   assert.match(admSyncSource, /pendingJobWorkCompleted/);
   assert.match(admSyncSource, /planAdmBackfillJobsForServer\(env, selected\.user_id, selected\.id/);
   assert.match(admSyncSource, /processImmediately: false/);
-  assert.match(admSyncSource, /prioritizedLiveCurrentJobKey/);
+  assert.equal(admSyncSource.includes("prioritizedLiveCurrentJobKey"), false);
+  assert.match(admSyncSource, /preliminaryPlan\.missingFiles/);
   assert.match(admSyncSource, /currentFileMaxPathVariants/);
   assert.match(admSyncSource, /trySeekWithoutRaw/);
   assert.match(admSyncSource, /lastProcessedFile = rowCompleted \? row\.filename : existingState\?\.last_processed_file/);
@@ -185,6 +186,25 @@ async function main() {
   assert.deepEqual(backfillPlan.createFiles, backfillFixtureNames.slice(0, 3));
   assert.equal(backfillPlan.oldestMissingFile, "DayZServer_PS4_x64_2026-05-20_06-02-03.ADM");
   assert.equal(backfillPlan.newestMissingFile, "DayZServer_PS4_x64_2026-05-20_12-02-31.ADM");
+
+  const postResetFiles = [
+    "DayZServer_PS4_x64_2026-05-31_16-02-03.ADM",
+    "DayZServer_PS4_x64_2026-05-31_17-01-47.ADM",
+    "DayZServer_PS4_x64_2026-05-31_18-02-38.ADM",
+    "DayZServer_PS4_x64_2026-05-31_19-01-29.ADM",
+  ];
+  const postResetPlan = buildAdmBackfillPlan({
+    files: postResetFiles.map((name) => ({ name, readable: true })),
+    handledFilenames: [postResetFiles[0]],
+    existingJobs: [],
+    planKey: "partner",
+    nowMs: Date.UTC(2026, 4, 31, 20, 0, 0),
+    maxJobsToCreate: 1,
+  });
+  assert.deepEqual(postResetPlan.missingFiles, postResetFiles.slice(1));
+  assert.deepEqual(postResetPlan.createFiles, [postResetFiles[1]]);
+  assert.equal(postResetPlan.oldestMissingFile, postResetFiles[1]);
+  assert.equal(postResetPlan.newestMissingFile, postResetFiles[3]);
 
   const manualDedupeBackfillPlan = buildAdmBackfillPlan({
     files: backfillFixtureNames.map((name) => ({ name, readable: true })),

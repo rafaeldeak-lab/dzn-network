@@ -3197,6 +3197,7 @@ export async function planAdmBackfillJobsForServer(
     maxFiles: scheduledBudgeted ? admBudget.maxFilesPerInvocation : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
     lookbackFiles: scheduledBudgeted ? 10 : 12,
     directPreferredFirst: scheduledBudgeted ? false : true,
+    adminLogsFirst: scheduledBudgeted ? false : undefined,
     maxListDirs: scheduledBudgeted ? 2 : 8,
     maxListSearches: scheduledBudgeted ? 1 : 3,
     currentFileMaxPathVariants: scheduledBudgeted ? Math.max(1, Math.min(2, admBudget.maxReadAttemptsPerFile)) : 6,
@@ -3265,14 +3266,9 @@ export async function planAdmBackfillJobsForServer(
       maxJobsToCreate,
     });
     const exactReadLimit = Math.max(1, Math.min(3, Math.trunc(Number(maxJobsToCreate))));
-    const newestAvailableKey = normalizeAdmFilenameKey(newestAvailable?.name);
-    const prioritizedMissingFiles = [
-      ...preliminaryPlan.missingFiles.filter((filename) => normalizeAdmFilenameKey(filename) === newestAvailableKey),
-      ...preliminaryPlan.missingFiles.filter((filename) => normalizeAdmFilenameKey(filename) !== newestAvailableKey),
-    ];
     const exactReadNames = preliminaryPlan.activeJobFilename
       ? []
-      : prioritizedMissingFiles
+      : preliminaryPlan.missingFiles
         .filter((filename) => !readableByName.has(normalizeAdmFilenameKey(filename)))
         .slice(0, exactReadLimit);
     for (const filename of exactReadNames) {
@@ -3341,24 +3337,7 @@ export async function planAdmBackfillJobsForServer(
       createdJobs.push(tailJob.job);
     }
   }
-  const prioritizedLiveCurrentJobKey = normalizeAdmFilenameKey(newestAvailable?.name);
-  if (scheduledBudgeted && !plan.activeJobFilename && prioritizedLiveCurrentJobKey) {
-    const liveCurrent = readableByName.get(prioritizedLiveCurrentJobKey);
-    if (liveCurrent && plan.createFiles.some((filename) => normalizeAdmFilenameKey(filename) === prioritizedLiveCurrentJobKey)) {
-      const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, liveCurrent.name);
-      if (!existingJob) {
-        const tailJob = await createOrExtendScheduledAdmTailJobForReadableFile(env, {
-          scope,
-          file: liveCurrent,
-          chunkSize: SCHEDULED_ADM_IMPORT_CHUNK_SIZE,
-          allowNewJob: true,
-        });
-        if (tailJob.job) createdJobs.push(tailJob.job);
-      }
-    }
-  }
   for (const filename of plan.createFiles) {
-    if (scheduledBudgeted && normalizeAdmFilenameKey(filename) === prioritizedLiveCurrentJobKey) continue;
     const readable = readableByName.get(normalizeAdmFilenameKey(filename));
     if (!readable?.lines.length) continue;
     const existingJob = await getAdmImportJobForFilename(env, scope.linkedServerId, filename);
@@ -3397,9 +3376,9 @@ export async function planAdmBackfillJobsForServer(
   const baseMessage = rateLimited
     ? batch.readError ?? batch.message ?? "Nitrado rate limited ADM reads. DZN is backing off and will retry automatically."
     : activeJobForStatus
-      ? `ADM backfill is processing ${activeJobForStatus.filename} chunk ${Math.min(activeJobForStatus.total_chunks, activeJobForStatus.chunks_processed + 1)}/${activeJobForStatus.total_chunks}.`
+      ? `Backfilling recent ADM files after reset. Processing ${activeJobForStatus.filename} chunk ${Math.min(activeJobForStatus.total_chunks, activeJobForStatus.chunks_processed + 1)}/${activeJobForStatus.total_chunks}.`
       : createdJobs.length
-        ? `Queued ${createdJobs.length} missing ADM file${createdJobs.length === 1 ? "" : "s"} for scheduled backfill.`
+        ? `Backfilling recent ADM files after reset. Queued ${createdJobs.length} ADM file${createdJobs.length === 1 ? "" : "s"} for scheduled import.`
         : plan.missingFiles.length && missingNewestAvailable
           ? `Current ADM is unreadable or already queued. ${plan.nextAction}`
           : plan.missingFiles.length
@@ -8933,6 +8912,7 @@ async function getReadableAdmFilesForLinkedServer(
     trySeekWithoutRaw?: boolean;
     broadLogFallback?: boolean;
     maxReadAttemptsPerFile?: number;
+    adminLogsFirst?: boolean;
     budget?: AdmInvocationBudget;
   } = {},
 ): Promise<{ files: ReadableAdmFileForSync[]; candidates: DiscoveredAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; apiStatus: string; message: string; readErrors: string[]; readError: string | null }> {
@@ -9005,6 +8985,7 @@ async function getReadableAdmFilesForLinkedServer(
     maxReadAttemptsPerFile: options.maxReadAttemptsPerFile,
     maxTokenizedAttempts: options.budget?.maxTokenizedAttemptsPerFile ?? (options.readMode === "full" ? 2 : 1),
     maxChunkedReadChunks: options.budget?.maxChunkedReadChunks,
+    adminLogsFirst: options.adminLogsFirst,
     broadLogFallback: options.broadLogFallback,
     diagnostics: {
       db: requireDb(env),
@@ -9044,6 +9025,56 @@ async function readSpecificAdmFileForBackfill(
 
   try {
     const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+    const preferredBatch = await fetchReadableNitradoAdmFiles(token, linkedServer.nitrado_service_id, {
+      mode: "full",
+      preferredAdmFileName: candidate.name,
+      preferredAdmPath: candidate.path ?? candidate.name,
+      previousLatestAdmFileName: null,
+      maxFiles: 1,
+      lookbackFiles: 1,
+      directPreferredFirst: false,
+      adminLogsFirst: false,
+      maxListDirs: 1,
+      maxListSearches: 1,
+      currentFileMaxPathVariants: Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+      trySeekWithoutRaw: false,
+      maxReadAttemptsPerFile: Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+      maxPathVariants: Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+      maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
+      maxChunkedReadChunks: budget.maxChunkedReadChunks,
+      broadLogFallback: false,
+      diagnostics: {
+        db: requireDb(env),
+        serverId: linkedServer.id,
+        serviceId: linkedServer.nitrado_service_id,
+        fileName: candidate.name,
+        filePath: candidate.path ?? candidate.name,
+        budget: budget.diagnosticRows,
+      },
+    });
+    const preferredReadable = preferredBatch.files.find((file) => normalizeAdmFilenameKey(file.name) === normalizeAdmFilenameKey(candidate.name))
+      ?? preferredBatch.files[0]
+      ?? null;
+    if (preferredReadable?.lines.length && looksLikeAdmText(preferredReadable.lines)) {
+      return {
+        file: {
+          name: candidate.name,
+          path: preferredReadable.path ?? candidate.path,
+          lines: preferredReadable.lines,
+          readableRouteUsed: preferredReadable.readableRouteUsed,
+        },
+        error: null,
+        diagnostic: null,
+      };
+    }
+    if (preferredBatch.apiStatus === "429") {
+      return {
+        file: null,
+        error: preferredBatch.readError ?? `${candidate.name} unreadable: Nitrado rate limited the noftp ADM source.`,
+        diagnostic: null,
+      };
+    }
+
     const read = await readAdmFileTextWithFallback({
       token,
       serviceId: linkedServer.nitrado_service_id,

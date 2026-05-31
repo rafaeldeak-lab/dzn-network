@@ -895,8 +895,56 @@ export async function fetchReadableNitradoAdmFiles(
 
   const files: NitradoReadableAdmFile[] = [];
   const readErrors: string[] = [];
-  const noFtpCurrent = newest && gameSpecificLogs.username
-    ? await readNewestAdmViaNoFtpDownload(token, serviceId, newest, gameSpecificLogs, options)
+  const preferredNoFtpEntry = options.preferredAdmFileName && gameSpecificLogs.username
+    ? allEntries.find((entry) => normalizeAdmName(entry.name) === normalizeAdmName(options.preferredAdmFileName))
+      ?? preferredEntries.find((entry) => normalizeAdmName(entry.name) === normalizeAdmName(options.preferredAdmFileName))
+      ?? null
+    : null;
+  const noFtpPreferred = preferredNoFtpEntry
+    ? await readAdmViaNoFtpDownload(token, serviceId, preferredNoFtpEntry, gameSpecificLogs, options)
+    : null;
+  if (noFtpPreferred?.file) {
+    files.push(noFtpPreferred.file);
+    return {
+      files,
+      candidates: allEntries.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        timestamp: timestampScore(entry),
+        modifiedAt: entry.modified ?? null,
+      })),
+      filesFound: allEntries.length,
+      newestAdmFileName: newest?.name ?? noFtpPreferred.file.name,
+      previousLatestAdmFileName,
+      lastCheckedAt,
+      apiStatus: "OK",
+      readErrors: [],
+      readError: null,
+    };
+  }
+  if (noFtpPreferred?.error) {
+    readErrors.push(`${preferredNoFtpEntry?.name ?? options.preferredAdmFileName ?? "ADM"}: ${noFtpPreferred.error}`);
+    if (noFtpPreferred.rateLimited) {
+      return {
+        files: [],
+        candidates: allEntries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          timestamp: timestampScore(entry),
+          modifiedAt: entry.modified ?? null,
+        })),
+        filesFound: allEntries.length,
+        newestAdmFileName: newest?.name ?? null,
+        previousLatestAdmFileName,
+        lastCheckedAt,
+        apiStatus: "429",
+        readErrors: dedupeStrings([...adminLogsErrors, ...readErrors]).slice(0, 8),
+        readError: dedupeStrings([...adminLogsErrors, ...readErrors])[0] ?? null,
+      };
+    }
+  }
+  const noFtpCurrent = newest && gameSpecificLogs.username && !preferredNoFtpEntry
+    ? await readAdmViaNoFtpDownload(token, serviceId, newest, gameSpecificLogs, options)
     : null;
   if (noFtpCurrent?.file) {
     files.push(noFtpCurrent.file);
@@ -2403,14 +2451,14 @@ async function readNitradoAdmCandidate(
   };
 }
 
-async function readNewestAdmViaNoFtpDownload(
+async function readAdmViaNoFtpDownload(
   token: string,
   serviceId: string,
-  newest: NitradoFileEntry,
+  admFile: NitradoFileEntry,
   details: GameSpecificLogDetails,
   options: AdmReadOptions,
 ): Promise<{ file: NitradoReadableAdmFile | null; error: string | null; rateLimited: boolean }> {
-  const paths = buildNoFtpDownloadCandidates(details, newest).slice(0, 3);
+  const paths = buildNoFtpDownloadCandidates(details, admFile).slice(0, 3);
   if (!paths.length) return { file: null, error: null, rateLimited: false };
   const labels = new Map(paths.map((path, index) => [path, `gameserver_details_log_files_noftp_${index + 1}`]));
   const readAttempts: AdmReadAttempt[] = [];
@@ -2425,7 +2473,7 @@ async function readNewestAdmViaNoFtpDownload(
     if (download.sample && containsDayZAdminLogMarkers(download.sample)) {
       return {
         file: {
-          name: newest.name,
+          name: admFile.name,
           path,
           lines: splitAdmLines(download.sample),
           readableRouteUsed: "gameserver_details_log_files_noftp",
