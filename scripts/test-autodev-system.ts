@@ -121,5 +121,7 @@ assert.equal(existsSync(".github/workflows/dzn-adm-cycle-watch.yml"), true);
 const admLiveVerify = read("scripts/verify-production-adm-live.ts");
 assert.equal(admLiveVerify.includes("gameserver_details_log_files_noftp_download"), true);
 assert.equal(admLiveVerify.includes("ADM Worker has not selected this service within 30 minutes"), true);
+assert.equal(admLiveVerify.includes("public home-stats ADM fallback"), true);
+assert.equal(admLiveVerify.includes("Permanent ADM data exists but public home-stats"), true);
 
 console.log("AutoDev system tests passed.");

@@ -173,8 +173,8 @@ assert.equal(homePreview.totals.recentEventsCount, 12);
 assert.equal(homePreview.network_pulse.events, 12);
 assert.equal(homePreview.network_pulse.top_server, null);
 assert.equal(homePreview.network_pulse.current_event, null);
-assert.equal(homePreview.map_nodes.length, 0);
-assert.equal(homePreview.syncHealth.active, 0);
+assert.equal(homePreview.map_nodes.length, 1);
+assert.equal(homePreview.syncHealth.active, 2);
 assert.equal(homePreview.top_build_servers.length, 0);
 assert.equal(homePreview.event_leaderboard, null);
 

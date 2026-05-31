@@ -76,6 +76,9 @@ assert.equal(dashboardSource.includes('activeTab === "discord-posts" || activeTa
 assert.equal(healthApiSource.includes("autoSync"), true);
 assert.equal(healthApiSource.includes("manualActionRequired"), true);
 assert.equal(healthApiSource.includes("retryMode: \"automatic\""), true);
+assert.equal(healthApiSource.includes("Nitrado Log Files"), true);
+assert.equal(healthApiSource.includes("currentLiveAdm.healthy"), true);
+assert.equal(healthApiSource.includes("backlog_status"), true);
 assert.equal(healthApiSource.includes("DZN found the latest ADM but Nitrado has not made it readable yet. Auto-sync will retry automatically."), true);
 assert.equal(healthApiSource.includes("Reduce Log Output is disabled"), false);
 

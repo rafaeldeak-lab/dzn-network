@@ -18,6 +18,19 @@ type AdmHealthService = {
   importJobStatus: string | null;
   lastSuccessfulImportAt: string | null;
   lastProcessedFile: string | null;
+  metadataLastCheckedAt?: string | null;
+  playerCountLastCheckedAt?: string | null;
+  lastWorkerSelectedAt?: string | null;
+  sourceMatrix?: Array<{ sourceName?: string | null; works?: boolean; preferred?: boolean; nextTestAt?: string | null; lastHttpStatus?: number | null }>;
+  latestFileState?: {
+    fileName?: string | null;
+    status?: string | null;
+    lineCount?: number | null;
+    importedLineCount?: number | null;
+    cursorLine?: number | null;
+    nextRetryAt?: string | null;
+    lastHttpStatus?: number | null;
+  } | null;
   activeImportJob?: { updatedAt?: string | null; status?: string | null } | null;
 };
 
@@ -123,6 +136,16 @@ async function main() {
     for (const service of result.json.services ?? []) {
       const status = String(service.lastSyncStatus ?? service.latestClassifiedError ?? "").toLowerCase();
       const classifiedError = String(service.latestClassifiedError ?? "").toLowerCase();
+      if (isOlderThanMinutes(service.metadataLastCheckedAt ?? service.playerCountLastCheckedAt, 30)) {
+        checks.push(fail(`service ${service.serviceId} metadata stale`, "Active ADM service metadata/player count is older than 30 minutes.", service, "high"));
+        fatal = true;
+        continue;
+      }
+      if (isOlderThanMinutes(service.lastWorkerSelectedAt, 30)) {
+        checks.push(fail(`service ${service.serviceId} selection stale`, "ADM Worker has not selected this service within 30 minutes.", service, "high"));
+        fatal = true;
+        continue;
+      }
       if (service.manualActionRequired || ["nitrado_unauthorized", "nitrado_forbidden"].includes(classifiedError)) {
         checks.push(fail(`service ${service.serviceId} auth`, "ADM health shows an auth/file permission issue.", service, "high"));
         fatal = true;
@@ -131,6 +154,21 @@ async function main() {
       if (service.activeImportJob && isStuckImportJob(service.activeImportJob.updatedAt)) {
         checks.push(fail(`service ${service.serviceId} import job stuck`, "Automatic ADM import job has not updated within the threshold.", service.activeImportJob, "high"));
         fatal = true;
+        continue;
+      }
+      const currentCursor = Math.max(
+        Number(service.latestFileState?.cursorLine ?? 0),
+        Number(service.latestFileState?.importedLineCount ?? 0),
+        Number(service.latestFileState?.lineCount ?? 0),
+      );
+      const noftp = service.sourceMatrix?.find((source) => source.sourceName === "gameserver_details_log_files_noftp_download");
+      const currentCaughtUp = currentCursor > 0 || /caught_up_waiting_for_growth|processed|completed_empty|completed_closed/i.test(String(service.latestFileState?.status ?? ""));
+      if (noftp?.works && noftp.preferred && currentCaughtUp) {
+        checks.push(pass(`service ${service.serviceId} current ADM`, "Nitrado Log Files source is preferred and current ADM has cursor/caught-up evidence.", {
+          file: service.latestFileState?.fileName,
+          status: service.latestFileState?.status,
+          cursor: currentCursor,
+        }));
         continue;
       }
       if (service.recoverable || classifyRecoverableProductionStatus(status) || classifyRecoverableProductionStatus(service.latestClassifiedError)) {
@@ -175,6 +213,11 @@ function heartbeatAgeSecondsFrom(value: string | null) {
   const time = Date.parse(String(value ?? ""));
   if (!Number.isFinite(time)) return null;
   return Math.max(0, Math.floor((Date.now() - time) / 1000));
+}
+
+function isOlderThanMinutes(value: string | null | undefined, minutes: number) {
+  const time = Date.parse(String(value ?? ""));
+  return !Number.isFinite(time) || Date.now() - time > minutes * 60 * 1000;
 }
 
 main().catch((error) => {

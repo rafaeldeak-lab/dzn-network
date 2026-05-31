@@ -4090,7 +4090,7 @@ async function finalizeAdmImportJob(
     }
   }
 
-  if (server.guild_id && shouldRefreshDerivedOutputs) {
+  if (server.guild_id) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: server.guild_id,
@@ -4171,7 +4171,7 @@ async function finalizeAdmImportJob(
     cursorValidationStatus: "new_file",
     cursorValidationError: null,
     cursorRecoveryStrategy: null,
-    cursorRecoveryReason: "manual_chunked_import",
+    cursorRecoveryReason: importCursorReason,
     previousLineHash: null,
     currentLineHash: null,
     cursorLineChecked: null,

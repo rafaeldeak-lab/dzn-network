@@ -189,6 +189,55 @@ async function checkProtectedEndpoints() {
   }
 }
 
+type PublicJson = Record<string, unknown> & {
+  ok?: boolean;
+  source?: string;
+  fallback_reason?: string;
+  totals?: Record<string, unknown>;
+  topServers?: unknown[];
+};
+
+async function requestPublicJson(path: string) {
+  const response = await fetch(`${baseUrl}${path}`, { headers: { "user-agent": "dzn-adm-live-verifier" } });
+  const body = await response.text();
+  let json: PublicJson | null = null;
+  try {
+    json = body ? JSON.parse(body) : null;
+  } catch {
+    json = null;
+  }
+  return { status: response.status, body: safeText(body), json };
+}
+
+async function checkPublicHomeStatsConsistency(hasPermanentAdmData: boolean) {
+  const result = await requestPublicJson("/api/public/home-stats");
+  if (result.status !== 200 || !result.json?.ok) {
+    fail("public home-stats", `Expected public home-stats 200 JSON, got HTTP ${result.status}.`, result);
+    return;
+  }
+  if (hasPermanentAdmData && (result.json.source === "empty_no_cache" || result.json.fallback_reason === "live_query_failed_no_snapshot")) {
+    fail("public home-stats ADM fallback", "Permanent ADM data exists but public home-stats is still reporting an empty/no-cache first-sync state.", {
+      source: result.json.source,
+      fallback_reason: result.json.fallback_reason,
+    });
+    return;
+  }
+  const totals = result.json.totals ?? {};
+  const hasPublicAdmEvidence = Number(totals.statsActiveServers ?? 0) > 0
+    || Number(totals.killsTracked ?? 0) > 0
+    || Number(totals.joinsTracked ?? 0) > 0
+    || Number(totals.recentEventsCount ?? 0) > 0
+    || (Array.isArray(result.json.topServers) && result.json.topServers.length > 0);
+  if (hasPermanentAdmData && !hasPublicAdmEvidence) {
+    fail("public home-stats ADM evidence", "Permanent ADM data exists but public home-stats does not expose last-known ADM evidence.", { totals });
+    return;
+  }
+  pass("public home-stats", "Public home-stats returns last-known ADM data instead of first-sync waiting state.", {
+    source: result.json.source,
+    totals,
+  });
+}
+
 type AdmHealthService = {
   serviceId: string | null;
   serverName?: string | null;
@@ -201,6 +250,8 @@ type AdmHealthService = {
   latestAdmFile?: string | null;
   nextRetryAt?: string | null;
   importJobStatus?: string | null;
+  lastSuccessfulImportAt?: string | null;
+  recentEventCount?: number | null;
   activeImportJob?: { status?: string | null; updatedAt?: string | null } | null;
   sourceMatrix?: Array<{ sourceName?: string | null; works?: boolean; preferred?: boolean; nextTestAt?: string | null; lastHttpStatus?: number | null }>;
   latestFileState?: {
@@ -242,6 +293,7 @@ async function fetchAdmHealth() {
 
 async function verifyFromAdmHealth() {
   const health = await fetchAdmHealth();
+  let hasPermanentAdmData = false;
   const heartbeatAge = Number(health.worker?.heartbeatAgeSeconds ?? Number.POSITIVE_INFINITY);
   if (health.worker?.heartbeatState === "stale" || heartbeatAge > 15 * 60) {
     fail("ADM Worker heartbeat", "Heartbeat is stale in ADM health fallback.", health.worker);
@@ -282,6 +334,7 @@ async function verifyFromAdmHealth() {
     }
     const fileState = service.latestFileState ?? null;
     const cursor = Math.max(Number(fileState?.cursorLine ?? 0), Number(fileState?.importedLineCount ?? 0), Number(fileState?.lineCount ?? 0));
+    if (service.lastSuccessfulImportAt || cursor > 0 || Number(service.recentEventCount ?? 0) > 0) hasPermanentAdmData = true;
     if (service.activeImportJob || cursor > 0 || ["caught_up_waiting_for_growth", "processed", "queued"].includes(String(fileState?.status ?? ""))) {
       pass(label, `Current ADM has scheduled job/cursor evidence for ${fileState?.fileName ?? service.latestAdmFile ?? "latest ADM"}.`, {
         importJobStatus: service.importJobStatus,
@@ -300,6 +353,7 @@ async function verifyFromAdmHealth() {
       });
     }
   }
+  await checkPublicHomeStatsConsistency(hasPermanentAdmData);
 }
 
 function safeText(value: unknown) {
@@ -415,6 +469,7 @@ async function main() {
     pass("ADM Worker heartbeat", `Fresh heartbeat at ${heartbeat.updated_at}.`, heartbeat);
   }
 
+  let permanentAdmDataDetected = false;
   for (const serviceId of serviceIds) {
     const server = linkedServers.find((row) => row.nitrado_service_id === serviceId);
     if (!server) {
@@ -478,6 +533,9 @@ async function main() {
 
     const serviceJobs = jobs.filter((job) => job.server_id === server.id || job.source_service_id === serviceId);
     const currentJob = serviceJobs.find((job) => job.filename === latestFile.adm_file && job.source === "scheduled_nitrado");
+    if (serviceJobs.some((job) => job.source === "scheduled_nitrado" && /completed/i.test(job.status)) || Math.max(Number(latestFile.cursor_line ?? 0), Number(latestFile.imported_line_count ?? 0), Number(latestFile.line_count ?? 0)) > 0) {
+      permanentAdmDataDetected = true;
+    }
     if (hasCurrentCursor(latestFile, serviceJobs)) {
       pass(label, `Current ADM has scheduled job/cursor evidence for ${latestFile.adm_file}.`, {
         fileStatus: latestFile.status,
@@ -501,6 +559,7 @@ async function main() {
   }
 
   await checkProtectedEndpoints();
+  await checkPublicHomeStatsConsistency(permanentAdmDataDetected);
   report();
 }
 

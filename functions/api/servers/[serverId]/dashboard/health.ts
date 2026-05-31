@@ -99,6 +99,14 @@ type AdmFileReadIssueRow = {
   adm_file: string | null;
   file_path?: string | null;
   status: string | null;
+  line_count?: number | null;
+  latest_known_line_count?: number | null;
+  imported_line_count?: number | null;
+  cursor_line?: number | null;
+  last_read_at?: string | null;
+  last_growth_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
   retry_count: number | null;
   next_retry_at: string | null;
   last_http_status: number | null;
@@ -130,6 +138,15 @@ type CompletedImportRow = {
   updated_at: string | null;
 };
 
+type SourceStateRow = {
+  source_name: string | null;
+  last_status: string | null;
+  last_http_status: number | null;
+  works: number | null;
+  preferred: number | null;
+  next_test_at: string | null;
+};
+
 export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   try {
     const linkedServerId = sanitizeId(params.serverId);
@@ -148,7 +165,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     await ensureAdmSyncSchema(env);
     const db = requireDb(env);
     const now = new Date().toISOString();
-    const [server, stats, recentEvents, activeJob, queuedJobs, completedToday, fileState, latestReadIssue, cronRows] = await Promise.all([
+    const [server, stats, recentEvents, activeJob, queuedJobs, completedToday, fileState, currentFileState, latestReadIssue, cronRows] = await Promise.all([
       db.prepare(
         `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.public_slug,
                 linked_servers.nitrado_service_id, linked_servers.display_name,
@@ -256,6 +273,17 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
          WHERE linked_server_id = ?`,
       ).bind(linkedServerId).first<{ missing_count: number | null; oldest_missing_file: string | null; newest_missing_file: string | null; unreadable_count: number | null }>().catch(() => null),
       db.prepare(
+        `SELECT adm_file, adm_path AS file_path, status, line_count, latest_known_line_count,
+                imported_line_count, cursor_line, completed_at, retry_count, next_retry_at,
+                last_http_status, last_endpoint_kind, last_method, last_error,
+                last_diagnostic_at, last_checked_at, updated_at
+         FROM adm_sync_file_state
+         WHERE linked_server_id = ?
+           AND ignored_at IS NULL
+         ORDER BY COALESCE(file_timestamp, '') DESC, adm_file DESC, COALESCE(updated_at, first_seen_at) DESC
+         LIMIT 1`,
+      ).bind(linkedServerId).first<AdmFileReadIssueRow>().catch(() => null),
+      db.prepare(
         `SELECT adm_file, adm_path AS file_path, status, retry_count, next_retry_at, last_http_status,
                 last_endpoint_kind, last_method, last_error, last_diagnostic_at, last_checked_at
          FROM adm_sync_file_state
@@ -274,7 +302,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     ]);
 
     if (!server) return dashboardHealthError(404, "server_not_found", "Server not found.");
-    const [latestDiagnostic, latestCompletedImport] = await Promise.all([
+    const [latestDiagnostic, latestCompletedImport, preferredSourceState] = await Promise.all([
       db.prepare(
         `SELECT file_name, file_path, method, endpoint_kind, status, http_status, error_code, error_message, created_at
          FROM nitrado_file_read_attempts
@@ -290,6 +318,13 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
          ORDER BY COALESCE(completed_at, updated_at, created_at) DESC
          LIMIT 1`,
       ).bind(linkedServerId).first<CompletedImportRow>().catch(() => null),
+      db.prepare(
+        `SELECT source_name, last_status, last_http_status, works, preferred, next_test_at
+         FROM adm_live_source_state
+         WHERE service_id = ?
+         ORDER BY preferred DESC, works DESC, COALESCE(last_tested_at, updated_at) DESC
+         LIMIT 1`,
+      ).bind(server.nitrado_service_id ?? "").first<SourceStateRow>().catch(() => null),
     ]);
     const latestReadTruth = normalizeLatestReadTruth(latestReadIssue, latestDiagnostic);
 
@@ -307,9 +342,15 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     const events = (recentEvents.results ?? []).map(normalizeRecentEvent);
     const cron = cronSnapshot(cronRows.results ?? [], now);
     const activeJobSnapshot = activeJob ? normalizeJob(activeJob) : null;
+    const currentLiveAdm = buildCurrentLiveAdmStatus(currentFileState, activeJobSnapshot, latestCompletedImport, server, statsSnapshot, preferredSourceState);
+    const backlogIssueAppliesToCurrent = latestReadTruth && currentLiveAdm.currentFile
+      ? normalizeAdmFilename(latestReadTruth.adm_file) === normalizeAdmFilename(currentLiveAdm.currentFile)
+      : !currentLiveAdm.currentFile;
     const admStatus = activeJobSnapshot
       ? "Importing ADM"
-      : server.newest_available_adm_filename && !server.newest_readable_adm_filename
+      : currentLiveAdm.healthy
+        ? "ADM Sync Active"
+        : server.newest_available_adm_filename && !server.newest_readable_adm_filename
         ? "Waiting for Nitrado"
         : statsSnapshot.kills > 0 || statsSnapshot.joins > 0 || server.last_processed_adm_filename
           ? "ADM Sync Active"
@@ -317,15 +358,15 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     const admNitradoReadFailure = numberOrZero(server.consecutive_failed_adm_reads) >= 3;
     const admReadStatusMessage = formatAdmReadIssueMessage(latestReadTruth, server.last_sync_message);
     const latestClassifiedError = classifyAdmReadIssue(latestReadTruth, server.last_sync_message);
-    const canonicalError = canonicalAdmErrorCode(latestClassifiedError);
+    const canonicalError = currentLiveAdm.healthy && !backlogIssueAppliesToCurrent ? null : canonicalAdmErrorCode(latestClassifiedError);
     const latestHttpStatus = numberOrNull(latestReadTruth?.last_http_status);
     const admNitradoReadFailureMessage = admReadStatusMessage
       ?? "DZN found the latest ADM but Nitrado has not made it readable yet. Auto-sync will retry automatically.";
     const warnings = [
       ...(!cron.adm_recent ? ["adm_cron_stale"] : []),
-      ...(fileState && numberOrZero(fileState.missing_count) > 0 ? ["adm_backfill_missing"] : []),
-      ...(fileState && numberOrZero(fileState.unreadable_count) > 0 ? ["nitrado_read_waiting"] : []),
-      ...(admNitradoReadFailure ? ["adm_nitrado_read_failure"] : []),
+      ...(fileState && numberOrZero(fileState.missing_count) > 0 && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? ["adm_backfill_missing"] : []),
+      ...(fileState && numberOrZero(fileState.unreadable_count) > 0 && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? ["nitrado_read_waiting"] : []),
+      ...(admNitradoReadFailure && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? ["adm_nitrado_read_failure"] : []),
       ...(server.subscription_status && !["active", "trialing"].includes(String(server.subscription_status).toLowerCase()) ? ["subscription_not_active"] : []),
     ];
 
@@ -368,20 +409,21 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       autoSync: {
         overallStatus: ownerAutoSyncStatus(activeJobSnapshot, canonicalError, server, statsSnapshot),
         headline: ownerAutoSyncHeadline(activeJobSnapshot, canonicalError, server, statsSnapshot),
-        message: ownerAutoSyncMessage(activeJobSnapshot, canonicalError, latestHttpStatus, admReadStatusMessage),
-        admSource: ownerAdmSource(latestReadTruth, activeJobSnapshot),
-        latestAdmState: ownerLatestAdmState(activeJobSnapshot, canonicalError, server, latestCompletedImport),
-        latestAdmFile: server.newest_available_adm_filename ?? server.latest_adm_file ?? latestReadTruth?.adm_file ?? null,
+        message: ownerAutoSyncMessage(activeJobSnapshot, canonicalError, latestHttpStatus, currentLiveAdm.healthy && !backlogIssueAppliesToCurrent ? null : admReadStatusMessage),
+        admSource: ownerAdmSource(latestReadTruth, activeJobSnapshot, preferredSourceState),
+        latestAdmState: currentLiveAdm.status ?? ownerLatestAdmState(activeJobSnapshot, canonicalError, server, latestCompletedImport),
+        latestAdmFile: currentLiveAdm.currentFile ?? server.newest_available_adm_filename ?? server.latest_adm_file ?? latestReadTruth?.adm_file ?? null,
         lastSuccessfulImportAt: latestCompletedImport?.completed_at ?? latestCompletedImport?.updated_at ?? server.last_successful_sync_at ?? null,
         lastAttemptedReadAt: latestReadTruth?.last_diagnostic_at ?? latestReadTruth?.last_checked_at ?? server.last_sync_at ?? null,
         nextDiscoveryAt: server.next_adm_discovery_due_at,
         nextProcessingAt: server.next_adm_pull_due_at,
         latestClassifiedError: canonicalError,
-        upstreamHttpStatus: latestHttpStatus,
+        upstreamHttpStatus: canonicalError ? latestHttpStatus : null,
         retryMode: "automatic",
         backoffEnabled: true,
         queueStatus: activeJobSnapshot ? "importing" : numberOrZero(queuedJobs?.count) > 0 ? "import_queued" : canonicalError ? "retrying" : "waiting",
         manualActionRequired: canonicalError === "NITRADO_UNAUTHORIZED" || canonicalError === "NITRADO_FORBIDDEN",
+        currentLiveAdm,
       },
       recent_events_count: events.length,
       latest_event_at: latestEventAt(events),
@@ -418,11 +460,20 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         } : null,
         last_attempted_adm_read: latestReadTruth?.last_diagnostic_at ?? latestReadTruth?.last_checked_at ?? server.last_sync_at ?? null,
         latest_unreadable_file: latestReadTruth?.adm_file ?? null,
-        latest_classified_error: latestClassifiedError,
-        latest_http_status: latestHttpStatus,
+        latest_classified_error: canonicalError,
+        latest_http_status: canonicalError ? latestHttpStatus : null,
         latest_endpoint_kind: latestReadTruth?.last_endpoint_kind ?? null,
         latest_method: latestReadTruth?.last_method ?? null,
-        adm_source: ownerAdmSource(latestReadTruth, activeJobSnapshot),
+        adm_source: ownerAdmSource(latestReadTruth, activeJobSnapshot, preferredSourceState),
+        current_live_adm_status: currentLiveAdm,
+        backlog_status: {
+          old_unreadable_count: numberOrZero(fileState?.unreadable_count),
+          missing_files_count: numberOrZero(fileState?.missing_count),
+          oldest_unreadable: fileState?.oldest_missing_file ?? null,
+          newest_unreadable: fileState?.newest_missing_file ?? null,
+          latest_recoverable_error: currentLiveAdm.healthy && !backlogIssueAppliesToCurrent ? latestClassifiedError : null,
+          latest_http_status: currentLiveAdm.healthy && !backlogIssueAppliesToCurrent ? latestHttpStatus : null,
+        },
         latest_completed_import: latestCompletedImport ? {
           id: latestCompletedImport.id,
           filename: latestCompletedImport.filename,
@@ -439,8 +490,8 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         next_adm_processing_due_at: server.next_adm_pull_due_at,
         last_error: sanitize(admReadStatusMessage ?? server.last_adm_discovery_error ?? server.last_sync_message),
         consecutive_failed_adm_reads: numberOrZero(server.consecutive_failed_adm_reads),
-        adm_nitrado_read_failure: admNitradoReadFailure,
-        adm_nitrado_read_failure_message: admNitradoReadFailure ? admNitradoReadFailureMessage : null,
+        adm_nitrado_read_failure: admNitradoReadFailure && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent),
+        adm_nitrado_read_failure_message: admNitradoReadFailure && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? admNitradoReadFailureMessage : null,
         next_action: activeJobSnapshot
           ? `Importing ${activeJobSnapshot.filename}`
           : server.newest_available_adm_filename && !server.newest_readable_adm_filename
@@ -454,16 +505,16 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         hasAdm: Boolean(server.newest_available_adm_filename || server.latest_adm_file || server.last_processed_adm_filename),
         hasStats: statsSnapshot.kills > 0 || statsSnapshot.joins > 0 || statsSnapshot.unique_players > 0,
       }),
-      adm_nitrado_read_failure: admNitradoReadFailure,
-      adm_nitrado_read_failure_message: admNitradoReadFailure ? admNitradoReadFailureMessage : null,
+      adm_nitrado_read_failure: admNitradoReadFailure && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent),
+      adm_nitrado_read_failure_message: admNitradoReadFailure && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? admNitradoReadFailureMessage : null,
       warnings,
-      warning_messages: admNitradoReadFailure ? {
+      warning_messages: admNitradoReadFailure && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? {
         adm_nitrado_read_failure: admNitradoReadFailureMessage,
       } : {},
     };
     return json({ ...payload, data: payload }, {
       headers: {
-        "cache-control": "private, no-store",
+        "cache-control": "private, no-store, no-cache, must-revalidate",
       },
     });
   } catch (error) {
@@ -683,13 +734,69 @@ function ownerAutoSyncMessage(activeJob: ReturnType<typeof normalizeJob> | null,
   return "DZN automatically discovers, retries, and imports ADM data without manual action.";
 }
 
-function ownerAdmSource(issue: AdmFileReadIssueRow | null, activeJob: ReturnType<typeof normalizeJob> | null) {
+function ownerAdmSource(issue: AdmFileReadIssueRow | null, activeJob: ReturnType<typeof normalizeJob> | null, preferredSource?: SourceStateRow | null) {
+  if (/noftp|gameserver_details_log_files/i.test(String(preferredSource?.source_name ?? "")) && Number(preferredSource?.works ?? 0) === 1) return "Nitrado Log Files";
+  if (/admin_logs/i.test(String(preferredSource?.source_name ?? "")) && Number(preferredSource?.works ?? 0) === 1) return "Nitrado Admin Logs";
   const sourceText = `${issue?.last_endpoint_kind ?? ""} ${issue?.last_method ?? ""} ${issue?.file_path ?? ""}`;
   if (/noftp|gameserver_details_log_files/i.test(sourceText)) return "Nitrado Log Files";
   if (issue?.last_endpoint_kind === "nitrado_admin_logs" || issue?.last_method === "admin_logs") return "Nitrado Admin Logs";
   if (issue?.last_endpoint_kind === "nitrado_seek" || issue?.last_endpoint_kind === "nitrado_download" || issue?.last_endpoint_kind === "tokenized_url") return "Nitrado File Server fallback";
   if (activeJob?.source === "scheduled_nitrado") return "Scheduled Nitrado ADM import";
   return "Automatic ADM tracking";
+}
+
+function buildCurrentLiveAdmStatus(
+  fileState: AdmFileReadIssueRow | null,
+  activeJob: ReturnType<typeof normalizeJob> | null,
+  latestCompletedImport: CompletedImportRow | null,
+  server: ServerRow,
+  stats: ReturnType<typeof statsFromRow>,
+  preferredSource?: SourceStateRow | null,
+) {
+  const cursorLine = Math.max(
+    numberOrZero(fileState?.cursor_line),
+    numberOrZero(fileState?.imported_line_count),
+    numberOrZero(fileState?.line_count),
+  );
+  const fileStatus = String(fileState?.status ?? "").toLowerCase();
+  const source = ownerAdmSource(fileState, activeJob, preferredSource);
+  const active = Boolean(activeJob);
+  const caughtUp = ["caught_up_waiting_for_growth", "processed", "completed_empty", "completed_closed"].includes(fileStatus);
+  const completedCurrent = Boolean(
+    latestCompletedImport?.filename
+    && fileState?.adm_file
+    && normalizeAdmFilename(latestCompletedImport.filename) === normalizeAdmFilename(fileState.adm_file),
+  );
+  const hasStats = stats.kills > 0 || stats.deaths > 0 || stats.joins > 0 || stats.disconnects > 0 || stats.unique_players > 0;
+  const processedCurrent = Boolean(
+    server.last_processed_adm_filename
+    && fileState?.adm_file
+    && normalizeAdmFilename(server.last_processed_adm_filename) === normalizeAdmFilename(fileState.adm_file),
+  );
+  const healthy = active || caughtUp || completedCurrent || processedCurrent || cursorLine > 0 || hasStats;
+  const status = active
+    ? "importing"
+    : caughtUp
+      ? "caught_up_waiting_for_growth"
+      : completedCurrent || processedCurrent
+        ? "completed_current"
+        : cursorLine > 0
+          ? "caught_up_waiting_for_growth"
+          : fileState?.next_retry_at
+            ? "retry_scheduled"
+            : null;
+  return {
+    healthy,
+    currentFile: fileState?.adm_file ?? server.newest_available_adm_filename ?? server.latest_adm_file ?? latestCompletedImport?.filename ?? null,
+    currentSource: source,
+    currentCursorLine: cursorLine,
+    currentLatestKnownLineCount: Math.max(numberOrZero(fileState?.latest_known_line_count), numberOrZero(fileState?.line_count)),
+    status,
+    lastReadAt: fileState?.last_read_at ?? fileState?.last_checked_at ?? null,
+    lastGrowthAt: fileState?.last_growth_at ?? null,
+    completedAt: fileState?.completed_at ?? latestCompletedImport?.completed_at ?? latestCompletedImport?.updated_at ?? null,
+    nextRetryAt: fileState?.next_retry_at ?? null,
+  };
 }
 
 function ownerLatestAdmState(activeJob: ReturnType<typeof normalizeJob> | null, code: string | null, server: ServerRow, latestCompletedImport: CompletedImportRow | null) {
@@ -716,6 +823,12 @@ function numberOrNull(value: unknown) {
 function sanitize(error: unknown) {
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? "");
   return message.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]").slice(0, 500);
+}
+
+function normalizeAdmFilename(value: unknown) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/DayZServer_PS4_x64_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.ADM/i);
+  return (match?.[0] ?? text.split(/[\\/]/).pop() ?? text).toLowerCase();
 }
 
 function dashboardHealthError(status: number, errorCode: string, message: string, details?: string | null) {

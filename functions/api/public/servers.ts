@@ -247,6 +247,10 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
       : { ok: true, servers: mockServers, stats: buildPublicStats(mockServers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
   }
 
+  if (!viewerLoggedIn && !slug) {
+    return getPublicServersPreviewPayload(env);
+  }
+
   await ensureLinkedServerMetadataColumns(env);
   await ensureServerLogConfigTable(env);
   await ensureAdmSyncSchema(env);
@@ -276,6 +280,108 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
   }
 
   return { ok: true, servers, stats: buildPublicStats(servers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
+}
+
+async function getPublicServersPreviewPayload(env: Env) {
+  const rows = await queryPublicServersPreview(env);
+  const servers = rows
+    .map(toSafePublicServerPreview)
+    .filter((server): server is SafePublicServer => Boolean(server))
+    .map((server) => applyPublicServerAccess(server, false));
+  sortPublicServersForDiscovery(servers);
+  return { ok: true, servers, stats: buildPublicStats(servers), access_level: "preview", is_locked: true };
+}
+
+async function queryPublicServersPreview(env: Env) {
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT
+        linked_servers.id,
+        linked_servers.public_slug,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        linked_servers.tags_json,
+        linked_servers.status,
+        linked_servers.nitrado_service_id,
+        linked_servers.nitrado_service_name,
+        COALESCE(server_public_cache.max_player_count, linked_servers.max_players, linked_servers.player_slots) AS player_slots,
+        COALESCE(server_public_cache.max_player_count, linked_servers.max_players) AS max_players,
+        COALESCE(server_public_cache.current_player_count, linked_servers.current_players) AS current_players,
+        linked_servers.platform,
+        linked_servers.map_name,
+        linked_servers.mission,
+        linked_servers.server_mode,
+        COALESCE(server_public_cache.server_status, linked_servers.server_status) AS server_status,
+        COALESCE(server_public_cache.server_online, linked_servers.is_online) AS is_online,
+        COALESCE(server_public_cache.last_status_update_at, linked_servers.metadata_last_checked_at) AS metadata_last_checked_at,
+        COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) AS player_count_last_checked_at,
+        linked_servers.player_count_source,
+        linked_servers.player_count_status,
+        linked_servers.created_at,
+        linked_servers.updated_at,
+        discord_guilds.name AS guild_name,
+        discord_guilds.icon_url AS guild_icon_url,
+        NULL AS adm_path,
+        CASE WHEN COALESCE(adm_sync_state.latest_adm_file, '') <> '' OR COALESCE(adm_sync_state.last_processed_file, '') <> '' THEN 1 ELSE 0 END AS adm_logs_found,
+        adm_sync_state.last_sync_at AS adm_last_checked_at,
+        adm_sync_state.latest_adm_file AS adm_sync_latest_file,
+        adm_sync_state.latest_adm_path AS adm_sync_latest_path,
+        adm_sync_state.last_sync_status AS adm_sync_status,
+        adm_sync_state.last_sync_message AS adm_sync_message,
+        adm_sync_state.last_sync_at AS adm_sync_at,
+        COALESCE(server_stats.total_kills, 0) AS total_kills,
+        COALESCE(server_stats.total_deaths, 0) AS total_deaths,
+        COALESCE(server_stats.total_joins, 0) AS total_joins,
+        COALESCE(server_stats.total_disconnects, 0) AS total_disconnects,
+        COALESCE(server_stats.unique_players, 0) AS unique_players,
+        server_stats.updated_at AS server_stats_updated_at,
+        server_public_cache.updated_at AS public_cache_updated_at,
+        CASE
+          WHEN COALESCE(server_stats.total_joins, 0) > 0
+            OR COALESCE(server_stats.total_disconnects, 0) > 0
+            OR COALESCE(server_stats.total_deaths, 0) > 0
+            OR COALESCE(server_stats.total_kills, 0) > 0
+            OR COALESCE(server_stats.unique_players, 0) > 0
+            OR COALESCE(server_public_cache.last_adm_update_at, '') <> ''
+            OR COALESCE(adm_sync_state.last_processed_file, '') <> ''
+          THEN 'completed' ELSE NULL
+        END AS latest_success_sync_status,
+        'scheduled_nitrado' AS latest_success_sync_trigger,
+        COALESCE(server_public_cache.last_adm_update_at, server_stats.updated_at, adm_sync_state.last_sync_at) AS latest_success_sync_at,
+        linked_servers.public_short_description,
+        linked_servers.public_description,
+        linked_servers.public_discord_invite,
+        linked_servers.public_website_url,
+        linked_servers.public_rules,
+        linked_servers.public_language,
+        linked_servers.public_region_label,
+        linked_servers.public_listing_updated_at,
+        server_advertising_state.last_bumped_at,
+        server_advertising_state.bump_count_current_period,
+        server_advertising_state.bump_period_start,
+        server_advertising_state.bump_period_end,
+        server_advertising_state.featured_until,
+        server_advertising_state.featured_label
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+       LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY
+         CASE
+           WHEN COALESCE(server_stats.total_kills, 0) > 0 OR COALESCE(server_stats.total_joins, 0) > 0 THEN 0
+           WHEN COALESCE(server_public_cache.last_adm_update_at, '') <> '' THEN 1
+           ELSE 2
+         END ASC,
+         COALESCE(server_public_cache.last_adm_update_at, server_stats.updated_at, linked_servers.updated_at, linked_servers.created_at) DESC
+       LIMIT 500`,
+    )
+    .all<PublicServerRow>()
+    .catch(() => ({ results: [] as PublicServerRow[] }));
+  return canonicalizePublicServerRows(result.results ?? []);
 }
 
 async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | null, server: SafePublicServer | null, viewerLoggedIn: boolean) {
@@ -622,6 +728,104 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     },
     recent_events: await getPublicRecentEvents(env, row.id),
   } satisfies SafePublicServer;
+}
+
+function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | null {
+  if (!row.public_slug) return null;
+  const tagsJson = normalizePublicTagsJson(row.tags_json);
+  const latestAdmPath = row.adm_sync_latest_path ?? row.adm_path;
+  const latestAdmFile = row.adm_sync_latest_file ?? fileNameFromPath(latestAdmPath);
+  const hasActivity =
+    numberOrZero(row.total_joins) > 0 ||
+    numberOrZero(row.total_disconnects) > 0 ||
+    numberOrZero(row.total_deaths) > 0 ||
+    numberOrZero(row.total_kills) > 0 ||
+    numberOrZero(row.unique_players) > 0 ||
+    Boolean(row.latest_success_sync_at || row.public_cache_updated_at);
+  const latestSyncCompleted = isSuccessfulAdmSyncStatus(row.latest_success_sync_status);
+  const admSyncCompleted = isSuccessfulAdmSyncStatus(row.adm_sync_status);
+  const readable = latestSyncCompleted || admSyncCompleted || hasActivity || Number(row.adm_logs_found) === 1;
+  const admStatus = readable ? "Connected" : latestAdmFile || row.adm_path ? "Discovered" : "Needs Review";
+  const statsSync = readable ? "Active" : latestAdmFile || row.adm_path ? "Pending" : "Not Started";
+  const lastSyncAt = latestPublicTimestamp([
+    row.latest_success_sync_at,
+    row.adm_sync_at,
+    row.metadata_last_checked_at,
+    row.player_count_last_checked_at,
+    row.server_stats_updated_at,
+    row.public_cache_updated_at,
+  ]);
+  const totalKills = numberOrZero(row.total_kills);
+  const totalDeaths = numberOrZero(row.total_deaths);
+  const stats = {
+    total_kills: totalKills,
+    total_deaths: totalDeaths,
+    total_joins: numberOrZero(row.total_joins),
+    total_disconnects: numberOrZero(row.total_disconnects),
+    unique_players: numberOrZero(row.unique_players),
+    longest_kill: 0,
+    kd: totalDeaths === 0 ? (totalKills > 0 ? totalKills : null) : Number((totalKills / totalDeaths).toFixed(2)),
+    kd_label: calculatePublicServerKd(totalKills, totalDeaths).label,
+    rank: null,
+    score: 0,
+    score_label: readable ? "ADM synced" : "Pending",
+  };
+  return {
+    linked_server_id: row.id,
+    public_slug: row.public_slug,
+    server_name: row.server_name,
+    server_type: row.server_type,
+    tags_json: tagsJson,
+    tags: parsePublicTags(tagsJson),
+    status: row.status,
+    nitrado_service_name: row.nitrado_service_name,
+    guild_name: row.guild_name,
+    guild_icon_url: row.guild_icon_url,
+    adm_status: admStatus,
+    stats_sync: statsSync,
+    player_slots: row.player_slots,
+    max_players: row.max_players ?? row.player_slots,
+    current_players: row.current_players === null ? null : numberOrZero(row.current_players),
+    platform: row.platform,
+    map_name: row.map_name,
+    mission: row.mission,
+    server_status: row.server_status,
+    is_online: Number(row.is_online) === 1,
+    last_sync_at: lastSyncAt,
+    metadata_last_checked_at: row.metadata_last_checked_at,
+    player_count_last_checked_at: row.player_count_last_checked_at,
+    player_count_source: row.player_count_source,
+    player_count_status: row.player_count_status,
+    public_short_description: row.public_short_description,
+    public_description: row.public_description,
+    public_discord_invite: row.public_discord_invite,
+    public_website_url: row.public_website_url,
+    public_rules: row.public_rules,
+    public_language: row.public_language,
+    public_region_label: row.public_region_label,
+    public_listing_updated_at: row.public_listing_updated_at,
+    created_at: row.created_at,
+    ...stats,
+    score_breakdown: null,
+    stats_sync_active: statsSync === "Active",
+    ...emptyPublicServerRatingSummary(),
+    advertising: publicAdvertisingFromState({
+      last_bumped_at: row.last_bumped_at,
+      bump_count_current_period: numberOrZero(row.bump_count_current_period),
+      bump_period_start: row.bump_period_start,
+      bump_period_end: row.bump_period_end,
+      featured_until: row.featured_until,
+      featured_label: row.featured_label,
+    }),
+    stats,
+    network_status: {
+      adm_status: admStatus,
+      stats_sync: statsSync,
+      public_listing: "Active",
+      last_sync_at: lastSyncAt,
+    },
+    recent_events: [],
+  };
 }
 
 async function getPublicServerRatingSummaries(env: Env, linkedServerIds: string[]) {

@@ -41,6 +41,16 @@ async function main() {
     ? pass("homepage first-sync copy", "Homepage does not show the scary generic network failure copy in the initial HTML.", { status: home.status })
     : fail("homepage first-sync copy", "Homepage shows scary generic network failure copy while ADM may simply be awaiting first sync.", { status: home.status }, "medium"));
 
+  const homeStats = await request("/api/public/home-stats");
+  const homeStatsJson = parseJson(homeStats.body);
+  checks.push(homeStats.ok && homeStats.status === 200 && homeStatsJson?.ok && homeStatsJson.source !== "empty_no_cache"
+    ? pass("public home-stats ADM snapshot", "Public home-stats returns last-known ADM data or a valid snapshot.", {
+      status: homeStats.status,
+      source: homeStatsJson?.source,
+      totals: homeStatsJson?.totals,
+    })
+    : fail("public home-stats ADM snapshot", `Expected public home-stats 200 JSON with non-empty source, got HTTP ${homeStats.status}.`, homeStats, "medium"));
+
   for (const path of ["/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run", "/api/autodev/adm-health"]) {
     const result = await request(path, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
     checks.push(result.ok && result.status === 401

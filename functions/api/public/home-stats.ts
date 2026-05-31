@@ -32,6 +32,7 @@ type TotalsRow = {
   deathsTracked: number | null;
   joinsTracked: number | null;
   longestKill: number | null;
+  recentEventsCount?: number | null;
   structuresBuilt: number | null;
   buildScore: number | null;
 };
@@ -190,21 +191,26 @@ function homeStatsCacheKey(viewerLoggedIn: boolean) {
 
 export async function getPublicHomeStatsPayload(env: Env, viewerLoggedIn: boolean) {
   if (!env.DB) throw new Error("Database binding is missing.");
+  if (!viewerLoggedIn) {
+    return applyHomeStatsAccess(await buildPreviewHomeStats(env), false);
+  }
   await ensureLinkedServerMetadataColumns(env);
   await ensureAdmSyncSchema(env);
   await ensureBuildEventSchema(env);
-  return applyHomeStatsAccess(viewerLoggedIn ? await buildHomeStats(env) : await buildPreviewHomeStats(env), viewerLoggedIn);
+  return applyHomeStatsAccess(await buildHomeStats(env), true);
 }
 
 async function buildPreviewHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, recentEventsCount, topServers] = await Promise.all([
-    getTotals(db),
-    getRecentEventsCount(db),
+  const [totals, topServers, gameModes, mapNodes] = await Promise.all([
+    getPreviewTotals(db),
     getPreviewTopServers(db),
+    getGameModes(db).catch(() => ({ pvp: 0, pve: 0, deathmatch: 0, pvpPve: 0 })),
+    getPreviewMapNodes(db),
   ]);
   const syncActive = numberOrZero(totals.statsActiveServers);
   const serversLinked = numberOrZero(totals.serversLinked);
+  const recentEventsCount = numberOrZero(totals.recentEventsCount);
   const data = emptyHomeStats();
   return {
     ...data,
@@ -227,10 +233,72 @@ async function buildPreviewHomeStats(env: Env) {
       top_server: topServers[0] ?? null,
     },
     topServers,
+    recentActivity: buildPreviewRecentActivity(topServers),
+    map_nodes: mapNodes,
+    gameModes,
     syncHealth: {
       active: syncActive,
       pending: Math.max(serversLinked - syncActive, 0),
     },
+  };
+}
+
+async function getPreviewTotals(db: D1Database) {
+  const row = await db
+    .prepare(
+      `SELECT
+        COUNT(linked_servers.id) AS serversLinked,
+        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS players_online,
+        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS currentPlayersOnline,
+        SUM(COALESCE(server_public_cache.max_player_count, linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
+        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NOT NULL THEN 1 ELSE 0 END) AS playerCountFreshServers,
+        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NULL THEN 1 ELSE 0 END) AS playerCountStaleServers,
+        SUM(
+          CASE
+            WHEN COALESCE(server_stats.total_joins, 0) > 0
+              OR COALESCE(server_stats.total_disconnects, 0) > 0
+              OR COALESCE(server_stats.total_deaths, 0) > 0
+              OR COALESCE(server_stats.total_kills, 0) > 0
+              OR COALESCE(server_stats.unique_players, 0) > 0
+              OR COALESCE(server_public_cache.last_adm_update_at, '') <> ''
+              OR COALESCE(adm_sync_state.last_processed_file, '') <> ''
+              OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'completed_with_warnings', 'adm_backfill_caught_up', 'caught_up_waiting_for_growth', 'processed', 'completed_empty', 'completed_closed')
+            THEN 1 ELSE 0
+          END
+        ) AS statsActiveServers,
+        SUM(COALESCE(server_stats.unique_players, 0)) AS playersSeenFromStats,
+        SUM(COALESCE(server_stats.total_kills, 0)) AS killsTracked,
+        SUM(COALESCE(server_stats.total_deaths, 0)) AS deathsTracked,
+        SUM(COALESCE(server_stats.total_joins, 0)) AS joinsTracked,
+        0 AS longestKill,
+        SUM(COALESCE(server_stats.total_kills, 0) + COALESCE(server_stats.total_joins, 0) + COALESCE(server_stats.total_disconnects, 0)) AS recentEventsCount,
+        0 AS structuresBuilt,
+        0 AS buildScore
+       FROM linked_servers
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
+    )
+    .first<TotalsRow>()
+    .catch(() => null);
+  return row ?? {
+    serversLinked: 0,
+    statsActiveServers: 0,
+    players_online: 0,
+    currentPlayersOnline: 0,
+    maxPlayersCapacity: 0,
+    playerCountFreshServers: 0,
+    playerCountStaleServers: 0,
+    playersSeenFromStats: 0,
+    killsTracked: 0,
+    deathsTracked: 0,
+    joinsTracked: 0,
+    longestKill: 0,
+    recentEventsCount: 0,
+    structuresBuilt: 0,
+    buildScore: 0,
   };
 }
 
@@ -398,7 +466,7 @@ async function getPreviewTopServers(db: D1Database) {
         COALESCE(server_stats.total_deaths, 0) AS total_deaths,
         COALESCE(server_stats.unique_players, 0) AS unique_players,
         COALESCE(server_stats.total_joins, 0) AS total_joins,
-        COALESCE((SELECT MAX(distance) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill,
+        0 AS longest_kill,
         CASE
           WHEN COALESCE(server_stats.total_joins, 0) > 0
             OR COALESCE(server_stats.total_disconnects, 0) > 0
@@ -434,7 +502,72 @@ async function getPreviewTopServers(db: D1Database) {
     score: 0,
     score_label: "Login required",
     score_breakdown: null,
+    updated_at: server.updated_at,
   }));
+}
+
+function buildPreviewRecentActivity(topServers: Array<{ server_name: string | null; public_slug: string | null; total_kills: number; total_joins: number; stats_active: number; updated_at?: string | null }>) {
+  return topServers
+    .filter((server) => numberOrZero(server.stats_active) > 0)
+    .slice(0, 4)
+    .map((server) => ({
+      source: "sync",
+      eventType: "sync_completed",
+      title: `${server.server_name ?? "DZN Server"} ADM sync updated`,
+      serverName: server.server_name,
+      publicSlug: server.public_slug,
+      occurredAt: server.updated_at ?? null,
+      killerName: null,
+      victimName: null,
+      weapon: null,
+      distance: null,
+    }));
+}
+
+async function getPreviewMapNodes(db: D1Database) {
+  const result = await db
+    .prepare(
+      `SELECT
+        linked_servers.id,
+        linked_servers.status,
+        linked_servers.merged_into_server_id,
+        linked_servers.public_slug,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        discord_guilds.name AS guild_name,
+        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        linked_servers.region,
+        linked_servers.platform,
+        linked_servers.map_name,
+        linked_servers.geo_latitude,
+        linked_servers.geo_longitude,
+        linked_servers.geo_country,
+        linked_servers.geo_region,
+        linked_servers.geo_city,
+        linked_servers.geo_timezone,
+        linked_servers.geo_source,
+        CASE
+          WHEN COALESCE(server_stats.total_joins, 0) > 0
+            OR COALESCE(server_stats.total_disconnects, 0) > 0
+            OR COALESCE(server_stats.total_deaths, 0) > 0
+            OR COALESCE(server_stats.total_kills, 0) > 0
+            OR COALESCE(server_stats.unique_players, 0) > 0
+            OR COALESCE(server_public_cache.last_adm_update_at, '') <> ''
+            OR COALESCE(adm_sync_state.last_processed_file, '') <> ''
+          THEN 1 ELSE 0
+        END AS stats_active
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY COALESCE(server_public_cache.last_adm_update_at, server_stats.updated_at, linked_servers.updated_at, linked_servers.created_at) DESC
+       LIMIT 80`,
+    )
+    .all<MapNodeRow>()
+    .catch(() => ({ results: [] as MapNodeRow[] }));
+  return buildPublicMapNodesFromRows(result.results ?? []);
 }
 
 async function buildBuildLeaderboardRows(db: D1Database, rows: PublicBuildLeaderboardRow[]) {
@@ -1192,8 +1325,8 @@ export function applyHomeStatsAccess<T extends {
     })),
     top_build_servers: [],
     event_leaderboard: null,
-    map_nodes: [],
-    syncHealth: data.syncHealth ? { ...data.syncHealth, active: 0, pending: 0 } : data.syncHealth,
+    map_nodes: data.map_nodes ?? [],
+    syncHealth: data.syncHealth ? { ...data.syncHealth } : data.syncHealth,
   };
 }
 

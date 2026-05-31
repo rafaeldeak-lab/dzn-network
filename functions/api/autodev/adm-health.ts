@@ -220,7 +220,8 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
                 last_error, last_endpoint_kind, last_method, updated_at
          FROM adm_sync_file_state
          WHERE linked_server_id = ?
-         ORDER BY COALESCE(last_diagnostic_at, last_checked_at, updated_at, first_seen_at) DESC
+           AND ignored_at IS NULL
+         ORDER BY COALESCE(file_timestamp, '') DESC, adm_file DESC, COALESCE(last_read_at, last_checked_at, updated_at, first_seen_at) DESC
          LIMIT 1`,
       ).bind(service.id)),
       safeFirst<ImportJobRow>(warnings, `latest import job ${service.id}`, db.prepare(
@@ -295,7 +296,7 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
       nextWorkerDueAt: service.next_worker_due_at ?? null,
       workerSelectedCount: Number(service.selected_count ?? 0),
       lastSelectionReason: service.last_selection_reason ?? null,
-      latestAdmFile: service.latest_adm_file ?? diagnostic?.file_name ?? fileState?.adm_file ?? null,
+      latestAdmFile: fileState?.adm_file ?? service.latest_adm_file ?? diagnostic?.file_name ?? null,
       lastProcessedFile: service.last_processed_file,
       lastSyncStatus: service.last_sync_status ?? latestStatus,
       latestClassifiedError,
