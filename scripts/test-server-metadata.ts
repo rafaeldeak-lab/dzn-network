@@ -87,7 +87,7 @@ const networkOverviewBlock = homepageSource.slice(
   homepageSource.indexOf("function NetworkOverview"),
   homepageSource.indexOf("function NetworkPulse"),
 );
-assert.equal(homepageSource.includes("value: dataPending ? \"Awaiting live data\" : formatNumber(playersOnline)"), true);
+assert.equal(homepageSource.includes("value: dataPending ? \"Checking ADM data\" : formatNumber(playersOnline)"), true);
 assert.equal(homepageSource.includes("DZN HOMEPAGE PLAYERS ONLINE ONLY"), true);
 assert.equal(homepageSource.includes("Live across connected servers"), true);
 assert.equal(homepageSource.includes("total slots"), false);

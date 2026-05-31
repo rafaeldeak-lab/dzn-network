@@ -193,7 +193,7 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
         <span className="dzn-operational-globe-fallback">Globe telemetry unavailable</span>
       ) : null}
       {ready && globePoints.length === 0 ? (
-        <span className="dzn-operational-globe-empty">Awaiting public server locations</span>
+        <span className="dzn-operational-globe-empty">Server locations update after ADM sync</span>
       ) : null}
       {tooltip ? (
         <span

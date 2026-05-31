@@ -103,10 +103,10 @@ includesAll(landing, [
   "latestRequestId",
   "fetchJsonWithRetry<HomeStatsResponse>",
   "HOME_STATS_LAST_GOOD_MAX_AGE_MS",
-  "Waiting for live data from the first synced ADM.",
+  "Checking last synced ADM data.",
   "payload.data && !payload.totals ? payload.data : payload",
-  "dataPending ? \"Awaiting live data\"",
-  "Waiting for first synced ADM",
+  "dataPending ? \"Checking ADM data\"",
+  "Checking recent ADM activity",
 ]);
 assert.equal(landing.includes("dataPending ? \"Refreshing\""), false, "Homepage must not render Refreshing as every stat-card value.");
 assert.equal(landing.includes("dataPending ? \"Loading\""), false, "Homepage stat cards must not render generic Loading as every stat-card value.");
