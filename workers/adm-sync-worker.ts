@@ -28,6 +28,7 @@ const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 const CRON_ENDPOINT_TIMEOUT_MS = 55000;
 const ADM_WORKER_CURSOR_KEY = "last_adm_linked_server_id";
 const ADM_WORKER_LAST_RECOVERY_KEY = "last_automation_lock_recovery_at";
+const ADM_WORKER_LAST_BUILD_REPARSE_KEY = "last_adm_build_reparse_at";
 
 const CRON_ENDPOINTS: CronEndpoint[] = [
   {
@@ -345,26 +346,44 @@ function sanitizeHeartbeatMessage(value: unknown) {
 
 async function runHourlyPostAdmMaintenance(env: Env) {
   const db = requireDb(env);
-  const row = await db
+  const recoveryRow = await db
     .prepare("SELECT value FROM adm_worker_state WHERE key = ? LIMIT 1")
     .bind(ADM_WORKER_LAST_RECOVERY_KEY)
     .first<{ value: string | null }>();
-  const lastRunAt = row?.value ? Date.parse(row.value) : 0;
-  if (Number.isFinite(lastRunAt) && Date.now() - lastRunAt < 60 * 60 * 1000) return;
+  const buildReparseRow = await db
+    .prepare("SELECT value FROM adm_worker_state WHERE key = ? LIMIT 1")
+    .bind(ADM_WORKER_LAST_BUILD_REPARSE_KEY)
+    .first<{ value: string | null }>();
+  const lastRecoveryAt = recoveryRow?.value ? Date.parse(recoveryRow.value) : 0;
+  const lastBuildReparseAt = buildReparseRow?.value ? Date.parse(buildReparseRow.value) : 0;
+  const recoveryDue = !Number.isFinite(lastRecoveryAt) || Date.now() - lastRecoveryAt >= 60 * 60 * 1000;
+  const buildReparseDue = !Number.isFinite(lastBuildReparseAt) || Date.now() - lastBuildReparseAt >= 60 * 60 * 1000;
+  if (!recoveryDue && !buildReparseDue) return;
 
-  await recoverStuckAutomationLocks(env);
-  await processRecentAdmBuildReparse(env, { maxFiles: 1, maxRawLines: 1200, maxRuntimeMs: 5000 }).catch((error) => {
-    console.warn("DZN ADM WORKER BUILD REPARSE SKIPPED", {
-      message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "build reparse failed",
+  if (recoveryDue) {
+    await recoverStuckAutomationLocks(env);
+    await updateAdmWorkerStateTimestamp(db, ADM_WORKER_LAST_RECOVERY_KEY);
+  }
+
+  if (buildReparseDue) {
+    await processRecentAdmBuildReparse(env, { maxFiles: 1, maxRawLines: 1200, maxRuntimeMs: 5000 }).catch((error) => {
+      console.warn("DZN ADM WORKER BUILD REPARSE SKIPPED", {
+        message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "build reparse failed",
+      });
     });
-  });
+    await updateAdmWorkerStateTimestamp(db, ADM_WORKER_LAST_BUILD_REPARSE_KEY);
+  }
+}
+
+async function updateAdmWorkerStateTimestamp(db: D1Database, key: string) {
+  const now = new Date().toISOString();
   await db
     .prepare(
       `INSERT INTO adm_worker_state (key, value, updated_at)
        VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
-    .bind(ADM_WORKER_LAST_RECOVERY_KEY, new Date().toISOString(), new Date().toISOString())
+    .bind(key, now, now)
     .run();
 }
 
