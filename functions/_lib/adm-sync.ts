@@ -2609,6 +2609,7 @@ const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 50;
 const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
+const SCHEDULED_ADM_IMPORT_STALE_MS = 2 * 60 * 1000;
 
 type AdmInvocationBudget = {
   maxFilesPerInvocation: number;
@@ -3098,7 +3099,7 @@ export async function processPendingAdmImportJobs(
   const source = options.source ?? SCHEDULED_ADM_IMPORT_SOURCE;
   await recoverStaleAdmImportJobs(env, source);
   await cleanupExpiredAdmImportJobText(env, source).catch(() => null);
-  const activeStaleCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const activeStaleCutoff = new Date(Date.now() - SCHEDULED_ADM_IMPORT_STALE_MS).toISOString();
   const rows = await requireDb(env)
     .prepare(
       `SELECT * FROM adm_import_jobs
@@ -4970,12 +4971,12 @@ function scheduledJobResultFromProgress(
 
 async function recoverStaleAdmImportJobs(env: Env, source: string) {
   const now = new Date().toISOString();
-  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - SCHEDULED_ADM_IMPORT_STALE_MS).toISOString();
   await requireDb(env)
     .prepare(
       `UPDATE adm_import_jobs SET
         status = 'failed_retryable',
-        error_message = COALESCE(error_message, 'Scheduled ADM import job stalled for more than 10 minutes. Worker cron will retry it automatically.'),
+        error_message = COALESCE(error_message, 'Scheduled ADM import job stalled. Worker cron will retry it automatically.'),
         chunk_size = CASE
           WHEN COALESCE(chunk_size, 0) > 50 THEN 50
           WHEN COALESCE(chunk_size, 0) > 25 THEN 25
