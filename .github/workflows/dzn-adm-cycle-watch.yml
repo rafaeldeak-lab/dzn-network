@@ -26,21 +26,29 @@ jobs:
       - run: npm ci
       - name: Watch ADM cycle
         id: adm-watch
-        continue-on-error: true
         env:
           DZN_APP_URL: ${{ vars.DZN_APP_URL }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           AUTODEV_WATCH_MINUTES: ${{ inputs.watchMinutes || '90' }}
-        run: npm run autodev:adm-watch
+        run: |
+          set +e
+          npm run autodev:adm-watch
+          code=$?
+          echo "result=$code" >> "$GITHUB_OUTPUT"
+          exit 0
       - name: Verify live ADM import evidence
         id: adm-live
-        continue-on-error: true
         env:
           DZN_APP_URL: ${{ vars.DZN_APP_URL }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
-        run: npm run verify:adm-live
+        run: |
+          set +e
+          npm run verify:adm-live
+          code=$?
+          echo "result=$code" >> "$GITHUB_OUTPUT"
+          exit 0
       - name: Upload AutoDev reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -48,7 +56,7 @@ jobs:
           name: autodev-adm-cycle-watch-reports
           path: .autodev/reports
       - name: Create or update issue on failure
-        if: always() && steps.adm-live.outcome == 'failure'
+        if: always() && steps.adm-live.outputs.result != '0'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -56,12 +64,12 @@ jobs:
       - name: Resolve ADM cycle watch result
         if: always()
         run: |
-          echo "ADM watch outcome: ${{ steps.adm-watch.outcome }}"
-          echo "Live evidence outcome: ${{ steps.adm-live.outcome }}"
-          if [ "${{ steps.adm-live.outcome }}" = "failure" ]; then
+          echo "ADM watch result: ${{ steps.adm-watch.outputs.result }}"
+          echo "Live evidence result: ${{ steps.adm-live.outputs.result }}"
+          if [ "${{ steps.adm-live.outputs.result }}" != "0" ]; then
             echo "Protected ADM health/live evidence failed."
             exit 1
           fi
-          if [ "${{ steps.adm-watch.outcome }}" = "failure" ]; then
+          if [ "${{ steps.adm-watch.outputs.result }}" != "0" ]; then
             echo "::warning::ADM watch did not complete, but protected live ADM evidence passed. Treating optional direct evidence as unavailable."
           fi

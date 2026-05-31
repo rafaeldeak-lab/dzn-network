@@ -65,15 +65,19 @@ assert.equal(read(".github/workflows/dzn-post-deploy-verify.yml").includes("DZN_
 const cycleWatchWorkflow = read(".github/workflows/dzn-adm-cycle-watch.yml");
 const postDeployWorkflow = read(".github/workflows/dzn-post-deploy-verify.yml");
 assert.equal(cycleWatchWorkflow.includes("Resolve ADM cycle watch result"), true);
-assert.equal(cycleWatchWorkflow.includes("steps.adm-live.outcome"), true);
+assert.equal(cycleWatchWorkflow.includes("steps.adm-live.outputs.result"), true);
 assert.equal(cycleWatchWorkflow.includes("Protected ADM health/live evidence failed."), true);
 assert.equal(cycleWatchWorkflow.includes("optional direct evidence as unavailable"), true);
 assert.equal(cycleWatchWorkflow.includes("if: steps.adm-watch.outcome == 'failure' || steps.adm-live.outcome == 'failure'"), false);
+assert.equal(cycleWatchWorkflow.includes("continue-on-error"), false);
+assert.equal(cycleWatchWorkflow.includes("echo \"result=$code\" >> \"$GITHUB_OUTPUT\""), true);
 assert.equal(postDeployWorkflow.includes("Resolve post deploy verification result"), true);
-assert.equal(postDeployWorkflow.includes("steps.adm-live.outcome"), true);
+assert.equal(postDeployWorkflow.includes("steps.adm-live.outputs.result"), true);
 assert.equal(postDeployWorkflow.includes("Production smoke or protected live ADM evidence failed."), true);
 assert.equal(postDeployWorkflow.includes("optional direct evidence as unavailable"), true);
 assert.equal(postDeployWorkflow.includes("steps.adm.outcome == 'failure' || steps.adm-live.outcome == 'failure'"), false);
+assert.equal(postDeployWorkflow.includes("continue-on-error"), false);
+assert.equal(postDeployWorkflow.includes("steps.smoke.outputs.result"), true);
 
 const admWatch = read("scripts/autodev/adm-cycle-watch.ts");
 assert.equal(admWatch.includes("classifyRecoverableProductionStatus"), true);
