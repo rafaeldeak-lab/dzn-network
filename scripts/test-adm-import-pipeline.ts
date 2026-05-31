@@ -157,6 +157,7 @@ async function main() {
   assert.match(admSyncSource, /COALESCE\(updated_at, created_at\) < \?/);
   assert.match(admSyncSource, /chunk_size = CASE/);
   assert.match(admSyncSource, /SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 50/);
+  assert.match(admSyncSource, /getNewestAdmFileStateForSyncState/);
   assert.match(admSyncSource, /currentFileMaxPathVariants/);
   assert.match(admSyncSource, /trySeekWithoutRaw/);
   assert.match(admSyncSource, /lastProcessedFile = rowCompleted \? row\.filename : existingState\?\.last_processed_file/);

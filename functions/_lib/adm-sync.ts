@@ -4707,6 +4707,26 @@ async function getImportedLineCountForAdmFile(env: Env, scope: AdmSyncContext, f
   return Math.max(0, fromFileState, fromSyncState);
 }
 
+async function getNewestAdmFileStateForSyncState(env: Env, linkedServerId: string, sourceServiceId: string | null | undefined) {
+  if (!sourceServiceId) return null;
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT adm_file, adm_path
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND source_service_id = ?
+         AND ignored_at IS NULL
+       ORDER BY COALESCE(file_timestamp, adm_file) DESC
+       LIMIT 50`,
+    )
+    .bind(linkedServerId, sourceServiceId)
+    .all<{ adm_file: string | null; adm_path: string | null }>()
+    .catch(() => ({ results: [] as Array<{ adm_file: string | null; adm_path: string | null }> }));
+  return (rows.results ?? [])
+    .filter((row): row is { adm_file: string; adm_path: string | null } => typeof row.adm_file === "string" && row.adm_file.trim().length > 0)
+    .sort((a, b) => compareAdmFileNamesChronological(b.adm_file, a.adm_file))[0] ?? null;
+}
+
 function isCompletedAdmFileStateStatus(status: string | null | undefined) {
   return ["processed", "caught_up_waiting_for_growth", "completed_empty", "completed_closed"].includes(String(status ?? "").toLowerCase());
 }
@@ -4823,10 +4843,14 @@ async function recordAdmImportJobProgressInSyncState(
   const progressStatus = status === "failed_retryable" ? "processing_in_chunks" : status;
   const rowCompleted = row.status === "completed" || row.status === "completed_with_warnings";
   const existingState = await getSyncState(env, row.server_id).catch(() => null);
-  const latestAdmFile = existingState?.latest_adm_file && compareAdmFileNamesChronological(existingState.latest_adm_file, row.filename) >= 0
-    ? existingState.latest_adm_file
-    : row.filename;
-  const latestAdmPath = latestAdmFile === row.filename
+  const newestFileState = await getNewestAdmFileStateForSyncState(env, row.server_id, row.source_service_id ?? null);
+  const latestCandidate = [existingState?.latest_adm_file ?? null, newestFileState?.adm_file ?? null, row.filename]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .sort((a, b) => compareAdmFileNamesChronological(b, a))[0] ?? row.filename;
+  const latestAdmFile = latestCandidate;
+  const latestAdmPath = latestAdmFile === newestFileState?.adm_file
+    ? newestFileState.adm_path ?? latestAdmFile
+    : latestAdmFile === row.filename
     ? row.filename
     : existingState?.latest_adm_path ?? row.filename;
   const lastProcessedFile = rowCompleted ? row.filename : existingState?.last_processed_file ?? null;
