@@ -137,11 +137,14 @@ type DiscordEventChannelOption = {
 
 type DiscordEventChannelsResponse = {
   ok: boolean;
+  source?: "live" | "cached";
+  warning?: string;
   guildId?: string | null;
   guildName?: string | null;
   channels: DiscordEventChannelOption[];
   selected?: Record<EventChannelType, EventChannelSummary | null>;
   error?: string;
+  errorCode?: string;
   message?: string;
 };
 
@@ -338,11 +341,12 @@ export function ServerSettingsPage() {
     setDescription(next.server.description ?? "");
     setVisibility(next.server.visibility);
     setEventChannelIds(channelIdsFromSettings(next));
-    await refreshDiscordEventChannels(serverId, false);
+    void refreshDiscordEventChannels(serverId, false);
   }
 
   async function refreshDiscordEventChannels(serverId = settings?.server.id ?? selectedServerId, showMessage = true) {
     if (!serverId) return;
+    if (discordChannelsLoading) return;
     setDiscordChannelsLoading(true);
     try {
       const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/discord/channels`, {
@@ -669,7 +673,7 @@ export function ServerSettingsPage() {
           {discordChannels?.ok === false ? (
             <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4">
               <p className="text-sm font-black text-amber-50">{discordChannels.message ?? "Discord channels are not ready."}</p>
-              <p className="mt-2 text-sm leading-6 text-amber-100/85">Connect a Discord server and add the DZN bot from Setup before choosing event channels.</p>
+              <p className="mt-2 text-sm leading-6 text-amber-100/85">{discordChannelHelpCopy(discordChannels.error)}</p>
               <Link href="/setup" className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-200/25 bg-amber-300/12 px-3 py-2 text-xs font-black uppercase text-amber-50">
                 Open Setup
               </Link>
@@ -925,6 +929,21 @@ function selectedChannelWarning(channels: DiscordEventChannelOption[], channelId
   if (!channel) return "Saved channel was not returned by Discord. Refresh channels or choose another event channel.";
   if (channel.canSelect) return null;
   return `Missing bot permissions: ${channel.missingPermissions.join(", ") || "required permissions"}.`;
+}
+
+function discordChannelHelpCopy(errorCode: string | undefined) {
+  switch (errorCode) {
+    case "DISCORD_GUILD_NOT_CONNECTED":
+      return "Connect a Discord server in Setup before choosing event channels.";
+    case "BOT_NOT_INSTALLED":
+      return "Add DZN Bot in Setup before choosing event channels.";
+    case "BOT_MISSING_PERMISSIONS":
+      return "No valid channels found. Make sure DZN Bot can View Channel, Send Messages, Embed Links, and Read Message History.";
+    case "RATE_LIMITED":
+      return "Discord rate limited channel lookup. Retry in a moment.";
+    default:
+      return "Discord channels could not be loaded right now. Retry in a moment.";
+  }
 }
 
 function signOut() {

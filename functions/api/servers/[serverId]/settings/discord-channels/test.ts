@@ -9,9 +9,21 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
   if (!user) return json({ ok: false, error: "NOT_AUTHENTICATED", message: "Log in to test Discord event channels." }, { status: 401 });
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
-  const body = await readJson<Record<string, unknown>>(request);
-  const result = await testOwnerDiscordEventChannel(env, user, serverId, body);
-  return json(result.payload, { status: result.status });
+  try {
+    const body = await readJson<Record<string, unknown>>(request);
+    const result = await testOwnerDiscordEventChannel(env, user, serverId, body);
+    return json(result.payload, { status: result.status });
+  } catch (error) {
+    const requestId = crypto.randomUUID();
+    console.warn("DZN Discord event channel test unavailable", { requestId, serverId, error: error instanceof Error ? error.message : "unknown" });
+    return json({
+      ok: false,
+      error: "DISCORD_TEST_MESSAGE_FAILED",
+      errorCode: "DISCORD_TEST_MESSAGE_FAILED",
+      message: "Discord test message failed. Check that DZN Bot can post embeds in the selected channel.",
+      requestId,
+    }, { status: 502 });
+  }
 };
 
 export const onRequestGet: PagesFunction = () => methodNotAllowed();

@@ -336,14 +336,30 @@ export async function listOwnerDiscordEventChannels(env: Env, user: SessionUser 
     await cacheDiscordChannels(env, guildId, channels);
     return { status: 200, payload: channelListPayload(server, guildId, saved, channels) };
   } catch (error) {
-    const code = error instanceof DiscordChannelFetchError ? error.code : "DISCORD_CHANNEL_FETCH_FAILED";
-    const status = error instanceof DiscordChannelFetchError && error.status ? error.status : 503;
+    const cachedChannels = await getCachedDiscordChannelOptions(env, guildId);
+    const mapped = mapDiscordChannelFetchError(error);
+    if (cachedChannels.length > 0) {
+      return {
+        status: 200,
+        payload: {
+          ok: true,
+          source: "cached",
+          warning: mapped.error,
+          message: mapped.message,
+          guildId,
+          guildName: server.guild_name,
+          selected: serializeSavedChannels(saved),
+          channels: cachedChannels,
+        },
+      };
+    }
     return {
-      status,
+      status: 200,
       payload: {
         ok: false,
-        error: code === "missing_bot_token" ? "BOT_NOT_INSTALLED" : code,
-        message: error instanceof Error ? error.message : "Unable to fetch Discord channels.",
+        error: mapped.error,
+        errorCode: mapped.error,
+        message: mapped.message,
         guildId,
         guildName: server.guild_name,
         channels: [],
@@ -372,9 +388,23 @@ export async function saveOwnerDiscordEventChannels(env: Env, user: SessionUser 
 
   const saved: SavedChannelRow[] = [];
   for (const [channelType, channelId] of provided) {
-    const channel = isMockAuthEnabled(env)
-      ? mockEventChannels().find((item) => item.channel_id === channelId) ?? null
-      : await verifyDiscordPostingChannel(env, guildId, channelId);
+    let channel: DiscordPostingChannel | null = null;
+    try {
+      channel = isMockAuthEnabled(env)
+        ? mockEventChannels().find((item) => item.channel_id === channelId) ?? null
+        : await verifyDiscordPostingChannel(env, guildId, channelId);
+    } catch (error) {
+      const mapped = mapDiscordChannelFetchError(error);
+      return {
+        status: mapped.httpStatus,
+        payload: {
+          ok: false,
+          error: mapped.error,
+          errorCode: mapped.error,
+          message: mapped.error === "BOT_MISSING_PERMISSIONS" ? "DZN Bot cannot post in that channel." : mapped.message,
+        },
+      };
+    }
     if (!channel) return { status: 404, payload: { ok: false, error: "CHANNEL_NOT_IN_CONNECTED_GUILD", message: "Channel was not found in the connected Discord server." } };
     if (!channel.can_post || channel.missing_permissions.length > 0) {
       return {
@@ -428,7 +458,20 @@ export async function testOwnerDiscordEventChannel(env: Env, user: SessionUser |
     return { status: 200, payload: { ok: true, message: "Test event message sent.", mocked: true } };
   }
   const payload = renderChannelTestEmbed(server);
-  const delivery = await sendOrEditEventDiscordMessage(env, selected.channel_id, payload, null);
+  let delivery: { messageId: string | null; operation: "edited" | "sent" | "replaced" };
+  try {
+    delivery = await sendOrEditEventDiscordMessage(env, selected.channel_id, payload, null);
+  } catch {
+    return {
+      status: 502,
+      payload: {
+        ok: false,
+        error: "DISCORD_TEST_MESSAGE_FAILED",
+        errorCode: "DISCORD_TEST_MESSAGE_FAILED",
+        message: "Discord test message failed. Check that DZN Bot can View Channel, Send Messages, Embed Links, and Read Message History.",
+      },
+    };
+  }
   await recordEventDiscordMessage(env, {
     eventId: "channel-test",
     matchupId: null,
@@ -712,16 +755,34 @@ async function fetchOwnerServer(env: Env, user: SessionUser, serverId: string) {
          ON discord_guilds.guild_id = linked_servers.guild_id
          OR discord_guilds.id = linked_servers.discord_guild_id
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-       WHERE linked_servers.id = ?
+       WHERE (linked_servers.id = ? OR linked_servers.nitrado_service_id = ? OR linked_servers.public_slug = ?)
          AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
        ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC
        LIMIT 1`,
     )
-    .bind(serverId)
+    .bind(serverId, serverId, serverId)
     .first<OwnerServerRow>();
   if (!row) return null;
   if (row.user_id === user.id || isDznAdminDiscordId(env, user.discord_id)) return row;
   return null;
+}
+
+function mapDiscordChannelFetchError(error: unknown) {
+  if (error instanceof DiscordChannelFetchError) {
+    if (error.code === "missing_bot_token") {
+      return { error: "BOT_NOT_INSTALLED", httpStatus: 409, message: "Add DZN Bot in Setup before choosing event channels." };
+    }
+    if (error.code === "discord_api_403") {
+      return { error: "BOT_MISSING_PERMISSIONS", httpStatus: 409, message: "DZN Bot cannot view channels in this Discord server. Check bot permissions in Discord." };
+    }
+    if (error.code === "bot_not_in_guild") {
+      return { error: "BOT_NOT_INSTALLED", httpStatus: 409, message: "Add DZN Bot in Setup before choosing event channels." };
+    }
+    if (error.status === 429) {
+      return { error: "RATE_LIMITED", httpStatus: 429, message: "Discord rate limited channel lookup. Retry in a moment." };
+    }
+  }
+  return { error: "DISCORD_CHANNELS_UNAVAILABLE", httpStatus: 502, message: "Discord channels could not be loaded right now. Retry in a moment." };
 }
 
 async function fetchOwnerVisibleEvents(env: Env, linkedServerId: string) {
@@ -1449,6 +1510,63 @@ async function cacheDiscordChannels(env: Env, guildId: string, channels: Discord
         now,
       )
       .run();
+  }
+}
+
+async function getCachedDiscordChannelOptions(env: Env, guildId: string) {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT channel_id, channel_name, channel_kind, bot_permission_json
+       FROM discord_guild_channels_cache
+       WHERE guild_id = ?
+       ORDER BY COALESCE(position, 9999), lower(COALESCE(channel_name, channel_id))
+       LIMIT 200`,
+    )
+    .bind(guildId)
+    .all<{ channel_id: string; channel_name: string | null; channel_kind: string | null; bot_permission_json: string | null }>()
+    .catch(() => ({ results: [] as Array<{ channel_id: string; channel_name: string | null; channel_kind: string | null; bot_permission_json: string | null }> }));
+
+  return (rows.results ?? []).map((row) => {
+    const permissions = parseChannelPermissionJson(row.bot_permission_json);
+    return {
+      id: row.channel_id,
+      name: row.channel_name ?? row.channel_id,
+      type: row.channel_kind ?? "text",
+      categoryName: null,
+      canSelect: permissions.canView && permissions.canSend && permissions.canEmbed && permissions.canReadHistory,
+      botCanView: permissions.canView,
+      botCanSend: permissions.canSend,
+      botCanEmbed: permissions.canEmbed,
+      botCanReadHistory: permissions.canReadHistory,
+      missingPermissions: permissions.missingPermissions,
+    };
+  });
+}
+
+function parseChannelPermissionJson(value: string | null) {
+  try {
+    const parsed = JSON.parse(value || "{}") as Partial<{
+      canView: boolean;
+      canSend: boolean;
+      canEmbed: boolean;
+      canReadHistory: boolean;
+      missingPermissions: string[];
+    }>;
+    return {
+      canView: Boolean(parsed.canView),
+      canSend: Boolean(parsed.canSend),
+      canEmbed: Boolean(parsed.canEmbed),
+      canReadHistory: Boolean(parsed.canReadHistory),
+      missingPermissions: Array.isArray(parsed.missingPermissions) ? parsed.missingPermissions.map(String) : [],
+    };
+  } catch {
+    return {
+      canView: false,
+      canSend: false,
+      canEmbed: false,
+      canReadHistory: false,
+      missingPermissions: REQUIRED_PERMISSION_LABELS,
+    };
   }
 }
 

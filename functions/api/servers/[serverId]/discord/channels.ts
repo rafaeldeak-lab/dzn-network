@@ -9,8 +9,21 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   if (!user) return json({ ok: false, error: "NOT_AUTHENTICATED", message: "Log in to view Discord channels." }, { status: 401 });
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
-  const result = await listOwnerDiscordEventChannels(env, user, serverId);
-  return json(result.payload, { status: result.status });
+  try {
+    const result = await listOwnerDiscordEventChannels(env, user, serverId);
+    return json(result.payload, { status: result.status });
+  } catch (error) {
+    const requestId = crypto.randomUUID();
+    console.warn("DZN Discord event channel lookup unavailable", { requestId, serverId, error: error instanceof Error ? error.message : "unknown" });
+    return json({
+      ok: false,
+      error: "DISCORD_CHANNELS_UNAVAILABLE",
+      errorCode: "DISCORD_CHANNELS_UNAVAILABLE",
+      message: "Discord channels could not be loaded right now. Retry in a moment.",
+      requestId,
+      channels: [],
+    }, { status: 200 });
+  }
 };
 
 export const onRequestPost: PagesFunction = () => methodNotAllowed();

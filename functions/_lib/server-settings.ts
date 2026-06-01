@@ -184,16 +184,17 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
   if (!access) return { status: 403, payload: { ok: false, error: "NOT_AUTHORIZED", message: "You do not have access to this server." } };
 
   const now = new Date().toISOString();
-  const monthlyChangesUsed = await countCategoryChangesInLast30Days(env, linkedServerId);
-  const eventLock = await getCategoryEventLockStatus(env, linkedServerId, now, server);
+  const resolvedLinkedServerId = server.id;
+  const monthlyChangesUsed = await countCategoryChangesInLast30Days(env, resolvedLinkedServerId);
+  const eventLock = await getCategoryEventLockStatus(env, resolvedLinkedServerId, now, server);
   const policy = categoryPolicyForPlan(server.plan_key, server.subscription_status);
   const cooldownUntil = futureIso(server.category_cooldown_until, now);
   const graceAvailable = isGraceAvailable(server, now);
-  const tagsEditCount = await countListingChanges(env, linkedServerId, "tags", "-7 days");
-  const visibilityEditCount = await countListingChanges(env, linkedServerId, "visibility", "-1 day");
-  const listingEditCount = await countListingChanges(env, linkedServerId, "listing", "-1 day");
+  const tagsEditCount = await countListingChanges(env, resolvedLinkedServerId, "tags", "-7 days");
+  const visibilityEditCount = await countListingChanges(env, resolvedLinkedServerId, "visibility", "-1 day");
+  const listingEditCount = await countListingChanges(env, resolvedLinkedServerId, "listing", "-1 day");
   const setupComplete = isServerSetupComplete(server);
-  const discordEventChannels = await getSavedDiscordEventChannelSummary(env, linkedServerId).catch(() => ({
+  const discordEventChannels = await getSavedDiscordEventChannelSummary(env, resolvedLinkedServerId).catch(() => ({
     selected: null,
     liveScoreboardReady: false,
     defaultReady: false,
@@ -259,6 +260,7 @@ export async function updateServerCategory(env: Env, user: SessionUser | null, l
   if (!canManageServer(env, user, server)) return { status: 403, payload: { ok: false, error: "NOT_AUTHORIZED", message: "You do not have access to this server." } };
   if (isServerSuspended(server)) return { status: 403, payload: { ok: false, error: "SERVER_SUSPENDED", message: "This server cannot be edited right now." } };
   if (!isServerSetupComplete(server)) return { status: 409, payload: { ok: false, error: "SETUP_INCOMPLETE", message: "Finish setup before changing the public category." } };
+  const resolvedLinkedServerId = server.id;
 
   const category = normalizeOwnerServerCategory(input.category);
   if (!category) return { status: 400, payload: { ok: false, error: "CATEGORY_INVALID", message: "Choose PvP, Deathmatch, PvE, or PvP / PvE." } };
@@ -301,7 +303,7 @@ export async function updateServerCategory(env: Env, user: SessionUser | null, l
       category_first_grace_used_at = CASE WHEN ? = 1 THEN ? ELSE category_first_grace_used_at END,
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-  ).bind(category, now, cooldownUntil, effectiveAt, now, check.graceUsed ? 1 : 0, check.graceUsed ? now : null, linkedServerId).run();
+  ).bind(category, now, cooldownUntil, effectiveAt, now, check.graceUsed ? 1 : 0, check.graceUsed ? now : null, resolvedLinkedServerId).run();
 
   await db.prepare(
     `INSERT INTO server_category_change_events (
@@ -311,8 +313,8 @@ export async function updateServerCategory(env: Env, user: SessionUser | null, l
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     crypto.randomUUID(),
-    linkedServerId,
-    linkedServerId,
+    resolvedLinkedServerId,
+    resolvedLinkedServerId,
     server.nitrado_service_id,
     user.id,
     oldCategory,
@@ -327,7 +329,7 @@ export async function updateServerCategory(env: Env, user: SessionUser | null, l
     now,
   ).run();
 
-  await refreshPublicCacheBestEffort(env, linkedServerId);
+  await refreshPublicCacheBestEffort(env, resolvedLinkedServerId);
 
   return {
     status: 200,
@@ -349,13 +351,14 @@ export async function updateServerTags(env: Env, user: SessionUser | null, linke
   if (!user) return { status: 401, payload: { ok: false, error: "NOT_AUTHENTICATED", message: "Log in to update tags." } };
   if (!server) return { status: 404, payload: { ok: false, error: "SERVER_NOT_FOUND", message: "Server not found." } };
   if (!canManageServer(env, user, server)) return { status: 403, payload: { ok: false, error: "NOT_AUTHORIZED", message: "You do not have access to this server." } };
+  const resolvedLinkedServerId = server.id;
 
   const tags = normalizePublicTags(input.tags);
   if (!tags.ok) return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: tags.error } };
   const now = new Date().toISOString();
   const cooldown = futureIso(server.tags_cooldown_until, now);
   if (cooldown) return { status: 429, payload: { ok: false, error: "TAGS_COOLDOWN_ACTIVE", message: "Tags can be edited once every 24 hours.", nextAllowedChangeAt: cooldown } };
-  const edits = await countListingChanges(env, linkedServerId, "tags", "-7 days");
+  const edits = await countListingChanges(env, resolvedLinkedServerId, "tags", "-7 days");
   if (edits >= 5) return { status: 429, payload: { ok: false, error: "TAGS_WEEKLY_LIMIT_REACHED", message: "Tags can be edited up to 5 times per 7 days." } };
 
   const previous = parseTags(server.tags_json);
@@ -367,9 +370,9 @@ export async function updateServerTags(env: Env, user: SessionUser | null, linke
       public_listing_updated_at = ?,
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-  ).bind(JSON.stringify(tags.value), now, addHoursIso(now, 24), now, linkedServerId).run();
-  await insertListingChangeEvent(env, linkedServerId, user.id, "tags", previous, tags.value, now);
-  await refreshPublicCacheBestEffort(env, linkedServerId);
+  ).bind(JSON.stringify(tags.value), now, addHoursIso(now, 24), now, resolvedLinkedServerId).run();
+  await insertListingChangeEvent(env, resolvedLinkedServerId, user.id, "tags", previous, tags.value, now);
+  await refreshPublicCacheBestEffort(env, resolvedLinkedServerId);
 
   return { status: 200, payload: { ok: true, tags: tags.value, tagsCooldownUntil: addHoursIso(now, 24), message: "Public tags updated." } };
 }
@@ -380,6 +383,7 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
   if (!user) return { status: 401, payload: { ok: false, error: "NOT_AUTHENTICATED", message: "Log in to update listing settings." } };
   if (!server) return { status: 404, payload: { ok: false, error: "SERVER_NOT_FOUND", message: "Server not found." } };
   if (!canManageServer(env, user, server)) return { status: 403, payload: { ok: false, error: "NOT_AUTHORIZED", message: "You do not have access to this server." } };
+  const resolvedLinkedServerId = server.id;
 
   const description = input.description === undefined ? server.public_description : sanitizePublicDescription(input.description);
   if (description && (description.length < 40 || description.length > 500)) {
@@ -396,11 +400,11 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
   }
 
   const now = new Date().toISOString();
-  const listingEdits = await countListingChanges(env, linkedServerId, "listing", "-1 day");
+  const listingEdits = await countListingChanges(env, resolvedLinkedServerId, "listing", "-1 day");
   if (listingEdits >= 5) return { status: 429, payload: { ok: false, error: "LISTING_RATE_LIMITED", message: "Listing details can be edited up to 5 times per day." } };
   const visibilityChanged = visibility !== normalizeListingVisibility(server.listing_visibility);
   if (visibilityChanged) {
-    const visibilityEdits = await countListingChanges(env, linkedServerId, "visibility", "-1 day");
+    const visibilityEdits = await countListingChanges(env, resolvedLinkedServerId, "visibility", "-1 day");
     if (visibilityEdits >= 5) return { status: 429, payload: { ok: false, error: "VISIBILITY_RATE_LIMITED", message: "Visibility can be changed up to 5 times per day." } };
   }
 
@@ -411,12 +415,12 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
       public_listing_updated_at = ?,
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-  ).bind(description || null, visibility, now, linkedServerId).run();
-  await insertListingChangeEvent(env, linkedServerId, user.id, "listing", { description: server.public_description, visibility: server.listing_visibility }, { description, visibility }, now);
+  ).bind(description || null, visibility, now, resolvedLinkedServerId).run();
+  await insertListingChangeEvent(env, resolvedLinkedServerId, user.id, "listing", { description: server.public_description, visibility: server.listing_visibility }, { description, visibility }, now);
   if (visibilityChanged) {
-    await insertListingChangeEvent(env, linkedServerId, user.id, "visibility", server.listing_visibility, visibility, now);
+    await insertListingChangeEvent(env, resolvedLinkedServerId, user.id, "visibility", server.listing_visibility, visibility, now);
   }
-  await refreshPublicCacheBestEffort(env, linkedServerId);
+  await refreshPublicCacheBestEffort(env, resolvedLinkedServerId);
 
   return { status: 200, payload: { ok: true, description: description || null, visibility, publicListingUpdatedAt: now, message: "Public listing updated." } };
 }
@@ -506,12 +510,12 @@ async function getSettingsServer(env: Env, linkedServerId: string) {
             server_subscriptions.status AS subscription_status
        FROM linked_servers
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-      WHERE linked_servers.id = ?
+      WHERE (linked_servers.id = ? OR linked_servers.nitrado_service_id = ? OR linked_servers.public_slug = ?)
         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
       ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC
       LIMIT 1`,
-  ).bind(linkedServerId).first<SettingsServerRow>();
+  ).bind(linkedServerId, linkedServerId, linkedServerId).first<SettingsServerRow>();
 }
 
 function serializeSettingsServer(server: SettingsServerRow) {

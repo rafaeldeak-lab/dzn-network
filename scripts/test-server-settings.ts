@@ -77,6 +77,9 @@ assert.equal(/DROP\s+TABLE|DELETE\s+FROM|TRUNCATE|CREATE\s+TABLE\s+(?:IF\s+NOT\s
 const settingsLib = source("functions/_lib/server-settings.ts");
 includesAll(settingsLib, [
   "Category cooldowns protect fair competition and cannot be bypassed by upgrading.",
+  "linked_servers.nitrado_service_id = ?",
+  "linked_servers.public_slug = ?",
+  "resolvedLinkedServerId",
   "CATEGORY_COOLDOWN_ACTIVE",
   "CATEGORY_MONTHLY_LIMIT_REACHED",
   "CATEGORY_LOCKED_DURING_EVENT",
@@ -91,7 +94,7 @@ includesAll(settingsLib, [
 assert.equal(settingsLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Server settings must not touch token encryption.");
 
 const settingsRoute = source("functions/api/servers/[serverId]/settings.ts");
-includesAll(settingsRoute, ["onRequestGet", "onRequestPatch", "NOT_AUTHENTICATED", "readOwnerServerSettings", "updateServerCategory"]);
+includesAll(settingsRoute, ["onRequestGet", "onRequestPatch", "NOT_AUTHENTICATED", "readOwnerServerSettings", "updateServerCategory", "SETTINGS_UNAVAILABLE", "requestId"]);
 const categoryRoute = source("functions/api/servers/[serverId]/settings/category.ts");
 includesAll(categoryRoute, ["onRequestPost", "NOT_AUTHENTICATED", "updateServerCategory"]);
 const tagsRoute = source("functions/api/servers/[serverId]/settings/tags.ts");
@@ -99,11 +102,11 @@ includesAll(tagsRoute, ["onRequestPost", "NOT_AUTHENTICATED", "updateServerTags"
 const listingRoute = source("functions/api/servers/[serverId]/settings/listing.ts");
 includesAll(listingRoute, ["onRequestPost", "NOT_AUTHENTICATED", "updateServerListing"]);
 const discordChannelsRoute = source("functions/api/servers/[serverId]/settings/discord-channels/index.ts");
-includesAll(discordChannelsRoute, ["onRequestPost", "NOT_AUTHENTICATED", "saveOwnerDiscordEventChannels"]);
+includesAll(discordChannelsRoute, ["onRequestPost", "NOT_AUTHENTICATED", "saveOwnerDiscordEventChannels", "SETTINGS_UNAVAILABLE", "requestId"]);
 const discordChannelsTestRoute = source("functions/api/servers/[serverId]/settings/discord-channels/test.ts");
-includesAll(discordChannelsTestRoute, ["onRequestPost", "NOT_AUTHENTICATED", "testOwnerDiscordEventChannel"]);
+includesAll(discordChannelsTestRoute, ["onRequestPost", "NOT_AUTHENTICATED", "testOwnerDiscordEventChannel", "DISCORD_TEST_MESSAGE_FAILED", "requestId"]);
 const discordChannelListRoute = source("functions/api/servers/[serverId]/discord/channels.ts");
-includesAll(discordChannelListRoute, ["onRequestGet", "NOT_AUTHENTICATED", "listOwnerDiscordEventChannels"]);
+includesAll(discordChannelListRoute, ["onRequestGet", "NOT_AUTHENTICATED", "listOwnerDiscordEventChannels", "DISCORD_CHANNELS_UNAVAILABLE", "status: 200"]);
 
 const dashboard = source("components/onboarding/dashboard.tsx");
 includesAll(dashboard, [
@@ -127,6 +130,9 @@ includesAll(settingsUi, [
   "Live Event Scoreboard Channel",
   "Event Results Channel",
   "Refresh Discord Channels",
+  "discordChannelHelpCopy",
+  "Discord channels could not be loaded right now. Retry in a moment.",
+  "void refreshDiscordEventChannels(serverId, false)",
   "Save Event Channels",
   "Test Bot Message",
   "View Channel, Send Messages, Embed Links, Read Message History",

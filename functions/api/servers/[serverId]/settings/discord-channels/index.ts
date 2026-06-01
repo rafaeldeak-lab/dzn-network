@@ -9,9 +9,21 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
   if (!user) return json({ ok: false, error: "NOT_AUTHENTICATED", message: "Log in to save Discord event channels." }, { status: 401 });
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
-  const body = await readJson<Record<string, unknown>>(request);
-  const result = await saveOwnerDiscordEventChannels(env, user, serverId, body);
-  return json(result.payload, { status: result.status });
+  try {
+    const body = await readJson<Record<string, unknown>>(request);
+    const result = await saveOwnerDiscordEventChannels(env, user, serverId, body);
+    return json(result.payload, { status: result.status });
+  } catch (error) {
+    const requestId = crypto.randomUUID();
+    console.warn("DZN Discord event channel save unavailable", { requestId, serverId, error: error instanceof Error ? error.message : "unknown" });
+    return json({
+      ok: false,
+      error: "SETTINGS_UNAVAILABLE",
+      errorCode: "SETTINGS_UNAVAILABLE",
+      message: "Discord event channel settings are temporarily unavailable. Please try again.",
+      requestId,
+    }, { status: 500 });
+  }
 };
 
 export const onRequestGet: PagesFunction = () => methodNotAllowed();

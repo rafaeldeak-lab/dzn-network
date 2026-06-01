@@ -178,12 +178,21 @@ const eventDiscordChannelsSource = readFileSync("functions/api/servers/[serverId
 assert.equal(eventDiscordChannelsSource.includes("listOwnerDiscordEventChannels"), true);
 assert.equal(eventDiscordChannelsSource.includes("NOT_AUTHENTICATED"), true);
 assert.equal(eventDiscordChannelsSource.includes("status: 401"), true);
+assert.equal(eventDiscordChannelsSource.includes("DISCORD_CHANNELS_UNAVAILABLE"), true);
+assert.equal(eventDiscordChannelsSource.includes("status: 200"), true);
 
 const eventHubSource = readFileSync("functions/_lib/event-hub.ts", "utf8");
 for (const snippet of [
   "verifyDiscordPostingChannel",
+  "linked_servers.nitrado_service_id = ?",
+  "linked_servers.public_slug = ?",
+  "getCachedDiscordChannelOptions",
+  "source: \"cached\"",
   "CHANNEL_NOT_IN_CONNECTED_GUILD",
   "BOT_MISSING_PERMISSIONS",
+  "DISCORD_CHANNELS_UNAVAILABLE",
+  "DISCORD_TEST_MESSAGE_FAILED",
+  "RATE_LIMITED",
   "View Channel",
   "Send Messages",
   "Embed Links",
@@ -207,6 +216,8 @@ for (const snippet of [
   "Live Event Scoreboard Channel",
   "Event Results Channel",
   "Missing bot permissions",
+  "discordChannelHelpCopy",
+  "void refreshDiscordEventChannels(serverId, false)",
 ]) {
   assert.equal(eventSettingsUi.includes(snippet), true, `Missing Server Settings event channel UI: ${snippet}`);
 }
