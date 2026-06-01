@@ -156,5 +156,7 @@ assert.equal(admLiveVerify.includes("waiting behind active ordered recent backfi
 assert.equal(admLiveVerify.includes('"unreadable", "failed_unreadable", "parser_error", "write_error", "partial"'), true);
 assert.equal(admLiveVerify.includes("retry_count"), true);
 assert.equal(admLiveVerify.includes("Recent noftp ADM files newer than the last completed import lack job/cursor evidence"), true);
+assert.equal(admLiveVerify.includes("hasCurrentFileStateEvidence"), true);
+assert.equal(admLiveVerify.includes("Current ADM has file-state/job/cursor evidence"), true);
 
 console.log("AutoDev system tests passed.");

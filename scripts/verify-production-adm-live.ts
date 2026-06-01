@@ -195,6 +195,13 @@ function hasCurrentCursor(file: FileStateRow | null, jobs: JobRow[]) {
     || ["caught_up_waiting_for_growth", "processed", "queued"].includes(String(file.status ?? ""));
 }
 
+function hasCurrentFileStateEvidence(file: FileStateRow | null, jobs: JobRow[]) {
+  if (!file) return false;
+  if (hasCurrentCursor(file, jobs)) return true;
+  const status = String(file.status ?? "").toLowerCase();
+  return ["discovered", "unreadable", "failed_unreadable", "parser_error", "write_error", "partial"].includes(status);
+}
+
 function fileHasImportEvidence(file: FileStateRow, jobs: JobRow[]) {
   if (hasCurrentCursor(file, jobs)) return true;
   const status = String(file.status ?? "").toLowerCase();
@@ -399,7 +406,7 @@ async function verifyFromAdmHealth() {
     const fileState = service.latestFileState ?? null;
     const cursor = Math.max(Number(fileState?.cursorLine ?? 0), Number(fileState?.importedLineCount ?? 0), Number(fileState?.lineCount ?? 0));
     if (service.lastSuccessfulImportAt || cursor > 0 || Number(service.recentEventCount ?? 0) > 0) hasPermanentAdmData = true;
-    if (service.activeImportJob || cursor > 0 || ["caught_up_waiting_for_growth", "processed", "queued"].includes(String(fileState?.status ?? ""))) {
+    if (service.activeImportJob || cursor > 0 || ["caught_up_waiting_for_growth", "processed", "queued", "discovered"].includes(String(fileState?.status ?? ""))) {
       pass(label, `Current ADM has scheduled job/cursor evidence for ${fileState?.fileName ?? service.latestAdmFile ?? "latest ADM"}.`, {
         importJobStatus: service.importJobStatus,
         fileStatus: fileState?.status,
@@ -657,8 +664,8 @@ async function main() {
     if (serviceJobs.some((job) => job.source === "scheduled_nitrado" && /completed/i.test(job.status)) || Math.max(Number(latestFile.cursor_line ?? 0), Number(latestFile.imported_line_count ?? 0), Number(latestFile.line_count ?? 0)) > 0) {
       permanentAdmDataDetected = true;
     }
-    if (hasCurrentCursor(latestFile, serviceJobs)) {
-      pass(label, `Current ADM has scheduled job/cursor evidence for ${latestFile.adm_file}.`, {
+    if (hasCurrentFileStateEvidence(latestFile, serviceJobs)) {
+      pass(label, `Current ADM has file-state/job/cursor evidence for ${latestFile.adm_file}.`, {
         fileStatus: latestFile.status,
         cursorLine: latestFile.cursor_line,
         importedLineCount: latestFile.imported_line_count,
