@@ -217,6 +217,8 @@ async function main() {
   const activeJobPriorityIndex = admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END");
   assert.ok(metadataPriorityIndex >= 0 && activeJobPriorityIndex >= 0 && metadataPriorityIndex < activeJobPriorityIndex, "Stale metadata must outrank active import jobs so one service cannot starve the fleet.");
   assert.ok(admSyncSource.includes("COALESCE(current_line, 0) >= COALESCE(total_lines, 0)"));
+  assert.ok(admSyncSource.includes("promoteNewestDiscoveredAdmFileInSyncState"), "Completed older ADM chunk jobs must not move latest_adm_file behind the newest discovered ADM.");
+  assert.ok(admSyncSource.includes("ORDER BY file_timestamp DESC, adm_file DESC"), "Newest discovered ADM promotion should use timestamp ordering.");
   assert.ok(admSyncSource.includes("ADM file ${directFileName} is already imported; Worker advanced to the next server."));
   assert.ok(admSyncSource.includes("await updateAdmWorkerCursor(env, options.cursorKey ?? \"last_adm_linked_server_id\", selected.id).catch(() => null);"));
   assert.ok(admSyncSource.includes("stateLatestAdmFile"));

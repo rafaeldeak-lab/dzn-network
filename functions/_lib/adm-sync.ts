@@ -4755,6 +4755,54 @@ async function getNewestAdmFileStateForSyncState(env: Env, linkedServerId: strin
     .sort((a, b) => compareAdmFileNamesChronological(b.adm_file, a.adm_file))[0] ?? null;
 }
 
+async function promoteNewestDiscoveredAdmFileInSyncState(env: Env, linkedServerId: string, sourceServiceId: string | null | undefined) {
+  if (!sourceServiceId) return;
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_sync_state
+       SET latest_adm_file = COALESCE((
+             SELECT adm_file
+             FROM adm_sync_file_state
+             WHERE linked_server_id = ?
+               AND source_service_id = ?
+               AND ignored_at IS NULL
+             ORDER BY file_timestamp DESC, adm_file DESC
+             LIMIT 1
+           ), latest_adm_file),
+           latest_adm_path = COALESCE((
+             SELECT adm_path
+             FROM adm_sync_file_state
+             WHERE linked_server_id = ?
+               AND source_service_id = ?
+               AND ignored_at IS NULL
+             ORDER BY file_timestamp DESC, adm_file DESC
+             LIMIT 1
+           ), latest_adm_path),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE linked_server_id = ?
+         AND source_service_id = ?
+         AND EXISTS (
+           SELECT 1
+           FROM adm_sync_file_state
+           WHERE linked_server_id = ?
+             AND source_service_id = ?
+             AND ignored_at IS NULL
+         )`,
+    )
+    .bind(
+      linkedServerId,
+      sourceServiceId,
+      linkedServerId,
+      sourceServiceId,
+      linkedServerId,
+      sourceServiceId,
+      linkedServerId,
+      sourceServiceId,
+    )
+    .run()
+    .catch(() => null);
+}
+
 function isCompletedAdmFileStateStatus(status: string | null | undefined) {
   return ["processed", "caught_up_waiting_for_growth", "completed_empty", "completed_closed"].includes(String(status ?? "").toLowerCase());
 }
@@ -4924,6 +4972,7 @@ async function recordAdmImportJobProgressInSyncState(
       ? row.source === SCHEDULED_ADM_IMPORT_SOURCE ? "scheduled_chunked_import" : "manual_chunked_import"
       : null),
   });
+  await promoteNewestDiscoveredAdmFileInSyncState(env, row.server_id, row.source_service_id ?? null);
 }
 
 function progressToImportJobRow(progress: AdmImportJobProgressResult, linkedServerId: string): AdmImportJobRow {
