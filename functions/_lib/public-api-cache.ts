@@ -14,7 +14,7 @@ type CacheRow = {
 
 export type PublicApiCacheMetadata = {
   generated_at: string;
-  source: "live" | "snapshot" | "empty_no_cache" | "empty_no_db";
+  source: "live" | "last_known" | "fallback_empty" | "snapshot" | "empty_no_cache" | "empty_no_db";
   stale: boolean;
   snapshot_generated_at?: string;
   message?: string;

@@ -251,7 +251,7 @@ async function checkPublicHomeStatsConsistency(hasPermanentAdmData: boolean) {
     fail("public home-stats", `Expected public home-stats 200 JSON, got HTTP ${result.status}.`, result);
     return;
   }
-  if (hasPermanentAdmData && (result.json.source === "empty_no_cache" || result.json.fallback_reason === "live_query_failed_no_snapshot")) {
+  if (hasPermanentAdmData && (result.json.source === "empty_no_cache" || result.json.source === "fallback_empty" || result.json.fallback_reason === "live_query_failed_no_snapshot")) {
     fail("public home-stats ADM fallback", "Permanent ADM data exists but public home-stats is still reporting an empty/no-cache first-sync state.", {
       source: result.json.source,
       fallback_reason: result.json.fallback_reason,

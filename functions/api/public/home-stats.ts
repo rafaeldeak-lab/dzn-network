@@ -4,13 +4,12 @@ import type { PublicBuildLeaderboardRow } from "../../_lib/build-events";
 import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
+import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import {
   logPublicApi503RootCause,
   logPublicApiLoadFailed,
   logPublicApiSnapshotFallbackServed,
   publicApiSnapshotAccess,
-  publicApiSnapshotFallbackHeaders,
   readPublicApiCache,
   safePublicCacheError,
   withPublicApiMetadata,
@@ -136,11 +135,20 @@ const HOME_STATS_SNAPSHOT_KEYS = {
   preview: "home-stats:preview",
   full: "home-stats:full",
 } as const;
+const HOME_STATS_NO_STORE_HEADERS = {
+  "cache-control": "no-store, no-cache, must-revalidate",
+  pragma: "no-cache",
+  expires: "0",
+  vary: "Cookie",
+};
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
-  const headers = publicAccessCacheHeaders(viewerLoggedIn);
+  const headers = {
+    ...publicAccessCacheHeaders(viewerLoggedIn),
+    ...HOME_STATS_NO_STORE_HEADERS,
+  };
   const accessLevel = publicApiSnapshotAccess(viewerLoggedIn);
   const cacheKey = homeStatsCacheKey(viewerLoggedIn);
   const endpoint = "/api/public/home-stats";
@@ -148,7 +156,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   try {
     const generatedAt = new Date().toISOString();
-    const data = await getPublicHomeStatsPayload(env, viewerLoggedIn);
+    const data = withHomeStatsEvidence(await getPublicHomeStatsPayload(env, viewerLoggedIn), {
+      generatedAt,
+      source: "live",
+    });
     await writePublicApiCache(env, cacheKey, data, generatedAt, accessLevel).catch((error) => {
       console.warn("DZN HOME STATS CACHE WRITE FAILED", safeErrorMessage(error));
     });
@@ -162,27 +173,49 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
     if (cached) {
       logPublicApiSnapshotFallbackServed(endpoint, cacheKey, requestId);
-      return json(withPublicApiMetadata(cached.payload, {
+      const payload = withHomeStatsEvidence(cached.payload, {
+        generatedAt: cached.generated_at,
+        source: "last_known",
+        statusMessage: "Updated from last synced ADM",
+      });
+      return json(withPublicApiMetadata(payload, {
         generated_at: cached.generated_at,
-        source: "snapshot",
+        source: "last_known",
         stale: true,
         fallback_reason: "live_query_failed_using_snapshot",
         snapshot_generated_at: cached.generated_at,
-        message: "Showing last known data while live refresh recovers.",
-      }), { headers: publicApiSnapshotFallbackHeaders(viewerLoggedIn) });
+        message: "Updated from last synced ADM while live refresh recovers.",
+      }), { headers });
+    }
+    const fallback = await buildLastKnownHomeStatsFallback(env, viewerLoggedIn).catch(() => null);
+    if (fallback?.hasAdmData || fallback?.everSyncedAdm) {
+      return json(withPublicApiMetadata(fallback, {
+        generated_at: fallback.generated_at ?? new Date().toISOString(),
+        source: "last_known",
+        stale: true,
+        fallback_reason: "live_query_failed_using_db_last_known",
+        message: "Updated from last synced ADM while live refresh recovers.",
+      }), { headers });
     }
     logPublicApi503RootCause(endpoint, error, requestId, "home_stats_live_query");
-    return json({
-      ok: false,
-      error_code: "live_query_failed_no_snapshot",
-      message: "Home stats are still refreshing and no last-known snapshot is available.",
-      generated_at: new Date().toISOString(),
-      source: "empty_no_cache",
-      stale: true,
+    const generatedAt = new Date().toISOString();
+    const empty = withHomeStatsEvidence(emptyHomeStats(), {
+      generatedAt,
+      source: "fallback_empty",
+      statusMessage: "Waiting for first ADM sync",
+    });
+    return json(withPublicApiMetadata({
+      ...empty,
       error: safePublicCacheError(error),
-      fallback_reason: "live_query_failed_no_snapshot",
+      error_code: "live_query_failed_no_snapshot",
       retry_after_seconds: 10,
-    }, { headers: publicApiErrorHeaders(), status: 503 });
+    }, {
+      generated_at: generatedAt,
+      source: "fallback_empty",
+      stale: true,
+      fallback_reason: "live_query_failed_no_snapshot",
+      message: "Waiting for first ADM sync.",
+    }), { headers });
   }
 };
 
@@ -192,22 +225,119 @@ function homeStatsCacheKey(viewerLoggedIn: boolean) {
 
 export async function getPublicHomeStatsPayload(env: Env, viewerLoggedIn: boolean) {
   if (!env.DB) throw new Error("Database binding is missing.");
+  await ensureLinkedServerMetadataColumns(env);
   if (!viewerLoggedIn) {
     return applyHomeStatsAccess(await buildPreviewHomeStats(env), false);
   }
-  await ensureLinkedServerMetadataColumns(env);
   await ensureAdmSyncSchema(env);
   await ensureBuildEventSchema(env);
   return applyHomeStatsAccess(await buildHomeStats(env), true);
 }
 
+async function buildLastKnownHomeStatsFallback(env: Env, viewerLoggedIn: boolean) {
+  if (!env.DB) return null;
+  const generatedAt = new Date().toISOString();
+  const data = await buildPreviewHomeStats(env);
+  return withHomeStatsEvidence(applyHomeStatsAccess(data, viewerLoggedIn), {
+    generatedAt,
+    source: "last_known",
+    statusMessage: "Updated from last synced ADM",
+  });
+}
+
+function withHomeStatsEvidence<T extends {
+  totals?: Record<string, unknown>;
+  network_pulse?: Record<string, unknown>;
+  topServers?: unknown[];
+  recentActivity?: unknown[];
+  top_build_servers?: unknown[];
+  event_leaderboard?: unknown;
+  map_nodes?: unknown[];
+  generated_at?: string | null;
+  source?: string | null;
+  hasAdmData?: boolean;
+  everSyncedAdm?: boolean;
+  lastSuccessfulAdmImportAt?: string | null;
+  buildLeaderboard?: unknown[];
+  statusMessage?: string;
+}>(data: T, options: {
+  generatedAt: string;
+  source: "live" | "last_known" | "fallback_empty";
+  statusMessage?: string;
+}) {
+  const totals = data.totals ?? {};
+  const topServers = Array.isArray(data.topServers) ? data.topServers : [];
+  const recentActivity = Array.isArray(data.recentActivity) ? data.recentActivity : [];
+  const mapNodes = Array.isArray(data.map_nodes) ? data.map_nodes : [];
+  const topBuildServers = Array.isArray(data.top_build_servers) ? data.top_build_servers : [];
+  const eventRows = data.event_leaderboard && typeof data.event_leaderboard === "object" && Array.isArray((data.event_leaderboard as { rows?: unknown[] }).rows)
+    ? (data.event_leaderboard as { rows: unknown[] }).rows
+    : [];
+  const buildLeaderboard = Array.isArray(data.buildLeaderboard)
+    ? data.buildLeaderboard
+    : eventRows.length > 0
+      ? eventRows
+      : topBuildServers;
+  const lastSuccessfulAdmImportAt = firstString(
+    data.lastSuccessfulAdmImportAt,
+    data.generated_at,
+    topServers.find((server) => Boolean((server as { updated_at?: unknown }).updated_at)) && (topServers.find((server) => Boolean((server as { updated_at?: unknown }).updated_at)) as { updated_at?: unknown }).updated_at,
+    options.source === "fallback_empty" ? null : options.generatedAt,
+  );
+  const statsActiveServers = numberOrZero(totals.statsActiveServers);
+  const killsTracked = numberOrZero(totals.killsTracked);
+  const deathsTracked = numberOrZero(totals.deathsTracked);
+  const joinsTracked = numberOrZero(totals.joinsTracked);
+  const recentEventsCount = numberOrZero(totals.recentEventsCount);
+  const hasAdmData = Boolean(data.hasAdmData)
+    || statsActiveServers > 0
+    || killsTracked > 0
+    || deathsTracked > 0
+    || joinsTracked > 0
+    || recentEventsCount > 0
+    || numberOrZero(totals.structuresBuilt) > 0
+    || numberOrZero(totals.buildScore) > 0
+    || topServers.length > 0
+    || recentActivity.length > 0
+    || buildLeaderboard.length > 0
+    || mapNodes.some((node) => Boolean((node as { active?: unknown; sync_status?: unknown; status?: unknown }).active)
+      || (node as { sync_status?: unknown }).sync_status === "active"
+      || (node as { status?: unknown }).status === "active");
+  const everSyncedAdm = Boolean(data.everSyncedAdm) || hasAdmData || Boolean(lastSuccessfulAdmImportAt);
+
+  return {
+    ...data,
+    source: options.source,
+    generated_at: options.generatedAt,
+    generatedAt: options.generatedAt,
+    lastSuccessfulAdmImportAt,
+    hasAdmData,
+    everSyncedAdm,
+    statsActiveServers,
+    playersOnline: numberOrZero(totals.players_online ?? totals.currentPlayersOnline),
+    serversLinked: numberOrZero(totals.serversLinked),
+    killsTracked,
+    deathsTracked,
+    joinsTracked,
+    recentEventsCount,
+    mapNodes: mapNodes.length,
+    buildLeaderboard,
+    statusMessage: options.statusMessage ?? (options.source === "last_known"
+      ? "Updated from last synced ADM"
+      : hasAdmData
+        ? "Live sync active"
+        : "Waiting for first ADM sync"),
+  };
+}
+
 async function buildPreviewHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, topServers, gameModes, mapNodes] = await Promise.all([
+  const [totals, topServers, gameModes, mapNodes, lastSuccessfulAdmImportAt] = await Promise.all([
     getPreviewTotals(db),
     getPreviewTopServers(db),
     getGameModes(db).catch(() => ({ pvp: 0, pve: 0, deathmatch: 0, pvpPve: 0 })),
     getPreviewMapNodes(db),
+    getLastSuccessfulAdmImportAt(db),
   ]);
   const syncActive = numberOrZero(totals.statsActiveServers);
   const serversLinked = numberOrZero(totals.serversLinked);
@@ -217,6 +347,7 @@ async function buildPreviewHomeStats(env: Env) {
     ...data,
     source: "last_known_adm_preview",
     generated_at: new Date().toISOString(),
+    lastSuccessfulAdmImportAt,
     totals: {
       ...data.totals,
       serversLinked,
@@ -308,7 +439,7 @@ async function getPreviewTotals(db: D1Database) {
 
 async function buildHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers] = await Promise.all([
+  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers, lastSuccessfulAdmImportAt] = await Promise.all([
     getTotals(db),
     getPlayerProfileCount(db),
     getRecentEventsCount(db),
@@ -318,6 +449,7 @@ async function buildHomeStats(env: Env) {
     getRecentActivity(db),
     getMapNodes(db),
     getRankedBuildServers(env, 10),
+    getLastSuccessfulAdmImportAt(db),
   ]);
   const buildLeaderboardRows = await buildBuildLeaderboardRows(db, topBuildServers);
 
@@ -328,6 +460,7 @@ async function buildHomeStats(env: Env) {
 
   return {
     ok: true,
+    lastSuccessfulAdmImportAt,
     totals: {
       serversLinked,
       statsActiveServers: syncActive,
@@ -412,6 +545,7 @@ async function getTotals(db: D1Database) {
           FROM kill_events
           INNER JOIN linked_servers AS live_kill_servers ON live_kill_servers.id = kill_events.linked_server_id
           WHERE lower(live_kill_servers.status) = 'live'
+            AND lower(COALESCE(live_kill_servers.listing_visibility, 'public')) != 'hidden'
             AND (live_kill_servers.merged_into_server_id IS NULL OR live_kill_servers.merged_into_server_id = '')
         ) AS killsTracked,
         (
@@ -419,6 +553,7 @@ async function getTotals(db: D1Database) {
           FROM kill_events
           INNER JOIN linked_servers AS live_death_servers ON live_death_servers.id = kill_events.linked_server_id
           WHERE lower(live_death_servers.status) = 'live'
+            AND lower(COALESCE(live_death_servers.listing_visibility, 'public')) != 'hidden'
             AND (live_death_servers.merged_into_server_id IS NULL OR live_death_servers.merged_into_server_id = '')
             AND kill_events.victim_name IS NOT NULL
         ) AS deathsTracked,
@@ -428,6 +563,7 @@ async function getTotals(db: D1Database) {
           FROM kill_events
           INNER JOIN linked_servers AS live_longest_servers ON live_longest_servers.id = kill_events.linked_server_id
           WHERE lower(live_longest_servers.status) = 'live'
+            AND lower(COALESCE(live_longest_servers.listing_visibility, 'public')) != 'hidden'
             AND (live_longest_servers.merged_into_server_id IS NULL OR live_longest_servers.merged_into_server_id = '')
         ) AS longestKill,
         SUM(COALESCE(server_build_stats.structures_built, 0)) AS structuresBuilt,
@@ -582,6 +718,43 @@ async function buildBuildLeaderboardRows(db: D1Database, rows: PublicBuildLeader
 
   const breakdowns = await getBuildLeaderboardBreakdowns(db);
   return buildPublicBuildEventLeaderboardRows(rows, breakdowns);
+}
+
+async function getLastSuccessfulAdmImportAt(db: D1Database) {
+  const row = await db
+    .prepare(
+      `SELECT MAX(value) AS lastSuccessfulAdmImportAt
+       FROM (
+         SELECT server_public_cache.last_adm_update_at AS value
+         FROM linked_servers
+         INNER JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND server_public_cache.last_adm_update_at IS NOT NULL
+         UNION ALL
+         SELECT adm_sync_state.last_sync_at AS value
+         FROM linked_servers
+         INNER JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+         WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND adm_sync_state.last_sync_at IS NOT NULL
+           AND lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'completed_with_warnings', 'adm_backfill_caught_up', 'caught_up_waiting_for_growth', 'processed', 'completed_empty', 'completed_closed', 'processing_in_chunks')
+         UNION ALL
+         SELECT COALESCE(adm_import_jobs.completed_at, adm_import_jobs.updated_at, adm_import_jobs.created_at) AS value
+         FROM adm_import_jobs
+         INNER JOIN linked_servers ON linked_servers.id = adm_import_jobs.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND lower(COALESCE(adm_import_jobs.source, '')) = 'scheduled_nitrado'
+           AND lower(COALESCE(adm_import_jobs.status, '')) IN ('completed', 'completed_empty', 'completed_no_new_events', 'completed_closed', 'caught_up_waiting_for_growth')
+       )`,
+    )
+    .first<{ lastSuccessfulAdmImportAt: string | null }>()
+    .catch(() => null);
+  return firstString(row?.lastSuccessfulAdmImportAt);
 }
 
 export function buildPublicBuildEventLeaderboardRows(rows: PublicBuildLeaderboardRow[], breakdowns = new Map<string, Partial<BuildBreakdownRow>>()) {

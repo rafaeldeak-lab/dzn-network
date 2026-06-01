@@ -138,9 +138,23 @@ type HomeStats = {
     pending: number;
   };
   generated_at?: string | null;
+  generatedAt?: string | null;
   stale?: boolean;
   source?: string | null;
   fallback_reason?: string | null;
+  hasAdmData: boolean;
+  everSyncedAdm: boolean;
+  lastSuccessfulAdmImportAt: string | null;
+  statsActiveServers: number;
+  playersOnline: number;
+  serversLinked: number;
+  killsTracked: number;
+  deathsTracked: number;
+  joinsTracked: number;
+  recentEventsCount: number;
+  mapNodes: number;
+  buildLeaderboard: PublicBuildServer[];
+  statusMessage: string;
   access_level: "full" | "preview";
   is_locked: boolean;
   locked_reason: string | null;
@@ -285,9 +299,23 @@ const emptyHomeStats: HomeStats = {
     pending: 0,
   },
   generated_at: null,
+  generatedAt: null,
   stale: false,
-  source: "initial",
+  source: "fallback_empty",
   fallback_reason: null,
+  hasAdmData: false,
+  everSyncedAdm: false,
+  lastSuccessfulAdmImportAt: null,
+  statsActiveServers: 0,
+  playersOnline: 0,
+  serversLinked: 0,
+  killsTracked: 0,
+  deathsTracked: 0,
+  joinsTracked: 0,
+  recentEventsCount: 0,
+  mapNodes: 0,
+  buildLeaderboard: [],
+  statusMessage: "Waiting for first ADM sync",
   access_level: "preview",
   is_locked: true,
   locked_reason: "Log in with Discord to unlock full network stats.",
@@ -298,7 +326,7 @@ const emptyHomeStats: HomeStats = {
 
 const HOME_STATS_REFRESH_MS = 30000;
 const HOME_STATS_LAST_GOOD_KEY = "dzn:lastGoodHomeStats";
-const HOME_STATS_LAST_GOOD_MAX_AGE_MS = 10 * 60 * 1000;
+const HOME_STATS_LAST_GOOD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 type HomeStatsLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "error_initial";
 const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
 const DZN_DISCORD_INVITE_URL =
@@ -448,8 +476,13 @@ function useHomeStats() {
         });
         if (!active || latestRequestId.current !== requestId) return;
         const normalized = normalizeHomeStats(payload.data && !payload.totals ? payload.data : payload);
-        setData(normalized);
-        setLastUpdated(normalized.generated_at ? new Date(normalized.generated_at) : new Date());
+        const shouldKeepVisibleLastKnown = normalized.source === "fallback_empty"
+          && !hasMeaningfulHomeStats(normalized)
+          && visibleHomeStatsRef.current;
+        if (!shouldKeepVisibleLastKnown) {
+          setData(normalized);
+          setLastUpdated(normalized.generated_at ? new Date(normalized.generated_at) : new Date());
+        }
         if (hasMeaningfulHomeStats(normalized)) saveLastGoodHomeStats(normalized);
         setLoadState("loaded");
         setError("");
@@ -466,7 +499,7 @@ function useHomeStats() {
             setError("");
             setLoadState("loaded");
           } else {
-            setError("Awaiting first synced ADM data.");
+            setError("Waiting for first ADM sync.");
             setLoadState("error_initial");
           }
         }
@@ -515,11 +548,20 @@ function saveLastGoodHomeStats(value: HomeStats) {
 }
 
 function hasMeaningfulHomeStats(value: HomeStats) {
-  return value.totals.serversLinked > 0
+  return value.hasAdmData
+    || value.everSyncedAdm
+    || value.totals.serversLinked > 0
     || value.totals.killsTracked > 0
+    || value.totals.deathsTracked > 0
+    || value.totals.joinsTracked > 0
     || value.totals.recentEventsCount > 0
+    || value.totals.structuresBuilt > 0
+    || value.totals.buildScore > 0
     || value.topServers.length > 0
-    || value.recentActivity.length > 0;
+    || value.recentActivity.length > 0
+    || value.top_build_servers.length > 0
+    || value.buildLeaderboard.length > 0
+    || value.map_nodes.length > 0;
 }
 
 function useHomepageAuth(): HomepageAuthState {
@@ -1065,6 +1107,15 @@ function HomepageAuthDebug({
         <MiniInfo label="Selected server" value={authState.selectedServerId ?? "none"} />
         <MiniInfo label="Manageable servers" value={String(authState.manageableServersCount)} />
         <MiniInfo label="Home stats logged in" value={homeStats.loggedIn ? "yes" : "no"} />
+        <MiniInfo label="Home stats source" value={homeStats.source ?? "unknown"} />
+        <MiniInfo label="ADM data" value={homeStats.hasAdmData ? "yes" : "no"} />
+        <MiniInfo label="Ever synced ADM" value={homeStats.everSyncedAdm ? "yes" : "no"} />
+        <MiniInfo label="Generated at" value={homeStats.generated_at ?? homeStats.generatedAt ?? "unknown"} />
+        <MiniInfo label="Last ADM import" value={homeStats.lastSuccessfulAdmImportAt ?? "none"} />
+        <MiniInfo label="Top servers" value={String(homeStats.topServers.length)} />
+        <MiniInfo label="Recent activity" value={String(homeStats.recentActivity.length)} />
+        <MiniInfo label="Build rows" value={String((homeStats.buildLeaderboard.length || homeStats.top_build_servers.length))} />
+        <MiniInfo label="Public stats error" value={homeStats.fallback_reason ?? "none"} />
         <MiniInfo label="Top servers lock" value={sectionDebugValue(homeStats.sections.topServers)} />
         <MiniInfo label="Activity lock" value={sectionDebugValue(homeStats.sections.recentActivity)} />
         <MiniInfo label="Globe lock" value={sectionDebugValue(homeStats.sections.liveGlobeTracker)} />
@@ -1135,7 +1186,7 @@ function TopServersPanel({ rows, locked = false, dataPending = false }: { rows: 
         <div className="dzn-top-servers-rows">
           {rows.length === 0 ? (
             <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-              {dataPending ? "Awaiting first synced ADM data" : "No ranked servers yet."}
+              {dataPending ? "Syncing latest ADM rankings" : "No ranked servers yet."}
             </div>
           ) : rows.slice(0, 3).map((row) => {
             const rowContent = (
@@ -1189,7 +1240,7 @@ function RecentActivityPanel({ rows, dataPending = false }: { rows: ActivityPane
       <div className="dzn-recent-activity-list">
         {rows.length === 0 ? (
           <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-            {dataPending ? "Awaiting first synced ADM activity" : "No recent activity yet."}
+            {dataPending ? "Syncing latest ADM activity" : "No recent activity yet."}
           </div>
         ) : rows.slice(0, 4).map((row, index) => {
           const Icon = row.icon;
@@ -1235,9 +1286,9 @@ function LiveMapPanel({ homeStats, dataPending = false }: { homeStats: HomeStats
         <DznOperationalGlobe nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
-        <MiniMetric label="Sync Active" value={dataPending ? "Awaiting" : formatNumber(homeStats.syncHealth.active)} />
-        <MiniMetric label="Pending" value={dataPending ? "Awaiting" : formatNumber(homeStats.syncHealth.pending)} />
-        <MiniMetric label="Events" value={dataPending ? "Awaiting ADM events" : formatNumber(homeStats.totals.recentEventsCount)} />
+        <MiniMetric label="Sync Active" value={dataPending ? "Syncing" : formatNumber(homeStats.syncHealth.active)} />
+        <MiniMetric label="Pending" value={dataPending ? "Syncing" : formatNumber(homeStats.syncHealth.pending)} />
+        <MiniMetric label="Events" value={dataPending ? "Syncing events" : formatNumber(homeStats.totals.recentEventsCount)} />
       </div>
     </div>
   );
@@ -1374,26 +1425,26 @@ function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeSt
     {
       icon: Users,
       label: "Players Online",
-      value: dataPending ? "Awaiting ADM data" : formatNumber(playersOnline),
+      value: dataPending ? "Syncing" : formatNumber(playersOnline),
       detail: "Live across connected servers",
       theme: "players",
     },
     {
       icon: Server,
       label: "Servers Linked",
-      value: dataPending ? "Awaiting ADM data" : formatNumber(homeStats.totals.serversLinked),
+      value: dataPending ? "Syncing" : formatNumber(homeStats.totals.serversLinked),
       theme: "servers",
     },
     {
       icon: Crosshair,
       label: "Kills",
-      value: dataPending ? "Awaiting ADM data" : formatNumber(homeStats.totals.killsTracked),
+      value: dataPending ? "Syncing" : formatNumber(homeStats.totals.killsTracked),
       theme: "kills",
     },
     {
       icon: Trophy,
       label: "Longest Kill",
-      value: dataPending ? "Awaiting ADM data" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "No long kill yet",
+      value: dataPending ? "Syncing" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "No long kill yet",
       theme: "longest",
     },
   ];
@@ -1440,21 +1491,21 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
     {
       icon: Wifi,
       eyebrow: "Active Servers",
-      value: dataPending ? "Awaiting ADM data" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
+      value: dataPending ? "Syncing" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
       detail: "Live and online right now",
       theme: "active",
     },
     {
       icon: Activity,
       eyebrow: "Events",
-      value: dataPending ? "Awaiting ADM events" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
+      value: dataPending ? "Syncing events" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
       detail: "Tracked across the network",
       theme: "events",
     },
     {
       icon: Trophy,
       eyebrow: "Top Server",
-      value: topServer ? formatServerDisplayName(topServer.server_name) : "Pending",
+      value: topServer ? formatServerDisplayName(topServer.server_name) : "No ranked server yet",
       detail: topServer ? `Score: ${topServer.score_label ?? formatNumber(topServer.score ?? 0)} | K/D: ${topKd}` : "Waiting for leaderboard data",
       theme: "top",
     },
@@ -1859,24 +1910,56 @@ function Footer() {
 }
 
 function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
+  const generatedAt = typeof payload.generated_at === "string"
+    ? payload.generated_at
+    : typeof payload.generatedAt === "string"
+      ? payload.generatedAt
+      : null;
+  const topBuildServers = Array.isArray(payload.top_build_servers)
+    ? payload.top_build_servers.map((row) => ({
+        rank: numberOrZero(row.rank),
+        server_id: typeof row.server_id === "string" ? row.server_id : "",
+        server_name: typeof row.server_name === "string" && row.server_name.trim() ? row.server_name : "Unnamed DZN Server",
+        slug: typeof row.slug === "string" && row.slug.trim() ? row.slug : null,
+        structures_built: numberOrZero(row.structures_built),
+        build_items_placed: numberOrZero(row.build_items_placed),
+        storage_items_placed: numberOrZero(row.storage_items_placed),
+        traps_placed: numberOrZero(row.traps_placed),
+        build_score: numberOrZero(row.build_score),
+        full_walls_built: numberOrZero(row.full_walls_built),
+        watchtowers_built: numberOrZero(row.watchtowers_built),
+        gates_fence_kits_built: numberOrZero(row.gates_fence_kits_built),
+        storage_expansion_built: numberOrZero(row.storage_expansion_built),
+        top_builder_name: typeof row.top_builder_name === "string" ? row.top_builder_name : null,
+        top_builder_count: numberOrZero(row.top_builder_count),
+        last_build_at: typeof row.last_build_at === "string" ? row.last_build_at : null,
+      }))
+    : [];
+  const eventLeaderboard = normalizeEventLeaderboard(payload.event_leaderboard);
+  const buildLeaderboard = Array.isArray(payload.buildLeaderboard)
+    ? payload.buildLeaderboard.map((row) => normalizeBuildServerRow(row))
+    : eventLeaderboard?.event_type === "build"
+      ? eventLeaderboard.rows
+      : topBuildServers;
+  const totals = {
+    serversLinked: numberOrZero(payload.totals?.serversLinked ?? payload.serversLinked),
+    statsActiveServers: numberOrZero(payload.totals?.statsActiveServers ?? payload.statsActiveServers),
+    players_online: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline ?? payload.playersOnline),
+    currentPlayersOnline: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline ?? payload.playersOnline),
+    maxPlayersCapacity: numberOrZero(payload.totals?.maxPlayersCapacity),
+    playerCountFreshServers: numberOrZero(payload.totals?.playerCountFreshServers),
+    playerCountStaleServers: numberOrZero(payload.totals?.playerCountStaleServers),
+    playersSeen: numberOrZero(payload.totals?.playersSeen),
+    killsTracked: numberOrZero(payload.totals?.killsTracked ?? payload.killsTracked),
+    deathsTracked: numberOrZero(payload.totals?.deathsTracked ?? payload.deathsTracked),
+    joinsTracked: numberOrZero(payload.totals?.joinsTracked ?? payload.joinsTracked),
+    longestKill: numberOrZero(payload.totals?.longestKill),
+    recentEventsCount: numberOrZero(payload.totals?.recentEventsCount ?? payload.recentEventsCount),
+    structuresBuilt: numberOrZero(payload.totals?.structuresBuilt),
+    buildScore: numberOrZero(payload.totals?.buildScore),
+  };
   return {
-    totals: {
-      serversLinked: numberOrZero(payload.totals?.serversLinked),
-      statsActiveServers: numberOrZero(payload.totals?.statsActiveServers),
-      players_online: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline),
-      currentPlayersOnline: numberOrZero(payload.totals?.players_online ?? payload.totals?.currentPlayersOnline),
-      maxPlayersCapacity: numberOrZero(payload.totals?.maxPlayersCapacity),
-      playerCountFreshServers: numberOrZero(payload.totals?.playerCountFreshServers),
-      playerCountStaleServers: numberOrZero(payload.totals?.playerCountStaleServers),
-      playersSeen: numberOrZero(payload.totals?.playersSeen),
-      killsTracked: numberOrZero(payload.totals?.killsTracked),
-      deathsTracked: numberOrZero(payload.totals?.deathsTracked),
-      joinsTracked: numberOrZero(payload.totals?.joinsTracked),
-      longestKill: numberOrZero(payload.totals?.longestKill),
-      recentEventsCount: numberOrZero(payload.totals?.recentEventsCount),
-      structuresBuilt: numberOrZero(payload.totals?.structuresBuilt),
-      buildScore: numberOrZero(payload.totals?.buildScore),
-    },
+    totals,
     network_pulse: {
       active_servers: numberOrZero(payload.network_pulse?.active_servers),
       events: numberOrZero(payload.network_pulse?.events),
@@ -1884,27 +1967,8 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       best_kd: finiteNumberOrNull(payload.network_pulse?.best_kd),
       current_event: normalizeNetworkEvent(payload.network_pulse?.current_event),
     },
-    event_leaderboard: normalizeEventLeaderboard(payload.event_leaderboard),
-    top_build_servers: Array.isArray(payload.top_build_servers)
-      ? payload.top_build_servers.map((row) => ({
-          rank: numberOrZero(row.rank),
-          server_id: typeof row.server_id === "string" ? row.server_id : "",
-          server_name: typeof row.server_name === "string" && row.server_name.trim() ? row.server_name : "Unnamed DZN Server",
-          slug: typeof row.slug === "string" && row.slug.trim() ? row.slug : null,
-          structures_built: numberOrZero(row.structures_built),
-          build_items_placed: numberOrZero(row.build_items_placed),
-          storage_items_placed: numberOrZero(row.storage_items_placed),
-          traps_placed: numberOrZero(row.traps_placed),
-          build_score: numberOrZero(row.build_score),
-          full_walls_built: numberOrZero(row.full_walls_built),
-          watchtowers_built: numberOrZero(row.watchtowers_built),
-          gates_fence_kits_built: numberOrZero(row.gates_fence_kits_built),
-          storage_expansion_built: numberOrZero(row.storage_expansion_built),
-          top_builder_name: typeof row.top_builder_name === "string" ? row.top_builder_name : null,
-          top_builder_count: numberOrZero(row.top_builder_count),
-          last_build_at: typeof row.last_build_at === "string" ? row.last_build_at : null,
-        }))
-      : [],
+    event_leaderboard: eventLeaderboard,
+    top_build_servers: topBuildServers,
     topServers: Array.isArray(payload.topServers)
       ? payload.topServers.map((server) => ({
           public_slug: server.public_slug ?? null,
@@ -1973,10 +2037,41 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       active: numberOrZero(payload.syncHealth?.active),
       pending: numberOrZero(payload.syncHealth?.pending),
     },
-    generated_at: typeof payload.generated_at === "string" ? payload.generated_at : null,
+    generated_at: generatedAt,
+    generatedAt,
     stale: Boolean(payload.stale),
     source: typeof payload.source === "string" ? payload.source : null,
     fallback_reason: typeof payload.fallback_reason === "string" ? payload.fallback_reason : null,
+    hasAdmData: Boolean(payload.hasAdmData)
+      || totals.statsActiveServers > 0
+      || totals.killsTracked > 0
+      || totals.deathsTracked > 0
+      || totals.joinsTracked > 0
+      || totals.recentEventsCount > 0
+      || totals.structuresBuilt > 0
+      || totals.buildScore > 0
+      || (Array.isArray(payload.topServers) && payload.topServers.length > 0)
+      || (Array.isArray(payload.recentActivity) && payload.recentActivity.length > 0)
+      || buildLeaderboard.length > 0,
+    everSyncedAdm: Boolean(payload.everSyncedAdm)
+      || Boolean(payload.hasAdmData)
+      || totals.statsActiveServers > 0
+      || totals.killsTracked > 0
+      || totals.deathsTracked > 0
+      || totals.joinsTracked > 0
+      || totals.recentEventsCount > 0
+      || Boolean(payload.lastSuccessfulAdmImportAt),
+    lastSuccessfulAdmImportAt: typeof payload.lastSuccessfulAdmImportAt === "string" ? payload.lastSuccessfulAdmImportAt : null,
+    statsActiveServers: numberOrZero(payload.statsActiveServers ?? totals.statsActiveServers),
+    playersOnline: numberOrZero(payload.playersOnline ?? totals.players_online),
+    serversLinked: numberOrZero(payload.serversLinked ?? totals.serversLinked),
+    killsTracked: numberOrZero(payload.killsTracked ?? totals.killsTracked),
+    deathsTracked: numberOrZero(payload.deathsTracked ?? totals.deathsTracked),
+    joinsTracked: numberOrZero(payload.joinsTracked ?? totals.joinsTracked),
+    recentEventsCount: numberOrZero(payload.recentEventsCount ?? totals.recentEventsCount),
+    mapNodes: numberOrZero(payload.mapNodes ?? (Array.isArray(payload.map_nodes) ? payload.map_nodes.length : 0)),
+    buildLeaderboard,
+    statusMessage: typeof payload.statusMessage === "string" ? payload.statusMessage : (payload.source === "last_known" ? "Updated from last synced ADM" : "Live sync active"),
     access_level: payload.access_level === "preview" ? "preview" : "full",
     is_locked: Boolean(payload.is_locked),
     locked_reason: typeof payload.locked_reason === "string" ? payload.locked_reason : null,

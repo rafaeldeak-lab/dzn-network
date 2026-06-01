@@ -60,17 +60,30 @@ includesAll(homeStatsRoute, [
   "home-stats:preview",
   "readPublicApiCache",
   "writePublicApiCache",
+  "withHomeStatsEvidence",
+  "hasAdmData",
+  "everSyncedAdm",
+  "lastSuccessfulAdmImportAt",
+  "statsActiveServers",
+  "killsTracked",
+  "recentEventsCount",
+  "mapNodes",
+  "source: \"last_known\"",
+  "source: \"fallback_empty\"",
+  "live_query_failed_using_db_last_known",
   "live_query_failed_using_snapshot",
   "live_query_failed_no_snapshot",
-  "status: 503",
-  "ok: false",
   "retry_after_seconds: 10",
-  "publicApiErrorHeaders()",
+  "HOME_STATS_NO_STORE_HEADERS",
   "logPublicApiLoadFailed",
   "logPublicApiSnapshotFallbackServed",
 ]);
+assert.equal(homeStatsRoute.includes("status: 503"), false, "Home stats should not turn recoverable public fallback into a first-sync 503.");
+assert.equal(homeStatsRoute.includes("publicApiErrorHeaders()"), false, "Home stats should use no-store JSON fallback instead of cached error payloads.");
 assert.equal(homeStatsRoute.includes("withPublicApiMetadata(applyHomeStatsAccess(emptyHomeStats()"), false, "Home stats must not return fake zero payloads as successful fallback responses.");
 assert.equal(homeStatsRoute.includes("server_stats.longest_kill_distance"), false, "Home stats must not query non-existent server_stats longest-kill columns.");
+assert.equal(homeStatsRoute.includes("lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'"), true, "Homepage stats should treat NULL listing visibility as public.");
+assert.equal(homeStatsRoute.includes("listing_visibility = 'public'"), false, "Homepage stats must not exclude NULL visibility public servers.");
 const previewAccessSource = homeStatsRoute.slice(homeStatsRoute.indexOf("export function applyHomeStatsAccess"));
 assert.equal(previewAccessSource.includes("killsTracked: 0"), false, "Homepage preview must not replace real aggregate kill totals with fake zeroes.");
 assert.equal(previewAccessSource.includes("recentEventsCount: 0"), false, "Homepage preview must not replace real aggregate event totals with fake zeroes.");
@@ -103,11 +116,17 @@ includesAll(landing, [
   "latestRequestId",
   "fetchJsonWithRetry<HomeStatsResponse>",
   "HOME_STATS_LAST_GOOD_MAX_AGE_MS",
-  "Awaiting first synced ADM data.",
   "payload.data && !payload.totals ? payload.data : payload",
-  "dataPending ? \"Awaiting ADM data\"",
-  "Awaiting first synced ADM activity",
+  "hasAdmData",
+  "everSyncedAdm",
+  "lastSuccessfulAdmImportAt",
+  "Syncing latest ADM rankings",
+  "Syncing latest ADM activity",
+  "Updated from last synced ADM",
 ]);
+assert.equal(landing.includes("Awaiting first synced ADM data"), false, "Homepage must not render fake first-sync copy while ADM data exists.");
+assert.equal(landing.includes("Awaiting ADM data"), false, "Homepage stat cards must not replace last-known ADM numbers with awaiting copy.");
+assert.equal(landing.includes("Checking ADM Data"), false, "Homepage must not show checking-copy as a permanent public state.");
 assert.equal(landing.includes("&& !hasMeaningfulHomeStats(displayHomeStats)"), true, "Homepage should use last-known ADM data instead of pending copy when stats exist.");
 assert.equal(landing.includes("dataPending ? \"Refreshing\""), false, "Homepage must not render Refreshing as every stat-card value.");
 assert.equal(landing.includes("dataPending ? \"Loading\""), false, "Homepage stat cards must not render generic Loading as every stat-card value.");

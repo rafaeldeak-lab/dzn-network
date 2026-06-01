@@ -50,7 +50,7 @@ async function main() {
   const homeStats = await request("/api/public/home-stats");
   const homeStatsJson = parseJson(homeStats.fullBody);
   const homeStatsHasAdmEvidence = hasAdmHomeStatsEvidence(homeStatsJson);
-  checks.push(homeStats.ok && homeStats.status === 200 && homeStatsJson?.ok && homeStatsJson.source !== "empty_no_cache" && homeStatsHasAdmEvidence
+  checks.push(homeStats.ok && homeStats.status === 200 && homeStatsJson?.ok && !["empty_no_cache", "fallback_empty"].includes(String(homeStatsJson.source ?? "")) && homeStatsHasAdmEvidence
     ? pass("public home-stats ADM snapshot", "Public home-stats returns last-known ADM data or a valid snapshot.", {
       status: homeStats.status,
       source: homeStatsJson?.source,
