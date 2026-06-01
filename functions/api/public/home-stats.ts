@@ -280,9 +280,7 @@ function withHomeStatsEvidence<T extends {
       : topBuildServers;
   const lastSuccessfulAdmImportAt = firstString(
     data.lastSuccessfulAdmImportAt,
-    data.generated_at,
     topServers.find((server) => Boolean((server as { updated_at?: unknown }).updated_at)) && (topServers.find((server) => Boolean((server as { updated_at?: unknown }).updated_at)) as { updated_at?: unknown }).updated_at,
-    options.source === "fallback_empty" ? null : options.generatedAt,
   );
   const statsActiveServers = numberOrZero(totals.statsActiveServers);
   const killsTracked = numberOrZero(totals.killsTracked);
@@ -744,7 +742,7 @@ async function getLastSuccessfulAdmImportAt(db: D1Database) {
          UNION ALL
          SELECT COALESCE(adm_import_jobs.completed_at, adm_import_jobs.updated_at, adm_import_jobs.created_at) AS value
          FROM adm_import_jobs
-         INNER JOIN linked_servers ON linked_servers.id = adm_import_jobs.linked_server_id
+         INNER JOIN linked_servers ON linked_servers.id = adm_import_jobs.server_id
          WHERE lower(linked_servers.status) = 'live'
            AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
