@@ -254,11 +254,12 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
          FROM adm_import_jobs
          WHERE server_id = ?
            AND status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable')
+           AND NOT (COALESCE(total_lines, 0) > 0 AND COALESCE(current_line, 0) >= COALESCE(total_lines, 0) AND status IN ('rebuilding', 'failed_retryable'))
          ORDER BY created_at ASC
          LIMIT 1`,
       ).bind(linkedServerId).first<JobRow>().catch(() => null),
       db.prepare(
-        "SELECT COUNT(*) AS count FROM adm_import_jobs WHERE server_id = ? AND status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable')",
+        "SELECT COUNT(*) AS count FROM adm_import_jobs WHERE server_id = ? AND status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable') AND NOT (COALESCE(total_lines, 0) > 0 AND COALESCE(current_line, 0) >= COALESCE(total_lines, 0) AND status IN ('rebuilding', 'failed_retryable'))",
       ).bind(linkedServerId).first<{ count: number | null }>().catch(() => ({ count: 0 })),
       db.prepare(
         "SELECT COUNT(*) AS count FROM adm_import_jobs WHERE server_id = ? AND status IN ('completed', 'completed_with_warnings') AND date(COALESCE(completed_at, updated_at, created_at)) = date('now')",
@@ -658,6 +659,7 @@ function normalizeLatestReadTruth(issue: AdmFileReadIssueRow | null, diagnostic:
 function classifyAdmReadIssue(issue: AdmFileReadIssueRow | null, fallback: string | null | undefined) {
   const httpStatus = numberOrNull(issue?.last_http_status);
   const error = sanitize(issue?.last_error ?? fallback ?? "");
+  if (isSuccessfulAdmActivity(error)) return null;
   if (httpStatus && httpStatus >= 500 && httpStatus <= 504) return `HTTP ${httpStatus} / NITRADO_UPSTREAM_DOWN`;
   if (httpStatus === 429) return "HTTP 429 / NITRADO_RATE_LIMITED";
   if (httpStatus === 401) return "HTTP 401 / NITRADO_UNAUTHORIZED";
@@ -686,6 +688,7 @@ function formatAdmReadIssueMessage(issue: AdmFileReadIssueRow | null, fallback: 
     return `Nitrado listed an ADM file but returned HTTP 404 when DZN tried to read it. DZN will skip it and continue with other eligible files.`;
   }
   const message = sanitize(issue?.last_error ?? fallback ?? "");
+  if (isSuccessfulAdmActivity(message)) return "ADM imported successfully.";
   if (/WORKER_SUBREQUEST_LIMIT/i.test(message)) return "Cloudflare Worker subrequest budget was reached before ADM file read completed. Auto-sync will continue in the next small batch.";
   if (/FETCH_TIMEOUT/i.test(message)) return `Nitrado ADM file read timed out.${retrySuffix}`;
   if (/TOKENIZED_EMPTY_BODY/i.test(message)) return `Nitrado tokenized ADM download returned an empty body.${retrySuffix}`;
@@ -694,6 +697,7 @@ function formatAdmReadIssueMessage(issue: AdmFileReadIssueRow | null, fallback: 
 
 function canonicalAdmErrorCode(value: string | null) {
   const text = String(value ?? "");
+  if (isSuccessfulAdmActivity(text)) return null;
   if (/NITRADO_UPSTREAM_DOWN|HTTP\s+5\d\d/i.test(text)) return "NITRADO_UPSTREAM_DOWN";
   if (/NITRADO_RATE_LIMITED|HTTP\s+429/i.test(text)) return "NITRADO_RATE_LIMITED";
   if (/NITRADO_UNAUTHORIZED|HTTP\s+401/i.test(text)) return "NITRADO_UNAUTHORIZED";
@@ -704,6 +708,10 @@ function canonicalAdmErrorCode(value: string | null) {
   if (/FETCH_THREW/i.test(text)) return "FETCH_THREW";
   if (/TOKENIZED_EMPTY_BODY/i.test(text)) return "TOKENIZED_EMPTY_BODY";
   return text.trim() || null;
+}
+
+function isSuccessfulAdmActivity(value: string | null | undefined) {
+  return /ADM chunk import completed|Scheduled ADM import completed|Manual ADM import completed|completed in \d+ chunks?|ADM backfill is caught up|is caught up at \d+ lines|already imported|processed successfully/i.test(String(value ?? ""));
 }
 
 function ownerAutoSyncStatus(activeJob: ReturnType<typeof normalizeJob> | null, code: string | null, server: ServerRow, stats: ReturnType<typeof statsFromRow>) {

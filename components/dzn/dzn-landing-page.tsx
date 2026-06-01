@@ -466,7 +466,7 @@ function useHomeStats() {
             setError("");
             setLoadState("loaded");
           } else {
-            setError("Checking last synced ADM data.");
+            setError("Awaiting first synced ADM data.");
             setLoadState("error_initial");
           }
         }
@@ -602,7 +602,8 @@ export function DznLandingPage() {
     () => (isLoggedIn ? unlockHomeStatsForLoggedIn(liveStats.data) : liveStats.data),
     [isLoggedIn, liveStats.data],
   );
-  const homeStatsPending = liveStats.loadState === "loading_initial" || liveStats.loadState === "error_initial";
+  const homeStatsPending = (liveStats.loadState === "loading_initial" || liveStats.loadState === "error_initial")
+    && !hasMeaningfulHomeStats(displayHomeStats);
   const loggedInContext = isLoggedIn
     ? authState.manageableServersCount > 0
       ? "connected_server"
@@ -1134,7 +1135,7 @@ function TopServersPanel({ rows, locked = false, dataPending = false }: { rows: 
         <div className="dzn-top-servers-rows">
           {rows.length === 0 ? (
             <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-              {dataPending ? "Checking last synced ADM data" : "No ranked servers yet."}
+              {dataPending ? "Awaiting first synced ADM data" : "No ranked servers yet."}
             </div>
           ) : rows.slice(0, 3).map((row) => {
             const rowContent = (
@@ -1188,7 +1189,7 @@ function RecentActivityPanel({ rows, dataPending = false }: { rows: ActivityPane
       <div className="dzn-recent-activity-list">
         {rows.length === 0 ? (
           <div className="rounded-lg border border-amber-300/18 bg-amber-300/[0.06] p-3 text-sm font-bold text-amber-100">
-            {dataPending ? "Checking recent ADM activity" : "No recent activity yet."}
+            {dataPending ? "Awaiting first synced ADM activity" : "No recent activity yet."}
           </div>
         ) : rows.slice(0, 4).map((row, index) => {
           const Icon = row.icon;
@@ -1234,9 +1235,9 @@ function LiveMapPanel({ homeStats, dataPending = false }: { homeStats: HomeStats
         <DznOperationalGlobe nodes={nodes} />
       </div>
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
-        <MiniMetric label="Sync Active" value={dataPending ? "Pending" : formatNumber(homeStats.syncHealth.active)} />
-        <MiniMetric label="Pending" value={dataPending ? "Pending" : formatNumber(homeStats.syncHealth.pending)} />
-        <MiniMetric label="Events" value={dataPending ? "Checking ADM events" : formatNumber(homeStats.totals.recentEventsCount)} />
+        <MiniMetric label="Sync Active" value={dataPending ? "Awaiting" : formatNumber(homeStats.syncHealth.active)} />
+        <MiniMetric label="Pending" value={dataPending ? "Awaiting" : formatNumber(homeStats.syncHealth.pending)} />
+        <MiniMetric label="Events" value={dataPending ? "Awaiting ADM events" : formatNumber(homeStats.totals.recentEventsCount)} />
       </div>
     </div>
   );
@@ -1373,26 +1374,26 @@ function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeSt
     {
       icon: Users,
       label: "Players Online",
-      value: dataPending ? "Checking ADM data" : formatNumber(playersOnline),
+      value: dataPending ? "Awaiting ADM data" : formatNumber(playersOnline),
       detail: "Live across connected servers",
       theme: "players",
     },
     {
       icon: Server,
       label: "Servers Linked",
-      value: dataPending ? "Checking ADM data" : formatNumber(homeStats.totals.serversLinked),
+      value: dataPending ? "Awaiting ADM data" : formatNumber(homeStats.totals.serversLinked),
       theme: "servers",
     },
     {
       icon: Crosshair,
       label: "Kills",
-      value: dataPending ? "Checking ADM data" : formatNumber(homeStats.totals.killsTracked),
+      value: dataPending ? "Awaiting ADM data" : formatNumber(homeStats.totals.killsTracked),
       theme: "kills",
     },
     {
       icon: Trophy,
       label: "Longest Kill",
-      value: dataPending ? "Checking ADM data" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "No long kill yet",
+      value: dataPending ? "Awaiting ADM data" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "No long kill yet",
       theme: "longest",
     },
   ];
@@ -1439,14 +1440,14 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
     {
       icon: Wifi,
       eyebrow: "Active Servers",
-      value: dataPending ? "Checking ADM data" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
+      value: dataPending ? "Awaiting ADM data" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
       detail: "Live and online right now",
       theme: "active",
     },
     {
       icon: Activity,
       eyebrow: "Events",
-      value: dataPending ? "Checking ADM events" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
+      value: dataPending ? "Awaiting ADM events" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
       detail: "Tracked across the network",
       theme: "events",
     },

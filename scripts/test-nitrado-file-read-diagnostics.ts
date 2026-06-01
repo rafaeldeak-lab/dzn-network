@@ -213,7 +213,10 @@ async function main() {
   assert.ok(admSyncSource.includes("completed_or_active"));
   assert.ok(admSyncSource.includes("completed_or_active.filename = adm_sync_file_state.adm_file"));
   assert.ok(admSyncSource.includes("completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')"));
-  assert.ok(admSyncSource.includes("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END"));
+  const metadataPriorityIndex = admSyncSource.indexOf("CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END");
+  const activeJobPriorityIndex = admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END");
+  assert.ok(metadataPriorityIndex >= 0 && activeJobPriorityIndex >= 0 && metadataPriorityIndex < activeJobPriorityIndex, "Stale metadata must outrank active import jobs so one service cannot starve the fleet.");
+  assert.ok(admSyncSource.includes("COALESCE(current_line, 0) >= COALESCE(total_lines, 0)"));
   assert.ok(admSyncSource.includes("ADM file ${directFileName} is already imported; Worker advanced to the next server."));
   assert.ok(admSyncSource.includes("await updateAdmWorkerCursor(env, options.cursorKey ?? \"last_adm_linked_server_id\", selected.id).catch(() => null);"));
   assert.ok(admSyncSource.includes("stateLatestAdmFile"));

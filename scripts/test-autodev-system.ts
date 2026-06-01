@@ -65,6 +65,7 @@ assert.equal(productionSmoke.includes("const json = parseJson(result.fullBody);"
 assert.equal(read(".github/workflows/dzn-post-deploy-verify.yml").includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
 const cycleWatchWorkflow = read(".github/workflows/dzn-adm-cycle-watch.yml");
 const postDeployWorkflow = read(".github/workflows/dzn-post-deploy-verify.yml");
+const admWatchSource = read("scripts/autodev/adm-cycle-watch.ts");
 assert.equal(cycleWatchWorkflow.includes("Resolve ADM cycle watch result"), true);
 assert.equal(cycleWatchWorkflow.includes("steps.adm-live.outputs.result"), true);
 assert.equal(cycleWatchWorkflow.includes("Protected ADM health/live evidence failed."), true);
@@ -72,6 +73,9 @@ assert.equal(cycleWatchWorkflow.includes("optional direct evidence as unavailabl
 assert.equal(cycleWatchWorkflow.includes("if: steps.adm-watch.outcome == 'failure' || steps.adm-live.outcome == 'failure'"), false);
 assert.equal(cycleWatchWorkflow.includes("continue-on-error"), false);
 assert.equal(cycleWatchWorkflow.includes("echo \"result=$code\" >> \"$GITHUB_OUTPUT\""), true);
+assert.equal(admWatchSource.includes("getServiceAdmEvidence"), true);
+assert.equal(admWatchSource.includes("Public home-stats has last-known ADM data."), true);
+assert.equal(admWatchSource.includes("Metadata/player count is older than 30 minutes, but current ADM evidence exists"), true);
 assert.equal(postDeployWorkflow.includes("Resolve post deploy verification result"), true);
 assert.equal(postDeployWorkflow.includes("steps.adm-live.outputs.result"), true);
 assert.equal(postDeployWorkflow.includes("Production smoke or protected live ADM evidence failed."), true);
@@ -139,6 +143,8 @@ assert.equal(existsSync(".github/workflows/dzn-adm-cycle-watch.yml"), true);
 const admLiveVerify = read("scripts/verify-production-adm-live.ts");
 assert.equal(admLiveVerify.includes("gameserver_details_log_files_noftp_download"), true);
 assert.equal(admLiveVerify.includes("ADM Worker has not selected this service within 30 minutes"), true);
+assert.equal(admLiveVerify.includes("getHealthServiceEvidence"), true);
+assert.equal(admLiveVerify.includes("protected ADM health has current evidence"), true);
 assert.equal(admLiveVerify.includes("public home-stats ADM fallback"), true);
 assert.equal(admLiveVerify.includes("Permanent ADM data exists but public home-stats"), true);
 assert.equal(admLiveVerify.includes("shouldUseProtectedAdmHealthFallbackBeforeD1"), true);

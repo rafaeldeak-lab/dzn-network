@@ -3342,6 +3342,10 @@ function SyncHealthSummaryPanel({
     ?? null;
   const classifiedError = dashboardHealth?.sync.latest_classified_error
     ?? classifyDashboardAdmError(dashboardHealth?.sync.latest_read_issue?.last_error ?? latestError);
+  const latestActivity = formatLatestAdmActivity(
+    dashboardHealth?.sync.latest_completed_import?.filename,
+    dashboardHealth?.sync.latest_read_issue?.last_error ?? latestError,
+  );
   return (
     <DashboardPanel className="p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -3356,10 +3360,10 @@ function SyncHealthSummaryPanel({
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MiniInfo label="Last successful ADM import" value={lastSuccessfulImport ? formatDashboardDate(lastSuccessfulImport) : "Not synced yet"} />
         <MiniInfo label="Last attempted ADM read" value={lastAttemptedAdmRead ? formatDashboardDate(lastAttemptedAdmRead) : "Not checked yet"} />
-        <MiniInfo label="Next scheduled sync" value={dashboardHealth?.sync.next_adm_processing_due_at ? formatDashboardDate(dashboardHealth.sync.next_adm_processing_due_at) : nextScheduledSync} />
+        <MiniInfo label="Next scheduled sync" value={dashboardHealth?.sync.next_adm_processing_due_at ? formatDueOrDashboardDate(dashboardHealth.sync.next_adm_processing_due_at) : nextScheduledSync} />
         <MiniInfo label="Latest readable file" value={dashboardHealth?.sync.newest_readable_adm_filename ?? syncStatus?.newest_readable_adm_filename ?? "Waiting for readable ADM"} />
         <MiniInfo label="Latest unreadable file" value={latestUnreadableFile ?? "None"} />
-        <MiniInfo label="Latest classified error" value={classifiedError} />
+        <MiniInfo label={classifiedError ? "Latest classified error" : "Latest activity"} value={classifiedError ?? latestActivity} />
         <MiniInfo label="Next ADM read retry" value={dashboardHealth?.sync.latest_read_issue?.next_retry_at ? formatDashboardDate(dashboardHealth.sync.latest_read_issue.next_retry_at) : "Next eligible sync"} />
         <MiniInfo label="Queued backfill files" value={String(dashboardHealth?.sync.backfill_status.queued_jobs_count ?? syncStatus?.adm_backfill_status.queued_files.length ?? 0)} />
         <MiniInfo label="Unreadable queue" value={String(dashboardHealth?.sync.backfill_status.unreadable_files_count ?? syncStatus?.adm_backfill_status.unreadable_files.length ?? syncStatus?.unreadable_files_queued ?? 0)} />
@@ -6863,8 +6867,8 @@ function AutomationStatusGrid({
         <MiniInfo label="Latest ADM State" value={state.latestAdmState || latestAdmFile || "Waiting for ADM"} />
         <MiniInfo label="Last Successful Import" value={lastImport ? formatDashboardDate(lastImport) : "Not synced yet"} />
         <MiniInfo label="Last Attempted Read" value={lastAttempt ? formatDashboardDate(lastAttempt) : "Not checked yet"} />
-        <MiniInfo label="Next Discovery Check" value={nextDiscovery ? formatDashboardDate(nextDiscovery) : "Scheduling automatically"} />
-        <MiniInfo label="Next Processing Check" value={nextProcessing ? formatDashboardDate(nextProcessing) : "Scheduling automatically"} />
+        <MiniInfo label="Next Discovery Check" value={nextDiscovery ? formatDueOrDashboardDate(nextDiscovery) : "Scheduling automatically"} />
+        <MiniInfo label="Next Processing Check" value={nextProcessing ? formatDueOrDashboardDate(nextProcessing) : "Scheduling automatically"} />
       </div>
     </DashboardPanel>
   );
@@ -6904,7 +6908,12 @@ function ImportantAutoHealth({
         <AutoHealthSignal label="ADM Discovery" value="Running" detail={discoveryInterval ? `Every ${discoveryInterval} minutes` : "Automatic cadence"} tone="cyan" />
         <AutoHealthSignal label="ADM Processing" value="Running" detail={processingInterval ? `Every ${processingInterval} minutes` : "Automatic cadence"} tone="emerald" />
         <AutoHealthSignal label="Backoff Protection" value="Enabled" detail="Auto retry active" tone="emerald" />
-        <AutoHealthSignal label="Latest Classified Error" value={state.latestClassifiedError ?? "None"} detail={state.latestErrorMessage} tone={state.manualActionRequired ? "orange" : state.latestClassifiedError ? "cyan" : "zinc"} />
+        <AutoHealthSignal
+          label={state.latestClassifiedError ? "Latest Classified Error" : "Latest Activity"}
+          value={state.latestClassifiedError ?? "ADM imported successfully"}
+          detail={state.latestClassifiedError ? state.latestErrorMessage : "Last-known ADM data remains available while DZN keeps checking Nitrado."}
+          tone={state.manualActionRequired ? "orange" : state.latestClassifiedError ? "cyan" : "emerald"}
+        />
         <AutoHealthSignal label="Retry Mode" value="Automatic" detail="DZN retries unreadable ADM files automatically" tone="cyan" />
         <AutoHealthSignal label="Queue Status" value={queueStatus} detail={state.nextAction} tone={activeJob ? "emerald" : "zinc"} />
       </div>
@@ -7401,6 +7410,12 @@ function LogDiagnosticsPanel({
 function formatDashboardDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatDueOrDashboardDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.getTime() <= Date.now() ? "Due now" : date.toLocaleString();
 }
 
 function formatNullableDashboardNumber(value: number | null) {
@@ -8826,6 +8841,7 @@ function getOwnerAdmAutoStatus(
 function formatAdmErrorCode(value: string | null | undefined) {
   const text = String(value ?? "").trim();
   if (!text || text.toLowerCase() === "null") return null;
+  if (isAdmSuccessActivityMessage(text)) return null;
   const classified = classifyDashboardAdmError(text);
   if (classified) return classified;
   if (/latest_adm_unreadable|adm_file_unreadable/i.test(text)) return "LATEST_ADM_UNREADABLE";
@@ -9102,7 +9118,7 @@ function formatSyncStatus(value: string) {
 
 function classifyDashboardAdmError(value: string | null) {
   const text = String(value ?? "").trim();
-  if (!text) return "None";
+  if (!text || isAdmSuccessActivityMessage(text)) return null;
   if (/worker_subrequest_limit|too many subrequests|subrequest limit/i.test(text)) return "WORKER_SUBREQUEST_LIMIT";
   if (/rate.?limit|429/i.test(text)) return "NITRADO_RATE_LIMITED";
   if (/upstream|503|502|504|500/i.test(text)) return "NITRADO_UPSTREAM_DOWN";
@@ -9113,6 +9129,17 @@ function classifyDashboardAdmError(value: string | null) {
   if (/403|forbidden/i.test(text)) return "NITRADO_FORBIDDEN";
   if (/404|not found/i.test(text)) return "NITRADO_FILE_NOT_FOUND";
   return text.length > 64 ? `${text.slice(0, 61)}...` : text;
+}
+
+function isAdmSuccessActivityMessage(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  return /ADM chunk import completed|Scheduled ADM import completed|Manual ADM import completed|completed in \d+ chunks?|ADM backfill is caught up|is caught up at \d+ lines|already imported|processed successfully/i.test(text);
+}
+
+function formatLatestAdmActivity(filename: string | null | undefined, fallback: string | null | undefined) {
+  if (filename) return `ADM imported successfully: ${filename}`;
+  if (isAdmSuccessActivityMessage(fallback)) return "ADM imported successfully";
+  return "Automatic ADM tracking is active";
 }
 
 function formatSyncTrigger(value: string | null | undefined) {

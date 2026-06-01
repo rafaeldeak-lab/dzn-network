@@ -66,6 +66,9 @@ for (const required of [
 
 assert.equal(autoSurface.includes("Nitrado Logs: Monitoring"), true);
 assert.equal(dashboardSource.includes("NITRADO_UPSTREAM_DOWN"), true);
+assert.equal(dashboardSource.includes("formatDueOrDashboardDate"), true);
+assert.equal(dashboardSource.includes("isAdmSuccessActivityMessage"), true);
+assert.equal(dashboardSource.includes('label={state.latestClassifiedError ? "Latest Classified Error" : "Latest Activity"}'), true);
 assert.equal(dashboardSource.includes("manualActionRequired: false"), true);
 assert.equal(dashboardSource.includes("NITRADO_UNAUTHORIZED"), true);
 assert.equal(dashboardSource.includes("manualActionRequired: true"), true);
@@ -79,6 +82,8 @@ assert.equal(healthApiSource.includes("retryMode: \"automatic\""), true);
 assert.equal(healthApiSource.includes("Nitrado Log Files"), true);
 assert.equal(healthApiSource.includes("currentLiveAdm.healthy"), true);
 assert.equal(healthApiSource.includes("backlog_status"), true);
+assert.equal(healthApiSource.includes("isSuccessfulAdmActivity"), true);
+assert.equal(healthApiSource.includes("COALESCE(current_line, 0) >= COALESCE(total_lines, 0)"), true);
 assert.equal(healthApiSource.includes("DZN found the latest ADM but Nitrado has not made it readable yet. Auto-sync will retry automatically."), true);
 assert.equal(healthApiSource.includes("Reduce Log Output is disabled"), false);
 

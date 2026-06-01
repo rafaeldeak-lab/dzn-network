@@ -1736,7 +1736,31 @@ class MemoryStatement {
       row.updated_at = this.values[0];
       return changed(1);
     }
-    if (q.includes("scheduled adm import job stalled for more than")) {
+    if (q.startsWith("update adm_import_jobs set") && q.includes("status = case") && q.includes("current_line = total_lines")) {
+      let changes = 0;
+      const source = String(this.values[2] ?? "");
+      const cutoff = String(this.values[3] ?? "");
+      for (const row of this.db.admImportJobs.values()) {
+        const updatedAt = String(row.updated_at ?? row.created_at ?? "");
+        if (
+          row.source === source &&
+          ["processing", "parsing", "writing", "rebuilding", "failed_retryable"].includes(String(row.status)) &&
+          Number(row.total_lines ?? 0) > 0 &&
+          Number(row.current_line ?? 0) >= Number(row.total_lines ?? 0) &&
+          updatedAt < cutoff
+        ) {
+          row.status = Number(row.failed_writes ?? 0) > 0 || String(row.warnings_json ?? "[]") !== "[]" || row.error_message ? "completed_with_warnings" : "completed";
+          row.error_message = null;
+          row.current_line = Number(row.total_lines ?? row.current_line);
+          row.chunks_processed = Number(row.total_chunks ?? row.chunks_processed);
+          row.completed_at = row.completed_at ?? row.updated_at ?? this.values[0];
+          row.updated_at = this.values[1];
+          changes += 1;
+        }
+      }
+      return changed(changes);
+    }
+    if (q.includes("scheduled adm import job stalled")) {
       let changes = 0;
       const source = String(this.values[1] ?? "");
       const cutoff = String(this.values[2] ?? "");

@@ -4246,39 +4246,6 @@ async function finalizeAdmImportJob(
     warnings.push(`${row.filename}: Last ADM Import Report could not be saved after ADM rows were written. ${safeSyncErrorMessage(error)}`);
   }
 
-  const syncRunMessage = buildAdmImportSyncRunMessage({
-    source: row.source,
-    filename: row.filename,
-    rawLines: totalLines,
-    parsedKills: fullReport.parsedPvpKills,
-    writtenKills: Number(row.written_kills ?? 0),
-    joins: Number(row.joins ?? 0),
-    disconnects: Number(row.disconnects ?? 0),
-    playerlistSnapshots: Number(row.playerlist_snapshots ?? 0),
-    duplicateSkips: Number(row.duplicate_skips ?? 0),
-    failedWrites: Number(row.failed_writes ?? 0),
-    importedAt: now,
-  });
-  try {
-    await recordSyncRun(env, {
-      id: row.id,
-      linkedServerId: row.server_id,
-      sourceServiceId: server.nitrado_service_id,
-      triggerType: row.source,
-      status: "completed",
-      message: syncRunMessage,
-      linesRead: totalLines,
-      linesProcessed: totalLines,
-      eventsCreated: Number(row.player_events ?? 0) + Number(row.written_kills ?? 0),
-      killsCreated: Number(row.written_kills ?? 0),
-      startedAt: row.created_at ?? now,
-      finishedAt: now,
-      durationMs: row.created_at ? Math.max(0, Date.parse(now) - Date.parse(row.created_at)) : 0,
-    });
-  } catch (error) {
-    warnings.push(`${row.filename}: Import history row could not be saved after ADM rows were written. ${safeSyncErrorMessage(error)}`);
-  }
-
   const hasSkippedFailedLineWarning = warnings.some((warning) => /skipped line \d+ after parser\/write failure/i.test(warning));
   const hasFinishWarnings = warnings.length > initialWarningCount;
   const finalStatus: AdmImportJobProgressResult["status"] = hasFinishWarnings || hasSkippedFailedLineWarning ? "completed_with_warnings" : "completed";
@@ -4332,10 +4299,46 @@ async function finalizeAdmImportJob(
         result_json = ?,
         completed_at = ?,
         updated_at = ?
-       WHERE id = ? AND server_id = ?`,
+      WHERE id = ? AND server_id = ?`,
     )
     .bind(finalStatus, chunkStats.totalChunks, chunkStats.totalChunks, publicCacheUpdated ? 1 : 0, discordQueuesCreated, JSON.stringify(warnings), JSON.stringify(fileResult), now, now, row.id, row.server_id)
     .run();
+
+  const syncRunMessage = buildAdmImportSyncRunMessage({
+    source: row.source,
+    filename: row.filename,
+    rawLines: totalLines,
+    parsedKills: fullReport.parsedPvpKills,
+    writtenKills: Number(row.written_kills ?? 0),
+    joins: Number(row.joins ?? 0),
+    disconnects: Number(row.disconnects ?? 0),
+    playerlistSnapshots: Number(row.playerlist_snapshots ?? 0),
+    duplicateSkips: Number(row.duplicate_skips ?? 0),
+    failedWrites: Number(row.failed_writes ?? 0),
+    importedAt: now,
+  });
+  try {
+    await recordSyncRun(env, {
+      id: row.id,
+      linkedServerId: row.server_id,
+      sourceServiceId: server.nitrado_service_id,
+      triggerType: row.source,
+      status: "completed",
+      message: syncRunMessage,
+      linesRead: totalLines,
+      linesProcessed: totalLines,
+      eventsCreated: Number(row.player_events ?? 0) + Number(row.written_kills ?? 0),
+      killsCreated: Number(row.written_kills ?? 0),
+      startedAt: row.created_at ?? now,
+      finishedAt: now,
+      durationMs: row.created_at ? Math.max(0, Date.parse(now) - Date.parse(row.created_at)) : 0,
+    });
+  } catch (error) {
+    console.warn("DZN ADM IMPORT HISTORY RECORD SKIPPED", {
+      filename: row.filename,
+      message: safeSyncErrorMessage(error),
+    });
+  }
 
   const completed = await getAdmImportJob(env, row.server_id, row.id);
   return toAdmImportJobProgress(completed ?? { ...row, status: finalStatus, result_json: JSON.stringify(fileResult), completed_at: now });
@@ -4996,6 +4999,30 @@ function scheduledJobResultFromProgress(
 async function recoverStaleAdmImportJobs(env: Env, source: string) {
   const now = new Date().toISOString();
   const cutoff = new Date(Date.now() - SCHEDULED_ADM_IMPORT_STALE_MS).toISOString();
+  await requireDb(env)
+    .prepare(
+      `UPDATE adm_import_jobs SET
+        status = CASE
+          WHEN COALESCE(failed_writes, 0) > 0
+            OR COALESCE(warnings_json, '[]') NOT IN ('', '[]')
+            OR COALESCE(error_message, '') != ''
+          THEN 'completed_with_warnings'
+          ELSE 'completed'
+        END,
+        error_message = NULL,
+        current_line = total_lines,
+        chunks_processed = total_chunks,
+        completed_at = COALESCE(completed_at, updated_at, ?),
+        updated_at = ?
+       WHERE source = ?
+         AND status IN ('processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable')
+         AND COALESCE(total_lines, 0) > 0
+         AND COALESCE(current_line, 0) >= COALESCE(total_lines, 0)
+         AND COALESCE(updated_at, created_at) < ?`,
+    )
+    .bind(now, now, source, cutoff)
+    .run();
+
   await requireDb(env)
     .prepare(
       `UPDATE adm_import_jobs SET
@@ -6155,13 +6182,13 @@ export async function runAdmWorkerSyncTick(
     }
 
     const activeImportJobs = Number(selected.active_import_jobs ?? 0);
-    const selectionReason = activeImportJobs > 0
-      ? "active_import_job"
-      : Number(selected.metadata_stale ?? 0) === 1
+    const selectionReason = Number(selected.metadata_stale ?? 0) === 1
         ? "stale_metadata"
-        : selected.target_adm_file
-          ? "target_adm_file"
-          : "due_discovery";
+        : activeImportJobs > 0
+          ? "active_import_job"
+          : selected.target_adm_file
+            ? "target_adm_file"
+            : "due_discovery";
     await recordAdmWorkerServiceSelection(env, selected, selectionReason).catch(() => null);
     let pendingJobs: PendingAdmImportJobsResult | undefined;
     if (activeImportJobs > 0 && !explicitTargetFileName) {
@@ -6723,8 +6750,8 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
        SELECT *
        FROM eligible
        ORDER BY
-         CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END,
          CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END,
+         CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END,
          CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END,
          CASE WHEN last_worker_selected_at IS NULL THEN 0 ELSE 1 END,
          COALESCE(last_worker_selected_at, '1970-01-01T00:00:00.000Z') ASC,

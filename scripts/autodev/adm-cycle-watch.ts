@@ -31,7 +31,7 @@ type AdmHealthService = {
     nextRetryAt?: string | null;
     lastHttpStatus?: number | null;
   } | null;
-  activeImportJob?: { updatedAt?: string | null; status?: string | null } | null;
+  activeImportJob?: { updatedAt?: string | null; status?: string | null; currentLine?: number | null; totalLines?: number | null } | null;
 };
 
 type AdmHealthSnapshot = {
@@ -71,6 +71,20 @@ async function poll() {
     json = body ? JSON.parse(body) : null;
   } catch {
     // handled below
+  }
+  return { status: response.status, json, body };
+}
+
+async function fetchHomeStats() {
+  const response = await fetch(`${baseUrl}/api/public/home-stats`, {
+    headers: { accept: "application/json" },
+  });
+  const body = await response.text();
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = body ? JSON.parse(body) as Record<string, unknown> : null;
+  } catch {
+    // handled by caller
   }
   return { status: response.status, json, body };
 }
@@ -136,22 +150,40 @@ async function main() {
     for (const service of result.json.services ?? []) {
       const status = String(service.lastSyncStatus ?? service.latestClassifiedError ?? "").toLowerCase();
       const classifiedError = String(service.latestClassifiedError ?? "").toLowerCase();
+      const currentEvidence = getServiceAdmEvidence(service);
       if (isOlderThanMinutes(service.metadataLastCheckedAt ?? service.playerCountLastCheckedAt, 30)) {
-        checks.push(fail(`service ${service.serviceId} metadata stale`, "Active ADM service metadata/player count is older than 30 minutes.", service, "high"));
-        fatal = true;
-        continue;
+        if (currentEvidence) {
+          checks.push(warn(`service ${service.serviceId} metadata stale`, `Metadata/player count is older than 30 minutes, but current ADM evidence exists: ${currentEvidence}.`, {
+            serviceId: service.serviceId,
+            metadataLastCheckedAt: service.metadataLastCheckedAt,
+            playerCountLastCheckedAt: service.playerCountLastCheckedAt,
+            latestFile: service.latestFileState?.fileName,
+          }, "medium"));
+        } else {
+          checks.push(fail(`service ${service.serviceId} metadata stale`, "Active ADM service metadata/player count is older than 30 minutes and no current ADM job/cursor/retry evidence was found.", service, "high"));
+          fatal = true;
+          continue;
+        }
       }
       if (isOlderThanMinutes(service.lastWorkerSelectedAt, 30)) {
-        checks.push(fail(`service ${service.serviceId} selection stale`, "ADM Worker has not selected this service within 30 minutes.", service, "high"));
-        fatal = true;
-        continue;
+        if (currentEvidence) {
+          checks.push(warn(`service ${service.serviceId} selection stale`, `ADM Worker selection is older than 30 minutes, but current ADM evidence exists: ${currentEvidence}.`, {
+            serviceId: service.serviceId,
+            lastWorkerSelectedAt: service.lastWorkerSelectedAt,
+            latestFile: service.latestFileState?.fileName,
+          }, "medium"));
+        } else {
+          checks.push(fail(`service ${service.serviceId} selection stale`, "ADM Worker has not selected this service within 30 minutes and no current ADM job/cursor/retry evidence was found.", service, "high"));
+          fatal = true;
+          continue;
+        }
       }
       if (service.manualActionRequired || ["nitrado_unauthorized", "nitrado_forbidden"].includes(classifiedError)) {
         checks.push(fail(`service ${service.serviceId} auth`, "ADM health shows an auth/file permission issue.", service, "high"));
         fatal = true;
         continue;
       }
-      if (service.activeImportJob && isStuckImportJob(service.activeImportJob.updatedAt)) {
+      if (service.activeImportJob && isStuckImportJob(service.activeImportJob.updatedAt) && !isTerminalImportJobEvidence(service.activeImportJob)) {
         checks.push(fail(`service ${service.serviceId} import job stuck`, "Automatic ADM import job has not updated within the threshold.", service.activeImportJob, "high"));
         fatal = true;
         continue;
@@ -195,6 +227,20 @@ async function main() {
   } while (Date.now() < deadline);
 
   checks.push(lastSnapshot ? pass("adm health snapshot", "ADM health snapshot completed.", { services: lastSnapshot.services?.length ?? 0 }) : fail("adm health snapshot", "No ADM health snapshot was collected.", undefined, "high"));
+  const homeStats = await fetchHomeStats().catch((error) => ({ status: 0, json: null, body: error instanceof Error ? error.message : String(error) }));
+  const totals = isRecord(homeStats.json?.totals) ? homeStats.json.totals : {};
+  const hasHomeAdmData = Number(totals.killsTracked ?? 0) > 0
+    || Number(totals.deathsTracked ?? 0) > 0
+    || Number(totals.joinsTracked ?? 0) > 0
+    || Number(totals.recentEventsCount ?? 0) > 0
+    || Number(totals.statsActiveServers ?? 0) > 0;
+  if (homeStats.status !== 200 || !homeStats.json) {
+    checks.push(fail("public home-stats", `Expected /api/public/home-stats 200 JSON, got ${homeStats.status}.`, { body: String(homeStats.body ?? "").slice(0, 500) }, "high"));
+  } else if (!hasHomeAdmData) {
+    checks.push(fail("public home-stats", "Public home-stats has no last-known ADM data despite ADM health evidence.", homeStats.json, "high"));
+  } else {
+    checks.push(pass("public home-stats", "Public home-stats has last-known ADM data.", totals));
+  }
 
   const report = makeReport("adm-cycle-watch", checks, [
     "Recoverable Nitrado states are acceptable when retry/backoff is present.",
@@ -209,6 +255,25 @@ function isStuckImportJob(updatedAt: string | null | undefined) {
   return Number.isFinite(time) && Date.now() - time > 30 * 60 * 1000;
 }
 
+function getServiceAdmEvidence(service: AdmHealthService) {
+  const currentCursor = Math.max(
+    Number(service.latestFileState?.cursorLine ?? 0),
+    Number(service.latestFileState?.importedLineCount ?? 0),
+    Number(service.latestFileState?.lineCount ?? 0),
+  );
+  const noftp = service.sourceMatrix?.find((source) => source.sourceName === "gameserver_details_log_files_noftp_download");
+  if (noftp?.works && noftp.preferred && currentCursor > 0) return `noftp preferred with cursor ${currentCursor}`;
+  if (service.activeImportJob) return `active job ${service.activeImportJob.status ?? "unknown"}`;
+  if (service.lastSuccessfulImportAt || service.lastProcessedFile) return `last processed ${service.lastProcessedFile ?? service.lastSuccessfulImportAt}`;
+  if (service.nextRetryAt || service.latestFileState?.nextRetryAt) return `retry scheduled ${service.latestFileState?.nextRetryAt ?? service.nextRetryAt}`;
+  return null;
+}
+
+function isTerminalImportJobEvidence(job: AdmHealthService["activeImportJob"]) {
+  const total = Number(job?.totalLines ?? 0);
+  return total > 0 && Number(job?.currentLine ?? 0) >= total && /rebuilding|failed_retryable/i.test(String(job?.status ?? ""));
+}
+
 function heartbeatAgeSecondsFrom(value: string | null) {
   const time = Date.parse(String(value ?? ""));
   if (!Number.isFinite(time)) return null;
@@ -218,6 +283,10 @@ function heartbeatAgeSecondsFrom(value: string | null) {
 function isOlderThanMinutes(value: string | null | undefined, minutes: number) {
   const time = Date.parse(String(value ?? ""));
   return !Number.isFinite(time) || Date.now() - time > minutes * 60 * 1000;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 main().catch((error) => {

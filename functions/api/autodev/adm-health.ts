@@ -285,7 +285,8 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
       || Boolean(fileState?.next_retry_at)
       || Boolean(lastSuccessfulJob?.completed_at || lastSyncRun?.finished_at)
     );
-    const activeImportJob = importJob && isActiveImportStatus(importJob.status) ? summarizeJob(importJob) : null;
+    const importJobLineComplete = isImportJobLineComplete(importJob);
+    const activeImportJob = importJob && isActiveImportStatus(importJob.status) && !importJobLineComplete ? summarizeJob(importJob) : null;
 
     return {
       serviceId: service.nitrado_service_id,
@@ -309,7 +310,7 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
       nextRetryAt: fileState?.next_retry_at ?? null,
       activeImportJob,
       lastSuccessfulImportAt: lastSuccessfulJob?.completed_at ?? lastSyncRun?.finished_at ?? null,
-      importJobStatus: importJob?.status ?? "no_active_import_job",
+      importJobStatus: importJobLineComplete ? "completed_with_warnings" : importJob?.status ?? "no_active_import_job",
       recentEventCount: Number(eventCount?.count ?? 0),
       recoverable,
       manualActionRequired,
@@ -435,6 +436,12 @@ function isActiveImportStatus(status: string | null | undefined) {
   return /queued|processing|parsing|writing|rebuilding|failed_retryable/i.test(String(status ?? ""));
 }
 
+function isImportJobLineComplete(job: ImportJobRow | null) {
+  if (!job) return false;
+  const total = Number(job.total_lines ?? 0);
+  return total > 0 && Number(job.current_line ?? 0) >= total && /rebuilding|failed_retryable/i.test(String(job.status ?? ""));
+}
+
 function isRecoverableStatus(value: string | null | undefined) {
   return RECOVERABLE_STATUSES.has(normalizeStatus(value));
 }
@@ -507,6 +514,7 @@ function normalizeStatus(value: string | null | undefined) {
 
 function canonicalError(value: string | null | undefined) {
   const text = String(value ?? "");
+  if (!text.trim() || /ADM chunk import completed|Scheduled ADM import completed|Manual ADM import completed|completed in \d+ chunks?|ADM backfill is caught up|is caught up at \d+ lines|already imported|processed successfully/i.test(text)) return null;
   if (/NITRADO_UPSTREAM_DOWN|HTTP\s+5\d\d/i.test(text)) return "NITRADO_UPSTREAM_DOWN";
   if (/NITRADO_RATE_LIMITED|HTTP\s+429/i.test(text)) return "NITRADO_RATE_LIMITED";
   if (/NITRADO_UNAUTHORIZED|HTTP\s+401/i.test(text)) return "NITRADO_UNAUTHORIZED";

@@ -288,7 +288,7 @@ type AdmHealthService = {
   importJobStatus?: string | null;
   lastSuccessfulImportAt?: string | null;
   recentEventCount?: number | null;
-  activeImportJob?: { status?: string | null; updatedAt?: string | null } | null;
+  activeImportJob?: { status?: string | null; updatedAt?: string | null; currentLine?: number | null; totalLines?: number | null } | null;
   sourceMatrix?: Array<{ sourceName?: string | null; works?: boolean; preferred?: boolean; nextTestAt?: string | null; lastHttpStatus?: number | null }>;
   latestFileState?: {
     fileName?: string | null;
@@ -344,19 +344,34 @@ async function verifyFromAdmHealth() {
       continue;
     }
     const label = `${service.serverName ?? serviceId} (${serviceId})`;
+    const serviceEvidence = getHealthServiceEvidence(service);
     if (isOlderThan(service.metadataLastCheckedAt ?? service.playerCountLastCheckedAt, 30)) {
-      fail(label, "Nitrado metadata/player count is older than 30 minutes.", {
-        metadataLastCheckedAt: service.metadataLastCheckedAt,
-        playerCountLastCheckedAt: service.playerCountLastCheckedAt,
-      });
+      if (serviceEvidence) {
+        warn(label, `Nitrado metadata/player count is older than 30 minutes, but protected ADM health has current evidence: ${serviceEvidence}.`, {
+          metadataLastCheckedAt: service.metadataLastCheckedAt,
+          playerCountLastCheckedAt: service.playerCountLastCheckedAt,
+        });
+      } else {
+        fail(label, "Nitrado metadata/player count is older than 30 minutes and no current ADM job/cursor/retry evidence was found.", {
+          metadataLastCheckedAt: service.metadataLastCheckedAt,
+          playerCountLastCheckedAt: service.playerCountLastCheckedAt,
+        });
+      }
     } else {
       pass(label, `Metadata is fresh enough. Current players ${Number(service.currentPlayers ?? 0)} / ${Number(service.maxPlayers ?? 0)}.`);
     }
     if (isOlderThan(service.lastWorkerSelectedAt, 30)) {
-      fail(label, "ADM Worker has not selected this service within 30 minutes.", {
-        lastWorkerSelectedAt: service.lastWorkerSelectedAt,
-        lastSelectionReason: service.lastSelectionReason,
-      });
+      if (serviceEvidence) {
+        warn(label, `ADM Worker selection is older than 30 minutes, but protected ADM health has current evidence: ${serviceEvidence}.`, {
+          lastWorkerSelectedAt: service.lastWorkerSelectedAt,
+          lastSelectionReason: service.lastSelectionReason,
+        });
+      } else {
+        fail(label, "ADM Worker has not selected this service within 30 minutes and no current ADM job/cursor/retry evidence was found.", {
+          lastWorkerSelectedAt: service.lastWorkerSelectedAt,
+          lastSelectionReason: service.lastSelectionReason,
+        });
+      }
     } else {
       pass(label, `Worker selected service recently for ${service.lastSelectionReason ?? "unknown reason"}.`);
     }
@@ -390,6 +405,22 @@ async function verifyFromAdmHealth() {
     }
   }
   await checkPublicHomeStatsConsistency(hasPermanentAdmData);
+}
+
+function getHealthServiceEvidence(service: AdmHealthService) {
+  const fileState = service.latestFileState ?? null;
+  const cursor = Math.max(Number(fileState?.cursorLine ?? 0), Number(fileState?.importedLineCount ?? 0), Number(fileState?.lineCount ?? 0));
+  const noftp = service.sourceMatrix?.find((source) => source.sourceName === "gameserver_details_log_files_noftp_download");
+  if (noftp?.works && noftp.preferred && cursor > 0) return `noftp preferred with cursor ${cursor}`;
+  if (service.activeImportJob && !isTerminalHealthImportJob(service.activeImportJob)) return `active job ${service.activeImportJob.status ?? "unknown"}`;
+  if (service.lastSuccessfulImportAt || service.recentEventCount || service.importJobStatus === "completed_with_warnings") return "successful import history";
+  if (isFuture(fileState?.nextRetryAt ?? service.nextRetryAt)) return `retry scheduled for ${fileState?.nextRetryAt ?? service.nextRetryAt}`;
+  return null;
+}
+
+function isTerminalHealthImportJob(job: AdmHealthService["activeImportJob"]) {
+  const total = Number(job?.totalLines ?? 0);
+  return total > 0 && Number(job?.currentLine ?? 0) >= total && /rebuilding|failed_retryable/i.test(String(job?.status ?? ""));
 }
 
 function safeText(value: unknown) {
