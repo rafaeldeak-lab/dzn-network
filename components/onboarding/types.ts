@@ -227,6 +227,16 @@ export type LinkedServer = {
   public_language?: string | null;
   public_region_label?: string | null;
   public_listing_updated_at?: string | null;
+  category_changed_at?: string | null;
+  category_cooldown_until?: string | null;
+  category_effective_at?: string | null;
+  category_first_set_at?: string | null;
+  category_first_grace_used_at?: string | null;
+  category_locked_until?: string | null;
+  category_lock_reason?: string | null;
+  listing_visibility?: "public" | "hidden" | string | null;
+  tags_changed_at?: string | null;
+  tags_cooldown_until?: string | null;
   adm_path?: string | null;
   adm_status?: "Connected" | "Discovered, read pending" | "Needs review" | string | null;
   adm_latest_file?: string | null;

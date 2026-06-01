@@ -2625,7 +2625,7 @@ function ServerDashboard({
         <div className="space-y-5 px-4 py-5 sm:px-5 xl:px-6">
       <ActionProgressPanel action={dashboardAction} onDismiss={clearDashboardAction} />
       {activeTab !== "sync-health" && !normalizedServerCategory ? (
-        <ServerCategoryReminderBanner onOpenSettings={() => setActiveTab("settings-danger")} />
+        <ServerCategoryReminderBanner onOpenSettings={() => { window.location.href = serverSettingsHref(server.id, "category"); }} />
       ) : null}
       {activeTab === "overview" ? (
       <>
@@ -2665,7 +2665,7 @@ function ServerDashboard({
                       <ExternalLink className="h-3.5 w-3.5" />
                     </Link>
                   ) : null}
-                  <Link href="/setup" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-100">
+                  <Link href={serverSettingsHref(server.id)} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-100">
                     Server Settings
                     <Settings className="h-3.5 w-3.5" />
                   </Link>
@@ -2811,7 +2811,7 @@ function ServerDashboard({
             refreshing={refreshingSyncData || manualRefreshing}
             onRefresh={() => void refreshNow()}
             publicProfileHref={server.public_slug ? publicServerProfileHref(server.public_slug) : null}
-            onOpenSettings={() => setActiveTab("settings-danger")}
+            onOpenSettings={() => { window.location.href = serverSettingsHref(server.id); }}
           />
           ) : null}
 
@@ -3216,7 +3216,7 @@ function ServerDashboard({
             <div className="mt-4 grid gap-3">
               <ActionLink href="/leaderboards" icon={<Crosshair className="h-4 w-4" />} label="View Kill Feed" />
               <ActionLink href="/setup" icon={<Settings className="h-4 w-4" />} label="Edit Server" />
-              <ActionLink href="/setup" icon={<Gauge className="h-4 w-4" />} label="Server Settings" />
+              <ActionLink href={serverSettingsHref(server.id)} icon={<Gauge className="h-4 w-4" />} label="Server Settings" />
               <ActionLink href="/setup#review-test" icon={<LifeBuoy className="h-4 w-4" />} label="Setup Guide" />
               <button type="button" disabled={refreshingServerInfo || isDashboardActionActive} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55">
                 <span>{dashboardActionKey === "refresh-server-info" || refreshingServerInfo ? "Running..." : "Refresh Server Info"}</span>
@@ -8393,6 +8393,12 @@ function normalizeDashboardSyncStatus(status: string, latestAdmFile: string) {
 
 function publicServerProfileHref(slug: string) {
   return `/servers/profile?slug=${encodeURIComponent(slug)}`;
+}
+
+function serverSettingsHref(serverId: string, focus?: "category") {
+  const query = new URLSearchParams({ serverId });
+  if (focus) query.set("focus", focus);
+  return `/dashboard/server-settings?${query.toString()}`;
 }
 
 function getSyncBanner(values: {

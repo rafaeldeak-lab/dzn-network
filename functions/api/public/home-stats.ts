@@ -282,6 +282,7 @@ async function getPreviewTotals(db: D1Database) {
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
     )
     .first<TotalsRow>()
@@ -437,6 +438,7 @@ async function getTotals(db: D1Database) {
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
     )
     .first<TotalsRow>();
@@ -464,7 +466,7 @@ async function getPreviewTopServers(db: D1Database) {
       `SELECT
         linked_servers.public_slug,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         COALESCE(server_stats.total_kills, 0) AS total_kills,
         COALESCE(server_stats.total_deaths, 0) AS total_deaths,
         COALESCE(server_stats.unique_players, 0) AS unique_players,
@@ -484,6 +486,7 @@ async function getPreviewTopServers(db: D1Database) {
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY stats_active DESC, updated_at DESC
        LIMIT 3`,
@@ -537,7 +540,7 @@ async function getPreviewMapNodes(db: D1Database) {
         linked_servers.public_slug,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         discord_guilds.name AS guild_name,
-        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         linked_servers.region,
         linked_servers.platform,
         linked_servers.map_name,
@@ -564,6 +567,7 @@ async function getPreviewMapNodes(db: D1Database) {
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY COALESCE(server_public_cache.last_adm_update_at, server_stats.updated_at, linked_servers.updated_at, linked_servers.created_at) DESC
        LIMIT 80`,
@@ -656,6 +660,7 @@ async function getBuildLeaderboardBreakdowns(db: D1Database) {
        FROM build_events
        INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        GROUP BY build_events.linked_server_id`,
     )
@@ -671,6 +676,7 @@ async function getPlayerProfileCount(db: D1Database) {
        FROM player_profiles
        INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND ${mockNameFilterSql("player_profiles.player_name")}`,
     )
@@ -687,6 +693,7 @@ async function getRecentEventsCount(db: D1Database) {
          FROM player_events
          INNER JOIN linked_servers ON linked_servers.id = player_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND COALESCE(player_events.occurred_at, player_events.created_at) >= datetime('now', '-1 day')
            AND ${mockNameFilterSql("player_events.player_name")}
@@ -695,6 +702,7 @@ async function getRecentEventsCount(db: D1Database) {
          FROM kill_events
          INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND COALESCE(kill_events.occurred_at, kill_events.created_at) >= datetime('now', '-1 day')
            AND ${mockNameFilterSql("kill_events.killer_name")}
@@ -704,6 +712,7 @@ async function getRecentEventsCount(db: D1Database) {
          FROM build_events
          INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND COALESCE(build_events.occurred_at, build_events.created_at) >= datetime('now', '-1 day')
            AND ${mockNameFilterSql("build_events.player_name")}
@@ -718,9 +727,10 @@ async function getGameModes(db: D1Database) {
     .prepare(
       `SELECT server_type, COUNT(*) AS count
        FROM (
-         SELECT COALESCE(NULLIF(server_mode, ''), server_type) AS server_type
+         SELECT COALESCE(NULLIF(server_category, ''), NULLIF(server_mode, ''), server_type) AS server_type
          FROM linked_servers
          WHERE lower(status) = 'live'
+           AND lower(COALESCE(listing_visibility, 'public')) != 'hidden'
        )
        GROUP BY server_type`,
     )
@@ -777,6 +787,7 @@ async function getTopPlayers(db: D1Database) {
        FROM player_profiles
        INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND ${mockNameFilterSql("player_profiles.player_name")}
        ORDER BY player_profiles.kills DESC, player_profiles.longest_kill_distance DESC, player_profiles.updated_at DESC
@@ -827,6 +838,7 @@ async function getRecentActivity(db: D1Database) {
          FROM kill_events
          INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("kill_events.killer_name")}
            AND ${mockNameFilterSql("kill_events.victim_name")}
@@ -851,6 +863,7 @@ async function getRecentActivity(db: D1Database) {
          FROM player_events
          INNER JOIN linked_servers ON linked_servers.id = player_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("player_events.player_name")}
          UNION ALL
@@ -874,6 +887,7 @@ async function getRecentActivity(db: D1Database) {
          FROM build_events
          INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("build_events.player_name")}
          UNION ALL
@@ -897,6 +911,7 @@ async function getRecentActivity(db: D1Database) {
          FROM sync_runs
          INNER JOIN linked_servers ON linked_servers.id = sync_runs.linked_server_id
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
          UNION ALL
@@ -919,6 +934,7 @@ async function getRecentActivity(db: D1Database) {
            linked_servers.created_at AS sort_time
          FROM linked_servers
          WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        )
        ORDER BY sort_time DESC
@@ -950,7 +966,7 @@ async function getMapNodes(db: D1Database) {
         linked_servers.public_slug,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         discord_guilds.name AS guild_name,
-        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         linked_servers.region,
         linked_servers.platform,
         linked_servers.map_name,
@@ -985,6 +1001,7 @@ async function getMapNodes(db: D1Database) {
        LEFT JOIN server_build_stats ON server_build_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY linked_servers.updated_at DESC, linked_servers.created_at DESC
        LIMIT 80`,

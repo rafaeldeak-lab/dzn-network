@@ -299,7 +299,7 @@ async function queryPublicServersPreview(env: Env) {
         linked_servers.id,
         linked_servers.public_slug,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         linked_servers.tags_json,
         linked_servers.status,
         linked_servers.nitrado_service_id,
@@ -369,6 +369,7 @@ async function queryPublicServersPreview(env: Env) {
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
          CASE
@@ -413,7 +414,7 @@ async function queryPublicServers(env: Env) {
       linked_servers.id,
       linked_servers.public_slug,
       COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-      COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+      COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
       linked_servers.tags_json,
       linked_servers.status,
       linked_servers.nitrado_service_id,
@@ -497,6 +498,7 @@ async function queryPublicServers(env: Env) {
     LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
     LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
     WHERE lower(linked_servers.status) = 'live'
+      AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
       AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
   `;
 
@@ -596,6 +598,7 @@ async function ensurePublicSlugsForLiveServers(env: Env) {
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.public_slug IS NULL OR linked_servers.public_slug = '')`,
     )
     .all<{ id: string; server_name: string | null; nitrado_service_name: string | null; public_slug: string | null; guild_name: string | null }>();

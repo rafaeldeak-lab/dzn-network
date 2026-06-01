@@ -76,7 +76,9 @@ includesAll(eventsLib, [
 const joinRoute = source("functions/api/events/[slug]/join.ts");
 includesAll(joinRoute, ["joinCompetitiveEvent", "readJson<JoinBody>", "server_id"]);
 const serverSettingsRoute = source("functions/api/servers/[serverId]/settings.ts");
-includesAll(serverSettingsRoute, ["normalizeServerCategory", "INVALID_SERVER_CATEGORY", "server_category", "You do not have access to this server."]);
+includesAll(serverSettingsRoute, ["readOwnerServerSettings", "updateServerCategory", "server_category", "NOT_AUTHENTICATED"]);
+const serverSettingsPolicy = source("functions/_lib/server-settings.ts");
+includesAll(serverSettingsPolicy, ["normalizeOwnerServerCategory", "CATEGORY_INVALID", "CATEGORY_COOLDOWN_ACTIVE", "CATEGORY_LOCKED_DURING_EVENT", "You do not have access to this server."]);
 const matchmakingRoute = source("functions/api/events/matchmaking.ts");
 includesAll(matchmakingRoute, ["createCategorySafeMatchmaking", "opponent_server_id", "event_slug"]);
 const eventsRoute = source("functions/api/events.ts");

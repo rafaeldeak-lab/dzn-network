@@ -432,6 +432,16 @@ export async function ensureLinkedServerMetadataColumns(env: Env) {
     ["public_language", "TEXT"],
     ["public_region_label", "TEXT"],
     ["public_listing_updated_at", "TEXT"],
+    ["category_changed_at", "TEXT"],
+    ["category_cooldown_until", "TEXT"],
+    ["category_effective_at", "TEXT"],
+    ["category_first_set_at", "TEXT"],
+    ["category_first_grace_used_at", "TEXT"],
+    ["category_locked_until", "TEXT"],
+    ["category_lock_reason", "TEXT"],
+    ["listing_visibility", "TEXT DEFAULT 'public'"],
+    ["tags_changed_at", "TEXT"],
+    ["tags_cooldown_until", "TEXT"],
   ].filter(([name]) => !existing.has(name));
 
   for (const [name, type] of missingColumns) {
