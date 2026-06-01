@@ -46,6 +46,7 @@ type FileStateRow = {
   next_retry_at: string | null;
   last_http_status: number | null;
   last_error: string | null;
+  retry_count: number | null;
 };
 
 type JobRow = {
@@ -195,7 +196,19 @@ function hasCurrentCursor(file: FileStateRow | null, jobs: JobRow[]) {
 }
 
 function fileHasImportEvidence(file: FileStateRow, jobs: JobRow[]) {
-  return hasCurrentCursor(file, jobs);
+  if (hasCurrentCursor(file, jobs)) return true;
+  const status = String(file.status ?? "").toLowerCase();
+  if (["unreadable", "failed_unreadable", "parser_error", "write_error", "partial"].includes(status)) {
+    return Boolean(
+      file.next_retry_at ||
+      file.last_error ||
+      file.last_http_status ||
+      Number(file.retry_count ?? 0) > 0 ||
+      Number(file.latest_known_line_count ?? 0) > 0 ||
+      Number(file.line_count ?? 0) > 0,
+    );
+  }
+  return false;
 }
 
 function scheduledJobForFile(file: FileStateRow, jobs: JobRow[]) {
@@ -507,7 +520,7 @@ async function main() {
   const fileStates = d1<FileStateRow>(`
     SELECT linked_server_id, source_service_id, adm_file, status, line_count,
            latest_known_line_count, imported_line_count, cursor_line, last_read_at,
-           last_growth_at, next_retry_at, last_http_status, last_error
+           last_growth_at, next_retry_at, last_http_status, last_error, retry_count
     FROM adm_sync_file_state
     WHERE source_service_id IN (${inClause})
       AND ignored_at IS NULL
@@ -524,7 +537,7 @@ async function main() {
     FROM adm_import_jobs
     WHERE source_service_id IN (${inClause}) OR server_id IN (${linkedServerIds.map(sqlString).join(", ") || "''"})
     ORDER BY COALESCE(updated_at, created_at) DESC
-    LIMIT 80
+    LIMIT 300
   `);
   const sources = d1<SourceStateRow>(`
     SELECT service_id, source_name, last_tested_at, last_status, last_http_status,
@@ -632,6 +645,9 @@ async function main() {
         importedLineCount: file.imported_line_count,
         latestKnownLineCount: file.latest_known_line_count,
         nextRetryAt: file.next_retry_at,
+        lastHttpStatus: file.last_http_status,
+        retryCount: file.retry_count,
+        lastError: safeText(file.last_error ?? ""),
       })));
     } else if (recentFilesAfterLastProcessed.length > 1) {
       pass(label, "Recent ADM files after the last processed file have import/cursor evidence or retry state in timestamp order.", {

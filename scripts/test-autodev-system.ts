@@ -153,5 +153,8 @@ assert.equal(admLiveVerify.includes("CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID"
 assert.equal(admLiveVerify.includes("Remote D1 query unavailable; using protected ADM health fallback."), true);
 assert.equal(admLiveVerify.includes("hasActiveOrderedBackfill"), true);
 assert.equal(admLiveVerify.includes("waiting behind active ordered recent backfill"), true);
+assert.equal(admLiveVerify.includes('"unreadable", "failed_unreadable", "parser_error", "write_error", "partial"'), true);
+assert.equal(admLiveVerify.includes("retry_count"), true);
+assert.equal(admLiveVerify.includes("Recent noftp ADM files newer than the last completed import lack job/cursor evidence"), true);
 
 console.log("AutoDev system tests passed.");

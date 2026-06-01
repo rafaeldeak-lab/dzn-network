@@ -164,6 +164,9 @@ async function main() {
   assert.match(admSyncSource, /getNewestAdmFileStateForSyncState/);
   assert.match(admSyncSource, /currentFileMaxPathVariants/);
   assert.match(admSyncSource, /trySeekWithoutRaw/);
+  assert.match(admSyncSource, /recordAdmFileStateFromImportJob/);
+  assert.match(admSyncSource, /Scheduled ADM import job has durable cursor evidence/);
+  assert.match(admSyncSource, /excluded\.status IN \('queued', 'unreadable'\) AND adm_sync_file_state\.status IN \('processed', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed'\)/);
   assert.match(admSyncSource, /lastProcessedFile = rowCompleted \? row\.filename : existingState\?\.last_processed_file/);
   assert.match(admSyncSource, /row\.source === SCHEDULED_ADM_IMPORT_SOURCE \? "scheduled_chunked_import" : "manual_chunked_import"/);
   assert.match(admSyncSource, /type = values\.source === SCHEDULED_ADM_IMPORT_SOURCE/);

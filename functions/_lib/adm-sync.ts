@@ -4909,6 +4909,73 @@ async function getAdmImportReadableRoute(env: Env, linkedServerId: string, filen
   return fallback;
 }
 
+async function recordAdmFileStateFromImportJob(env: Env, row: AdmImportJobRow) {
+  const filename = sanitizeManualAdmFilename(row.filename);
+  if (!filename) return;
+  if (!isActiveAdmImportJobStatus(row.status) && !isCompletedAdmImportJobStatus(row.status)) return;
+
+  const db = requireDb(env);
+  const [server, existingState] = await Promise.all([
+    db
+      .prepare(
+        `SELECT nitrado_service_id, server_name, display_name, hostname, nitrado_service_name
+         FROM linked_servers
+         WHERE id = ?
+         LIMIT 1`,
+      )
+      .bind(row.server_id)
+      .first<{
+        nitrado_service_id: string | null;
+        server_name: string | null;
+        display_name: string | null;
+        hostname: string | null;
+        nitrado_service_name: string | null;
+      }>()
+      .catch(() => null),
+    db
+      .prepare(
+        `SELECT adm_path
+         FROM adm_sync_file_state
+         WHERE linked_server_id = ?
+           AND adm_file = ?
+         ORDER BY COALESCE(last_read_at, last_checked_at, updated_at, first_seen_at) DESC
+         LIMIT 1`,
+      )
+      .bind(row.server_id, filename)
+      .first<{ adm_path: string | null }>()
+      .catch(() => null),
+  ]);
+  const serviceId = row.source_service_id ?? server?.nitrado_service_id ?? null;
+  if (!serviceId) return;
+
+  const completed = isCompletedAdmImportJobStatus(row.status);
+  const lineCount = Math.max(Number(row.total_lines ?? 0), Number(row.current_line ?? 0), 0);
+  const processedLine = completed ? lineCount : Math.max(0, Number(row.current_line ?? 0));
+  const context: AdmSyncContext = {
+    linkedServerId: row.server_id,
+    nitradoServiceId: serviceId,
+    serverName: firstString(server?.display_name, server?.hostname, server?.server_name, server?.nitrado_service_name) ?? row.server_id,
+    admFileName: filename,
+    syncRunId: row.id,
+  };
+  await recordAdmFileAttempt(env, context, {
+    name: filename,
+    path: existingState?.adm_path ?? filename,
+    timestamp: extractAdmTimestampScore(filename),
+  }, {
+    status: completed ? "processed" : "queued",
+    lineCount,
+    rawKillLinesFound: Number(row.raw_kill_lines_found ?? row.parsed_kills ?? 0),
+    parsedKillLinesFound: Number(row.parsed_kills ?? 0),
+    insertedKills: Number(row.written_kills ?? 0),
+    parserSkippedLines: 0,
+    lastLineProcessed: processedLine,
+    message: completed
+      ? null
+      : `Scheduled ADM import job has durable cursor evidence at ${processedLine}/${lineCount} lines.`,
+  });
+}
+
 async function recordAdmImportJobProgressInSyncState(
   env: Env,
   row: AdmImportJobRow,
@@ -4971,6 +5038,12 @@ async function recordAdmImportJobProgressInSyncState(
     cursorRecoveryReason: existingState?.cursor_recovery_reason ?? (rowCompleted
       ? row.source === SCHEDULED_ADM_IMPORT_SOURCE ? "scheduled_chunked_import" : "manual_chunked_import"
       : null),
+  });
+  await recordAdmFileStateFromImportJob(env, row).catch((error) => {
+    console.warn("DZN ADM FILE STATE REPAIR SKIPPED", {
+      filename: row.filename,
+      message: safeSyncErrorMessage(error),
+    });
   });
   await promoteNewestDiscoveredAdmFileInSyncState(env, row.server_id, row.source_service_id ?? null);
 }
@@ -5071,6 +5144,27 @@ async function recoverStaleAdmImportJobs(env: Env, source: string) {
     )
     .bind(now, now, source, cutoff)
     .run();
+
+  const recoveredRows = await requireDb(env)
+    .prepare(
+      `SELECT *
+       FROM adm_import_jobs
+       WHERE source = ?
+         AND status IN ('completed', 'completed_with_warnings')
+         AND updated_at = ?
+       LIMIT 25`,
+    )
+    .bind(source, now)
+    .all<AdmImportJobRow>()
+    .catch(() => ({ results: [] as AdmImportJobRow[] }));
+  for (const row of recoveredRows.results ?? []) {
+    await recordAdmFileStateFromImportJob(env, row).catch((error) => {
+      console.warn("DZN ADM RECOVERED JOB FILE STATE REPAIR SKIPPED", {
+        filename: row.filename,
+        message: safeSyncErrorMessage(error),
+      });
+    });
+  }
 
   await requireDb(env)
     .prepare(
@@ -7624,6 +7718,12 @@ async function recordAdmFileAttempt(
         status = CASE
           WHEN adm_sync_file_state.ignored_at IS NOT NULL THEN adm_sync_file_state.status
           WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'processed', 'partial', 'failed_unreadable', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed') THEN adm_sync_file_state.status
+          WHEN excluded.status IN ('queued', 'unreadable') AND adm_sync_file_state.status IN ('processed', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed')
+            AND excluded.latest_known_line_count <= MAX(COALESCE(adm_sync_file_state.latest_known_line_count, 0), COALESCE(adm_sync_file_state.imported_line_count, 0), COALESCE(adm_sync_file_state.cursor_line, 0), COALESCE(adm_sync_file_state.line_count, 0))
+          THEN adm_sync_file_state.status
+          WHEN excluded.status = 'unreadable' AND adm_sync_file_state.status IN ('queued', 'partial')
+            AND MAX(COALESCE(adm_sync_file_state.latest_known_line_count, 0), COALESCE(adm_sync_file_state.imported_line_count, 0), COALESCE(adm_sync_file_state.cursor_line, 0), COALESCE(adm_sync_file_state.line_count, 0)) > 0
+          THEN adm_sync_file_state.status
           ELSE excluded.status
         END,
         last_checked_at = excluded.last_checked_at,
