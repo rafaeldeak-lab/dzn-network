@@ -13,6 +13,7 @@ import {
   DatabaseZap,
   Download,
   ExternalLink,
+  Flag,
   Gamepad2,
   Gauge,
   LifeBuoy,
@@ -404,7 +405,7 @@ function EmptyDashboard() {
   );
 }
 
-type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "billing" | "discord-posts" | "settings-danger";
+type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "events" | "billing" | "discord-posts" | "settings-danger";
 
 function ServerDashboard({
   server: serverProp,
@@ -2530,6 +2531,7 @@ function ServerDashboard({
     { key: "overview", label: "Overview", icon: <Server className="h-4 w-4" /> },
     { key: "sync-health", label: "Sync Health", icon: <RefreshCw className="h-4 w-4" /> },
     { key: "public-listing", label: "Public Listing", icon: <ExternalLink className="h-4 w-4" /> },
+    { key: "events", label: "Events", icon: <Flag className="h-4 w-4" /> },
     { key: "billing", label: "Billing & Boosts", icon: <Gauge className="h-4 w-4" /> },
     { key: "discord-posts", label: "Discord Posts", icon: <Bell className="h-4 w-4" /> },
     { key: "settings-danger", label: "Settings & Danger", icon: <Settings className="h-4 w-4" /> },
@@ -2773,6 +2775,7 @@ function ServerDashboard({
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions" />
             <div className="mt-3 grid gap-2">
               <ActionLink href="/leaderboards" icon={<Crosshair className="h-4 w-4" />} label="View Kill Feed" />
+              <ActionLink href={eventHubHref(server.id)} icon={<Flag className="h-4 w-4" />} label="Events" />
               <button type="button" onClick={() => setActiveTab("public-listing")} className="inline-flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm font-bold text-zinc-100">Edit Server <ArrowRight className="h-4 w-4" /></button>
               <button type="button" disabled={refreshingServerInfo || isDashboardActionActive} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 disabled:opacity-55">{dashboardActionKey === "refresh-server-info" ? "Running..." : "Refresh Server Info"} <RefreshCw className={`h-4 w-4 ${refreshingServerInfo || dashboardActionKey === "refresh-server-info" ? "animate-spin" : ""}`} /></button>
             </div>
@@ -3124,6 +3127,37 @@ function ServerDashboard({
           />
           ) : null}
 
+          {activeTab === "events" ? (
+          <DashboardPanel className="p-5">
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">
+              <div>
+                <PanelHeader icon={<Flag className="h-5 w-5" />} title="Events" />
+                <h2 className="mt-3 text-2xl font-black text-white">Enter DZN challenges and tournaments</h2>
+                <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-zinc-300">
+                  Event Hub shows eligible events, locked requirements, live matchups, brackets, results, and Discord event channel readiness for this server.
+                </p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <MiniInfo label="Category" value={serverCategoryLabel} />
+                  <MiniInfo label="ADM Sync" value={statsSyncActive ? "Ready" : overviewAdmSyncStatus} />
+                  <MiniInfo label="Discord" value={server.guild_id ? "Connected" : "Missing"} />
+                  <MiniInfo label="Plan" value={currentPlanName} />
+                </div>
+                {!normalizedServerCategory ? (
+                  <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-3 text-sm font-bold leading-6 text-amber-50">
+                    Set your server category to enter category-matched events.
+                  </p>
+                ) : null}
+              </div>
+              <div className="grid gap-2">
+                <ActionLink href={eventHubHref(server.id)} icon={<Flag className="h-4 w-4" />} label="Open Event Hub" tone="emerald" />
+                {!normalizedServerCategory ? <ActionLink href={serverSettingsHref(server.id, "category")} icon={<Gamepad2 className="h-4 w-4" />} label="Set Category" /> : null}
+                <ActionLink href={`/dashboard/server-settings?serverId=${encodeURIComponent(server.id)}#discord-event-channels`} icon={<Bell className="h-4 w-4" />} label="Choose Event Channel" />
+                <ActionLink href="/setup" icon={<Settings className="h-4 w-4" />} label="Complete Setup" />
+              </div>
+            </div>
+          </DashboardPanel>
+          ) : null}
+
           {activeTab === "discord-posts" ? (
           <DiscordAutoPostsPanel
             serverId={server.id}
@@ -3216,6 +3250,7 @@ function ServerDashboard({
             <div className="mt-4 grid gap-3">
               <ActionLink href="/leaderboards" icon={<Crosshair className="h-4 w-4" />} label="View Kill Feed" />
               <ActionLink href="/setup" icon={<Settings className="h-4 w-4" />} label="Edit Server" />
+              <ActionLink href={eventHubHref(server.id)} icon={<Flag className="h-4 w-4" />} label="Events" />
               <ActionLink href={serverSettingsHref(server.id)} icon={<Gauge className="h-4 w-4" />} label="Server Settings" />
               <ActionLink href="/setup#review-test" icon={<LifeBuoy className="h-4 w-4" />} label="Setup Guide" />
               <button type="button" disabled={refreshingServerInfo || isDashboardActionActive} onClick={refreshServerInfo} className="inline-flex items-center justify-between rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-left text-sm font-bold text-emerald-50 transition hover:border-emerald-300/45 hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-55">
@@ -8399,6 +8434,11 @@ function serverSettingsHref(serverId: string, focus?: "category") {
   const query = new URLSearchParams({ serverId });
   if (focus) query.set("focus", focus);
   return `/dashboard/server-settings?${query.toString()}`;
+}
+
+function eventHubHref(serverId: string) {
+  const query = new URLSearchParams({ serverId });
+  return `/dashboard/events?${query.toString()}`;
 }
 
 function getSyncBanner(values: {

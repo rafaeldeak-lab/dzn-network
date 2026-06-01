@@ -174,6 +174,43 @@ assert.equal(discordChannelsEndpointSource.includes("status: 503"), true);
 assert.equal(discordChannelsEndpointSource.includes("last_fetch_success_at"), true);
 assert.equal(discordChannelsEndpointSource.includes("using_cached_channel_state"), true);
 
+const eventDiscordChannelsSource = readFileSync("functions/api/servers/[serverId]/discord/channels.ts", "utf8");
+assert.equal(eventDiscordChannelsSource.includes("listOwnerDiscordEventChannels"), true);
+assert.equal(eventDiscordChannelsSource.includes("NOT_AUTHENTICATED"), true);
+assert.equal(eventDiscordChannelsSource.includes("status: 401"), true);
+
+const eventHubSource = readFileSync("functions/_lib/event-hub.ts", "utf8");
+for (const snippet of [
+  "verifyDiscordPostingChannel",
+  "CHANNEL_NOT_IN_CONNECTED_GUILD",
+  "BOT_MISSING_PERMISSIONS",
+  "View Channel",
+  "Send Messages",
+  "Embed Links",
+  "Read Message History",
+  "server_discord_channel_settings",
+  "event_live_scoreboard",
+  "event_results",
+  "DZN Event Channel Connected",
+]) {
+  assert.equal(eventHubSource.includes(snippet), true, `Missing Event Hub Discord snippet: ${snippet}`);
+}
+assert.equal(eventHubSource.includes("bot_access_token"), false, "Event channel settings must not use legacy per-server bot tokens.");
+assert.equal(eventHubSource.includes("TOKEN_ENCRYPTION_KEY"), false, "Event channel settings must not touch Nitrado token encryption.");
+
+const eventSettingsUi = readFileSync("components/onboarding/server-settings-page.tsx", "utf8");
+for (const snippet of [
+  "Discord Event Channels",
+  "Refresh Discord Channels",
+  "Save Event Channels",
+  "Test Bot Message",
+  "Live Event Scoreboard Channel",
+  "Event Results Channel",
+  "Missing bot permissions",
+]) {
+  assert.equal(eventSettingsUi.includes(snippet), true, `Missing Server Settings event channel UI: ${snippet}`);
+}
+
 const onboardingApiSource = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(onboardingApiSource.includes("getDiscordPostingChannels"), true);
 assert.equal(onboardingApiSource.includes("!response.ok && !data.diagnostics"), true);

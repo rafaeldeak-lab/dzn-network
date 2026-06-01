@@ -1,5 +1,6 @@
 import { isDznAdminDiscordId } from "./admin";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
+import { getSavedDiscordEventChannelSummary } from "./event-hub";
 import { normalizePlanKey } from "./plans";
 import { getServerCategoryLabel, normalizeServerCategory } from "./server-categories";
 import type { Env, SessionUser } from "./types";
@@ -192,6 +193,11 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
   const visibilityEditCount = await countListingChanges(env, linkedServerId, "visibility", "-1 day");
   const listingEditCount = await countListingChanges(env, linkedServerId, "listing", "-1 day");
   const setupComplete = isServerSetupComplete(server);
+  const discordEventChannels = await getSavedDiscordEventChannelSummary(env, linkedServerId).catch(() => ({
+    selected: null,
+    liveScoreboardReady: false,
+    defaultReady: false,
+  }));
 
   return {
     status: 200,
@@ -238,6 +244,7 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
         tagEditsUsedLast7Days: tagsEditCount,
         visibilityEditsUsedToday: visibilityEditCount,
       },
+      discordEventChannels,
       setupPageUrl: "/setup",
       publicPageUrl: server.public_slug ? `/servers/profile?slug=${encodeURIComponent(server.public_slug)}` : "/servers",
     },
@@ -523,6 +530,7 @@ function serializeSettingsServer(server: SettingsServerRow) {
     categoryChangedAt: server.category_changed_at,
     categoryEffectiveAt: server.category_effective_at,
     setupComplete: isServerSetupComplete(server),
+    discordConnected: Boolean(server.guild_id || server.discord_guild_id),
   };
 }
 

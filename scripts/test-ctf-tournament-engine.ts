@@ -5,6 +5,7 @@ import {
   isCurrentTimeInGracePeriod,
   renderAsciiProgressBlocks,
 } from "../functions/_lib/ctf-tournaments";
+import { buildChallengePhaseTemplates, renderEventProgressBar } from "../functions/_lib/event-hub";
 
 const migration = readFileSync("migrations/0030_ctf_bot_tournament_engine.sql", "utf8");
 for (const snippet of [
@@ -47,12 +48,39 @@ for (const snippet of [
   assert.equal(ctfSource.includes(snippet), true, `Missing CTF engine snippet: ${snippet}`);
 }
 
+const eventHubSource = readFileSync("functions/_lib/event-hub.ts", "utf8");
+for (const snippet of [
+  "processDueEventScoring",
+  "event_challenge_phases",
+  "event_phase_scores",
+  "event_discord_messages",
+  "message_id",
+  "last_payload_hash",
+  "sendOrEditEventDiscordMessage",
+  "PATCH",
+  "phase_live",
+  "phase_final",
+  "pvp_headshot_count",
+  "build_score",
+  "calculatePhaseScore",
+  "kill_events",
+  "build_events",
+]) {
+  assert.equal(eventHubSource.includes(snippet), true, `Missing Event Hub tournament scoring snippet: ${snippet}`);
+}
+assert.equal(eventHubSource.includes("readNitrado"), false, "Event scoring must not read Nitrado directly.");
+assert.equal(eventHubSource.includes("TOKEN_ENCRYPTION_KEY"), false, "Event scoring must not touch Nitrado token handling.");
+
 assert.equal(renderAsciiProgressBlocks(0, 1000), "⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛");
 assert.equal(renderAsciiProgressBlocks(500, 1000), "🟩🟩🟩🟩🟩⬛⬛⬛⬛⬛");
 assert.equal(renderAsciiProgressBlocks(1000, 1000), "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩");
 assert.equal(isCurrentTimeInGracePeriod('{"start":"02:00","end":"06:00"}', new Date("2026-05-21T03:15:00Z")), true);
 assert.equal(isCurrentTimeInGracePeriod('{"start":"22:00","end":"06:00"}', new Date("2026-05-21T23:15:00Z")), true);
 assert.equal(isCurrentTimeInGracePeriod('{"start":"22:00","end":"06:00"}', new Date("2026-05-21T12:15:00Z")), false);
+assert.equal(buildChallengePhaseTemplates("pvp_pve", "capture_the_flag").length, 6);
+assert.equal(buildChallengePhaseTemplates("deathmatch", "capture_the_flag").every((phase) => phase.metricType.startsWith("pvp_")), true);
+assert.equal(buildChallengePhaseTemplates("pve", "survival_challenge").some((phase) => phase.metricType === "build_score"), true);
+assert.equal(renderEventProgressBar(145, 92).includes("🏳️"), true);
 
 const onboardingSave = readFileSync("functions/api/onboarding/save.ts", "utf8");
 assert.equal(onboardingSave.includes("saveBotOnboardingConfig"), true);

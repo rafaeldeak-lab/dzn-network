@@ -1,15 +1,15 @@
-import { ensureMockUser, getSessionUser } from "../../../_lib/db";
-import { getOwnerEventHub } from "../../../_lib/event-hub";
-import { json, methodNotAllowed } from "../../../_lib/http";
-import { isMockAuth } from "../../../_lib/mock";
-import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
+import { ensureMockUser, getSessionUser } from "../../../../_lib/db";
+import { listOwnerDiscordEventChannels } from "../../../../_lib/event-hub";
+import { json, methodNotAllowed } from "../../../../_lib/http";
+import { isMockAuth } from "../../../../_lib/mock";
+import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
 export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   const user = await resolveUser(env, request);
-  if (!user) return json({ ok: false, error: "NOT_AUTHENTICATED", message: "Log in to view Event Hub." }, { status: 401 });
+  if (!user) return json({ ok: false, error: "NOT_AUTHENTICATED", message: "Log in to view Discord channels." }, { status: 401 });
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
-  const result = await getOwnerEventHub(env, user, serverId);
+  const result = await listOwnerDiscordEventChannels(env, user, serverId);
   return json(result.payload, { status: result.status });
 };
 
@@ -18,21 +18,11 @@ export const onRequestPatch: PagesFunction = () => methodNotAllowed();
 export const onRequestPut: PagesFunction = () => methodNotAllowed();
 export const onRequestDelete: PagesFunction = () => methodNotAllowed();
 
-export const onRequestOptions: PagesFunction = () => new Response(null, {
-  status: 204,
-  headers: { Allow: "GET, OPTIONS" },
-});
-
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
   const user = await getSessionUser(env, request);
   if (user || !isMockAuth(env.MOCK_AUTH)) return user;
   const mock = await ensureMockUser(env);
-  return {
-    id: mock.userId,
-    discord_id: mock.user.id,
-    username: mock.user.username,
-    avatar: mock.user.avatar,
-  };
+  return { id: mock.userId, discord_id: mock.user.id, username: mock.user.username, avatar: mock.user.avatar };
 }
 
 function sanitizeLinkedServerId(value: unknown) {

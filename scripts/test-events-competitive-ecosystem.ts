@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
 import { getEventsListPayload, resolveEventStatusFilter } from "../functions/_lib/events";
+import { buildChallengePhaseTemplates, renderEventProgressBar } from "../functions/_lib/event-hub";
 import { assertSameServerCategory, categoryMismatchPayload, normalizeServerCategory } from "../functions/_lib/server-categories";
 import type { Env } from "../functions/_lib/types";
 
@@ -50,6 +51,22 @@ includesAll(migration, [
 ]);
 assert.equal(/DROP\s+TABLE|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE\s+player_profiles|CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+player_stats/i.test(migration), false, "Events migration must be additive and must not create a duplicate player_stats table.");
 
+const eventHubMigration = source("migrations/0042_owner_event_hub.sql");
+includesAll(eventHubMigration, [
+  "CREATE TABLE IF NOT EXISTS server_discord_channel_settings",
+  "UNIQUE(linked_server_id, channel_type)",
+  "CREATE TABLE IF NOT EXISTS server_event_entries",
+  "CREATE TABLE IF NOT EXISTS event_matchups",
+  "CREATE TABLE IF NOT EXISTS event_challenge_phases",
+  "CREATE TABLE IF NOT EXISTS event_phase_scores",
+  "CREATE TABLE IF NOT EXISTS event_cooldowns",
+  "CREATE TABLE IF NOT EXISTS event_discord_messages",
+  "CREATE TABLE IF NOT EXISTS event_reports",
+  "requires_discord_posting",
+  "scoring_rules_json",
+]);
+assert.equal(/DROP\s+TABLE|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE\s+player_profiles|CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?player_stats|TOKEN_ENCRYPTION_KEY|DISCORD_BOT_TOKEN/i.test(eventHubMigration), false, "Event Hub migration must be additive and must not touch profiles/player_stats/secrets.");
+
 const eventsLib = source("functions/_lib/events.ts");
 includesAll(eventsLib, [
   "ensureCompetitiveEventsSchema",
@@ -85,6 +102,72 @@ const eventsRoute = source("functions/api/events.ts");
 includesAll(eventsRoute, ["getEventsListPayload", "full", "category", "status", "type"]);
 const eventCreateRoute = source("functions/api/events/create.ts");
 includesAll(eventCreateRoute, ["createCompetitiveEvent", "getSessionUser", "hosting_server_id"]);
+
+const eventHubLib = source("functions/_lib/event-hub.ts");
+includesAll(eventHubLib, [
+  "ensureEventHubSchema",
+  "server_discord_channel_settings",
+  "getOwnerEventHub",
+  "enterOwnerEvent",
+  "leaveOwnerEvent",
+  "listOwnerDiscordEventChannels",
+  "saveOwnerDiscordEventChannels",
+  "testOwnerDiscordEventChannel",
+  "processDueEventScoring",
+  "buildChallengePhaseTemplates",
+  "event_live_scoreboard",
+  "event_results",
+  "View Channel",
+  "Send Messages",
+  "Embed Links",
+  "Read Message History",
+  "DISCORD_EVENT_CHANNEL_REQUIRED",
+  "CATEGORY_MISMATCH",
+  "PLAN_REQUIRED",
+  "ADM_SYNC_REQUIRED",
+  "pvp_headshot_count",
+  "build_score",
+  "event_phase_scores",
+  "event_discord_messages",
+  "message_id",
+  "last_payload_hash",
+  "Scored automatically from DZN ADM Sync. Updates every 5 minutes.",
+]);
+assert.equal(eventHubLib.includes("fetchNitrado"), false, "Event scoring must not read Nitrado directly.");
+assert.equal(eventHubLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Event Hub must not touch Nitrado token encryption.");
+
+const ownerEventsRoute = source("functions/api/servers/[serverId]/events.ts");
+includesAll(ownerEventsRoute, ["getOwnerEventHub", "NOT_AUTHENTICATED", "status: 401"]);
+const enterRoute = source("functions/api/servers/[serverId]/events/[eventId]/enter.ts");
+includesAll(enterRoute, ["enterOwnerEvent", "NOT_AUTHENTICATED", "status: 401"]);
+const leaveRoute = source("functions/api/servers/[serverId]/events/[eventId]/leave.ts");
+includesAll(leaveRoute, ["leaveOwnerEvent", "NOT_AUTHENTICATED", "status: 401"]);
+const discordListRoute = source("functions/api/servers/[serverId]/discord/channels.ts");
+includesAll(discordListRoute, ["listOwnerDiscordEventChannels", "NOT_AUTHENTICATED", "status: 401"]);
+const discordSaveRoute = source("functions/api/servers/[serverId]/settings/discord-channels/index.ts");
+includesAll(discordSaveRoute, ["saveOwnerDiscordEventChannels", "NOT_AUTHENTICATED", "status: 401"]);
+const discordTestRoute = source("functions/api/servers/[serverId]/settings/discord-channels/test.ts");
+includesAll(discordTestRoute, ["testOwnerDiscordEventChannel", "NOT_AUTHENTICATED", "status: 401"]);
+
+const eventHubUi = source("components/onboarding/event-hub-page.tsx");
+includesAll(eventHubUi, [
+  "Event Hub",
+  "Scoring is handled automatically from ADM sync.",
+  "Available",
+  "Entered",
+  "Live",
+  "Brackets",
+  "Results",
+  "Locked",
+  "Choose Channel",
+  "Enter Event",
+  "No eligible events right now",
+  "View Public Event",
+]);
+const appEventHubRoute = source("app/dashboard/events/page.tsx");
+includesAll(appEventHubRoute, ["EventHubPage"]);
+const workerSource = source("workers/adm-sync-worker.ts");
+includesAll(workerSource, ["processDueEventScoring", "runEventScoring", "maxPhases: 4", "maxDiscordMessages: 8"]);
 
 for (const route of [
   "app/events/page.tsx",
@@ -144,6 +227,8 @@ assert.equal(source("functions/api/leaderboards.ts").includes("./public/leaderbo
 assert.equal(source("components/dzn/dzn-landing-page.tsx").includes('{ label: "Events", href: "/events" }'), true, "Top nav Events link must open the Events Hub.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to join events and matchmaking."), true, "Dashboard must remind owners to set a server category.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes('href="/events/create"'), true, "Dashboard must expose event creation after category selection.");
+assert.equal(source("components/onboarding/dashboard.tsx").includes("Open Event Hub"), true, "Dashboard must expose owner Event Hub.");
+assert.equal(source("components/onboarding/dashboard.tsx").includes("/dashboard/events"), true, "Dashboard Events link must open the owner Event Hub.");
 assert.equal(source("components/onboarding/setup-wizard.tsx").includes("Server Category"), true, "Onboarding must expose server category selection.");
 
 void main();
@@ -156,6 +241,10 @@ async function main() {
   assert.equal(upcomingPayload.events.every((event) => ["upcoming", "registration_open", "standby"].includes(event.status)), true, "Upcoming filter must hide live events.");
   const activePayload = await getEventsListPayload({} as Env, null, { status: "active", limit: 50 });
   assert.equal(activePayload.events.every((event) => event.status === "live"), true, "Active filter must only show live events.");
+  assert.equal(buildChallengePhaseTemplates("pvp_pve", "capture_the_flag").length, 6, "72h PvP/PvE CTF should create six phase templates.");
+  assert.equal(buildChallengePhaseTemplates("deathmatch", "capture_the_flag").every((phase) => phase.metricType.startsWith("pvp_")), true, "Deathmatch phases must stay PvP-only.");
+  assert.equal(buildChallengePhaseTemplates("pve", "survival_challenge").some((phase) => phase.metricType === "build_score"), true, "PvE templates must include build/base scoring.");
+  assert.equal(renderEventProgressBar(75, 25).includes("🏳️"), true, "Discord progress bar should include flag marker.");
 
   console.log("Events competitive ecosystem tests passed.");
 }

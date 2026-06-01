@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Bell,
   CheckCircle2,
   Clock3,
   Eye,
@@ -14,6 +15,7 @@ import {
   LogOut,
   RefreshCw,
   Save,
+  Send,
   Settings,
   ShieldCheck,
   Skull,
@@ -47,6 +49,7 @@ type SettingsResponse = {
     categoryChangedAt: string | null;
     categoryEffectiveAt: string | null;
     setupComplete: boolean;
+    discordConnected?: boolean;
   };
   availableCategories: Array<{
     value: CategoryValue;
@@ -95,14 +98,51 @@ type SettingsResponse = {
     tagEditsUsedLast7Days: number;
     visibilityEditsUsedToday: number;
   };
+  discordEventChannels?: {
+    selected: Record<EventChannelType, EventChannelSummary | null> | null;
+    liveScoreboardReady: boolean;
+    defaultReady: boolean;
+  };
   setupPageUrl: string;
   publicPageUrl: string;
 };
 
 type SaveState = {
-  area: "category" | "tags" | "listing" | null;
+  area: "category" | "tags" | "listing" | "discord" | null;
   message: string | null;
   error: string | null;
+};
+
+type EventChannelType = "default_event" | "event_announcements" | "event_live_scoreboard" | "event_results";
+
+type EventChannelSummary = {
+  channelId: string;
+  channelName: string | null;
+  channelType: string;
+  valid: boolean;
+  missingPermissions: string[];
+};
+
+type DiscordEventChannelOption = {
+  id: string;
+  name: string;
+  type: string;
+  canSelect: boolean;
+  botCanView: boolean;
+  botCanSend: boolean;
+  botCanEmbed: boolean;
+  botCanReadHistory: boolean;
+  missingPermissions: string[];
+};
+
+type DiscordEventChannelsResponse = {
+  ok: boolean;
+  guildId?: string | null;
+  guildName?: string | null;
+  channels: DiscordEventChannelOption[];
+  selected?: Record<EventChannelType, EventChannelSummary | null>;
+  error?: string;
+  message?: string;
 };
 
 const CATEGORY_ICON: Record<CategoryValue, React.ReactNode> = {
@@ -111,6 +151,33 @@ const CATEGORY_ICON: Record<CategoryValue, React.ReactNode> = {
   pve: <ShieldCheck className="h-5 w-5" />,
   pvp_pve: <Gamepad2 className="h-5 w-5" />,
 };
+
+const EVENT_CHANNEL_FIELDS: Array<{ key: EventChannelType; inputKey: string; label: string; description: string }> = [
+  {
+    key: "default_event",
+    inputKey: "defaultEventChannelId",
+    label: "Default Event Channel",
+    description: "Fallback for announcements, live scoreboards, and final results.",
+  },
+  {
+    key: "event_announcements",
+    inputKey: "eventAnnouncementsChannelId",
+    label: "Event Announcements Channel",
+    description: "Entry confirmations, tournament starts, and bracket announcements.",
+  },
+  {
+    key: "event_live_scoreboard",
+    inputKey: "eventLiveScoreboardChannelId",
+    label: "Live Event Scoreboard Channel",
+    description: "Same-message live phase scoreboards and midpoint updates.",
+  },
+  {
+    key: "event_results",
+    inputKey: "eventResultsChannelId",
+    label: "Event Results Channel",
+    description: "Final matchup reports, tournament reports, and champion posts.",
+  },
+];
 
 export function ServerSettingsPage() {
   const [authChecked, setAuthChecked] = useState(false);
@@ -125,6 +192,14 @@ export function ServerSettingsPage() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<ListingVisibility>("public");
+  const [discordChannels, setDiscordChannels] = useState<DiscordEventChannelsResponse | null>(null);
+  const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
+  const [eventChannelIds, setEventChannelIds] = useState<Record<EventChannelType, string>>({
+    default_event: "",
+    event_announcements: "",
+    event_live_scoreboard: "",
+    event_results: "",
+  });
 
   useEffect(() => {
     let active = true;
@@ -171,6 +246,7 @@ export function ServerSettingsPage() {
         setSelectedTags(data.currentTags);
         setDescription(data.server.description ?? "");
         setVisibility(data.server.visibility);
+        setEventChannelIds(channelIdsFromSettings(data));
         setSaveState({ area: null, message: null, error: null });
       })
       .catch((error) => {
@@ -189,10 +265,19 @@ export function ServerSettingsPage() {
   useEffect(() => {
     if (!settings) return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get("focus") === "category") {
-      window.requestAnimationFrame(() => document.getElementById("category")?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    const hash = window.location.hash.replace(/^#/, "");
+    const focus = params.get("focus") || hash;
+    if (focus === "category" || focus === "discord-event-channels") {
+      window.requestAnimationFrame(() => document.getElementById(focus)?.scrollIntoView({ block: "start", behavior: "smooth" }));
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (!settings) return;
+    void refreshDiscordEventChannels(settings.server.id, false);
+    // The refresh helper intentionally reads the current selected server state; this effect is only keyed to the loaded server id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.server.id]);
 
   const selectedServer = useMemo(() => servers.find((server) => server.id === selectedServerId) ?? null, [servers, selectedServerId]);
   const selectedCategoryOption = settings?.availableCategories.find((category) => category.value === selectedCategory) ?? null;
@@ -200,6 +285,7 @@ export function ServerSettingsPage() {
   const descriptionChanged = Boolean(settings && description !== (settings.server.description ?? ""));
   const visibilityChanged = Boolean(settings && visibility !== settings.server.visibility);
   const tagsChanged = Boolean(settings && JSON.stringify(selectedTags) !== JSON.stringify(settings.currentTags));
+  const discordChanged = Boolean(settings && JSON.stringify(eventChannelIds) !== JSON.stringify(channelIdsFromSettings(settings)));
 
   async function saveCategory() {
     if (!settings || !selectedCategory) return;
@@ -251,6 +337,59 @@ export function ServerSettingsPage() {
     setSelectedTags(next.currentTags);
     setDescription(next.server.description ?? "");
     setVisibility(next.server.visibility);
+    setEventChannelIds(channelIdsFromSettings(next));
+    await refreshDiscordEventChannels(serverId, false);
+  }
+
+  async function refreshDiscordEventChannels(serverId = settings?.server.id ?? selectedServerId, showMessage = true) {
+    if (!serverId) return;
+    setDiscordChannelsLoading(true);
+    try {
+      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/discord/channels`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
+      setDiscordChannels(data as DiscordEventChannelsResponse);
+      if (data.selected) setEventChannelIds(channelIdsFromSelected(data.selected));
+      if (showMessage) setSaveState({ area: null, message: "Discord channels refreshed.", error: null });
+    } catch (error) {
+      setDiscordChannels((current) => current ?? { ok: false, channels: [], message: error instanceof Error ? error.message : "Unable to refresh Discord channels." });
+      if (showMessage) setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to refresh Discord channels." });
+    } finally {
+      setDiscordChannelsLoading(false);
+    }
+  }
+
+  async function saveDiscordEventChannels() {
+    if (!settings) return;
+    setSaveState({ area: "discord", message: null, error: null });
+    try {
+      const body = EVENT_CHANNEL_FIELDS.reduce<Record<string, string>>((acc, field) => {
+        acc[field.inputKey] = eventChannelIds[field.key] || "";
+        return acc;
+      }, {});
+      const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/discord-channels`, body);
+      setSaveState({ area: null, message: result.message ?? "Discord event channels saved.", error: null });
+      await reloadSettings(settings.server.id);
+    } catch (error) {
+      setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to save Discord event channels." });
+    }
+  }
+
+  async function testDiscordEventChannel() {
+    if (!settings) return;
+    setSaveState({ area: "discord", message: null, error: null });
+    try {
+      const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/discord-channels/test`, {
+        channelType: eventChannelIds.event_live_scoreboard ? "event_live_scoreboard" : "default_event",
+      });
+      setSaveState({ area: null, message: result.message ?? "Test event message sent.", error: null });
+    } catch (error) {
+      setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to send test event message." });
+    }
   }
 
   function toggleTag(tag: string) {
@@ -496,6 +635,87 @@ export function ServerSettingsPage() {
         </section>
       </div>
 
+      <section id="discord-event-channels" className="glass-surface animated-border mt-5 rounded-lg p-5">
+        <div className="relative z-10">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <SectionTitle icon={<Bell className="h-5 w-5" />} title="Discord Event Channels" />
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+                Choose where DZN should post event announcements, live scoreboards, and final results for this server.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={discordChannelsLoading}
+                onClick={() => refreshDiscordEventChannels(settings.server.id, true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 disabled:opacity-55"
+              >
+                <RefreshCw className={`h-4 w-4 ${discordChannelsLoading ? "animate-spin" : ""}`} />
+                Refresh Discord Channels
+              </button>
+              <button
+                type="button"
+                disabled={saveState.area === "discord" || (!eventChannelIds.default_event && !eventChannelIds.event_live_scoreboard)}
+                onClick={testDiscordEventChannel}
+                className="inline-flex items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-xs font-black uppercase text-violet-50 disabled:opacity-55"
+              >
+                <Send className="h-4 w-4" />
+                Test Bot Message
+              </button>
+            </div>
+          </div>
+
+          {discordChannels?.ok === false ? (
+            <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4">
+              <p className="text-sm font-black text-amber-50">{discordChannels.message ?? "Discord channels are not ready."}</p>
+              <p className="mt-2 text-sm leading-6 text-amber-100/85">Connect a Discord server and add the DZN bot from Setup before choosing event channels.</p>
+              <Link href="/setup" className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-200/25 bg-amber-300/12 px-3 py-2 text-xs font-black uppercase text-amber-50">
+                Open Setup
+              </Link>
+            </div>
+          ) : null}
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {EVENT_CHANNEL_FIELDS.map((field) => (
+              <label key={field.key} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-4">
+                <span className="text-sm font-black text-white">{field.label}</span>
+                <span className="text-xs leading-5 text-zinc-400">{field.description}</span>
+                <select
+                  value={eventChannelIds[field.key]}
+                  onChange={(event) => setEventChannelIds((current) => ({ ...current, [field.key]: event.target.value }))}
+                  className="mt-1 rounded-lg border border-white/10 bg-[#080b16] px-3 py-3 text-sm font-bold text-white outline-none focus:border-cyan-300/45"
+                >
+                  <option value="">Not selected</option>
+                  {(discordChannels?.channels ?? []).map((channel) => (
+                    <option key={`${field.key}-${channel.id}`} value={channel.id} disabled={!channel.canSelect}>
+                      #{channel.name} - {channel.type}{channel.canSelect ? " - Bot can post" : ` - Missing ${channel.missingPermissions.join(", ") || "permissions"}`}
+                    </option>
+                  ))}
+                </select>
+                {selectedChannelWarning(discordChannels?.channels ?? [], eventChannelIds[field.key]) ? (
+                  <span className="text-xs font-bold text-amber-100">{selectedChannelWarning(discordChannels?.channels ?? [], eventChannelIds[field.key])}</span>
+                ) : null}
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={!discordChanged || saveState.area === "discord"}
+              onClick={saveDiscordEventChannels}
+              className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {saveState.area === "discord" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Event Channels
+            </button>
+            <span className="text-xs font-bold text-zinc-400">
+              Required bot permissions: View Channel, Send Messages, Embed Links, Read Message History.
+            </span>
+          </div>
+        </div>
+      </section>
+
       <div className="mt-5 grid gap-5 xl:grid-cols-2">
         <section className="glass-surface animated-border rounded-lg p-5">
           <div className="relative z-10">
@@ -684,6 +904,27 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function channelIdsFromSettings(settings: SettingsResponse): Record<EventChannelType, string> {
+  return channelIdsFromSelected(settings.discordEventChannels?.selected ?? null);
+}
+
+function channelIdsFromSelected(selected: Record<EventChannelType, EventChannelSummary | null> | null | undefined): Record<EventChannelType, string> {
+  return {
+    default_event: selected?.default_event?.channelId ?? "",
+    event_announcements: selected?.event_announcements?.channelId ?? "",
+    event_live_scoreboard: selected?.event_live_scoreboard?.channelId ?? "",
+    event_results: selected?.event_results?.channelId ?? "",
+  };
+}
+
+function selectedChannelWarning(channels: DiscordEventChannelOption[], channelId: string) {
+  if (!channelId) return null;
+  const channel = channels.find((item) => item.id === channelId);
+  if (!channel) return "Saved channel was not returned by Discord. Refresh channels or choose another event channel.";
+  if (channel.canSelect) return null;
+  return `Missing bot permissions: ${channel.missingPermissions.join(", ") || "required permissions"}.`;
 }
 
 function signOut() {

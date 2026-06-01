@@ -6,6 +6,7 @@ import {
   recoverStuckAutomationLocks,
 } from "../functions/_lib/automation";
 import { requireDb } from "../functions/_lib/db";
+import { processDueEventScoring } from "../functions/_lib/event-hub";
 
 type WorkerScheduledController = {
   cron?: string;
@@ -104,6 +105,7 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
         message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "Unknown maintenance error",
       });
     });
+    results.push(await runEventScoring(env));
     results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));
 
     const heartbeat = classifyHeartbeatFromResults(results);
@@ -168,6 +170,33 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
         source,
         worker_direct: true,
         error: message,
+      },
+    };
+  }
+}
+
+async function runEventScoring(env: Env) {
+  try {
+    const result = await processDueEventScoring(env, { maxPhases: 4, maxDiscordMessages: 8 });
+    return {
+      label: "event-scoring" as const,
+      status: 200,
+      ok: result.ok,
+      body: result,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Event scoring failed";
+    console.warn("DZN EVENT SCORING LOOP SKIPPED", {
+      message: sanitizeHeartbeatMessage(message),
+    });
+    return {
+      label: "event-scoring" as const,
+      status: 200,
+      ok: true,
+      body: {
+        ok: true,
+        skipped: true,
+        warning: sanitizeHeartbeatMessage(message),
       },
     };
   }
