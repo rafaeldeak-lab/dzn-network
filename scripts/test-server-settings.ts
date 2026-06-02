@@ -88,25 +88,27 @@ includesAll(settingsLib, [
   "server_category_change_events",
   "server_listing_change_events",
   "rebuildPublicCacheForServer",
-  "getSavedDiscordEventChannelSummary",
+  "getSavedDiscordEventChannelSummaryForSettings",
   "discordEventChannels",
+  "server_discord_channel_settings",
 ]);
+assert.equal(settingsLib.includes("from \"./event-hub\""), false, "Base server settings must not import Event Hub or live Discord channel lookup.");
 assert.equal(settingsLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Server settings must not touch token encryption.");
 
 const settingsRoute = source("functions/api/servers/[serverId]/settings.ts");
-includesAll(settingsRoute, ["onRequestGet", "onRequestPatch", "NOT_AUTHENTICATED", "readOwnerServerSettings", "updateServerCategory", "SETTINGS_UNAVAILABLE", "requestId"]);
+includesAll(settingsRoute, ["onRequestGet", "onRequestPatch", "NOT_AUTHENTICATED", "import(\"../../../_lib/server-settings\")", "SETTINGS_UNAVAILABLE", "requestId"]);
 const categoryRoute = source("functions/api/servers/[serverId]/settings/category.ts");
-includesAll(categoryRoute, ["onRequestPost", "NOT_AUTHENTICATED", "updateServerCategory"]);
+includesAll(categoryRoute, ["onRequestPost", "NOT_AUTHENTICATED", "import(\"../../../../_lib/server-settings\")", "SETTINGS_UNAVAILABLE"]);
 const tagsRoute = source("functions/api/servers/[serverId]/settings/tags.ts");
-includesAll(tagsRoute, ["onRequestPost", "NOT_AUTHENTICATED", "updateServerTags"]);
+includesAll(tagsRoute, ["onRequestPost", "NOT_AUTHENTICATED", "import(\"../../../../_lib/server-settings\")", "SETTINGS_UNAVAILABLE"]);
 const listingRoute = source("functions/api/servers/[serverId]/settings/listing.ts");
-includesAll(listingRoute, ["onRequestPost", "NOT_AUTHENTICATED", "updateServerListing"]);
+includesAll(listingRoute, ["onRequestPost", "NOT_AUTHENTICATED", "import(\"../../../../_lib/server-settings\")", "SETTINGS_UNAVAILABLE"]);
 const discordChannelsRoute = source("functions/api/servers/[serverId]/settings/discord-channels/index.ts");
-includesAll(discordChannelsRoute, ["onRequestPost", "NOT_AUTHENTICATED", "saveOwnerDiscordEventChannels", "SETTINGS_UNAVAILABLE", "requestId"]);
+includesAll(discordChannelsRoute, ["onRequestPost", "NOT_AUTHENTICATED", "import(\"../../../../../_lib/event-hub\")", "SETTINGS_UNAVAILABLE", "requestId"]);
 const discordChannelsTestRoute = source("functions/api/servers/[serverId]/settings/discord-channels/test.ts");
-includesAll(discordChannelsTestRoute, ["onRequestPost", "NOT_AUTHENTICATED", "testOwnerDiscordEventChannel", "DISCORD_TEST_MESSAGE_FAILED", "requestId"]);
+includesAll(discordChannelsTestRoute, ["onRequestPost", "NOT_AUTHENTICATED", "import(\"../../../../../_lib/event-hub\")", "DISCORD_TEST_MESSAGE_FAILED", "requestId"]);
 const discordChannelListRoute = source("functions/api/servers/[serverId]/discord/channels.ts");
-includesAll(discordChannelListRoute, ["onRequestGet", "NOT_AUTHENTICATED", "listOwnerDiscordEventChannels", "DISCORD_CHANNELS_UNAVAILABLE", "status: 200"]);
+includesAll(discordChannelListRoute, ["onRequestGet", "NOT_AUTHENTICATED", "import(\"../../../../_lib/event-hub\")", "DISCORD_CHANNELS_UNAVAILABLE", "status: 200"]);
 
 const dashboard = source("components/onboarding/dashboard.tsx");
 includesAll(dashboard, [
@@ -132,6 +134,12 @@ includesAll(settingsUi, [
   "Refresh Discord Channels",
   "discordChannelHelpCopy",
   "Discord channels could not be loaded right now. Retry in a moment.",
+  "readApiResponse",
+  "settingsReloadNonce",
+  "settings && !selectedServer",
+  "Safe debug details",
+  "status: {loadError.status",
+  "requestId: {loadError.requestId",
   "void refreshDiscordEventChannels(serverId, false)",
   "Save Event Channels",
   "Test Bot Message",

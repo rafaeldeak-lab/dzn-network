@@ -1,7 +1,6 @@
 import { ensureMockUser, getSessionUser } from "../../../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
 import { isMockAuth } from "../../../../_lib/mock";
-import { updateServerTags } from "../../../../_lib/server-settings";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
 type TagsBody = {
@@ -14,9 +13,24 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
 
-  const body = await readJson<TagsBody>(request);
-  const result = await updateServerTags(env, user, serverId, body);
-  return json(result.payload, { status: result.status });
+  try {
+    const [{ updateServerTags }, body] = await Promise.all([
+      import("../../../../_lib/server-settings"),
+      readJson<TagsBody>(request),
+    ]);
+    const result = await updateServerTags(env, user, serverId, body);
+    return json(result.payload, { status: result.status });
+  } catch (error) {
+    const requestId = crypto.randomUUID();
+    console.warn("DZN server tag update unavailable", { requestId, serverId, error: error instanceof Error ? error.message : "unknown" });
+    return json({
+      ok: false,
+      error: "SETTINGS_UNAVAILABLE",
+      errorCode: "SETTINGS_UNAVAILABLE",
+      message: "Server settings are temporarily unavailable. Please try again.",
+      requestId,
+    }, { status: 500 });
+  }
 };
 
 export const onRequestGet: PagesFunction = () => methodNotAllowed();

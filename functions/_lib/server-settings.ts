@@ -1,6 +1,5 @@
 import { isDznAdminDiscordId } from "./admin";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
-import { getSavedDiscordEventChannelSummary } from "./event-hub";
 import { normalizePlanKey } from "./plans";
 import { getServerCategoryLabel, normalizeServerCategory } from "./server-categories";
 import type { Env, SessionUser } from "./types";
@@ -194,11 +193,7 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
   const visibilityEditCount = await countListingChanges(env, resolvedLinkedServerId, "visibility", "-1 day");
   const listingEditCount = await countListingChanges(env, resolvedLinkedServerId, "listing", "-1 day");
   const setupComplete = isServerSetupComplete(server);
-  const discordEventChannels = await getSavedDiscordEventChannelSummary(env, resolvedLinkedServerId).catch(() => ({
-    selected: null,
-    liveScoreboardReady: false,
-    defaultReady: false,
-  }));
+  const discordEventChannels = await getSavedDiscordEventChannelSummaryForSettings(env, resolvedLinkedServerId);
 
   return {
     status: 200,
@@ -516,6 +511,98 @@ async function getSettingsServer(env: Env, linkedServerId: string) {
       ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC
       LIMIT 1`,
   ).bind(linkedServerId, linkedServerId, linkedServerId).first<SettingsServerRow>();
+}
+
+type SettingsEventChannelSummary = {
+  channelId: string;
+  channelName: string | null;
+  channelType: string;
+  valid: boolean;
+  missingPermissions: string[];
+};
+
+const SETTINGS_EVENT_CHANNEL_TYPES = [
+  "default_event",
+  "event_announcements",
+  "event_live_scoreboard",
+  "event_results",
+] as const;
+
+type SettingsEventChannelSelection = Record<typeof SETTINGS_EVENT_CHANNEL_TYPES[number], SettingsEventChannelSummary | null>;
+
+async function getSavedDiscordEventChannelSummaryForSettings(env: Env, linkedServerId: string): Promise<{
+  selected: SettingsEventChannelSelection;
+  liveScoreboardReady: boolean;
+  defaultReady: boolean;
+}> {
+  const empty = emptyDiscordEventChannelSummary();
+  try {
+    const rows = await requireDb(env)
+      .prepare(
+        `SELECT channel_type, channel_id, channel_name, channel_kind,
+                bot_can_view, bot_can_send, bot_can_embed, bot_can_read_history
+           FROM server_discord_channel_settings
+          WHERE linked_server_id = ?`,
+      )
+      .bind(linkedServerId)
+      .all<{
+        channel_type: string;
+        channel_id: string;
+        channel_name: string | null;
+        channel_kind: string | null;
+        bot_can_view: number | null;
+        bot_can_send: number | null;
+        bot_can_embed: number | null;
+        bot_can_read_history: number | null;
+      }>();
+
+    const selected = { ...empty.selected };
+    for (const row of rows.results ?? []) {
+      if (!isSettingsEventChannelType(row.channel_type)) continue;
+      const missingPermissions = [
+        row.bot_can_view ? null : "View Channel",
+        row.bot_can_send ? null : "Send Messages",
+        row.bot_can_embed ? null : "Embed Links",
+        row.bot_can_read_history ? null : "Read Message History",
+      ].filter(Boolean) as string[];
+      selected[row.channel_type] = {
+        channelId: row.channel_id,
+        channelName: row.channel_name,
+        channelType: row.channel_kind ?? "text",
+        valid: missingPermissions.length === 0,
+        missingPermissions,
+      };
+    }
+    return {
+      selected,
+      liveScoreboardReady: Boolean(selected.event_live_scoreboard?.valid),
+      defaultReady: Boolean(selected.default_event?.valid),
+    };
+  } catch (error) {
+    console.warn("DZN server settings Discord channel summary skipped", error instanceof Error ? error.message : "unknown error");
+    return empty;
+  }
+}
+
+function emptyDiscordEventChannelSummary(): {
+  selected: SettingsEventChannelSelection;
+  liveScoreboardReady: boolean;
+  defaultReady: boolean;
+} {
+  return {
+    selected: {
+      default_event: null,
+      event_announcements: null,
+      event_live_scoreboard: null,
+      event_results: null,
+    },
+    liveScoreboardReady: false,
+    defaultReady: false,
+  };
+}
+
+function isSettingsEventChannelType(value: string): value is typeof SETTINGS_EVENT_CHANNEL_TYPES[number] {
+  return (SETTINGS_EVENT_CHANNEL_TYPES as readonly string[]).includes(value);
 }
 
 function serializeSettingsServer(server: SettingsServerRow) {

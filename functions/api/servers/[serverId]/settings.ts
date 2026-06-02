@@ -1,8 +1,6 @@
 import { ensureMockUser, getSessionUser } from "../../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
-import { getServerCategoryLabel } from "../../../_lib/server-categories";
-import { readOwnerServerSettings, updateServerCategory } from "../../../_lib/server-settings";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type LegacySettingsBody = {
@@ -16,6 +14,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
 
   try {
+    const { readOwnerServerSettings } = await import("../../../_lib/server-settings");
     const result = await readOwnerServerSettings(env, user, serverId);
     return json(result.payload, { status: result.status });
   } catch (error) {
@@ -37,16 +36,33 @@ export const onRequestPatch: PagesFunction = async ({ request, env, params }) =>
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
 
-  const body = await readJson<LegacySettingsBody>(request);
-  const result = await updateServerCategory(env, user, serverId, {
-    category: body.server_category,
-    source: "owner",
-  });
+  let result: Awaited<ReturnType<typeof import("../../../_lib/server-settings").updateServerCategory>>;
+  try {
+    const [{ updateServerCategory }, body] = await Promise.all([
+      import("../../../_lib/server-settings"),
+      readJson<LegacySettingsBody>(request),
+    ]);
+    result = await updateServerCategory(env, user, serverId, {
+      category: body.server_category,
+      source: "owner",
+    });
+  } catch (error) {
+    const requestId = crypto.randomUUID();
+    console.warn("DZN legacy server settings update unavailable", { requestId, serverId, error: error instanceof Error ? error.message : "unknown" });
+    return json({
+      ok: false,
+      error: "SETTINGS_UNAVAILABLE",
+      errorCode: "SETTINGS_UNAVAILABLE",
+      message: "Server settings are temporarily unavailable. Please try again.",
+      requestId,
+    }, { status: 500 });
+  }
 
   if (result.status !== 200 || !("newCategory" in result.payload)) {
     return json(result.payload, { status: result.status });
   }
 
+  const { getServerCategoryLabel } = await import("../../../_lib/server-categories");
   return json({
     ...result.payload,
     ok: true,

@@ -1,5 +1,4 @@
 import { ensureMockUser, getSessionUser } from "../../../../../_lib/db";
-import { testOwnerDiscordEventChannel } from "../../../../../_lib/event-hub";
 import { json, methodNotAllowed, readJson } from "../../../../../_lib/http";
 import { isMockAuth } from "../../../../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../../../../_lib/types";
@@ -10,7 +9,10 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
   try {
-    const body = await readJson<Record<string, unknown>>(request);
+    const [{ testOwnerDiscordEventChannel }, body] = await Promise.all([
+      import("../../../../../_lib/event-hub"),
+      readJson<Record<string, unknown>>(request),
+    ]);
     const result = await testOwnerDiscordEventChannel(env, user, serverId, body);
     return json(result.payload, { status: result.status });
   } catch (error) {

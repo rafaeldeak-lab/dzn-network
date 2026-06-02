@@ -1,5 +1,4 @@
 import { ensureMockUser, getSessionUser } from "../../../_lib/db";
-import { getOwnerEventHub } from "../../../_lib/event-hub";
 import { json, methodNotAllowed } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
@@ -9,8 +8,21 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   if (!user) return json({ ok: false, error: "NOT_AUTHENTICATED", message: "Log in to view Event Hub." }, { status: 401 });
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
-  const result = await getOwnerEventHub(env, user, serverId);
-  return json(result.payload, { status: result.status });
+  try {
+    const { getOwnerEventHub } = await import("../../../_lib/event-hub");
+    const result = await getOwnerEventHub(env, user, serverId);
+    return json(result.payload, { status: result.status });
+  } catch (error) {
+    const requestId = crypto.randomUUID();
+    console.warn("DZN owner Event Hub unavailable", { requestId, serverId, error: error instanceof Error ? error.message : "unknown" });
+    return json({
+      ok: false,
+      error: "SETTINGS_UNAVAILABLE",
+      errorCode: "SETTINGS_UNAVAILABLE",
+      message: "Event Hub is temporarily unavailable. Please try again.",
+      requestId,
+    }, { status: 500 });
+  }
 };
 
 export const onRequestPost: PagesFunction = () => methodNotAllowed();

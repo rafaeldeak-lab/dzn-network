@@ -1,5 +1,4 @@
 import { ensureMockUser, getSessionUser } from "../../../../../_lib/db";
-import { enterOwnerEvent } from "../../../../../_lib/event-hub";
 import { json, methodNotAllowed } from "../../../../../_lib/http";
 import { isMockAuth } from "../../../../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../../../../_lib/types";
@@ -10,8 +9,21 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
   const serverId = sanitizeIdentifier(params.serverId);
   const eventId = sanitizeIdentifier(params.eventId);
   if (!serverId || !eventId) return json({ ok: false, error: "VALIDATION_FAILED", message: "Invalid server or event id." }, { status: 400 });
-  const result = await enterOwnerEvent(env, user, serverId, eventId);
-  return json(result.payload, { status: result.status });
+  try {
+    const { enterOwnerEvent } = await import("../../../../../_lib/event-hub");
+    const result = await enterOwnerEvent(env, user, serverId, eventId);
+    return json(result.payload, { status: result.status });
+  } catch (error) {
+    const requestId = crypto.randomUUID();
+    console.warn("DZN owner event entry unavailable", { requestId, serverId, eventId, error: error instanceof Error ? error.message : "unknown" });
+    return json({
+      ok: false,
+      error: "SETTINGS_UNAVAILABLE",
+      errorCode: "SETTINGS_UNAVAILABLE",
+      message: "Event entry is temporarily unavailable. Please try again.",
+      requestId,
+    }, { status: 500 });
+  }
 };
 
 export const onRequestGet: PagesFunction = () => methodNotAllowed();

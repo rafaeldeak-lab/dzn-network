@@ -1,5 +1,4 @@
 import { ensureMockUser, getSessionUser } from "../../../../_lib/db";
-import { listOwnerDiscordEventChannels } from "../../../../_lib/event-hub";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { isMockAuth } from "../../../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
@@ -10,6 +9,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   const serverId = sanitizeLinkedServerId(params.serverId);
   if (!serverId) return json({ ok: false, error: "INVALID_SERVER_ID", message: "Invalid server id." }, { status: 400 });
   try {
+    const { listOwnerDiscordEventChannels } = await import("../../../../_lib/event-hub");
     const result = await listOwnerDiscordEventChannels(env, user, serverId);
     return json(result.payload, { status: result.status });
   } catch (error) {

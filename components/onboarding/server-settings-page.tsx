@@ -113,6 +113,14 @@ type SaveState = {
   error: string | null;
 };
 
+type ApiErrorDetails = {
+  message: string;
+  endpoint: string;
+  status: number | null;
+  errorCode: string | null;
+  requestId: string | null;
+};
+
 type EventChannelType = "default_event" | "event_announcements" | "event_live_scoreboard" | "event_results";
 
 type EventChannelSummary = {
@@ -188,6 +196,8 @@ export function ServerSettingsPage() {
   const [servers, setServers] = useState<LinkedServer[]>([]);
   const [selectedServerId, setSelectedServerId] = useState("");
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
+  const [settingsLoadError, setSettingsLoadError] = useState<ApiErrorDetails | null>(null);
+  const [settingsReloadNonce, setSettingsReloadNonce] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>({ area: null, message: null, error: null });
   const [selectedCategory, setSelectedCategory] = useState<CategoryValue | "">("");
@@ -233,18 +243,16 @@ export function ServerSettingsPage() {
       return;
     }
     let active = true;
+    const endpoint = `/api/servers/${encodeURIComponent(selectedServerId)}/settings`;
     fetch(`/api/servers/${encodeURIComponent(selectedServerId)}/settings`, {
       cache: "no-store",
       credentials: "include",
     })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
-        return data as SettingsResponse;
-      })
+      .then((response) => readApiResponse<SettingsResponse>(response, endpoint, "Server settings are temporarily unavailable. Please retry."))
       .then((data) => {
         if (!active) return;
         setSettings(data);
+        setSettingsLoadError(null);
         setSelectedCategory(data.server.currentCategory ?? "");
         setSelectedTags(data.currentTags);
         setDescription(data.server.description ?? "");
@@ -254,7 +262,9 @@ export function ServerSettingsPage() {
       })
       .catch((error) => {
         if (!active) return;
-        setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to load server settings." });
+        const details = apiErrorDetails(error, endpoint, "Server settings are temporarily unavailable. Please retry.");
+        setSettingsLoadError(details);
+        setSaveState({ area: null, message: null, error: details.message });
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -263,7 +273,7 @@ export function ServerSettingsPage() {
     return () => {
       active = false;
     };
-  }, [selectedServerId]);
+  }, [selectedServerId, settingsReloadNonce]);
 
   useEffect(() => {
     if (!settings) return;
@@ -328,13 +338,13 @@ export function ServerSettingsPage() {
   }
 
   async function reloadSettings(serverId: string) {
-    const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/settings`, {
+    const endpoint = `/api/servers/${encodeURIComponent(serverId)}/settings`;
+    const response = await fetch(endpoint, {
       cache: "no-store",
       credentials: "include",
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
-    const next = data as SettingsResponse;
+    const next = await readApiResponse<SettingsResponse>(response, endpoint, "Server settings are temporarily unavailable. Please retry.");
+    setSettingsLoadError(null);
     setSettings(next);
     setSelectedCategory(next.server.currentCategory ?? "");
     setSelectedTags(next.currentTags);
@@ -347,21 +357,22 @@ export function ServerSettingsPage() {
   async function refreshDiscordEventChannels(serverId = settings?.server.id ?? selectedServerId, showMessage = true) {
     if (!serverId) return;
     if (discordChannelsLoading) return;
+    const endpoint = `/api/servers/${encodeURIComponent(serverId)}/discord/channels`;
     setDiscordChannelsLoading(true);
     try {
-      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/discord/channels`, {
+      const response = await fetch(endpoint, {
         cache: "no-store",
         credentials: "include",
         headers: { accept: "application/json" },
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
+      const data = await readApiResponse<DiscordEventChannelsResponse>(response, endpoint, "Discord channels could not be loaded right now. Retry in a moment.");
       setDiscordChannels(data as DiscordEventChannelsResponse);
       if (data.selected) setEventChannelIds(channelIdsFromSelected(data.selected));
       if (showMessage) setSaveState({ area: null, message: "Discord channels refreshed.", error: null });
     } catch (error) {
-      setDiscordChannels((current) => current ?? { ok: false, channels: [], message: error instanceof Error ? error.message : "Unable to refresh Discord channels." });
-      if (showMessage) setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to refresh Discord channels." });
+      const details = apiErrorDetails(error, endpoint, "Discord channels could not be loaded right now. Retry in a moment.");
+      setDiscordChannels((current) => current ?? { ok: false, channels: [], message: details.message, error: details.errorCode ?? "DISCORD_CHANNELS_UNAVAILABLE", errorCode: details.errorCode ?? "DISCORD_CHANNELS_UNAVAILABLE" });
+      if (showMessage) setSaveState({ area: null, message: null, error: details.message });
     } finally {
       setDiscordChannelsLoading(false);
     }
@@ -412,7 +423,7 @@ export function ServerSettingsPage() {
     return <LoginRequired />;
   }
 
-  if (!selectedServerId || !selectedServer) {
+  if (!selectedServerId) {
     return (
       <PageShell onLogout={signOut}>
         <section className="glass-surface animated-border rounded-lg p-6">
@@ -430,13 +441,48 @@ export function ServerSettingsPage() {
   }
 
   if (!settings) {
+    const loadError = settingsLoadError ?? {
+      message: "Server settings are temporarily unavailable.",
+      endpoint: selectedServerId ? `/api/servers/${selectedServerId}/settings` : "/api/servers/[serverId]/settings",
+      status: null,
+      errorCode: null,
+      requestId: null,
+    };
     return (
       <PageShell onLogout={signOut}>
         <section className="glass-surface animated-border rounded-lg p-6">
           <div className="relative z-10">
             <p className="text-xs font-black uppercase text-red-200/75">Server Settings</p>
             <h1 className="mt-2 text-3xl font-black text-white">Settings unavailable</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">{saveState.error ?? "DZN could not load this server settings page."}</p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">{loadError.message}</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setLoading(true);
+                  setSettingsLoadError(null);
+                  setSettingsReloadNonce((value) => value + 1);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Retry
+              </button>
+              <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black uppercase text-zinc-100">
+                Back to Dashboard
+              </Link>
+            </div>
+            <details className="mt-5 rounded-lg border border-white/10 bg-black/24 p-3 text-xs text-zinc-400">
+              <summary className="cursor-pointer font-black uppercase text-zinc-200">Safe debug details</summary>
+              <div className="mt-3 grid gap-1 break-all">
+                <span>route: /dashboard/server-settings</span>
+                <span>serverId: {selectedServerId || "missing"}</span>
+                <span>endpoint: {loadError.endpoint}</span>
+                <span>status: {loadError.status ?? "unknown"}</span>
+                <span>errorCode: {loadError.errorCode ?? "unknown"}</span>
+                <span>requestId: {loadError.requestId ?? "not provided"}</span>
+              </div>
+            </details>
           </div>
         </section>
       </PageShell>
@@ -459,10 +505,17 @@ export function ServerSettingsPage() {
             value={selectedServerId}
             onChange={(event) => {
               setLoading(true);
+              setSettings(null);
+              setSettingsLoadError(null);
               setSelectedServerId(event.target.value);
             }}
             className="appearance-none bg-transparent pr-8 text-sm font-black text-white outline-none"
           >
+            {settings && !selectedServer ? (
+              <option value={settings.server.id} className="bg-[#080b16] text-white">
+                {settings.server.name}
+              </option>
+            ) : null}
             {servers.map((server) => (
               <option key={server.id} value={server.id} className="bg-[#080b16] text-white">
                 {server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name}
@@ -890,9 +943,47 @@ async function postJson(path: string, body: unknown) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  return readApiResponse<{ message?: string }>(response, path, "Server settings are temporarily unavailable. Please retry.");
+}
+
+class ApiRequestError extends Error {
+  details: ApiErrorDetails;
+
+  constructor(details: ApiErrorDetails) {
+    super(details.message);
+    this.name = "ApiRequestError";
+    this.details = details;
+  }
+}
+
+async function readApiResponse<T>(response: Response, endpoint: string, fallbackMessage: string): Promise<T> {
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
-  return data as { message?: string };
+  if (!response.ok) {
+    const body = data && typeof data === "object" ? data as Record<string, unknown> : {};
+    throw new ApiRequestError({
+      message: stringOrNull(body.message) ?? fallbackMessage,
+      endpoint,
+      status: response.status,
+      errorCode: stringOrNull(body.errorCode) ?? stringOrNull(body.error),
+      requestId: stringOrNull(body.requestId),
+    });
+  }
+  return data as T;
+}
+
+function apiErrorDetails(error: unknown, endpoint: string, fallbackMessage: string): ApiErrorDetails {
+  if (error instanceof ApiRequestError) return error.details;
+  return {
+    message: error instanceof Error && !/^Request failed:/i.test(error.message) ? error.message : fallbackMessage,
+    endpoint,
+    status: null,
+    errorCode: null,
+    requestId: null,
+  };
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function formatPlan(value: string) {
