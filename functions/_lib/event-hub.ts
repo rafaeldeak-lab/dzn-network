@@ -457,7 +457,7 @@ export async function testOwnerDiscordEventChannel(env: Env, user: SessionUser |
     });
     return { status: 200, payload: { ok: true, message: "Test event message sent.", mocked: true } };
   }
-  const payload = renderChannelTestEmbed(server);
+  const payload = renderChannelTestEmbed(server, hasAdvancedEventRouting(channels));
   let delivery: { messageId: string | null; operation: "edited" | "sent" | "replaced" };
   try {
     delivery = await sendOrEditEventDiscordMessage(env, selected.channel_id, payload, null);
@@ -610,8 +610,8 @@ function getEventEligibility(event: EventHubEventRow, context: EventEligibilityC
   if (context.cooldownUntil && Date.parse(context.cooldownUntil) > Date.now()) return eligibility(false, "EVENT_COOLDOWN_ACTIVE", "This server is cooling down after a completed official event.", "Cooldown Active");
   if (!context.admReady) return eligibility(false, "ADM_SYNC_REQUIRED", "ADM sync must have recent successful evidence before event entry.", "View Sync Health");
   if (!publicListingActive) return eligibility(false, "PUBLIC_LISTING_REQUIRED", "Public listing must be active to enter this event.", "Open Server Settings");
-  if (requiresDiscord && !hasUsableEventChannel(context.channels, "event_live_scoreboard")) {
-    return eligibility(false, "DISCORD_EVENT_CHANNEL_REQUIRED", "Choose a Discord event channel before entering events that require live Discord updates.", "Choose Channel");
+  if (requiresDiscord && !hasUsablePrimaryEventChannel(context.channels)) {
+    return eligibility(false, "DISCORD_EVENT_CHANNEL_REQUIRED", "Choose a Primary Event Channel before entering events that require Discord updates.", "Choose Channel");
   }
   if (Number(event.server_limit ?? event.team_limit ?? 0) > 0 && Number(event.registered_servers ?? 0) >= Number(event.server_limit ?? event.team_limit ?? 0)) {
     return eligibility(false, "EVENT_FULL", "This event is full.", "Event Full");
@@ -648,7 +648,8 @@ function serializeEventCard(event: EventHubEventRow, eligibility: ReturnType<typ
     maxEntries: Number(event.server_limit ?? event.team_limit ?? 0) || null,
     scoringSource: "Scored automatically from ADM sync",
     requiresDiscordPosting: eventRequiresDiscord(event),
-    selectedDiscordEventChannel: serializeSavedChannel(resolveEventChannel(context.channels, "event_live_scoreboard")),
+    selectedDiscordEventChannel: serializeSavedChannel(findUsableEventChannel(context.channels, "default_event")),
+    discordRoutingAdvanced: hasAdvancedEventRouting(context.channels),
     rewards: event.rewards,
     rulesSummary: event.rules,
     eligibility,
@@ -710,12 +711,13 @@ function serializeSavedChannel(row: SavedChannelRow | null | undefined) {
 }
 
 function summarizeChannelStatus(env: Env, server: OwnerServerRow, rows: SavedChannelRow[]) {
-  const selected = resolveEventChannel(rows, "event_live_scoreboard");
+  const selected = findUsableEventChannel(rows, "default_event");
   const ready = Boolean(selected && isSavedChannelUsable(selected));
   return {
     ready,
-    label: ready ? "Discord Channel Ready" : "Discord Channel Missing",
+    label: ready ? "Discord Event Channel Ready" : "Discord Event Channel Missing",
     selectedChannel: serializeSavedChannel(selected),
+    advancedRoutingEnabled: hasAdvancedEventRouting(rows),
     guildId: server.guild_id ?? server.discord_guild_id,
     guildName: server.guild_name,
     botConfigured: Boolean(cleanBotToken(env.DISCORD_BOT_TOKEN)) || rows.some(isSavedChannelUsable),
@@ -1347,11 +1349,11 @@ function renderPhaseLiveEmbed(matchup: MatchupRow, phase: PhaseRow, scoring: Awa
   };
 }
 
-function renderChannelTestEmbed(server: OwnerServerRow) {
+function renderChannelTestEmbed(server: OwnerServerRow, advancedRoutingEnabled = false) {
   return {
     embeds: [{
       title: "DZN Event Channel Connected",
-      description: "This channel will receive event announcements, live scoreboards, and final results.",
+      description: `DZN will post event announcements, live scoreboards, and final results here unless advanced routing is configured.${advancedRoutingEnabled ? "\n\nAdvanced routing is enabled for this server." : ""}`,
       color: 0x22d3ee,
       fields: [{ name: "Server", value: serverDisplayName(server), inline: true }],
       footer: { text: "DZN Event Hub" },
@@ -1614,6 +1616,19 @@ function eventRequiresDiscord(event: Pick<EventHubEventRow, "requires_discord_po
 
 function hasUsableEventChannel(rows: SavedChannelRow[], preferred: EventChannelType) {
   return Boolean(resolveEventChannel(rows, preferred));
+}
+
+function hasUsablePrimaryEventChannel(rows: SavedChannelRow[]) {
+  return Boolean(findUsableEventChannel(rows, "default_event"));
+}
+
+function hasAdvancedEventRouting(rows: SavedChannelRow[]) {
+  return Boolean(findUsableEventChannel(rows, "default_event"))
+    && EVENT_CHANNEL_TYPES.some((type) => type !== "default_event" && Boolean(findUsableEventChannel(rows, type)));
+}
+
+function findUsableEventChannel(rows: SavedChannelRow[], type: EventChannelType) {
+  return rows.find((item) => item.channel_type === type && isSavedChannelUsable(item)) ?? null;
 }
 
 function resolveEventChannel(rows: SavedChannelRow[], preferred: EventChannelType): SavedChannelRow | null {

@@ -126,11 +126,16 @@ includesAll(settingsUi, [
   "Manage how your server appears across DZN",
   "Open Setup Page",
   "View Public Page",
-  "Discord Event Channels",
-  "Choose where DZN should post event announcements, live scoreboards, and final results for this server.",
-  "Default Event Channel",
-  "Live Event Scoreboard Channel",
-  "Event Results Channel",
+  "Discord Event Channel",
+  "Choose where DZN should post event updates for this server.",
+  "Primary Event Channel",
+  "Recommended. DZN will use this channel for all event announcements, live scoreboards, and final results unless you choose advanced channels below.",
+  "Advanced channel routing",
+  "Optional. Send announcements, live scoreboards, and results to different channels.",
+  "Announcement Channel Optional",
+  "Live Scoreboard Channel Optional",
+  "Results Channel Optional",
+  "Uses Primary Event Channel",
   "Refresh Discord Channels",
   "discordChannelHelpCopy",
   "Discord channels could not be loaded right now. Retry in a moment.",
@@ -141,13 +146,16 @@ includesAll(settingsUi, [
   "status: {loadError.status",
   "requestId: {loadError.requestId",
   "void refreshDiscordEventChannels(serverId, false)",
-  "Save Event Channels",
-  "Test Bot Message",
+  "Save Discord Event Channel",
+  "Save Discord Event Channels",
+  "Send Test Event Message",
   "View Channel, Send Messages, Embed Links, Read Message History",
   "Change server category?",
   "Hidden servers keep ADM sync running",
   "Category cooldowns protect fair competition",
 ]);
+assert.equal(settingsUi.includes("Default Event Channel"), false, "Owner UI must use Primary Event Channel instead of Default Event Channel.");
+assert.equal(settingsUi.includes("Live Event Scoreboard Channel"), false, "Owner UI should use Live Scoreboard Channel Optional.");
 
 for (const publicFile of ["functions/api/public/servers.ts", "functions/api/public/home-stats.ts"]) {
   const file = source(publicFile);

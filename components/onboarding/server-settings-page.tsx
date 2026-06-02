@@ -156,6 +156,8 @@ type DiscordEventChannelsResponse = {
   message?: string;
 };
 
+const ADVANCED_EVENT_CHANNEL_TYPES: EventChannelType[] = ["event_announcements", "event_live_scoreboard", "event_results"];
+
 const CATEGORY_ICON: Record<CategoryValue, React.ReactNode> = {
   pvp: <Swords className="h-5 w-5" />,
   deathmatch: <Skull className="h-5 w-5" />,
@@ -167,26 +169,26 @@ const EVENT_CHANNEL_FIELDS: Array<{ key: EventChannelType; inputKey: string; lab
   {
     key: "default_event",
     inputKey: "defaultEventChannelId",
-    label: "Default Event Channel",
-    description: "Fallback for announcements, live scoreboards, and final results.",
+    label: "Primary Event Channel",
+    description: "Recommended. DZN will use this channel for all event announcements, live scoreboards, and final results unless you choose advanced channels below.",
   },
   {
     key: "event_announcements",
     inputKey: "eventAnnouncementsChannelId",
-    label: "Event Announcements Channel",
-    description: "Entry confirmations, tournament starts, and bracket announcements.",
+    label: "Announcement Channel Optional",
+    description: "Overrides the primary channel for event entries, tournament starts, bracket updates, and event announcements.",
   },
   {
     key: "event_live_scoreboard",
     inputKey: "eventLiveScoreboardChannelId",
-    label: "Live Event Scoreboard Channel",
-    description: "Same-message live phase scoreboards and midpoint updates.",
+    label: "Live Scoreboard Channel Optional",
+    description: "Overrides the primary channel for live matchup scoreboards, phase progress, and midpoint updates.",
   },
   {
     key: "event_results",
     inputKey: "eventResultsChannelId",
-    label: "Event Results Channel",
-    description: "Final matchup reports, tournament reports, and champion posts.",
+    label: "Results Channel Optional",
+    description: "Overrides the primary channel for final matchup results, champions, and tournament reports.",
   },
 ];
 
@@ -207,6 +209,7 @@ export function ServerSettingsPage() {
   const [visibility, setVisibility] = useState<ListingVisibility>("public");
   const [discordChannels, setDiscordChannels] = useState<DiscordEventChannelsResponse | null>(null);
   const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
+  const [advancedRoutingOpen, setAdvancedRoutingOpen] = useState(false);
   const [eventChannelIds, setEventChannelIds] = useState<Record<EventChannelType, string>>({
     default_event: "",
     event_announcements: "",
@@ -399,7 +402,7 @@ export function ServerSettingsPage() {
     setSaveState({ area: "discord", message: null, error: null });
     try {
       const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/discord-channels/test`, {
-        channelType: eventChannelIds.event_live_scoreboard ? "event_live_scoreboard" : "default_event",
+        channelType: "default_event",
       });
       setSaveState({ area: null, message: result.message ?? "Test event message sent.", error: null });
     } catch (error) {
@@ -491,6 +494,13 @@ export function ServerSettingsPage() {
 
   const categoryLocked = !settings.editState.canEditCategory && categoryChanged;
   const setupUrl = settings.setupPageUrl;
+  const advancedRoutingSelected = ADVANCED_EVENT_CHANNEL_TYPES.some((type) => Boolean(eventChannelIds[type]));
+  const primaryChannelName = channelDisplayName(discordChannels?.channels ?? [], settings.discordEventChannels?.selected?.default_event ?? null, eventChannelIds.default_event);
+  const selectedChannelSummaries = {
+    event_announcements: channelDisplayName(discordChannels?.channels ?? [], settings.discordEventChannels?.selected?.event_announcements ?? null, eventChannelIds.event_announcements),
+    event_live_scoreboard: channelDisplayName(discordChannels?.channels ?? [], settings.discordEventChannels?.selected?.event_live_scoreboard ?? null, eventChannelIds.event_live_scoreboard),
+    event_results: channelDisplayName(discordChannels?.channels ?? [], settings.discordEventChannels?.selected?.event_results ?? null, eventChannelIds.event_results),
+  };
 
   return (
     <PageShell onLogout={signOut}>
@@ -696,9 +706,9 @@ export function ServerSettingsPage() {
         <div className="relative z-10">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <SectionTitle icon={<Bell className="h-5 w-5" />} title="Discord Event Channels" />
+              <SectionTitle icon={<Bell className="h-5 w-5" />} title="Discord Event Channel" />
               <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-                Choose where DZN should post event announcements, live scoreboards, and final results for this server.
+                Choose where DZN should post event updates for this server.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -713,12 +723,12 @@ export function ServerSettingsPage() {
               </button>
               <button
                 type="button"
-                disabled={saveState.area === "discord" || (!eventChannelIds.default_event && !eventChannelIds.event_live_scoreboard)}
+                disabled={saveState.area === "discord" || !eventChannelIds.default_event}
                 onClick={testDiscordEventChannel}
                 className="inline-flex items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-xs font-black uppercase text-violet-50 disabled:opacity-55"
               >
                 <Send className="h-4 w-4" />
-                Test Bot Message
+                Send Test Event Message
               </button>
             </div>
           </div>
@@ -733,28 +743,46 @@ export function ServerSettingsPage() {
             </div>
           ) : null}
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            {EVENT_CHANNEL_FIELDS.map((field) => (
-              <label key={field.key} className="grid gap-2 rounded-lg border border-white/10 bg-black/24 p-4">
-                <span className="text-sm font-black text-white">{field.label}</span>
-                <span className="text-xs leading-5 text-zinc-400">{field.description}</span>
-                <select
-                  value={eventChannelIds[field.key]}
-                  onChange={(event) => setEventChannelIds((current) => ({ ...current, [field.key]: event.target.value }))}
-                  className="mt-1 rounded-lg border border-white/10 bg-[#080b16] px-3 py-3 text-sm font-bold text-white outline-none focus:border-cyan-300/45"
-                >
-                  <option value="">Not selected</option>
-                  {(discordChannels?.channels ?? []).map((channel) => (
-                    <option key={`${field.key}-${channel.id}`} value={channel.id} disabled={!channel.canSelect}>
-                      #{channel.name} - {channel.type}{channel.canSelect ? " - Bot can post" : ` - Missing ${channel.missingPermissions.join(", ") || "permissions"}`}
-                    </option>
-                  ))}
-                </select>
-                {selectedChannelWarning(discordChannels?.channels ?? [], eventChannelIds[field.key]) ? (
-                  <span className="text-xs font-bold text-amber-100">{selectedChannelWarning(discordChannels?.channels ?? [], eventChannelIds[field.key])}</span>
-                ) : null}
-              </label>
-            ))}
+          <div className="mt-4 grid gap-4">
+            {renderEventChannelSelect(EVENT_CHANNEL_FIELDS[0], {
+              channels: discordChannels?.channels ?? [],
+              selectedId: eventChannelIds.default_event,
+              primarySelected: Boolean(eventChannelIds.default_event),
+              highlighted: true,
+              onChange: (value) => setEventChannelIds((current) => ({ ...current, default_event: value })),
+            })}
+
+            {eventChannelIds.default_event ? (
+              <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-4">
+                {!advancedRoutingSelected ? (
+                  <p className="text-sm font-bold text-cyan-50">All event posts will use {primaryChannelName ?? "the Primary Event Channel"}.</p>
+                ) : (
+                  <div className="grid gap-2 text-sm font-bold text-cyan-50">
+                    <p>Advanced routing enabled.</p>
+                    <p>Announcements: {selectedChannelSummaries.event_announcements ?? "Uses Primary Event Channel"}</p>
+                    <p>Live scoreboards: {selectedChannelSummaries.event_live_scoreboard ?? "Uses Primary Event Channel"}</p>
+                    <p>Results: {selectedChannelSummaries.event_results ?? "Uses Primary Event Channel"}</p>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <details
+              className="rounded-lg border border-white/10 bg-black/24 p-4"
+              onToggle={(event) => setAdvancedRoutingOpen(event.currentTarget.open)}
+            >
+              <summary className="cursor-pointer text-sm font-black text-white">Advanced channel routing</summary>
+              <p className="mt-2 text-xs leading-5 text-zinc-400">Optional. Send announcements, live scoreboards, and results to different channels.</p>
+              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                {EVENT_CHANNEL_FIELDS.slice(1).map((field) => renderEventChannelSelect(field, {
+                  channels: discordChannels?.channels ?? [],
+                  selectedId: eventChannelIds[field.key],
+                  primarySelected: Boolean(eventChannelIds.default_event),
+                  highlighted: false,
+                  onChange: (value) => setEventChannelIds((current) => ({ ...current, [field.key]: value })),
+                }))}
+              </div>
+            </details>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
@@ -764,7 +792,7 @@ export function ServerSettingsPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-55"
             >
               {saveState.area === "discord" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Event Channels
+              {advancedRoutingOpen || advancedRoutingSelected ? "Save Discord Event Channels" : "Save Discord Event Channel"}
             </button>
             <span className="text-xs font-bold text-zinc-400">
               Required bot permissions: View Channel, Send Messages, Embed Links, Read Message History.
@@ -1012,6 +1040,54 @@ function channelIdsFromSelected(selected: Record<EventChannelType, EventChannelS
     event_live_scoreboard: selected?.event_live_scoreboard?.channelId ?? "",
     event_results: selected?.event_results?.channelId ?? "",
   };
+}
+
+function renderEventChannelSelect(
+  field: { key: EventChannelType; inputKey: string; label: string; description: string },
+  options: {
+    channels: DiscordEventChannelOption[];
+    selectedId: string;
+    primarySelected: boolean;
+    highlighted: boolean;
+    onChange: (value: string) => void;
+  },
+) {
+  const warning = selectedChannelWarning(options.channels, options.selectedId);
+  const emptyLabel = field.key === "default_event" || !options.primarySelected ? "Not selected" : "Uses Primary Event Channel";
+  return (
+    <label
+      key={field.key}
+      className={`grid gap-2 rounded-lg border p-4 ${
+        options.highlighted
+          ? "border-cyan-300/35 bg-cyan-400/12 shadow-[0_0_28px_rgba(34,211,238,0.12)]"
+          : "border-white/10 bg-black/24"
+      }`}
+    >
+      <span className="text-sm font-black text-white">{field.label}</span>
+      <span className="text-xs leading-5 text-zinc-400">{field.description}</span>
+      <select
+        value={options.selectedId}
+        onChange={(event) => options.onChange(event.target.value)}
+        className="mt-1 rounded-lg border border-white/10 bg-[#080b16] px-3 py-3 text-sm font-bold text-white outline-none focus:border-cyan-300/45"
+      >
+        <option value="">{emptyLabel}</option>
+        {options.channels.map((channel) => (
+          <option key={`${field.key}-${channel.id}`} value={channel.id} disabled={!channel.canSelect}>
+            #{channel.name} - {channel.type}{channel.canSelect ? " - Bot can post" : ` - Missing ${channel.missingPermissions.join(", ") || "permissions"}`}
+          </option>
+        ))}
+      </select>
+      {warning ? <span className="text-xs font-bold text-amber-100">{warning}</span> : null}
+    </label>
+  );
+}
+
+function channelDisplayName(channels: DiscordEventChannelOption[], saved: EventChannelSummary | null | undefined, channelId: string) {
+  if (!channelId) return null;
+  const live = channels.find((channel) => channel.id === channelId);
+  if (live?.name) return `#${live.name}`;
+  if (saved?.channelId === channelId && saved.channelName) return `#${saved.channelName}`;
+  return "saved channel";
 }
 
 function selectedChannelWarning(channels: DiscordEventChannelOption[], channelId: string) {

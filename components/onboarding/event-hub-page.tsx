@@ -58,6 +58,7 @@ type EventHubPayload = {
       ready: boolean;
       label: string;
       selectedChannel: EventChannelSummary | null;
+      advancedRoutingEnabled?: boolean;
     };
     settingsUrl: string;
   };
@@ -107,6 +108,7 @@ type EventCard = {
   scoringSource: string;
   requiresDiscordPosting: boolean;
   selectedDiscordEventChannel: EventChannelSummary | null;
+  discordRoutingAdvanced?: boolean;
   rewards: string | null;
   rulesSummary: string | null;
   eligibility: EventEligibility;
@@ -345,8 +347,8 @@ export function EventHubPage() {
             </button>
           ))}
           <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-3">
-            <p className="text-xs font-black uppercase text-zinc-300">Discord Event Channel</p>
-            <p className="mt-2 text-sm font-bold text-zinc-100">{payload?.discordChannels.status.selectedChannel?.channelName ? `#${payload.discordChannels.status.selectedChannel.channelName}` : "Not selected"}</p>
+            <p className="text-xs font-black uppercase text-zinc-300">{payload?.discordChannels.status.advancedRoutingEnabled ? "Discord Event Channels" : "Discord Event Channel"}</p>
+            <p className="mt-2 text-sm font-bold text-zinc-100">{eventChannelStatusText(payload)}</p>
             <Link href={payload?.discordChannels.settingsUrl ?? "/dashboard/server-settings#discord-event-channels"} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50">
               Choose Channel
             </Link>
@@ -395,7 +397,7 @@ function ReadinessBanners({ payload }: { payload: EventHubPayload }) {
   const notices: Array<{ key: string; text: string; href: string; action: string }> = [];
   if (!payload.server.category) notices.push({ key: "category", text: "Set your server category before entering category-matched events.", href: "/dashboard/server-settings#category", action: "Set Category" });
   if (!payload.server.setupComplete) notices.push({ key: "setup", text: "Complete setup before entering ADM-scored events.", href: "/setup", action: "Complete Setup" });
-  if (!payload.discordChannels.status.ready) notices.push({ key: "discord", text: "Choose a Discord event channel before entering events that post live scoreboards.", href: payload.discordChannels.settingsUrl, action: "Choose Channel" });
+  if (!payload.discordChannels.status.ready) notices.push({ key: "discord", text: "Choose a Discord event channel before entering events that require live updates.", href: payload.discordChannels.settingsUrl, action: "Choose Channel" });
   if (!notices.length) return null;
   return (
     <div className="mt-4 grid gap-3">
@@ -455,8 +457,8 @@ function EventCardView({ event, busy = false, locked = false, onEnter }: { event
             View Public Event
           </Link>
           <div className="rounded-lg border border-white/10 bg-black/24 p-3">
-            <p className="text-[10px] font-black uppercase text-zinc-500">Selected Channel</p>
-            <p className="mt-1 text-sm font-bold text-zinc-100">{event.selectedDiscordEventChannel?.channelName ? `#${event.selectedDiscordEventChannel.channelName}` : "Not selected"}</p>
+            <p className="text-[10px] font-black uppercase text-zinc-500">{event.discordRoutingAdvanced ? "Discord Event Channels" : "Discord Event Channel"}</p>
+            <p className="mt-1 text-sm font-bold text-zinc-100">{event.discordRoutingAdvanced ? "Advanced routing enabled" : event.selectedDiscordEventChannel?.channelName ? `#${event.selectedDiscordEventChannel.channelName}` : "Choose a Discord event channel before entering events that require live updates."}</p>
           </div>
         </div>
       </div>
@@ -604,6 +606,14 @@ function Mini({ label, value }: { label: string; value: React.ReactNode }) {
       <p className="mt-1 text-xs font-bold text-zinc-100">{value}</p>
     </div>
   );
+}
+
+function eventChannelStatusText(payload: EventHubPayload | null) {
+  if (!payload) return "Choose a Discord event channel before entering events that require live updates.";
+  if (payload.discordChannels.status.advancedRoutingEnabled) return "Advanced routing enabled";
+  const channelName = payload.discordChannels.status.selectedChannel?.channelName;
+  if (channelName) return `#${channelName}`;
+  return "Choose a Discord event channel before entering events that require live updates.";
 }
 
 function ctaHref(code: string | null) {

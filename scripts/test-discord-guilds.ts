@@ -209,18 +209,24 @@ assert.equal(eventHubSource.includes("TOKEN_ENCRYPTION_KEY"), false, "Event chan
 
 const eventSettingsUi = readFileSync("components/onboarding/server-settings-page.tsx", "utf8");
 for (const snippet of [
-  "Discord Event Channels",
+  "Discord Event Channel",
   "Refresh Discord Channels",
-  "Save Event Channels",
-  "Test Bot Message",
-  "Live Event Scoreboard Channel",
-  "Event Results Channel",
+  "Save Discord Event Channel",
+  "Send Test Event Message",
+  "Primary Event Channel",
+  "Advanced channel routing",
+  "Announcement Channel Optional",
+  "Live Scoreboard Channel Optional",
+  "Results Channel Optional",
+  "Uses Primary Event Channel",
   "Missing bot permissions",
   "discordChannelHelpCopy",
   "void refreshDiscordEventChannels(serverId, false)",
 ]) {
   assert.equal(eventSettingsUi.includes(snippet), true, `Missing Server Settings event channel UI: ${snippet}`);
 }
+assert.equal(eventSettingsUi.includes("Default Event Channel"), false, "Owner event settings should not show the old Default Event Channel label.");
+assert.equal(eventSettingsUi.includes("Test Bot Message"), false, "Owner event settings should use Send Test Event Message.");
 
 const onboardingApiSource = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(onboardingApiSource.includes("getDiscordPostingChannels"), true);
