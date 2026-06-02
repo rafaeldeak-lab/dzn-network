@@ -45,6 +45,7 @@ assert.equal(sanitizePublicDescription("javascript:alert(1) A clean public descr
 for (const path of [
   "app/dashboard/server-settings/page.tsx",
   "components/onboarding/server-settings-page.tsx",
+  "components/onboarding/save-progress.tsx",
   "functions/api/servers/[serverId]/settings.ts",
   "functions/api/servers/[serverId]/settings/category.ts",
   "functions/api/servers/[serverId]/settings/tags.ts",
@@ -149,6 +150,16 @@ includesAll(settingsUi, [
   "Save Discord Event Channel",
   "Save Discord Event Channels",
   "Send Test Event Message",
+  "Checking channel permissions...",
+  "Saving Discord event channel...",
+  "Refreshing channel status...",
+  "Discord event channel saved.",
+  "Saving Category...",
+  "Saving Tags...",
+  "Saving Description...",
+  "Saving Visibility...",
+  "SaveProgressButton",
+  "useSaveProgress",
   "View Channel, Send Messages, Embed Links, Read Message History",
   "Change server category?",
   "Hidden servers keep ADM sync running",
@@ -156,6 +167,22 @@ includesAll(settingsUi, [
 ]);
 assert.equal(settingsUi.includes("Default Event Channel"), false, "Owner UI must use Primary Event Channel instead of Default Event Channel.");
 assert.equal(settingsUi.includes("Live Event Scoreboard Channel"), false, "Owner UI should use Live Scoreboard Channel Optional.");
+assert.equal(settingsUi.includes("window.location.reload"), false, "Server Settings saves must soft-refresh without a full browser reload.");
+
+const saveProgressUi = source("components/onboarding/save-progress.tsx");
+includesAll(saveProgressUi, [
+  "SaveProgressStatus",
+  "idle",
+  "validating",
+  "saving",
+  "refreshing",
+  "saved",
+  "failed",
+  "aria-busy",
+  "aria-live=\"polite\"",
+  "100",
+  "Retry Save",
+]);
 
 for (const publicFile of ["functions/api/public/servers.ts", "functions/api/public/home-stats.ts"]) {
   const file = source(publicFile);

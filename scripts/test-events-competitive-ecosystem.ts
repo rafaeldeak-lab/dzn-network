@@ -167,9 +167,21 @@ includesAll(eventHubUi, [
   "Locked",
   "Choose Channel",
   "Enter Event",
+  "Validating eligibility",
+  "Entering event",
+  "Refreshing entry",
+  "Server entered. DZN will score this event automatically from ADM sync.",
+  "Leave Event",
+  "Validating event entry",
+  "Leaving event",
+  "Refreshing event entries",
+  "Event entry removed.",
+  "SaveProgressButton",
+  "readApiResponse",
   "No eligible events right now",
   "View Public Event",
 ]);
+assert.equal(eventHubUi.includes("window.location.reload"), false, "Event Hub actions must soft-refresh without a full browser reload.");
 const appEventHubRoute = source("app/dashboard/events/page.tsx");
 includesAll(appEventHubRoute, ["EventHubPage"]);
 const workerSource = source("workers/adm-sync-worker.ts");

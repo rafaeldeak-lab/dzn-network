@@ -25,6 +25,7 @@ import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { clearClientAuthState, getMe, logoutAndRedirect } from "./api";
+import { SaveProgressButton, useSaveProgress, type SaveProgressState } from "./save-progress";
 import type { LinkedServer } from "./types";
 
 type EventHubPayload = {
@@ -160,7 +161,10 @@ export function EventHubPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("available");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [enteringEventId, setEnteringEventId] = useState<string | null>(null);
+  const [activeEventActionId, setActiveEventActionId] = useState<string | null>(null);
+  const [activeLeaveEntryId, setActiveLeaveEntryId] = useState<string | null>(null);
+  const enterEventProgress = useSaveProgress();
+  const leaveEventProgress = useSaveProgress();
 
   useEffect(() => {
     let active = true;
@@ -194,11 +198,7 @@ export function EventHubPage() {
       credentials: "include",
       headers: { accept: "application/json" },
     })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
-        return data as EventHubPayload;
-      })
+      .then((response) => readApiResponse<EventHubPayload>(response, "Unable to load Event Hub."))
       .then((data) => {
         if (!active) return;
         setPayload(data);
@@ -227,10 +227,12 @@ export function EventHubPage() {
 
   async function enterEvent(eventId: string) {
     if (!selectedServerId) return;
-    setEnteringEventId(eventId);
+    setActiveEventActionId(eventId);
+    enterEventProgress.start("Validating eligibility", 15);
     setMessage(null);
     setError(null);
     try {
+      enterEventProgress.setStage("saving", "Entering event", 35);
       const response = await fetch(`/api/servers/${encodeURIComponent(selectedServerId)}/events/${encodeURIComponent(eventId)}/enter`, {
         method: "POST",
         cache: "no-store",
@@ -238,15 +240,16 @@ export function EventHubPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
-      setMessage(data.message ?? "Server entered successfully.");
+      const data = await readApiResponse<{ message?: string }>(response, "Unable to enter event.");
+      enterEventProgress.setStage("refreshing", "Refreshing entry", 70);
       await reloadHub(selectedServerId);
+      enterEventProgress.complete("Entered");
+      setMessage(data.message ?? "Server entered. DZN will score this event automatically from ADM sync.");
       setActiveTab("entered");
     } catch (enterError) {
-      setError(enterError instanceof Error ? enterError.message : "Unable to enter event.");
-    } finally {
-      setEnteringEventId(null);
+      const message = safeErrorMessage(enterError, "Unable to enter event.");
+      setError(message);
+      enterEventProgress.fail(message);
     }
   }
 
@@ -256,9 +259,44 @@ export function EventHubPage() {
       credentials: "include",
       headers: { accept: "application/json" },
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
+    const data = await readApiResponse<EventHubPayload>(response, "Unable to refresh Event Hub.");
     setPayload(data as EventHubPayload);
+  }
+
+  async function leaveEvent(entry: EventEntry) {
+    if (!selectedServerId) return;
+    const eventId = entry.event_id ?? entry.id ?? "";
+    if (!eventId) {
+      const message = "Unable to leave event because the event id is missing.";
+      setError(message);
+      leaveEventProgress.fail(message);
+      return;
+    }
+    const entryId = String(entry.id ?? eventId);
+    setActiveLeaveEntryId(entryId);
+    leaveEventProgress.start("Validating event entry", 15);
+    setMessage(null);
+    setError(null);
+    try {
+      leaveEventProgress.setStage("saving", "Leaving event", 35);
+      const response = await fetch(`/api/servers/${encodeURIComponent(selectedServerId)}/events/${encodeURIComponent(eventId)}/leave`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await readApiResponse<{ message?: string }>(response, "Unable to leave event.");
+      leaveEventProgress.setStage("refreshing", "Refreshing event entries", 70);
+      await reloadHub(selectedServerId);
+      leaveEventProgress.complete("Left");
+      setMessage(data.message ?? "Event entry removed.");
+      setActiveTab("available");
+    } catch (leaveError) {
+      const message = safeErrorMessage(leaveError, "Unable to leave event.");
+      setError(message);
+      leaveEventProgress.fail(message);
+    }
   }
 
   if (!authChecked || loading) return <LoadingScreen />;
@@ -287,6 +325,10 @@ export function EventHubPage() {
               setPayload(null);
               setError(null);
               setMessage(null);
+              setActiveEventActionId(null);
+              setActiveLeaveEntryId(null);
+              enterEventProgress.reset();
+              leaveEventProgress.reset();
               setSelectedServerId(event.target.value);
             }}
             className="appearance-none bg-transparent pr-8 text-sm font-black text-white outline-none"
@@ -358,7 +400,7 @@ export function EventHubPage() {
         <section className="grid gap-4">
           {!payload ? <EmptyState title="Event Hub unavailable" detail={error ?? "DZN could not load owner event data."} /> : null}
           {payload && activeTab === "available" ? (
-            payload.availableEvents.length ? payload.availableEvents.map((event) => <EventCardView key={event.id} event={event} busy={enteringEventId === event.id} onEnter={() => enterEvent(event.id)} />) : (
+            payload.availableEvents.length ? payload.availableEvents.map((event) => <EventCardView key={event.id} event={event} actionProgress={activeEventActionId === event.id ? enterEventProgress.state : null} onEnter={() => enterEvent(event.id)} />) : (
               <EmptyState title="No eligible events right now" detail="When real DZN events are open for this server category and plan, they will appear here." />
             )
           ) : null}
@@ -368,7 +410,10 @@ export function EventHubPage() {
             )
           ) : null}
           {payload && activeTab === "entered" ? (
-            payload.enteredEvents.length ? payload.enteredEvents.map((entry) => <EntryRow key={String(entry.id)} entry={entry} />) : (
+            payload.enteredEvents.length ? payload.enteredEvents.map((entry) => {
+              const entryId = String(entry.id ?? entry.event_id ?? "");
+              return <EntryRow key={entryId} entry={entry} actionProgress={activeLeaveEntryId === entryId ? leaveEventProgress.state : null} onLeave={() => leaveEvent(entry)} />;
+            }) : (
               <EmptyState title="No entered events" detail="Enter an eligible event to create a server entry and start automatic ADM scoring when the event goes live." />
             )
           ) : null}
@@ -413,7 +458,8 @@ function ReadinessBanners({ payload }: { payload: EventHubPayload }) {
   );
 }
 
-function EventCardView({ event, busy = false, locked = false, onEnter }: { event: EventCard; busy?: boolean; locked?: boolean; onEnter?: () => void }) {
+function EventCardView({ event, actionProgress, locked = false, onEnter }: { event: EventCard; actionProgress?: SaveProgressState | null; locked?: boolean; onEnter?: () => void }) {
+  const busy = actionProgress?.status === "validating" || actionProgress?.status === "saving" || actionProgress?.status === "refreshing";
   const disabled = locked || !event.eligibility.canEnter || busy;
   const href = ctaHref(event.eligibility.code);
   return (
@@ -443,10 +489,19 @@ function EventCardView({ event, busy = false, locked = false, onEnter }: { event
         </div>
         <div className="grid content-start gap-2">
           {event.eligibility.canEnter && onEnter ? (
-            <button type="button" disabled={disabled} onClick={onEnter} className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-55">
-              {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trophy className="h-4 w-4" />}
-              Enter Event
-            </button>
+            <SaveProgressButton
+              idleLabel="Enter Event"
+              savingLabel="Entering Event..."
+              refreshingLabel="Refreshing..."
+              successLabel="Entered"
+              errorLabel="Retry Enter"
+              state={actionProgress ?? { status: "idle", progress: 0, label: "Waiting", error: null }}
+              disabled={disabled}
+              onClick={onEnter}
+              icon={<Trophy className="h-4 w-4" />}
+              fullWidth
+              buttonClassName="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-55"
+            />
           ) : (
             <Link href={href} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black uppercase text-zinc-100">
               {event.eligibility.action}
@@ -466,12 +521,30 @@ function EventCardView({ event, busy = false, locked = false, onEnter }: { event
   );
 }
 
-function EntryRow({ entry }: { entry: EventEntry }) {
+function EntryRow({ entry, actionProgress, onLeave }: { entry: EventEntry; actionProgress?: SaveProgressState | null; onLeave?: () => void }) {
+  const busy = actionProgress?.status === "validating" || actionProgress?.status === "saving" || actionProgress?.status === "refreshing";
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-      <p className="text-xs font-black uppercase text-violet-200/75">{entry.status ?? "entered"}</p>
-      <h3 className="mt-1 text-xl font-black text-white">{entry.name ?? "Entered event"}</h3>
-      <p className="mt-2 text-sm text-zinc-400">Entered {formatDate(entry.entered_at ?? null)}. ADM scoring starts when the event phase is live.</p>
+    <div className="grid gap-4 rounded-lg border border-white/10 bg-white/[0.04] p-4 md:grid-cols-[minmax(0,1fr)_180px] md:items-start">
+      <div>
+        <p className="text-xs font-black uppercase text-violet-200/75">{entry.status ?? "entered"}</p>
+        <h3 className="mt-1 text-xl font-black text-white">{entry.name ?? "Entered event"}</h3>
+        <p className="mt-2 text-sm text-zinc-400">Entered {formatDate(entry.entered_at ?? null)}. ADM scoring starts when the event phase is live.</p>
+      </div>
+      {onLeave ? (
+        <SaveProgressButton
+          idleLabel="Leave Event"
+          savingLabel="Leaving Event..."
+          refreshingLabel="Refreshing..."
+          successLabel="Left"
+          errorLabel="Retry Leave"
+          state={actionProgress ?? { status: "idle", progress: 0, label: "Waiting", error: null }}
+          disabled={busy}
+          onClick={onLeave}
+          icon={<ArrowRight className="h-4 w-4 rotate-180" />}
+          fullWidth
+          buttonClassName="inline-flex items-center justify-center gap-2 rounded-lg border border-red-300/25 bg-red-400/10 px-4 py-3 text-xs font-black uppercase text-red-50 transition hover:border-red-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+        />
+      ) : null}
     </div>
   );
 }
@@ -641,6 +714,32 @@ function formatDate(value: string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(time));
+}
+
+class ApiRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
+async function readApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const body = data && typeof data === "object" ? data as Record<string, unknown> : {};
+    throw new ApiRequestError(stringOrNull(body.message) ?? stringOrNull(body.error) ?? fallbackMessage);
+  }
+  return data as T;
+}
+
+function safeErrorMessage(error: unknown, fallbackMessage: string) {
+  if (error instanceof ApiRequestError) return error.message;
+  if (error instanceof Error && !/^Request failed:/i.test(error.message)) return error.message;
+  return fallbackMessage;
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function signOut() {

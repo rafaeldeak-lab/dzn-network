@@ -2633,6 +2633,7 @@ const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 50;
 const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
+const NOFTP_LIVE_SOURCE_NAME = "gameserver_details_log_files_noftp_download";
 const SCHEDULED_ADM_IMPORT_STALE_MS = 2 * 60 * 1000;
 
 type AdmInvocationBudget = {
@@ -4698,6 +4699,7 @@ async function updateScheduledAdmImportJobTailText(
       row.server_id,
     )
     .run();
+
 }
 
 async function getImportedLineCountForAdmFile(env: Env, scope: AdmSyncContext, filename: string) {
@@ -4909,6 +4911,65 @@ async function getAdmImportReadableRoute(env: Env, linkedServerId: string, filen
   return fallback;
 }
 
+function hasNoftpRouteEvidence(values: {
+  path?: string | null;
+  endpointKind?: string | null;
+  method?: string | null;
+  readableRoute?: string | null;
+}) {
+  const combined = `${values.path ?? ""} ${values.endpointKind ?? ""} ${values.method ?? ""} ${values.readableRoute ?? ""}`;
+  return values.readableRoute === NOFTP_LIVE_SOURCE_NAME || /\/noftp\//i.test(combined) || /gameserver_details|game_details/i.test(combined);
+}
+
+async function repairNoftpLiveSourceEvidence(
+  env: Env,
+  serviceId: string | null | undefined,
+  evidence: {
+    fileName?: string | null;
+    path?: string | null;
+    status?: string | null;
+    evidenceType: string;
+  },
+) {
+  if (!serviceId) return;
+  const now = new Date().toISOString();
+  const excerpt = JSON.stringify({
+    evidence: evidence.evidenceType,
+    fileName: evidence.fileName ?? null,
+    pathKind: evidence.path && /\/noftp\//i.test(evidence.path) ? "noftp" : null,
+  }).slice(0, 500);
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO adm_live_source_state (
+         id, service_id, source_name, last_tested_at, last_status, last_http_status,
+         last_error_code, last_response_excerpt, works, preferred, next_test_at, updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, 200, NULL, ?, 1, 1, ?, ?)
+       ON CONFLICT(service_id, source_name) DO UPDATE SET
+         last_tested_at = excluded.last_tested_at,
+         last_status = excluded.last_status,
+         last_http_status = excluded.last_http_status,
+         last_error_code = NULL,
+         last_response_excerpt = excluded.last_response_excerpt,
+         works = 1,
+         preferred = 1,
+         next_test_at = excluded.next_test_at,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      serviceId,
+      NOFTP_LIVE_SOURCE_NAME,
+      now,
+      evidence.status ?? "success",
+      excerpt,
+      now,
+      now,
+    )
+    .run()
+    .catch(() => null);
+}
+
 async function recordAdmFileStateFromImportJob(env: Env, row: AdmImportJobRow) {
   const filename = sanitizeManualAdmFilename(row.filename);
   if (!filename) return;
@@ -5002,6 +5063,14 @@ async function recordAdmImportJobProgressInSyncState(
   const readableRoute = row.source === SCHEDULED_ADM_IMPORT_SOURCE
     ? await getAdmImportReadableRoute(env, row.server_id, row.filename, "scheduled_chunked_import")
     : "manual_chunked_import";
+  if (row.source === SCHEDULED_ADM_IMPORT_SOURCE && readableRoute === NOFTP_LIVE_SOURCE_NAME && row.source_service_id) {
+    await repairNoftpLiveSourceEvidence(env, row.source_service_id, {
+      fileName: row.filename,
+      path: latestAdmPath,
+      status: rowCompleted ? "success" : "scheduled_import_progress",
+      evidenceType: rowCompleted ? "scheduled_nitrado_import_completed" : "scheduled_nitrado_job_cursor",
+    });
+  }
   const progressMessage = message ?? (rowCompleted
     ? `ADM chunk import completed for ${row.filename}.`
     : `Processing latest ADM in chunks. File: ${row.filename}. Progress: chunk ${Math.min(Number(row.chunks_processed ?? 0) + 1, Number(row.total_chunks ?? 1))}/${Number(row.total_chunks ?? 1)}. Parsed kills so far: ${Number(row.parsed_kills ?? 0)}. Written kills so far: ${Number(row.written_kills ?? 0)}. Duplicates skipped: ${Number(row.duplicate_skips ?? 0)}. Next chunk on next cron tick.`);
@@ -7807,6 +7876,22 @@ async function recordAdmFileAttempt(
       now,
     )
     .run();
+
+  if (
+    values.status !== "unreadable" &&
+    hasNoftpRouteEvidence({
+      path: file.path,
+      endpointKind: diagnostic?.endpointKind ?? null,
+      method: diagnostic?.method ?? null,
+    })
+  ) {
+    await repairNoftpLiveSourceEvidence(env, context.nitradoServiceId, {
+      fileName: file.name,
+      path: file.path,
+      status: values.status,
+      evidenceType: `adm_file_state_${values.status}`,
+    });
+  }
 }
 
 function getAdmUnreadableBackoffMs(retryAttempt: number) {

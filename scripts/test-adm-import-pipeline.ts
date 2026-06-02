@@ -951,6 +951,23 @@ async function main() {
   assert.equal(isAdmFileNewerThan("DayZServer_PS4_x64_2026-05-19_16-01-55.ADM", largeFixtureName), false);
 
   const scheduledCreateDb = new MemoryD1();
+  const scheduledMockAdmName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
+  const scheduledMockAdmNames = [
+    scheduledMockAdmName,
+    "DayZServer_PS4_x64_2026-05-14_11-29-09.ADM",
+  ];
+  for (const admName of scheduledMockAdmNames) {
+    scheduledCreateDb.admSyncFileState.set(`${linkedServerId}:${nitradoServiceId}:${admName}`, {
+      linked_server_id: linkedServerId,
+      source_service_id: nitradoServiceId,
+      adm_file: admName,
+      adm_path: `/games/fixture-user/noftp/${admName}`,
+      status: "discovered",
+      last_endpoint_kind: "nitrado_download",
+      last_method: "download",
+      updated_at: "2026-05-20T12:00:00.000Z",
+    });
+  }
   const scheduledCreate = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledCreateDb), MOCK_NITRADO: "true" },
     "fixture-user",
@@ -1420,6 +1437,8 @@ class MemoryD1 {
   admBuildReparseState = new Map<string, MemoryRow>();
   syncRuns: MemoryRow[] = [];
   admSyncState = new Map<string, MemoryRow>();
+  admSyncFileState = new Map<string, MemoryRow>();
+  admLiveSourceState = new Map<string, MemoryRow>();
   serverPublicCache = new Map<string, MemoryRow>();
   automationJobs: MemoryRow[] = [];
   admImportJobs = new Map<string, MemoryRow>();
@@ -1686,6 +1705,47 @@ class MemoryStatement {
         cursor_recovery_strategy: this.values[33],
         cursor_recovery_reason: this.values[34],
       });
+      return changed(1);
+    }
+    if (q.includes("insert into adm_sync_file_state")) {
+      const linkedServerIdValue = String(this.values[1]);
+      const sourceServiceIdValue = String(this.values[2]);
+      const admFile = String(this.values[3]);
+      this.db.admSyncFileState.set(`${linkedServerIdValue}:${sourceServiceIdValue}:${admFile}`, {
+        id: this.values[0],
+        linked_server_id: linkedServerIdValue,
+        source_service_id: sourceServiceIdValue,
+        adm_file: admFile,
+        adm_path: this.values[4],
+        status: this.values[5],
+        latest_known_line_count: Number(this.values[26] ?? this.values[10] ?? 0),
+        imported_line_count: Number(this.values[27] ?? 0),
+        cursor_line: Number(this.values[28] ?? 0),
+        last_endpoint_kind: this.values[20],
+        last_method: this.values[21],
+        updated_at: this.values[34],
+      });
+      return changed(1);
+    }
+    if (q.includes("insert into adm_live_source_state")) {
+      const serviceId = String(this.values[1]);
+      const sourceName = String(this.values[2]);
+      const fixedSuccess = q.includes("last_http_status") && q.includes("200") && q.includes("works") && q.includes("1, 1");
+      const row = {
+        id: this.values[0],
+        service_id: serviceId,
+        source_name: sourceName,
+        last_tested_at: this.values[3],
+        last_status: this.values[4],
+        last_http_status: fixedSuccess ? 200 : Number(this.values[5] ?? 0),
+        last_error_code: fixedSuccess ? null : this.values[6],
+        last_response_excerpt: fixedSuccess ? this.values[5] : this.values[7],
+        works: fixedSuccess ? 1 : Number(this.values[8] ?? 0),
+        preferred: fixedSuccess ? 1 : Number(this.values[9] ?? 0),
+        next_test_at: fixedSuccess ? this.values[6] : this.values[10],
+        updated_at: fixedSuccess ? this.values[7] : this.values[11],
+      };
+      this.db.admLiveSourceState.set(`${serviceId}:${sourceName}`, row);
       return changed(1);
     }
     if (q.includes("insert into adm_import_jobs")) {
@@ -2025,6 +2085,14 @@ class MemoryStatement {
       return (row ?? null) as T | null;
     }
     if (q.includes("from adm_sync_state") && q.includes("select *")) return (this.db.admSyncState.get(String(this.values[0])) ?? null) as T | null;
+    if (q.includes("from adm_sync_file_state") && q.includes("select adm_path, last_endpoint_kind, last_method")) {
+      const linked = String(this.values[0]);
+      const filename = String(this.values[1]);
+      const rows = [...this.db.admSyncFileState.values()]
+        .filter((row) => row.linked_server_id === linked && row.adm_file === filename)
+        .sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")));
+      return (rows[0] ?? null) as T | null;
+    }
     if (q.includes("select last_import_report_json from adm_sync_state")) return ({ last_import_report_json: this.db.admSyncState.get(String(this.values[0]))?.last_import_report_json ?? null } as T);
     if (q.includes("from linked_servers") && q.includes("server_subscriptions.plan_key")) return (this.db.linkedServers.get(String(this.values[0])) ?? null) as T | null;
     if (q.includes("from linked_servers") && q.includes("where linked_servers.id = ?") && q.includes("linked_servers.user_id = ?")) {

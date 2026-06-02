@@ -36,6 +36,7 @@ type FileStateRow = {
   linked_server_id: string;
   source_service_id: string;
   adm_file: string;
+  adm_path: string | null;
   status: string | null;
   line_count: number | null;
   latest_known_line_count: number | null;
@@ -43,6 +44,8 @@ type FileStateRow = {
   cursor_line: number | null;
   last_read_at: string | null;
   last_growth_at: string | null;
+  last_endpoint_kind: string | null;
+  last_method: string | null;
   next_retry_at: string | null;
   last_http_status: number | null;
   last_error: string | null;
@@ -84,6 +87,7 @@ const serviceIds = parseServiceIds(process.argv.slice(2));
 const baseUrl = (process.env.DZN_APP_URL || "https://dzn-network.pages.dev").replace(/\/$/, "");
 const cronSecret = process.env.DZN_CRON_SECRET || process.env.SYNC_CRON_SECRET || "";
 const checks: Check[] = [];
+const NOFTP_SOURCE_NAME = "gameserver_details_log_files_noftp_download";
 
 function parseServiceIds(args: string[]) {
   const values = args.flatMap((arg) => arg.split(",")).map((arg) => arg.trim()).filter(Boolean);
@@ -229,6 +233,77 @@ function hasActiveOrderedBackfill(file: FileStateRow, jobs: JobRow[]) {
   return isFuture(file.next_retry_at);
 }
 
+function fileHasNoftpEvidence(file: FileStateRow | null | undefined) {
+  const combined = `${file?.adm_path ?? ""} ${file?.last_endpoint_kind ?? ""} ${file?.last_method ?? ""}`;
+  return /\/noftp\//i.test(combined) || /gameserver_details|game_details/i.test(combined);
+}
+
+function noftpSourceEvidenceFromFiles(files: FileStateRow[], jobs: JobRow[], latestFile: FileStateRow | null) {
+  const candidates = [...files]
+    .filter((file) => fileHasNoftpEvidence(file))
+    .sort((left, right) => newerAdmFile(right.adm_file, left.adm_file));
+  const current = latestFile && fileHasNoftpEvidence(latestFile) ? latestFile : null;
+  const evidenceFile = current ?? candidates.find((file) => hasCurrentFileStateEvidence(file, jobs)) ?? candidates[0] ?? null;
+  if (!evidenceFile) return null;
+  const job = scheduledJobForFile(evidenceFile, jobs);
+  return {
+    file: evidenceFile.adm_file,
+    fileStatus: evidenceFile.status,
+    pathKind: /\/noftp\//i.test(String(evidenceFile.adm_path ?? "")) ? "noftp" : null,
+    endpointKind: evidenceFile.last_endpoint_kind,
+    method: evidenceFile.last_method,
+    cursorLine: evidenceFile.cursor_line,
+    importedLineCount: evidenceFile.imported_line_count,
+    latestKnownLineCount: evidenceFile.latest_known_line_count,
+    jobStatus: job?.status ?? null,
+  };
+}
+
+function noftpDiscoveryRecoverableEvidence(sources: SourceStateRow[], files: FileStateRow[], jobs: JobRow[], latestFile: FileStateRow | null) {
+  const logFilesSource = sources.find((source) => source.source_name === "gameserver_details_log_files" && Number(source.works ?? 0) === 1);
+  const noftp = sources.find((source) => source.source_name === NOFTP_SOURCE_NAME);
+  if (!logFilesSource || !noftp || !isRecoverableDirectNoftpSource(noftp)) return null;
+  const latestHasEvidence = latestFile ? hasCurrentFileStateEvidence(latestFile, jobs) || isFuture(latestFile.next_retry_at) : false;
+  const recentScheduledJob = jobs.find((job) => job.source === "scheduled_nitrado" && (isCompletedJobStatus(job.status) || isActiveJobStatus(job.status))) ?? null;
+  if (!latestHasEvidence && !recentScheduledJob) return null;
+  return {
+    logFilesSource,
+    noftpSourceState: noftp,
+    latestFile: latestFile ? {
+      file: latestFile.adm_file,
+      status: latestFile.status,
+      cursorLine: latestFile.cursor_line,
+      importedLineCount: latestFile.imported_line_count,
+      latestKnownLineCount: latestFile.latest_known_line_count,
+      nextRetryAt: latestFile.next_retry_at,
+      lastError: latestFile.last_error,
+    } : null,
+    latestJobSource: recentScheduledJob ? {
+      file: recentScheduledJob.filename,
+      source: recentScheduledJob.source,
+      status: recentScheduledJob.status,
+      currentLine: recentScheduledJob.current_line,
+      totalLines: recentScheduledJob.total_lines,
+      completedAt: recentScheduledJob.completed_at,
+    } : null,
+  };
+}
+
+function isRecoverableDirectNoftpSource(source: SourceStateRow) {
+  const status = Number(source.last_http_status ?? 0);
+  const code = String(source.last_error_code ?? "").toUpperCase();
+  if (status === 401 || status === 403 || code === "NITRADO_UNAUTHORIZED" || code === "NITRADO_FORBIDDEN") return false;
+  return isFuture(source.next_test_at) || status === 404 || status === 429 || status >= 500 || /NITRADO_UPSTREAM_DOWN|NITRADO_RATE_LIMITED|FETCH_TIMEOUT|FETCH_THREW|WORKER_SUBREQUEST_LIMIT|NITRADO_FILE_NOT_FOUND/i.test(code);
+}
+
+function isCompletedJobStatus(status: string | null | undefined) {
+  return /completed|completed_with_warnings|completed_empty|completed_no_new_events|completed_current|caught_up/i.test(String(status ?? ""));
+}
+
+function isActiveJobStatus(status: string | null | undefined) {
+  return /queued|processing|parsing|writing|rebuilding|failed_retryable/i.test(String(status ?? ""));
+}
+
 async function checkProtectedEndpoints() {
   for (const path of ["/api/debug/nitrado-admin-logs", "/api/debug/nitrado-file-read", "/api/sync/adm/retry-unreadable", "/api/sync/adm/run", "/api/autodev/adm-health"]) {
     try {
@@ -309,15 +384,26 @@ type AdmHealthService = {
   lastSuccessfulImportAt?: string | null;
   recentEventCount?: number | null;
   activeImportJob?: { status?: string | null; updatedAt?: string | null; currentLine?: number | null; totalLines?: number | null } | null;
-  sourceMatrix?: Array<{ sourceName?: string | null; works?: boolean; preferred?: boolean; nextTestAt?: string | null; lastHttpStatus?: number | null }>;
+  sourceMatrix?: Array<{
+    sourceName?: string | null;
+    works?: boolean;
+    preferred?: boolean;
+    nextTestAt?: string | null;
+    lastHttpStatus?: number | null;
+    lastStatus?: string | null;
+    lastErrorCode?: string | null;
+  }>;
   latestFileState?: {
     fileName?: string | null;
     status?: string | null;
     cursorLine?: number | null;
     importedLineCount?: number | null;
     lineCount?: number | null;
+    latestKnownLineCount?: number | null;
     nextRetryAt?: string | null;
     lastHttpStatus?: number | null;
+    lastEndpointKind?: string | null;
+    lastMethod?: string | null;
   } | null;
 };
 
@@ -395,13 +481,36 @@ async function verifyFromAdmHealth() {
     } else {
       pass(label, `Worker selected service recently for ${service.lastSelectionReason ?? "unknown reason"}.`);
     }
-    const noftp = service.sourceMatrix?.find((source) => source.sourceName === "gameserver_details_log_files_noftp_download");
+    const noftp = service.sourceMatrix?.find((source) => source.sourceName === NOFTP_SOURCE_NAME);
+    const noftpHealthEvidence = getHealthNoftpEvidence(service);
     if (noftp?.works && noftp.preferred) {
       pass(label, "Nitrado Log Files/noftp source is preferred and working.", noftp);
     } else if (noftp?.lastHttpStatus === 429 && isFuture(noftp.nextTestAt)) {
       pass(label, "Nitrado noftp source is rate-limited with future automatic retry.", noftp);
+    } else if (noftpHealthEvidence) {
+      pass(label, "Nitrado Log Files/noftp source is backed by current ADM health evidence.", noftpHealthEvidence);
     } else {
-      fail(label, "No working preferred noftp source is recorded in ADM health.", service.sourceMatrix);
+      fail(label, "No working preferred noftp source is recorded in ADM health.", {
+        serviceId,
+        serverName: service.serverName ?? null,
+        latestAdm: service.latestAdmFile ?? service.latestFileState?.fileName ?? null,
+        sourceStateRows: service.sourceMatrix ?? [],
+        latestFileStateSource: service.latestFileState ? {
+          file: service.latestFileState.fileName,
+          endpointKind: service.latestFileState.lastEndpointKind,
+          method: service.latestFileState.lastMethod,
+          status: service.latestFileState.status,
+          cursorLine: service.latestFileState.cursorLine,
+          importedLineCount: service.latestFileState.importedLineCount,
+          latestKnownLineCount: service.latestFileState.latestKnownLineCount,
+        } : null,
+        latestJobSource: {
+          status: service.importJobStatus ?? null,
+          activeJobStatus: service.activeImportJob?.status ?? null,
+          lastSuccessfulImportAt: service.lastSuccessfulImportAt ?? null,
+        },
+        expectedSourceKeys: [NOFTP_SOURCE_NAME],
+      });
     }
     const fileState = service.latestFileState ?? null;
     const cursor = Math.max(Number(fileState?.cursorLine ?? 0), Number(fileState?.importedLineCount ?? 0), Number(fileState?.lineCount ?? 0));
@@ -430,12 +539,65 @@ async function verifyFromAdmHealth() {
 function getHealthServiceEvidence(service: AdmHealthService) {
   const fileState = service.latestFileState ?? null;
   const cursor = Math.max(Number(fileState?.cursorLine ?? 0), Number(fileState?.importedLineCount ?? 0), Number(fileState?.lineCount ?? 0));
-  const noftp = service.sourceMatrix?.find((source) => source.sourceName === "gameserver_details_log_files_noftp_download");
+  const noftp = service.sourceMatrix?.find((source) => source.sourceName === NOFTP_SOURCE_NAME);
   if (noftp?.works && noftp.preferred && cursor > 0) return `noftp preferred with cursor ${cursor}`;
   if (service.activeImportJob && !isTerminalHealthImportJob(service.activeImportJob)) return `active job ${service.activeImportJob.status ?? "unknown"}`;
   if (service.lastSuccessfulImportAt || service.recentEventCount || service.importJobStatus === "completed_with_warnings") return "successful import history";
   if (isFuture(fileState?.nextRetryAt ?? service.nextRetryAt)) return `retry scheduled for ${fileState?.nextRetryAt ?? service.nextRetryAt}`;
   return null;
+}
+
+function getHealthNoftpEvidence(service: AdmHealthService) {
+  const noftp = service.sourceMatrix?.find((source) => source.sourceName === NOFTP_SOURCE_NAME);
+  const fileState = service.latestFileState ?? null;
+  const cursor = Math.max(
+    Number(fileState?.cursorLine ?? 0),
+    Number(fileState?.importedLineCount ?? 0),
+    Number(fileState?.lineCount ?? 0),
+    Number(fileState?.latestKnownLineCount ?? 0),
+  );
+  const fileHasNoftp = healthFileHasNoftpEvidence(fileState);
+  const retryAt = fileState?.nextRetryAt ?? service.nextRetryAt ?? noftp?.nextTestAt ?? null;
+  const serviceEvidence = getHealthServiceEvidence(service);
+  const sourceRecoverable = Boolean(noftp && !isAuthNoftpFailure(noftp) && (isFuture(noftp.nextTestAt) || Number(noftp.lastHttpStatus ?? 0) >= 500 || isRecoverableNoftpError(noftp.lastErrorCode)));
+  if (fileHasNoftp && (cursor > 0 || service.activeImportJob || service.lastSuccessfulImportAt || isFuture(retryAt))) {
+    return {
+      sourceState: noftp ?? null,
+      fileEvidence: {
+        file: fileState?.fileName ?? service.latestAdmFile ?? null,
+        status: fileState?.status ?? null,
+        endpointKind: fileState?.lastEndpointKind ?? null,
+        method: fileState?.lastMethod ?? null,
+        cursorLine: fileState?.cursorLine ?? null,
+        importedLineCount: fileState?.importedLineCount ?? null,
+        latestKnownLineCount: fileState?.latestKnownLineCount ?? null,
+        retryAt,
+      },
+    };
+  }
+  if (sourceRecoverable && serviceEvidence) {
+    return {
+      sourceState: noftp ?? null,
+      serviceEvidence,
+      retryAt,
+    };
+  }
+  return null;
+}
+
+function healthFileHasNoftpEvidence(file: AdmHealthService["latestFileState"]) {
+  const combined = `${file?.lastEndpointKind ?? ""} ${file?.lastMethod ?? ""}`;
+  return /gameserver_details|game_details/i.test(combined);
+}
+
+function isAuthNoftpFailure(source: NonNullable<AdmHealthService["sourceMatrix"]>[number]) {
+  const status = Number(source.lastHttpStatus ?? 0);
+  const code = String(source.lastErrorCode ?? "").toUpperCase();
+  return status === 401 || status === 403 || code === "NITRADO_UNAUTHORIZED" || code === "NITRADO_FORBIDDEN";
+}
+
+function isRecoverableNoftpError(value: string | null | undefined) {
+  return /NITRADO_UPSTREAM_DOWN|NITRADO_RATE_LIMITED|FETCH_TIMEOUT|FETCH_THREW|WORKER_SUBREQUEST_LIMIT|NITRADO_FILE_NOT_FOUND/i.test(String(value ?? ""));
 }
 
 function isTerminalHealthImportJob(job: AdmHealthService["activeImportJob"]) {
@@ -525,9 +687,9 @@ async function main() {
     return;
   }
   const fileStates = d1<FileStateRow>(`
-    SELECT linked_server_id, source_service_id, adm_file, status, line_count,
+    SELECT linked_server_id, source_service_id, adm_file, adm_path, status, line_count,
            latest_known_line_count, imported_line_count, cursor_line, last_read_at,
-           last_growth_at, next_retry_at, last_http_status, last_error, retry_count
+           last_growth_at, last_endpoint_kind, last_method, next_retry_at, last_http_status, last_error, retry_count
     FROM adm_sync_file_state
     WHERE source_service_id IN (${inClause})
       AND ignored_at IS NULL
@@ -597,7 +759,12 @@ async function main() {
     }
 
     const serviceSources = sources.filter((source) => source.service_id === serviceId);
-    const noftp = serviceSources.find((source) => source.source_name === "gameserver_details_log_files_noftp_download");
+    const serviceFiles = fileStates.filter((row) => row.source_service_id === serviceId || row.linked_server_id === server.id);
+    const latestFile = newestFile(serviceFiles);
+    const serviceJobs = jobs.filter((job) => job.server_id === server.id || job.source_service_id === serviceId);
+    const noftp = serviceSources.find((source) => source.source_name === NOFTP_SOURCE_NAME);
+    const noftpFileEvidence = noftpSourceEvidenceFromFiles(serviceFiles, serviceJobs, latestFile);
+    const noftpDiscoveryRetryEvidence = noftpDiscoveryRecoverableEvidence(serviceSources, serviceFiles, serviceJobs, latestFile);
     if (noftp?.works === 1 && noftp.preferred !== 1) {
       fail(label, "Nitrado noftp source works but is not preferred.", noftp);
     } else if (noftp?.works === 1) {
@@ -605,16 +772,38 @@ async function main() {
         lastTestedAt: noftp.last_tested_at,
         status: noftp.last_status,
       });
+    } else if (noftpFileEvidence) {
+      pass(label, "Nitrado Log Files/noftp source is backed by current file-state/job evidence.", {
+        sourceState: noftp ?? null,
+        fileEvidence: noftpFileEvidence,
+      });
+    } else if (noftpDiscoveryRetryEvidence) {
+      pass(label, "Nitrado Log Files/noftp discovery is working and current noftp read has recoverable evidence.", noftpDiscoveryRetryEvidence);
     } else if (isFuture(server.rate_limited_until) || serviceSources.some((source) => source.last_http_status === 429 && isFuture(source.next_test_at))) {
       pass(label, "Nitrado reads are rate-limited with future automatic retry.", {
         rateLimitedUntil: server.rate_limited_until,
       });
     } else {
-      fail(label, "No working noftp live source is recorded for this service.", serviceSources);
+      fail(label, "No working noftp live source is recorded for this service.", {
+        serviceId,
+        serverName: server.display_name ?? server.hostname ?? server.server_name ?? null,
+        latestAdm: latestFile?.adm_file ?? server.latest_adm_file ?? null,
+        sourceStateRows: serviceSources,
+        latestJobSource: serviceJobs[0] ? {
+          file: serviceJobs[0].filename,
+          source: serviceJobs[0].source,
+          status: serviceJobs[0].status,
+        } : null,
+        latestFileStateSource: latestFile ? {
+          file: latestFile.adm_file,
+          path: latestFile.adm_path,
+          endpointKind: latestFile.last_endpoint_kind,
+          method: latestFile.last_method,
+          status: latestFile.status,
+        } : null,
+        expectedSourceKeys: [NOFTP_SOURCE_NAME],
+      });
     }
-
-    const serviceFiles = fileStates.filter((row) => row.source_service_id === serviceId || row.linked_server_id === server.id);
-    const latestFile = newestFile(serviceFiles);
     if (!latestFile) {
       fail(label, "No ADM file state rows exist for this service.");
       continue;
@@ -628,7 +817,6 @@ async function main() {
       pass(label, `Latest ADM state points at ${server.latest_adm_file ?? latestFile.adm_file}.`);
     }
 
-    const serviceJobs = jobs.filter((job) => job.server_id === server.id || job.source_service_id === serviceId);
     const currentJob = serviceJobs.find((job) => job.filename === latestFile.adm_file && job.source === "scheduled_nitrado");
     const lastProcessedTime = parseAdmTimestamp(server.last_processed_file);
     const recentFilesAfterLastProcessed = [...serviceFiles]

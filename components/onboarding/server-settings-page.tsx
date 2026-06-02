@@ -28,6 +28,7 @@ import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { clearClientAuthState, getMe, logoutAndRedirect } from "./api";
+import { SaveProgressButton, useSaveProgress } from "./save-progress";
 import type { LinkedServer } from "./types";
 
 type CategoryValue = "pvp" | "deathmatch" | "pve" | "pvp_pve";
@@ -216,6 +217,12 @@ export function ServerSettingsPage() {
     event_live_scoreboard: "",
     event_results: "",
   });
+  const categoryProgress = useSaveProgress();
+  const tagsProgress = useSaveProgress();
+  const descriptionProgress = useSaveProgress();
+  const visibilityProgress = useSaveProgress();
+  const discordSaveProgress = useSaveProgress();
+  const discordTestProgress = useSaveProgress();
 
   useEffect(() => {
     let active = true;
@@ -305,38 +312,62 @@ export function ServerSettingsPage() {
 
   async function saveCategory() {
     if (!settings || !selectedCategory) return;
-    setSaveState({ area: "category", message: null, error: null });
+    categoryProgress.start("Validating category change...", 15);
+    setSaveState({ area: null, message: null, error: null });
     try {
+      categoryProgress.setStage("saving", "Saving category...", 35);
       const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/category`, { category: selectedCategory });
+      categoryProgress.setStage("refreshing", "Refreshing category status...", 70);
+      await reloadSettings(settings.server.id);
       setSaveState({ area: null, message: result.message ?? "Category updated.", error: null });
       setConfirmingCategory(false);
-      await reloadSettings(settings.server.id);
+      categoryProgress.complete("Saved");
     } catch (error) {
-      setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to save category." });
+      const message = safeErrorMessage(error, "Unable to save category.");
+      setSaveState({ area: null, message: null, error: message });
+      categoryProgress.fail(message);
     }
   }
 
   async function saveTags() {
     if (!settings) return;
-    setSaveState({ area: "tags", message: null, error: null });
+    tagsProgress.start("Validating tags...", 15);
+    setSaveState({ area: null, message: null, error: null });
     try {
+      tagsProgress.setStage("saving", "Saving tags...", 35);
       const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/tags`, { tags: selectedTags });
-      setSaveState({ area: null, message: result.message ?? "Tags updated.", error: null });
+      tagsProgress.setStage("refreshing", "Refreshing saved tags...", 70);
       await reloadSettings(settings.server.id);
+      setSaveState({ area: null, message: result.message ?? "Tags updated.", error: null });
+      tagsProgress.complete("Saved");
     } catch (error) {
-      setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to save tags." });
+      const message = safeErrorMessage(error, "Unable to save tags.");
+      setSaveState({ area: null, message: null, error: message });
+      tagsProgress.fail(message);
     }
   }
 
-  async function saveListing() {
+  async function saveListing(kind: "description" | "visibility") {
     if (!settings) return;
-    setSaveState({ area: "listing", message: null, error: null });
+    const progress = kind === "description" ? descriptionProgress : visibilityProgress;
+    progress.start(kind === "description" ? "Validating description..." : "Validating visibility...", 15);
+    setSaveState({ area: null, message: null, error: null });
     try {
+      progress.setStage("saving", kind === "description" ? "Saving public description..." : "Saving listing visibility...", 35);
       const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/listing`, { description, visibility });
-      setSaveState({ area: null, message: result.message ?? "Public listing updated.", error: null });
+      progress.setStage("refreshing", "Refreshing public listing status...", 70);
       await reloadSettings(settings.server.id);
+      const fallback = kind === "visibility"
+        ? visibility === "hidden"
+          ? "Server hidden from public listings."
+          : "Public listing updated."
+        : "Public description updated.";
+      setSaveState({ area: null, message: result.message ?? fallback, error: null });
+      progress.complete("Saved");
     } catch (error) {
-      setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to save listing." });
+      const message = safeErrorMessage(error, "Unable to save listing.");
+      setSaveState({ area: null, message: null, error: message });
+      progress.fail(message);
     }
   }
 
@@ -383,30 +414,46 @@ export function ServerSettingsPage() {
 
   async function saveDiscordEventChannels() {
     if (!settings) return;
-    setSaveState({ area: "discord", message: null, error: null });
+    discordSaveProgress.start("Checking channel permissions...", 15);
+    setSaveState({ area: null, message: null, error: null });
     try {
+      if (!eventChannelIds.default_event) {
+        throw new Error("Choose a Primary Event Channel before saving.");
+      }
       const body = EVENT_CHANNEL_FIELDS.reduce<Record<string, string>>((acc, field) => {
         acc[field.inputKey] = eventChannelIds[field.key] || "";
         return acc;
       }, {});
+      discordSaveProgress.setStage("saving", "Saving Discord event channel...", 35);
       const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/discord-channels`, body);
-      setSaveState({ area: null, message: result.message ?? "Discord event channels saved.", error: null });
+      discordSaveProgress.setStage("refreshing", "Refreshing channel status...", 70);
       await reloadSettings(settings.server.id);
+      await refreshDiscordEventChannels(settings.server.id, false);
+      setSaveState({ area: null, message: result.message ?? "Discord event channel saved.", error: null });
+      discordSaveProgress.complete("Discord event channel saved.");
     } catch (error) {
-      setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to save Discord event channels." });
+      const message = safeErrorMessage(error, "Unable to save Discord event channel.");
+      setSaveState({ area: null, message: null, error: message });
+      discordSaveProgress.fail(message);
     }
   }
 
   async function testDiscordEventChannel() {
     if (!settings) return;
-    setSaveState({ area: "discord", message: null, error: null });
+    discordTestProgress.start("Checking channel permissions...", 15);
+    setSaveState({ area: null, message: null, error: null });
     try {
+      discordTestProgress.setStage("saving", "Sending test event message...", 35);
       const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/discord-channels/test`, {
         channelType: "default_event",
       });
-      setSaveState({ area: null, message: result.message ?? "Test event message sent.", error: null });
+      discordTestProgress.complete("Test Sent");
+      const channelName = primaryChannelName ?? "the Primary Event Channel";
+      setSaveState({ area: null, message: result.message ?? `Test event message sent to ${channelName}.`, error: null });
     } catch (error) {
-      setSaveState({ area: null, message: null, error: error instanceof Error ? error.message : "Unable to send test event message." });
+      const message = safeErrorMessage(error, "DZN could not send a message to this channel. Check View Channel, Send Messages, Embed Links, and Read Message History permissions.");
+      setSaveState({ area: null, message: null, error: message });
+      discordTestProgress.fail(message);
     }
   }
 
@@ -602,11 +649,11 @@ export function ServerSettingsPage() {
             </div>
             <button
               type="button"
-              disabled={!categoryChanged || categoryLocked || saveState.area === "category"}
+              disabled={!categoryChanged || categoryLocked || categoryProgress.isBusy}
               onClick={() => setConfirmingCategory(true)}
               className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-55"
             >
-              {saveState.area === "category" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              <Save className="h-4 w-4" />
               Save Category
             </button>
           </div>
@@ -657,15 +704,18 @@ export function ServerSettingsPage() {
               })}
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                disabled={!tagsChanged || !settings.editState.canEditTags || saveState.area === "tags"}
+              <SaveProgressButton
+                idleLabel="Save Tags"
+                savingLabel="Saving Tags..."
+                refreshingLabel="Refreshing..."
+                successLabel="Saved"
+                errorLabel="Retry Save"
+                state={tagsProgress.state}
+                disabled={!tagsChanged || !settings.editState.canEditTags}
                 onClick={saveTags}
-                className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {saveState.area === "tags" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save Tags
-              </button>
+                icon={<Save className="h-4 w-4" />}
+                buttonClassName="inline-flex items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+              />
               <span className="text-xs font-bold text-zinc-400">{selectedTags.length}/8 active tags. {settings.editState.tagsCooldownUntil ? `Next edit ${formatDate(settings.editState.tagsCooldownUntil)}.` : `${settings.editState.tagEditsUsedLast7Days}/5 edits used this week.`}</span>
             </div>
           </div>
@@ -689,15 +739,19 @@ export function ServerSettingsPage() {
               <span>40 to 500 characters. HTML is sanitized.</span>
               <span>{description.length}/500</span>
             </div>
-            <button
-              type="button"
-              disabled={!descriptionChanged || !settings.editState.canEditDescription || saveState.area === "listing"}
-              onClick={saveListing}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-4 py-3 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              {saveState.area === "listing" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Description
-            </button>
+            <SaveProgressButton
+              idleLabel="Save Description"
+              savingLabel="Saving Description..."
+              refreshingLabel="Refreshing..."
+              successLabel="Saved"
+              errorLabel="Retry Save"
+              state={descriptionProgress.state}
+              disabled={!descriptionChanged || !settings.editState.canEditDescription}
+              onClick={() => saveListing("description")}
+              icon={<Save className="h-4 w-4" />}
+              className="mt-4"
+              buttonClassName="inline-flex items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-4 py-3 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
           </div>
         </section>
       </div>
@@ -721,15 +775,18 @@ export function ServerSettingsPage() {
                 <RefreshCw className={`h-4 w-4 ${discordChannelsLoading ? "animate-spin" : ""}`} />
                 Refresh Discord Channels
               </button>
-              <button
-                type="button"
-                disabled={saveState.area === "discord" || !eventChannelIds.default_event}
+              <SaveProgressButton
+                idleLabel="Send Test Event Message"
+                savingLabel="Sending Test..."
+                refreshingLabel="Sending Test..."
+                successLabel="Test Sent"
+                errorLabel="Retry Test"
+                state={discordTestProgress.state}
+                disabled={!eventChannelIds.default_event}
                 onClick={testDiscordEventChannel}
-                className="inline-flex items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-xs font-black uppercase text-violet-50 disabled:opacity-55"
-              >
-                <Send className="h-4 w-4" />
-                Send Test Event Message
-              </button>
+                icon={<Send className="h-4 w-4" />}
+                buttonClassName="inline-flex items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-xs font-black uppercase text-violet-50 disabled:opacity-55"
+              />
             </div>
           </div>
 
@@ -785,15 +842,18 @@ export function ServerSettingsPage() {
             </details>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={!discordChanged || saveState.area === "discord"}
+            <SaveProgressButton
+              idleLabel={advancedRoutingOpen || advancedRoutingSelected ? "Save Discord Event Channels" : "Save Discord Event Channel"}
+              savingLabel="Saving Channel..."
+              refreshingLabel="Refreshing..."
+              successLabel="Saved"
+              errorLabel="Retry Save"
+              state={discordSaveProgress.state}
+              disabled={!discordChanged}
               onClick={saveDiscordEventChannels}
-              className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              {saveState.area === "discord" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {advancedRoutingOpen || advancedRoutingSelected ? "Save Discord Event Channels" : "Save Discord Event Channel"}
-            </button>
+              icon={<Save className="h-4 w-4" />}
+              buttonClassName="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-55"
+            />
             <span className="text-xs font-bold text-zinc-400">
               Required bot permissions: View Channel, Send Messages, Embed Links, Read Message History.
             </span>
@@ -818,15 +878,19 @@ export function ServerSettingsPage() {
                 <span className="mt-1 block text-xs leading-5 text-zinc-400">Sync continues without public discovery.</span>
               </button>
             </div>
-            <button
-              type="button"
-              disabled={!visibilityChanged || !settings.editState.canEditVisibility || saveState.area === "listing"}
-              onClick={saveListing}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-4 py-3 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/45 disabled:cursor-not-allowed disabled:opacity-55"
-            >
-              {saveState.area === "listing" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Visibility
-            </button>
+            <SaveProgressButton
+              idleLabel="Save Visibility"
+              savingLabel="Saving Visibility..."
+              refreshingLabel="Refreshing..."
+              successLabel="Saved"
+              errorLabel="Retry Save"
+              state={visibilityProgress.state}
+              disabled={!visibilityChanged || !settings.editState.canEditVisibility}
+              onClick={() => saveListing("visibility")}
+              icon={<Save className="h-4 w-4" />}
+              className="mt-4"
+              buttonClassName="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-4 py-3 text-xs font-black uppercase text-emerald-50 transition hover:border-emerald-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
           </div>
         </section>
 
@@ -870,10 +934,17 @@ export function ServerSettingsPage() {
             </div>
             <div className="mt-5 flex flex-wrap justify-end gap-2">
               <button type="button" onClick={() => setConfirmingCategory(false)} className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black uppercase text-zinc-100">Cancel</button>
-              <button type="button" disabled={saveState.area === "category"} onClick={saveCategory} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white disabled:opacity-55">
-                {saveState.area === "category" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Confirm Category Change
-              </button>
+              <SaveProgressButton
+                idleLabel="Confirm Category Change"
+                savingLabel="Saving Category..."
+                refreshingLabel="Refreshing..."
+                successLabel="Saved"
+                errorLabel="Retry Save"
+                state={categoryProgress.state}
+                onClick={saveCategory}
+                icon={<CheckCircle2 className="h-4 w-4" />}
+                buttonClassName="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white disabled:opacity-55"
+              />
             </div>
           </div>
         </div>
@@ -1008,6 +1079,12 @@ function apiErrorDetails(error: unknown, endpoint: string, fallbackMessage: stri
     errorCode: null,
     requestId: null,
   };
+}
+
+function safeErrorMessage(error: unknown, fallbackMessage: string) {
+  if (error instanceof ApiRequestError) return error.details.message;
+  if (error instanceof Error && !/^Request failed:/i.test(error.message)) return error.message;
+  return fallbackMessage;
 }
 
 function stringOrNull(value: unknown) {

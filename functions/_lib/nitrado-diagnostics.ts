@@ -51,6 +51,8 @@ export type NitradoFileReadAttemptPayload = {
   requestUrlRedacted?: string | null;
 };
 
+const NOFTP_DOWNLOAD_SOURCE_NAME: NitradoLiveSourceName = "gameserver_details_log_files_noftp_download";
+
 export type NitradoFileReadDiagnosticsContext = {
   db?: D1Database | null;
   serverId?: string | null;
@@ -426,6 +428,7 @@ async function recordNitradoLiveSourceState(db: D1Database, payload: NitradoFile
   }
 
   const nextTestAt = works ? nowIso : rateLimitedUntil ?? addMinutes(now, sourceBackoffMinutes(payload));
+  const preserveNoftpSuccess = sourceName === NOFTP_DOWNLOAD_SOURCE_NAME && !works && isRecoverableNoftpSourceFailure(payload);
   await db
     .prepare(
       `INSERT INTO adm_live_source_state (
@@ -435,12 +438,22 @@ async function recordNitradoLiveSourceState(db: D1Database, payload: NitradoFile
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(service_id, source_name) DO UPDATE SET
          last_tested_at = excluded.last_tested_at,
-         last_status = excluded.last_status,
+         last_status = CASE
+           WHEN ? = 1 AND adm_live_source_state.works = 1 THEN 'recoverable_retry_scheduled'
+           ELSE excluded.last_status
+         END,
          last_http_status = excluded.last_http_status,
          last_error_code = excluded.last_error_code,
          last_response_excerpt = excluded.last_response_excerpt,
-         works = excluded.works,
-         preferred = CASE WHEN excluded.works = 1 THEN 1 ELSE adm_live_source_state.preferred END,
+         works = CASE
+           WHEN ? = 1 AND adm_live_source_state.works = 1 THEN 1
+           ELSE excluded.works
+         END,
+         preferred = CASE
+           WHEN excluded.works = 1 THEN 1
+           WHEN ? = 1 AND adm_live_source_state.works = 1 THEN 1
+           ELSE adm_live_source_state.preferred
+         END,
          next_test_at = excluded.next_test_at,
          updated_at = excluded.updated_at`,
     )
@@ -456,6 +469,55 @@ async function recordNitradoLiveSourceState(db: D1Database, payload: NitradoFile
       works ? 1 : 0,
       works ? 1 : 0,
       nextTestAt,
+      nowIso,
+      preserveNoftpSuccess ? 1 : 0,
+      preserveNoftpSuccess ? 1 : 0,
+      preserveNoftpSuccess ? 1 : 0,
+    )
+    .run()
+    .catch(() => null);
+
+  if (sourceName === "gameserver_details_log_files" && works) {
+    await recordNoftpDiscoveryLiveSourceState(db, payload, nowIso);
+  }
+}
+
+function isRecoverableNoftpSourceFailure(payload: NitradoFileReadAttemptPayload) {
+  const httpStatus = Number(payload.httpStatus ?? 0);
+  const errorCode = String(payload.errorCode ?? "").toUpperCase();
+  if (httpStatus === 401 || httpStatus === 403) return false;
+  if (errorCode === "NITRADO_UNAUTHORIZED" || errorCode === "NITRADO_FORBIDDEN" || errorCode === "NITRADO_UNSAFE_PATH") return false;
+  return true;
+}
+
+async function recordNoftpDiscoveryLiveSourceState(db: D1Database, payload: NitradoFileReadAttemptPayload, nowIso: string) {
+  const excerpt = sanitizeResponseExcerpt(payload.responseExcerpt, 500);
+  await db
+    .prepare(
+      `INSERT INTO adm_live_source_state (
+         id, service_id, source_name, last_tested_at, last_status, last_http_status,
+         last_error_code, last_response_excerpt, works, preferred, next_test_at, updated_at
+       )
+       VALUES (?, ?, ?, ?, 'discovery_success', ?, NULL, ?, 1, 1, ?, ?)
+       ON CONFLICT(service_id, source_name) DO UPDATE SET
+         last_tested_at = excluded.last_tested_at,
+         last_status = excluded.last_status,
+         last_http_status = excluded.last_http_status,
+         last_error_code = NULL,
+         last_response_excerpt = excluded.last_response_excerpt,
+         works = 1,
+         preferred = 1,
+         next_test_at = excluded.next_test_at,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      payload.serviceId,
+      NOFTP_DOWNLOAD_SOURCE_NAME,
+      nowIso,
+      payload.httpStatus ?? 200,
+      excerpt,
+      nowIso,
       nowIso,
     )
     .run()
