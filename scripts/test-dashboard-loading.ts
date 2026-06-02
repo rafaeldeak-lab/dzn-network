@@ -66,7 +66,13 @@ includesAll(homeStatsRoute, [
   "lastSuccessfulAdmImportAt",
   "statsActiveServers",
   "killsTracked",
+  "totalEventsTracked",
+  "recentActivityCount",
   "recentEventsCount",
+  "getMonotonicNetworkEventTotal",
+  "public_home_stats_monotonic_guard",
+  "Math.max(calculated, cachedTotal)",
+  "events: totalEventsTracked",
   "mapNodes",
   "source: \"last_known\"",
   "source: \"fallback_empty\"",
@@ -87,6 +93,7 @@ assert.equal(homeStatsRoute.includes("listing_visibility = 'public'"), false, "H
 const previewAccessSource = homeStatsRoute.slice(homeStatsRoute.indexOf("export function applyHomeStatsAccess"));
 assert.equal(previewAccessSource.includes("killsTracked: 0"), false, "Homepage preview must not replace real aggregate kill totals with fake zeroes.");
 assert.equal(previewAccessSource.includes("recentEventsCount: 0"), false, "Homepage preview must not replace real aggregate event totals with fake zeroes.");
+assert.equal(previewAccessSource.includes("totalEventsTracked: 0"), false, "Homepage preview must not replace monotonic all-time event totals with fake zeroes.");
 
 for (const route of [
   "functions/api/public/leaderboards.ts",
@@ -120,10 +127,15 @@ includesAll(landing, [
   "hasAdmData",
   "everSyncedAdm",
   "lastSuccessfulAdmImportAt",
+  "totalEventsTracked",
+  "Events Tracked",
+  "All-time ADM events tracked",
   "Syncing latest ADM rankings",
   "Syncing latest ADM activity",
   "Updated from last synced ADM",
 ]);
+assert.equal(landing.includes("homeStats.network_pulse.events || homeStats.totals.recentEventsCount"), false, "Homepage Events card must not use recentEventsCount as its primary network total.");
+assert.equal(landing.includes("Math.max(homeStats.totalEventsTracked, homeStats.totals.totalEventsTracked"), true, "Homepage Events card must prefer totalEventsTracked.");
 assert.equal(landing.includes("Awaiting first synced ADM data"), false, "Homepage must not render fake first-sync copy while ADM data exists.");
 assert.equal(landing.includes("Awaiting ADM data"), false, "Homepage stat cards must not replace last-known ADM numbers with awaiting copy.");
 assert.equal(landing.includes("Checking ADM Data"), false, "Homepage must not show checking-copy as a permanent public state.");

@@ -133,11 +133,12 @@ const homePreview = applyHomeStatsAccess({
     players_online: 3,
     currentPlayersOnline: 3,
     killsTracked: 55,
+    totalEventsTracked: 120,
     recentEventsCount: 12,
   },
   network_pulse: {
     active_servers: 2,
-    events: 12,
+    events: 120,
     top_server: { server_name: "Hidden top" },
     best_kd: 4.2,
     current_event: { title: "Hidden event" },
@@ -169,8 +170,9 @@ assert.equal(homePreview.recentActivity[0].title, "PANDORA activity synced");
 assert.equal(JSON.stringify(homePreview.recentActivity).includes("Player A"), false);
 assert.equal(homePreview.totals.players_online, 0);
 assert.equal(homePreview.totals.killsTracked, 55);
+assert.equal(homePreview.totals.totalEventsTracked, 120);
 assert.equal(homePreview.totals.recentEventsCount, 12);
-assert.equal(homePreview.network_pulse.events, 12);
+assert.equal(homePreview.network_pulse.events, 120);
 assert.equal(homePreview.network_pulse.top_server, null);
 assert.equal(homePreview.network_pulse.current_event, null);
 assert.equal(homePreview.map_nodes.length, 1);

@@ -232,6 +232,7 @@ async function main() {
   const hasHomeAdmData = Number(totals.killsTracked ?? 0) > 0
     || Number(totals.deathsTracked ?? 0) > 0
     || Number(totals.joinsTracked ?? 0) > 0
+    || Number(totals.totalEventsTracked ?? homeStats.json?.totalEventsTracked ?? 0) > 0
     || Number(totals.recentEventsCount ?? 0) > 0
     || Number(totals.statsActiveServers ?? 0) > 0;
   if (homeStats.status !== 200 || !homeStats.json) {

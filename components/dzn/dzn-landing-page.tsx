@@ -90,6 +90,7 @@ type HomeStats = {
     deathsTracked: number;
     joinsTracked: number;
     longestKill: number;
+    totalEventsTracked: number;
     recentEventsCount: number;
     structuresBuilt: number;
     buildScore: number;
@@ -151,7 +152,9 @@ type HomeStats = {
   killsTracked: number;
   deathsTracked: number;
   joinsTracked: number;
+  totalEventsTracked: number;
   recentEventsCount: number;
+  recentActivityCount: number;
   mapNodes: number;
   buildLeaderboard: PublicBuildServer[];
   statusMessage: string;
@@ -271,6 +274,7 @@ const emptyHomeStats: HomeStats = {
     deathsTracked: 0,
     joinsTracked: 0,
     longestKill: 0,
+    totalEventsTracked: 0,
     recentEventsCount: 0,
     structuresBuilt: 0,
     buildScore: 0,
@@ -312,7 +316,9 @@ const emptyHomeStats: HomeStats = {
   killsTracked: 0,
   deathsTracked: 0,
   joinsTracked: 0,
+  totalEventsTracked: 0,
   recentEventsCount: 0,
+  recentActivityCount: 0,
   mapNodes: 0,
   buildLeaderboard: [],
   statusMessage: "Waiting for first ADM sync",
@@ -554,6 +560,8 @@ function hasMeaningfulHomeStats(value: HomeStats) {
     || value.totals.killsTracked > 0
     || value.totals.deathsTracked > 0
     || value.totals.joinsTracked > 0
+    || value.totals.totalEventsTracked > 0
+    || value.totalEventsTracked > 0
     || value.totals.recentEventsCount > 0
     || value.totals.structuresBuilt > 0
     || value.totals.buildScore > 0
@@ -1267,6 +1275,7 @@ function RecentActivityPanel({ rows, dataPending = false }: { rows: ActivityPane
 
 function LiveMapPanel({ homeStats, dataPending = false }: { homeStats: HomeStats; dataPending?: boolean }) {
   const nodes = homeStats.map_nodes;
+  const totalEventsTracked = Math.max(homeStats.totalEventsTracked, homeStats.totals.totalEventsTracked, homeStats.network_pulse.events, homeStats.totals.recentEventsCount);
 
   return (
     <div className="dzn-home-panel relative overflow-hidden rounded-xl border border-cyan-300/15 bg-cyan-300/[0.045] p-4 shadow-[0_0_38px_rgba(14,165,233,0.08)]">
@@ -1288,7 +1297,7 @@ function LiveMapPanel({ homeStats, dataPending = false }: { homeStats: HomeStats
       <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
         <MiniMetric label="Sync Active" value={dataPending ? "Syncing" : formatNumber(homeStats.syncHealth.active)} />
         <MiniMetric label="Pending" value={dataPending ? "Syncing" : formatNumber(homeStats.syncHealth.pending)} />
-        <MiniMetric label="Events" value={dataPending ? "Syncing events" : formatNumber(homeStats.totals.recentEventsCount)} />
+        <MiniMetric label="ADM Events" value={dataPending ? "Syncing events" : formatNumber(totalEventsTracked)} />
       </div>
     </div>
   );
@@ -1484,6 +1493,7 @@ function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeSt
 function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats; dataPending?: boolean }) {
   const topServer = homeStats.network_pulse.top_server ?? homeStats.topServers[0] ?? null;
   const currentEvent = homeStats.network_pulse.current_event;
+  const totalEventsTracked = Math.max(homeStats.totalEventsTracked, homeStats.totals.totalEventsTracked, homeStats.network_pulse.events, homeStats.totals.recentEventsCount);
   const topKills = numberOrZero(topServer?.total_kills);
   const topDeaths = numberOrZero(topServer?.total_deaths);
   const topKd = topServer ? (topKills === 0 ? "Awaiting data" : topDeaths > 0 ? (topKills / topDeaths).toFixed(2) : "Flawless") : "Pending";
@@ -1497,9 +1507,9 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
     },
     {
       icon: Activity,
-      eyebrow: "Events",
-      value: dataPending ? "Syncing events" : `${formatNumber(homeStats.network_pulse.events || homeStats.totals.recentEventsCount)} events`,
-      detail: "Tracked across the network",
+      eyebrow: "Events Tracked",
+      value: dataPending ? "Syncing events" : `${formatNumber(totalEventsTracked)} events`,
+      detail: "All-time ADM events tracked",
       theme: "events",
     },
     {
@@ -1954,6 +1964,7 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
     deathsTracked: numberOrZero(payload.totals?.deathsTracked ?? payload.deathsTracked),
     joinsTracked: numberOrZero(payload.totals?.joinsTracked ?? payload.joinsTracked),
     longestKill: numberOrZero(payload.totals?.longestKill),
+    totalEventsTracked: numberOrZero(payload.totals?.totalEventsTracked ?? payload.totalEventsTracked ?? payload.network_pulse?.events ?? payload.totals?.recentEventsCount ?? payload.recentEventsCount),
     recentEventsCount: numberOrZero(payload.totals?.recentEventsCount ?? payload.recentEventsCount),
     structuresBuilt: numberOrZero(payload.totals?.structuresBuilt),
     buildScore: numberOrZero(payload.totals?.buildScore),
@@ -2047,6 +2058,7 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       || totals.killsTracked > 0
       || totals.deathsTracked > 0
       || totals.joinsTracked > 0
+      || totals.totalEventsTracked > 0
       || totals.recentEventsCount > 0
       || totals.structuresBuilt > 0
       || totals.buildScore > 0
@@ -2059,6 +2071,7 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       || totals.killsTracked > 0
       || totals.deathsTracked > 0
       || totals.joinsTracked > 0
+      || totals.totalEventsTracked > 0
       || totals.recentEventsCount > 0
       || Boolean(payload.lastSuccessfulAdmImportAt),
     lastSuccessfulAdmImportAt: typeof payload.lastSuccessfulAdmImportAt === "string" ? payload.lastSuccessfulAdmImportAt : null,
@@ -2068,7 +2081,9 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
     killsTracked: numberOrZero(payload.killsTracked ?? totals.killsTracked),
     deathsTracked: numberOrZero(payload.deathsTracked ?? totals.deathsTracked),
     joinsTracked: numberOrZero(payload.joinsTracked ?? totals.joinsTracked),
+    totalEventsTracked: numberOrZero(payload.totalEventsTracked ?? totals.totalEventsTracked),
     recentEventsCount: numberOrZero(payload.recentEventsCount ?? totals.recentEventsCount),
+    recentActivityCount: numberOrZero(payload.recentActivityCount ?? (Array.isArray(payload.recentActivity) ? payload.recentActivity.length : 0)),
     mapNodes: numberOrZero(payload.mapNodes ?? (Array.isArray(payload.map_nodes) ? payload.map_nodes.length : 0)),
     buildLeaderboard,
     statusMessage: typeof payload.statusMessage === "string" ? payload.statusMessage : (payload.source === "last_known" ? "Updated from last synced ADM" : "Live sync active"),

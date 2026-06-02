@@ -357,6 +357,7 @@ async function checkPublicHomeStatsConsistency(hasPermanentAdmData: boolean) {
   const hasPublicAdmEvidence = Number(totals.statsActiveServers ?? 0) > 0
     || Number(totals.killsTracked ?? 0) > 0
     || Number(totals.joinsTracked ?? 0) > 0
+    || Number(totals.totalEventsTracked ?? result.json.totalEventsTracked ?? 0) > 0
     || Number(totals.recentEventsCount ?? 0) > 0
     || (Array.isArray(result.json.topServers) && result.json.topServers.length > 0);
   if (hasPermanentAdmData && !hasPublicAdmEvidence) {

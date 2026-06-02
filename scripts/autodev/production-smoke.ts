@@ -123,6 +123,7 @@ function hasAdmHomeStatsEvidence(value: unknown) {
     || Number(totals.killsTracked ?? 0) > 0
     || Number(totals.deathsTracked ?? 0) > 0
     || Number(totals.joinsTracked ?? 0) > 0
+    || Number(totals.totalEventsTracked ?? (record as { totalEventsTracked?: unknown }).totalEventsTracked ?? 0) > 0
     || Number(totals.recentEventsCount ?? 0) > 0
     || (Array.isArray(record.topServers) && record.topServers.length > 0);
 }

@@ -31,6 +31,7 @@ type TotalsRow = {
   deathsTracked: number | null;
   joinsTracked: number | null;
   longestKill: number | null;
+  totalEventsTracked?: number | null;
   recentEventsCount?: number | null;
   structuresBuilt: number | null;
   buildScore: number | null;
@@ -258,6 +259,8 @@ function withHomeStatsEvidence<T extends {
   hasAdmData?: boolean;
   everSyncedAdm?: boolean;
   lastSuccessfulAdmImportAt?: string | null;
+  totalEventsTracked?: number | null;
+  recentActivityCount?: number | null;
   buildLeaderboard?: unknown[];
   statusMessage?: string;
 }>(data: T, options: {
@@ -287,11 +290,19 @@ function withHomeStatsEvidence<T extends {
   const deathsTracked = numberOrZero(totals.deathsTracked);
   const joinsTracked = numberOrZero(totals.joinsTracked);
   const recentEventsCount = numberOrZero(totals.recentEventsCount);
+  const totalEventsTracked = Math.max(
+    numberOrZero(totals.totalEventsTracked),
+    numberOrZero(data.totalEventsTracked),
+    numberOrZero((data.network_pulse as { events?: unknown } | undefined)?.events),
+    recentEventsCount,
+  );
+  const recentActivityCount = recentActivity.length;
   const hasAdmData = Boolean(data.hasAdmData)
     || statsActiveServers > 0
     || killsTracked > 0
     || deathsTracked > 0
     || joinsTracked > 0
+    || totalEventsTracked > 0
     || recentEventsCount > 0
     || numberOrZero(totals.structuresBuilt) > 0
     || numberOrZero(totals.buildScore) > 0
@@ -305,6 +316,17 @@ function withHomeStatsEvidence<T extends {
 
   return {
     ...data,
+    totals: {
+      ...totals,
+      totalEventsTracked,
+      recentEventsCount,
+    },
+    network_pulse: data.network_pulse
+      ? {
+          ...data.network_pulse,
+          events: totalEventsTracked,
+        }
+      : data.network_pulse,
     source: options.source,
     generated_at: options.generatedAt,
     generatedAt: options.generatedAt,
@@ -317,7 +339,9 @@ function withHomeStatsEvidence<T extends {
     killsTracked,
     deathsTracked,
     joinsTracked,
+    totalEventsTracked,
     recentEventsCount,
+    recentActivityCount,
     mapNodes: mapNodes.length,
     buildLeaderboard,
     statusMessage: options.statusMessage ?? (options.source === "last_known"
@@ -330,16 +354,18 @@ function withHomeStatsEvidence<T extends {
 
 async function buildPreviewHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, topServers, gameModes, mapNodes, lastSuccessfulAdmImportAt] = await Promise.all([
+  const [totals, topServers, gameModes, mapNodes, lastSuccessfulAdmImportAt, totalEventsTracked] = await Promise.all([
     getPreviewTotals(db),
     getPreviewTopServers(db),
     getGameModes(db).catch(() => ({ pvp: 0, pve: 0, deathmatch: 0, pvpPve: 0 })),
     getPreviewMapNodes(db),
     getLastSuccessfulAdmImportAt(db),
+    getMonotonicNetworkEventTotal(env),
   ]);
   const syncActive = numberOrZero(totals.statsActiveServers);
   const serversLinked = numberOrZero(totals.serversLinked);
-  const recentEventsCount = numberOrZero(totals.recentEventsCount);
+  const recentActivity = buildPreviewRecentActivity(topServers);
+  const recentEventsCount = recentActivity.length;
   const data = emptyHomeStats();
   return {
     ...data,
@@ -354,6 +380,7 @@ async function buildPreviewHomeStats(env: Env) {
       deathsTracked: numberOrZero(totals.deathsTracked),
       joinsTracked: numberOrZero(totals.joinsTracked),
       longestKill: numberOrZero(totals.longestKill),
+      totalEventsTracked,
       recentEventsCount,
       structuresBuilt: numberOrZero(totals.structuresBuilt),
       buildScore: numberOrZero(totals.buildScore),
@@ -361,11 +388,11 @@ async function buildPreviewHomeStats(env: Env) {
     network_pulse: {
       ...data.network_pulse,
       active_servers: syncActive,
-      events: recentEventsCount,
+      events: totalEventsTracked,
       top_server: topServers[0] ?? null,
     },
     topServers,
-    recentActivity: buildPreviewRecentActivity(topServers),
+    recentActivity,
     map_nodes: mapNodes,
     gameModes,
     syncHealth: {
@@ -437,10 +464,11 @@ async function getPreviewTotals(db: D1Database) {
 
 async function buildHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers, lastSuccessfulAdmImportAt] = await Promise.all([
+  const [totals, profileCount, recentEventsCount, totalEventsTracked, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers, lastSuccessfulAdmImportAt] = await Promise.all([
     getTotals(db),
     getPlayerProfileCount(db),
     getRecentEventsCount(db),
+    getMonotonicNetworkEventTotal(env),
     getGameModes(db),
     getTopServers(env),
     getTopPlayers(db),
@@ -472,13 +500,14 @@ async function buildHomeStats(env: Env) {
       deathsTracked: numberOrZero(totals.deathsTracked),
       joinsTracked: numberOrZero(totals.joinsTracked),
       longestKill: numberOrZero(totals.longestKill),
+      totalEventsTracked,
       recentEventsCount,
       structuresBuilt: numberOrZero(totals.structuresBuilt),
       buildScore: numberOrZero(totals.buildScore),
     },
     network_pulse: {
       active_servers: syncActive,
-      events: recentEventsCount,
+      events: totalEventsTracked,
       top_server: topServers[0] ?? null,
       best_kd: topServers[0]?.total_deaths
         ? Number((numberOrZero(topServers[0]?.total_kills) / numberOrZero(topServers[0]?.total_deaths)).toFixed(2))
@@ -891,6 +920,114 @@ async function getRecentEventsCount(db: D1Database) {
     )
     .first<{ count: number | null }>();
   return numberOrZero(row?.count);
+}
+
+export async function getMonotonicNetworkEventTotal(env: Env, calculatedTotal?: number | null) {
+  if (!env.DB) return numberOrZero(calculatedTotal);
+  const db = requireDb(env);
+  const calculated = calculatedTotal === undefined
+    ? await getCalculatedNetworkEventTotal(db)
+    : numberOrZero(calculatedTotal);
+  const cachedTotals = await Promise.all(
+    Object.values(HOME_STATS_SNAPSHOT_KEYS).map(async (cacheKey) => {
+      const cached = await readPublicApiCache<unknown>(env, cacheKey).catch(() => null);
+      return extractHomeStatsEventTotal(cached?.payload);
+    }),
+  );
+  const cachedTotal = Math.max(0, ...cachedTotals);
+  const keptTotal = Math.max(calculated, cachedTotal);
+  if (keptTotal > calculated) {
+    console.warn("DZN HOME STATS MONOTONIC EVENT TOTAL KEPT", {
+      previous_total: cachedTotal,
+      attempted_total: calculated,
+      kept_total: keptTotal,
+      reason: "public_home_stats_monotonic_guard",
+      created_at: new Date().toISOString(),
+    });
+  }
+  return keptTotal;
+}
+
+async function getCalculatedNetworkEventTotal(db: D1Database) {
+  const row = await db
+    .prepare(
+      `SELECT SUM(count) AS count
+       FROM (
+         SELECT COUNT(*) AS count
+         FROM kill_events
+         INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND ${mockNameFilterSql("kill_events.killer_name")}
+           AND ${mockNameFilterSql("kill_events.victim_name")}
+         UNION ALL
+         SELECT COUNT(*) AS count
+         FROM player_events
+         INNER JOIN linked_servers ON linked_servers.id = player_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND ${mockNameFilterSql("player_events.player_name")}
+         UNION ALL
+         SELECT COUNT(*) AS count
+         FROM build_events
+         INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND ${mockNameFilterSql("build_events.player_name")}
+       )`,
+    )
+    .first<{ count: number | null }>()
+    .catch(() => null);
+  if (row) return numberOrZero(row.count);
+  return getServerStatsNetworkEventTotal(db);
+}
+
+async function getServerStatsNetworkEventTotal(db: D1Database) {
+  const row = await db
+    .prepare(
+      `SELECT SUM(
+        COALESCE(server_stats.total_kills, 0)
+        + COALESCE(server_stats.total_deaths, 0)
+        + COALESCE(server_stats.total_joins, 0)
+        + COALESCE(server_stats.total_disconnects, 0)
+      ) AS count
+       FROM server_stats
+       INNER JOIN linked_servers ON linked_servers.id = server_stats.linked_server_id
+       WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
+    )
+    .first<{ count: number | null }>()
+    .catch(() => null);
+  return numberOrZero(row?.count);
+}
+
+function extractHomeStatsEventTotal(payload: unknown): number {
+  const root = isRecord(payload) ? payload : {};
+  const data = isRecord(root.data) ? root.data : {};
+  return Math.max(
+    extractHomeStatsEventTotalFromRecord(root),
+    extractHomeStatsEventTotalFromRecord(data),
+  );
+}
+
+function extractHomeStatsEventTotalFromRecord(record: Record<string, unknown>): number {
+  const totals = isRecord(record.totals) ? record.totals : {};
+  const networkPulse = isRecord(record.network_pulse) ? record.network_pulse : {};
+  return Math.max(
+    numberOrZero(record.totalEventsTracked),
+    numberOrZero(totals.totalEventsTracked),
+    numberOrZero(networkPulse.events),
+    numberOrZero(record.recentEventsCount),
+    numberOrZero(totals.recentEventsCount),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function getGameModes(db: D1Database) {
@@ -1416,6 +1553,7 @@ function emptyHomeStats() {
       deathsTracked: 0,
       joinsTracked: 0,
       longestKill: 0,
+      totalEventsTracked: 0,
       recentEventsCount: 0,
       structuresBuilt: 0,
       buildScore: 0,
@@ -1449,6 +1587,8 @@ function emptyHomeStats() {
 export function applyHomeStatsAccess<T extends {
   totals?: Record<string, unknown>;
   network_pulse?: Record<string, unknown>;
+  totalEventsTracked?: number | null;
+  recentActivityCount?: number | null;
   topServers: Array<Record<string, unknown>>;
   topPlayers: Array<Record<string, unknown>>;
   recentActivity: Array<{ source?: string; serverName?: string | null; title: string } & Record<string, unknown>>;
