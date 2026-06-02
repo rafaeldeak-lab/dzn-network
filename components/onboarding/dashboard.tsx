@@ -33,8 +33,8 @@ import {
 import Link from "next/link";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing, updateServerSettings } from "./api";
-import { getServerCategoryOption, isServerCategoryValue, SERVER_CATEGORY_OPTIONS } from "./server-category-options";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { getServerCategoryOption } from "./server-category-options";
 import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
@@ -508,8 +508,6 @@ function ServerDashboard({
   const [actionMessage, setActionMessage] = useState("");
   const [dashboardAction, setDashboardAction] = useState<DashboardActionProgress | null>(() => loadDashboardActionState(serverProp.id));
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
-  const [serverCategoryOverride, setServerCategoryOverride] = useState<{ serverId: string; value: string | null } | null>(null);
-  const [savingServerCategory, setSavingServerCategory] = useState(false);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const dashboardHealthRequestIdRef = useRef(0);
@@ -521,9 +519,8 @@ function ServerDashboard({
     () => ({
       ...serverProp,
       ...(serverInfoOverride?.serverId === serverProp.id ? serverInfoOverride.patch : {}),
-      ...(serverCategoryOverride?.serverId === serverProp.id ? { server_category: serverCategoryOverride.value } : {}),
     }),
-    [serverCategoryOverride, serverInfoOverride, serverProp],
+    [serverInfoOverride, serverProp],
   );
   const normalizedServerCategory = getServerCategoryOption(server.server_category)?.value ?? null;
   const serverCategoryLabel = getServerCategoryOption(normalizedServerCategory)?.label ?? "Not set";
@@ -548,26 +545,6 @@ function ServerDashboard({
     dashboardActionRef.current = null;
     setDashboardAction(null);
     saveDashboardActionState(server.id, null);
-  }
-
-  async function saveServerCategory(nextCategory: string) {
-    if (!isServerCategoryValue(nextCategory)) {
-      setActionMessage("Choose a valid server category before saving.");
-      return;
-    }
-    setSavingServerCategory(true);
-    setActionMessage("");
-    try {
-      const result = await updateServerSettings(server.id, { server_category: nextCategory });
-      const savedCategory = result.server.server_category ?? nextCategory;
-      setServerCategoryOverride({ serverId: server.id, value: savedCategory });
-      setActionMessage("Server category saved. This server can now join matching events and matchmaking.");
-      await onRefreshRef.current();
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Unable to save server category.");
-    } finally {
-      setSavingServerCategory(false);
-    }
   }
 
   useEffect(() => {
@@ -2626,9 +2603,6 @@ function ServerDashboard({
         </header>
         <div className="space-y-5 px-4 py-5 sm:px-5 xl:px-6">
       <ActionProgressPanel action={dashboardAction} onDismiss={clearDashboardAction} />
-      {activeTab !== "sync-health" && !normalizedServerCategory ? (
-        <ServerCategoryReminderBanner onOpenSettings={() => { window.location.href = serverSettingsHref(server.id, "category"); }} />
-      ) : null}
       {activeTab === "overview" ? (
       <>
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
@@ -3239,12 +3213,6 @@ function ServerDashboard({
           {activeTab === "sync-health" && effectiveAutomationHealth ? <AutomationHealthPanel health={effectiveAutomationHealth} /> : null}
           {activeTab === "settings-danger" ? (
           <>
-          <ServerCategorySettingsPanel
-            key={server.id}
-            category={normalizedServerCategory}
-            saving={savingServerCategory}
-            onSave={saveServerCategory}
-          />
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions & Setup" />
             <div className="mt-4 grid gap-3">
@@ -3451,80 +3419,6 @@ function buildAdmAutoSyncTargetPayload(value: string): {
       filePath: expectedPath,
     },
   };
-}
-
-function ServerCategoryReminderBanner({ onOpenSettings }: { onOpenSettings: () => void }) {
-  return (
-    <div className="rounded-lg border border-amber-300/25 bg-amber-400/10 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <Gamepad2 className="mt-0.5 h-5 w-5 shrink-0 text-amber-100" />
-          <div>
-            <p className="text-sm font-black uppercase text-amber-50">Set your server category to join events and matchmaking.</p>
-            <p className="mt-1 text-sm leading-6 text-zinc-300">
-              Categories keep DZN events fair: Deathmatch only matches Deathmatch, PvP only matches PvP, and so on.
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="inline-flex items-center justify-center rounded-lg border border-amber-300/35 bg-amber-300/12 px-4 py-2 text-xs font-black uppercase text-amber-50 transition hover:border-amber-200/65 hover:bg-amber-300/18"
-        >
-          Set Category
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ServerCategorySettingsPanel({
-  category,
-  saving,
-  onSave,
-}: {
-  category: string | null;
-  saving: boolean;
-  onSave: (value: string) => Promise<void>;
-}) {
-  const [selectedCategory, setSelectedCategory] = useState(category ?? "");
-
-  const currentOption = getServerCategoryOption(category);
-  return (
-    <DashboardPanel className="p-4">
-      <PanelHeader icon={<Gamepad2 className="h-5 w-5" />} title="Server Category" />
-      <p className="mt-3 text-sm leading-6 text-zinc-300">
-        Choose the canonical category used for DZN Events and matchmaking. This is required before a server can join category-safe competitions.
-      </p>
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-end">
-        <label className="block">
-          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">Server Category</span>
-          <select
-            value={selectedCategory}
-            onChange={(event) => setSelectedCategory(event.target.value)}
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/32 px-3 text-sm font-bold text-white outline-none transition focus:border-violet-300/45 focus:bg-violet-300/[0.04]"
-          >
-            <option value="" className="bg-zinc-950 text-white">Choose category</option>
-            {SERVER_CATEGORY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value} className="bg-zinc-950 text-white">{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          disabled={saving || !isServerCategoryValue(selectedCategory) || selectedCategory === category}
-          onClick={() => onSave(selectedCategory)}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/12 px-4 text-xs font-black uppercase text-violet-50 transition hover:border-violet-200/55 hover:bg-violet-400/20 disabled:cursor-not-allowed disabled:opacity-55"
-        >
-          {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CircleCheck className="h-4 w-4" />}
-          {saving ? "Saving..." : "Save Category"}
-        </button>
-      </div>
-      <div className="mt-4 rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-200">
-        Current category: <span className={currentOption ? "text-emerald-100" : "text-amber-100"}>{currentOption?.label ?? "Not set"}</span>
-      </div>
-    </DashboardPanel>
-  );
 }
 
 function ActionProgressPanel({ action, onDismiss }: { action: DashboardActionProgress | null; onDismiss: () => void }) {

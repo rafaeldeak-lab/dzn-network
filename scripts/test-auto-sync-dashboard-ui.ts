@@ -73,7 +73,11 @@ assert.equal(dashboardSource.includes("manualActionRequired: false"), true);
 assert.equal(dashboardSource.includes("NITRADO_UNAUTHORIZED"), true);
 assert.equal(dashboardSource.includes("manualActionRequired: true"), true);
 
-assert.equal(dashboardSource.includes('activeTab !== "sync-health" && !normalizedServerCategory'), true);
+assert.equal(dashboardSource.includes('activeTab !== "sync-health" && !normalizedServerCategory'), false, "Dashboard must not render a shared category banner outside Sync Health.");
+assert.equal(dashboardSource.includes("ServerCategoryReminderBanner"), false, "Dashboard must not include the removed global category banner component.");
+assert.equal(dashboardSource.includes("Set your server category to join events and matchmaking."), false, "Dashboard overview must not show the old global category warning.");
+assert.equal(dashboardSource.includes("Set your server category to enter category-matched events."), true, "Event Hub must keep its contextual category warning.");
+assert.equal(dashboardSource.includes('<SetupCheck label="Server Category"'), true, "Setup Progress must still show Server Category when missing.");
 assert.equal(dashboardSource.includes('activeTab === "discord-posts" || activeTab === "sync-health" ? "hidden"'), true);
 
 assert.equal(healthApiSource.includes("autoSync"), true);
