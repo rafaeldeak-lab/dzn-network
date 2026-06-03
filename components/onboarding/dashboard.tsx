@@ -36,7 +36,8 @@ import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
 import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
@@ -511,6 +512,7 @@ function ServerDashboard({
   const [actionMessage, setActionMessage] = useState("");
   const [dashboardAction, setDashboardAction] = useState<DashboardActionProgress | null>(() => loadDashboardActionState(serverProp.id));
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
+  const [badgeStatus, setBadgeStatus] = useState<ServerBadgeStatusResponse | null>(null);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const dashboardHealthRequestIdRef = useRef(0);
@@ -687,6 +689,20 @@ function ServerDashboard({
   useEffect(() => {
     void Promise.resolve().then(refreshDashboardHealth);
   }, [refreshDashboardHealth]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getServerBadgeStatus(server.id)
+      .then((status) => {
+        if (!cancelled && status.ok) setBadgeStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setBadgeStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [server.id]);
 
   async function rebuildPublicProfileCache() {
     await runDashboardAction({
@@ -888,6 +904,9 @@ function ServerDashboard({
   }), [effectiveBillingStatus?.plan_key, effectiveServerMode, normalizedServerCategory, ownerReputationTier, server.map_name, server.mission]);
   const ownerEarnedBadges = ownerBadgeCollection.showcaseBadges.length ? ownerBadgeCollection.showcaseBadges : ownerVisuals.badges;
   const ownerLockedBadges = ownerBadgeCollection.lockedBadges.slice(0, 4);
+  const badgeEvaluationLastAt = badgeStatus?.lastEvaluationAt ?? null;
+  const badgeEvaluationLastLabel = badgeEvaluationLastAt ? formatCompactDate(badgeEvaluationLastAt) : "Pending first batch";
+  const badgeEvaluationNextLabel = badgeStatus?.nextEvaluationEstimate ?? (badgeEvaluationLastAt ? "Next safe batch" : "After first safe batch");
   const hasDashboardDataToDisplay = Boolean(
     effectiveSyncData ||
     effectiveDashboardHealth ||
@@ -2820,13 +2839,16 @@ function ServerDashboard({
               <MiniInfo label="Reputation" value={ownerReputationTier} />
               <MiniInfo label="Frame" value={ownerVisuals.profileFrame.label} />
               <MiniInfo label="Theme" value={ownerVisuals.themeBanner.label} />
+              <MiniInfo label="Last Badge Eval" value={badgeEvaluationLastLabel} />
+              <MiniInfo label="Next Eval" value={badgeEvaluationNextLabel} />
+              <MiniInfo label="Owner Grants" value="Not allowed" />
             </div>
             <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
               <p className="text-[10px] font-black uppercase text-zinc-500">Locked rewards preview</p>
               <div className="mt-3">
                 <BadgeShowcase badges={ownerLockedBadges} title="Locked Badges" emptyText="More locked rewards will appear as DZN seasons expand." />
               </div>
-              <p className="mt-3 text-xs leading-5 text-zinc-400">Owners can preview rewards here. Competitive badges are earned from DZN activity, reputation, crowns, and seasons.</p>
+              <p className="mt-3 text-xs leading-5 text-zinc-400">Owners can preview rewards here. Automatic badges are evaluated in safe DZN batches, while protected crowns, founder, seasonal, and support badges can only be granted by DZN admin/support tooling.</p>
             </div>
           </DashboardPanel>
           <DashboardPanel className="p-4">

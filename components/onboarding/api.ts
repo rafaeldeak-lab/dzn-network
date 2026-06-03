@@ -34,6 +34,16 @@ import type {
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
+export type ServerBadgeStatusResponse = {
+  ok: boolean;
+  serverId: string;
+  earnedCount: number;
+  lockedCount: number;
+  lastEvaluationAt: string | null;
+  nextEvaluationEstimate: string;
+  ownerCanGrantProtectedBadges: boolean;
+};
+
 export async function getMe() {
   return request<AuthResponse>("/api/auth/me", { cache: "no-store" });
 }
@@ -140,6 +150,10 @@ export async function bumpServer(linkedServerId: string) {
 
 export async function getServerAdvertisingStatus(linkedServerId: string) {
   return request<{ ok: boolean; advertising: AdvertisingBumpStatus }>(`/api/servers/${encodeURIComponent(linkedServerId)}/advertising/bump`);
+}
+
+export async function getServerBadgeStatus(linkedServerId: string) {
+  return request<ServerBadgeStatusResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/badges/status`, { cache: "no-store" });
 }
 
 export async function testOnboarding() {
