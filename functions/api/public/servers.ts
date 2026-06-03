@@ -22,6 +22,7 @@ import { getPublicBadgeAwardMap, type ServerBadgeAwardRow } from "../../_lib/bad
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import { buildAchievementShowcase, buildServerReputationSummary, type AchievementShowcase, type ReputationSummary } from "../../_lib/reputation";
 import { resolvePublicServerVisualLoadout, type PublicServerVisualLoadout } from "../../_lib/server-visual-loadouts";
+import { explainServerVisibility, getFeaturedServerCandidates, getRecommendedServers, getServerDiscoveryScore, getServerVisibilityConfig, getSpotlightEligibleServers, type VisibilityExplanation, type VisibilityTier } from "../../_lib/server-visibility";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
 import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
@@ -170,6 +171,12 @@ type SafePublicServer = {
   plan_key: string;
   premium_status: "standard" | "premium";
   visibility_weight: number;
+  visibilityWeight: number;
+  discoveryScore: number;
+  visibilityTier: VisibilityTier;
+  isFeaturedEligible: boolean;
+  isSpotlightEligible: boolean;
+  visibilityExplanation: VisibilityExplanation;
   reputation: ReputationSummary;
   achievement_showcase: AchievementShowcase;
   badges?: VisualBadge[];
@@ -276,7 +283,7 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
     const mockServers = shouldShowMockServers(env) ? mockPublicServers().map((server) => applyPublicServerAccess(server, viewerLoggedIn)) : [];
     return slug
       ? { ok: true, server: findPublicServerBySlug(mockServers, slug) ?? null, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn }
-      : { ok: true, servers: mockServers, stats: buildPublicStats(mockServers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
+      : { ok: true, servers: mockServers, ...buildPublicServerVisibilityGroups(mockServers), stats: buildPublicStats(mockServers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
   }
 
   if (!viewerLoggedIn && !slug) {
@@ -315,10 +322,10 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
 
   if (servers.length === 0 && shouldShowMockServers(env)) {
     const mockServers = mockPublicServers().map((server) => applyPublicServerAccess(server, viewerLoggedIn));
-    return { ok: true, servers: mockServers, stats: buildPublicStats(mockServers), mock: true, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
+    return { ok: true, servers: mockServers, ...buildPublicServerVisibilityGroups(mockServers), stats: buildPublicStats(mockServers), mock: true, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
   }
 
-  return { ok: true, servers, stats: buildPublicStats(servers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
+  return { ok: true, servers, ...buildPublicServerVisibilityGroups(servers), stats: buildPublicStats(servers), access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
 }
 
 async function getPublicServersPreviewPayload(env: Env) {
@@ -332,7 +339,7 @@ async function getPublicServersPreviewPayload(env: Env) {
     .filter((server): server is SafePublicServer => Boolean(server))
     .map((server) => applyPublicServerAccess(server, false));
   sortPublicServersForDiscovery(servers);
-  return { ok: true, servers, stats: buildPublicStats(servers), access_level: "preview", is_locked: true };
+  return { ok: true, servers, ...buildPublicServerVisibilityGroups(servers), stats: buildPublicStats(servers), access_level: "preview", is_locked: true };
 }
 
 async function queryPublicServersPreview(env: Env) {
@@ -793,6 +800,36 @@ async function toSafePublicServer(
       accentColour: visualShowcase.profileFrame.glowColour,
     },
   );
+  const visibilityInput = {
+    planKey,
+    stats_sync: statsSync,
+    stats_sync_active: ranking?.stats_sync_active ?? statsSync === "Active",
+    is_online: Number(row.is_online) === 1,
+    current_players: row.current_players,
+    total_joins: stats.total_joins,
+    unique_players: stats.unique_players,
+    last_sync_at: lastSyncAt,
+    metadata_last_checked_at: row.metadata_last_checked_at,
+    public_description: row.public_description,
+    public_short_description: row.public_short_description,
+    public_discord_invite: row.public_discord_invite,
+    public_website_url: row.public_website_url,
+    tags,
+    reputation,
+    earnedBadges: badgeCollection.earnedBadges,
+    showcaseBadges: publicVisualLoadout.showcaseBadges,
+    crowns: badgeCollection.crowns,
+    visualLoadout: {
+      source: publicVisualLoadout.source,
+      animationEnabled: publicVisualLoadout.animationEnabled,
+      cardStyle: publicVisualLoadout.cardStyle,
+      showcaseBadgeCodes: publicVisualLoadout.showcaseBadges.map((badge) => badge.code),
+      profileFrameKey: publicVisualLoadout.profileFrame.key,
+      themeBannerKey: publicVisualLoadout.themeBanner.key,
+    },
+  };
+  const visibilityConfig = getServerVisibilityConfig(visibilityInput);
+  const discoveryScore = getServerDiscoveryScore(visibilityInput);
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -837,7 +874,13 @@ async function toSafePublicServer(
     advertising,
     plan_key: planKey,
     premium_status: reputation.premiumStatus,
-    visibility_weight: reputation.visibilityWeight,
+    visibility_weight: visibilityConfig.visibilityWeight,
+    visibilityWeight: visibilityConfig.visibilityWeight,
+    discoveryScore,
+    visibilityTier: visibilityConfig.visibilityTier,
+    isFeaturedEligible: visibilityConfig.isFeaturedEligible,
+    isSpotlightEligible: visibilityConfig.isSpotlightEligible,
+    visibilityExplanation: explainServerVisibility(visibilityInput),
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
@@ -850,13 +893,13 @@ async function toSafePublicServer(
     profileFrame: publicVisualLoadout.profileFrame,
     themeBanner: publicVisualLoadout.themeBanner,
     visualLoadout: {
-      source: publicVisualLoadout.source,
-      animationEnabled: publicVisualLoadout.animationEnabled,
-      cardStyle: publicVisualLoadout.cardStyle,
+      source: visibilityInput.visualLoadout.source,
+      animationEnabled: visibilityInput.visualLoadout.animationEnabled,
+      cardStyle: visibilityInput.visualLoadout.cardStyle,
       accentColour: publicVisualLoadout.accentColour,
-      showcaseBadgeCodes: publicVisualLoadout.showcaseBadges.map((badge) => badge.code),
-      profileFrameKey: publicVisualLoadout.profileFrame.key,
-      themeBannerKey: publicVisualLoadout.themeBanner.key,
+      showcaseBadgeCodes: visibilityInput.visualLoadout.showcaseBadgeCodes,
+      profileFrameKey: visibilityInput.visualLoadout.profileFrameKey,
+      themeBannerKey: visibilityInput.visualLoadout.themeBannerKey,
     },
     cardStyle: publicVisualLoadout.cardStyle,
     accentColour: publicVisualLoadout.accentColour,
@@ -980,6 +1023,36 @@ async function toSafePublicServerPreview(
       accentColour: visualShowcase.profileFrame.glowColour,
     },
   );
+  const visibilityInput = {
+    planKey,
+    stats_sync: statsSync,
+    stats_sync_active: statsSync === "Active",
+    is_online: Number(row.is_online) === 1,
+    current_players: row.current_players,
+    total_joins: stats.total_joins,
+    unique_players: stats.unique_players,
+    last_sync_at: lastSyncAt,
+    metadata_last_checked_at: row.metadata_last_checked_at,
+    public_description: row.public_description,
+    public_short_description: row.public_short_description,
+    public_discord_invite: row.public_discord_invite,
+    public_website_url: row.public_website_url,
+    tags: parsePublicTags(tagsJson),
+    reputation,
+    earnedBadges: badgeCollection.earnedBadges,
+    showcaseBadges: publicVisualLoadout.showcaseBadges,
+    crowns: badgeCollection.crowns,
+    visualLoadout: {
+      source: publicVisualLoadout.source,
+      animationEnabled: publicVisualLoadout.animationEnabled,
+      cardStyle: publicVisualLoadout.cardStyle,
+      showcaseBadgeCodes: publicVisualLoadout.showcaseBadges.map((badge) => badge.code),
+      profileFrameKey: publicVisualLoadout.profileFrame.key,
+      themeBannerKey: publicVisualLoadout.themeBanner.key,
+    },
+  };
+  const visibilityConfig = getServerVisibilityConfig(visibilityInput);
+  const discoveryScore = getServerDiscoveryScore(visibilityInput);
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -1022,7 +1095,13 @@ async function toSafePublicServerPreview(
     advertising,
     plan_key: planKey,
     premium_status: reputation.premiumStatus,
-    visibility_weight: reputation.visibilityWeight,
+    visibility_weight: visibilityConfig.visibilityWeight,
+    visibilityWeight: visibilityConfig.visibilityWeight,
+    discoveryScore,
+    visibilityTier: visibilityConfig.visibilityTier,
+    isFeaturedEligible: visibilityConfig.isFeaturedEligible,
+    isSpotlightEligible: visibilityConfig.isSpotlightEligible,
+    visibilityExplanation: explainServerVisibility(visibilityInput),
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
@@ -1035,13 +1114,13 @@ async function toSafePublicServerPreview(
     profileFrame: publicVisualLoadout.profileFrame,
     themeBanner: publicVisualLoadout.themeBanner,
     visualLoadout: {
-      source: publicVisualLoadout.source,
-      animationEnabled: publicVisualLoadout.animationEnabled,
-      cardStyle: publicVisualLoadout.cardStyle,
+      source: visibilityInput.visualLoadout.source,
+      animationEnabled: visibilityInput.visualLoadout.animationEnabled,
+      cardStyle: visibilityInput.visualLoadout.cardStyle,
       accentColour: publicVisualLoadout.accentColour,
-      showcaseBadgeCodes: publicVisualLoadout.showcaseBadges.map((badge) => badge.code),
-      profileFrameKey: publicVisualLoadout.profileFrame.key,
-      themeBannerKey: publicVisualLoadout.themeBanner.key,
+      showcaseBadgeCodes: visibilityInput.visualLoadout.showcaseBadgeCodes,
+      profileFrameKey: visibilityInput.visualLoadout.profileFrameKey,
+      themeBannerKey: visibilityInput.visualLoadout.themeBannerKey,
     },
     cardStyle: publicVisualLoadout.cardStyle,
     accentColour: publicVisualLoadout.accentColour,
@@ -1189,8 +1268,23 @@ function buildPublicStats(servers: SafePublicServer[]) {
   };
 }
 
+function buildPublicServerVisibilityGroups(servers: SafePublicServer[]) {
+  const featuredServers = getFeaturedServerCandidates({ servers, limit: 6 });
+  const spotlightServers = getSpotlightEligibleServers({ servers, limit: 3 });
+  const recommendedServers = getRecommendedServers({ servers, limit: 8 });
+  const highlightedIds = new Set([...featuredServers, ...spotlightServers, ...recommendedServers].map((server) => server.linked_server_id));
+  const standardServers = servers.filter((server) => !highlightedIds.has(server.linked_server_id)).slice(0, 12);
+  return {
+    featuredServers,
+    spotlightServers,
+    recommendedServers,
+    standardServers,
+  };
+}
+
 export function sortPublicServersForDiscovery<T extends {
   advertising?: PublicAdvertising;
+  discoveryScore?: number;
   visibility_weight?: number;
   rank: number | null;
   score: number;
@@ -1199,6 +1293,8 @@ export function sortPublicServersForDiscovery<T extends {
   servers.sort((a, b) => {
     const adDiff = advertisingSortScore(b.advertising ?? publicAdvertisingFromState(null)) - advertisingSortScore(a.advertising ?? publicAdvertisingFromState(null));
     if (adDiff) return adDiff;
+    const discoveryDiff = numberOrZero(b.discoveryScore) - numberOrZero(a.discoveryScore);
+    if (discoveryDiff) return discoveryDiff;
     const visibilityDiff = numberOrZero(b.visibility_weight) - numberOrZero(a.visibility_weight);
     if (visibilityDiff) return visibilityDiff;
     const rankA = typeof a.rank === "number" && a.rank > 0 ? a.rank : Number.MAX_SAFE_INTEGER;
@@ -1460,10 +1556,34 @@ function mockReputationFields(planKey: string, input: {
     category: input.server_type,
     achievementShowcase,
   });
+  const visibilityInput = {
+    planKey,
+    stats_sync: input.active ? "Active" : "Pending",
+    stats_sync_active: input.active,
+    total_joins: input.total_joins,
+    unique_players: input.unique_players,
+    reputation,
+    showcaseBadges: visualShowcase.badges,
+    visualLoadout: {
+      source: "fallback",
+      animationEnabled: false,
+      cardStyle: visualShowcase.planVisualTreatment.cardTreatment,
+      showcaseBadgeCodes: visualShowcase.badges.map((badge) => badge.code),
+      profileFrameKey: visualShowcase.profileFrame.key,
+      themeBannerKey: visualShowcase.themeBanner.key,
+    },
+  };
+  const visibilityConfig = getServerVisibilityConfig(visibilityInput);
   return {
     plan_key: publicPlanKey(planKey),
     premium_status: reputation.premiumStatus,
-    visibility_weight: reputation.visibilityWeight,
+    visibility_weight: visibilityConfig.visibilityWeight,
+    visibilityWeight: visibilityConfig.visibilityWeight,
+    discoveryScore: getServerDiscoveryScore(visibilityInput),
+    visibilityTier: visibilityConfig.visibilityTier,
+    isFeaturedEligible: visibilityConfig.isFeaturedEligible,
+    isSpotlightEligible: visibilityConfig.isSpotlightEligible,
+    visibilityExplanation: explainServerVisibility(visibilityInput),
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,

@@ -76,6 +76,16 @@ const baseServer = {
   plan_key: "premium",
   premium_status: "premium",
   visibility_weight: 4,
+  visibilityWeight: 4,
+  discoveryScore: 640,
+  visibilityTier: "premium",
+  isFeaturedEligible: true,
+  isSpotlightEligible: true,
+  visibilityExplanation: {
+    summary: "Premium visibility for discovery surfaces.",
+    factors: ["Premium discovery priority (weight 4)"],
+    fairness: "Visibility affects discovery only and does not change competitive leaderboard rank.",
+  },
   reputation: {
     tier: "Diamond",
     score: 1000,

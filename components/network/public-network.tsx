@@ -106,6 +106,16 @@ type PublicServer = {
   plan_key?: string;
   premium_status?: "standard" | "premium";
   visibility_weight?: number;
+  visibilityWeight?: number;
+  discoveryScore?: number;
+  visibilityTier?: "standard" | "enhanced" | "premium";
+  isFeaturedEligible?: boolean;
+  isSpotlightEligible?: boolean;
+  visibilityExplanation?: {
+    summary: string;
+    factors: string[];
+    fairness: string;
+  };
   reputation?: ReputationSummary;
   achievement_showcase?: AchievementShowcase;
   badges?: VisualBadge[];
@@ -215,6 +225,10 @@ type PublicServersResponse = {
   data?: PublicServersResponse;
   server?: PublicServer | null;
   servers?: PublicServer[];
+  featuredServers?: PublicServer[];
+  spotlightServers?: PublicServer[];
+  recommendedServers?: PublicServer[];
+  standardServers?: PublicServer[];
   stats?: PublicStats;
   access_level?: "full" | "preview";
   is_locked?: boolean;
