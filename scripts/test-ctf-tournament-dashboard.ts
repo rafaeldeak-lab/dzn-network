@@ -11,7 +11,7 @@ for (const snippet of [
   "ctf_cached_aggregate",
   "can_use_cross_server_matching",
   "PRO",
-  "DZN_PARTNER",
+  "PREMIUM",
   "parser_dropout_protected",
   "cache-control",
   "no-store",
@@ -47,7 +47,7 @@ for (const snippet of [
   "dzn:lastGoodTournamentDashboard:",
   "/api/servers/${encodeURIComponent(serverId)}/ctf/dashboard",
   "/api/servers/${encodeURIComponent(serverId)}/ctf/roster",
-  "PRO or DZN_PARTNER required",
+  "Pro or Premium required",
   "Anti-alt policy",
   "case-sensitive",
 ]) {

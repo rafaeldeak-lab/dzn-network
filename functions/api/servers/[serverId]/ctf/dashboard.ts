@@ -146,7 +146,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   const planKey = normalizePlanKey(server.plan_key);
   const subscriptionStatus = cleanStatus(server.subscription_status);
-  const canUseCrossServerMatching = isActiveSubscription(subscriptionStatus) && (planKey === "pro" || planKey === "premium" || planKey === "network" || planKey === "partner");
+  const canUseCrossServerMatching = isActiveSubscription(subscriptionStatus) && (planKey === "pro" || planKey === "premium");
 
   return json(
     {
@@ -159,7 +159,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
           plan_key: planKey,
           status: subscriptionStatus,
           can_use_cross_server_matching: canUseCrossServerMatching,
-          required_plans: ["PRO", "DZN_PARTNER"],
+          required_plans: ["PRO", "PREMIUM"],
         },
         active_tournament: activeTournament ? normalizeTournament(activeTournament) : null,
         participants,

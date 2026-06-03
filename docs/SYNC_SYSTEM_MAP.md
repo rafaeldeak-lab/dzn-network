@@ -301,7 +301,7 @@ Posting order:
 Spam prevention:
 
 - Scheduled dispatcher can skip `skipped_unchanged`.
-- Basic status embeds include `Last checked` / `Updated at`, so Partner status updates can change at the 1-minute cadence when metadata is refreshed.
+- Basic status embeds include `Last checked` / `Updated at`, so Premium status updates can change at the 1-minute cadence when metadata is refreshed.
 
 ## D. Run Now
 
@@ -387,7 +387,7 @@ Important:
 
 - The Worker can run every minute.
 - Backend due-state decides which servers are actually due.
-- Partner status can run every 1 minute.
+- Premium status can run every 1 minute.
 - ADM remains limited to 10 minutes minimum.
 - The worker should not force every server to sync every minute.
 
@@ -426,7 +426,7 @@ Stripe subscription state controls:
 - ADM sync interval
 - Manual refresh cooldown
 - Allowed Discord auto-post types
-- Public/partner listing priority
+- Public/premium listing priority
 
 Active/trialing:
 

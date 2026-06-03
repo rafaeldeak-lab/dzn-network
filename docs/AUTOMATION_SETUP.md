@@ -22,7 +22,7 @@ DZN_CRON_SECRET=the-same-long-random-secret
 DZN_APP_URL=https://dzn-network.pages.dev
 ```
 
-The Worker runs every minute and executes the ADM sync path directly with its own D1 binding and subrequest budget. The backend decides which servers are actually due, so Starter/Pro/Network servers are not pulled every minute.
+The Worker runs every minute and executes the ADM sync path directly with its own D1 binding and subrequest budget. The backend decides which servers are actually due, so Starter, Pro, and Premium servers are not pulled every minute.
 
 ## 3. GitHub manual backup trigger
 
@@ -56,7 +56,9 @@ STRIPE_PRICE_PRO=price_...
 STRIPE_PRICE_PREMIUM=price_...
 ```
 
-The older `NEXT_PUBLIC_STRIPE_*_PRICE_ID` names still work during rollout, but the server-side `STRIPE_PRICE_*` names are preferred. Existing Network/Partner Stripe price IDs remain supported only as legacy migration aliases and map to Premium.
+Active public plans are Starter, Pro, and Premium only. Premium is £19.99/month. Network and Partner are legacy aliases only and must not appear in public billing UI, pricing cards, checkout options, or plan comparison pages.
+
+DZN Partner is archived in Stripe. Keep `STRIPE_PRICE_NETWORK` and `STRIPE_PRICE_PARTNER` only while existing legacy subscriptions can still emit Stripe webhook events using those archived Price IDs; they map to Premium for compatibility and are not used for new checkout. The old `NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID` and `NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID` variables are not needed by DZN and can be removed after this cleanup is deployed.
 
 ## 5. Run the D1 migration after account access is fixed
 
@@ -93,8 +95,8 @@ Open Dashboard -> Automation Health.
 Confirm:
 
 - Latest source is `Cloudflare`
-- Partner server status interval is 1 minute
-- Partner ADM interval is 10 minutes
+- Premium server status interval is 1 minute
+- Premium ADM interval is 10 minutes
 - No failed jobs are building up
 - Stuck locks are zero
 - Migration warning is gone after `npm run db:migrate:remote` succeeds

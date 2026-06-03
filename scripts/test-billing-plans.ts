@@ -82,8 +82,8 @@ const env = {
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_starter",
   NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_pro",
   NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID: "price_premium",
-  NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID: "price_network_legacy",
-  NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID: "price_partner_legacy",
+  STRIPE_PRICE_NETWORK: "price_network_legacy",
+  STRIPE_PRICE_PARTNER: "price_partner_legacy",
 } as Env;
 assert.equal(getPlanFromStripePriceId(env, "price_pro"), "pro");
 assert.equal(getPlanFromStripePriceId(env, "price_premium"), "premium");
@@ -91,6 +91,14 @@ assert.equal(getPlanFromStripePriceId(env, "price_network_legacy"), "premium");
 assert.equal(getPlanFromStripePriceId(env, "price_partner_legacy"), "premium");
 assert.equal(getPlanFromStripePriceId(env, "price_missing"), "free");
 assert.deepEqual(getCheckoutConfigured(env), { starter: true, pro: true, premium: true });
+assert.equal(getPlanFromStripePriceId({
+  NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID: "price_network_public_legacy",
+  NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID: "price_partner_public_legacy",
+} as unknown as Env, "price_network_public_legacy"), "free");
+assert.equal(getPlanFromStripePriceId({
+  NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID: "price_network_public_legacy",
+  NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID: "price_partner_public_legacy",
+} as unknown as Env, "price_partner_public_legacy"), "free");
 
 const partialEnv = {
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_1TY4c6JPrnZ0cnkH7207aAi4",

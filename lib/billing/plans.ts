@@ -1,6 +1,7 @@
 export type PaidPlanKey = "starter" | "pro" | "premium";
 export type LegacyPaidPlanKey = "network" | "partner";
-export type PlanKey = "free" | PaidPlanKey | LegacyPaidPlanKey;
+export type NormalizedPlanKey = "free" | PaidPlanKey;
+export type PlanKey = NormalizedPlanKey | LegacyPaidPlanKey;
 
 export type PlanFeature =
   | "server_profile"
@@ -52,7 +53,7 @@ export type AutoPostType =
   | "priority_status_embed";
 
 export type BillingPlanConfig = {
-  key: PlanKey;
+  key: NormalizedPlanKey;
   name: string;
   monthly_price: number;
   stripe_price_env_key: string | null;
@@ -67,7 +68,7 @@ export type BillingPlanConfig = {
   priority_level: number;
 };
 
-export type AutoPostOptionGroup = "Basic" | "Stats" | "Events" | "Feeds" | "Admin" | "Partner";
+export type AutoPostOptionGroup = "Basic" | "Stats" | "Events" | "Feeds" | "Admin" | "Premium";
 export type AutoPostOption = {
   key: AutoPostType;
   label: string;
@@ -80,7 +81,7 @@ export const MIN_SERVER_STATUS_INTERVAL_MINUTES = 1;
 export const MIN_ADM_DISCOVERY_INTERVAL_MINUTES = 3;
 export const MIN_ADM_PULL_INTERVAL_MINUTES = 10;
 
-export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
+export const BILLING_PLAN_CONFIG: Record<NormalizedPlanKey, BillingPlanConfig> = {
   free: {
     key: "free",
     name: "DZN Free",
@@ -208,118 +209,6 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
     ],
     priority_level: 4,
   },
-  network: {
-    key: "network",
-    name: "Premium",
-    monthly_price: 19.99,
-    stripe_price_env_key: "STRIPE_PRICE_NETWORK",
-    server_status_interval_minutes: 3,
-    adm_discovery_interval_minutes: 5,
-    adm_pull_interval_minutes: 15,
-    manual_adm_refresh_cooldown_minutes: 15,
-    public_publish_interval_minutes: 0,
-    visibility_weight: 4,
-    allowed_features: [
-      "server_profile",
-      "basic_stats",
-      "basic_status",
-      "leaderboards",
-      "advanced_stats",
-      "server_vs_server",
-      "event_leaderboards",
-      "network_rankings",
-      "public_network_listing",
-      "partner_placement",
-      "partner_badge",
-      "priority_visibility",
-      "priority_refresh",
-      "public_featured_listing",
-      "achievement_participation",
-      "seasonal_participation",
-      "featured_rotation",
-      "enhanced_discovery",
-      "profile_customization",
-      "enhanced_achievement_tracking",
-      "premium_badge",
-      "homepage_featured",
-      "priority_discovery",
-      "server_spotlight",
-      "premium_seasonal_rewards",
-      "premium_analytics",
-      "premium_reputation_multiplier",
-      "billing_portal",
-    ],
-    allowed_auto_posts: [
-      "basic_status_embed",
-      "leaderboard_embed",
-      "daily_summary_embed",
-      "event_leaderboard_embed",
-      "network_ranking_embed",
-      "server_vs_server_embed",
-      "killfeed_embed",
-      "pve_feed_embed",
-      "hit_feed_embed",
-      "connection_feed_embed",
-      "build_feed_embed",
-      "admin_alerts_embed",
-      "admin_logs_embed",
-      "partner_featured_embed",
-      "priority_status_embed",
-    ],
-    priority_level: 4,
-  },
-  partner: {
-    key: "partner",
-    name: "Premium",
-    monthly_price: 19.99,
-    stripe_price_env_key: "STRIPE_PRICE_PARTNER",
-    server_status_interval_minutes: 1,
-    adm_discovery_interval_minutes: 3,
-    adm_pull_interval_minutes: 10,
-    manual_adm_refresh_cooldown_minutes: 10,
-    public_publish_interval_minutes: 0,
-    visibility_weight: 4,
-    allowed_features: [
-      "everything",
-      "partner_placement",
-      "partner_badge",
-      "priority_visibility",
-      "priority_refresh",
-      "public_featured_listing",
-      "achievement_participation",
-      "seasonal_participation",
-      "featured_rotation",
-      "enhanced_discovery",
-      "profile_customization",
-      "enhanced_achievement_tracking",
-      "premium_badge",
-      "homepage_featured",
-      "priority_discovery",
-      "server_spotlight",
-      "premium_seasonal_rewards",
-      "premium_analytics",
-      "premium_reputation_multiplier",
-      "billing_portal",
-    ],
-    allowed_auto_posts: [
-      "basic_status_embed",
-      "leaderboard_embed",
-      "daily_summary_embed",
-      "event_leaderboard_embed",
-      "network_ranking_embed",
-      "server_vs_server_embed",
-      "killfeed_embed",
-      "pve_feed_embed",
-      "hit_feed_embed",
-      "connection_feed_embed",
-      "build_feed_embed",
-      "admin_alerts_embed",
-      "admin_logs_embed",
-      "partner_featured_embed",
-      "priority_status_embed",
-    ],
-    priority_level: 4,
-  },
 };
 
 export const PAID_PLAN_KEYS: PaidPlanKey[] = ["starter", "pro", "premium"];
@@ -356,11 +245,11 @@ export const AUTO_POST_OPTIONS: AutoPostOption[] = [
   { key: "build_feed_embed", label: "Build Feed", group: "Feeds", min_plan_key: "premium", upgrade_label: "Upgrade to Premium" },
   { key: "admin_alerts_embed", label: "Admin Alerts", group: "Admin", min_plan_key: "premium", upgrade_label: "Upgrade to Premium" },
   { key: "admin_logs_embed", label: "Admin Logs", group: "Admin", min_plan_key: "premium", upgrade_label: "Upgrade to Premium" },
-  { key: "partner_featured_embed", label: "Premium Featured Post", group: "Partner", min_plan_key: "premium", upgrade_label: "Upgrade to Premium" },
-  { key: "priority_status_embed", label: "Priority Status Post", group: "Partner", min_plan_key: "premium", upgrade_label: "Upgrade to Premium" },
+  { key: "partner_featured_embed", label: "Premium Featured Post", group: "Premium", min_plan_key: "premium", upgrade_label: "Upgrade to Premium" },
+  { key: "priority_status_embed", label: "Priority Status Post", group: "Premium", min_plan_key: "premium", upgrade_label: "Upgrade to Premium" },
 ];
 
-export function normalizePlanKey(value: unknown): PlanKey {
+export function normalizePlanKey(value: unknown): NormalizedPlanKey {
   const key = typeof value === "string" ? value.toLowerCase() : "";
   if (key === "network" || key === "partner") return "premium";
   return key === "starter" || key === "pro" || key === "premium" ? key : "free";
@@ -373,7 +262,7 @@ export function getPlanByKey(planKey: unknown): BillingPlanConfig {
 export function getPlanByStripePriceId(
   priceId: string | null | undefined,
   priceIds: Partial<Record<PaidPlanKey | LegacyPaidPlanKey, string | null>>,
-): PlanKey {
+): NormalizedPlanKey {
   const price = typeof priceId === "string" ? priceId : "";
   if (price && price === priceIds.starter) return "starter";
   if (price && price === priceIds.pro) return "pro";

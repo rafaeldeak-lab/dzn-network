@@ -15,7 +15,7 @@ export function ChallengeBattleCard({ match, locked = true }: { match: EventMatc
           {locked ? (
             <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/28 bg-violet-500/12 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">
               <Lock className="h-3.5 w-3.5" />
-              Pro / Partner
+              Pro / Premium
             </span>
           ) : null}
           <ServerCategoryBadge category={match.category} label={match.category_label} compact />

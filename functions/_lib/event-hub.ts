@@ -1606,7 +1606,6 @@ function normalizeRequiredPlan(value: unknown): PlanKey {
   if (!text || text === "community" || text === "trial") return "free";
   const normalized = normalizePlanKey(text);
   if (normalized === "starter") return "free";
-  if (normalized === "network" || normalized === "partner") return "premium";
   return normalized;
 }
 

@@ -17,6 +17,7 @@ import {
   hasPlanFeature as centralHasPlanFeature,
   normalizePlanKey as centralNormalizePlanKey,
   type AutoPostType,
+  type NormalizedPlanKey,
   type PlanFeature,
 } from "../../lib/billing/plans";
 
@@ -73,7 +74,7 @@ export type BillingPlanSummary = PlanEntitlements & {
   features: string[];
 };
 
-export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
+export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
   free: {
     plan_key: "free",
     ...automationPlan("free"),
@@ -130,34 +131,6 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
     can_use_featured_slots: true,
     stat_history_days: 365,
   },
-  network: {
-    plan_key: "network",
-    ...automationPlan("network"),
-    max_linked_servers: 10,
-    can_use_reviews: true,
-    can_use_public_listing: true,
-    can_use_advanced_analytics: true,
-    can_join_events: true,
-    can_use_ad_bumps: true,
-    included_bumps_per_month: 10,
-    bump_cooldown_hours: 12,
-    can_use_featured_slots: true,
-    stat_history_days: 180,
-  },
-  partner: {
-    plan_key: "partner",
-    ...automationPlan("partner"),
-    max_linked_servers: 25,
-    can_use_reviews: true,
-    can_use_public_listing: true,
-    can_use_advanced_analytics: true,
-    can_join_events: true,
-    can_use_ad_bumps: true,
-    included_bumps_per_month: 30,
-    bump_cooldown_hours: 6,
-    can_use_featured_slots: true,
-    stat_history_days: 365,
-  },
 };
 
 const PLAN_MARKETING: Record<PaidPlanKey, {
@@ -186,17 +159,21 @@ const PLAN_MARKETING: Record<PaidPlanKey, {
   },
 };
 
-export function normalizePlanKey(value: unknown): PlanKey {
+function canonicalPlanKey(value: unknown): NormalizedPlanKey {
   return centralNormalizePlanKey(value);
 }
 
+export function normalizePlanKey(value: unknown): PlanKey {
+  return canonicalPlanKey(value);
+}
+
 export function paidPlanKey(value: unknown): PaidPlanKey | null {
-  const key = normalizePlanKey(value);
+  const key = canonicalPlanKey(value);
   return key === "starter" || key === "pro" || key === "premium" ? key : null;
 }
 
 export function getPlanConfig(planKey: unknown): PlanEntitlements {
-  return PLAN_CONFIG[normalizePlanKey(planKey)];
+  return PLAN_CONFIG[canonicalPlanKey(planKey)];
 }
 
 export function getPlanFromStripePriceId(env: Env, priceId: string | null | undefined): PlanKey {
@@ -204,17 +181,22 @@ export function getPlanFromStripePriceId(env: Env, priceId: string | null | unde
     starter: getStripePriceIdForPlan(env, "starter"),
     pro: getStripePriceIdForPlan(env, "pro"),
     premium: getStripePriceIdForPlan(env, "premium"),
-    network: getStripePriceIdForPlan(env, "network"),
-    partner: getStripePriceIdForPlan(env, "partner"),
+    network: getLegacyStripePriceIdForPlan(env, "network"),
+    partner: getLegacyStripePriceIdForPlan(env, "partner"),
   });
 }
 
 export function getStripePriceIdForPlan(env: Env, planKey: PlanKey) {
-  if (planKey === "starter") return cleanEnvString(env.STRIPE_PRICE_STARTER) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID);
-  if (planKey === "pro") return cleanEnvString(env.STRIPE_PRICE_PRO) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID);
-  if (planKey === "premium") return cleanEnvString(env.STRIPE_PRICE_PREMIUM) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID);
-  if (planKey === "network") return cleanEnvString(env.STRIPE_PRICE_NETWORK) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID);
-  if (planKey === "partner") return cleanEnvString(env.STRIPE_PRICE_PARTNER) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID);
+  const normalized = canonicalPlanKey(planKey);
+  if (normalized === "starter") return cleanEnvString(env.STRIPE_PRICE_STARTER) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID);
+  if (normalized === "pro") return cleanEnvString(env.STRIPE_PRICE_PRO) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID);
+  if (normalized === "premium") return cleanEnvString(env.STRIPE_PRICE_PREMIUM) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID);
+  return null;
+}
+
+function getLegacyStripePriceIdForPlan(env: Env, planKey: LegacyPaidPlanKey) {
+  if (planKey === "network") return cleanEnvString(env.STRIPE_PRICE_NETWORK);
+  if (planKey === "partner") return cleanEnvString(env.STRIPE_PRICE_PARTNER);
   return null;
 }
 
@@ -275,10 +257,11 @@ export function getPublicPublishIntervalMinutes(planKey: unknown) {
 export { AUTO_POST_TYPES };
 export { AUTO_POST_OPTIONS };
 
-export function effectiveEntitlementPlan(planKey: PlanKey, status: string | null | undefined): PlanKey {
-  if (planKey === "free") return "free";
+export function effectiveEntitlementPlan(planKey: PlanKey, status: string | null | undefined): NormalizedPlanKey {
+  const normalizedPlanKey = canonicalPlanKey(planKey);
+  if (normalizedPlanKey === "free") return "free";
   const normalizedStatus = (status ?? "").toLowerCase();
-  return normalizedStatus === "active" || normalizedStatus === "trialing" ? planKey : "free";
+  return normalizedStatus === "active" || normalizedStatus === "trialing" ? normalizedPlanKey : "free";
 }
 
 export async function ensureBillingSchema(env: Env) {
@@ -429,7 +412,7 @@ export async function getOwnerBillingStatus(env: Env, user: SessionUser): Promis
     .prepare("SELECT * FROM owner_billing_accounts WHERE discord_user_id = ? LIMIT 1")
     .bind(user.discord_id)
     .first<Record<string, unknown>>();
-  const planKey = normalizePlanKey(account?.plan_key);
+  const planKey = canonicalPlanKey(account?.plan_key);
   const planStatus = typeof account?.plan_status === "string" ? account.plan_status : planKey === "free" ? "free" : "unknown";
   const entitlements = await upsertOwnerEntitlements(env, user.discord_id, planKey, planStatus);
   const countRow = await db
@@ -470,6 +453,7 @@ export async function upsertBillingAccount(env: Env, input: {
 }) {
   await ensureBillingSchema(env);
   const now = new Date().toISOString();
+  const normalizedPlanKey = canonicalPlanKey(input.planKey);
   await requireDb(env)
     .prepare(
       `INSERT INTO owner_billing_accounts (
@@ -491,7 +475,7 @@ export async function upsertBillingAccount(env: Env, input: {
       input.discordUserId,
       input.stripeCustomerId ?? null,
       input.stripeSubscriptionId ?? null,
-      input.planKey,
+      normalizedPlanKey,
       input.planStatus,
       input.currentPeriodStart ?? null,
       input.currentPeriodEnd ?? null,
@@ -500,7 +484,7 @@ export async function upsertBillingAccount(env: Env, input: {
       now,
     )
     .run();
-  return upsertOwnerEntitlements(env, input.discordUserId, input.planKey, input.planStatus);
+  return upsertOwnerEntitlements(env, input.discordUserId, normalizedPlanKey, input.planStatus);
 }
 
 export async function findBillingAccountByCustomerOrSubscription(env: Env, input: { customerId?: string | null; subscriptionId?: string | null }) {
@@ -523,7 +507,7 @@ export async function findBillingAccountByCustomerOrSubscription(env: Env, input
 }
 
 export function entitlementsFromRow(row: Record<string, unknown>): PlanEntitlements {
-  const planKey = normalizePlanKey(row.plan_key);
+  const planKey = canonicalPlanKey(row.plan_key);
   return {
     plan_key: planKey,
     ...automationPlan(planKey),
@@ -543,7 +527,7 @@ export function entitlementsFromRow(row: Record<string, unknown>): PlanEntitleme
 }
 
 function automationPlan(planKey: PlanKey) {
-  const plan = BILLING_PLAN_CONFIG[planKey];
+  const plan = BILLING_PLAN_CONFIG[canonicalPlanKey(planKey)];
   return {
     name: plan.name,
     monthly_price: plan.monthly_price,

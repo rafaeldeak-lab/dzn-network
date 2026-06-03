@@ -32,7 +32,7 @@ export function ServerEventProfile({ profile }: { profile: ServerEventsPayload }
         </div>
       </section>
 
-      {profile.premiumLocked ? <PremiumLockedCard message="Advanced score history and full event telemetry require DZN Pro or Partner." /> : null}
+      {profile.premiumLocked ? <PremiumLockedCard message="Advanced score history and full event telemetry require DZN Pro or Premium." /> : null}
 
       <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="space-y-4">
