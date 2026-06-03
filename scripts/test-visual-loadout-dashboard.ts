@@ -15,7 +15,9 @@ for (const text of [
   "Frame selector",
   "Theme selector",
   "Animation level selector",
-  "Premium unlocks 8 badges",
+  "Premium unlocks 8 slots",
+  "earned badges can be selected",
+  "Earned competitive badges still cannot be faked",
   "Save Visual Loadout",
 ]) {
   assert.equal(section.includes(text), true, `Visual loadout UI should include ${text}.`);

@@ -110,6 +110,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
   const selectedFrame = withFrameMotion(ALL_FRAMES.find((frame) => frame.key === selectedFrameKey) ?? payload?.loadout.profileFrame ?? null, animationEnabled);
   const selectedTheme = ALL_THEMES.find((theme) => theme.key === selectedThemeKey) ?? payload?.loadout.themeBanner ?? null;
   const limits = payload?.limits ?? payload?.loadout.limits ?? { planKey, maxShowcaseBadges: 3, animationsAllowed: false };
+  const selectedCount = selectedBadgeCodes.length;
   const changed = Boolean(payload && (
     selectedFrameKey !== payload.loadout.profileFrameKey ||
     selectedThemeKey !== payload.loadout.themeBannerKey ||
@@ -166,14 +167,14 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
             </div>
           </div>
           <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-xs font-bold text-zinc-300">
-            {planLabel}: {limits.maxShowcaseBadges} showcase badges
+            {planLabel}: {selectedCount}/{limits.maxShowcaseBadges} showcase slots
           </div>
         </div>
 
         {loading ? <p className="mt-4 text-sm font-bold text-zinc-400">Loading visual loadout...</p> : null}
         {loadError ? <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3 text-sm font-bold text-amber-50">{loadError.message}</p> : null}
         {message || error ? (
-          <p className={`mt-4 rounded-lg border p-3 text-sm font-bold ${error ? "border-red-300/25 bg-red-400/10 text-red-50" : "border-emerald-300/25 bg-emerald-400/10 text-emerald-50"}`}>
+          <p aria-live="polite" className={`mt-4 rounded-lg border p-3 text-sm font-bold ${error ? "border-red-300/25 bg-red-400/10 text-red-50" : "border-emerald-300/25 bg-emerald-400/10 text-emerald-50"}`}>
             {error ?? message}
           </p>
         ) : null}
@@ -219,7 +220,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
               </div>
 
               <div className="grid gap-4">
-                <SelectorPanel title="Showcase badge selector" helper={`${selectedBadgeCodes.length}/${limits.maxShowcaseBadges} selected. Locked badges are shown as previews only.`}>
+                <SelectorPanel title="Showcase badge selector" helper={`${selectedCount}/${limits.maxShowcaseBadges} selected. Only earned badges can be selected; locked crowns, founder rewards, and seasonal wins are previews until awarded.`}>
                   <div className="grid max-h-[230px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                     {(payload.availableShowcaseBadges.length ? payload.availableShowcaseBadges : []).map((badge) => {
                       const selected = selectedBadgeCodes.includes(badge.code);
@@ -310,8 +311,8 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
 
             <div className="mt-4 flex flex-col gap-3 rounded-lg border border-white/10 bg-black/24 p-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="grid gap-1 text-sm font-bold text-zinc-300">
-                <span>{planLabel} can display {limits.maxShowcaseBadges} showcase badges.</span>
-                {limits.planKey !== "premium" ? <span className="text-amber-100">Premium unlocks 8 badges, premium frames, premium themes, and animated loadouts.</span> : <span className="text-cyan-100">Premium visual loadout unlocked.</span>}
+                <span>{planLabel} can display {limits.maxShowcaseBadges} showcase badges. You are using {selectedCount} slot{selectedCount === 1 ? "" : "s"}.</span>
+                {limits.planKey !== "premium" ? <span className="text-amber-100">Premium unlocks 8 slots, animated frames, and all theme banners. Earned competitive badges still cannot be faked.</span> : <span className="text-cyan-100">Premium visual loadout unlocked: 8 slots, animations, premium frames, and premium themes.</span>}
               </div>
               <SaveProgressButton
                 idleLabel="Save Visual Loadout"

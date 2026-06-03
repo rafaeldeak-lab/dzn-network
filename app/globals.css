@@ -4248,6 +4248,12 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  max-width: 100%;
+  align-items: center;
+}
+
+.dzn-server-card-badges {
+  overflow: visible;
 }
 
 .dzn-badge-showcase {
@@ -4314,6 +4320,7 @@ body {
 .dzn-profile-frame--compact {
   border-radius: 13px;
   padding: 4px;
+  box-shadow: 0 0 22px color-mix(in srgb, var(--dzn-frame-glow, #22d3ee) 26%, transparent);
 }
 
 .dzn-profile-frame--anim-electric,
@@ -4357,7 +4364,7 @@ body {
   z-index: 1;
   background:
     radial-gradient(circle at 14% 18%, rgba(139, 92, 246, 0.24), transparent 30%),
-    linear-gradient(90deg, rgba(2, 3, 10, 0.92), rgba(2, 3, 10, 0.54), rgba(2, 3, 10, 0.88));
+    linear-gradient(90deg, rgba(2, 3, 10, 0.95), rgba(2, 3, 10, 0.62), rgba(2, 3, 10, 0.9));
   pointer-events: none;
 }
 
@@ -4442,5 +4449,19 @@ body {
   .dzn-badge-chip:hover,
   .dzn-badge-chip:focus-visible {
     transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .dzn-server-card-badges {
+    gap: 6px;
+  }
+
+  .dzn-server-card-badges .dzn-badge-chip:nth-child(n+5) {
+    display: none;
+  }
+
+  .dzn-badge-tooltip__content {
+    width: min(220px, 82vw);
   }
 }

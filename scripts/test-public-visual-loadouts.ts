@@ -9,6 +9,7 @@ const loadouts = read("functions/_lib/server-visual-loadouts.ts");
 const publicServers = read("functions/api/public/servers.ts");
 const publicNetwork = read("components/network/public-network.tsx");
 const globals = read("app/globals.css");
+const docs = read("docs/VISUAL_LOADOUT_SYSTEM.md");
 
 assert.equal(loadouts.includes("resolvePublicServerVisualLoadout"), true, "Public visual loadout resolver should exist.");
 assert.equal(loadouts.includes("PublicServerVisualLoadoutFallback"), true, "Public resolver should accept automatic visual fallbacks.");
@@ -38,6 +39,13 @@ assert.equal(publicNetwork.includes("--dzn-card-accent"), true, "Public cards sh
 assert.equal(publicNetwork.includes("--dzn-profile-accent"), true, "Public profile should apply selected accent colour.");
 assert.equal(globals.includes(".dzn-server-card--visual-premium"), true, "Premium card treatment CSS should exist.");
 assert.equal(globals.includes(".dzn-profile-header--visual-premium"), true, "Premium profile treatment CSS should exist.");
+assert.equal(globals.includes("@media (max-width: 640px)"), true, "Public card badges should have mobile compact rules.");
+assert.equal(globals.includes(".dzn-server-card-badges .dzn-badge-chip:nth-child(n+5)"), true, "Mobile cards should avoid badge overflow.");
+assert.equal(globals.includes("@media (prefers-reduced-motion: reduce)"), true, "Visuals should keep reduced-motion support.");
+
+for (const text of ["Plan Limits", "Badge Showcase Rules", "Frame Rules", "Theme Rules", "Fallback Behaviour", "Future Phase 5E"]) {
+  assert.equal(docs.includes(text), true, `Visual loadout docs should include ${text}.`);
+}
 
 assert.equal(getVisualLoadoutPlanLimits("starter").maxShowcaseBadges, 3);
 assert.equal(getVisualLoadoutPlanLimits("pro").maxShowcaseBadges, 5);
