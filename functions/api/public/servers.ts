@@ -19,6 +19,7 @@ import {
   writePublicApiCache,
 } from "../../_lib/public-api-cache";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
+import { buildAchievementShowcase, buildServerReputationSummary, type AchievementShowcase, type ReputationSummary } from "../../_lib/reputation";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -80,6 +81,8 @@ type PublicServerRow = {
   bump_period_end: string | null;
   featured_until: string | null;
   featured_label: string | null;
+  plan_key: string | null;
+  subscription_status: string | null;
 };
 
 type PublicRecentEvent = {
@@ -160,6 +163,11 @@ type SafePublicServer = {
   review_count: number;
   rating_breakdown: RatingBreakdown;
   advertising: PublicAdvertising;
+  plan_key: string;
+  premium_status: "standard" | "premium";
+  visibility_weight: number;
+  reputation: ReputationSummary;
+  achievement_showcase: AchievementShowcase;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -361,13 +369,16 @@ async function queryPublicServersPreview(env: Env) {
         server_advertising_state.bump_period_start,
         server_advertising_state.bump_period_end,
         server_advertising_state.featured_until,
-        server_advertising_state.featured_label
+        server_advertising_state.featured_label,
+        COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
+        server_subscriptions.status AS subscription_status
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
@@ -488,7 +499,9 @@ async function queryPublicServers(env: Env) {
       server_advertising_state.bump_period_start,
       server_advertising_state.bump_period_end,
       server_advertising_state.featured_until,
-      server_advertising_state.featured_label
+      server_advertising_state.featured_label,
+      COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
+      server_subscriptions.status AS subscription_status
     FROM linked_servers
     LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
     LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
@@ -497,6 +510,7 @@ async function queryPublicServers(env: Env) {
     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
     LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
     LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+    LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
     WHERE lower(linked_servers.status) = 'live'
       AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
       AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
@@ -673,6 +687,33 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     score: ranking?.score ?? 0,
     score_label: ranking?.score_label ?? "Pending",
   };
+  const planKey = publicPlanKey(row.plan_key);
+  const reputation = buildServerReputationSummary({
+    planKey,
+    createdAt: row.created_at,
+    totalKills: stats.total_kills,
+    totalDeaths: stats.total_deaths,
+    totalJoins: stats.total_joins,
+    totalDisconnects: stats.total_disconnects,
+    uniquePlayers: stats.unique_players,
+    rank: stats.rank,
+    score: stats.score,
+    category: row.server_type,
+    active: statsSync === "Active",
+  });
+  const achievementShowcase = buildAchievementShowcase({
+    planKey,
+    createdAt: row.created_at,
+    totalKills: stats.total_kills,
+    totalDeaths: stats.total_deaths,
+    totalJoins: stats.total_joins,
+    totalDisconnects: stats.total_disconnects,
+    uniquePlayers: stats.unique_players,
+    rank: stats.rank,
+    score: stats.score,
+    category: row.server_type,
+    active: statsSync === "Active",
+  });
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -722,6 +763,11 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
       featured_until: row.featured_until,
       featured_label: row.featured_label,
     }),
+    plan_key: planKey,
+    premium_status: reputation.premiumStatus,
+    visibility_weight: reputation.visibilityWeight,
+    reputation,
+    achievement_showcase: achievementShowcase,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -773,6 +819,33 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     score: 0,
     score_label: readable ? "ADM synced" : "Pending",
   };
+  const planKey = publicPlanKey(row.plan_key);
+  const reputation = buildServerReputationSummary({
+    planKey,
+    createdAt: row.created_at,
+    totalKills: stats.total_kills,
+    totalDeaths: stats.total_deaths,
+    totalJoins: stats.total_joins,
+    totalDisconnects: stats.total_disconnects,
+    uniquePlayers: stats.unique_players,
+    rank: stats.rank,
+    score: stats.score,
+    category: row.server_type,
+    active: statsSync === "Active",
+  });
+  const achievementShowcase = buildAchievementShowcase({
+    planKey,
+    createdAt: row.created_at,
+    totalKills: stats.total_kills,
+    totalDeaths: stats.total_deaths,
+    totalJoins: stats.total_joins,
+    totalDisconnects: stats.total_disconnects,
+    uniquePlayers: stats.unique_players,
+    rank: stats.rank,
+    score: stats.score,
+    category: row.server_type,
+    active: statsSync === "Active",
+  });
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -820,6 +893,11 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
       featured_until: row.featured_until,
       featured_label: row.featured_label,
     }),
+    plan_key: planKey,
+    premium_status: reputation.premiumStatus,
+    visibility_weight: reputation.visibilityWeight,
+    reputation,
+    achievement_showcase: achievementShowcase,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -923,6 +1001,7 @@ function buildPublicStats(servers: SafePublicServer[]) {
 
 export function sortPublicServersForDiscovery<T extends {
   advertising?: PublicAdvertising;
+  visibility_weight?: number;
   rank: number | null;
   score: number;
   created_at: string | null;
@@ -930,6 +1009,8 @@ export function sortPublicServersForDiscovery<T extends {
   servers.sort((a, b) => {
     const adDiff = advertisingSortScore(b.advertising ?? publicAdvertisingFromState(null)) - advertisingSortScore(a.advertising ?? publicAdvertisingFromState(null));
     if (adDiff) return adDiff;
+    const visibilityDiff = numberOrZero(b.visibility_weight) - numberOrZero(a.visibility_weight);
+    if (visibilityDiff) return visibilityDiff;
     const rankA = typeof a.rank === "number" && a.rank > 0 ? a.rank : Number.MAX_SAFE_INTEGER;
     const rankB = typeof b.rank === "number" && b.rank > 0 ? b.rank : Number.MAX_SAFE_INTEGER;
     if (rankA !== rankB) return rankA - rankB;
@@ -938,6 +1019,13 @@ export function sortPublicServersForDiscovery<T extends {
     return dateValue(b.created_at) - dateValue(a.created_at);
   });
   return servers;
+}
+
+function publicPlanKey(value: unknown) {
+  const plan = String(value ?? "").trim().toLowerCase();
+  if (plan === "premium" || plan === "network" || plan === "partner") return "premium";
+  if (plan === "pro") return "pro";
+  return "starter";
 }
 
 export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn: boolean): SafePublicServer {
@@ -1041,6 +1129,7 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync_active: false,
       ...emptyPublicServerRatingSummary(),
       advertising: publicAdvertisingFromState(null),
+      ...mockReputationFields("starter", { created_at: new Date().toISOString(), server_type: "PVP / PVE", total_kills: 0, total_deaths: 0, total_joins: 0, total_disconnects: 0, unique_players: 0, rank: null, score: 0, active: false }),
       ...mockListingFields("Hybrid PvP/PvE community with factions, events, traders, and weekend raids."),
       recent_events: [],
     },
@@ -1085,6 +1174,7 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync_active: true,
       ...emptyPublicServerRatingSummary(),
       advertising: publicAdvertisingFromState(null),
+      ...mockReputationFields("premium", { created_at: new Date().toISOString(), server_type: "PVP", total_kills: 12, total_deaths: 18, total_joins: 42, total_disconnects: 36, unique_players: 14, rank: 1, score: 0, active: true }),
       ...mockListingFields("Raid-focused PvP server with active factions and competitive stat tracking."),
       recent_events: [],
     },
@@ -1129,10 +1219,57 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync_active: false,
       ...emptyPublicServerRatingSummary(),
       advertising: publicAdvertisingFromState(null),
+      ...mockReputationFields("starter", { created_at: new Date().toISOString(), server_type: "DEATHMATCH", total_kills: 0, total_deaths: 0, total_joins: 0, total_disconnects: 0, unique_players: 0, rank: null, score: 0, active: false }),
       ...mockListingFields("Fast respawn deathmatch arena for clean fights and leaderboard runs."),
       recent_events: [],
     },
   ];
+}
+
+function mockReputationFields(planKey: string, input: {
+  created_at: string;
+  server_type: string;
+  total_kills: number;
+  total_deaths: number;
+  total_joins: number;
+  total_disconnects: number;
+  unique_players: number;
+  rank: number | null;
+  score: number;
+  active: boolean;
+}) {
+  const reputation = buildServerReputationSummary({
+    planKey,
+    createdAt: input.created_at,
+    totalKills: input.total_kills,
+    totalDeaths: input.total_deaths,
+    totalJoins: input.total_joins,
+    totalDisconnects: input.total_disconnects,
+    uniquePlayers: input.unique_players,
+    rank: input.rank,
+    score: input.score,
+    category: input.server_type,
+    active: input.active,
+  });
+  return {
+    plan_key: publicPlanKey(planKey),
+    premium_status: reputation.premiumStatus,
+    visibility_weight: reputation.visibilityWeight,
+    reputation,
+    achievement_showcase: buildAchievementShowcase({
+      planKey,
+      createdAt: input.created_at,
+      totalKills: input.total_kills,
+      totalDeaths: input.total_deaths,
+      totalJoins: input.total_joins,
+      totalDisconnects: input.total_disconnects,
+      uniquePlayers: input.unique_players,
+      rank: input.rank,
+      score: input.score,
+      category: input.server_type,
+      active: input.active,
+    }),
+  };
 }
 
 function mockListingFields(shortDescription: string) {

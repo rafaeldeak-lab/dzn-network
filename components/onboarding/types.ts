@@ -256,14 +256,14 @@ export type LinkedServer = {
 };
 
 export type BillingStatus = {
-  plan_key: "free" | "starter" | "pro" | "network" | "partner";
+  plan_key: "free" | "starter" | "pro" | "premium" | "network" | "partner";
   plan_status: string;
   current_period_start: string | null;
   current_period_end: string | null;
   current_period_end_label: string;
   cancel_at_period_end: boolean;
   entitlements: {
-    plan_key: "free" | "starter" | "pro" | "network" | "partner";
+    plan_key: "free" | "starter" | "pro" | "premium" | "network" | "partner";
     max_linked_servers: number;
     can_use_reviews: boolean;
     can_use_public_listing: boolean;
@@ -284,11 +284,11 @@ export type BillingStatus = {
   linked_server_count: number;
   can_link_more_servers: boolean;
   stripe_customer_exists: boolean;
-  checkout_configured: Record<"starter" | "pro" | "network" | "partner", boolean>;
+  checkout_configured: Record<"starter" | "pro" | "premium", boolean>;
 };
 
 export type BillingPlanSummary = {
-  plan_key: "starter" | "pro" | "network" | "partner";
+  plan_key: "starter" | "pro" | "premium";
   name: string;
   price_label: string;
   monthly_price_gbp: number;
@@ -308,6 +308,9 @@ export type BillingPlanSummary = {
   adm_discovery_interval_minutes?: number;
   adm_pull_interval_minutes?: number;
   manual_adm_refresh_cooldown_minutes?: number;
+  public_publish_interval_minutes: number;
+  visibility_weight: number;
+  allowed_features?: string[];
   allowed_auto_posts?: string[];
   priority_level?: number;
 };
@@ -1246,7 +1249,7 @@ export type DashboardHealthResult = {
     player_count_last_checked_at: string | null;
     player_count_status: string | null;
   };
-  current_plan: "free" | "starter" | "pro" | "network" | "partner" | string;
+  current_plan: "free" | "starter" | "pro" | "premium" | "network" | "partner" | string;
   configured_plan: string;
   subscription_status: string | null;
   plan_limits: {

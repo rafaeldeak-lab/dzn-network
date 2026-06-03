@@ -18,7 +18,7 @@ export function EventHero({ event, detail = false }: { event?: CompetitiveEvent 
             <p className="mt-2 text-sm font-semibold text-zinc-300">Compete. Conquer. Be remembered.</p>
             <div className="mt-5 flex flex-wrap gap-2 text-[10px] font-black uppercase text-zinc-400">
               <span className="rounded-md border border-violet-300/25 bg-violet-500/10 px-3 py-2">SAME CATEGORY ONLY</span>
-              <span className="rounded-md border border-cyan-300/25 bg-cyan-400/10 px-3 py-2">PRO / PARTNER MATCHING</span>
+              <span className="rounded-md border border-cyan-300/25 bg-cyan-400/10 px-3 py-2">PRO / PREMIUM MATCHING</span>
               <span className="rounded-md border border-rose-300/25 bg-rose-400/10 px-3 py-2">TOP 10 TEASER</span>
             </div>
           </div>

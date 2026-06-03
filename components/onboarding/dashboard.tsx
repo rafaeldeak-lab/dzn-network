@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -4094,10 +4094,9 @@ type DashboardReviewSummary = {
 };
 
 const billingPlans = [
-  { key: "starter", label: "Starter", price: "£4.99/mo", detail: "1 server, listing, reviews, 30 day stats" },
-  { key: "pro", label: "Pro", price: "£9.99/mo", detail: "3 servers, events, analytics, 3 bumps/mo" },
-  { key: "network", label: "Network", price: "£19.99/mo", detail: "10 servers, multi-server dashboard, 10 bumps/mo" },
-  { key: "partner", label: "Partner", price: "£29.99/mo", detail: "25 servers, featured eligibility, 30 bumps/mo" },
+  { key: "starter", label: "Starter", price: "GBP 4.99/mo", detail: "Server listing, basic leaderboards, 24 hour public publishing" },
+  { key: "pro", label: "Pro", price: "GBP 9.99/mo", detail: "Featured rotation, enhanced discovery, 4 hour public publishing" },
+  { key: "premium", label: "Premium", price: "GBP 24.99/mo", detail: "Homepage featured placement, premium badge, real-time public publishing" },
 ] as const;
 
 function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; message: string; onRefresh: () => Promise<void> }) {
@@ -4106,7 +4105,7 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
   const planKey = billing?.plan_key ?? "free";
   const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
 
-  async function upgrade(planKey: "starter" | "pro" | "network" | "partner") {
+  async function upgrade(planKey: "starter" | "pro" | "premium") {
     setBusyPlan(planKey);
     try {
       const session = await createCheckoutSession(planKey, "/dashboard");
@@ -4158,12 +4157,12 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
               <div>
                 <p className="text-sm font-black uppercase text-white">{plan.name} <span className="text-violet-200">{plan.price_label}</span></p>
                 <p className="mt-1 text-xs leading-5 text-zinc-400">
-                  {plan.max_linked_servers} server{plan.max_linked_servers === 1 ? "" : "s"} · {plan.stat_history_days} day stats · {plan.included_bumps_per_month} bumps/mo
+                  {plan.max_linked_servers} server{plan.max_linked_servers === 1 ? "" : "s"} · {plan.stat_history_days} day stats · visibility weight {plan.visibility_weight}
                 </p>
                 <div className="mt-2 grid gap-1 text-[11px] leading-5 text-zinc-500">
-                  <p><span className="font-black uppercase text-zinc-400">Server Status Sync:</span> player count, online/offline, slots, and basic status checked every {plan.server_status_interval_minutes ?? "?"} minute{plan.server_status_interval_minutes === 1 ? "" : "s"}.</p>
-                  <p><span className="font-black uppercase text-zinc-400">ADM Discovery:</span> new ADM files checked every {plan.adm_discovery_interval_minutes ?? "?"} minutes.</p>
-                  <p><span className="font-black uppercase text-zinc-400">ADM Processing:</span> kills, deaths, K/D, leaderboards, and events processed every {plan.adm_pull_interval_minutes ?? "?"} minutes.</p>
+                  <p><span className="font-black uppercase text-zinc-400">Tracking:</span> ADM ingestion and statistics collection continue normally on every plan.</p>
+                  <p><span className="font-black uppercase text-zinc-400">Public Publishing:</span> public profile, leaderboard, and discovery refresh every {formatPublishingInterval(plan.public_publish_interval_minutes)}.</p>
+                  <p><span className="font-black uppercase text-zinc-400">Discovery:</span> visibility weight {plan.visibility_weight}; competitive rankings are not altered.</p>
                 </div>
                 <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                   {plan.configured ? "Checkout configured" : "Checkout not configured"}
@@ -6301,21 +6300,21 @@ function groupPostingOptions(options: PostingOptionSummary[]) {
 
 function fallbackPostingOptions(): PostingOptionSummary[] {
   return [
-    ["basic_status_embed", "Basic Server Status", "Basic", "starter", "Upgrade to DZN Starter"],
-    ["leaderboard_embed", "Leaderboards", "Stats", "pro", "Upgrade to DZN Pro"],
-    ["daily_summary_embed", "Daily Summary", "Stats", "pro", "Upgrade to DZN Pro"],
-    ["event_leaderboard_embed", "Event Leaderboard", "Events", "network", "Upgrade to DZN Network"],
-    ["server_vs_server_embed", "Server-vs-Server Progress", "Events", "network", "Upgrade to DZN Network"],
-    ["network_ranking_embed", "Network Ranking", "Events", "network", "Upgrade to DZN Network"],
-    ["killfeed_embed", "Killfeed", "Feeds", "partner", "Upgrade to DZN Partner"],
-    ["pve_feed_embed", "PvE Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
-    ["hit_feed_embed", "Hit Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
-    ["connection_feed_embed", "Connection Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
-    ["build_feed_embed", "Build Feed", "Feeds", "partner", "Upgrade to DZN Partner"],
-    ["admin_alerts_embed", "Admin Alerts", "Admin", "partner", "Upgrade to DZN Partner"],
-    ["admin_logs_embed", "Admin Logs", "Admin", "partner", "Upgrade to DZN Partner"],
-    ["partner_featured_embed", "Partner Featured Post", "Partner", "partner", "Upgrade to DZN Partner"],
-    ["priority_status_embed", "Priority Status Post", "Partner", "partner", "Upgrade to DZN Partner"],
+    ["basic_status_embed", "Basic Server Status", "Basic", "starter", "Upgrade to Starter"],
+    ["leaderboard_embed", "Leaderboards", "Stats", "pro", "Upgrade to Pro"],
+    ["daily_summary_embed", "Daily Summary", "Stats", "pro", "Upgrade to Pro"],
+    ["event_leaderboard_embed", "Event Leaderboard", "Events", "pro", "Upgrade to Pro"],
+    ["server_vs_server_embed", "Server-vs-Server Progress", "Events", "pro", "Upgrade to Pro"],
+    ["network_ranking_embed", "Network Ranking", "Events", "pro", "Upgrade to Pro"],
+    ["killfeed_embed", "Killfeed", "Feeds", "premium", "Upgrade to Premium"],
+    ["pve_feed_embed", "PvE Feed", "Feeds", "premium", "Upgrade to Premium"],
+    ["hit_feed_embed", "Hit Feed", "Feeds", "premium", "Upgrade to Premium"],
+    ["connection_feed_embed", "Connection Feed", "Feeds", "premium", "Upgrade to Premium"],
+    ["build_feed_embed", "Build Feed", "Feeds", "premium", "Upgrade to Premium"],
+    ["admin_alerts_embed", "Admin Alerts", "Admin", "premium", "Upgrade to Premium"],
+    ["admin_logs_embed", "Admin Logs", "Admin", "premium", "Upgrade to Premium"],
+    ["partner_featured_embed", "Premium Featured Post", "Premium", "premium", "Upgrade to Premium"],
+    ["priority_status_embed", "Priority Status Post", "Premium", "premium", "Upgrade to Premium"],
   ].map(([key, label, group, minPlan, upgrade]) => ({
     key,
     label,
@@ -7531,9 +7530,23 @@ function formatRelativeTime(value: string) {
 function planLabel(value: string) {
   if (value === "starter") return "Starter";
   if (value === "pro") return "Pro";
-  if (value === "network") return "Network";
-  if (value === "partner") return "Partner";
+  if (value === "premium" || value === "network" || value === "partner") return "Premium";
   return "Free";
+}
+
+function formatPublishingInterval(minutes: number | null | undefined) {
+  if (minutes === 0) return "near real time";
+  const value = Number(minutes ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return "near real time";
+  if (value >= 1440 && value % 1440 === 0) {
+    const days = value / 1440;
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }
+  if (value >= 60 && value % 60 === 0) {
+    const hours = value / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${value} minute${value === 1 ? "" : "s"}`;
 }
 
 function getNitradoLogSettingsSourceLabel(settings: NitradoLogSettingsConfirmation | null) {
@@ -7633,9 +7646,13 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_use_featured_slots: false,
       monthly_price_gbp: 4.99,
       server_status_interval_minutes: 7,
+      adm_discovery_interval_minutes: 15,
       adm_pull_interval_minutes: 60,
       manual_adm_refresh_cooldown_minutes: 60,
+      public_publish_interval_minutes: 1440,
+      visibility_weight: 1,
       priority_level: 1,
+      allowed_features: ["server_profile", "basic_stats", "basic_status", "leaderboards", "achievement_participation", "seasonal_participation", "billing_portal"],
       allowed_auto_posts: ["basic_status_embed"],
     },
     pro: {
@@ -7649,41 +7666,33 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_use_featured_slots: false,
       monthly_price_gbp: 9.99,
       server_status_interval_minutes: 5,
+      adm_discovery_interval_minutes: 10,
       adm_pull_interval_minutes: 30,
       manual_adm_refresh_cooldown_minutes: 30,
+      public_publish_interval_minutes: 240,
+      visibility_weight: 2,
       priority_level: 2,
-      allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed"],
-    },
-    network: {
-      max_linked_servers: 10,
-      included_bumps_per_month: 10,
-      bump_cooldown_hours: 12,
-      stat_history_days: 180,
-      can_use_ad_bumps: true,
-      can_use_advanced_analytics: true,
-      can_join_events: true,
-      can_use_featured_slots: true,
-      monthly_price_gbp: 19.99,
-      server_status_interval_minutes: 3,
-      adm_pull_interval_minutes: 15,
-      manual_adm_refresh_cooldown_minutes: 15,
-      priority_level: 3,
+      allowed_features: ["server_profile", "basic_stats", "basic_status", "leaderboards", "advanced_stats", "featured_rotation", "enhanced_discovery", "profile_customization", "enhanced_achievement_tracking", "billing_portal"],
       allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed"],
     },
-    partner: {
-      max_linked_servers: 25,
-      included_bumps_per_month: 30,
+    premium: {
+      max_linked_servers: 10,
+      included_bumps_per_month: 12,
       bump_cooldown_hours: 6,
       stat_history_days: 365,
       can_use_ad_bumps: true,
       can_use_advanced_analytics: true,
       can_join_events: true,
       can_use_featured_slots: true,
-      monthly_price_gbp: 29.99,
+      monthly_price_gbp: 24.99,
       server_status_interval_minutes: 1,
+      adm_discovery_interval_minutes: 3,
       adm_pull_interval_minutes: 10,
       manual_adm_refresh_cooldown_minutes: 10,
+      public_publish_interval_minutes: 0,
+      visibility_weight: 4,
       priority_level: 4,
+      allowed_features: ["server_profile", "basic_stats", "basic_status", "leaderboards", "advanced_stats", "server_vs_server", "event_leaderboards", "network_rankings", "public_network_listing", "premium_badge", "homepage_featured", "priority_discovery", "server_spotlight", "premium_seasonal_rewards", "premium_analytics", "premium_reputation_multiplier", "billing_portal"],
       allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed", "killfeed_embed", "pve_feed_embed", "hit_feed_embed", "connection_feed_embed", "build_feed_embed", "admin_alerts_embed", "admin_logs_embed", "partner_featured_embed", "priority_status_embed"],
     },
   }[plan.key];
@@ -7706,8 +7715,12 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
     can_use_featured_slots: base.can_use_featured_slots,
     stat_history_days: base.stat_history_days,
     server_status_interval_minutes: base.server_status_interval_minutes,
+    adm_discovery_interval_minutes: base.adm_discovery_interval_minutes,
     adm_pull_interval_minutes: base.adm_pull_interval_minutes,
     manual_adm_refresh_cooldown_minutes: base.manual_adm_refresh_cooldown_minutes,
+    public_publish_interval_minutes: base.public_publish_interval_minutes,
+    visibility_weight: base.visibility_weight,
+    allowed_features: base.allowed_features,
     allowed_auto_posts: base.allowed_auto_posts,
     priority_level: base.priority_level,
   };

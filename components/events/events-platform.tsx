@@ -304,7 +304,7 @@ export function EventCreatePage() {
           </button>
         </form>
         <aside className="space-y-5">
-          <PremiumLockedCard title="PRO / PARTNER EVENT TOOL" message="Event creation and cross-server matching use your existing Pro/Partner entitlement. Free users keep teaser access." />
+          <PremiumLockedCard title="PRO / PREMIUM EVENT TOOL" message="Event creation and cross-server matching use your existing Pro/Premium entitlement. Free users keep teaser access." />
           <InfoPanel title="Creation Safeties" rows={[
             ["Category", selectedCategory ? `${CATEGORY_LABELS[selectedCategory]} only` : "Set category first"],
             ["Telemetry", "Reads existing ADM aggregates only"],
@@ -517,7 +517,7 @@ export function EventsChallengesPage() {
           <LeaderboardTeaser rows={fallbackServers} locked={data.teaserMode} />
         </main>
         <aside className="space-y-5">
-          <PremiumLockedCard title="CROSS-SERVER MATCHING" message="Cross-server matching is an exclusive Pro/Partner platform feature." />
+          <PremiumLockedCard title="CROSS-SERVER MATCHING" message="Cross-server matching is an exclusive Pro/Premium platform feature." />
           <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
             <h2 className="flex items-center gap-2 text-sm font-black uppercase text-white"><Filter className="h-4 w-4 text-cyan-200" />Challenge Filters</h2>
             {["deathmatch", "pvp", "pve", "pvp_pve", "hardcore", "roleplay"].map((category) => (

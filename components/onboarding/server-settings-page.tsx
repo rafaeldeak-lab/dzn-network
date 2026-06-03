@@ -64,7 +64,7 @@ type SettingsResponse = {
   plan: {
     plan_key: string;
     subscription_status: string;
-    policy_group: "trial_free" | "pro_partner";
+    policy_group: "trial_free" | "pro_premium";
   };
   categoryPolicy: {
     cooldownDays: number;

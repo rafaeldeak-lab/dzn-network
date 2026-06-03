@@ -24,8 +24,7 @@ Plan intervals:
 | --- | --- |
 | Starter | Every 7 minutes |
 | Pro | Every 5 minutes |
-| Network | Every 3 minutes |
-| Partner | Every 1 minute |
+| Premium | Every 1 minute |
 
 Hard floor:
 
@@ -125,8 +124,7 @@ Discovery intervals:
 | --- | --- |
 | Starter | Every 15 minutes |
 | Pro | Every 10 minutes |
-| Network | Every 5 minutes |
-| Partner | Every 3 minutes |
+| Premium | Every 3 minutes |
 
 Processing intervals:
 
@@ -134,8 +132,7 @@ Processing intervals:
 | --- | --- |
 | Starter | Every 60 minutes |
 | Pro | Every 30 minutes |
-| Network | Every 15 minutes |
-| Partner | Every 10 minutes |
+| Premium | Every 10 minutes |
 
 Hard floors:
 
@@ -446,9 +443,8 @@ Auto-post limits:
 | Plan | Auto-posts |
 | --- | --- |
 | Starter | Basic Server Status |
-| Pro | Basic Server Status, Leaderboards, Daily Summary |
-| Network | Pro posts plus Event Leaderboard, Network Ranking, Server-vs-Server Progress |
-| Partner | Everything, including feeds, admin posts, partner featured, priority status |
+| Pro | Basic Server Status, Leaderboards, Daily Summary, Event Leaderboard, Network Ranking, Server-vs-Server Progress |
+| Premium | Everything, including feeds, admin posts, premium featured, priority status |
 
 ## I. Public Profile Cache
 

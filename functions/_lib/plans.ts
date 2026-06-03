@@ -1,4 +1,4 @@
-import { requireDb } from "./db";
+﻿import { requireDb } from "./db";
 import type { Env, SessionUser } from "./types";
 import {
   AUTO_POST_TYPES,
@@ -10,6 +10,8 @@ import {
   getManualRefreshCooldown as centralManualRefreshCooldown,
   getPlanByStripePriceId,
   getPlanPriority as centralPlanPriority,
+  getPlanVisibilityWeight as centralPlanVisibilityWeight,
+  getPublicPublishIntervalMinutes as centralPublicPublishInterval,
   getServerStatusInterval as centralServerStatusInterval,
   hasAutoPost as centralHasAutoPost,
   hasPlanFeature as centralHasPlanFeature,
@@ -18,8 +20,9 @@ import {
   type PlanFeature,
 } from "../../lib/billing/plans";
 
-export type PlanKey = "free" | "starter" | "pro" | "network" | "partner";
-export type PaidPlanKey = Exclude<PlanKey, "free">;
+export type PaidPlanKey = "starter" | "pro" | "premium";
+export type LegacyPaidPlanKey = "network" | "partner";
+export type PlanKey = "free" | PaidPlanKey | LegacyPaidPlanKey;
 
 export type PlanEntitlements = {
   plan_key: PlanKey;
@@ -30,6 +33,8 @@ export type PlanEntitlements = {
   adm_discovery_interval_minutes: number;
   adm_pull_interval_minutes: number;
   manual_adm_refresh_cooldown_minutes: number;
+  public_publish_interval_minutes: number;
+  visibility_weight: number;
   allowed_features: PlanFeature[];
   allowed_auto_posts: AutoPostType[];
   priority_level: number;
@@ -111,6 +116,20 @@ export const PLAN_CONFIG: Record<PlanKey, PlanEntitlements> = {
     can_use_featured_slots: false,
     stat_history_days: 90,
   },
+  premium: {
+    plan_key: "premium",
+    ...automationPlan("premium"),
+    max_linked_servers: 10,
+    can_use_reviews: true,
+    can_use_public_listing: true,
+    can_use_advanced_analytics: true,
+    can_join_events: true,
+    can_use_ad_bumps: true,
+    included_bumps_per_month: 12,
+    bump_cooldown_hours: 6,
+    can_use_featured_slots: true,
+    stat_history_days: 365,
+  },
   network: {
     plan_key: "network",
     ...automationPlan("network"),
@@ -148,28 +167,22 @@ const PLAN_MARKETING: Record<PaidPlanKey, {
   features: string[];
 }> = {
   starter: {
-    name: "DZN Starter",
-    price_label: "£4.99/mo",
+    name: "Starter",
+    price_label: "GBP 4.99/mo",
     monthly_price_gbp: 4.99,
-    features: ["1 linked server", "Full public listing", "Reviews and ratings", "30 day stat history"],
+    features: ["Server listing", "Basic leaderboards", "Public server profile", "Achievement and seasonal participation", "24 hour public publishing"],
   },
   pro: {
-    name: "DZN Pro",
-    price_label: "£9.99/mo",
+    name: "Pro",
+    price_label: "GBP 9.99/mo",
     monthly_price_gbp: 9.99,
-    features: ["3 linked servers", "Leaderboard visibility", "Event participation", "3 bumps per month"],
+    features: ["Advanced analytics", "Featured rotation placement", "Enhanced discovery", "Additional profile customisation", "4 hour public publishing"],
   },
-  network: {
-    name: "DZN Network",
-    price_label: "£19.99/mo",
-    monthly_price_gbp: 19.99,
-    features: ["10 linked servers", "Multi-server dashboard", "Advanced analytics", "10 bumps per month"],
-  },
-  partner: {
-    name: "DZN Partner",
-    price_label: "£29.99/mo",
-    monthly_price_gbp: 29.99,
-    features: ["25 linked servers", "Featured placement eligibility", "Custom event branding", "30 bumps per month"],
+  premium: {
+    name: "Premium",
+    price_label: "GBP 24.99/mo",
+    monthly_price_gbp: 24.99,
+    features: ["Homepage featured placement", "Premium badge", "Priority discovery", "Server spotlight eligibility", "Premium reputation multiplier"],
   },
 };
 
@@ -179,7 +192,7 @@ export function normalizePlanKey(value: unknown): PlanKey {
 
 export function paidPlanKey(value: unknown): PaidPlanKey | null {
   const key = normalizePlanKey(value);
-  return key === "free" ? null : key;
+  return key === "starter" || key === "pro" || key === "premium" ? key : null;
 }
 
 export function getPlanConfig(planKey: unknown): PlanEntitlements {
@@ -190,6 +203,7 @@ export function getPlanFromStripePriceId(env: Env, priceId: string | null | unde
   return getPlanByStripePriceId(priceId, {
     starter: getStripePriceIdForPlan(env, "starter"),
     pro: getStripePriceIdForPlan(env, "pro"),
+    premium: getStripePriceIdForPlan(env, "premium"),
     network: getStripePriceIdForPlan(env, "network"),
     partner: getStripePriceIdForPlan(env, "partner"),
   });
@@ -198,6 +212,7 @@ export function getPlanFromStripePriceId(env: Env, priceId: string | null | unde
 export function getStripePriceIdForPlan(env: Env, planKey: PlanKey) {
   if (planKey === "starter") return cleanEnvString(env.STRIPE_PRICE_STARTER) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID);
   if (planKey === "pro") return cleanEnvString(env.STRIPE_PRICE_PRO) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID);
+  if (planKey === "premium") return cleanEnvString(env.STRIPE_PRICE_PREMIUM) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID);
   if (planKey === "network") return cleanEnvString(env.STRIPE_PRICE_NETWORK) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID);
   if (planKey === "partner") return cleanEnvString(env.STRIPE_PRICE_PARTNER) ?? cleanEnvString(env.NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID);
   return null;
@@ -207,8 +222,7 @@ export function getCheckoutConfigured(env: Env): Record<PaidPlanKey, boolean> {
   return {
     starter: Boolean(getStripePriceIdForPlan(env, "starter")),
     pro: Boolean(getStripePriceIdForPlan(env, "pro")),
-    network: Boolean(getStripePriceIdForPlan(env, "network")),
-    partner: Boolean(getStripePriceIdForPlan(env, "partner")),
+    premium: Boolean(getStripePriceIdForPlan(env, "premium")),
   };
 }
 
@@ -248,6 +262,14 @@ export function getManualRefreshCooldown(planKey: unknown) {
 
 export function getPlanPriority(planKey: unknown) {
   return centralPlanPriority(planKey);
+}
+
+export function getPlanVisibilityWeight(planKey: unknown) {
+  return centralPlanVisibilityWeight(planKey);
+}
+
+export function getPublicPublishIntervalMinutes(planKey: unknown) {
+  return centralPublicPublishInterval(planKey);
 }
 
 export { AUTO_POST_TYPES };
@@ -297,10 +319,14 @@ export async function ensureBillingSchema(env: Env) {
         bump_cooldown_hours INTEGER NOT NULL DEFAULT 24,
         can_use_featured_slots INTEGER NOT NULL DEFAULT 0,
         stat_history_days INTEGER NOT NULL DEFAULT 7,
+        public_publish_interval_minutes INTEGER NOT NULL DEFAULT 1440,
+        visibility_weight INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL
       )`,
     )
     .run();
+  await ensureColumn(env, "owner_plan_entitlements", "public_publish_interval_minutes", "INTEGER NOT NULL DEFAULT 1440");
+  await ensureColumn(env, "owner_plan_entitlements", "visibility_weight", "INTEGER NOT NULL DEFAULT 0");
 
   await db
     .prepare(
@@ -346,8 +372,9 @@ export async function upsertOwnerEntitlements(env: Env, discordUserId: string, p
       `INSERT INTO owner_plan_entitlements (
         discord_user_id, plan_key, max_linked_servers, can_use_reviews, can_use_public_listing,
         can_use_advanced_analytics, can_join_events, can_use_ad_bumps, included_bumps_per_month,
-        bump_cooldown_hours, can_use_featured_slots, stat_history_days, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        bump_cooldown_hours, can_use_featured_slots, stat_history_days, public_publish_interval_minutes,
+        visibility_weight, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(discord_user_id) DO UPDATE SET
         plan_key = excluded.plan_key,
         max_linked_servers = excluded.max_linked_servers,
@@ -360,6 +387,8 @@ export async function upsertOwnerEntitlements(env: Env, discordUserId: string, p
         bump_cooldown_hours = excluded.bump_cooldown_hours,
         can_use_featured_slots = excluded.can_use_featured_slots,
         stat_history_days = excluded.stat_history_days,
+        public_publish_interval_minutes = excluded.public_publish_interval_minutes,
+        visibility_weight = excluded.visibility_weight,
         updated_at = excluded.updated_at`,
     )
     .bind(
@@ -375,6 +404,8 @@ export async function upsertOwnerEntitlements(env: Env, discordUserId: string, p
       config.bump_cooldown_hours,
       boolInt(config.can_use_featured_slots),
       config.stat_history_days,
+      config.public_publish_interval_minutes,
+      config.visibility_weight,
       now,
     )
     .run();
@@ -506,6 +537,8 @@ export function entitlementsFromRow(row: Record<string, unknown>): PlanEntitleme
     bump_cooldown_hours: numberOrDefault(row.bump_cooldown_hours, 24),
     can_use_featured_slots: Number(row.can_use_featured_slots ?? 0) === 1,
     stat_history_days: numberOrDefault(row.stat_history_days, 7),
+    public_publish_interval_minutes: numberOrDefault(row.public_publish_interval_minutes, PLAN_CONFIG[planKey].public_publish_interval_minutes),
+    visibility_weight: numberOrDefault(row.visibility_weight, PLAN_CONFIG[planKey].visibility_weight),
   };
 }
 
@@ -519,10 +552,21 @@ function automationPlan(planKey: PlanKey) {
     adm_discovery_interval_minutes: plan.adm_discovery_interval_minutes,
     adm_pull_interval_minutes: plan.adm_pull_interval_minutes,
     manual_adm_refresh_cooldown_minutes: plan.manual_adm_refresh_cooldown_minutes,
+    public_publish_interval_minutes: plan.public_publish_interval_minutes,
+    visibility_weight: plan.visibility_weight,
     allowed_features: plan.allowed_features,
     allowed_auto_posts: plan.allowed_auto_posts,
     priority_level: plan.priority_level,
   };
+}
+
+async function ensureColumn(env: Env, tableName: string, columnName: string, definition: string) {
+  const db = requireDb(env);
+  const columns = await db.prepare(`PRAGMA table_info(${tableName})`).all<{ name: string }>();
+  const exists = (columns.results ?? []).some((column) => column.name === columnName);
+  if (!exists) {
+    await db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`).run();
+  }
 }
 
 function numberOrDefault(value: unknown, fallback: number) {

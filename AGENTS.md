@@ -20,33 +20,69 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Flag any Worker change that may exceed Cloudflare subrequest limits as P1.
 - Require tests for all API behavior changes.
 
-## ADM-only AutoDev rules
+## DZN AutoDev scope
 
-DZN AutoDev is scoped only to ADM tracking automation.
+DZN AutoDev is not limited solely to ADM tracking. DZN is a complete DayZ server competition platform, not solely an ADM automation project.
 
-Allowed:
+Allowed ADM systems:
 - ADM discovery
-- Nitrado ADM file read diagnostics
-- unreadable retry/backoff
+- ADM imports
+- ADM diagnostics
 - ADM Worker health
-- ADM import jobs
-- ADM Sync Health dashboard display
-- ADM production smoke
-- ADM cycle watching
-- ADM tests/docs
+- ADM Sync Health dashboard
+- ADM automation
+- Nitrado integrations
+- ADM production monitoring
 
-Forbidden:
-- billing
+Allowed platform systems:
+- Billing
 - Stripe
-- Discord OAuth
-- sessions
-- account management
-- subscriptions
-- unrelated Events/Tournaments
-- server-owner private settings
-- destructive migrations
-- player_stats creation
-- player_profiles reset/delete
-- secrets handling unless explicitly human-reviewed
+- Subscription plans
+- Plan enforcement
+- Server achievements
+- Badge systems
+- Reputation systems
+- Server profile enhancements
+- Public leaderboard presentation
+- Visibility ranking systems
+- Server discovery systems
+- Featured server systems
+- Seasonal competitions
+- Crown systems
+- Server vs Server events
+- Tournament systems
+- Public statistics presentation
 
-Codex must refuse out-of-scope fixes and create/report an issue instead.
+Allowed dashboard systems:
+- Owner dashboards
+- Subscription management
+- Billing pages
+- Plan comparison pages
+- Achievement management
+- Server profile management
+- Analytics presentation
+
+Still forbidden:
+- Destructive migrations
+- Resetting player_profiles
+- Deleting kills
+- Deleting deaths
+- Deleting events
+- Weakening authentication
+- Weakening authorization
+- Exposing secrets
+- Copying Cloudflare secrets into GitHub
+- Creating player_stats tables
+- Replacing player_profiles
+- Removing same-category matchmaking
+
+Protected systems requiring extreme caution and human approval before major refactors:
+- ADM ingestion pipeline
+- Nitrado token handling
+- Sync workers
+- Cloudflare Worker infrastructure
+- Authentication
+- Discord OAuth
+- Stripe webhook processing
+
+All changes affecting billing, subscriptions, achievements, reputation, badges, visibility, rankings, or profiles must include tests.

@@ -10,12 +10,14 @@ import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const starter = getPlanConfig("starter");
 const pro = getPlanConfig("pro");
-const network = getPlanConfig("network");
+const premium = getPlanConfig("premium");
 
 assert.equal(starter.can_use_ad_bumps, false);
 assert.equal(pro.can_use_ad_bumps, true);
 assert.equal(pro.max_linked_servers, 3);
-assert.equal(network.max_linked_servers, 10);
+assert.equal(premium.max_linked_servers, 10);
+assert.equal(premium.visibility_weight, 4);
+assert.equal(premium.public_publish_interval_minutes, 0);
 assert.equal(getPlanConfig("free").max_linked_servers, 1);
 
 const now = new Date("2026-05-17T12:00:00.000Z");
@@ -73,21 +75,28 @@ assert.equal(JSON.stringify(sorted).includes("stripe_subscription_id"), false);
 const env = {
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_starter",
   NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_pro",
-  NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID: "price_network",
-  NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID: "price_partner",
+  NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID: "price_premium",
+  NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID: "price_network_legacy",
+  NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID: "price_partner_legacy",
 } as Env;
 assert.equal(getPlanFromStripePriceId(env, "price_pro"), "pro");
+assert.equal(getPlanFromStripePriceId(env, "price_premium"), "premium");
+assert.equal(getPlanFromStripePriceId(env, "price_network_legacy"), "premium");
+assert.equal(getPlanFromStripePriceId(env, "price_partner_legacy"), "premium");
 assert.equal(getPlanFromStripePriceId(env, "price_missing"), "free");
-assert.deepEqual(getCheckoutConfigured(env), { starter: true, pro: true, network: true, partner: true });
+assert.deepEqual(getCheckoutConfigured(env), { starter: true, pro: true, premium: true });
 
 const partialEnv = {
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_1TY4c6JPrnZ0cnkH7207aAi4",
   NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
 } as Env;
-assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true, network: false, partner: false });
+assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true, premium: false });
 const planSummaries = getBillingPlanSummaries(partialEnv);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configured, true);
-assert.equal(planSummaries.find((plan) => plan.plan_key === "network")?.configured, false);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.configured, false);
+const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
+assert.equal(planSummaryKeys.includes("network"), false);
+assert.equal(planSummaryKeys.includes("partner"), false);
 assert.equal(JSON.stringify(planSummaries).includes("sk_test"), false);
 
 const statements: string[] = [];
@@ -135,7 +144,9 @@ async function run() {
   assert.equal(plansResponse.status, 200);
   const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean }> };
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "starter")?.configured, true);
-  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "partner")?.configured, false);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.configured, false);
+  assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("network"), false);
+  assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("partner"), false);
 
   const unauthCheckout = await checkoutHandler(makeContext(checkoutHandler, new Request("https://local.test/api/billing/create-checkout-session", { method: "POST" }), {} as Env));
   assert.equal(unauthCheckout.status, 401);
@@ -144,7 +155,7 @@ async function run() {
     checkoutHandler,
     new Request("https://local.test/api/billing/create-checkout-session", {
       method: "POST",
-      body: JSON.stringify({ plan_key: "network" }),
+      body: JSON.stringify({ plan_key: "premium" }),
       headers: { "content-type": "application/json" },
     }),
     { ...fakeEnv, MOCK_AUTH: "true" } as Env,

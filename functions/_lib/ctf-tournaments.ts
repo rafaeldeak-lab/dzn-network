@@ -48,7 +48,7 @@ type ScorecardTeamRow = {
   bot_access_token: string | null;
 };
 
-const STRICT_MATCHMAKING_PLANS: PlanKey[] = ["pro", "partner"];
+const STRICT_MATCHMAKING_PLANS: PlanKey[] = ["pro", "premium", "network", "partner"];
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 let ctfAuditLogsPrinted = false;
 
@@ -122,7 +122,7 @@ export async function processServerMatchmakingOptIn(env: Env, linkedServerId: st
       status: "plan_locked" as const,
       plan_key: planKey,
       subscription_status: row.status ?? "inactive",
-      reason: "Matchmaking requires an active DZN Pro or DZN Partner subscription.",
+      reason: "Matchmaking requires an active Pro or Premium subscription.",
     };
   }
 

@@ -1598,7 +1598,7 @@ function planAllowsEvent(requiredPlan: PlanKey, plan: PlanKey, active: boolean) 
 }
 
 function planRank(plan: PlanKey) {
-  return { free: 0, starter: 1, pro: 2, network: 3, partner: 4 }[plan] ?? 0;
+  return { free: 0, starter: 1, pro: 2, premium: 4, network: 4, partner: 4 }[plan] ?? 0;
 }
 
 function normalizeRequiredPlan(value: unknown): PlanKey {
@@ -1606,7 +1606,7 @@ function normalizeRequiredPlan(value: unknown): PlanKey {
   if (!text || text === "community" || text === "trial") return "free";
   const normalized = normalizePlanKey(text);
   if (normalized === "starter") return "free";
-  if (normalized === "network") return "pro";
+  if (normalized === "network" || normalized === "partner") return "premium";
   return normalized;
 }
 

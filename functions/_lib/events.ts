@@ -35,7 +35,7 @@ const EVENT_TYPE_LABELS: Record<CompetitiveEventType, string> = {
   survival_challenge: "Survival Challenge",
 };
 
-const FULL_EVENT_PLANS: PlanKey[] = ["pro", "partner"];
+const FULL_EVENT_PLANS: PlanKey[] = ["pro", "premium", "network", "partner"];
 
 type EventRow = {
   id: string;
@@ -311,7 +311,7 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
     return { ok: false, status: 409, error: "NO_CATEGORY", message: "Set your server category before creating events." };
   }
   if (!serverHasEventEntitlement(server)) {
-    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Event creation is a Pro/Partner feature." };
+    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Event creation is a Pro or Premium feature." };
   }
 
   const name = sanitizePlainText(input.name, 90);
@@ -427,7 +427,7 @@ export async function joinCompetitiveEvent(env: Env, viewer: SessionUser | null,
   }
   const entitlement = serverHasEventEntitlement(server);
   if (event.premium_tier && event.premium_tier !== "free" && !entitlement) {
-    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Unlock event registration with DZN Pro or DZN Partner." };
+    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Unlock event registration with Pro or Premium." };
   }
   const existing = await db
     .prepare("SELECT id FROM competitive_event_servers WHERE event_id = ? AND server_id = ? LIMIT 1")
@@ -485,7 +485,7 @@ export async function createCategorySafeMatchmaking(env: Env, viewer: SessionUse
   const primary = await fetchOwnedServer(env, viewer, input.server_id);
   if (!primary) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Server not found." };
   if (!serverHasEventEntitlement(primary)) {
-    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Cross-server matchmaking is a Pro/Partner feature." };
+    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Cross-server matchmaking is a Pro or Premium feature." };
   }
   if (Number(primary.competitive_enabled ?? 0) !== 1) {
     return { ok: false, status: 409, error: "COMPETITIVE_DISABLED", message: "Enable competitive matchmaking for this server first." };
@@ -738,7 +738,7 @@ async function findMatchmakingOpponent(env: Env, primary: ServerRow, category: S
          AND linked_servers.competitive_enabled = 1
          AND lower(COALESCE(linked_servers.status, '')) = 'live'
          AND lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing')
-         AND lower(COALESCE(server_subscriptions.plan_key, '')) IN ('pro', 'partner')
+         AND lower(COALESCE(server_subscriptions.plan_key, '')) IN ('pro', 'premium', 'network', 'partner')
          ${typeCondition}
        ORDER BY CASE WHEN linked_servers.server_category = ? THEN 0 ELSE 1 END,
                 ABS(COALESCE(linked_servers.event_mmr, 1000) - ?) ASC,
@@ -821,7 +821,9 @@ async function hasFullEventAccess(env: Env, viewer: SessionUser | null) {
        WHERE server_subscriptions.owner_discord_id = ?
           OR discord_guilds.owner_user_id = ?
        ORDER BY CASE lower(COALESCE(server_subscriptions.plan_key, 'free'))
+         WHEN 'premium' THEN 0
          WHEN 'partner' THEN 0
+         WHEN 'network' THEN 1
          WHEN 'pro' THEN 1
          ELSE 2
        END

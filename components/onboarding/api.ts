@@ -119,7 +119,7 @@ export async function getBillingPlans() {
   return request<{ plans: BillingPlanSummary[] }>("/api/billing/plans");
 }
 
-export async function createCheckoutSession(planKey: "starter" | "pro" | "network" | "partner", returnTo = "/dashboard") {
+export async function createCheckoutSession(planKey: "starter" | "pro" | "premium", returnTo = "/dashboard") {
   return request<{ url: string }>("/api/billing/create-checkout-session", {
     method: "POST",
     body: JSON.stringify({ plan_key: planKey, returnTo }),

@@ -1,6 +1,6 @@
 import { Lock, Sparkles } from "lucide-react";
 
-export function PremiumLockedCard({ title = "PRO / PARTNER FEATURE", message = "Unlock full event analytics with DZN Pro." }: { title?: string; message?: string }) {
+export function PremiumLockedCard({ title = "PRO / PREMIUM FEATURE", message = "Unlock full event analytics with Pro or Premium." }: { title?: string; message?: string }) {
   return (
     <div className="rounded-lg border border-violet-300/24 bg-[linear-gradient(135deg,rgba(124,58,237,0.14),rgba(14,165,233,0.08)),rgba(2,6,23,0.82)] p-4 shadow-[0_0_34px_rgba(124,58,237,0.16)]">
       <div className="flex items-start gap-3">

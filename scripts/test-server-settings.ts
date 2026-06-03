@@ -30,6 +30,7 @@ assert.equal(normalizeOwnerServerCategory("hardcore"), null);
 assert.equal(categoryPolicyForPlan("free", "active").cooldownDays, 30);
 assert.equal(categoryPolicyForPlan("starter", "active").monthlyLimit, 1);
 assert.equal(categoryPolicyForPlan("pro", "active").cooldownDays, 7);
+assert.equal(categoryPolicyForPlan("premium", "active").monthlyLimit, 2);
 assert.equal(categoryPolicyForPlan("partner", "trialing").monthlyLimit, 2);
 assert.equal(categoryPolicyForPlan("pro", "canceled").cooldownDays, 30);
 

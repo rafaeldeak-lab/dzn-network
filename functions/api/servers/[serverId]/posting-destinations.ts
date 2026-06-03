@@ -559,8 +559,8 @@ function requiredFeatureForPostType(postType: AutoPostType) {
 }
 
 function lockedMessage(postType: AutoPostType) {
-  if (postType === "server_vs_server_embed") return "Upgrade to DZN Network to auto-post server-vs-server competition updates.";
-  if (postType === "partner_featured_embed" || postType === "priority_status_embed") return "Upgrade to DZN Partner to unlock priority Discord posting.";
+  if (postType === "server_vs_server_embed") return "Upgrade to Pro to auto-post server-vs-server competition updates.";
+  if (postType === "partner_featured_embed" || postType === "priority_status_embed") return "Upgrade to Premium to unlock priority Discord posting.";
   return "Upgrade your DZN plan to unlock this Discord auto-post.";
 }
 

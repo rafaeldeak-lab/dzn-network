@@ -81,7 +81,7 @@ type SettingsServerRow = {
 };
 
 type CategoryPolicy = {
-  planGroup: "trial_free" | "pro_partner";
+  planGroup: "trial_free" | "pro_premium";
   cooldownDays: number;
   monthlyLimit: number;
 };
@@ -466,9 +466,9 @@ export function sanitizePublicDescription(value: unknown): string | null | false
 export function categoryPolicyForPlan(planKey: unknown, subscriptionStatus?: unknown): CategoryPolicy {
   const normalized = normalizePlanKey(planKey);
   const active = ["active", "trialing"].includes(String(subscriptionStatus ?? "").toLowerCase());
-  const fairPaid = active && (normalized === "pro" || normalized === "network" || normalized === "partner");
+  const fairPaid = active && (normalized === "pro" || normalized === "premium" || normalized === "network" || normalized === "partner");
   return fairPaid
-    ? { planGroup: "pro_partner", cooldownDays: 7, monthlyLimit: 2 }
+    ? { planGroup: "pro_premium", cooldownDays: 7, monthlyLimit: 2 }
     : { planGroup: "trial_free", cooldownDays: 30, monthlyLimit: 1 };
 }
 

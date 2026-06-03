@@ -25,6 +25,9 @@ assert.equal(getPlanByKey("pro").adm_pull_interval_minutes, 30);
 assert.equal(getPlanByKey("network").server_status_interval_minutes, 3);
 assert.equal(getPlanByKey("network").adm_discovery_interval_minutes, 5);
 assert.equal(getPlanByKey("network").adm_pull_interval_minutes, 15);
+assert.equal(getPlanByKey("premium").server_status_interval_minutes, 1);
+assert.equal(getPlanByKey("premium").public_publish_interval_minutes, 0);
+assert.equal(getPlanByKey("premium").visibility_weight, 4);
 assert.equal(getPlanByKey("partner").server_status_interval_minutes, 1);
 assert.equal(getAdmDiscoveryIntervalMinutes("partner"), 3);
 assert.equal(getAdmDiscoveryIntervalMinutes("free") >= 3, true);
@@ -33,21 +36,25 @@ assert.equal(getAdmPullInterval("free") >= 10, true);
 assert.equal(getServerStatusInterval("partner"), 1);
 assert.equal(getServerStatusInterval("free") >= 1, true);
 assert.equal(getManualRefreshCooldown("pro"), 30);
-assert.equal(getPlanPriority("network"), 3);
+assert.equal(getPlanPriority("premium"), 4);
+assert.equal(getPlanPriority("network"), 4);
 
-assert.equal(hasPlanFeature("starter", "leaderboards"), false);
+assert.equal(hasPlanFeature("starter", "leaderboards"), true);
 assert.equal(hasPlanFeature("pro", "leaderboards"), true);
 assert.equal(hasPlanFeature("partner", "server_vs_server"), true);
+assert.equal(hasPlanFeature("premium", "premium_badge"), true);
 assert.equal(hasAutoPost("starter", "basic_status_embed"), true);
 assert.equal(hasAutoPost("starter", "leaderboard_embed"), false);
 assert.equal(hasAutoPost("pro", "daily_summary_embed"), true);
 assert.equal(hasAutoPost("network", "server_vs_server_embed"), true);
-assert.equal(hasAutoPost("network", "partner_featured_embed"), false);
-assert.equal(hasAutoPost("network", "killfeed_embed"), false);
+assert.equal(hasAutoPost("network", "partner_featured_embed"), true);
+assert.equal(hasAutoPost("network", "killfeed_embed"), true);
+assert.equal(hasAutoPost("premium", "priority_status_embed"), true);
 assert.equal(hasAutoPost("partner", "killfeed_embed"), true);
 assert.equal(hasAutoPost("partner", "admin_logs_embed"), true);
 assert.equal(hasAutoPost("partner", "priority_status_embed"), true);
-assert.equal(getPlanByStripePriceId("price_network", { network: "price_network" }), "network");
+assert.equal(getPlanByStripePriceId("price_premium", { premium: "price_premium" }), "premium");
+assert.equal(getPlanByStripePriceId("price_network", { network: "price_network" }), "premium");
 
 const cronEnv = { DZN_CRON_SECRET: "unit-test-secret" } as Env;
 assert.equal(isDiscordPostCronAuthorized(new Request("https://dzn.test", {
@@ -241,7 +248,7 @@ assert.equal(packageJson.scripts["test:full-system"], "npm run lint && npm run t
 const systemAuditSource = readFileSync("scripts/audit-dzn-system.ts", "utf8");
 assert.equal(systemAuditSource.includes("DISCORD_BOT_TOKEN"), true);
 assert.equal(systemAuditSource.includes("DZN_CRON_SECRET"), true);
-assert.equal(systemAuditSource.includes("STRIPE_PRICE_PARTNER"), true);
+assert.equal(systemAuditSource.includes("STRIPE_PRICE_PREMIUM"), true);
 assert.equal(systemAuditSource.includes("workers/adm-sync-worker.ts"), true);
 assert.equal(systemAuditSource.includes("functions/api/sync/metadata/run.ts"), true);
 assert.equal(systemAuditSource.includes("functions/api/sync/discord-posts/run.ts"), true);
@@ -301,7 +308,7 @@ assert.equal(syncMapDoc.includes("DZN attempts to verify these automatically"), 
 assert.equal(syncMapDoc.includes("Discord Auto-Post Dispatcher"), true);
 assert.equal(syncMapDoc.includes("Cloudflare Worker Cron"), true);
 assert.equal(syncMapDoc.includes("GitHub Actions Manual Backup"), true);
-assert.equal(syncMapDoc.includes("Partner | Every 1 minute"), true);
+assert.equal(syncMapDoc.includes("Premium | Every 1 minute"), true);
 assert.equal(syncMapDoc.includes("ADM remains limited to 10 minutes minimum"), true);
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
@@ -321,8 +328,8 @@ assert.equal(dashboardSource.includes("selectedPostTypes.includes(option.key)"),
 assert.equal(dashboardSource.includes("BOT MODE"), true);
 assert.equal(dashboardSource.includes("WEBHOOK FALLBACK"), true);
 assert.equal(dashboardSource.includes("Active"), true);
-assert.equal(dashboardSource.includes("Server Status Sync:"), true);
-assert.equal(dashboardSource.includes("ADM Discovery:"), true);
+assert.equal(dashboardSource.includes("Tracking:"), true);
+assert.equal(dashboardSource.includes("Public Publishing:"), true);
 assert.equal(dashboardSource.includes("Nitrado Log Settings"), true);
 assert.equal(dashboardSource.includes("Check Nitrado Log Settings"), true);
 assert.equal(dashboardSource.includes("Nitrado log settings verified automatically"), true);

@@ -83,7 +83,7 @@ includesAll(eventsLib, [
   "NO_CATEGORY",
   "Set your server category before joining events.",
   "Set your server category before creating events.",
-  "Event creation is a Pro/Partner feature.",
+  "Event creation is a Pro or Premium feature.",
   "Only same-category servers can register.",
   "assertSameServerCategory(primary, opponent)",
   "sanitizePlainText",
@@ -222,7 +222,7 @@ for (const component of [
 const detailUi = source("components/events/events-platform.tsx");
 includesAll(detailUi, [
   "SAME CATEGORY ONLY",
-  "Cross-server matching is an exclusive Pro/Partner platform feature.",
+  "Cross-server matching is an exclusive Pro/Premium platform feature.",
   "EventCreatePage",
   "CREATE EVENT",
   "Set your server category before creating an event.",
@@ -235,8 +235,8 @@ includesAll(detailUi, [
 ]);
 assert.equal(source("components/events/EventHero.tsx").includes('href="/events/create"'), true, "Create Event CTA must route to /events/create.");
 assert.equal(source("components/events/EventTabs.tsx").includes("/events/tournaments?status=active"), true, "Active tab must use the active status alias.");
-assert.equal(source("components/events/ChallengeBattleCard.tsx").includes("Cross-server matching is an exclusive Pro/Partner platform feature."), false, "Challenge cards should not repeat the full premium lock sentence.");
-assert.equal(source("components/events/PremiumLockedCard.tsx").includes("PRO / PARTNER FEATURE"), true);
+assert.equal(source("components/events/ChallengeBattleCard.tsx").includes("Cross-server matching is an exclusive Pro/Premium platform feature."), false, "Challenge cards should not repeat the full premium lock sentence.");
+assert.equal(source("components/events/PremiumLockedCard.tsx").includes("PRO / PREMIUM FEATURE"), true);
 assert.equal(source("components/events/LeaderboardTeaser.tsx").includes("TOP 10 MASTER TEASER"), true);
 
 assert.equal(existsSync("functions/api/servers/[serverId]/ctf/dashboard.ts"), true, "Existing CTF dashboard route must still exist.");

@@ -28,7 +28,7 @@ const ctfSource = readFileSync("functions/_lib/ctf-tournaments.ts", "utf8");
 for (const snippet of [
   "processServerMatchmakingOptIn",
   "STRICT_MATCHMAKING_PLANS",
-  "[\"pro\", \"partner\"]",
+  "[\"pro\", \"premium\", \"network\", \"partner\"]",
   "dispatchUnifiedRegistrationEmbed",
   "Link Profile & Verify Entry",
   "Anti-alt roster lock",

@@ -100,12 +100,45 @@ type PublicServer = {
     boosted_time_left_label?: string | null;
     badge_label: "FEATURED" | "BOOSTED" | "SPONSORED" | null;
   };
+  plan_key?: string;
+  premium_status?: "standard" | "premium";
+  visibility_weight?: number;
+  reputation?: ReputationSummary;
+  achievement_showcase?: AchievementShowcase;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
   access_level?: "full" | "preview";
   is_locked?: boolean;
   locked_reason?: string | null;
+};
+
+type ReputationSummary = {
+  tier: "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond" | "Legendary";
+  score: number;
+  nextTier: string | null;
+  nextTierScore: number | null;
+  progressToNextTier: number;
+  visibilityWeight: number;
+  premiumStatus: "standard" | "premium";
+};
+
+type AchievementDefinition = {
+  key: string;
+  name: string;
+  category: string;
+  description: string;
+  points: number;
+  permanent: boolean;
+  limitedAvailability?: boolean;
+};
+
+type AchievementShowcase = {
+  topEarnedBadges: AchievementDefinition[];
+  crownBadges: AchievementDefinition[];
+  seasonalTrophies: AchievementDefinition[];
+  founderBadges: AchievementDefinition[];
+  premiumBadges: AchievementDefinition[];
 };
 
 type ScoreBreakdown = {
@@ -567,6 +600,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
               <h2 className="mt-1 truncate text-2xl font-black text-white">{server.server_name}</h2>
               <p className="mt-1 truncate text-sm font-bold text-zinc-400">{server.nitrado_service_name ?? server.server_name}</p>
               <ServerRatingChip server={server} />
+              <ServerReputationBadges server={server} compact />
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
@@ -585,6 +619,8 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           <StatusPill label="DZN Verified" tone="violet" />
           <StatusPill label={server.server_type} tone="violet" />
           <StatusPill label={server.rank ? `Rank #${server.rank}` : "Rank Pending"} tone={server.rank ? "emerald" : "zinc"} />
+          {server.reputation ? <StatusPill label={`${server.reputation.tier} Reputation`} tone="cyan" /> : null}
+          {server.premium_status === "premium" ? <StatusPill label="Premium Server" tone="violet" /> : null}
           <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
             Score {server.score_label}
           </span>
@@ -663,6 +699,100 @@ function RatingStars({ rating }: { rating: number }) {
         );
       })}
     </span>
+  );
+}
+
+function ServerReputationBadges({ server, compact = false }: { server: PublicServer; compact?: boolean }) {
+  const reputation = server.reputation;
+  const crowns = server.achievement_showcase?.crownBadges ?? [];
+  const seasonal = server.achievement_showcase?.seasonalTrophies ?? [];
+  const founder = server.achievement_showcase?.founderBadges ?? [];
+  const badges = [
+    ...crowns.slice(0, compact ? 1 : 3),
+    ...seasonal.slice(0, compact ? 1 : 2),
+    ...founder.slice(0, compact ? 1 : 1),
+  ];
+
+  if (!reputation && badges.length === 0 && server.premium_status !== "premium") return null;
+
+  return (
+    <div className={`mt-3 flex flex-wrap gap-2 ${compact ? "max-w-[320px]" : ""}`}>
+      {reputation ? (
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-cyan-100">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          {reputation.tier}
+        </span>
+      ) : null}
+      {server.premium_status === "premium" ? (
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-violet-100">
+          <Sparkles className="h-3.5 w-3.5" />
+          Premium
+        </span>
+      ) : null}
+      {badges.map((badge) => (
+        <span key={badge.key} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-amber-100">
+          {badge.category === "legendary" ? <Crown className="h-3.5 w-3.5" /> : <Trophy className="h-3.5 w-3.5" />}
+          <span className="truncate">{badge.name}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ServerAchievementPanel({ server }: { server: PublicServer }) {
+  const showcase = server.achievement_showcase;
+  const groups = [
+    { title: "Top Badges", icon: Medal, rows: showcase?.topEarnedBadges ?? [] },
+    { title: "Crowns", icon: Crown, rows: showcase?.crownBadges ?? [] },
+    { title: "Seasonal", icon: Trophy, rows: showcase?.seasonalTrophies ?? [] },
+    { title: "Founder", icon: ShieldCheck, rows: showcase?.founderBadges ?? [] },
+  ];
+  const hasRows = groups.some((group) => group.rows.length > 0) || server.premium_status === "premium";
+
+  return (
+    <GlassPanel title="Achievements" icon={Crown}>
+      <div className="grid gap-4">
+        <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100/75">Reputation</p>
+          <div className="mt-2 flex items-end justify-between gap-3">
+            <div>
+              <p className="text-2xl font-black uppercase text-white">{server.reputation?.tier ?? "Bronze"}</p>
+              <p className="mt-1 text-xs font-bold text-zinc-400">{server.reputation?.score ?? 0} reputation points</p>
+            </div>
+            <span className="rounded-md border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">
+              Weight {server.visibility_weight ?? 0}
+            </span>
+          </div>
+        </div>
+
+        {hasRows ? (
+          <div className="grid gap-3">
+            {server.premium_status === "premium" ? <AchievementRow icon={Sparkles} name="Premium Server" description="Premium discovery and reputation framework member." /> : null}
+            {groups.map((group) =>
+              group.rows.slice(0, 4).map((badge) => (
+                <AchievementRow key={badge.key} icon={group.icon} name={badge.name} description={badge.description} />
+              )),
+            )}
+          </div>
+        ) : (
+          <p className="text-sm leading-6 text-zinc-400">Achievements will appear here as this server builds reputation across DZN.</p>
+        )}
+      </div>
+    </GlassPanel>
+  );
+}
+
+function AchievementRow({ icon: Icon, name, description }: { icon: typeof Activity; name: string; description: string }) {
+  return (
+    <div className="flex gap-3 rounded-lg border border-white/10 bg-black/24 p-3">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-400/10 text-violet-100">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-black uppercase text-white">{name}</p>
+        <p className="mt-1 text-xs leading-5 text-zinc-400">{description}</p>
+      </div>
+    </div>
   );
 }
 
@@ -752,6 +882,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
               </div>
+              <ServerReputationBadges server={server} />
             </div>
           </div>
 
@@ -818,7 +949,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
           <div className="grid gap-5 md:grid-cols-2">
             <FeaturePreviewPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." variant="faction" />
-            <FeaturePreviewPanel title="Achievements" icon={Crown} text="Community milestones will unlock as the DZN sync engine expands." variant="achievement" />
+            <ServerAchievementPanel server={server} />
           </div>
         </div>
 

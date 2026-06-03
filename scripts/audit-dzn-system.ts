@@ -38,8 +38,7 @@ const REQUIRED_ENV = [
   "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
   "STRIPE_PRICE_STARTER",
   "STRIPE_PRICE_PRO",
-  "STRIPE_PRICE_NETWORK",
-  "STRIPE_PRICE_PARTNER",
+  "STRIPE_PRICE_PREMIUM",
   "TOKEN_ENCRYPTION_KEY",
 ] as const;
 
@@ -144,16 +143,15 @@ function auditBillingPlans() {
     if (key === "starter" && plan.allowed_auto_posts.length === 1 && plan.allowed_auto_posts[0] === "basic_status_embed") {
       pass("Starter auto-post limit", "Starter only allows Basic Server Status.");
     }
-    if (key === "partner" && AUTO_POST_TYPES.every((postType) => hasAutoPost("partner", postType))) {
-      pass("Partner auto-post limit", "Partner allows every configured auto-post type.");
+    if (key === "premium" && AUTO_POST_TYPES.every((postType) => hasAutoPost("premium", postType))) {
+      pass("Premium auto-post limit", "Premium allows every configured auto-post type.");
     }
   }
 
   const expectedIntervals = [
     ["starter", 7, 15, 60],
     ["pro", 5, 10, 30],
-    ["network", 3, 5, 15],
-    ["partner", 1, 3, 10],
+    ["premium", 1, 3, 10],
   ] as const;
   for (const [planKey, statusInterval, discoveryInterval, admInterval] of expectedIntervals) {
     if (getServerStatusInterval(planKey) === statusInterval) pass(`${planKey} status cadence`, `Status sync every ${statusInterval} minutes.`);
