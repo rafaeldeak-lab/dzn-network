@@ -4,6 +4,7 @@ import {
   getAvailableFrameVisuals,
   getAvailableThemeBannerVisuals,
   toVisualBadge,
+  type PlanVisualTreatment,
   type ProfileFrameVisual,
   type ServerThemeBannerVisual,
   type VisualBadge,
@@ -39,6 +40,24 @@ export type ServerVisualLoadout = {
   animationEnabled: boolean;
   limits: VisualLoadoutPlanLimits;
   updatedAt: string | null;
+};
+
+export type PublicServerVisualLoadout = {
+  showcaseBadges: VisualBadge[];
+  profileFrame: ProfileFrameVisual;
+  themeBanner: ServerThemeBannerVisual;
+  animationEnabled: boolean;
+  cardStyle: PlanVisualTreatment["cardTreatment"];
+  accentColour: string;
+  source: "saved" | "fallback";
+};
+
+export type PublicServerVisualLoadoutFallback = {
+  showcaseBadges: VisualBadge[];
+  profileFrame: ProfileFrameVisual;
+  themeBanner: ServerThemeBannerVisual;
+  cardStyle?: PlanVisualTreatment["cardTreatment"];
+  accentColour?: string | null;
 };
 
 export type OwnerVisualLoadoutServer = {
@@ -164,6 +183,48 @@ export async function resolveServerVisualLoadout(env: Env, serverId: string): Pr
     animationEnabled,
     limits,
     updatedAt: saved?.updated_at ?? null,
+  };
+}
+
+export async function resolvePublicServerVisualLoadout(
+  env: Env,
+  serverId: string,
+  planKey: unknown,
+  earnedShowcaseBadges: VisualBadge[],
+  fallback: PublicServerVisualLoadoutFallback,
+): Promise<PublicServerVisualLoadout> {
+  const limits = getVisualLoadoutPlanLimits(planKey);
+  const saved = await readPublicServerVisualLoadout(env, serverId);
+  const source = saved ? "saved" : "fallback";
+  const earnedBadgeByCode = new Map(earnedShowcaseBadges.filter((badge) => badge.isPublic).map((badge) => [badge.code, badge]));
+  const savedBadgeCodes = saved?.showcase_badges_json === null || saved?.showcase_badges_json === undefined
+    ? null
+    : parseSavedBadgeCodes(saved.showcase_badges_json);
+  const validSavedBadges = savedBadgeCodes
+    ?.filter((code) => earnedBadgeByCode.has(code))
+    .slice(0, limits.maxShowcaseBadges)
+    .map((code) => earnedBadgeByCode.get(code))
+    .filter(Boolean) as VisualBadge[] | undefined;
+  const savedBadgeSelectionIsInvalid = Boolean(savedBadgeCodes?.length && !validSavedBadges?.length);
+  const selectedBadges = savedBadgeCodes === null || savedBadgeSelectionIsInvalid ? fallback.showcaseBadges : validSavedBadges ?? [];
+
+  const frames = publicFrameVisualsForPlan(limits.planKey, earnedShowcaseBadges);
+  const themes = publicThemeBannerVisualsForPlan(limits.planKey);
+  const savedFrameKey = normalizeVisualKey(saved?.profile_frame_key);
+  const savedThemeKey = normalizeVisualKey(saved?.theme_banner_key);
+  const profileFrame = frames.find((frame) => frame.key === savedFrameKey) ?? fallback.profileFrame ?? frames[0];
+  const themeBanner = themes.find((theme) => theme.key === savedThemeKey) ?? fallback.themeBanner ?? themes[0];
+  const animationEnabled = Boolean(limits.animationsAllowed && saved?.animation_enabled !== 0);
+  const accentColour = fallback.accentColour || profileFrame?.glowColour || themeBanner?.palette?.[0] || "#22d3ee";
+
+  return {
+    showcaseBadges: selectedBadges,
+    profileFrame,
+    themeBanner,
+    animationEnabled,
+    cardStyle: fallback.cardStyle ?? (limits.planKey === "premium" ? "premium" : limits.planKey === "pro" ? "pro" : "standard"),
+    accentColour,
+    source,
   };
 }
 
@@ -354,6 +415,14 @@ export async function ensureServerVisualLoadoutSchema(env: Env) {
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_customisation_audit_log_action ON server_customisation_audit_log(action, created_at)").run();
 }
 
+async function readPublicServerVisualLoadout(env: Env, serverId: string) {
+  return requireDb(env)
+    .prepare("SELECT * FROM server_visual_loadouts WHERE server_id = ? LIMIT 1")
+    .bind(serverId)
+    .first<VisualLoadoutRow>()
+    .catch(() => null);
+}
+
 async function resolveRequestUser(env: Env, request: Request): Promise<SessionUser | null> {
   const user = await getSessionUser(env, request);
   if (user || !isMockAuth(env.MOCK_AUTH)) return user;
@@ -418,6 +487,25 @@ function earnedAwardsToShowcaseBadges(awards: Array<{ badge_code: string; awarde
       });
     })
     .filter((badge): badge is VisualBadge => Boolean(badge && badge.isPublic && badge.isShowcaseBadge));
+}
+
+function publicFrameVisualsForPlan(planKey: NormalizedPlanKey, earnedShowcaseBadges: VisualBadge[]) {
+  const frames = getAvailableFrameVisuals();
+  if (planKey === "premium") return Object.values(frames);
+  if (planKey === "pro") {
+    const earnedReputation = new Set(earnedShowcaseBadges
+      .filter((badge) => badge.category === "reputation")
+      .map((badge) => normalizeVisualKey(badge.code)));
+    const keys = REPUTATION_FRAME_KEYS.filter((key) => key === DEFAULT_FRAME_KEY || earnedReputation.has(key));
+    return keys.map((key) => frames[key]).filter(Boolean);
+  }
+  return [frames[DEFAULT_FRAME_KEY]].filter(Boolean);
+}
+
+function publicThemeBannerVisualsForPlan(planKey: NormalizedPlanKey) {
+  const themes = getAvailableThemeBannerVisuals();
+  const keys = planKey === "premium" ? Object.keys(themes) : planKey === "pro" ? STANDARD_THEME_KEYS : [DEFAULT_THEME_KEY];
+  return keys.map((key) => themes[key]).filter(Boolean);
 }
 
 function parseSavedBadgeCodes(value: string | null | undefined) {

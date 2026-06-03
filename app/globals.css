@@ -3552,6 +3552,31 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
+.dzn-server-card--visual-pro,
+.dzn-server-card--visual-premium {
+  border-color: color-mix(in srgb, var(--dzn-card-accent, #22d3ee) 32%, rgba(255, 255, 255, 0.12));
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--dzn-card-accent, #22d3ee) 14%, transparent),
+    0 18px 70px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+.dzn-server-card--visual-premium {
+  border-color: color-mix(in srgb, var(--dzn-card-accent, #facc15) 48%, rgba(255, 255, 255, 0.14));
+  box-shadow:
+    0 0 30px color-mix(in srgb, var(--dzn-card-accent, #facc15) 22%, transparent),
+    0 18px 72px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.11);
+}
+
+.dzn-profile-header--visual-pro,
+.dzn-profile-header--visual-premium {
+  border-color: color-mix(in srgb, var(--dzn-profile-accent, #22d3ee) 40%, rgba(255, 255, 255, 0.12));
+  box-shadow:
+    0 0 42px color-mix(in srgb, var(--dzn-profile-accent, #22d3ee) 18%, transparent),
+    0 24px 90px rgba(0, 0, 0, 0.45);
+}
+
 .dzn-boosted-card-line {
   position: absolute;
   top: -1.25rem;

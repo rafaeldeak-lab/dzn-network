@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -117,6 +117,17 @@ type PublicServer = {
   profileFrame?: ProfileFrameVisual;
   themeBanner?: ServerThemeBannerVisual;
   planVisualTreatment?: PlanVisualTreatment;
+  visualLoadout?: {
+    source: "saved" | "fallback";
+    animationEnabled: boolean;
+    cardStyle: "standard" | "pro" | "premium";
+    accentColour: string;
+    showcaseBadgeCodes: string[];
+    profileFrameKey: string;
+    themeBannerKey: string;
+  };
+  cardStyle?: "standard" | "pro" | "premium";
+  accentColour?: string;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -256,6 +267,11 @@ const PUBLIC_NETWORK_LAST_GOOD_PREFIX = "dzn:lastGoodPublicNetwork:";
 const PUBLIC_NETWORK_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 type PublicLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "empty_real_data" | "error_initial";
 let hasLoggedBoostedServerDisplayPolished = false;
+
+type VisualAccentStyle = CSSProperties & {
+  "--dzn-card-accent"?: string;
+  "--dzn-profile-accent"?: string;
+};
 
 export function PublicNetwork() {
   const slug = useSyncExternalStore(subscribeToPath, getCurrentSlug, getServerSlugSnapshot);
@@ -594,13 +610,17 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
   const isLocked = Boolean(server.is_locked);
   const isAdvertised = Boolean(server.advertising?.is_featured || server.advertising?.is_boosted);
   const playerCountLabel = formatPlayers(server);
+  const visualCardStyle = server.cardStyle ?? server.visualLoadout?.cardStyle ?? server.planVisualTreatment?.cardTreatment ?? "standard";
+  const visualAccent = server.accentColour ?? server.visualLoadout?.accentColour ?? server.profileFrame?.glowColour ?? null;
+  const cardAccentStyle: VisualAccentStyle | undefined = visualAccent ? { "--dzn-card-accent": visualAccent } : undefined;
   return (
     <motion.article
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.36, delay: index * 0.05 }}
       whileHover={{ y: -5 }}
-      className={`glass-surface animated-border rounded-lg p-5 ${isAdvertised ? "dzn-server-card--boosted" : ""}`}
+      className={`glass-surface animated-border rounded-lg p-5 ${isAdvertised ? "dzn-server-card--boosted" : ""} ${visualCardStyle !== "standard" ? `dzn-server-card--visual-${visualCardStyle}` : ""}`}
+      style={cardAccentStyle}
     >
       <div className="relative z-10">
         {isAdvertised ? <span className="dzn-boosted-card-line" aria-hidden="true" /> : null}
@@ -915,6 +935,9 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const pvpLeaderboard = server.pvp_leaderboard ?? players;
   const kd = server.kd_label || calculateServerKd(server.total_kills, server.total_deaths);
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
+  const visualCardStyle = server.cardStyle ?? server.visualLoadout?.cardStyle ?? server.planVisualTreatment?.cardTreatment ?? "standard";
+  const visualAccent = server.accentColour ?? server.visualLoadout?.accentColour ?? server.profileFrame?.glowColour ?? null;
+  const profileAccentStyle: VisualAccentStyle | undefined = visualAccent ? { "--dzn-profile-accent": visualAccent } : undefined;
 
   useEffect(() => {
     console.log("DZN LIVE SERVER PROFILE LOADED");
@@ -928,7 +951,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
         Back to servers
       </Link>
 
-      <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className="relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+      <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className={`relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl ${visualCardStyle !== "standard" ? `dzn-profile-header--visual-${visualCardStyle}` : ""}`} style={profileAccentStyle}>
         <ServerThemeBanner theme={server.themeBanner} overlay />
         <div className="relative z-10 grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="flex min-w-0 flex-col gap-5 sm:flex-row">

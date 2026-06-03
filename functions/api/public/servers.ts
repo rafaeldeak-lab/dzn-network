@@ -21,6 +21,7 @@ import {
 import { getPublicBadgeAwardMap, type ServerBadgeAwardRow } from "../../_lib/badge-awards";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import { buildAchievementShowcase, buildServerReputationSummary, type AchievementShowcase, type ReputationSummary } from "../../_lib/reputation";
+import { resolvePublicServerVisualLoadout, type PublicServerVisualLoadout } from "../../_lib/server-visual-loadouts";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
 import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
@@ -180,6 +181,17 @@ type SafePublicServer = {
   profileFrame?: ProfileFrameVisual;
   themeBanner?: ServerThemeBannerVisual;
   planVisualTreatment?: PlanVisualTreatment;
+  visualLoadout?: {
+    source: PublicServerVisualLoadout["source"];
+    animationEnabled: boolean;
+    cardStyle: PublicServerVisualLoadout["cardStyle"];
+    accentColour: string;
+    showcaseBadgeCodes: string[];
+    profileFrameKey: string;
+    themeBannerKey: string;
+  };
+  cardStyle?: PublicServerVisualLoadout["cardStyle"];
+  accentColour?: string;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -311,8 +323,12 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
 
 async function getPublicServersPreviewPayload(env: Env) {
   const rows = await queryPublicServersPreview(env);
-  const servers = rows
-    .map(toSafePublicServerPreview)
+  const badgeAwardMap = await getPublicBadgeAwardMap(env, rows.map((row) => row.id));
+  const servers = (await Promise.all(rows.map((row) => toSafePublicServerPreview(
+    env,
+    row,
+    badgeAwardMap.get(row.id) ?? null,
+  ))))
     .filter((server): server is SafePublicServer => Boolean(server))
     .map((server) => applyPublicServerAccess(server, false));
   sortPublicServersForDiscovery(servers);
@@ -762,6 +778,21 @@ async function toSafePublicServer(
     awardData: badgeAwardData,
     featured: advertising.is_featured,
   });
+  const automaticShowcaseBadges = badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges;
+  const availableShowcaseBadges = badgeCollection.earnedBadges.filter((badge) => badge.isPublic && badge.isShowcaseBadge);
+  const publicVisualLoadout = await resolvePublicServerVisualLoadout(
+    env,
+    row.id,
+    planKey,
+    availableShowcaseBadges.length ? availableShowcaseBadges : automaticShowcaseBadges,
+    {
+      showcaseBadges: automaticShowcaseBadges,
+      profileFrame: visualShowcase.profileFrame,
+      themeBanner: visualShowcase.themeBanner,
+      cardStyle: visualShowcase.planVisualTreatment.cardTreatment,
+      accentColour: visualShowcase.profileFrame.glowColour,
+    },
+  );
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -810,12 +841,25 @@ async function toSafePublicServer(
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
-    badges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    badges: publicVisualLoadout.showcaseBadges,
     earnedBadges: badgeCollection.earnedBadges,
     lockedBadges: badgeCollection.lockedBadges,
-    showcaseBadges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    showcaseBadges: publicVisualLoadout.showcaseBadges,
     crowns: badgeCollection.crowns,
     reputationVisual: badgeCollection.reputationBadge,
+    profileFrame: publicVisualLoadout.profileFrame,
+    themeBanner: publicVisualLoadout.themeBanner,
+    visualLoadout: {
+      source: publicVisualLoadout.source,
+      animationEnabled: publicVisualLoadout.animationEnabled,
+      cardStyle: publicVisualLoadout.cardStyle,
+      accentColour: publicVisualLoadout.accentColour,
+      showcaseBadgeCodes: publicVisualLoadout.showcaseBadges.map((badge) => badge.code),
+      profileFrameKey: publicVisualLoadout.profileFrame.key,
+      themeBannerKey: publicVisualLoadout.themeBanner.key,
+    },
+    cardStyle: publicVisualLoadout.cardStyle,
+    accentColour: publicVisualLoadout.accentColour,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -827,7 +871,11 @@ async function toSafePublicServer(
   } satisfies SafePublicServer;
 }
 
-function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | null {
+async function toSafePublicServerPreview(
+  env: Env,
+  row: PublicServerRow,
+  badgeAwardData: { awards: ServerBadgeAwardRow[]; crownCodes: string[] } | null,
+): Promise<SafePublicServer | null> {
   if (!row.public_slug) return null;
   const tagsJson = normalizePublicTagsJson(row.tags_json);
   const latestAdmPath = row.adm_sync_latest_path ?? row.adm_path;
@@ -914,9 +962,24 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     stats,
     planKey,
     statsSync,
-    awardData: null,
+    awardData: badgeAwardData,
     featured: advertising.is_featured,
   });
+  const automaticShowcaseBadges = badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges;
+  const availableShowcaseBadges = badgeCollection.earnedBadges.filter((badge) => badge.isPublic && badge.isShowcaseBadge);
+  const publicVisualLoadout = await resolvePublicServerVisualLoadout(
+    env,
+    row.id,
+    planKey,
+    availableShowcaseBadges.length ? availableShowcaseBadges : automaticShowcaseBadges,
+    {
+      showcaseBadges: automaticShowcaseBadges,
+      profileFrame: visualShowcase.profileFrame,
+      themeBanner: visualShowcase.themeBanner,
+      cardStyle: visualShowcase.planVisualTreatment.cardTreatment,
+      accentColour: visualShowcase.profileFrame.glowColour,
+    },
+  );
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -963,12 +1026,25 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
-    badges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    badges: publicVisualLoadout.showcaseBadges,
     earnedBadges: badgeCollection.earnedBadges,
     lockedBadges: badgeCollection.lockedBadges,
-    showcaseBadges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    showcaseBadges: publicVisualLoadout.showcaseBadges,
     crowns: badgeCollection.crowns,
     reputationVisual: badgeCollection.reputationBadge,
+    profileFrame: publicVisualLoadout.profileFrame,
+    themeBanner: publicVisualLoadout.themeBanner,
+    visualLoadout: {
+      source: publicVisualLoadout.source,
+      animationEnabled: publicVisualLoadout.animationEnabled,
+      cardStyle: publicVisualLoadout.cardStyle,
+      accentColour: publicVisualLoadout.accentColour,
+      showcaseBadgeCodes: publicVisualLoadout.showcaseBadges.map((badge) => badge.code),
+      profileFrameKey: publicVisualLoadout.profileFrame.key,
+      themeBannerKey: publicVisualLoadout.themeBanner.key,
+    },
+    cardStyle: publicVisualLoadout.cardStyle,
+    accentColour: publicVisualLoadout.accentColour,
     stats,
     network_status: {
       adm_status: admStatus,
