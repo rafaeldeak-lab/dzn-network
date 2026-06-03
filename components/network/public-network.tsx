@@ -239,9 +239,22 @@ type PublicServersResponse = {
   error?: string;
 };
 
+type PublicServerGroups = {
+  featuredServers: PublicServer[];
+  spotlightServers: PublicServer[];
+  recommendedServers: PublicServer[];
+  standardServers: PublicServer[];
+};
+
+type PublicServerGroupPayload = Partial<Pick<PublicServersResponse, "featuredServers" | "spotlightServers" | "recommendedServers" | "standardServers">>;
+
 type PublicNetworkCachePayload = {
   server?: PublicServer | null;
   servers?: PublicServer[];
+  featuredServers?: PublicServer[];
+  spotlightServers?: PublicServer[];
+  recommendedServers?: PublicServer[];
+  standardServers?: PublicServer[];
   stats?: PublicStats | null;
   cached_at?: string;
 };
@@ -293,6 +306,7 @@ export function PublicNetwork() {
   const [servers, setServers] = useState<PublicServer[]>(() => slug ? [] : initialCache?.servers ?? []);
   const [server, setServer] = useState<PublicServer | null>(() => slug ? initialCache?.server ?? null : null);
   const [stats, setStats] = useState<PublicStats | null>(() => slug ? null : initialCache?.stats ?? null);
+  const [serverGroups, setServerGroups] = useState<PublicServerGroups>(() => slug ? emptyPublicServerGroups() : publicServerGroupsFromPayload(initialCache, initialCache?.servers ?? []));
   const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(() => !initialCache);
   const [loadState, setLoadState] = useState<PublicLoadState>(() => initialCache ? "loaded" : "loading_initial");
@@ -331,6 +345,7 @@ export function PublicNetwork() {
         setServer(requestedSlug ? cached.server ?? null : null);
         setServers(requestedSlug ? [] : cached.servers ?? []);
         setStats(requestedSlug ? null : cached.stats ?? null);
+        setServerGroups(requestedSlug ? emptyPublicServerGroups() : publicServerGroupsFromPayload(cached, cached.servers ?? []));
       }
       try {
         const endpoint = requestedSlug ? `/api/public/servers?slug=${encodeURIComponent(requestedSlug)}` : "/api/public/servers";
@@ -349,16 +364,19 @@ export function PublicNetwork() {
           setServer(matchedServer);
           setServers([]);
           setStats(null);
+          setServerGroups(emptyPublicServerGroups());
           if (matchedServer) savePublicNetworkCache(requestedSlug, { server: matchedServer });
           setLoadState(matchedServer ? "loaded" : "empty_real_data");
           if (matchedServer) console.log("DZN SERVER PROFILE SCOPED DATA LOADED");
         } else {
           const nextServers = Array.isArray(payload.servers) ? payload.servers : [];
           const nextStats = payload.stats ?? null;
+          const nextGroups = publicServerGroupsFromPayload(payload, nextServers);
           setServers(nextServers);
           setStats(nextStats);
           setServer(null);
-          if (nextServers.length || hasMeaningfulPublicStats(nextStats)) savePublicNetworkCache(null, { servers: nextServers, stats: nextStats });
+          setServerGroups(nextGroups);
+          if (nextServers.length || hasMeaningfulPublicStats(nextStats)) savePublicNetworkCache(null, { servers: nextServers, stats: nextStats, ...nextGroups });
           setLoadState(nextServers.length > 0 ? "loaded" : "empty_real_data");
           console.log("DZN PUBLIC SERVERS FRESH DATA LOADED");
           console.log("DZN SERVER LIST RATINGS READY");
@@ -371,6 +389,7 @@ export function PublicNetwork() {
           setServer(requestedSlug ? fallback.server ?? null : null);
           setServers(requestedSlug ? [] : fallback.servers ?? []);
           setStats(requestedSlug ? null : fallback.stats ?? null);
+          setServerGroups(requestedSlug ? emptyPublicServerGroups() : publicServerGroupsFromPayload(fallback, fallback.servers ?? []));
           setError("");
           setLoadState("loaded");
         } else if (hasVisibleData) {
@@ -405,7 +424,7 @@ export function PublicNetwork() {
         {slug ? (
           <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
         ) : (
-          <ServerBrowser servers={filteredServers} allServers={servers} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
+          <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
         )}
       </div>
     </main>
@@ -460,6 +479,7 @@ function PublicNav() {
 function ServerBrowser({
   servers,
   allServers,
+  groups,
   stats,
   filter,
   setFilter,
@@ -470,6 +490,7 @@ function ServerBrowser({
 }: {
   servers: PublicServer[];
   allServers: PublicServer[];
+  groups: PublicServerGroups;
   stats: PublicStats;
   filter: string;
   setFilter: (filter: string) => void;
@@ -481,6 +502,7 @@ function ServerBrowser({
   const isPreview = allServers.some((server) => server.is_locked);
   const initialError = loadState === "error_initial";
   const realEmpty = loadState === "empty_real_data";
+  const visibleGroups = useMemo(() => publicServerGroupsForFilter(groups, filter, allServers), [allServers, filter, groups]);
   return (
     <div className="pb-16 pt-16">
       <motion.header
@@ -532,14 +554,208 @@ function ServerBrowser({
         {error ? <MessagePanel message={error} onRetry={onRetry} /> : null}
         {loading ? <ServerSkeletonGrid /> : null}
         {!loading && !error && realEmpty && servers.length === 0 ? <EmptyPublicState /> : null}
+        {!loading && !error && !realEmpty ? <VisibilityDiscoverySections groups={visibleGroups} /> : null}
         {!loading && servers.length > 0 ? (
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            {servers.map((item, index) => (
-              <ServerCard key={item.public_slug} server={item} index={index} />
+          <section className="mt-8" aria-label="Standard server directory">
+            <VisibilitySectionHeader
+              icon={RadioTower}
+              eyebrow="Standard Servers"
+              title="All Public Servers"
+              copy="Starter, Pro and Premium servers remain visible here. Spotlight and featured placement do not change competitive rank."
+              meta={`${servers.length} visible listings`}
+            />
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              {servers.map((item, index) => (
+                <ServerCard key={item.public_slug} server={item} index={index} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups }) {
+  const spotlightServers = groups.spotlightServers.slice(0, 3);
+  const spotlightIds = new Set(spotlightServers.map((server) => server.linked_server_id));
+  const featuredServers = groups.featuredServers.filter((server) => !spotlightIds.has(server.linked_server_id)).slice(0, 4);
+  const featuredIds = new Set([...spotlightIds, ...featuredServers.map((server) => server.linked_server_id)]);
+  const recommendedServers = groups.recommendedServers.filter((server) => !featuredIds.has(server.linked_server_id)).slice(0, 6);
+
+  if (!spotlightServers.length && !featuredServers.length && !recommendedServers.length) return null;
+
+  return (
+    <div className="mt-7 grid gap-7">
+      {spotlightServers.length ? (
+        <section aria-label="Premium Spotlight Servers">
+          <VisibilitySectionHeader
+            icon={Crown}
+            eyebrow="Premium Spotlight"
+            title="Premium Spotlight Servers"
+            copy="Premium servers with eligible public profiles and enhanced discovery treatment."
+            meta="1-3 spotlight listings"
+            tone="premium"
+          />
+          <div className="mt-4 grid gap-4 xl:grid-cols-3">
+            {spotlightServers.map((server, index) => (
+              <DiscoveryServerCard key={`spotlight-${server.linked_server_id}`} server={server} index={index} variant="spotlight" />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {featuredServers.length ? (
+        <section aria-label="Featured Servers">
+          <VisibilitySectionHeader
+            icon={Sparkles}
+            eyebrow="Featured"
+            title="Featured Servers"
+            copy="Pro and Premium servers eligible for enhanced discovery rotation."
+            meta={`${featuredServers.length} featured`}
+          />
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {featuredServers.map((server, index) => (
+              <DiscoveryServerCard key={`featured-${server.linked_server_id}`} server={server} index={index} variant="featured" />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {recommendedServers.length ? (
+        <section aria-label="Recommended Servers">
+          <VisibilitySectionHeader
+            icon={Target}
+            eyebrow="Recommended"
+            title="Recommended Servers"
+            copy="Recommended by activity, reputation, profile quality and visibility settings."
+            meta={`${recommendedServers.length} recommendations`}
+          />
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {recommendedServers.map((server, index) => (
+              <DiscoveryServerCard key={`recommended-${server.linked_server_id}`} server={server} index={index} variant="recommended" />
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function VisibilitySectionHeader({
+  icon: Icon,
+  eyebrow,
+  title,
+  copy,
+  meta,
+  tone = "default",
+}: {
+  icon: typeof Activity;
+  eyebrow: string;
+  title: string;
+  copy: string;
+  meta?: string;
+  tone?: "default" | "premium";
+}) {
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        <p className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] ${tone === "premium" ? "text-amber-100" : "text-violet-100"}`}>
+          <Icon className="h-4 w-4" />
+          {eyebrow}
+        </p>
+        <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">{title}</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400" title="Visibility affects discovery placement only, not competitive leaderboard rank.">
+          {copy}
+        </p>
+      </div>
+      {meta ? (
+        <span className="inline-flex w-fit rounded-lg border border-white/10 bg-black/28 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-zinc-300">
+          {meta}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function DiscoveryServerCard({ server, index, variant }: { server: PublicServer; index: number; variant: "spotlight" | "featured" | "recommended" }) {
+  const visualCardStyle = server.cardStyle ?? server.visualLoadout?.cardStyle ?? server.planVisualTreatment?.cardTreatment ?? "standard";
+  const visualAccent = server.accentColour ?? server.visualLoadout?.accentColour ?? server.profileFrame?.glowColour ?? null;
+  const cardAccentStyle: VisualAccentStyle | undefined = visualAccent ? { "--dzn-card-accent": visualAccent } : undefined;
+  const tags = parseTags(server.tags_json).slice(0, variant === "spotlight" ? 4 : 3);
+  const isSpotlight = variant === "spotlight";
+
+  return (
+    <motion.article
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.32, delay: index * 0.04 }}
+      className={`relative overflow-hidden rounded-xl border border-white/10 bg-[#060817]/82 p-4 shadow-[0_18px_70px_rgba(0,0,0,0.34)] backdrop-blur-xl ${isSpotlight ? "shadow-[0_24px_90px_rgba(250,204,21,0.12)]" : ""} ${visualCardStyle !== "standard" ? `dzn-server-card--visual-${visualCardStyle}` : ""}`}
+      style={cardAccentStyle}
+    >
+      {isSpotlight ? <ServerThemeBanner theme={server.themeBanner} overlay /> : null}
+      <div className="relative z-10 flex h-full flex-col gap-4">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="flex min-w-0 gap-3">
+            <ServerProfileFrame frame={server.profileFrame} compact>
+              <GuildIcon server={server} size="md" />
+            </ServerProfileFrame>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] font-black uppercase tracking-[0.14em] text-violet-100/70">{server.guild_name ?? "DZN Network"}</p>
+              <h3 className={`${isSpotlight ? "text-2xl" : "text-xl"} mt-1 truncate font-black uppercase text-white`}>{server.server_name}</h3>
+              <p className="mt-1 truncate text-xs font-bold text-zinc-400">{server.server_type}</p>
+            </div>
+          </div>
+          <VisibilityLabels server={server} />
+        </div>
+
+        <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={isSpotlight ? 6 : 4} />
+
+        <div className="grid grid-cols-3 gap-2">
+          <MiniMetric label="Kills" value={formatNumber(server.total_kills)} />
+          <MiniMetric label="Players" value={formatPlayers(server)} />
+          <MiniMetric label="Reputation" value={server.reputation?.tier ?? "Bronze"} />
+        </div>
+
+        {tags.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {tags.map((tag) => (
+              <span key={`${server.linked_server_id}-${tag}`} className="rounded-md border border-cyan-300/15 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-bold text-cyan-100">
+                {tag}
+              </span>
             ))}
           </div>
         ) : null}
-      </section>
+
+        <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{server.visibilityExplanation?.summary ?? "Discovery placement"}</p>
+          <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400">
+            View
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      </div>
+    </motion.article>
+  );
+}
+
+function VisibilityLabels({ server }: { server: PublicServer }) {
+  const tier = server.visibilityTier ?? (server.premium_status === "premium" ? "premium" : server.isFeaturedEligible ? "enhanced" : "standard");
+  const label = tier === "premium" ? "Premium" : tier === "enhanced" ? "Enhanced" : "Standard";
+  const className = tier === "premium"
+    ? "border-amber-300/30 bg-amber-300/12 text-amber-100"
+    : tier === "enhanced"
+      ? "border-cyan-300/25 bg-cyan-300/10 text-cyan-100"
+      : "border-white/10 bg-white/[0.04] text-zinc-200";
+
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1.5">
+      <span className={`rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${className}`}>{label}</span>
+      {server.isSpotlightEligible ? (
+        <span className="rounded-md border border-violet-300/25 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">
+          Spotlight Eligible
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -1920,6 +2136,75 @@ function parseTags(value: string) {
   }
 }
 
+function emptyPublicServerGroups(): PublicServerGroups {
+  return {
+    featuredServers: [],
+    spotlightServers: [],
+    recommendedServers: [],
+    standardServers: [],
+  };
+}
+
+function publicServerGroupsFromPayload(payload: PublicServerGroupPayload | null | undefined, fallbackServers: PublicServer[] = []): PublicServerGroups {
+  const derived = derivePublicServerGroups(fallbackServers);
+  return {
+    spotlightServers: payloadHasGroup(payload?.spotlightServers) ? uniquePublicServers(payload?.spotlightServers ?? []) : derived.spotlightServers,
+    featuredServers: payloadHasGroup(payload?.featuredServers) ? uniquePublicServers(payload?.featuredServers ?? []) : derived.featuredServers,
+    recommendedServers: payloadHasGroup(payload?.recommendedServers) ? uniquePublicServers(payload?.recommendedServers ?? []) : derived.recommendedServers,
+    standardServers: payloadHasGroup(payload?.standardServers) ? uniquePublicServers(payload?.standardServers ?? []) : derived.standardServers,
+  };
+}
+
+function publicServerGroupsForFilter(groups: PublicServerGroups, filter: string, fallbackServers: PublicServer[]): PublicServerGroups {
+  const source = groupHasServers(groups) ? groups : derivePublicServerGroups(fallbackServers);
+  return {
+    spotlightServers: filterPublicServerGroup(source.spotlightServers, filter),
+    featuredServers: filterPublicServerGroup(source.featuredServers, filter),
+    recommendedServers: filterPublicServerGroup(source.recommendedServers, filter),
+    standardServers: filterPublicServerGroup(source.standardServers, filter),
+  };
+}
+
+function derivePublicServerGroups(servers: PublicServer[]): PublicServerGroups {
+  const ordered = uniquePublicServers([...servers].sort((a, b) => discoveryValue(b) - discoveryValue(a)));
+  const spotlightServers = ordered.filter((server) => server.isSpotlightEligible).slice(0, 3);
+  const featuredServers = ordered.filter((server) => server.isFeaturedEligible).slice(0, 6);
+  const recommendedServers = ordered.slice(0, 8);
+  const highlightedIds = new Set([...spotlightServers, ...featuredServers, ...recommendedServers].map((server) => server.linked_server_id));
+  const standardServers = servers.filter((server) => !highlightedIds.has(server.linked_server_id)).slice(0, 12);
+  return { spotlightServers, featuredServers, recommendedServers, standardServers };
+}
+
+function filterPublicServerGroup(servers: PublicServer[], filter: string) {
+  if (filter === "All") return servers;
+  return servers.filter((server) => server.server_type === filter);
+}
+
+function uniquePublicServers(servers: PublicServer[]) {
+  const seen = new Set<string>();
+  const unique: PublicServer[] = [];
+  for (const server of servers) {
+    const key = server.linked_server_id || server.public_slug;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(server);
+  }
+  return unique;
+}
+
+function payloadHasGroup(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function groupHasServers(groups: PublicServerGroups) {
+  return groups.spotlightServers.length > 0 || groups.featuredServers.length > 0 || groups.recommendedServers.length > 0 || groups.standardServers.length > 0;
+}
+
+function discoveryValue(server: PublicServer) {
+  const score = Number(server.discoveryScore ?? 0);
+  return Number.isFinite(score) ? score : 0;
+}
+
 function serverSortRank(server: PublicServer) {
   const adScore = advertisingRank(server);
   if (adScore > 0) return -adScore;
@@ -2016,6 +2301,12 @@ function publicCardFooter(server: PublicServer) {
   if (server.adm_status === "Connected") return "ADM connected";
   if (server.adm_status === "Discovered") return "ADM discovered";
   return "Awaiting sync data";
+}
+
+function formatNumber(value: number) {
+  const number = Number(value ?? 0);
+  if (!Number.isFinite(number)) return "0";
+  return Intl.NumberFormat("en-GB", { notation: number >= 10000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(number);
 }
 
 function publicEventDetail(event: PublicRecentEvent) {

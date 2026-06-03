@@ -74,13 +74,24 @@ const explanation = explainServerVisibility({ planKey: "premium" });
 assert.match(explanation.fairness, /does not change competitive leaderboard rank/i);
 
 const publicServers = readFileSync("functions/api/public/servers.ts", "utf8");
+const publicNetwork = readFileSync("components/network/public-network.tsx", "utf8");
 for (const field of ["visibilityWeight", "discoveryScore", "visibilityTier", "isFeaturedEligible", "isSpotlightEligible", "visibilityExplanation"]) {
   assert.equal(publicServers.includes(field), true, `/api/public/servers should expose ${field}.`);
 }
 for (const group of ["featuredServers", "spotlightServers", "recommendedServers", "standardServers"]) {
   assert.equal(publicServers.includes(group), true, `/api/public/servers should prepare ${group}.`);
+  assert.equal(publicNetwork.includes(group), true, `Public network UI should consume ${group}.`);
 }
 assert.equal(publicServers.includes("rankA") && publicServers.includes("scoreDiff"), true, "Discovery sorting should retain competitive rank/score as fallback only.");
+assert.equal(publicNetwork.includes("Premium Spotlight Servers"), true, "Spotlight section should render when spotlightServers exist.");
+assert.equal(publicNetwork.includes("!spotlightServers.length") && publicNetwork.includes("return null"), true, "Spotlight/recommendation sections should hide safely when empty.");
+assert.equal(publicNetwork.includes("Featured Servers"), true, "Featured section should render featuredServers.");
+assert.equal(publicNetwork.includes("Recommended Servers"), true, "Recommended section should render recommendedServers.");
+assert.equal(publicNetwork.includes("Recommended by activity, reputation, profile quality and visibility settings."), true, "Recommended copy should explain discovery placement.");
+assert.equal(publicNetwork.includes("All Public Servers"), true, "Standard server directory should still render.");
+assert.equal(publicNetwork.includes('tier === "premium" ? "Premium"'), true, "Premium label should only be used for premium visibility tier.");
+assert.equal(publicNetwork.includes("Spotlight Eligible"), true, "Spotlight eligible label should be available for eligible servers.");
+assert.equal(publicNetwork.includes("do not change competitive rank"), true, "Public UI copy should preserve competitive ranking fairness.");
 
 const docs = readFileSync("docs/PREMIUM_VISIBILITY_SYSTEM.md", "utf8");
 for (const text of ["What It Affects", "What It Does Not Affect", "Spotlight Eligibility", "competitive leaderboards remain fair"]) {
