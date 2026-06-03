@@ -42,6 +42,7 @@ import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner 
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import type { PlanVisualTreatment, ProfileFrameVisual, ServerThemeBannerVisual, VisualBadge } from "@/lib/badges/visuals";
+import type { PublicLockedBadge } from "@/lib/badges/rules";
 
 type PublicServer = {
   linked_server_id: string;
@@ -108,6 +109,11 @@ type PublicServer = {
   reputation?: ReputationSummary;
   achievement_showcase?: AchievementShowcase;
   badges?: VisualBadge[];
+  earnedBadges?: VisualBadge[];
+  lockedBadges?: PublicLockedBadge[];
+  showcaseBadges?: VisualBadge[];
+  crowns?: VisualBadge[];
+  reputationVisual?: VisualBadge;
   profileFrame?: ProfileFrameVisual;
   themeBanner?: ServerThemeBannerVisual;
   planVisualTreatment?: PlanVisualTreatment;
@@ -608,7 +614,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
               <h2 className="mt-1 truncate text-2xl font-black text-white">{server.server_name}</h2>
               <p className="mt-1 truncate text-sm font-bold text-zinc-400">{server.nitrado_service_name ?? server.server_name}</p>
               <ServerRatingChip server={server} />
-              <ServerCardBadges badges={server.badges} className="mt-3" />
+              <ServerCardBadges badges={server.showcaseBadges ?? server.badges} className="mt-3" />
               <ServerReputationBadges server={server} compact />
             </div>
           </div>
@@ -713,16 +719,13 @@ function RatingStars({ rating }: { rating: number }) {
 
 function ServerReputationBadges({ server, compact = false }: { server: PublicServer; compact?: boolean }) {
   const reputation = server.reputation;
-  const crowns = server.achievement_showcase?.crownBadges ?? [];
-  const seasonal = server.achievement_showcase?.seasonalTrophies ?? [];
-  const founder = server.achievement_showcase?.founderBadges ?? [];
-  const badges = [
-    ...crowns.slice(0, compact ? 1 : 3),
-    ...seasonal.slice(0, compact ? 1 : 2),
-    ...founder.slice(0, compact ? 1 : 1),
+  const visualBadges = [
+    ...(server.crowns ?? []).slice(0, compact ? 1 : 3),
+    ...(server.earnedBadges ?? []).filter((badge) => badge.category === "seasonal").slice(0, compact ? 1 : 2),
+    ...(server.earnedBadges ?? []).filter((badge) => badge.category === "founder").slice(0, compact ? 1 : 1),
   ];
 
-  if (!reputation && badges.length === 0 && server.premium_status !== "premium") return null;
+  if (!reputation && visualBadges.length === 0 && server.premium_status !== "premium") return null;
 
   return (
     <div className={`mt-3 flex flex-wrap gap-2 ${compact ? "max-w-[320px]" : ""}`}>
@@ -738,9 +741,9 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
           Premium
         </span>
       ) : null}
-      {badges.map((badge) => (
-        <span key={badge.key} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-amber-100">
-          {badge.category === "legendary" ? <Crown className="h-3.5 w-3.5" /> : <Trophy className="h-3.5 w-3.5" />}
+      {visualBadges.map((badge) => (
+        <span key={badge.code} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-amber-100">
+          {badge.category === "crown" ? <Crown className="h-3.5 w-3.5" /> : <Trophy className="h-3.5 w-3.5" />}
           <span className="truncate">{badge.name}</span>
         </span>
       ))}
@@ -750,13 +753,24 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
 
 function ServerAchievementPanel({ server }: { server: PublicServer }) {
   const showcase = server.achievement_showcase;
+  const earnedBadges = server.earnedBadges ?? [];
+  const lockedBadges = server.lockedBadges ?? [];
+  const groupedEarned = [
+    { title: "Crowns", icon: Crown, rows: earnedBadges.filter((badge) => badge.category === "crown") },
+    { title: "Reputation", icon: ShieldCheck, rows: earnedBadges.filter((badge) => badge.category === "reputation") },
+    { title: "Combat", icon: Crosshair, rows: earnedBadges.filter((badge) => badge.category === "combat") },
+    { title: "Seasonal", icon: Trophy, rows: earnedBadges.filter((badge) => badge.category === "seasonal") },
+    { title: "Premium/Status", icon: Sparkles, rows: earnedBadges.filter((badge) => badge.category === "premium") },
+    { title: "Community", icon: Users, rows: earnedBadges.filter((badge) => badge.category === "community") },
+    { title: "Founder/Legacy", icon: Medal, rows: earnedBadges.filter((badge) => badge.category === "founder") },
+  ];
   const groups = [
     { title: "Top Badges", icon: Medal, rows: showcase?.topEarnedBadges ?? [] },
     { title: "Crowns", icon: Crown, rows: showcase?.crownBadges ?? [] },
     { title: "Seasonal", icon: Trophy, rows: showcase?.seasonalTrophies ?? [] },
     { title: "Founder", icon: ShieldCheck, rows: showcase?.founderBadges ?? [] },
   ];
-  const hasRows = groups.some((group) => group.rows.length > 0) || server.premium_status === "premium";
+  const hasRows = earnedBadges.length > 0 || groups.some((group) => group.rows.length > 0) || server.premium_status === "premium";
 
   return (
     <GlassPanel title="Achievements" icon={Crown}>
@@ -775,18 +789,44 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
         </div>
 
         <BadgeShowcase
-          badges={server.badges ?? []}
+          badges={server.showcaseBadges ?? server.badges ?? []}
           title="Visual Showcase"
           emptyText="Badge visuals will appear here as this server earns crowns, seasonal trophies, and reputation rewards."
         />
 
+        {earnedBadges.length ? (
+          <div className="grid gap-3">
+            {groupedEarned.filter((group) => group.rows.length).map((group) => (
+              <div key={group.title} className="rounded-lg border border-white/10 bg-black/24 p-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">{group.title}</p>
+                <div className="mt-3 grid gap-2">
+                  {group.rows.slice(0, 8).map((badge) => (
+                    <AchievementRow key={badge.code} icon={group.icon} name={badge.name} description={badge.description} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {lockedBadges.length ? (
+          <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">Locked progress</p>
+            <div className="mt-3 grid gap-2">
+              {lockedBadges.slice(0, 6).map((badge) => (
+                <LockedBadgeProgress key={badge.code} badge={badge} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {hasRows ? (
           <div className="grid gap-3">
-            {server.premium_status === "premium" ? <AchievementRow icon={Sparkles} name="Premium Server" description="Premium discovery and reputation framework member." /> : null}
+            {earnedBadges.length === 0 && server.premium_status === "premium" ? <AchievementRow icon={Sparkles} name="Premium Server" description="Premium discovery and reputation framework member." /> : null}
             {groups.map((group) =>
-              group.rows.slice(0, 4).map((badge) => (
+              earnedBadges.length === 0 ? group.rows.slice(0, 4).map((badge) => (
                 <AchievementRow key={badge.key} icon={group.icon} name={badge.name} description={badge.description} />
-              )),
+              )) : null,
             )}
           </div>
         ) : (
@@ -794,6 +834,25 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
         )}
       </div>
     </GlassPanel>
+  );
+}
+
+function LockedBadgeProgress({ badge }: { badge: PublicLockedBadge }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-black uppercase text-zinc-100">{badge.name}</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">{badge.requirementLabel}</p>
+        </div>
+        <span className="shrink-0 rounded-md border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+          {Math.round(badge.progressPercent)}%
+        </span>
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-violet-300" style={{ width: `${Math.max(0, Math.min(100, badge.progressPercent))}%` }} />
+      </div>
+    </div>
   );
 }
 
@@ -898,7 +957,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
               </div>
-              <ServerCardBadges badges={server.badges} max={8} className="mt-4" />
+              <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={8} className="mt-4" />
               <ServerReputationBadges server={server} />
             </div>
           </div>

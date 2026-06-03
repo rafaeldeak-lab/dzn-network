@@ -199,6 +199,7 @@ export type LinkedServer = {
   ip_address?: string | null;
   player_slots?: number | null;
   status: "pending" | "live" | "error" | "Pending" | "Live" | "Error";
+  created_at?: string | null;
   public_slug: string;
   display_name?: string | null;
   hostname?: string | null;

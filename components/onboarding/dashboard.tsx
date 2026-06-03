@@ -34,7 +34,8 @@ import Link from "next/link";
 
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { getLockedShowcaseBadges, getServerVisualShowcase } from "@/lib/badges/visuals";
+import { getServerVisualShowcase } from "@/lib/badges/visuals";
+import { buildServerBadgeCollection } from "@/lib/badges/rules";
 import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
 import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
@@ -843,6 +844,41 @@ function ServerDashboard({
       ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending"),
   };
   const ownerReputationTier = inferDashboardReputationTier(server.score ?? cachedDashboardStats?.stats.score ?? 0);
+  const ownerBadgeCollection = useMemo(() => buildServerBadgeCollection({
+    serverId: server.id,
+    planKey: effectiveBillingStatus?.plan_key ?? "starter",
+    createdAt: server.created_at,
+    totalKills: dashboardStatValues.kills,
+    totalDeaths: dashboardStatValues.deaths,
+    totalJoins: dashboardStatValues.joins,
+    totalDisconnects: dashboardStatValues.disconnects,
+    uniquePlayers: dashboardStatValues.uniquePlayers,
+    longestKill: server.longest_kill ?? server.score_breakdown?.longest_kill_points ?? 0,
+    rank: server.global_rank ?? server.rank ?? null,
+    score: server.score ?? cachedDashboardStats?.stats.score ?? 0,
+    category: normalizedServerCategory ?? effectiveServerMode,
+    active: statsSyncActive,
+    verified: statsSyncActive,
+    featured: false,
+  }), [
+    cachedDashboardStats?.stats.score,
+    dashboardStatValues.deaths,
+    dashboardStatValues.disconnects,
+    dashboardStatValues.joins,
+    dashboardStatValues.kills,
+    dashboardStatValues.uniquePlayers,
+    effectiveBillingStatus?.plan_key,
+    effectiveServerMode,
+    normalizedServerCategory,
+    server.created_at,
+    server.global_rank,
+    server.id,
+    server.longest_kill,
+    server.rank,
+    server.score,
+    server.score_breakdown?.longest_kill_points,
+    statsSyncActive,
+  ]);
   const ownerVisuals = useMemo(() => getServerVisualShowcase({
     planKey: effectiveBillingStatus?.plan_key ?? "starter",
     reputationTier: ownerReputationTier,
@@ -850,11 +886,8 @@ function ServerDashboard({
     mapName: server.map_name ?? server.mission,
     maxBadges: 7,
   }), [effectiveBillingStatus?.plan_key, effectiveServerMode, normalizedServerCategory, ownerReputationTier, server.map_name, server.mission]);
-  const ownerLockedBadges = useMemo(() => getLockedShowcaseBadges({
-    planKey: effectiveBillingStatus?.plan_key ?? "starter",
-    reputationTier: ownerReputationTier,
-    category: normalizedServerCategory ?? effectiveServerMode,
-  }).slice(0, 4), [effectiveBillingStatus?.plan_key, effectiveServerMode, normalizedServerCategory, ownerReputationTier]);
+  const ownerEarnedBadges = ownerBadgeCollection.showcaseBadges.length ? ownerBadgeCollection.showcaseBadges : ownerVisuals.badges;
+  const ownerLockedBadges = ownerBadgeCollection.lockedBadges.slice(0, 4);
   const hasDashboardDataToDisplay = Boolean(
     effectiveSyncData ||
     effectiveDashboardHealth ||
@@ -2780,7 +2813,7 @@ function ServerDashboard({
                     <p className="mt-1 text-[10px] font-black uppercase text-cyan-100">{ownerVisuals.planVisualTreatment.label} visual treatment</p>
                   </div>
                 </div>
-                <ServerCardBadges badges={ownerVisuals.badges} max={5} />
+                <ServerCardBadges badges={ownerEarnedBadges} max={5} />
               </div>
             </ServerThemeBanner>
             <div className="mt-4 grid grid-cols-3 gap-2">

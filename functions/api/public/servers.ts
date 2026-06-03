@@ -18,11 +18,13 @@ import {
   withPublicApiMetadata,
   writePublicApiCache,
 } from "../../_lib/public-api-cache";
+import { getPublicBadgeAwardMap, type ServerBadgeAwardRow } from "../../_lib/badge-awards";
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import { buildAchievementShowcase, buildServerReputationSummary, type AchievementShowcase, type ReputationSummary } from "../../_lib/reputation";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
 import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
+import { buildServerBadgeCollection, type PublicLockedBadge, type ServerBadgeCollection } from "../../../lib/badges/rules";
 
 type PublicServerRow = {
   id: string;
@@ -170,6 +172,11 @@ type SafePublicServer = {
   reputation: ReputationSummary;
   achievement_showcase: AchievementShowcase;
   badges?: VisualBadge[];
+  earnedBadges?: VisualBadge[];
+  lockedBadges?: PublicLockedBadge[];
+  showcaseBadges?: VisualBadge[];
+  crowns?: VisualBadge[];
+  reputationVisual?: VisualBadge;
   profileFrame?: ProfileFrameVisual;
   themeBanner?: ServerThemeBannerVisual;
   planVisualTreatment?: PlanVisualTreatment;
@@ -274,7 +281,14 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
   const rankingById = new Map(rankedServers.map((server) => [server.server_id, server]));
   const publicRows = slug ? await findPublicServerRowsBySlug(env, rows, slug) : rows;
   const reviewSummaries = await getPublicServerRatingSummaries(env, publicRows.map((row) => row.id));
-  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(env, row, rankingById.get(row.id) ?? null, reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary()))))
+  const badgeAwardMap = await getPublicBadgeAwardMap(env, publicRows.map((row) => row.id));
+  const servers = (await Promise.all(publicRows.map((row) => toSafePublicServer(
+    env,
+    row,
+    rankingById.get(row.id) ?? null,
+    reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary(),
+    badgeAwardMap.get(row.id) ?? null,
+  ))))
     .filter((server): server is SafePublicServer => Boolean(server))
     .map((server) => applyPublicServerAccess(server, viewerLoggedIn));
   sortPublicServersForDiscovery(servers);
@@ -651,7 +665,13 @@ async function ensureServerLogConfigTable(env: Env) {
     .run();
 }
 
-async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: PublicLeaderboardServer | null, reviewSummary: PublicServerRatingSummary): Promise<SafePublicServer | null> {
+async function toSafePublicServer(
+  env: Env,
+  row: PublicServerRow,
+  ranking: PublicLeaderboardServer | null,
+  reviewSummary: PublicServerRatingSummary,
+  badgeAwardData: { awards: ServerBadgeAwardRow[]; crownCodes: string[] } | null,
+): Promise<SafePublicServer | null> {
   if (!row.public_slug) return null;
   const tagsJson = normalizePublicTagsJson(row.tags_json);
   const tags = parsePublicTags(tagsJson);
@@ -719,12 +739,28 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     category: row.server_type,
     active: statsSync === "Active",
   });
+  const advertising = publicAdvertisingFromState({
+    last_bumped_at: row.last_bumped_at,
+    bump_count_current_period: numberOrZero(row.bump_count_current_period),
+    bump_period_start: row.bump_period_start,
+    bump_period_end: row.bump_period_end,
+    featured_until: row.featured_until,
+    featured_label: row.featured_label,
+  });
   const visualShowcase = getServerVisualShowcase({
     planKey,
     reputationTier: reputation.tier,
     category: row.server_type,
     mapName: row.map_name ?? row.mission,
     achievementShowcase,
+  });
+  const badgeCollection = buildPublicBadgeCollection({
+    row,
+    stats,
+    planKey,
+    statsSync,
+    awardData: badgeAwardData,
+    featured: advertising.is_featured,
   });
   return {
     linked_server_id: row.id,
@@ -767,20 +803,19 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     average_rating: reviewSummary.average_rating,
     review_count: reviewSummary.review_count,
     rating_breakdown: reviewSummary.rating_breakdown,
-    advertising: publicAdvertisingFromState({
-      last_bumped_at: row.last_bumped_at,
-      bump_count_current_period: numberOrZero(row.bump_count_current_period),
-      bump_period_start: row.bump_period_start,
-      bump_period_end: row.bump_period_end,
-      featured_until: row.featured_until,
-      featured_label: row.featured_label,
-    }),
+    advertising,
     plan_key: planKey,
     premium_status: reputation.premiumStatus,
     visibility_weight: reputation.visibilityWeight,
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
+    badges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    earnedBadges: badgeCollection.earnedBadges,
+    lockedBadges: badgeCollection.lockedBadges,
+    showcaseBadges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    crowns: badgeCollection.crowns,
+    reputationVisual: badgeCollection.reputationBadge,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -866,6 +901,22 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     mapName: row.map_name ?? row.mission,
     achievementShowcase,
   });
+  const advertising = publicAdvertisingFromState({
+    last_bumped_at: row.last_bumped_at,
+    bump_count_current_period: numberOrZero(row.bump_count_current_period),
+    bump_period_start: row.bump_period_start,
+    bump_period_end: row.bump_period_end,
+    featured_until: row.featured_until,
+    featured_label: row.featured_label,
+  });
+  const badgeCollection = buildPublicBadgeCollection({
+    row,
+    stats,
+    planKey,
+    statsSync,
+    awardData: null,
+    featured: advertising.is_featured,
+  });
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -905,20 +956,19 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     score_breakdown: null,
     stats_sync_active: statsSync === "Active",
     ...emptyPublicServerRatingSummary(),
-    advertising: publicAdvertisingFromState({
-      last_bumped_at: row.last_bumped_at,
-      bump_count_current_period: numberOrZero(row.bump_count_current_period),
-      bump_period_start: row.bump_period_start,
-      bump_period_end: row.bump_period_end,
-      featured_until: row.featured_until,
-      featured_label: row.featured_label,
-    }),
+    advertising,
     plan_key: planKey,
     premium_status: reputation.premiumStatus,
     visibility_weight: reputation.visibilityWeight,
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
+    badges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    earnedBadges: badgeCollection.earnedBadges,
+    lockedBadges: badgeCollection.lockedBadges,
+    showcaseBadges: badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges,
+    crowns: badgeCollection.crowns,
+    reputationVisual: badgeCollection.reputationBadge,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -928,6 +978,49 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     },
     recent_events: [],
   };
+}
+
+function buildPublicBadgeCollection(input: {
+  row: PublicServerRow;
+  stats: {
+    total_kills: number;
+    total_deaths: number;
+    total_joins: number;
+    total_disconnects: number;
+    unique_players: number;
+    longest_kill: number;
+    rank: number | null;
+    score: number;
+  };
+  planKey: string;
+  statsSync: "Active" | "Pending" | "Not Started";
+  awardData: { awards: ServerBadgeAwardRow[]; crownCodes: string[] } | null;
+  featured: boolean;
+}): ServerBadgeCollection {
+  const awards = input.awardData?.awards ?? [];
+  const awardedBadgeCodes = awards.map((award) => award.badge_code);
+  const earnedAtByCode = Object.fromEntries(awards.map((award) => [award.badge_code, award.awarded_at]));
+  return buildServerBadgeCollection({
+    serverId: input.row.id,
+    planKey: input.planKey,
+    createdAt: input.row.created_at,
+    totalKills: input.stats.total_kills,
+    totalDeaths: input.stats.total_deaths,
+    totalJoins: input.stats.total_joins,
+    totalDisconnects: input.stats.total_disconnects,
+    uniquePlayers: input.stats.unique_players,
+    longestKill: input.stats.longest_kill,
+    rank: input.stats.rank,
+    score: input.stats.score,
+    category: input.row.server_type,
+    active: input.statsSync === "Active",
+    verified: String(input.row.status ?? "").toLowerCase() === "live" || input.statsSync === "Active",
+    featured: input.featured,
+    achievementCount: awardedBadgeCodes.length,
+    awardedBadgeCodes,
+    activeCrownCodes: input.awardData?.crownCodes ?? [],
+    earnedAtByCode,
+  });
 }
 
 async function getPublicServerRatingSummaries(env: Env, linkedServerIds: string[]) {
