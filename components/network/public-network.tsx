@@ -38,8 +38,10 @@ import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { DznLogo } from "@/components/dzn/dzn-logo";
+import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
+import type { PlanVisualTreatment, ProfileFrameVisual, ServerThemeBannerVisual, VisualBadge } from "@/lib/badges/visuals";
 
 type PublicServer = {
   linked_server_id: string;
@@ -105,6 +107,10 @@ type PublicServer = {
   visibility_weight?: number;
   reputation?: ReputationSummary;
   achievement_showcase?: AchievementShowcase;
+  badges?: VisualBadge[];
+  profileFrame?: ProfileFrameVisual;
+  themeBanner?: ServerThemeBannerVisual;
+  planVisualTreatment?: PlanVisualTreatment;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -594,12 +600,15 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
         {isAdvertised ? <span className="dzn-boosted-card-line" aria-hidden="true" /> : null}
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-center gap-4">
-            <GuildIcon server={server} size="md" />
+            <ServerProfileFrame frame={server.profileFrame} compact>
+              <GuildIcon server={server} size="md" />
+            </ServerProfileFrame>
             <div className="min-w-0">
               <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified Discord"}</p>
               <h2 className="mt-1 truncate text-2xl font-black text-white">{server.server_name}</h2>
               <p className="mt-1 truncate text-sm font-bold text-zinc-400">{server.nitrado_service_name ?? server.server_name}</p>
               <ServerRatingChip server={server} />
+              <ServerCardBadges badges={server.badges} className="mt-3" />
               <ServerReputationBadges server={server} compact />
             </div>
           </div>
@@ -765,6 +774,12 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
           </div>
         </div>
 
+        <BadgeShowcase
+          badges={server.badges ?? []}
+          title="Visual Showcase"
+          emptyText="Badge visuals will appear here as this server earns crowns, seasonal trophies, and reputation rewards."
+        />
+
         {hasRows ? (
           <div className="grid gap-3">
             {server.premium_status === "premium" ? <AchievementRow icon={Sparkles} name="Premium Server" description="Premium discovery and reputation framework member." /> : null}
@@ -855,11 +870,12 @@ function ServerProfile({ server }: { server: PublicServer }) {
       </Link>
 
       <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className="relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-        <div className="absolute inset-0 bg-[url('/media/dzn-cinematic-survivor.png')] bg-cover bg-center opacity-28" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_18%,rgba(139,92,246,0.32),transparent_30%),linear-gradient(90deg,rgba(2,3,10,0.95),rgba(2,3,10,0.58),rgba(2,3,10,0.9))]" />
+        <ServerThemeBanner theme={server.themeBanner} overlay />
         <div className="relative z-10 grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="flex min-w-0 flex-col gap-5 sm:flex-row">
-            <ServerHeroAvatar server={server} />
+            <ServerProfileFrame frame={server.profileFrame}>
+              <ServerHeroAvatar server={server} />
+            </ServerProfileFrame>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">DZN Network</span>
@@ -882,6 +898,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
               </div>
+              <ServerCardBadges badges={server.badges} max={8} className="mt-4" />
               <ServerReputationBadges server={server} />
             </div>
           </div>

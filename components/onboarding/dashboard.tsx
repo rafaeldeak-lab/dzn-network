@@ -32,7 +32,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { DznLogo } from "@/components/dzn/dzn-logo";
+import { getLockedShowcaseBadges, getServerVisualShowcase } from "@/lib/badges/visuals";
 import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
 import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
@@ -840,6 +842,19 @@ function ServerDashboard({
     score: server.score_label
       ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending"),
   };
+  const ownerReputationTier = inferDashboardReputationTier(server.score ?? cachedDashboardStats?.stats.score ?? 0);
+  const ownerVisuals = useMemo(() => getServerVisualShowcase({
+    planKey: effectiveBillingStatus?.plan_key ?? "starter",
+    reputationTier: ownerReputationTier,
+    category: normalizedServerCategory ?? effectiveServerMode,
+    mapName: server.map_name ?? server.mission,
+    maxBadges: 7,
+  }), [effectiveBillingStatus?.plan_key, effectiveServerMode, normalizedServerCategory, ownerReputationTier, server.map_name, server.mission]);
+  const ownerLockedBadges = useMemo(() => getLockedShowcaseBadges({
+    planKey: effectiveBillingStatus?.plan_key ?? "starter",
+    reputationTier: ownerReputationTier,
+    category: normalizedServerCategory ?? effectiveServerMode,
+  }).slice(0, 4), [effectiveBillingStatus?.plan_key, effectiveServerMode, normalizedServerCategory, ownerReputationTier]);
   const hasDashboardDataToDisplay = Boolean(
     effectiveSyncData ||
     effectiveDashboardHealth ||
@@ -2743,6 +2758,42 @@ function ServerDashboard({
               <MiniInfo label="Servers Used" value={effectiveBillingStatus ? `${effectiveBillingStatus.linked_server_count} / ${effectiveBillingStatus.entitlements.max_linked_servers}` : "Loading"} />
               <MiniInfo label="Bumps This Month" value={advertisingStatus ? `${advertisingStatus.bump_count_current_period} / ${advertisingStatus.included_bumps_per_month}` : String(effectiveBillingStatus?.entitlements.included_bumps_per_month ?? "Loading")} />
               <MiniInfo label="Renews" value={billingRenewalLabel(effectiveBillingStatus)} />
+            </div>
+          </DashboardPanel>
+          <DashboardPanel className="p-4">
+            <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Badge & Theme Preview" />
+            <ServerThemeBanner theme={ownerVisuals.themeBanner} className="mt-4">
+              <div className="grid gap-3 p-3">
+                <div className="flex items-center gap-3">
+                  <ServerProfileFrame frame={ownerVisuals.profileFrame} compact>
+                    {server.guild_icon_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={server.guild_icon_url} alt="" className="h-12 w-12 rounded-lg object-cover" />
+                    ) : (
+                      <span className="grid h-12 w-12 place-items-center rounded-lg border border-white/10 bg-black/40 text-lg font-black text-white">
+                        {(server.guild_name ?? serverDisplayName ?? "D")[0]}
+                      </span>
+                    )}
+                  </ServerProfileFrame>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black uppercase text-white">{serverDisplayName}</p>
+                    <p className="mt-1 text-[10px] font-black uppercase text-cyan-100">{ownerVisuals.planVisualTreatment.label} visual treatment</p>
+                  </div>
+                </div>
+                <ServerCardBadges badges={ownerVisuals.badges} max={5} />
+              </div>
+            </ServerThemeBanner>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <MiniInfo label="Reputation" value={ownerReputationTier} />
+              <MiniInfo label="Frame" value={ownerVisuals.profileFrame.label} />
+              <MiniInfo label="Theme" value={ownerVisuals.themeBanner.label} />
+            </div>
+            <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-3">
+              <p className="text-[10px] font-black uppercase text-zinc-500">Locked rewards preview</p>
+              <div className="mt-3">
+                <BadgeShowcase badges={ownerLockedBadges} title="Locked Badges" emptyText="More locked rewards will appear as DZN seasons expand." />
+              </div>
+              <p className="mt-3 text-xs leading-5 text-zinc-400">Owners can preview rewards here. Competitive badges are earned from DZN activity, reputation, crowns, and seasons.</p>
             </div>
           </DashboardPanel>
           <DashboardPanel className="p-4">
@@ -7532,6 +7583,17 @@ function planLabel(value: string) {
   if (value === "pro") return "Pro";
   if (value === "premium" || value === "network" || value === "partner") return "Premium";
   return "Free";
+}
+
+function inferDashboardReputationTier(score: number | null | undefined) {
+  const value = Number(score ?? 0);
+  if (!Number.isFinite(value)) return "Bronze";
+  if (value >= 1450) return "Legendary";
+  if (value >= 1000) return "Diamond";
+  if (value >= 650) return "Platinum";
+  if (value >= 350) return "Gold";
+  if (value >= 150) return "Silver";
+  return "Bronze";
 }
 
 function formatPublishingInterval(minutes: number | null | undefined) {

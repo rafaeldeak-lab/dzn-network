@@ -22,6 +22,7 @@ import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLead
 import { buildAchievementShowcase, buildServerReputationSummary, type AchievementShowcase, type ReputationSummary } from "../../_lib/reputation";
 import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
+import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
 
 type PublicServerRow = {
   id: string;
@@ -168,6 +169,10 @@ type SafePublicServer = {
   visibility_weight: number;
   reputation: ReputationSummary;
   achievement_showcase: AchievementShowcase;
+  badges?: VisualBadge[];
+  profileFrame?: ProfileFrameVisual;
+  themeBanner?: ServerThemeBannerVisual;
+  planVisualTreatment?: PlanVisualTreatment;
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
@@ -714,6 +719,13 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     category: row.server_type,
     active: statsSync === "Active",
   });
+  const visualShowcase = getServerVisualShowcase({
+    planKey,
+    reputationTier: reputation.tier,
+    category: row.server_type,
+    mapName: row.map_name ?? row.mission,
+    achievementShowcase,
+  });
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -768,6 +780,7 @@ async function toSafePublicServer(env: Env, row: PublicServerRow, ranking: Publi
     visibility_weight: reputation.visibilityWeight,
     reputation,
     achievement_showcase: achievementShowcase,
+    ...visualShowcase,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -846,6 +859,13 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     category: row.server_type,
     active: statsSync === "Active",
   });
+  const visualShowcase = getServerVisualShowcase({
+    planKey,
+    reputationTier: reputation.tier,
+    category: row.server_type,
+    mapName: row.map_name ?? row.mission,
+    achievementShowcase,
+  });
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -898,6 +918,7 @@ function toSafePublicServerPreview(row: PublicServerRow): SafePublicServer | nul
     visibility_weight: reputation.visibilityWeight,
     reputation,
     achievement_showcase: achievementShowcase,
+    ...visualShowcase,
     stats,
     network_status: {
       adm_status: admStatus,
@@ -1251,24 +1272,32 @@ function mockReputationFields(planKey: string, input: {
     category: input.server_type,
     active: input.active,
   });
+  const achievementShowcase = buildAchievementShowcase({
+    planKey,
+    createdAt: input.created_at,
+    totalKills: input.total_kills,
+    totalDeaths: input.total_deaths,
+    totalJoins: input.total_joins,
+    totalDisconnects: input.total_disconnects,
+    uniquePlayers: input.unique_players,
+    rank: input.rank,
+    score: input.score,
+    category: input.server_type,
+    active: input.active,
+  });
+  const visualShowcase = getServerVisualShowcase({
+    planKey,
+    reputationTier: reputation.tier,
+    category: input.server_type,
+    achievementShowcase,
+  });
   return {
     plan_key: publicPlanKey(planKey),
     premium_status: reputation.premiumStatus,
     visibility_weight: reputation.visibilityWeight,
     reputation,
-    achievement_showcase: buildAchievementShowcase({
-      planKey,
-      createdAt: input.created_at,
-      totalKills: input.total_kills,
-      totalDeaths: input.total_deaths,
-      totalJoins: input.total_joins,
-      totalDisconnects: input.total_disconnects,
-      uniquePlayers: input.unique_players,
-      rank: input.rank,
-      score: input.score,
-      category: input.server_type,
-      active: input.active,
-    }),
+    achievement_showcase: achievementShowcase,
+    ...visualShowcase,
   };
 }
 
