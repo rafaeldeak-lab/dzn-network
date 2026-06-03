@@ -354,14 +354,14 @@ function withHomeStatsEvidence<T extends {
 
 async function buildPreviewHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, topServers, gameModes, mapNodes, lastSuccessfulAdmImportAt, totalEventsTracked] = await Promise.all([
+  const [totals, topServers, gameModes, mapNodes, lastSuccessfulAdmImportAt] = await Promise.all([
     getPreviewTotals(db),
     getPreviewTopServers(db),
     getGameModes(db).catch(() => ({ pvp: 0, pve: 0, deathmatch: 0, pvpPve: 0 })),
     getPreviewMapNodes(db),
     getLastSuccessfulAdmImportAt(db),
-    getMonotonicNetworkEventTotal(env),
   ]);
+  const totalEventsTracked = await getMonotonicNetworkEventTotal(env, approximateNetworkEventTotalFromTotals(totals));
   const syncActive = numberOrZero(totals.statsActiveServers);
   const serversLinked = numberOrZero(totals.serversLinked);
   const recentActivity = buildPreviewRecentActivity(topServers);
@@ -464,11 +464,10 @@ async function getPreviewTotals(db: D1Database) {
 
 async function buildHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, profileCount, recentEventsCount, totalEventsTracked, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers, lastSuccessfulAdmImportAt] = await Promise.all([
+  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers, lastSuccessfulAdmImportAt] = await Promise.all([
     getTotals(db),
     getPlayerProfileCount(db),
     getRecentEventsCount(db),
-    getMonotonicNetworkEventTotal(env),
     getGameModes(db),
     getTopServers(env),
     getTopPlayers(db),
@@ -477,6 +476,7 @@ async function buildHomeStats(env: Env) {
     getRankedBuildServers(env, 10),
     getLastSuccessfulAdmImportAt(db),
   ]);
+  const totalEventsTracked = await getMonotonicNetworkEventTotal(env, Math.max(approximateNetworkEventTotalFromTotals(totals), recentEventsCount));
   const buildLeaderboardRows = await buildBuildLeaderboardRows(db, topBuildServers);
 
   const playersSeen = Math.max(numberOrZero(totals.playersSeenFromStats), profileCount);
@@ -1003,6 +1003,15 @@ async function getServerStatsNetworkEventTotal(db: D1Database) {
     .first<{ count: number | null }>()
     .catch(() => null);
   return numberOrZero(row?.count);
+}
+
+function approximateNetworkEventTotalFromTotals(totals: Partial<TotalsRow>) {
+  const kills = numberOrZero(totals.killsTracked);
+  const deaths = numberOrZero(totals.deathsTracked);
+  const joins = numberOrZero(totals.joinsTracked);
+  const killJoinDisconnectTotal = numberOrZero(totals.recentEventsCount);
+  const inferredDisconnects = Math.max(0, killJoinDisconnectTotal - kills - joins);
+  return Math.max(killJoinDisconnectTotal, kills + deaths + joins + inferredDisconnects);
 }
 
 function extractHomeStatsEventTotal(payload: unknown): number {

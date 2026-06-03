@@ -51,7 +51,7 @@ function checkPlanIntervals() {
   const expected = [
     ["starter", 15, 60],
     ["pro", 10, 30],
-    ["network", 5, 15],
+    ["network", 3, 10],
     ["partner", 3, 10],
   ] as const;
 

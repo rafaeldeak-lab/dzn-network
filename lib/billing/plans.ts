@@ -151,7 +151,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
   premium: {
     key: "premium",
     name: "Premium",
-    monthly_price: 24.99,
+    monthly_price: 19.99,
     stripe_price_env_key: "STRIPE_PRICE_PREMIUM",
     server_status_interval_minutes: 1,
     adm_discovery_interval_minutes: 3,
@@ -211,7 +211,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
   network: {
     key: "network",
     name: "Premium",
-    monthly_price: 24.99,
+    monthly_price: 19.99,
     stripe_price_env_key: "STRIPE_PRICE_NETWORK",
     server_status_interval_minutes: 3,
     adm_discovery_interval_minutes: 5,
@@ -271,7 +271,7 @@ export const BILLING_PLAN_CONFIG: Record<PlanKey, BillingPlanConfig> = {
   partner: {
     key: "partner",
     name: "Premium",
-    monthly_price: 24.99,
+    monthly_price: 19.99,
     stripe_price_env_key: "STRIPE_PRICE_PARTNER",
     server_status_interval_minutes: 1,
     adm_discovery_interval_minutes: 3,
@@ -362,7 +362,8 @@ export const AUTO_POST_OPTIONS: AutoPostOption[] = [
 
 export function normalizePlanKey(value: unknown): PlanKey {
   const key = typeof value === "string" ? value.toLowerCase() : "";
-  return key === "starter" || key === "pro" || key === "premium" || key === "network" || key === "partner" ? key : "free";
+  if (key === "network" || key === "partner") return "premium";
+  return key === "starter" || key === "pro" || key === "premium" ? key : "free";
 }
 
 export function getPlanByKey(planKey: unknown): BillingPlanConfig {

@@ -168,20 +168,20 @@ const PLAN_MARKETING: Record<PaidPlanKey, {
 }> = {
   starter: {
     name: "Starter",
-    price_label: "GBP 4.99/mo",
+    price_label: "£4.99/month",
     monthly_price_gbp: 4.99,
     features: ["Server listing", "Basic leaderboards", "Public server profile", "Achievement and seasonal participation", "24 hour public publishing"],
   },
   pro: {
     name: "Pro",
-    price_label: "GBP 9.99/mo",
+    price_label: "£9.99/month",
     monthly_price_gbp: 9.99,
     features: ["Advanced analytics", "Featured rotation placement", "Enhanced discovery", "Additional profile customisation", "4 hour public publishing"],
   },
   premium: {
     name: "Premium",
-    price_label: "GBP 24.99/mo",
-    monthly_price_gbp: 24.99,
+    price_label: "£19.99/month",
+    monthly_price_gbp: 19.99,
     features: ["Homepage featured placement", "Premium badge", "Priority discovery", "Server spotlight eligibility", "Premium reputation multiplier"],
   },
 };

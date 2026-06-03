@@ -4094,9 +4094,9 @@ type DashboardReviewSummary = {
 };
 
 const billingPlans = [
-  { key: "starter", label: "Starter", price: "GBP 4.99/mo", detail: "Server listing, basic leaderboards, 24 hour public publishing" },
-  { key: "pro", label: "Pro", price: "GBP 9.99/mo", detail: "Featured rotation, enhanced discovery, 4 hour public publishing" },
-  { key: "premium", label: "Premium", price: "GBP 24.99/mo", detail: "Homepage featured placement, premium badge, real-time public publishing" },
+  { key: "starter", label: "Starter", price: "£4.99/month", detail: "Server listing, basic leaderboards, 24 hour public publishing" },
+  { key: "pro", label: "Pro", price: "£9.99/month", detail: "Featured rotation, enhanced discovery, 4 hour public publishing" },
+  { key: "premium", label: "Premium", price: "£19.99/month", detail: "Homepage featured placement, premium badge, real-time public publishing" },
 ] as const;
 
 function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; message: string; onRefresh: () => Promise<void> }) {
@@ -7684,7 +7684,7 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_use_advanced_analytics: true,
       can_join_events: true,
       can_use_featured_slots: true,
-      monthly_price_gbp: 24.99,
+      monthly_price_gbp: 19.99,
       server_status_interval_minutes: 1,
       adm_discovery_interval_minutes: 3,
       adm_pull_interval_minutes: 10,

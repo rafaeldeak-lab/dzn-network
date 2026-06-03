@@ -40,6 +40,8 @@ assert.deepEqual(summaries.map((plan) => plan.plan_key), ["starter", "pro", "pre
 assert.equal(summaries.find((plan) => plan.plan_key === "starter")?.visibility_weight, 1);
 assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.visibility_weight, 2);
 assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.visibility_weight, 4);
+assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
+assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
 assert.equal(summaries.find((plan) => plan.plan_key === "starter")?.public_publish_interval_minutes, 1440);
 assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.public_publish_interval_minutes, 240);
 assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.public_publish_interval_minutes, 0);

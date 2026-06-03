@@ -16,9 +16,15 @@ assert.equal(starter.can_use_ad_bumps, false);
 assert.equal(pro.can_use_ad_bumps, true);
 assert.equal(pro.max_linked_servers, 3);
 assert.equal(premium.max_linked_servers, 10);
+assert.equal(premium.monthly_price, 19.99);
+assert.equal(Math.round(premium.monthly_price * 100), 1999);
 assert.equal(premium.visibility_weight, 4);
 assert.equal(premium.public_publish_interval_minutes, 0);
 assert.equal(getPlanConfig("free").max_linked_servers, 1);
+assert.equal(getPlanConfig("network").plan_key, "premium");
+assert.equal(getPlanConfig("partner").plan_key, "premium");
+assert.equal(getPlanConfig("network").monthly_price, 19.99);
+assert.equal(getPlanConfig("partner").monthly_price, 19.99);
 
 const now = new Date("2026-05-17T12:00:00.000Z");
 assert.deepEqual(evaluateBumpEligibility({ entitlements: starter, state: null, now }).code, "upgrade_required");
@@ -94,6 +100,8 @@ assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true, 
 const planSummaries = getBillingPlanSummaries(partialEnv);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configured, true);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.configured, false);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
 const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
@@ -142,9 +150,11 @@ async function run() {
 
   const plansResponse = await billingPlansHandler(makeContext(billingPlansHandler, new Request("https://local.test/api/billing/plans"), partialEnv));
   assert.equal(plansResponse.status, 200);
-  const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean }> };
+  const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean; monthly_price_gbp: number; price_label: string }> };
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "starter")?.configured, true);
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.configured, false);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("network"), false);
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("partner"), false);
 

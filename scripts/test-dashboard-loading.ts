@@ -70,6 +70,8 @@ includesAll(homeStatsRoute, [
   "recentActivityCount",
   "recentEventsCount",
   "getMonotonicNetworkEventTotal",
+  "approximateNetworkEventTotalFromTotals",
+  "getMonotonicNetworkEventTotal(env, approximateNetworkEventTotalFromTotals(totals))",
   "public_home_stats_monotonic_guard",
   "Math.max(calculated, cachedTotal)",
   "events: totalEventsTracked",
