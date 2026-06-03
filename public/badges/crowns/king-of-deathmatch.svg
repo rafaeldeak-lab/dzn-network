@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 256 256">
+  <title>King of Deathmatch</title>
+  <defs>
+    <linearGradient id="king-of-deathmatch-metal" x1="42" y1="24" x2="214" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc" stop-opacity=".85"/>
+      <stop offset=".22" stop-color="#38bdf8"/>
+      <stop offset=".68" stop-color="#facc15"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="king-of-deathmatch-glow" cx="50%" cy="46%" r="56%">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#facc15" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="king-of-deathmatch-shine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".65"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  
+  <circle class="" cx="128" cy="128" r="108" fill="url(#king-of-deathmatch-glow)" opacity=".7"/>
+  <path d="M128 18 L222 64 V132 C222 188 184 226 128 242 C72 226 34 188 34 132 V64 Z" fill="#020617" stroke="url(#king-of-deathmatch-metal)" stroke-width="10"/>
+  <path d="M128 38 L202 74 V130 C202 178 172 208 128 222 C84 208 54 178 54 130 V74 Z" fill="rgba(15,23,42,.88)" stroke="#38bdf8" stroke-width="4" opacity=".96"/>
+  <circle cx="128" cy="128" r="72" fill="rgba(2,6,23,.62)" stroke="#facc15" stroke-width="5" opacity=".9"/>
+  <g class=" "><path d="M66 154 L82 84 L114 126 L128 68 L146 126 L178 84 L194 154 Z" fill="#facc15" stroke="#fff7ed" stroke-width="7"/><rect x="76" y="154" width="104" height="28" rx="10" fill="#38bdf8" stroke="#fff7ed" stroke-width="6"/><g transform="translate(0 44) scale(.76) translate(40 20)"><path d="M82 118 Q82 62 128 62 Q174 62 174 118 Q174 148 156 164 V186 H100 V164 Q82 148 82 118 Z" fill="#38bdf8" stroke="#dbeafe" stroke-width="7"/><circle cx="108" cy="126" r="12" fill="#020617"/><circle cx="148" cy="126" r="12" fill="#020617"/><path d="M128 138 L118 156 H138 Z" fill="#020617"/><path d="M108 184 V166 M128 184 V166 M148 184 V166" stroke="#020617" stroke-width="6"/></g></g>
+  <path d="M76 62 Q128 34 180 62" stroke="#fff" stroke-width="5" opacity=".25" fill="none"/>
+</svg>

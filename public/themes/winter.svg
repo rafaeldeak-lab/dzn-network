@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 420">
+  <title>DZN Winter theme banner</title>
+  <defs><linearGradient id="theme-winter" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#020617"/><stop offset=".52" stop-color="#1e3a8a"/><stop offset="1" stop-color="#93c5fd" stop-opacity=".72"/></linearGradient><radialGradient id="theme-winter-glow" cx="82%" cy="18%" r="55%"><stop offset="0" stop-color="#93c5fd" stop-opacity=".34"/><stop offset="1" stop-color="#020617" stop-opacity="0"/></radialGradient></defs>
+  
+  <rect width="1200" height="420" fill="url(#theme-winter)"/>
+  <rect class="" width="1200" height="420" fill="url(#theme-winter-glow)"/>
+  <g class=""><path d="M0 296 C210 230 360 320 540 260 C750 190 910 310 1200 232 V420 H0 Z" fill="#e0f2fe" opacity=".18"/><g stroke="#93c5fd" stroke-width="5" opacity=".5"><path d="M180 118 v44 M158 140 h44 M820 88 v48 M796 112 h48 M1050 156 v38 M1031 175 h38"/></g></g>
+  <path d="M0 360 C200 330 390 380 600 342 C800 306 980 348 1200 310 V420 H0 Z" fill="#020617" opacity=".56"/>
+</svg>

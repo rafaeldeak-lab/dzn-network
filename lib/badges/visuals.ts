@@ -73,6 +73,7 @@ export type ProfileFrameVisual = {
   glowColour: string;
   theme: string;
   imageOverlayUrl: string | null;
+  animatedImageOverlayUrl: string | null;
   isAnimated: boolean;
   eligibility: "earned" | "plan" | "standard" | "seasonal";
 };
@@ -83,6 +84,7 @@ export type ServerThemeBannerVisual = {
   description: string;
   palette: string[];
   backgroundUrl: string | null;
+  animatedBackgroundUrl?: string | null;
   fallbackGradient: string;
   publicPreview: boolean;
   ownerPreview: boolean;
@@ -133,6 +135,7 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
   platinum: visual("reputation", "platinum", "Platinum Reputation", "epic", "#93c5fd", "electric", 40),
   diamond: visual("reputation", "diamond", "Diamond Reputation", "legendary", "#67e8f9", "legendary", 50),
   legendary: visual("reputation", "legendary", "Legendary Reputation", "mythic", "#c084fc", "legendary", 60),
+  dzn_legend: visual("reputation", "dzn-legend", "DZN Legend", "mythic", "#facc15", "legendary", 65),
 
   premium_server: visual("premium", "premium-server", "Premium Server", "premium", "#facc15", "premium", 110),
   verified_server: visual("premium", "verified-server", "Verified Server", "rare", "#22d3ee", "glow", 102),
@@ -141,6 +144,9 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
   top_pick: visual("premium", "top-pick", "Top Pick", "epic", "#a78bfa", "sparks", 97),
   rising_server: visual("premium", "rising-server", "Rising Server", "rare", "#34d399", "pulse", 80),
   community_favourite: visual("premium", "community-favourite", "Community Favourite", "epic", "#f472b6", "sparks", 92),
+  active_server: visual("premium", "active-server", "Active Server", "uncommon", "#22c55e", "pulse", 78),
+  exclusive: visual("premium", "exclusive", "Exclusive", "legendary", "#a78bfa", "legendary", 118),
+  hardcore_mode: visual("premium", "hardcore-mode", "Hardcore Mode", "epic", "#ef4444", "flame", 88),
 
   king_of_pvp: visual("crowns", "king-of-pvp", "King of PvP", "crown", "#f59e0b", "crown", 300),
   king_of_survival: visual("crowns", "king-of-survival", "King of Survival", "crown", "#34d399", "crown", 300),
@@ -162,10 +168,12 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
   loot_master: visual("community", "loot-master", "Loot Master", "rare", "#a78bfa", "shimmer", 70),
   event_champion: visual("community", "event-champion", "Event Champion", "legendary", "#facc15", "legendary", 130),
 
-  founder: visual("legendary", "founder", "Founder", "limited", "#f59e0b", "legendary", 250),
-  early_adopter: visual("legendary", "early-adopter", "Early Adopter", "limited", "#22d3ee", "shimmer", 230),
-  beta_veteran: visual("legendary", "beta-veteran", "Beta Veteran", "limited", "#a78bfa", "electric", 240),
-  legacy_server: visual("legendary", "legacy-server", "Legacy Server", "limited", "#facc15", "legendary", 245),
+  founder: visual("founder", "founder", "Founder", "limited", "#f59e0b", "legendary", 250),
+  early_adopter: visual("founder", "early-adopter", "Early Adopter", "limited", "#22d3ee", "shimmer", 230),
+  beta_veteran: visual("founder", "beta-veteran", "Beta Veteran", "limited", "#a78bfa", "electric", 240),
+  legacy_server: visual("founder", "legacy-server", "Legacy Server", "limited", "#facc15", "legendary", 245),
+  pioneer: visual("founder", "pioneer", "Pioneer", "limited", "#34d399", "glow", 232),
+  veteran: visual("founder", "veteran", "Veteran", "limited", "#facc15", "shimmer", 238),
 
   spring_champion: visual("seasonal", "spring-champion", "Spring Champion", "seasonal", "#86efac", "seasonal", 200),
   summer_champion: visual("seasonal", "summer-champion", "Summer Champion", "seasonal", "#facc15", "seasonal", 205),
@@ -174,6 +182,7 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
   halloween_champion: visual("seasonal", "halloween-champion", "Halloween Champion", "seasonal", "#f97316", "flame", 218),
   christmas_champion: visual("seasonal", "christmas-champion", "Christmas Champion", "seasonal", "#ef4444", "seasonal", 219),
   easter_champion: visual("seasonal", "easter-champion", "Easter Champion", "seasonal", "#f9a8d4", "seasonal", 220),
+  new_year_champion: visual("seasonal", "new-year-champion", "New Year Champion", "seasonal", "#facc15", "sparks", 221),
 };
 
 const FRAME_VISUALS: Record<string, ProfileFrameVisual> = {
@@ -194,16 +203,16 @@ const FRAME_VISUALS: Record<string, ProfileFrameVisual> = {
 };
 
 const THEME_BANNERS: Record<string, ServerThemeBannerVisual> = {
-  apocalypse: theme("apocalypse", "Apocalypse", "Dark survival banner with burnt orange highlights.", ["#020617", "#7c2d12", "#f97316"], "/themes/apocalypse.webp", "linear-gradient(135deg, rgba(2,6,23,0.95), rgba(88,28,12,0.72), rgba(249,115,22,0.22))"),
-  chernarus: theme("chernarus", "Chernarus", "Forest survival banner for classic DayZ servers.", ["#02130f", "#14532d", "#22c55e"], "/themes/chernarus.webp", "linear-gradient(135deg, rgba(2,19,15,0.96), rgba(20,83,45,0.68), rgba(34,197,94,0.18))"),
-  winter: theme("winter", "Winter", "Cold blue seasonal banner.", ["#020617", "#1e3a8a", "#93c5fd"], "/themes/winter.webp", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(30,58,138,0.72), rgba(147,197,253,0.22))"),
-  desert: theme("desert", "Desert", "Dry survival banner with sand and amber tones.", ["#180f05", "#92400e", "#f59e0b"], "/themes/desert.webp", "linear-gradient(135deg, rgba(24,15,5,0.96), rgba(146,64,14,0.72), rgba(245,158,11,0.18))"),
-  neon_city: theme("neon_city", "Neon City", "High-energy neon banner for deathmatch servers.", ["#020617", "#7c3aed", "#22d3ee"], "/themes/neon-city.webp", "linear-gradient(135deg, rgba(2,6,23,0.95), rgba(124,58,237,0.64), rgba(34,211,238,0.2))"),
-  toxic_zone: theme("toxic_zone", "Toxic Zone", "Green danger-zone banner.", ["#020617", "#365314", "#a3e635"], "/themes/toxic-zone.webp", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(54,83,20,0.72), rgba(163,230,53,0.2))"),
-  island: theme("island", "Island", "Coastal island server banner.", ["#031827", "#0e7490", "#67e8f9"], "/themes/island.webp", "linear-gradient(135deg, rgba(3,24,39,0.96), rgba(14,116,144,0.7), rgba(103,232,249,0.18))"),
-  space: theme("space", "Space", "Deep-space premium profile banner.", ["#020617", "#4c1d95", "#a78bfa"], "/themes/space.webp", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(76,29,149,0.72), rgba(167,139,250,0.22))"),
-  military: theme("military", "Military", "Restrained tactical banner.", ["#020617", "#1f2937", "#84cc16"], "/themes/military.webp", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(31,41,55,0.78), rgba(132,204,22,0.16))"),
-  night_ops: theme("night_ops", "Night Ops", "Low-light stealth banner.", ["#020617", "#0f172a", "#38bdf8"], "/themes/night-ops.webp", "linear-gradient(135deg, rgba(2,6,23,0.98), rgba(15,23,42,0.84), rgba(56,189,248,0.16))"),
+  apocalypse: theme("apocalypse", "Apocalypse", "Dark survival banner with burnt orange highlights.", ["#020617", "#7c2d12", "#f97316"], "/themes/apocalypse.svg", "linear-gradient(135deg, rgba(2,6,23,0.95), rgba(88,28,12,0.72), rgba(249,115,22,0.22))"),
+  chernarus: theme("chernarus", "Chernarus", "Forest survival banner for classic DayZ servers.", ["#02130f", "#14532d", "#22c55e"], "/themes/chernarus.svg", "linear-gradient(135deg, rgba(2,19,15,0.96), rgba(20,83,45,0.68), rgba(34,197,94,0.18))"),
+  winter: theme("winter", "Winter", "Cold blue seasonal banner.", ["#020617", "#1e3a8a", "#93c5fd"], "/themes/winter.svg", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(30,58,138,0.72), rgba(147,197,253,0.22))"),
+  desert: theme("desert", "Desert", "Dry survival banner with sand and amber tones.", ["#180f05", "#92400e", "#f59e0b"], "/themes/desert.svg", "linear-gradient(135deg, rgba(24,15,5,0.96), rgba(146,64,14,0.72), rgba(245,158,11,0.18))"),
+  neon_city: theme("neon_city", "Neon City", "High-energy neon banner for deathmatch servers.", ["#020617", "#7c3aed", "#22d3ee"], "/themes/neon-city.svg", "linear-gradient(135deg, rgba(2,6,23,0.95), rgba(124,58,237,0.64), rgba(34,211,238,0.2))"),
+  toxic_zone: theme("toxic_zone", "Toxic Zone", "Green danger-zone banner.", ["#020617", "#365314", "#a3e635"], "/themes/toxic-zone.svg", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(54,83,20,0.72), rgba(163,230,53,0.2))"),
+  island: theme("island", "Island", "Coastal island server banner.", ["#031827", "#0e7490", "#67e8f9"], "/themes/island.svg", "linear-gradient(135deg, rgba(3,24,39,0.96), rgba(14,116,144,0.7), rgba(103,232,249,0.18))"),
+  space: theme("space", "Space", "Deep-space premium profile banner.", ["#020617", "#4c1d95", "#a78bfa"], "/themes/space.svg", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(76,29,149,0.72), rgba(167,139,250,0.22))"),
+  military: theme("military", "Military", "Restrained tactical banner.", ["#020617", "#1f2937", "#84cc16"], "/themes/military.svg", "linear-gradient(135deg, rgba(2,6,23,0.96), rgba(31,41,55,0.78), rgba(132,204,22,0.16))"),
+  night_ops: theme("night_ops", "Night Ops", "Low-light stealth banner.", ["#020617", "#0f172a", "#38bdf8"], "/themes/night-ops.svg", "linear-gradient(135deg, rgba(2,6,23,0.98), rgba(15,23,42,0.84), rgba(56,189,248,0.16))"),
 };
 
 export function getBadgeVisualConfig(code: string, category?: string | null, name?: string | null): BadgeVisualConfig {
@@ -249,12 +258,13 @@ export function toVisualBadge(source: AchievementVisualSource, options: { earned
 
 export function getReputationVisual(tier: string | null | undefined): ReputationVisual {
   const key = normalizeBadgeKey(tier || "bronze");
-  const normalized = ["bronze", "silver", "gold", "platinum", "diamond", "legendary"].includes(key) ? key : "bronze";
+  const normalized = ["bronze", "silver", "gold", "platinum", "diamond", "legendary", "dzn_legend"].includes(key) ? key : "bronze";
+  const label = humanizeBadgeName(normalized);
   return {
     key: normalized,
-    tier: titleCase(normalized),
-    label: `${titleCase(normalized)} Reputation`,
-    ...getBadgeVisualConfig(normalized, "reputation", `${titleCase(normalized)} Reputation`),
+    tier: label,
+    label: `${label} Reputation`,
+    ...getBadgeVisualConfig(normalized, "reputation", `${label} Reputation`),
   };
 }
 
@@ -401,11 +411,23 @@ export function getAvailableThemeBannerKeys() {
   return Object.keys(THEME_BANNERS);
 }
 
+export function getKnownBadgeVisualCodes() {
+  return Object.keys(BADGE_VISUALS);
+}
+
+export function getAvailableFrameVisuals() {
+  return { ...FRAME_VISUALS };
+}
+
+export function getAvailableThemeBannerVisuals() {
+  return { ...THEME_BANNERS };
+}
+
 function visual(folder: string, slug: string, label: string, rarity: BadgeRarity, glowColour: string, animationType: BadgeAnimationType, sortOrder: number): Partial<BadgeVisualConfig> & { label: string } {
   return {
     label,
-    staticIconUrl: `/badges/${folder}/${slug}.webp`,
-    animatedIconUrl: `/badges/${folder}/${slug}-animated.webp`,
+    staticIconUrl: `/badges/${folder}/${slug}.svg`,
+    animatedIconUrl: `/badges/${folder}/${slug}-animated.svg`,
     imageAlt: `${label} badge`,
     rarity,
     theme: folder === "crowns" ? "crown" : folder,
@@ -427,19 +449,22 @@ function frame(key: string, label: string, description: string, glowColour: stri
     animationType,
     glowColour,
     theme,
-    imageOverlayUrl: `/frames/${key}.webp`,
+    imageOverlayUrl: `/frames/${key}.svg`,
+    animatedImageOverlayUrl: `/frames/${key}-animated.svg`,
     isAnimated,
     eligibility,
   };
 }
 
 function theme(key: string, label: string, description: string, palette: string[], backgroundUrl: string, fallbackGradient: string): ServerThemeBannerVisual {
+  const animatedBackgroundUrl = backgroundUrl.replace(/\.svg$/, "-animated.svg");
   return {
     key,
     label,
     description,
     palette,
     backgroundUrl,
+    animatedBackgroundUrl,
     fallbackGradient,
     publicPreview: true,
     ownerPreview: true,
@@ -447,9 +472,9 @@ function theme(key: string, label: string, description: string, palette: string[
 }
 
 function badgeAssetPath(category: string, key: string, animated: boolean) {
-  const folder = category === "crown" ? "crowns" : category === "founder" ? "legendary" : category;
+  const folder = category === "crown" ? "crowns" : category;
   const slug = key.replace(/_/g, "-");
-  return `/badges/${folder}/${slug}${animated ? "-animated" : ""}.webp`;
+  return `/badges/${folder}/${slug}${animated ? "-animated" : ""}.svg`;
 }
 
 function normalizeBadgeKey(value: string) {
@@ -468,7 +493,7 @@ function baseBadgeKey(key: string) {
 function inferBadgeCategory(key: string) {
   if (key.startsWith("king_of_")) return "crown";
   if (key.includes("champion")) return "seasonal";
-  if (["bronze", "silver", "gold", "platinum", "diamond", "legendary"].includes(key)) return "reputation";
+  if (["bronze", "silver", "gold", "platinum", "diamond", "legendary", "dzn_legend"].includes(key)) return "reputation";
   return "community";
 }
 
@@ -517,8 +542,4 @@ function humanizeBadgeName(key: string) {
   return key
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function titleCase(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 }

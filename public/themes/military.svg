@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 420">
+  <title>DZN Military theme banner</title>
+  <defs><linearGradient id="theme-military" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#020617"/><stop offset=".52" stop-color="#1f2937"/><stop offset="1" stop-color="#84cc16" stop-opacity=".72"/></linearGradient><radialGradient id="theme-military-glow" cx="82%" cy="18%" r="55%"><stop offset="0" stop-color="#84cc16" stop-opacity=".34"/><stop offset="1" stop-color="#020617" stop-opacity="0"/></radialGradient></defs>
+  
+  <rect width="1200" height="420" fill="url(#theme-military)"/>
+  <rect class="" width="1200" height="420" fill="url(#theme-military-glow)"/>
+  <g class=""><path d="M0 302 C210 236 360 304 560 248 C750 196 890 270 1200 218 V420 H0 Z" fill="#020617" opacity=".78"/><path d="M130 264 h110 l30 -56 h72 l38 56 h110" stroke="#84cc16" stroke-width="10" opacity=".36" fill="none"/></g>
+  <path d="M0 360 C200 330 390 380 600 342 C800 306 980 348 1200 310 V420 H0 Z" fill="#020617" opacity=".56"/>
+</svg>

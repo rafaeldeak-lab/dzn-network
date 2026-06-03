@@ -1,0 +1,132 @@
+{
+  "apocalypse": {
+    "key": "apocalypse",
+    "label": "Apocalypse",
+    "description": "burnt survival skyline",
+    "palette": [
+      "#020617",
+      "#7c2d12",
+      "#f97316"
+    ],
+    "backgroundUrl": "/themes/apocalypse.svg",
+    "animatedBackgroundUrl": "/themes/apocalypse-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #020617, #7c2d12, #f97316)"
+  },
+  "chernarus": {
+    "key": "chernarus",
+    "label": "Chernarus",
+    "description": "pine forest hills",
+    "palette": [
+      "#02130f",
+      "#14532d",
+      "#22c55e"
+    ],
+    "backgroundUrl": "/themes/chernarus.svg",
+    "animatedBackgroundUrl": "/themes/chernarus-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #02130f, #14532d, #22c55e)"
+  },
+  "winter": {
+    "key": "winter",
+    "label": "Winter",
+    "description": "snow fields and ice",
+    "palette": [
+      "#020617",
+      "#1e3a8a",
+      "#93c5fd"
+    ],
+    "backgroundUrl": "/themes/winter.svg",
+    "animatedBackgroundUrl": "/themes/winter-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #020617, #1e3a8a, #93c5fd)"
+  },
+  "desert": {
+    "key": "desert",
+    "label": "Desert",
+    "description": "dry ridges and dunes",
+    "palette": [
+      "#180f05",
+      "#92400e",
+      "#f59e0b"
+    ],
+    "backgroundUrl": "/themes/desert.svg",
+    "animatedBackgroundUrl": "/themes/desert-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #180f05, #92400e, #f59e0b)"
+  },
+  "neon_city": {
+    "key": "neon_city",
+    "label": "Neon City",
+    "description": "neon skyline",
+    "palette": [
+      "#020617",
+      "#7c3aed",
+      "#22d3ee"
+    ],
+    "backgroundUrl": "/themes/neon-city.svg",
+    "animatedBackgroundUrl": "/themes/neon-city-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #020617, #7c3aed, #22d3ee)"
+  },
+  "toxic_zone": {
+    "key": "toxic_zone",
+    "label": "Toxic Zone",
+    "description": "gas zone and warning haze",
+    "palette": [
+      "#020617",
+      "#365314",
+      "#a3e635"
+    ],
+    "backgroundUrl": "/themes/toxic-zone.svg",
+    "animatedBackgroundUrl": "/themes/toxic-zone-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #020617, #365314, #a3e635)"
+  },
+  "island": {
+    "key": "island",
+    "label": "Island",
+    "description": "coastline and islands",
+    "palette": [
+      "#031827",
+      "#0e7490",
+      "#67e8f9"
+    ],
+    "backgroundUrl": "/themes/island.svg",
+    "animatedBackgroundUrl": "/themes/island-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #031827, #0e7490, #67e8f9)"
+  },
+  "space": {
+    "key": "space",
+    "label": "Space",
+    "description": "orbital night sky",
+    "palette": [
+      "#020617",
+      "#4c1d95",
+      "#a78bfa"
+    ],
+    "backgroundUrl": "/themes/space.svg",
+    "animatedBackgroundUrl": "/themes/space-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #020617, #4c1d95, #a78bfa)"
+  },
+  "military": {
+    "key": "military",
+    "label": "Military",
+    "description": "tactical ridgeline",
+    "palette": [
+      "#020617",
+      "#1f2937",
+      "#84cc16"
+    ],
+    "backgroundUrl": "/themes/military.svg",
+    "animatedBackgroundUrl": "/themes/military-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #020617, #1f2937, #84cc16)"
+  },
+  "night_ops": {
+    "key": "night_ops",
+    "label": "Night Ops",
+    "description": "low light operation",
+    "palette": [
+      "#020617",
+      "#0f172a",
+      "#38bdf8"
+    ],
+    "backgroundUrl": "/themes/night-ops.svg",
+    "animatedBackgroundUrl": "/themes/night-ops-animated.svg",
+    "fallbackGradient": "linear-gradient(135deg, #020617, #0f172a, #38bdf8)"
+  }
+}

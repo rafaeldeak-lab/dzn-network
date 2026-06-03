@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 420">
+  <title>DZN Chernarus theme banner</title>
+  <defs><linearGradient id="theme-chernarus" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#02130f"/><stop offset=".52" stop-color="#14532d"/><stop offset="1" stop-color="#22c55e" stop-opacity=".72"/></linearGradient><radialGradient id="theme-chernarus-glow" cx="82%" cy="18%" r="55%"><stop offset="0" stop-color="#22c55e" stop-opacity=".34"/><stop offset="1" stop-color="#02130f" stop-opacity="0"/></radialGradient></defs>
+  
+  <rect width="1200" height="420" fill="url(#theme-chernarus)"/>
+  <rect class="" width="1200" height="420" fill="url(#theme-chernarus-glow)"/>
+  <g class=""><path d="M0 310 C160 220 250 288 400 218 C560 138 650 260 820 176 C980 96 1080 170 1200 112 V420 H0 Z" fill="#020617" opacity=".72"/><g fill="#22c55e" opacity=".35"><path d="M120 274 l34 -90 l34 90 Z"/><path d="M230 288 l42 -118 l42 118 Z"/><path d="M940 260 l50 -132 l50 132 Z"/></g></g>
+  <path d="M0 360 C200 330 390 380 600 342 C800 306 980 348 1200 310 V420 H0 Z" fill="#020617" opacity=".56"/>
+</svg>

@@ -1,0 +1,114 @@
+{
+  "premium": {
+    "key": "premium",
+    "label": "Premium Frame",
+    "staticOverlayUrl": "/frames/premium.svg",
+    "animatedOverlayUrl": "/frames/premium-animated.svg",
+    "animationType": "premium",
+    "glowColour": "#facc15"
+  },
+  "platinum": {
+    "key": "platinum",
+    "label": "Platinum Frame",
+    "staticOverlayUrl": "/frames/platinum.svg",
+    "animatedOverlayUrl": "/frames/platinum-animated.svg",
+    "animationType": "electric",
+    "glowColour": "#e0f2fe"
+  },
+  "diamond": {
+    "key": "diamond",
+    "label": "Diamond Frame",
+    "staticOverlayUrl": "/frames/diamond.svg",
+    "animatedOverlayUrl": "/frames/diamond-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#67e8f9"
+  },
+  "emerald": {
+    "key": "emerald",
+    "label": "Emerald Frame",
+    "staticOverlayUrl": "/frames/emerald.svg",
+    "animatedOverlayUrl": "/frames/emerald-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#34d399"
+  },
+  "gold": {
+    "key": "gold",
+    "label": "Gold Frame",
+    "staticOverlayUrl": "/frames/gold.svg",
+    "animatedOverlayUrl": "/frames/gold-animated.svg",
+    "animationType": "shimmer",
+    "glowColour": "#facc15"
+  },
+  "silver": {
+    "key": "silver",
+    "label": "Silver Frame",
+    "staticOverlayUrl": "/frames/silver.svg",
+    "animatedOverlayUrl": "/frames/silver-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#cbd5e1"
+  },
+  "bronze": {
+    "key": "bronze",
+    "label": "Bronze Frame",
+    "staticOverlayUrl": "/frames/bronze.svg",
+    "animatedOverlayUrl": "/frames/bronze-animated.svg",
+    "animationType": "none",
+    "glowColour": "#cd7f32"
+  },
+  "legendary": {
+    "key": "legendary",
+    "label": "Legendary Frame",
+    "staticOverlayUrl": "/frames/legendary.svg",
+    "animatedOverlayUrl": "/frames/legendary-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#c084fc"
+  },
+  "neon": {
+    "key": "neon",
+    "label": "Neon Frame",
+    "staticOverlayUrl": "/frames/neon.svg",
+    "animatedOverlayUrl": "/frames/neon-animated.svg",
+    "animationType": "electric",
+    "glowColour": "#22d3ee"
+  },
+  "toxic": {
+    "key": "toxic",
+    "label": "Toxic Zone Frame",
+    "staticOverlayUrl": "/frames/toxic.svg",
+    "animatedOverlayUrl": "/frames/toxic-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#84cc16"
+  },
+  "fire": {
+    "key": "fire",
+    "label": "Fire Frame",
+    "staticOverlayUrl": "/frames/fire.svg",
+    "animatedOverlayUrl": "/frames/fire-animated.svg",
+    "animationType": "flame",
+    "glowColour": "#ef4444"
+  },
+  "ice": {
+    "key": "ice",
+    "label": "Ice Frame",
+    "staticOverlayUrl": "/frames/ice.svg",
+    "animatedOverlayUrl": "/frames/ice-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#93c5fd"
+  },
+  "space": {
+    "key": "space",
+    "label": "Space Frame",
+    "staticOverlayUrl": "/frames/space.svg",
+    "animatedOverlayUrl": "/frames/space-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#a78bfa"
+  },
+  "seasonal": {
+    "key": "seasonal",
+    "label": "Seasonal Frame",
+    "staticOverlayUrl": "/frames/seasonal.svg",
+    "animatedOverlayUrl": "/frames/seasonal-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#38bdf8"
+  }
+}

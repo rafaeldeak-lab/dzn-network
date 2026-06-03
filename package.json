@@ -40,6 +40,7 @@
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
     "test:reputation-platform": "tsx scripts/test-reputation-platform.ts",
     "test:badge-visual-system": "tsx scripts/test-badge-visual-system.ts",
+    "check:badge-assets": "tsx scripts/check-badge-assets.ts",
     "check:billing-config": "tsx scripts/check-billing-config.ts",
     "adm:audit-health": "tsx scripts/adm-audit-health.ts",
     "player-counts:audit": "tsx scripts/audit-player-counts.ts",

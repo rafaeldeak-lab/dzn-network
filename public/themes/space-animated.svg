@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 420">
+  <title>DZN Space theme banner animated</title>
+  <defs><linearGradient id="theme-space" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#020617"/><stop offset=".52" stop-color="#4c1d95"/><stop offset="1" stop-color="#a78bfa" stop-opacity=".72"/></linearGradient><radialGradient id="theme-space-glow" cx="82%" cy="18%" r="55%"><stop offset="0" stop-color="#a78bfa" stop-opacity=".34"/><stop offset="1" stop-color="#020617" stop-opacity="0"/></radialGradient></defs>
+  <style>.pulse{animation:pulse 4s ease-in-out infinite}.drift{animation:drift 8s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:.45}50%{opacity:.8}}@keyframes drift{0%,100%{transform:translateX(0)}50%{transform:translateX(18px)}}@media (prefers-reduced-motion: reduce){*{animation:none!important}}</style>
+  <rect width="1200" height="420" fill="url(#theme-space)"/>
+  <rect class="pulse" width="1200" height="420" fill="url(#theme-space-glow)"/>
+  <g class="drift"><circle cx="950" cy="118" r="70" fill="#a78bfa" opacity=".26"/><circle cx="970" cy="100" r="68" fill="#020617" opacity=".42"/><g fill="#fff" opacity=".65"><circle cx="170" cy="82" r="3"/><circle cx="310" cy="154" r="2"/><circle cx="640" cy="76" r="3"/><circle cx="1080" cy="212" r="2"/></g></g>
+  <path d="M0 360 C200 330 390 380 600 342 C800 306 980 348 1200 310 V420 H0 Z" fill="#020617" opacity=".56"/>
+</svg>

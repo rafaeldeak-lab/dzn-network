@@ -4271,6 +4271,21 @@ body {
   box-shadow: 0 0 34px color-mix(in srgb, var(--dzn-frame-glow, #22d3ee) 34%, transparent);
 }
 
+.dzn-profile-frame > :not(.dzn-profile-frame__image) {
+  position: relative;
+  z-index: 1;
+}
+
+.dzn-profile-frame__image {
+  position: absolute;
+  inset: -7%;
+  z-index: 2;
+  width: 114%;
+  height: 114%;
+  pointer-events: none;
+  object-fit: contain;
+}
+
 .dzn-profile-frame--compact {
   border-radius: 13px;
   padding: 4px;

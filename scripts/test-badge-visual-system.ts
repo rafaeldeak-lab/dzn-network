@@ -6,9 +6,12 @@ import {
 } from "../functions/_lib/reputation";
 import {
   getAvailableFrameKeys,
+  getAvailableFrameVisuals,
   getAvailableThemeBannerKeys,
+  getAvailableThemeBannerVisuals,
   getBadgeVisualConfig,
   getCrownVisual,
+  getKnownBadgeVisualCodes,
   getPlanVisualTreatment,
   getReputationVisual,
   getSeasonalVisual,
@@ -24,6 +27,9 @@ const barrel = getBadgeVisualConfig("premium_server", "premium");
 assert.equal(barrel.rarity, "premium");
 assert.equal(barrel.animationType, "premium");
 assert.equal(barrel.staticIconUrl?.startsWith("/badges/"), true);
+assert.equal(barrel.staticIconUrl?.endsWith(".svg"), true);
+assert.equal(existsSync(`public${barrel.staticIconUrl}`), true);
+assert.equal(existsSync(`public${barrel.animatedIconUrl}`), true);
 
 const deathDealer = getBadgeVisualConfig("death_dealer_3", "combat", "Death Dealer 3");
 assert.equal(deathDealer.rarity, "rare");
@@ -44,6 +50,14 @@ const seasonal = getSeasonalVisual("summer_champion_2027");
 assert.equal(seasonal.key, "summer_champion");
 assert.equal(seasonal.rarity, "seasonal");
 assert.equal(seasonal.animationType, "seasonal");
+
+for (const code of ["bronze", "king_of_pvp", "summer_champion", "premium_server", "founder", "new_year_champion"]) {
+  const visual = getBadgeVisualConfig(code);
+  assert.equal(visual.staticIconUrl?.endsWith(".svg"), true, `${code} should use SVG static asset.`);
+  assert.equal(visual.animatedIconUrl?.endsWith(".svg"), true, `${code} should use SVG animated asset.`);
+  assert.equal(existsSync(`public${visual.staticIconUrl}`), true, `${code} static asset should exist.`);
+  assert.equal(existsSync(`public${visual.animatedIconUrl}`), true, `${code} animated asset should exist.`);
+}
 
 assert.equal(getPlanVisualTreatment("network").planKey, "premium");
 assert.equal(getPlanVisualTreatment("partner").planKey, "premium");
@@ -81,6 +95,10 @@ assert.equal(badges.every((badge) => badge.staticIconUrl !== undefined && badge.
 const profileFrame = getServerProfileFrame({ planKey: "premium", reputationTier: "Bronze" });
 assert.equal(profileFrame.key, "premium");
 assert.equal(profileFrame.isAnimated, true);
+assert.equal(profileFrame.imageOverlayUrl?.endsWith(".svg"), true);
+assert.equal(profileFrame.animatedImageOverlayUrl?.endsWith(".svg"), true);
+assert.equal(existsSync(`public${profileFrame.imageOverlayUrl}`), true);
+assert.equal(existsSync(`public${profileFrame.animatedImageOverlayUrl}`), true);
 const earnedFrame = getServerProfileFrame({ planKey: "starter", reputationTier: "Legendary" });
 assert.equal(earnedFrame.key, "legendary");
 
@@ -88,6 +106,10 @@ const themeBanner = getServerThemeBanner({ planKey: "starter", category: "deathm
 assert.equal(themeBanner.key, "neon_city");
 assert.equal(themeBanner.palette.length >= 3, true);
 assert.equal(themeBanner.backgroundUrl?.startsWith("/themes/"), true);
+assert.equal(themeBanner.backgroundUrl?.endsWith(".svg"), true);
+assert.equal(themeBanner.animatedBackgroundUrl?.endsWith(".svg"), true);
+assert.equal(existsSync(`public${themeBanner.backgroundUrl}`), true);
+assert.equal(existsSync(`public${themeBanner.animatedBackgroundUrl}`), true);
 
 const fullVisuals = getServerVisualShowcase({
   planKey: "premium",
@@ -112,26 +134,50 @@ assert.equal(JSON.stringify(activePlans).includes("Partner"), false);
 
 for (const path of [
   "public/badges/README.md",
+  "public/badges/badge-assets.json",
   "public/badges/combat/README.md",
   "public/badges/reputation/README.md",
   "public/badges/crowns/README.md",
   "public/badges/seasonal/README.md",
   "public/badges/premium/README.md",
   "public/badges/community/README.md",
+  "public/badges/founder/founder.svg",
+  "public/badges/founder/founder-animated.svg",
   "public/badges/legendary/README.md",
   "public/frames/README.md",
+  "public/frames/frame-assets.json",
   "public/themes/README.md",
+  "public/themes/theme-assets.json",
 ]) {
   assert.equal(existsSync(path), true, `${path} should exist.`);
 }
 
 const frames = getAvailableFrameKeys();
+const frameVisuals = getAvailableFrameVisuals();
 for (const key of ["premium", "platinum", "diamond", "emerald", "gold", "silver", "bronze", "legendary", "neon", "toxic", "fire", "ice", "space", "seasonal"]) {
   assert.equal(frames.includes(key), true, `${key} frame should be configured.`);
+  assert.equal(existsSync(`public${frameVisuals[key].imageOverlayUrl}`), true, `${key} frame asset should exist.`);
+  assert.equal(existsSync(`public${frameVisuals[key].animatedImageOverlayUrl}`), true, `${key} animated frame asset should exist.`);
 }
 const themes = getAvailableThemeBannerKeys();
+const themeVisuals = getAvailableThemeBannerVisuals();
 for (const key of ["apocalypse", "chernarus", "winter", "desert", "neon_city", "toxic_zone", "island", "space", "military", "night_ops"]) {
   assert.equal(themes.includes(key), true, `${key} theme should be configured.`);
+  assert.equal(existsSync(`public${themeVisuals[key].backgroundUrl}`), true, `${key} theme asset should exist.`);
+  assert.equal(existsSync(`public${themeVisuals[key].animatedBackgroundUrl}`), true, `${key} animated theme asset should exist.`);
+}
+
+const badgeManifest = JSON.parse(readFileSync("public/badges/badge-assets.json", "utf8")) as Record<string, { staticIconUrl: string; animatedIconUrl: string; imageAlt: string }>;
+for (const code of ["death_dealer", "trusted_server", "king_of_dzn", "dzn_legend"]) {
+  assert.equal(Boolean(badgeManifest[code]), true, `${code} should be in the badge asset manifest.`);
+  assert.equal(existsSync(`public${badgeManifest[code].staticIconUrl}`), true);
+  assert.equal(existsSync(`public${badgeManifest[code].animatedIconUrl}`), true);
+  assert.equal(Boolean(badgeManifest[code].imageAlt), true);
+}
+for (const code of getKnownBadgeVisualCodes()) {
+  const visual = getBadgeVisualConfig(code);
+  assert.equal(existsSync(`public${visual.staticIconUrl}`), true, `${code} mapped static asset should exist.`);
+  assert.equal(existsSync(`public${visual.animatedIconUrl}`), true, `${code} mapped animated asset should exist.`);
 }
 
 const componentSource = readFileSync("components/badges/server-visuals.tsx", "utf8");
@@ -141,6 +187,7 @@ for (const componentName of ["BadgeIcon", "AnimatedBadge", "BadgeTooltip", "Badg
 assert.equal(componentSource.includes("loading=\"lazy\""), true);
 assert.equal(componentSource.includes("alt={badge.imageAlt}"), true);
 assert.equal(componentSource.includes("tabIndex={0}"), true);
+assert.equal(componentSource.includes("dzn-profile-frame__image"), true);
 
 const css = readFileSync("app/globals.css", "utf8");
 for (const animation of ["dznBadgeGlowPulse", "dznBadgeShimmer", "dznBadgeSparks", "dznBadgeElectric", "dznBadgeFireAura", "dznBadgeCrownShine", "dznBadgeSeasonalSparkle", "dznBadgeLegendaryAura", "dznBadgePremiumGlow"]) {

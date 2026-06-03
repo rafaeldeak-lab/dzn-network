@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 256 256">
+  <title>Long Shot Legend</title>
+  <defs>
+    <linearGradient id="long-shot-legend-metal" x1="42" y1="24" x2="214" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc" stop-opacity=".85"/>
+      <stop offset=".22" stop-color="#22d3ee"/>
+      <stop offset=".68" stop-color="#0e7490"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="long-shot-legend-glow" cx="50%" cy="46%" r="56%">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#0e7490" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="long-shot-legend-shine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".65"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  
+  <circle class="" cx="128" cy="128" r="108" fill="url(#long-shot-legend-glow)" opacity=".7"/>
+  <path d="M128 18 L222 64 V132 C222 188 184 226 128 242 C72 226 34 188 34 132 V64 Z" fill="#020617" stroke="url(#long-shot-legend-metal)" stroke-width="10"/>
+  <path d="M128 38 L202 74 V130 C202 178 172 208 128 222 C84 208 54 178 54 130 V74 Z" fill="rgba(15,23,42,.88)" stroke="#22d3ee" stroke-width="4" opacity=".96"/>
+  <circle cx="128" cy="128" r="72" fill="rgba(2,6,23,.62)" stroke="#0e7490" stroke-width="5" opacity=".9"/>
+  <g class=" "><circle cx="128" cy="128" r="72" fill="none" stroke="#22d3ee" stroke-width="9"/><path d="M68 128 H110 M146 128 H188 M128 68 V110 M128 146 V188" stroke="#0e7490" stroke-width="7" stroke-linecap="round"/><circle cx="128" cy="128" r="10" fill="#f8fafc"/></g>
+  <path d="M76 62 Q128 34 180 62" stroke="#fff" stroke-width="5" opacity=".25" fill="none"/>
+</svg>

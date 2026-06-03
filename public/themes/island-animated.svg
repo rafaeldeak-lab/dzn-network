@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 420">
+  <title>DZN Island theme banner animated</title>
+  <defs><linearGradient id="theme-island" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#031827"/><stop offset=".52" stop-color="#0e7490"/><stop offset="1" stop-color="#67e8f9" stop-opacity=".72"/></linearGradient><radialGradient id="theme-island-glow" cx="82%" cy="18%" r="55%"><stop offset="0" stop-color="#67e8f9" stop-opacity=".34"/><stop offset="1" stop-color="#031827" stop-opacity="0"/></radialGradient></defs>
+  <style>.pulse{animation:pulse 4s ease-in-out infinite}.drift{animation:drift 8s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:.45}50%{opacity:.8}}@keyframes drift{0%,100%{transform:translateX(0)}50%{transform:translateX(18px)}}@media (prefers-reduced-motion: reduce){*{animation:none!important}}</style>
+  <rect width="1200" height="420" fill="url(#theme-island)"/>
+  <rect class="pulse" width="1200" height="420" fill="url(#theme-island-glow)"/>
+  <g class="drift"><path d="M0 310 C190 280 320 334 500 300 C730 258 890 322 1200 290 V420 H0 Z" fill="#67e8f9" opacity=".2"/><path d="M260 290 C350 218 438 286 520 274 C460 318 342 330 260 290 Z" fill="#020617" opacity=".68"/><path d="M410 260 C430 210 442 178 450 132" stroke="#67e8f9" stroke-width="8"/><path d="M450 138 C492 142 520 160 546 188" stroke="#67e8f9" stroke-width="7" fill="none"/></g>
+  <path d="M0 360 C200 330 390 380 600 342 C800 306 980 348 1200 310 V420 H0 Z" fill="#020617" opacity=".56"/>
+</svg>

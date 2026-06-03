@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 256 256">
+  <title>Rising Server</title>
+  <defs>
+    <linearGradient id="rising-server-metal" x1="42" y1="24" x2="214" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc" stop-opacity=".85"/>
+      <stop offset=".22" stop-color="#34d399"/>
+      <stop offset=".68" stop-color="#22c55e"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="rising-server-glow" cx="50%" cy="46%" r="56%">
+      <stop offset="0" stop-color="#34d399" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rising-server-shine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".65"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  
+  <circle class="" cx="128" cy="128" r="108" fill="url(#rising-server-glow)" opacity=".7"/>
+  <path d="M128 18 L222 64 V132 C222 188 184 226 128 242 C72 226 34 188 34 132 V64 Z" fill="#020617" stroke="url(#rising-server-metal)" stroke-width="10"/>
+  <path d="M128 38 L202 74 V130 C202 178 172 208 128 222 C84 208 54 178 54 130 V74 Z" fill="rgba(15,23,42,.88)" stroke="#34d399" stroke-width="4" opacity=".96"/>
+  <circle cx="128" cy="128" r="72" fill="rgba(2,6,23,.62)" stroke="#22c55e" stroke-width="5" opacity=".9"/>
+  <g class=" "><path d="M86 176 V86 M86 86 L64 108 M86 86 L108 108" stroke="#34d399" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M132 176 V108 M132 108 L110 130 M132 108 L154 130" stroke="#34d399" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M178 176 V66 M178 66 L156 88 M178 66 L200 88" stroke="#34d399" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none"/></g>
+  <path d="M76 62 Q128 34 180 62" stroke="#fff" stroke-width="5" opacity=".25" fill="none"/>
+</svg>

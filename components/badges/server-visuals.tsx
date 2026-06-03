@@ -156,7 +156,9 @@ export function PremiumBadge({ badge }: { badge: VisualBadge }) {
 }
 
 export function ServerProfileFrame({ frame, children, compact = false, className = "" }: { frame: ProfileFrameVisual | null | undefined; children: ReactNode; compact?: boolean; className?: string }) {
+  const [frameImageFailed, setFrameImageFailed] = useState(false);
   if (!frame) return <>{children}</>;
+  const frameImageUrl = frame.isAnimated ? frame.animatedImageOverlayUrl || frame.imageOverlayUrl : frame.imageOverlayUrl;
   const style: GlowStyle = {
     "--dzn-frame-glow": frame.glowColour,
   };
@@ -174,6 +176,18 @@ export function ServerProfileFrame({ frame, children, compact = false, className
       aria-label={frame.label}
     >
       {children}
+      {frameImageUrl && !frameImageFailed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={frameImageUrl}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+          decoding="async"
+          className="dzn-profile-frame__image"
+          onError={() => setFrameImageFailed(true)}
+        />
+      ) : null}
     </span>
   );
 }

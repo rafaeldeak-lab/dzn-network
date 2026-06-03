@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 420">
+  <title>DZN Toxic Zone theme banner</title>
+  <defs><linearGradient id="theme-toxic-zone" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#020617"/><stop offset=".52" stop-color="#365314"/><stop offset="1" stop-color="#a3e635" stop-opacity=".72"/></linearGradient><radialGradient id="theme-toxic-zone-glow" cx="82%" cy="18%" r="55%"><stop offset="0" stop-color="#a3e635" stop-opacity=".34"/><stop offset="1" stop-color="#020617" stop-opacity="0"/></radialGradient></defs>
+  
+  <rect width="1200" height="420" fill="url(#theme-toxic-zone)"/>
+  <rect class="" width="1200" height="420" fill="url(#theme-toxic-zone-glow)"/>
+  <g class=""><circle cx="920" cy="150" r="92" fill="#a3e635" opacity=".19"/><path d="M0 310 C180 250 320 306 500 260 C700 210 820 300 1200 240 V420 H0 Z" fill="#020617" opacity=".72"/><path d="M180 204 Q220 160 260 204 T340 204" stroke="#a3e635" stroke-width="10" opacity=".4" fill="none"/></g>
+  <path d="M0 360 C200 330 390 380 600 342 C800 306 980 348 1200 310 V420 H0 Z" fill="#020617" opacity=".56"/>
+</svg>

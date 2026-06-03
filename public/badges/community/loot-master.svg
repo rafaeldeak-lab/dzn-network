@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 256 256">
+  <title>Loot Master</title>
+  <defs>
+    <linearGradient id="loot-master-metal" x1="42" y1="24" x2="214" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc" stop-opacity=".85"/>
+      <stop offset=".22" stop-color="#facc15"/>
+      <stop offset=".68" stop-color="#92400e"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="loot-master-glow" cx="50%" cy="46%" r="56%">
+      <stop offset="0" stop-color="#facc15" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#92400e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="loot-master-shine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".65"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  
+  <circle class="" cx="128" cy="128" r="108" fill="url(#loot-master-glow)" opacity=".7"/>
+  <path d="M128 18 L222 64 V132 C222 188 184 226 128 242 C72 226 34 188 34 132 V64 Z" fill="#020617" stroke="url(#loot-master-metal)" stroke-width="10"/>
+  <path d="M128 38 L202 74 V130 C202 178 172 208 128 222 C84 208 54 178 54 130 V74 Z" fill="rgba(15,23,42,.88)" stroke="#facc15" stroke-width="4" opacity=".96"/>
+  <circle cx="128" cy="128" r="72" fill="rgba(2,6,23,.62)" stroke="#92400e" stroke-width="5" opacity=".9"/>
+  <g class=" "><path d="M70 92 H186 V180 H70 Z" fill="#facc15" stroke="#fff7ed" stroke-width="7"/><path d="M70 116 H186 M98 92 V180 M156 92 V180 M82 168 L174 104 M82 104 L174 168" stroke="#92400e" stroke-width="6"/></g>
+  <path d="M76 62 Q128 34 180 62" stroke="#fff" stroke-width="5" opacity=".25" fill="none"/>
+</svg>

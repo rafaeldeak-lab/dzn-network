@@ -1,0 +1,462 @@
+{
+  "bronze": {
+    "code": "bronze",
+    "category": "reputation",
+    "rarity": "common",
+    "staticIconUrl": "/badges/reputation/bronze.svg",
+    "animatedIconUrl": "/badges/reputation/bronze-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#cd7f32",
+    "imageAlt": "Bronze reputation badge"
+  },
+  "silver": {
+    "code": "silver",
+    "category": "reputation",
+    "rarity": "uncommon",
+    "staticIconUrl": "/badges/reputation/silver.svg",
+    "animatedIconUrl": "/badges/reputation/silver-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#cbd5e1",
+    "imageAlt": "Silver reputation badge"
+  },
+  "gold": {
+    "code": "gold",
+    "category": "reputation",
+    "rarity": "rare",
+    "staticIconUrl": "/badges/reputation/gold.svg",
+    "animatedIconUrl": "/badges/reputation/gold-animated.svg",
+    "animationType": "shimmer",
+    "glowColour": "#facc15",
+    "imageAlt": "Gold reputation badge"
+  },
+  "platinum": {
+    "code": "platinum",
+    "category": "reputation",
+    "rarity": "epic",
+    "staticIconUrl": "/badges/reputation/platinum.svg",
+    "animatedIconUrl": "/badges/reputation/platinum-animated.svg",
+    "animationType": "electric",
+    "glowColour": "#e0f2fe",
+    "imageAlt": "Platinum reputation badge"
+  },
+  "diamond": {
+    "code": "diamond",
+    "category": "reputation",
+    "rarity": "legendary",
+    "staticIconUrl": "/badges/reputation/diamond.svg",
+    "animatedIconUrl": "/badges/reputation/diamond-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#67e8f9",
+    "imageAlt": "Diamond reputation badge"
+  },
+  "legendary": {
+    "code": "legendary",
+    "category": "reputation",
+    "rarity": "mythic",
+    "staticIconUrl": "/badges/reputation/legendary.svg",
+    "animatedIconUrl": "/badges/reputation/legendary-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#f59e0b",
+    "imageAlt": "Legendary reputation badge"
+  },
+  "dzn_legend": {
+    "code": "dzn_legend",
+    "category": "reputation",
+    "rarity": "mythic",
+    "staticIconUrl": "/badges/reputation/dzn-legend.svg",
+    "animatedIconUrl": "/badges/reputation/dzn-legend-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Legend reputation badge"
+  },
+  "premium_server": {
+    "code": "premium_server",
+    "category": "premium",
+    "rarity": "premium",
+    "staticIconUrl": "/badges/premium/premium-server.svg",
+    "animatedIconUrl": "/badges/premium/premium-server-animated.svg",
+    "animationType": "premium",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Premium Server badge"
+  },
+  "verified_server": {
+    "code": "verified_server",
+    "category": "premium",
+    "rarity": "rare",
+    "staticIconUrl": "/badges/premium/verified-server.svg",
+    "animatedIconUrl": "/badges/premium/verified-server-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#22d3ee",
+    "imageAlt": "DZN Verified Server badge"
+  },
+  "featured_server": {
+    "code": "featured_server",
+    "category": "premium",
+    "rarity": "premium",
+    "staticIconUrl": "/badges/premium/featured-server.svg",
+    "animatedIconUrl": "/badges/premium/featured-server-animated.svg",
+    "animationType": "shimmer",
+    "glowColour": "#a78bfa",
+    "imageAlt": "DZN Featured Server badge"
+  },
+  "trending_server": {
+    "code": "trending_server",
+    "category": "premium",
+    "rarity": "epic",
+    "staticIconUrl": "/badges/premium/trending-server.svg",
+    "animatedIconUrl": "/badges/premium/trending-server-animated.svg",
+    "animationType": "pulse",
+    "glowColour": "#34d399",
+    "imageAlt": "DZN Trending Server badge"
+  },
+  "top_pick": {
+    "code": "top_pick",
+    "category": "premium",
+    "rarity": "epic",
+    "staticIconUrl": "/badges/premium/top-pick.svg",
+    "animatedIconUrl": "/badges/premium/top-pick-animated.svg",
+    "animationType": "sparks",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Top Pick badge"
+  },
+  "rising_server": {
+    "code": "rising_server",
+    "category": "premium",
+    "rarity": "rare",
+    "staticIconUrl": "/badges/premium/rising-server.svg",
+    "animatedIconUrl": "/badges/premium/rising-server-animated.svg",
+    "animationType": "pulse",
+    "glowColour": "#34d399",
+    "imageAlt": "DZN Rising Server badge"
+  },
+  "community_favourite": {
+    "code": "community_favourite",
+    "category": "premium",
+    "rarity": "epic",
+    "staticIconUrl": "/badges/premium/community-favourite.svg",
+    "animatedIconUrl": "/badges/premium/community-favourite-animated.svg",
+    "animationType": "sparks",
+    "glowColour": "#f472b6",
+    "imageAlt": "DZN Community Favourite badge"
+  },
+  "active_server": {
+    "code": "active_server",
+    "category": "premium",
+    "rarity": "uncommon",
+    "staticIconUrl": "/badges/premium/active-server.svg",
+    "animatedIconUrl": "/badges/premium/active-server-animated.svg",
+    "animationType": "pulse",
+    "glowColour": "#22c55e",
+    "imageAlt": "DZN Active Server badge"
+  },
+  "exclusive": {
+    "code": "exclusive",
+    "category": "premium",
+    "rarity": "legendary",
+    "staticIconUrl": "/badges/premium/exclusive.svg",
+    "animatedIconUrl": "/badges/premium/exclusive-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#a78bfa",
+    "imageAlt": "DZN Exclusive badge"
+  },
+  "hardcore_mode": {
+    "code": "hardcore_mode",
+    "category": "premium",
+    "rarity": "epic",
+    "staticIconUrl": "/badges/premium/hardcore-mode.svg",
+    "animatedIconUrl": "/badges/premium/hardcore-mode-animated.svg",
+    "animationType": "flame",
+    "glowColour": "#ef4444",
+    "imageAlt": "DZN Hardcore Mode badge"
+  },
+  "death_dealer": {
+    "code": "death_dealer",
+    "category": "combat",
+    "rarity": "rare",
+    "staticIconUrl": "/badges/combat/death-dealer.svg",
+    "animatedIconUrl": "/badges/combat/death-dealer-animated.svg",
+    "animationType": "pulse",
+    "glowColour": "#38bdf8",
+    "imageAlt": "DZN Death Dealer combat badge"
+  },
+  "headhunter": {
+    "code": "headhunter",
+    "category": "combat",
+    "rarity": "epic",
+    "staticIconUrl": "/badges/combat/headhunter.svg",
+    "animatedIconUrl": "/badges/combat/headhunter-animated.svg",
+    "animationType": "sparks",
+    "glowColour": "#ef4444",
+    "imageAlt": "DZN Headhunter combat badge"
+  },
+  "long_shot_legend": {
+    "code": "long_shot_legend",
+    "category": "combat",
+    "rarity": "legendary",
+    "staticIconUrl": "/badges/combat/long-shot-legend.svg",
+    "animatedIconUrl": "/badges/combat/long-shot-legend-animated.svg",
+    "animationType": "shimmer",
+    "glowColour": "#22d3ee",
+    "imageAlt": "DZN Long Shot Legend combat badge"
+  },
+  "warlord": {
+    "code": "warlord",
+    "category": "combat",
+    "rarity": "legendary",
+    "staticIconUrl": "/badges/combat/warlord.svg",
+    "animatedIconUrl": "/badges/combat/warlord-animated.svg",
+    "animationType": "flame",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Warlord combat badge"
+  },
+  "hot_streak": {
+    "code": "hot_streak",
+    "category": "combat",
+    "rarity": "epic",
+    "staticIconUrl": "/badges/combat/hot-streak.svg",
+    "animatedIconUrl": "/badges/combat/hot-streak-animated.svg",
+    "animationType": "flame",
+    "glowColour": "#f97316",
+    "imageAlt": "DZN Hot Streak combat badge"
+  },
+  "trusted_server": {
+    "code": "trusted_server",
+    "category": "community",
+    "rarity": "rare",
+    "staticIconUrl": "/badges/community/trusted-server.svg",
+    "animatedIconUrl": "/badges/community/trusted-server-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#22d3ee",
+    "imageAlt": "DZN Trusted Server badge"
+  },
+  "team_player": {
+    "code": "team_player",
+    "category": "community",
+    "rarity": "uncommon",
+    "staticIconUrl": "/badges/community/team-player.svg",
+    "animatedIconUrl": "/badges/community/team-player-animated.svg",
+    "animationType": "pulse",
+    "glowColour": "#34d399",
+    "imageAlt": "DZN Team Player badge"
+  },
+  "helping_hand": {
+    "code": "helping_hand",
+    "category": "community",
+    "rarity": "uncommon",
+    "staticIconUrl": "/badges/community/helping-hand.svg",
+    "animatedIconUrl": "/badges/community/helping-hand-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#f472b6",
+    "imageAlt": "DZN Helping Hand badge"
+  },
+  "loot_master": {
+    "code": "loot_master",
+    "category": "community",
+    "rarity": "rare",
+    "staticIconUrl": "/badges/community/loot-master.svg",
+    "animatedIconUrl": "/badges/community/loot-master-animated.svg",
+    "animationType": "shimmer",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Loot Master badge"
+  },
+  "event_champion": {
+    "code": "event_champion",
+    "category": "community",
+    "rarity": "legendary",
+    "staticIconUrl": "/badges/community/event-champion.svg",
+    "animatedIconUrl": "/badges/community/event-champion-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Event Champion badge"
+  },
+  "founder": {
+    "code": "founder",
+    "category": "founder",
+    "rarity": "limited",
+    "staticIconUrl": "/badges/founder/founder.svg",
+    "animatedIconUrl": "/badges/founder/founder-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Founder badge"
+  },
+  "early_adopter": {
+    "code": "early_adopter",
+    "category": "founder",
+    "rarity": "limited",
+    "staticIconUrl": "/badges/founder/early-adopter.svg",
+    "animatedIconUrl": "/badges/founder/early-adopter-animated.svg",
+    "animationType": "shimmer",
+    "glowColour": "#38bdf8",
+    "imageAlt": "DZN Early Adopter badge"
+  },
+  "beta_veteran": {
+    "code": "beta_veteran",
+    "category": "founder",
+    "rarity": "limited",
+    "staticIconUrl": "/badges/founder/beta-veteran.svg",
+    "animatedIconUrl": "/badges/founder/beta-veteran-animated.svg",
+    "animationType": "electric",
+    "glowColour": "#34d399",
+    "imageAlt": "DZN Beta Veteran badge"
+  },
+  "legacy_server": {
+    "code": "legacy_server",
+    "category": "founder",
+    "rarity": "limited",
+    "staticIconUrl": "/badges/founder/legacy-server.svg",
+    "animatedIconUrl": "/badges/founder/legacy-server-animated.svg",
+    "animationType": "legendary",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Legacy Server badge"
+  },
+  "pioneer": {
+    "code": "pioneer",
+    "category": "founder",
+    "rarity": "limited",
+    "staticIconUrl": "/badges/founder/pioneer.svg",
+    "animatedIconUrl": "/badges/founder/pioneer-animated.svg",
+    "animationType": "glow",
+    "glowColour": "#34d399",
+    "imageAlt": "DZN Pioneer badge"
+  },
+  "veteran": {
+    "code": "veteran",
+    "category": "founder",
+    "rarity": "limited",
+    "staticIconUrl": "/badges/founder/veteran.svg",
+    "animatedIconUrl": "/badges/founder/veteran-animated.svg",
+    "animationType": "shimmer",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Veteran badge"
+  },
+  "king_of_pvp": {
+    "code": "king_of_pvp",
+    "category": "crowns",
+    "rarity": "crown",
+    "staticIconUrl": "/badges/crowns/king-of-pvp.svg",
+    "animatedIconUrl": "/badges/crowns/king-of-pvp-animated.svg",
+    "animationType": "crown",
+    "glowColour": "#ef4444",
+    "imageAlt": "DZN King of PvP crown badge"
+  },
+  "king_of_survival": {
+    "code": "king_of_survival",
+    "category": "crowns",
+    "rarity": "crown",
+    "staticIconUrl": "/badges/crowns/king-of-survival.svg",
+    "animatedIconUrl": "/badges/crowns/king-of-survival-animated.svg",
+    "animationType": "crown",
+    "glowColour": "#22c55e",
+    "imageAlt": "DZN King of Survival crown badge"
+  },
+  "king_of_deathmatch": {
+    "code": "king_of_deathmatch",
+    "category": "crowns",
+    "rarity": "crown",
+    "staticIconUrl": "/badges/crowns/king-of-deathmatch.svg",
+    "animatedIconUrl": "/badges/crowns/king-of-deathmatch-animated.svg",
+    "animationType": "crown",
+    "glowColour": "#38bdf8",
+    "imageAlt": "DZN King of Deathmatch crown badge"
+  },
+  "king_of_pve": {
+    "code": "king_of_pve",
+    "category": "crowns",
+    "rarity": "crown",
+    "staticIconUrl": "/badges/crowns/king-of-pve.svg",
+    "animatedIconUrl": "/badges/crowns/king-of-pve-animated.svg",
+    "animationType": "crown",
+    "glowColour": "#a78bfa",
+    "imageAlt": "DZN King of PvE crown badge"
+  },
+  "king_of_dzn": {
+    "code": "king_of_dzn",
+    "category": "crowns",
+    "rarity": "crown",
+    "staticIconUrl": "/badges/crowns/king-of-dzn.svg",
+    "animatedIconUrl": "/badges/crowns/king-of-dzn-animated.svg",
+    "animationType": "crown",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN King of DZN crown badge"
+  },
+  "spring_champion": {
+    "code": "spring_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/spring-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/spring-champion-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#86efac",
+    "imageAlt": "DZN Spring Champion seasonal badge"
+  },
+  "summer_champion": {
+    "code": "summer_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/summer-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/summer-champion-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN Summer Champion seasonal badge"
+  },
+  "autumn_champion": {
+    "code": "autumn_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/autumn-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/autumn-champion-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#fb923c",
+    "imageAlt": "DZN Autumn Champion seasonal badge"
+  },
+  "winter_champion": {
+    "code": "winter_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/winter-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/winter-champion-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#93c5fd",
+    "imageAlt": "DZN Winter Champion seasonal badge"
+  },
+  "halloween_champion": {
+    "code": "halloween_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/halloween-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/halloween-champion-animated.svg",
+    "animationType": "flame",
+    "glowColour": "#f97316",
+    "imageAlt": "DZN Halloween Champion seasonal badge"
+  },
+  "christmas_champion": {
+    "code": "christmas_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/christmas-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/christmas-champion-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#ef4444",
+    "imageAlt": "DZN Christmas Champion seasonal badge"
+  },
+  "easter_champion": {
+    "code": "easter_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/easter-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/easter-champion-animated.svg",
+    "animationType": "seasonal",
+    "glowColour": "#f9a8d4",
+    "imageAlt": "DZN Easter Champion seasonal badge"
+  },
+  "new_year_champion": {
+    "code": "new_year_champion",
+    "category": "seasonal",
+    "rarity": "seasonal",
+    "staticIconUrl": "/badges/seasonal/new-year-champion.svg",
+    "animatedIconUrl": "/badges/seasonal/new-year-champion-animated.svg",
+    "animationType": "sparks",
+    "glowColour": "#facc15",
+    "imageAlt": "DZN New Year Champion seasonal badge"
+  }
+}

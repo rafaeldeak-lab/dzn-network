@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 256 256">
+  <title>Diamond Reputation</title>
+  <defs>
+    <linearGradient id="diamond-metal" x1="42" y1="24" x2="214" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc" stop-opacity=".85"/>
+      <stop offset=".22" stop-color="#67e8f9"/>
+      <stop offset=".68" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="diamond-glow" cx="50%" cy="46%" r="56%">
+      <stop offset="0" stop-color="#67e8f9" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#2563eb" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="diamond-shine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".65"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  
+  <circle class="" cx="128" cy="128" r="108" fill="url(#diamond-glow)" opacity=".7"/>
+  <path d="M128 18 L222 64 V132 C222 188 184 226 128 242 C72 226 34 188 34 132 V64 Z" fill="#020617" stroke="url(#diamond-metal)" stroke-width="10"/>
+  <path d="M128 38 L202 74 V130 C202 178 172 208 128 222 C84 208 54 178 54 130 V74 Z" fill="rgba(15,23,42,.88)" stroke="#67e8f9" stroke-width="4" opacity=".96"/>
+  <circle cx="128" cy="128" r="72" fill="rgba(2,6,23,.62)" stroke="#2563eb" stroke-width="5" opacity=".9"/>
+  <g class=" "><path d="M128 48 L188 104 L128 216 L68 104 Z" fill="#67e8f9" stroke="#e0f2fe" stroke-width="7"/><path d="M68 104 H188 M98 104 L128 216 L156 104 M98 104 L128 48 L156 104" stroke="#2563eb" stroke-width="5" fill="none" opacity=".85"/></g>
+  <path d="M76 62 Q128 34 180 62" stroke="#fff" stroke-width="5" opacity=".25" fill="none"/>
+</svg>
