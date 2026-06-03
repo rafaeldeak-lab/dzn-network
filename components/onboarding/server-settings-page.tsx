@@ -30,6 +30,7 @@ import { DznLogo } from "@/components/dzn/dzn-logo";
 import { clearClientAuthState, getMe, logoutAndRedirect } from "./api";
 import { SaveProgressButton, useSaveProgress } from "./save-progress";
 import type { LinkedServer } from "./types";
+import { VisualLoadoutSection } from "./visual-loadout-section";
 
 type CategoryValue = "pvp" | "deathmatch" | "pve" | "pvp_pve";
 type ListingVisibility = "public" | "hidden";
@@ -755,6 +756,8 @@ export function ServerSettingsPage() {
           </div>
         </section>
       </div>
+
+      <VisualLoadoutSection key={settings.server.id} serverId={settings.server.id} serverName={settings.server.name} planKey={settings.plan.plan_key} />
 
       <section id="discord-event-channels" className="glass-surface animated-border mt-5 rounded-lg p-5">
         <div className="relative z-10">
