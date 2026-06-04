@@ -116,6 +116,12 @@ type PublicServer = {
     factors: string[];
     fairness: string;
   };
+  activePromotions?: Array<{
+    id: string;
+    promotionType: string;
+    status: string;
+    endsAt: string;
+  }>;
   reputation?: ReputationSummary;
   achievement_showcase?: AchievementShowcase;
   badges?: VisualBadge[];
@@ -684,6 +690,12 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
   const cardAccentStyle: VisualAccentStyle | undefined = visualAccent ? { "--dzn-card-accent": visualAccent } : undefined;
   const tags = parseTags(server.tags_json).slice(0, variant === "spotlight" ? 4 : 3);
   const isSpotlight = variant === "spotlight";
+  const trackingSource = `discovery_${variant}`;
+  const activePromotionId = server.activePromotions?.[0]?.id ?? null;
+
+  useEffect(() => {
+    trackPromotionEvent(server.linked_server_id, activePromotionId, "impression", trackingSource);
+  }, [activePromotionId, server.linked_server_id, trackingSource]);
 
   return (
     <motion.article
@@ -729,7 +741,11 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
           <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{server.visibilityExplanation?.summary ?? "Discovery placement"}</p>
-          <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400">
+          <Link
+            href={publicServerProfileHref(server.public_slug)}
+            onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
+          >
             View
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
@@ -2226,6 +2242,31 @@ function advertisingRank(server: PublicServer) {
 
 function publicServerProfileHref(slug: string) {
   return `/servers/profile?slug=${encodeURIComponent(slug)}`;
+}
+
+function trackPromotionEvent(serverId: string, promotionId: string | null, eventType: "impression" | "click", source: string) {
+  if (typeof window === "undefined" || !serverId) return;
+  const payload = JSON.stringify({
+    serverId,
+    eventType,
+    source,
+    promotionId,
+  });
+  try {
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+      navigator.sendBeacon("/api/public/promotions/track", new Blob([payload], { type: "application/json" }));
+      return;
+    }
+    void fetch("/api/public/promotions/track", {
+      method: "POST",
+      cache: "no-store",
+      keepalive: true,
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: payload,
+    }).catch(() => undefined);
+  } catch {
+    // Promotion analytics must never block public browsing.
+  }
 }
 
 function publicNetworkCacheKey(slug: string | null) {

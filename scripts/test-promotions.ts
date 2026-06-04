@@ -5,6 +5,8 @@ import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import {
   explainPromotionBenefits,
   getPromotionConfigForPlan,
+  recordPromotionClick,
+  recordPromotionImpression,
 } from "../functions/_lib/server-promotions";
 import { getServerDiscoveryScore } from "../functions/_lib/server-visibility";
 import { publicAdvertisingFromState } from "../functions/_lib/advertising";
@@ -62,6 +64,14 @@ for (const table of ["promotion_credits", "server_promotions", "promotion_audit_
 }
 assert.equal(/DROP TABLE|DELETE FROM|TRUNCATE|player_stats/i.test(migration), false, "Migration must stay additive and avoid forbidden tables.");
 
+const analyticsMigration = readFileSync("migrations/0049_promotion_analytics.sql", "utf8");
+for (const table of ["promotion_impressions", "promotion_clicks"]) {
+  assert.equal(analyticsMigration.includes(`CREATE TABLE IF NOT EXISTS ${table}`), true, `Analytics migration should create ${table}.`);
+  assert.equal(analyticsMigration.includes(`${table}(server_id, occurred_at)`), true, `${table} should support 7-day server aggregation.`);
+  assert.equal(analyticsMigration.includes(`${table}(promotion_id, occurred_at)`), true, `${table} should support promotion-scoped diagnostics.`);
+}
+assert.equal(/DROP TABLE|DELETE FROM|TRUNCATE|player_stats|player_profiles|kill_events|player_events/i.test(analyticsMigration), false, "Analytics migration must stay additive and avoid protected tracking tables.");
+
 const helper = readFileSync("functions/_lib/server-promotions.ts", "utf8");
 for (const snippet of [
   "getPromotionConfigForPlan",
@@ -71,16 +81,30 @@ for (const snippet of [
   "getActivePromotionsForServer",
   "getPromotionStatus",
   "explainPromotionBenefits",
+  "recordPromotionImpression",
+  "recordPromotionClick",
+  "getPromotionAnalytics",
+  "impressionsLast7Days",
+  "clicksLast7Days",
+  "estimatedVisibilityLift",
+  "recentPromotionEvents",
+  "SELECT COUNT(*) AS total FROM promotion_impressions",
+  "SELECT COUNT(*) AS total FROM promotion_clicks",
+  "UNION ALL",
+  "ORDER BY occurred_at DESC",
   "PROMOTION_ALREADY_ACTIVE",
   "credits_available > 0",
 ]) {
   assert.equal(helper.includes(snippet), true, `Promotion helper should include ${snippet}.`);
 }
 assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events/i.test(helper.replace(/nitrado_service_id/g, "")), false, "Promotion helper must not touch protected tracking or Stripe webhook systems.");
+assert.equal(typeof recordPromotionImpression, "function");
+assert.equal(typeof recordPromotionClick, "function");
 
 const statusEndpoint = readFileSync("functions/api/servers/[serverId]/promotion-status.ts", "utf8");
 const useCreditEndpoint = readFileSync("functions/api/servers/[serverId]/promotions/use-credit.ts", "utf8");
-for (const endpoint of [statusEndpoint, useCreditEndpoint]) {
+const analyticsEndpoint = readFileSync("functions/api/servers/[serverId]/promotion-analytics.ts", "utf8");
+for (const endpoint of [statusEndpoint, useCreditEndpoint, analyticsEndpoint]) {
   assert.equal(endpoint.includes("resolveOwnerVisualLoadoutServer"), true, "Promotion endpoints should reuse owner/admin/support resolver.");
   assert.equal(endpoint.includes("status: access.status"), true, "Promotion endpoints should preserve resolver 401/403 status.");
   assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events/i.test(endpoint.replace(/nitrado_service_id/g, "")), false, "Promotion endpoints must not touch protected tracking or Stripe webhook systems.");
@@ -88,6 +112,14 @@ for (const endpoint of [statusEndpoint, useCreditEndpoint]) {
 assert.equal(statusEndpoint.includes("getPromotionStatus"), true);
 assert.equal(useCreditEndpoint.includes("usePromotionCredit"), true);
 assert.equal(useCreditEndpoint.includes("readJson"), true);
+assert.equal(analyticsEndpoint.includes("getPromotionAnalytics"), true);
+assert.equal(analyticsEndpoint.includes("PROMOTION_ANALYTICS_UNAVAILABLE"), true);
+
+const publicTrackEndpoint = readFileSync("functions/api/public/promotions/track.ts", "utf8");
+assert.equal(publicTrackEndpoint.includes("recordPromotionImpression"), true, "Public tracking endpoint should record impressions.");
+assert.equal(publicTrackEndpoint.includes("recordPromotionClick"), true, "Public tracking endpoint should record clicks.");
+assert.equal(publicTrackEndpoint.includes("readJson"), true, "Public tracking endpoint should parse JSON safely.");
+assert.equal(/user|discord|session|cookie|ip|player_profiles|kill_events|player_events/i.test(publicTrackEndpoint), false, "Public tracking endpoint must not store personal data or touch protected systems.");
 
 const visibilitySource = readFileSync("functions/_lib/server-visibility.ts", "utf8");
 assert.equal(visibilitySource.includes("activePromotions"), true, "Visibility helper should accept active promotions.");
@@ -103,9 +135,15 @@ const serverSettingsUi = readFileSync("components/onboarding/server-settings-pag
 for (const snippet of [
   "Server Promotion Credits",
   "/promotion-status",
+  "/promotion-analytics",
   "/promotions/use-credit",
   "creditsAvailable",
   "creditsUsed",
+  "Promotion Results",
+  "impressionsLast7Days",
+  "clicksLast7Days",
+  "estimatedVisibilityLift",
+  "These are discovery/visibility results, not competitive leaderboard boosts.",
   "activePromotions",
   "availablePromotionTypes",
   "lockedPromotionTypes",
@@ -124,6 +162,13 @@ assert.equal(serverSettingsUi.includes("actionState.busy || !promotion.allowed |
 assert.equal(serverSettingsUi.includes("method: \"POST\""), true, "Use credit action should call POST endpoint.");
 assert.equal(serverSettingsUi.includes("safeErrorMessage(error, \"Promotion credit could not be used right now.\")"), true, "Use credit action should show API error messages.");
 assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events/i.test(serverSettingsUi.replace(/nitrado_service_id/g, "")), false, "Promotion UI must not touch protected tracking or Stripe webhook systems.");
+
+const publicNetworkUi = readFileSync("components/network/public-network.tsx", "utf8");
+assert.equal(publicNetworkUi.includes("/api/public/promotions/track"), true, "Public discovery cards should send lightweight promotion analytics.");
+assert.equal(publicNetworkUi.includes("navigator.sendBeacon"), true, "Promotion tracking should be non-blocking where supported.");
+assert.equal(publicNetworkUi.includes("Promotion analytics must never block public browsing."), true, "Public tracking failures should be ignored.");
+const trackingHelperSource = publicNetworkUi.slice(publicNetworkUi.indexOf("function trackPromotionEvent"), publicNetworkUi.indexOf("function publicNetworkCacheKey"));
+assert.equal(/user|discord|session|cookie|ip|player_profiles|kill_events|player_events/i.test(trackingHelperSource), false, "Public tracking UI must not collect personal data or touch protected systems.");
 
 const publicPlans = getBillingPlanSummaries({} as Env);
 assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);

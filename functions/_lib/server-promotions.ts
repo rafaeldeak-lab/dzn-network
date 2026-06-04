@@ -28,6 +28,14 @@ export type PromotionCreditsRow = {
   updated_at: string;
 };
 
+export type PromotionAnalyticsEvent = {
+  id: string;
+  type: "impression" | "click";
+  source: string;
+  promotionId: string | null;
+  occurredAt: string;
+};
+
 export type PromotionTypeStatus = {
   promotionType: PromotionType;
   label: string;
@@ -48,6 +56,18 @@ export type PromotionConfig = {
 type PromotionServerRow = {
   id: string;
   plan_key: string | null;
+};
+
+type PromotionAnalyticsCountRow = {
+  total: number | null;
+};
+
+type PromotionAnalyticsEventRow = {
+  id: string;
+  type: "impression" | "click";
+  source: string;
+  promotion_id: string | null;
+  occurred_at: string;
 };
 
 export class PromotionError extends Error {
@@ -276,6 +296,61 @@ export async function getPromotionStatus(env: Env, serverId: string) {
   };
 }
 
+export async function recordPromotionImpression(env: Env, serverId: string, source: unknown, promotionId?: unknown) {
+  return recordPromotionEvent(env, "promotion_impressions", serverId, source, promotionId);
+}
+
+export async function recordPromotionClick(env: Env, serverId: string, source: unknown, promotionId?: unknown) {
+  return recordPromotionEvent(env, "promotion_clicks", serverId, source, promotionId);
+}
+
+export async function getPromotionAnalytics(env: Env, serverId: string) {
+  await ensurePromotionSchema(env);
+  const normalizedServerId = cleanIdentifier(serverId);
+  if (!normalizedServerId) throw new PromotionError("SERVER_NOT_FOUND", "Server not found.", 404);
+
+  const credits = await ensurePromotionCreditsForCurrentPeriod(env, normalizedServerId);
+  const activePromotions = await getActivePromotionsForServer(env, normalizedServerId);
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const db = requireDb(env);
+  const [impressionsRow, clicksRow, recentRows] = await Promise.all([
+    db
+      .prepare("SELECT COUNT(*) AS total FROM promotion_impressions WHERE server_id = ? AND occurred_at >= ?")
+      .bind(normalizedServerId, cutoff)
+      .first<PromotionAnalyticsCountRow>(),
+    db
+      .prepare("SELECT COUNT(*) AS total FROM promotion_clicks WHERE server_id = ? AND occurred_at >= ?")
+      .bind(normalizedServerId, cutoff)
+      .first<PromotionAnalyticsCountRow>(),
+    db
+      .prepare(
+        `SELECT id, 'impression' AS type, source, promotion_id, occurred_at
+         FROM promotion_impressions
+         WHERE server_id = ?
+         UNION ALL
+         SELECT id, 'click' AS type, source, promotion_id, occurred_at
+         FROM promotion_clicks
+         WHERE server_id = ?
+         ORDER BY occurred_at DESC
+         LIMIT 12`,
+      )
+      .bind(normalizedServerId, normalizedServerId)
+      .all<PromotionAnalyticsEventRow>(),
+  ]);
+
+  const impressionsLast7Days = Number(impressionsRow?.total ?? 0);
+  const clicksLast7Days = Number(clicksRow?.total ?? 0);
+  const recentPromotionEvents = (recentRows.results ?? []).map(toPublicAnalyticsEvent);
+  return {
+    impressionsLast7Days,
+    clicksLast7Days,
+    activePromotionCount: activePromotions.length,
+    creditsUsedThisPeriod: Number(credits.credits_used ?? 0),
+    estimatedVisibilityLift: estimateVisibilityLift(activePromotions, impressionsLast7Days, clicksLast7Days),
+    recentPromotionEvents,
+  };
+}
+
 export function explainPromotionBenefits(planKey: unknown) {
   const normalized = promotionPlanKey(planKey);
   if (normalized === "premium") {
@@ -355,6 +430,32 @@ export async function ensurePromotionSchema(env: Env) {
     .run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_promotion_audit_log_server ON promotion_audit_log(server_id, created_at)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_promotion_audit_log_action ON promotion_audit_log(action, created_at)").run();
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS promotion_impressions (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL,
+        promotion_id TEXT,
+        source TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+      )`,
+    )
+    .run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_promotion_impressions_server_time ON promotion_impressions(server_id, occurred_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_promotion_impressions_promotion_time ON promotion_impressions(promotion_id, occurred_at)").run();
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS promotion_clicks (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL,
+        promotion_id TEXT,
+        source TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+      )`,
+    )
+    .run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_promotion_clicks_server_time ON promotion_clicks(server_id, occurred_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_promotion_clicks_promotion_time ON promotion_clicks(promotion_id, occurred_at)").run();
 }
 
 function promotionPlanKey(planKey: unknown): "starter" | "pro" | "premium" {
@@ -466,6 +567,26 @@ async function logPromotionAudit(env: Env, input: {
     .run();
 }
 
+async function recordPromotionEvent(
+  env: Env,
+  tableName: "promotion_impressions" | "promotion_clicks",
+  serverId: string,
+  source: unknown,
+  promotionId?: unknown,
+) {
+  await ensurePromotionSchema(env);
+  const server = await findPromotionServer(env, serverId);
+  if (!server) throw new PromotionError("SERVER_NOT_FOUND", "Server not found.", 404);
+  const normalizedPromotionId = cleanOptionalIdentifier(promotionId);
+  const safeSource = cleanPromotionSource(source);
+  const occurredAt = new Date().toISOString();
+  await requireDb(env)
+    .prepare(`INSERT INTO ${tableName} (id, server_id, promotion_id, source, occurred_at) VALUES (?, ?, ?, ?, ?)`)
+    .bind(crypto.randomUUID(), server.id, normalizedPromotionId, safeSource, occurredAt)
+    .run();
+  return { ok: true, serverId: server.id, source: safeSource, promotionId: normalizedPromotionId, occurredAt };
+}
+
 function toPublicPromotion(row: PromotionRow) {
   return {
     id: row.id,
@@ -475,6 +596,28 @@ function toPublicPromotion(row: PromotionRow) {
     endsAt: row.ends_at,
     label: promotionLabel(row.promotion_type),
   };
+}
+
+function toPublicAnalyticsEvent(row: PromotionAnalyticsEventRow): PromotionAnalyticsEvent {
+  return {
+    id: row.id,
+    type: row.type,
+    source: row.source,
+    promotionId: row.promotion_id,
+    occurredAt: row.occurred_at,
+  };
+}
+
+function estimateVisibilityLift(activePromotions: PromotionRow[], impressions: number, clicks: number) {
+  const promotionLift: Record<PromotionType, number> = {
+    directory_bump: 8,
+    featured_rotation: 14,
+    spotlight_boost: 24,
+    seasonal_push: 0,
+  };
+  const activeLift = activePromotions.reduce((total, promotion) => total + (promotionLift[promotion.promotion_type] ?? 0), 0);
+  const engagementLift = Math.min(10, impressions / 20) + Math.min(12, clicks * 2);
+  return Math.min(75, Math.round(activeLift + engagementLift));
 }
 
 function currentPeriod(now: Date) {
@@ -489,4 +632,15 @@ function currentPeriod(now: Date) {
 
 function cleanIdentifier(value: unknown) {
   return typeof value === "string" && /^[a-zA-Z0-9-_]{2,120}$/.test(value) ? value : null;
+}
+
+function cleanOptionalIdentifier(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  return cleanIdentifier(value);
+}
+
+function cleanPromotionSource(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase();
+  const cleaned = text.replace(/[^a-z0-9:_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80);
+  return cleaned || "unknown";
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   Bell,
   CheckCircle2,
   Clock3,
@@ -224,6 +225,24 @@ type PromotionStatusResponse = {
   message?: string;
 };
 
+type PromotionAnalyticsEvent = {
+  id: string;
+  type: "impression" | "click";
+  source: string;
+  promotionId: string | null;
+  occurredAt: string;
+};
+
+type PromotionAnalyticsResponse = {
+  ok: true;
+  impressionsLast7Days: number;
+  clicksLast7Days: number;
+  activePromotionCount: number;
+  creditsUsedThisPeriod: number;
+  estimatedVisibilityLift: number;
+  recentPromotionEvents: PromotionAnalyticsEvent[];
+};
+
 type PromotionActionState = {
   promotionType: PromotionType | null;
   busy: boolean;
@@ -290,6 +309,9 @@ export function ServerSettingsPage() {
   const [promotionStatus, setPromotionStatus] = useState<PromotionStatusResponse | null>(null);
   const [promotionStatusLoading, setPromotionStatusLoading] = useState(false);
   const [promotionStatusError, setPromotionStatusError] = useState<string | null>(null);
+  const [promotionAnalytics, setPromotionAnalytics] = useState<PromotionAnalyticsResponse | null>(null);
+  const [promotionAnalyticsLoading, setPromotionAnalyticsLoading] = useState(false);
+  const [promotionAnalyticsError, setPromotionAnalyticsError] = useState<string | null>(null);
   const [promotionAction, setPromotionAction] = useState<PromotionActionState>({ promotionType: null, busy: false, message: null, error: null });
   const [advancedRoutingOpen, setAdvancedRoutingOpen] = useState(false);
   const [eventChannelIds, setEventChannelIds] = useState<Record<EventChannelType, string>>({
@@ -396,6 +418,16 @@ export function ServerSettingsPage() {
   useEffect(() => {
     if (!settings?.server.id) return;
     const timer = window.setTimeout(() => void refreshPromotionStatus(settings.server.id), 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+    // The refresh helper intentionally reads the current selected server state; this effect is only keyed to the loaded server id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.server.id]);
+
+  useEffect(() => {
+    if (!settings?.server.id) return;
+    const timer = window.setTimeout(() => void refreshPromotionAnalytics(settings.server.id), 0);
     return () => {
       window.clearTimeout(timer);
     };
@@ -553,6 +585,26 @@ export function ServerSettingsPage() {
     }
   }
 
+  async function refreshPromotionAnalytics(serverId = settings?.server.id ?? selectedServerId) {
+    if (!serverId) return;
+    const endpoint = `/api/servers/${encodeURIComponent(serverId)}/promotion-analytics`;
+    setPromotionAnalyticsLoading(true);
+    setPromotionAnalyticsError(null);
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const data = await readApiResponse<PromotionAnalyticsResponse>(response, endpoint, "Promotion results could not be loaded right now.");
+      setPromotionAnalytics(data);
+    } catch (error) {
+      setPromotionAnalyticsError(safeErrorMessage(error, "Promotion results could not be loaded right now."));
+    } finally {
+      setPromotionAnalyticsLoading(false);
+    }
+  }
+
   async function activatePromotionCredit(promotionType: PromotionType) {
     if (!settings || promotionAction.busy) return;
     const endpoint = `/api/servers/${encodeURIComponent(settings.server.id)}/promotions/use-credit`;
@@ -574,6 +626,7 @@ export function ServerSettingsPage() {
         error: null,
       });
       void refreshVisibilityStatus(settings.server.id);
+      void refreshPromotionAnalytics(settings.server.id);
     } catch (error) {
       setPromotionAction({
         promotionType,
@@ -804,9 +857,15 @@ export function ServerSettingsPage() {
         status={promotionStatus}
         loading={promotionStatusLoading}
         error={promotionStatusError}
+        analytics={promotionAnalytics}
+        analyticsLoading={promotionAnalyticsLoading}
+        analyticsError={promotionAnalyticsError}
         fallbackPlanKey={settings.plan.plan_key}
         actionState={promotionAction}
-        onRetry={() => refreshPromotionStatus(settings.server.id)}
+        onRetry={() => {
+          void refreshPromotionStatus(settings.server.id);
+          void refreshPromotionAnalytics(settings.server.id);
+        }}
         onUseCredit={activatePromotionCredit}
       />
 
@@ -1291,6 +1350,9 @@ function PromotionCreditsPanel({
   status,
   loading,
   error,
+  analytics,
+  analyticsLoading,
+  analyticsError,
   fallbackPlanKey,
   actionState,
   onRetry,
@@ -1299,6 +1361,9 @@ function PromotionCreditsPanel({
   status: PromotionStatusResponse | null;
   loading: boolean;
   error: string | null;
+  analytics: PromotionAnalyticsResponse | null;
+  analyticsLoading: boolean;
+  analyticsError: string | null;
   fallbackPlanKey: string;
   actionState: PromotionActionState;
   onRetry: () => void;
@@ -1364,6 +1429,15 @@ function PromotionCreditsPanel({
                 {actionState.error ?? actionState.message}
               </div>
             ) : null}
+
+            <PromotionResultsPanel
+              analytics={analytics}
+              loading={analyticsLoading}
+              error={analyticsError}
+              fallbackActivePromotionCount={status.activePromotions.length}
+              fallbackCreditsUsed={status.creditsUsed}
+              onRetry={onRetry}
+            />
 
             <div className="grid gap-3 lg:grid-cols-2">
               <div className="rounded-lg border border-white/10 bg-black/24 p-4">
@@ -1441,6 +1515,77 @@ function PromotionCreditsPanel({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function PromotionResultsPanel({
+  analytics,
+  loading,
+  error,
+  fallbackActivePromotionCount,
+  fallbackCreditsUsed,
+  onRetry,
+}: {
+  analytics: PromotionAnalyticsResponse | null;
+  loading: boolean;
+  error: string | null;
+  fallbackActivePromotionCount: number;
+  fallbackCreditsUsed: number;
+  onRetry: () => void;
+}) {
+  const activePromotionCount = analytics?.activePromotionCount ?? fallbackActivePromotionCount;
+  const creditsUsedThisPeriod = analytics?.creditsUsedThisPeriod ?? fallbackCreditsUsed;
+  return (
+    <div className="rounded-lg border border-cyan-300/18 bg-cyan-400/[0.055] p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="flex items-center gap-2 text-xs font-black uppercase text-cyan-100">
+            <BarChart3 className="h-4 w-4" />
+            Promotion Results
+          </p>
+          <p className="mt-2 text-xs leading-5 text-zinc-400">
+            These are discovery/visibility results, not competitive leaderboard boosts.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={loading}
+          className="inline-flex w-fit items-center gap-2 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[10px] font-black uppercase text-zinc-100 disabled:opacity-55"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          Refresh Results
+        </button>
+      </div>
+
+      {error ? (
+        <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-50">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <InfoRow label="Impressions 7d" value={loading && !analytics ? "Loading" : `${analytics?.impressionsLast7Days ?? 0}`} />
+        <InfoRow label="Clicks 7d" value={loading && !analytics ? "Loading" : `${analytics?.clicksLast7Days ?? 0}`} />
+        <InfoRow label="Active promotions" value={`${activePromotionCount}`} />
+        <InfoRow label="Credits used this month" value={`${creditsUsedThisPeriod}`} />
+        <InfoRow label="Est. visibility lift" value={`${analytics?.estimatedVisibilityLift ?? 0}%`} />
+      </div>
+
+      {analytics?.recentPromotionEvents.length ? (
+        <div className="mt-4 grid gap-2">
+          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Recent promotion events</p>
+          <div className="grid gap-1.5 md:grid-cols-2">
+            {analytics.recentPromotionEvents.slice(0, 4).map((event) => (
+              <div key={event.id} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs">
+                <span className="font-bold text-zinc-200">{event.type === "click" ? "Click" : "Impression"} - {formatPromotionSource(event.source)}</span>
+                <span className="shrink-0 font-bold text-zinc-500">{formatRelativeDate(event.occurredAt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1616,6 +1761,20 @@ function formatShortDate(value: string) {
     day: "numeric",
     month: "short",
   }).format(new Date(value));
+}
+
+function formatRelativeDate(value: string) {
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return "Recently";
+  const diffMinutes = Math.max(0, Math.round((Date.now() - time) / 60000));
+  if (diffMinutes < 60) return `${diffMinutes || 1}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 48) return `${diffHours}h ago`;
+  return formatShortDate(value);
+}
+
+function formatPromotionSource(value: string) {
+  return value.replace(/^discovery_/, "").replace(/_/g, " ");
 }
 
 function promotionTypeLabel(value: PromotionType) {
