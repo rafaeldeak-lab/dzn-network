@@ -1380,19 +1380,19 @@ body {
   --leaderboard-ref-red: #ff354f;
   --leaderboard-ref-panel: rgba(4, 7, 20, 0.84);
   --leaderboard-ref-line: rgba(153, 82, 255, 0.46);
-  padding: 0.55rem 0.8rem 0.9rem !important;
+  padding: 0.55rem 0.9rem 0.9rem !important;
   background:
-    radial-gradient(circle at 45% 2%, rgba(168, 85, 247, 0.3), transparent 19rem),
-    radial-gradient(circle at 58% 24%, rgba(249, 115, 22, 0.16), transparent 23rem),
-    linear-gradient(180deg, rgba(2, 3, 10, 0.18) 0%, #02030a 38%, #01020a 100%),
+    radial-gradient(circle at 44% 0%, rgba(168, 85, 247, 0.34), transparent 23rem),
+    radial-gradient(circle at 63% 19%, rgba(249, 115, 22, 0.2), transparent 26rem),
+    linear-gradient(180deg, rgba(2, 3, 10, 0.1) 0%, #02030a 37%, #01020a 100%),
     #02030a !important;
 }
 
 .leaderboard-ref-page::before {
   background:
-    url("/leaderboards/leaderboard-hero-battlefield.svg") top center / min(1500px, 100vw) auto no-repeat,
+    url("/leaderboards/leaderboard-hero-battlefield.png") top center / min(1600px, 100vw) auto no-repeat,
     radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.28), transparent 18rem);
-  opacity: 0.38;
+  opacity: 0.46;
 }
 
 .leaderboard-ref-page::after {
@@ -1420,23 +1420,24 @@ body {
 }
 
 .leaderboard-ref-shell {
-  gap: 0.85rem !important;
-  max-width: 1500px !important;
+  gap: 0.78rem !important;
+  max-width: 1580px !important;
 }
 
 .leaderboard-ref-hero {
   position: relative;
   display: block !important;
   min-height: 0 !important;
-  height: clamp(168px, 13.2vw, 205px) !important;
+  height: clamp(270px, 19.5vw, 318px) !important;
   overflow: hidden;
-  padding: clamp(0.45rem, 0.88vw, 0.82rem) clamp(0.7rem, 1.35vw, 1.18rem) !important;
-  border: 1px solid rgba(139, 92, 246, 0.26) !important;
+  padding: clamp(0.9rem, 1.4vw, 1.35rem) clamp(1rem, 1.8vw, 1.75rem) !important;
+  border: 1px solid rgba(139, 92, 246, 0.46) !important;
   border-radius: 0 !important;
   background: #02030a !important;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.04),
-    0 0 38px rgba(139, 92, 246, 0.2) !important;
+    0 0 46px rgba(139, 92, 246, 0.28),
+    inset 0 0 70px rgba(2, 3, 10, 0.78) !important;
   isolation: isolate;
 }
 
@@ -1445,18 +1446,19 @@ body {
   inset: 0;
   z-index: -2;
   background:
-    linear-gradient(90deg, rgba(2, 3, 10, 0.78), rgba(2, 3, 10, 0.02) 43%, rgba(2, 3, 10, 0.38) 100%),
-    url("/leaderboards/leaderboard-hero-battlefield.svg") center top / cover no-repeat;
-  filter: brightness(1.15) saturate(1.16);
+    linear-gradient(90deg, rgba(2, 3, 10, 0.84), rgba(2, 3, 10, 0.04) 42%, rgba(2, 3, 10, 0.44) 100%),
+    url("/leaderboards/leaderboard-hero-battlefield.png") center 48% / cover no-repeat;
+  filter: brightness(0.98) saturate(1.24) contrast(1.08);
 }
 
 .leaderboard-ref-hero::before {
   z-index: -1;
   background:
-    radial-gradient(circle at 47% 74%, rgba(249, 115, 22, 0.2), transparent 14rem),
-    radial-gradient(circle at 53% 9%, rgba(216, 180, 254, 0.18), transparent 12rem),
+    radial-gradient(circle at 65% 82%, rgba(249, 115, 22, 0.26), transparent 15rem),
+    radial-gradient(circle at 54% 13%, rgba(216, 180, 254, 0.22), transparent 14rem),
+    radial-gradient(circle at 83% 28%, rgba(14, 165, 233, 0.16), transparent 16rem),
     repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 92px);
-  opacity: 0.72;
+  opacity: 0.82;
   animation: heroParallax 12s ease-in-out infinite;
 }
 
@@ -1470,7 +1472,7 @@ body {
 .leaderboard-ref-hero-copy {
   min-height: 0 !important;
   align-items: start !important;
-  max-width: min(38vw, 25rem);
+  max-width: min(43vw, 39rem);
 }
 
 .leaderboard-ref-live-badge {
@@ -1491,15 +1493,16 @@ body {
 }
 
 .leaderboard-ref-title {
-  max-width: 9.7ch !important;
-  margin-top: 0.38rem !important;
+  max-width: 10ch !important;
+  margin-top: 0.52rem !important;
   font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif !important;
-  font-size: clamp(3rem, 5vw, 5.45rem) !important;
-  line-height: 0.78 !important;
+  font-size: clamp(4.4rem, 7vw, 7.1rem) !important;
+  line-height: 0.75 !important;
   text-transform: uppercase;
   text-shadow:
-    0 4px 0 rgba(0, 0, 0, 0.78),
-    0 0 28px rgba(168, 85, 247, 0.72);
+    0 5px 0 rgba(0, 0, 0, 0.84),
+    0 0 32px rgba(168, 85, 247, 0.82),
+    0 0 72px rgba(59, 130, 246, 0.24);
 }
 
 .leaderboard-ref-title span:first-child {
@@ -1513,19 +1516,19 @@ body {
 
 .leaderboard-ref-subtitle {
   max-width: 39rem !important;
-  margin-top: 0.55rem !important;
+  margin-top: 0.82rem !important;
 }
 
 .leaderboard-ref-updated {
-  margin-top: 0.38rem !important;
+  margin-top: 0.48rem !important;
 }
 
 .leaderboard-ref-hero-intel {
   position: absolute;
-  top: clamp(0.8rem, 1.6vw, 1.3rem);
-  right: clamp(0.75rem, 1.4vw, 1.25rem);
+  top: clamp(1.05rem, 1.7vw, 1.55rem);
+  right: clamp(1rem, 1.7vw, 1.55rem);
   display: grid !important;
-  width: min(570px, 38vw);
+  width: min(650px, 43vw);
   align-content: start !important;
   padding-top: 0 !important;
 }
@@ -1533,14 +1536,14 @@ body {
 .leaderboard-ref-stats {
   display: grid !important;
   grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  gap: clamp(0.55rem, 1vw, 1rem) !important;
+  gap: clamp(0.68rem, 1.08vw, 1.08rem) !important;
 }
 
 .leaderboard-ref-stat-card {
   position: relative;
-  min-height: clamp(110px, 9vw, 136px) !important;
+  min-height: clamp(124px, 9.2vw, 154px) !important;
   gap: 0.45rem !important;
-  padding: 0.68rem 0.52rem !important;
+  padding: 0.72rem 0.56rem !important;
   clip-path: polygon(11% 0, 89% 0, 100% 13%, 100% 87%, 89% 100%, 11% 100%, 0 87%, 0 13%);
   border-color: var(--dzn-stat-border) !important;
   border-radius: 0 !important;
@@ -1587,12 +1590,12 @@ body {
 
 .leaderboard-ref-grid {
   display: grid !important;
-  grid-template-columns: minmax(0, 1.48fr) minmax(390px, 1fr) !important;
+  grid-template-columns: minmax(0, 1.52fr) minmax(420px, 1fr) !important;
   grid-template-areas:
     "servers longest"
     "players longest"
     "personal cta" !important;
-  gap: clamp(0.85rem, 1.3vw, 1.35rem) !important;
+  gap: clamp(0.72rem, 1.15vw, 1.12rem) !important;
   align-items: start !important;
 }
 
@@ -1605,20 +1608,6 @@ body {
 .leaderboard-ref-main,
 .leaderboard-ref-side {
   min-width: 0;
-}
-
-@media (min-width: 981px) {
-  .leaderboard-ref-grid {
-    position: relative;
-  }
-
-  .leaderboard-ref-area--cta {
-    grid-area: auto !important;
-    position: absolute;
-    top: clamp(22.5rem, 31vw, 29rem);
-    right: 0;
-    width: calc((100% - clamp(0.85rem, 1.3vw, 1.35rem)) * 0.403);
-  }
 }
 
 .leaderboard-ref-panel,
@@ -1640,8 +1629,8 @@ body {
 
 .leaderboard-ref-page .leaderboard-ref-cta {
   background:
-    linear-gradient(90deg, rgba(25, 8, 57, 0.92), rgba(2, 6, 23, 0.34) 62%, rgba(2, 6, 23, 0.7)),
-    url("/leaderboards/cta-survivor-scene.svg") center / cover no-repeat !important;
+    linear-gradient(90deg, rgba(25, 8, 57, 0.96), rgba(2, 6, 23, 0.4) 55%, rgba(2, 6, 23, 0.48)),
+    url("/leaderboards/cta-survivor-scene.png") center / cover no-repeat !important;
 }
 
 .leaderboard-ref-panel::before,
@@ -1669,12 +1658,13 @@ body {
   width: 100%;
   min-width: 0 !important;
   table-layout: fixed;
+  border-spacing: 0 0.38rem !important;
 }
 
 .leaderboard-ref-table th,
 .leaderboard-ref-table td {
   overflow: hidden;
-  padding: clamp(0.28rem, 0.48vw, 0.42rem) clamp(0.35rem, 0.58vw, 0.58rem) !important;
+  padding: clamp(0.24rem, 0.42vw, 0.38rem) clamp(0.4rem, 0.62vw, 0.64rem) !important;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1690,9 +1680,52 @@ body {
 }
 
 .leaderboard-ref-rank {
-  min-width: 2.08rem !important;
-  padding: 0.22rem 0.32rem !important;
+  min-width: 2.32rem !important;
+  padding: 0.24rem 0.42rem !important;
   border-radius: 0.2rem !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 18px rgba(168, 85, 247, 0.28);
+}
+
+.leaderboard-ref-page .dzn-rank-badge--gold {
+  border-color: rgba(255, 211, 84, 0.9) !important;
+  background:
+    radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.58), transparent 20%),
+    linear-gradient(135deg, rgba(255, 213, 99, 0.42), rgba(249, 115, 22, 0.3) 58%, rgba(87, 28, 8, 0.92)) !important;
+  color: #fff8d4 !important;
+  text-shadow: 0 0 10px rgba(251, 191, 36, 0.88);
+  box-shadow:
+    0 0 0 1px rgba(255, 244, 199, 0.22),
+    0 0 18px rgba(251, 191, 36, 0.62),
+    0 0 34px rgba(249, 115, 22, 0.26),
+    inset 0 0 18px rgba(255, 255, 255, 0.16) !important;
+}
+
+.leaderboard-ref-page .dzn-rank-badge--cyan {
+  border-color: rgba(125, 211, 252, 0.88) !important;
+  background:
+    radial-gradient(circle at 32% 18%, rgba(255, 255, 255, 0.48), transparent 20%),
+    linear-gradient(135deg, rgba(191, 219, 254, 0.3), rgba(14, 165, 233, 0.26) 58%, rgba(8, 47, 73, 0.92)) !important;
+  color: #e0f7ff !important;
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(186, 230, 253, 0.18),
+    0 0 18px rgba(14, 165, 233, 0.58),
+    inset 0 0 18px rgba(255, 255, 255, 0.12) !important;
+}
+
+.leaderboard-ref-page .dzn-rank-badge--orange {
+  border-color: rgba(251, 146, 60, 0.9) !important;
+  background:
+    radial-gradient(circle at 32% 18%, rgba(255, 255, 255, 0.42), transparent 20%),
+    linear-gradient(135deg, rgba(251, 146, 60, 0.34), rgba(194, 65, 12, 0.3) 58%, rgba(67, 20, 7, 0.92)) !important;
+  color: #ffedd5 !important;
+  text-shadow: 0 0 10px rgba(251, 146, 60, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(254, 215, 170, 0.16),
+    0 0 18px rgba(249, 115, 22, 0.56),
+    inset 0 0 18px rgba(255, 255, 255, 0.11) !important;
 }
 
 .leaderboard-ref-player {
@@ -1717,10 +1750,12 @@ body {
 
 .leaderboard-ref-kill-card {
   position: relative;
-  min-height: clamp(96px, 8.5vw, 132px) !important;
-  padding: clamp(0.6rem, 0.88vw, 0.9rem) !important;
+  min-height: clamp(118px, 9.2vw, 150px) !important;
+  padding: clamp(0.72rem, 0.98vw, 0.98rem) !important;
   overflow: hidden;
   border-radius: 0.34rem !important;
+  background-size: cover !important;
+  background-position: center !important;
 }
 
 .leaderboard-ref-kill-card::after {
@@ -1741,24 +1776,32 @@ body {
 
 .leaderboard-ref-kill-card--violet {
   border-color: rgba(168, 85, 247, 0.7) !important;
+  background-image:
+    linear-gradient(90deg, rgba(6, 4, 18, 0.94), rgba(23, 9, 56, 0.56) 48%, rgba(8, 5, 22, 0.12)),
+    url("/leaderboards/sniper-accent.png") !important;
 }
 
 .leaderboard-ref-kill-card--cyan {
   border-color: rgba(14, 165, 233, 0.68) !important;
+  background-image:
+    linear-gradient(90deg, rgba(3, 8, 18, 0.94), rgba(6, 34, 64, 0.54) 50%, rgba(3, 10, 24, 0.08)),
+    url("/leaderboards/rifle-accent.png") !important;
 }
 
 .leaderboard-ref-kill-card--orange {
   border-color: rgba(249, 115, 22, 0.74) !important;
+  background-image:
+    linear-gradient(90deg, rgba(17, 5, 4, 0.95), rgba(73, 18, 8, 0.5) 46%, rgba(24, 8, 4, 0.12)),
+    url("/leaderboards/bullet-tracer-accent.png") !important;
 }
 
 .leaderboard-ref-page .leaderboard-ref-kill-art {
   position: absolute;
-  top: 0 !important;
-  right: -0.75rem !important;
+  inset: 0 !important;
   z-index: 1;
-  width: min(58%, 18rem) !important;
+  width: 100% !important;
   height: 100% !important;
-  opacity: 0.96;
+  opacity: 0.72;
   background-position: right center;
   background-repeat: no-repeat;
   background-size: cover;
@@ -1768,15 +1811,163 @@ body {
 }
 
 .leaderboard-ref-page .leaderboard-ref-kill-art--projectile {
-  width: min(54%, 16rem) !important;
-  right: -0.35rem !important;
+  width: 100% !important;
+  right: 0 !important;
 }
+
+.leaderboard-ref-page .leaderboard-ref-bullet-scene {
+  top: 0 !important;
+  right: -0.1rem !important;
+  z-index: 1;
+  width: min(66%, 21rem) !important;
+  height: 100% !important;
+  overflow: hidden;
+  background: none !important;
+  opacity: 0.98;
+  perspective: 680px;
+  transform: translateZ(0);
+  animation: leaderboard-ref-bullet-spiral 3.2s ease-in-out infinite !important;
+  will-change: transform, opacity;
+}
+
+.leaderboard-ref-bullet-glow,
+.leaderboard-ref-bullet-trail,
+.leaderboard-ref-bullet-shockwave,
+.leaderboard-ref-bullet-ember,
+.leaderboard-ref-bullet-flight,
+.leaderboard-ref-bullet-img {
+  position: absolute;
+  pointer-events: none;
+}
+
+.leaderboard-ref-bullet-glow {
+  right: 0.4rem;
+  top: 50%;
+  width: 72%;
+  height: 92%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 72% 50%, rgba(255, 244, 199, 0.5), transparent 13%),
+    radial-gradient(circle at 62% 50%, rgba(251, 146, 60, 0.72), transparent 31%),
+    radial-gradient(circle at 45% 53%, rgba(239, 68, 68, 0.38), transparent 56%);
+  filter: blur(6px);
+  transform: translateY(-50%);
+  mix-blend-mode: screen;
+  animation: leaderboard-ref-orange-glow-pulse 1.45s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+.leaderboard-ref-bullet-trail {
+  right: 42%;
+  top: 52%;
+  width: 58%;
+  height: 1.2rem;
+  border-radius: 999px;
+  transform: translateY(-50%) rotate(-7deg);
+  transform-origin: right center;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(127, 29, 29, 0.2) 15%, rgba(249, 115, 22, 0.72) 56%, rgba(255, 247, 194, 0.92) 100%);
+  filter: blur(4px);
+  mix-blend-mode: screen;
+  animation: leaderboard-ref-trail-flicker 0.42s steps(2, end) infinite;
+  will-change: opacity, transform;
+}
+
+.leaderboard-ref-bullet-trail--wide {
+  right: 38%;
+  width: 64%;
+  height: 2.5rem;
+  opacity: 0.54;
+  filter: blur(11px);
+}
+
+.leaderboard-ref-bullet-trail--hot {
+  height: 0.42rem;
+  opacity: 0.92;
+  box-shadow:
+    0 0 14px rgba(251, 146, 60, 0.9),
+    0 0 32px rgba(239, 68, 68, 0.54);
+}
+
+.leaderboard-ref-bullet-shockwave {
+  right: 10%;
+  top: 50%;
+  width: 38%;
+  height: 56%;
+  border: 1px solid rgba(251, 146, 60, 0.58);
+  border-left-color: transparent;
+  border-bottom-color: rgba(255, 237, 213, 0.24);
+  border-radius: 50%;
+  transform: translateY(-50%) rotate(-8deg);
+  filter: drop-shadow(0 0 14px rgba(249, 115, 22, 0.52));
+  animation: leaderboard-ref-shockwave-pulse 1.3s ease-out infinite;
+  will-change: transform, opacity;
+}
+
+.leaderboard-ref-bullet-shockwave--two {
+  right: 0;
+  width: 54%;
+  height: 72%;
+  border-color: rgba(251, 146, 60, 0.34);
+  border-left-color: transparent;
+  animation-delay: -0.62s;
+}
+
+.leaderboard-ref-bullet-flight {
+  right: -0.1rem;
+  top: 50%;
+  width: 82%;
+  height: 78%;
+  transform-style: preserve-3d;
+  transform: translate3d(0, -50%, 0);
+  animation: leaderboard-ref-bullet-flight 1.08s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  will-change: transform;
+}
+
+.leaderboard-ref-bullet-img {
+  inset: 0;
+  background: url("/leaderboards/bullet-tracer-accent.png") right center / cover no-repeat;
+  opacity: 0.86;
+  mix-blend-mode: screen;
+  filter:
+    drop-shadow(0 0 8px rgba(255, 244, 199, 0.58))
+    drop-shadow(0 0 18px rgba(251, 146, 60, 0.72))
+    drop-shadow(0 0 36px rgba(239, 68, 68, 0.48));
+  transform-origin: 70% 50%;
+  animation: leaderboard-ref-bullet-spin 0.34s linear infinite;
+  will-change: transform, filter;
+}
+
+.leaderboard-ref-bullet-ember {
+  right: 49%;
+  top: 50%;
+  width: 0.22rem;
+  height: 0.22rem;
+  border-radius: 999px;
+  background: #fed7aa;
+  box-shadow:
+    0 0 7px rgba(255, 237, 213, 0.95),
+    0 0 15px rgba(249, 115, 22, 0.86),
+    0 0 27px rgba(239, 68, 68, 0.48);
+  animation: leaderboard-ref-ember-drift 1.65s linear infinite;
+  will-change: transform, opacity;
+}
+
+.leaderboard-ref-bullet-ember--1 { --ember-x: -5.6rem; --ember-y: -1.1rem; animation-delay: -0.1s; }
+.leaderboard-ref-bullet-ember--2 { --ember-x: -7.2rem; --ember-y: 0.7rem; animation-delay: -0.28s; transform: scale(0.72); }
+.leaderboard-ref-bullet-ember--3 { --ember-x: -8.8rem; --ember-y: -0.35rem; animation-delay: -0.46s; }
+.leaderboard-ref-bullet-ember--4 { --ember-x: -10.3rem; --ember-y: 1.2rem; animation-delay: -0.64s; transform: scale(0.8); }
+.leaderboard-ref-bullet-ember--5 { --ember-x: -11.7rem; --ember-y: -1.45rem; animation-delay: -0.82s; }
+.leaderboard-ref-bullet-ember--6 { --ember-x: -13.1rem; --ember-y: 0.15rem; animation-delay: -1s; transform: scale(0.7); }
+.leaderboard-ref-bullet-ember--7 { --ember-x: -14.5rem; --ember-y: 1.55rem; animation-delay: -1.18s; }
+.leaderboard-ref-bullet-ember--8 { --ember-x: -15.6rem; --ember-y: -0.78rem; animation-delay: -1.34s; transform: scale(0.64); }
+.leaderboard-ref-bullet-ember--9 { --ember-x: -17rem; --ember-y: 0.92rem; animation-delay: -1.48s; }
 
 .leaderboard-ref-cta {
   min-height: clamp(150px, 13vw, 198px) !important;
   background:
     linear-gradient(90deg, rgba(25, 8, 57, 0.92), rgba(2, 6, 23, 0.34) 62%, rgba(2, 6, 23, 0.7)),
-    url("/leaderboards/cta-survivor-scene.svg") center / cover no-repeat !important;
+    url("/leaderboards/cta-survivor-scene.png") center / cover no-repeat !important;
 }
 
 .leaderboard-ref-cta-title {
@@ -1802,6 +1993,45 @@ body {
 @keyframes refTracerShimmer {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); filter: saturate(1); }
   50% { transform: translate3d(-0.3rem, 0.04rem, 0) scale(1.02); filter: saturate(1.2); }
+}
+
+@keyframes leaderboard-ref-bullet-flight {
+  0%, 100% { transform: translate3d(0.2rem, -50%, 0) rotateZ(-2deg); }
+  35% { transform: translate3d(-0.65rem, calc(-50% - 0.18rem), 18px) rotateZ(-4deg); }
+  70% { transform: translate3d(0.05rem, calc(-50% + 0.14rem), -6px) rotateZ(-1deg); }
+}
+
+@keyframes leaderboard-ref-bullet-spin {
+  0% { transform: rotateX(0deg) rotateY(0deg) rotateZ(-7deg) scale(1); }
+  50% { transform: rotateX(180deg) rotateY(28deg) rotateZ(-7deg) scale(1.018); }
+  100% { transform: rotateX(360deg) rotateY(0deg) rotateZ(-7deg) scale(1); }
+}
+
+@keyframes leaderboard-ref-bullet-spiral {
+  0%, 100% { transform: translate3d(0, 0, 0) rotateZ(0deg); }
+  33% { transform: translate3d(-0.22rem, -0.14rem, 0) rotateZ(-0.7deg); }
+  66% { transform: translate3d(0.1rem, 0.18rem, 0) rotateZ(0.6deg); }
+}
+
+@keyframes leaderboard-ref-trail-flicker {
+  0%, 100% { opacity: 0.68; transform: translateY(-50%) rotate(-7deg) scaleX(0.94); }
+  50% { opacity: 1; transform: translateY(calc(-50% + 0.08rem)) rotate(-7deg) scaleX(1.08); }
+}
+
+@keyframes leaderboard-ref-ember-drift {
+  0% { opacity: 0; transform: translate3d(0, -50%, 0) scale(0.4); }
+  14% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--ember-x), calc(-50% + var(--ember-y)), 0) scale(0.95); }
+}
+
+@keyframes leaderboard-ref-shockwave-pulse {
+  0% { opacity: 0.72; transform: translateY(-50%) rotate(-8deg) scale(0.62); }
+  100% { opacity: 0; transform: translateY(-50%) rotate(-8deg) scale(1.32); }
+}
+
+@keyframes leaderboard-ref-orange-glow-pulse {
+  0%, 100% { opacity: 0.58; transform: translateY(-50%) scale(0.96); }
+  50% { opacity: 0.95; transform: translateY(-50%) scale(1.08); }
 }
 
 @media (max-width: 980px) {
@@ -1841,7 +2071,9 @@ body {
   }
 
   .leaderboard-ref-title {
-    font-size: clamp(3.1rem, 15vw, 5rem) !important;
+    max-width: 100% !important;
+    font-size: clamp(2.65rem, 10.6vw, 3.85rem) !important;
+    line-height: 0.8 !important;
   }
 
   .leaderboard-ref-stats {
@@ -1865,6 +2097,22 @@ body {
     width: 60%;
     opacity: 0.62;
   }
+
+  .leaderboard-ref-page .leaderboard-ref-bullet-scene {
+    right: -1.55rem !important;
+    width: 58% !important;
+    opacity: 0.5;
+    transform: scale(0.86);
+  }
+
+  .leaderboard-ref-page .leaderboard-ref-bullet-flight {
+    right: -0.4rem;
+    width: 96%;
+  }
+
+  .leaderboard-ref-page .leaderboard-ref-bullet-trail {
+    opacity: 0.58;
+  }
 }
 
 @media (max-width: 460px) {
@@ -1878,10 +2126,22 @@ body {
   .leaderboard-ref-embers,
   .leaderboard-ref-stat-card,
   .leaderboard-ref-kill-art,
+  .leaderboard-ref-bullet-scene,
+  .leaderboard-ref-bullet-flight,
+  .leaderboard-ref-bullet-img,
+  .leaderboard-ref-bullet-trail,
+  .leaderboard-ref-bullet-ember,
+  .leaderboard-ref-bullet-shockwave,
+  .leaderboard-ref-bullet-glow,
   .leaderboard-ref-hero::before {
     animation: none !important;
     transition: none !important;
     transform: none !important;
+  }
+
+  .leaderboard-ref-bullet-ember,
+  .leaderboard-ref-bullet-shockwave {
+    opacity: 0 !important;
   }
 }
 
