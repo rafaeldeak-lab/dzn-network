@@ -1817,9 +1817,9 @@ body {
 
 .leaderboard-ref-page .leaderboard-ref-bullet-scene {
   top: 0 !important;
-  right: -0.1rem !important;
+  right: -0.25rem !important;
   z-index: 1;
-  width: min(66%, 21rem) !important;
+  width: min(40%, 16rem) !important;
   height: 100% !important;
   overflow: hidden;
   background: none !important;
@@ -2099,9 +2099,9 @@ body {
   }
 
   .leaderboard-ref-page .leaderboard-ref-bullet-scene {
-    right: -1.55rem !important;
-    width: 58% !important;
-    opacity: 0.5;
+    right: -1rem !important;
+    width: 44% !important;
+    opacity: 0.42;
     transform: scale(0.86);
   }
 
