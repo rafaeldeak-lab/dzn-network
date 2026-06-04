@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
 function source(path: string) {
@@ -162,6 +162,12 @@ includesAll(leaderboards, [
   "data.data && !data.top_servers ? data.data : data",
   "Leaderboard data could not be loaded right now.",
   "KillProjectileAccent",
+  "leaderboard-ref-page",
+  "leaderboard-ref-hero-art",
+  "leaderboard-ref-stats",
+  "leaderboard-ref-grid",
+  "leaderboard-ref-kill-card",
+  "leaderboard-ref-cta",
   "leaderboard-reference-page",
   "leaderboard-reference-grid",
   "leaderboard-reference-stat-grid",
@@ -188,8 +194,34 @@ for (const fakeStaticName of ["NukeTown DEATHMATCH", "PANDORA DayZ", "xAKA-MINI_
   assert.equal(leaderboards.includes(fakeStaticName), false, "Leaderboards page must not replace API data with static mock rows.");
 }
 
+const leaderboardAccent = source("components/leaderboards/animated-bullet.tsx");
+includesAll(leaderboardAccent, [
+  "leaderboard-ref-kill-art",
+  "/leaderboards/sniper-accent.svg",
+  "/leaderboards/rifle-accent.svg",
+  "/leaderboards/bullet-tracer-accent.svg",
+]);
+
 const globals = source("app/globals.css");
 includesAll(globals, [
+  ".leaderboard-ref-page",
+  ".leaderboard-ref-shell",
+  ".leaderboard-ref-hero",
+  ".leaderboard-ref-hero-art",
+  ".leaderboard-ref-title",
+  ".leaderboard-ref-stats",
+  ".leaderboard-ref-stat-card",
+  ".leaderboard-ref-grid",
+  ".leaderboard-ref-main",
+  ".leaderboard-ref-side",
+  ".leaderboard-ref-panel",
+  ".leaderboard-ref-table",
+  ".leaderboard-ref-rank",
+  ".leaderboard-ref-longest",
+  ".leaderboard-ref-kill-card",
+  ".leaderboard-ref-kill-art",
+  ".leaderboard-ref-cta",
+  ".leaderboard-ref-embers",
   ".leaderboard-reference-page",
   ".leaderboard-reference-hero",
   ".leaderboard-reference-grid",
@@ -205,7 +237,11 @@ includesAll(globals, [
   ".dzn-kill-ember",
   ".dzn-leaderboard-card",
   ".dzn-leaderboard-row:hover",
-  "url(\"/media/dzn-cinematic-survivor.png\")",
+  "url(\"/leaderboards/leaderboard-hero-battlefield.svg\")",
+  "url(\"/leaderboards/cta-survivor-scene.svg\")",
+  "@keyframes refEmberDrift",
+  "@keyframes refCardPulse",
+  "@keyframes refTracerShimmer",
   "@keyframes signalSweep",
   "@keyframes killRoundSpin",
   "@keyframes killTracerDrift",
@@ -213,6 +249,15 @@ includesAll(globals, [
   "@keyframes heroParallax",
   "@media (prefers-reduced-motion: reduce)",
 ]);
+for (const assetPath of [
+  "public/leaderboards/leaderboard-hero-battlefield.svg",
+  "public/leaderboards/sniper-accent.svg",
+  "public/leaderboards/rifle-accent.svg",
+  "public/leaderboards/bullet-tracer-accent.svg",
+  "public/leaderboards/cta-survivor-scene.svg",
+]) {
+  assert.equal(existsSync(assetPath), true, `${assetPath} must exist for the cinematic leaderboard reference rebuild.`);
+}
 assert.equal(leaderboards.includes("AnimatedBullet"), false, "Hero projectile component must not be rendered on the Global Leaderboards hero.");
 assert.equal(globals.includes(".dzn-bullet-wrap"), false, "Global Leaderboards hero must not keep the old giant bullet wrapper CSS.");
 

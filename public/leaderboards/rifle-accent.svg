@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 190" role="img" aria-labelledby="title desc">
+  <title id="title">DZN rifle accent</title>
+  <desc id="desc">Assault rifle silhouette with rail, scope, and blue glow.</desc>
+  <defs>
+    <radialGradient id="blueGlow" cx="66%" cy="48%" r="58%">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity=".6"/>
+      <stop offset=".45" stop-color="#0e7490" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="metal" x1="42" x2="482" y1="0" y2="0">
+      <stop offset="0" stop-color="#020617"/>
+      <stop offset=".18" stop-color="#334155"/>
+      <stop offset=".45" stop-color="#cbd5e1"/>
+      <stop offset=".72" stop-color="#1e293b"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="grip" x1="150" x2="228" y1="112" y2="180">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset=".45" stop-color="#475569"/>
+      <stop offset="1" stop-color="#030712"/>
+    </linearGradient>
+    <filter id="rifleDrop" x="-20%" y="-30%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#0ea5e9" flood-opacity=".44"/>
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000" flood-opacity=".72"/>
+    </filter>
+  </defs>
+  <rect width="520" height="190" fill="url(#blueGlow)"/>
+  <g fill="none" stroke="#38bdf8" stroke-opacity=".24" stroke-width="2">
+    <ellipse cx="372" cy="95" rx="116" ry="31"/>
+    <path d="M185 135c78-47 177-72 298-75"/>
+  </g>
+  <g filter="url(#rifleDrop)" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M48 101h322" stroke="url(#metal)" stroke-width="16"/>
+    <path d="M368 99h96" stroke="#101827" stroke-width="9"/>
+    <path d="M462 99h50" stroke="#dbeafe" stroke-width="4"/>
+    <path d="M102 87h172l42 26H91z" fill="url(#metal)" stroke="#020617" stroke-width="4"/>
+    <path d="M114 75h156" stroke="#94a3b8" stroke-width="5"/>
+    <path d="M131 66h18M162 66h18M193 66h18M224 66h18" stroke="#0f172a" stroke-width="8"/>
+    <path d="M74 108c-23 19-44 31-64 36l28-46z" fill="#111827" stroke="#020617" stroke-width="4"/>
+    <path d="M166 112l33 70h45l-35-70z" fill="url(#grip)" stroke="#020617" stroke-width="4"/>
+    <path d="M252 112c12 21 5 39-26 48" fill="none" stroke="#020617" stroke-width="7"/>
+    <path d="M289 62c0-18 16-32 38-32s38 14 38 32-16 32-38 32-38-14-38-32z" fill="#07111f" stroke="url(#metal)" stroke-width="6"/>
+    <path d="M306 62h56M327 42v43" stroke="#bfdbfe" stroke-width="3" opacity=".72"/>
+    <path d="M347 92h62" stroke="#020617" stroke-width="5"/>
+    <path d="M392 93l55 6-55 8z" fill="#e0f2fe" opacity=".7"/>
+    <path d="M63 97h-45M138 93h48M218 94h38M318 98h42" stroke="#dbeafe" stroke-width="3" opacity=".68"/>
+  </g>
+</svg>

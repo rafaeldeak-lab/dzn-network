@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 320" role="img" aria-labelledby="title desc">
+  <title id="title">DZN leaderboard battlefield hero</title>
+  <desc id="desc">Purple storm battlefield with fire glow, helicopter silhouettes, forest line, and central survivor silhouette.</desc>
+  <defs>
+    <radialGradient id="storm" cx="49%" cy="18%" r="62%">
+      <stop offset="0" stop-color="#b78cff" stop-opacity=".86"/>
+      <stop offset=".18" stop-color="#6d32b8" stop-opacity=".64"/>
+      <stop offset=".42" stop-color="#1d174a" stop-opacity=".82"/>
+      <stop offset="1" stop-color="#030712"/>
+    </radialGradient>
+    <radialGradient id="fire" cx="46%" cy="67%" r="28%">
+      <stop offset="0" stop-color="#ff9b35" stop-opacity=".95"/>
+      <stop offset=".2" stop-color="#ff4d1d" stop-opacity=".68"/>
+      <stop offset=".62" stop-color="#5b1a12" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="vignette" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#02030a" stop-opacity=".9"/>
+      <stop offset=".18" stop-color="#02030a" stop-opacity=".28"/>
+      <stop offset=".58" stop-color="#02030a" stop-opacity=".02"/>
+      <stop offset=".84" stop-color="#02030a" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#02030a" stop-opacity=".86"/>
+    </linearGradient>
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <filter id="emberBlur" x="-200%" y="-200%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="1.4"/>
+    </filter>
+  </defs>
+  <rect width="1500" height="320" fill="url(#storm)"/>
+  <path d="M0 0h1500v320H0z" fill="url(#vignette)"/>
+  <path d="M0 190c120-38 212-20 318-46 144-36 250-83 390-42 135 39 232 23 358-14 138-40 316-18 434 42v190H0z" fill="#070b1c" opacity=".52"/>
+  <path d="M0 210c132-34 278-18 404-47 163-38 262-74 405-28 154 49 312-1 501 6 94 4 151 28 190 52v127H0z" fill="#0b102b" opacity=".48"/>
+  <ellipse cx="690" cy="214" rx="330" ry="98" fill="url(#fire)"/>
+  <g filter="url(#softGlow)" opacity=".9">
+    <path d="M527 210c16-28 45-42 77-36-20 11-26 32-22 57-30 9-54 9-55-21z" fill="#ff7b22"/>
+    <path d="M633 205c18-26 48-34 80-23-24 8-35 31-34 56-31 5-56 1-46-33z" fill="#ff4d1d"/>
+    <path d="M458 232c12-22 38-31 66-22-21 7-30 23-31 45-23 7-47 4-35-23z" fill="#ffb347"/>
+  </g>
+  <g opacity=".58" stroke="#c4b5fd" stroke-width="2">
+    <path d="M544 0 421 91l82-18-115 102 166-124-74 12L612 0" fill="none"/>
+    <path d="M678 0 582 79l61-10-80 67 128-88-52 6L760 0" fill="none" opacity=".62"/>
+  </g>
+  <g fill="#050816" opacity=".82">
+    <path d="M0 254h1500v66H0z"/>
+    <path d="M0 246c46-26 95-19 137-38 64-28 92 9 155-19 63-28 98 10 148 1 73-12 113-53 201-24 78 26 123-26 206-7 83 19 137 58 231 31 84-24 121-8 188 10 72 19 155-9 234 18v102H0z"/>
+  </g>
+  <g fill="#030712" opacity=".95">
+    <path d="M77 234h9v56h-9zM97 220h10v70H97zM116 238h8v52h-8zM132 210h11v80h-11z"/>
+    <path d="M1248 226h9v64h-9zM1265 207h13v83h-13zM1290 232h9v58h-9zM1310 215h10v75h-10z"/>
+  </g>
+  <g fill="#020617" stroke="#0f172a" stroke-width="2" opacity=".92">
+    <path d="M164 68h74l17 9-17 8h-74l-20-8z"/>
+    <path d="M188 55h22l10 12h-42z"/>
+    <path d="M132 74h54M238 74h54" stroke="#050816" stroke-width="5"/>
+    <path d="M1009 79h86l19 10-19 9h-86l-23-9z"/>
+    <path d="M1037 64h24l11 14h-47z"/>
+    <path d="M956 87h66M1094 87h70" stroke="#050816" stroke-width="5"/>
+  </g>
+  <g transform="translate(716 39)" fill="#02030a" stroke="#12172a" stroke-width="2">
+    <path d="M80 30c32 0 57 25 57 58v18c24 16 38 43 38 77v69H7v-69c0-34 14-61 38-77V88c0-33 23-58 55-58z"/>
+    <path d="M69 22c5-13 21-18 34-11 12 7 19 23 15 42H56c2-13 5-24 13-31z"/>
+    <path d="M31 113c-18 16-27 44-27 86v53h42l15-123z"/>
+    <path d="M147 112c25 20 37 51 37 99v41h-49l-15-122z"/>
+    <path d="M50 125h92l24 145H25z" fill="#07111f"/>
+    <path d="M67 132h75l13 96H52z" fill="#111827"/>
+    <path d="M78 32h35l16 36H60z" fill="#0b1220"/>
+    <path d="M45 146h112M52 180h103M60 214h92" stroke="#243044" opacity=".65"/>
+    <path d="M161 53l13 133" stroke="#030712" stroke-width="14" stroke-linecap="round"/>
+    <path d="M174 47l49 123" stroke="#030712" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <g opacity=".95">
+    <circle cx="586" cy="226" r="3" fill="#ffbf5f" filter="url(#emberBlur)"/>
+    <circle cx="616" cy="188" r="2" fill="#ff6b2a" filter="url(#emberBlur)"/>
+    <circle cx="462" cy="204" r="2" fill="#ff9b35" filter="url(#emberBlur)"/>
+    <circle cx="372" cy="169" r="2" fill="#f97316" filter="url(#emberBlur)"/>
+    <circle cx="927" cy="205" r="2" fill="#fb923c" filter="url(#emberBlur)"/>
+    <circle cx="1043" cy="160" r="2" fill="#a855f7" filter="url(#emberBlur)"/>
+    <circle cx="1196" cy="203" r="2" fill="#ff6b2a" filter="url(#emberBlur)"/>
+  </g>
+  <path d="M0 0h1500v320H0z" fill="none" stroke="#7c3aed" stroke-opacity=".18" stroke-width="2"/>
+</svg>

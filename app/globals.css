@@ -1373,6 +1373,518 @@ body {
   }
 }
 
+.leaderboard-ref-page {
+  --leaderboard-ref-violet: #9d4edd;
+  --leaderboard-ref-blue: #18b6ff;
+  --leaderboard-ref-orange: #ff8a22;
+  --leaderboard-ref-red: #ff354f;
+  --leaderboard-ref-panel: rgba(4, 7, 20, 0.84);
+  --leaderboard-ref-line: rgba(153, 82, 255, 0.46);
+  padding: 0.55rem 0.8rem 0.9rem !important;
+  background:
+    radial-gradient(circle at 45% 2%, rgba(168, 85, 247, 0.3), transparent 19rem),
+    radial-gradient(circle at 58% 24%, rgba(249, 115, 22, 0.16), transparent 23rem),
+    linear-gradient(180deg, rgba(2, 3, 10, 0.18) 0%, #02030a 38%, #01020a 100%),
+    #02030a !important;
+}
+
+.leaderboard-ref-page::before {
+  background:
+    url("/leaderboards/leaderboard-hero-battlefield.svg") top center / min(1500px, 100vw) auto no-repeat,
+    radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.28), transparent 18rem);
+  opacity: 0.38;
+}
+
+.leaderboard-ref-page::after {
+  background:
+    linear-gradient(180deg, transparent 0 18rem, rgba(2, 3, 10, 0.72) 27rem, #02030a 100%),
+    radial-gradient(circle at 3% 28%, rgba(249, 115, 22, 0.14), transparent 9rem),
+    radial-gradient(circle at 93% 25%, rgba(14, 165, 233, 0.1), transparent 12rem),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.78), transparent 18%, transparent 78%, rgba(2, 3, 10, 0.82));
+}
+
+.leaderboard-ref-embers {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 11% 39%, rgba(249, 115, 22, 0.8) 0 2px, transparent 3px),
+    radial-gradient(circle at 24% 16%, rgba(249, 115, 22, 0.6) 0 1px, transparent 3px),
+    radial-gradient(circle at 42% 28%, rgba(255, 191, 95, 0.6) 0 1px, transparent 3px),
+    radial-gradient(circle at 67% 34%, rgba(168, 85, 247, 0.55) 0 1px, transparent 3px),
+    radial-gradient(circle at 88% 31%, rgba(249, 115, 22, 0.7) 0 2px, transparent 3px),
+    radial-gradient(circle at 96% 67%, rgba(255, 191, 95, 0.55) 0 1px, transparent 3px);
+  opacity: 0.45;
+  animation: refEmberDrift 10s ease-in-out infinite;
+}
+
+.leaderboard-ref-shell {
+  gap: 0.85rem !important;
+  max-width: 1500px !important;
+}
+
+.leaderboard-ref-hero {
+  position: relative;
+  display: block !important;
+  min-height: 0 !important;
+  height: clamp(168px, 13.2vw, 205px) !important;
+  overflow: hidden;
+  padding: clamp(0.45rem, 0.88vw, 0.82rem) clamp(0.7rem, 1.35vw, 1.18rem) !important;
+  border: 1px solid rgba(139, 92, 246, 0.26) !important;
+  border-radius: 0 !important;
+  background: #02030a !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 38px rgba(139, 92, 246, 0.2) !important;
+  isolation: isolate;
+}
+
+.leaderboard-ref-hero-art {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    linear-gradient(90deg, rgba(2, 3, 10, 0.78), rgba(2, 3, 10, 0.02) 43%, rgba(2, 3, 10, 0.38) 100%),
+    url("/leaderboards/leaderboard-hero-battlefield.svg") center top / cover no-repeat;
+  filter: brightness(1.15) saturate(1.16);
+}
+
+.leaderboard-ref-hero::before {
+  z-index: -1;
+  background:
+    radial-gradient(circle at 47% 74%, rgba(249, 115, 22, 0.2), transparent 14rem),
+    radial-gradient(circle at 53% 9%, rgba(216, 180, 254, 0.18), transparent 12rem),
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 92px);
+  opacity: 0.72;
+  animation: heroParallax 12s ease-in-out infinite;
+}
+
+.leaderboard-ref-hero::after {
+  z-index: -1;
+  background:
+    linear-gradient(180deg, rgba(2, 3, 10, 0.02), rgba(2, 3, 10, 0.18) 58%, rgba(2, 3, 10, 0.58)),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.74), transparent 28%, transparent 74%, rgba(2, 3, 10, 0.62));
+}
+
+.leaderboard-ref-hero-copy {
+  min-height: 0 !important;
+  align-items: start !important;
+  max-width: min(38vw, 25rem);
+}
+
+.leaderboard-ref-live-badge {
+  position: relative;
+  border-radius: 0.2rem !important;
+  box-shadow:
+    0 0 20px rgba(168, 85, 247, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.leaderboard-ref-live-badge::before {
+  width: 0.6rem !important;
+  height: 0.44rem !important;
+  border-left: 2px solid #e9d5ff;
+  border-right: 2px solid #a855f7;
+  transform: skewX(-12deg);
+  box-shadow: 0 0 8px rgba(216, 180, 254, 0.78);
+}
+
+.leaderboard-ref-title {
+  max-width: 9.7ch !important;
+  margin-top: 0.38rem !important;
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif !important;
+  font-size: clamp(3rem, 5vw, 5.45rem) !important;
+  line-height: 0.78 !important;
+  text-transform: uppercase;
+  text-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.78),
+    0 0 28px rgba(168, 85, 247, 0.72);
+}
+
+.leaderboard-ref-title span:first-child {
+  color: #f8fafc;
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.34);
+}
+
+.leaderboard-ref-title span:last-child {
+  color: #a855f7;
+}
+
+.leaderboard-ref-subtitle {
+  max-width: 39rem !important;
+  margin-top: 0.55rem !important;
+}
+
+.leaderboard-ref-updated {
+  margin-top: 0.38rem !important;
+}
+
+.leaderboard-ref-hero-intel {
+  position: absolute;
+  top: clamp(0.8rem, 1.6vw, 1.3rem);
+  right: clamp(0.75rem, 1.4vw, 1.25rem);
+  display: grid !important;
+  width: min(570px, 38vw);
+  align-content: start !important;
+  padding-top: 0 !important;
+}
+
+.leaderboard-ref-stats {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: clamp(0.55rem, 1vw, 1rem) !important;
+}
+
+.leaderboard-ref-stat-card {
+  position: relative;
+  min-height: clamp(110px, 9vw, 136px) !important;
+  gap: 0.45rem !important;
+  padding: 0.68rem 0.52rem !important;
+  clip-path: polygon(11% 0, 89% 0, 100% 13%, 100% 87%, 89% 100%, 11% 100%, 0 87%, 0 13%);
+  border-color: var(--dzn-stat-border) !important;
+  border-radius: 0 !important;
+  background:
+    linear-gradient(145deg, rgba(7, 11, 30, 0.88), rgba(2, 4, 13, 0.74)),
+    radial-gradient(circle at 50% 0%, var(--dzn-stat-glow), transparent 54%) !important;
+  box-shadow:
+    0 0 24px var(--dzn-stat-shadow),
+    inset 0 0 42px rgba(255, 255, 255, 0.035),
+    inset 0 0 24px var(--dzn-stat-shadow) !important;
+  animation: refCardPulse 4.8s ease-in-out infinite;
+}
+
+.leaderboard-ref-stat-card::after {
+  content: "";
+  position: absolute;
+  inset: 0.42rem;
+  clip-path: inherit;
+  border: 1px solid var(--dzn-stat-border);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.leaderboard-ref-stat-card svg {
+  width: clamp(1.8rem, 2.3vw, 2.45rem) !important;
+  height: clamp(1.8rem, 2.3vw, 2.45rem) !important;
+  color: var(--dzn-stat-icon) !important;
+  filter: drop-shadow(0 0 10px var(--dzn-stat-shadow));
+}
+
+.leaderboard-ref-stat-card .leaderboard-reference-stat-value {
+  font-size: clamp(1.45rem, 2.45vw, 2.45rem) !important;
+}
+
+.leaderboard-ref-stat-card .leaderboard-reference-stat-value--long {
+  font-size: clamp(0.88rem, 1.35vw, 1.15rem) !important;
+}
+
+.leaderboard-ref-stat-card span:last-child {
+  max-width: 6.8rem;
+  font-size: clamp(0.48rem, 0.68vw, 0.62rem) !important;
+  line-height: 1.08 !important;
+}
+
+.leaderboard-ref-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.48fr) minmax(390px, 1fr) !important;
+  grid-template-areas:
+    "servers longest"
+    "players longest"
+    "personal cta" !important;
+  gap: clamp(0.85rem, 1.3vw, 1.35rem) !important;
+  align-items: start !important;
+}
+
+.leaderboard-ref-area--servers { grid-area: servers; }
+.leaderboard-ref-area--longest { grid-area: longest; }
+.leaderboard-ref-area--players { grid-area: players; }
+.leaderboard-ref-area--personal { grid-area: personal; }
+.leaderboard-ref-area--cta { grid-area: cta; }
+
+.leaderboard-ref-main,
+.leaderboard-ref-side {
+  min-width: 0;
+}
+
+@media (min-width: 981px) {
+  .leaderboard-ref-grid {
+    position: relative;
+  }
+
+  .leaderboard-ref-area--cta {
+    grid-area: auto !important;
+    position: absolute;
+    top: clamp(22.5rem, 31vw, 29rem);
+    right: 0;
+    width: calc((100% - clamp(0.85rem, 1.3vw, 1.35rem)) * 0.403);
+  }
+}
+
+.leaderboard-ref-panel,
+.leaderboard-ref-grid .dzn-leaderboard-card,
+.leaderboard-ref-cta {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--leaderboard-ref-line) !important;
+  border-radius: 0.42rem !important;
+  background:
+    linear-gradient(180deg, rgba(16, 12, 38, 0.78), rgba(2, 5, 17, 0.9)),
+    radial-gradient(circle at 8% 0%, rgba(168, 85, 247, 0.2), transparent 30%),
+    radial-gradient(circle at 95% 100%, rgba(14, 165, 233, 0.12), transparent 34%) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.035),
+    0 0 24px rgba(139, 92, 246, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.leaderboard-ref-page .leaderboard-ref-cta {
+  background:
+    linear-gradient(90deg, rgba(25, 8, 57, 0.92), rgba(2, 6, 23, 0.34) 62%, rgba(2, 6, 23, 0.7)),
+    url("/leaderboards/cta-survivor-scene.svg") center / cover no-repeat !important;
+}
+
+.leaderboard-ref-panel::before,
+.leaderboard-ref-longest::before,
+.leaderboard-ref-cta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 92px),
+    linear-gradient(116deg, transparent 0 44%, rgba(139, 92, 246, 0.1) 46%, transparent 55%);
+  opacity: 0.72;
+}
+
+.leaderboard-ref-panel h2,
+.leaderboard-ref-longest h2 {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif !important;
+  font-size: clamp(1.1rem, 1.5vw, 1.55rem) !important;
+  letter-spacing: 0.02em !important;
+}
+
+.leaderboard-ref-table {
+  width: 100%;
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+
+.leaderboard-ref-table th,
+.leaderboard-ref-table td {
+  overflow: hidden;
+  padding: clamp(0.28rem, 0.48vw, 0.42rem) clamp(0.35rem, 0.58vw, 0.58rem) !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-ref-table th {
+  font-size: clamp(0.48rem, 0.56vw, 0.62rem) !important;
+  color: rgba(203, 213, 225, 0.56) !important;
+}
+
+.leaderboard-ref-table td span:not(.leaderboard-ref-rank):not(.leaderboard-ref-player):not(.leaderboard-reference-avatar) {
+  font-size: clamp(0.62rem, 0.68vw, 0.78rem) !important;
+  line-height: 1.08;
+}
+
+.leaderboard-ref-rank {
+  min-width: 2.08rem !important;
+  padding: 0.22rem 0.32rem !important;
+  border-radius: 0.2rem !important;
+}
+
+.leaderboard-ref-player {
+  max-width: 100%;
+}
+
+.leaderboard-ref-player > span:last-child,
+.leaderboard-ref-table a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-ref-longest {
+  padding: clamp(0.7rem, 1vw, 1rem) !important;
+}
+
+.leaderboard-ref-longest-stack {
+  gap: clamp(0.45rem, 0.75vw, 0.72rem) !important;
+}
+
+.leaderboard-ref-kill-card {
+  position: relative;
+  min-height: clamp(96px, 8.5vw, 132px) !important;
+  padding: clamp(0.6rem, 0.88vw, 0.9rem) !important;
+  overflow: hidden;
+  border-radius: 0.34rem !important;
+}
+
+.leaderboard-ref-kill-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(3, 7, 18, 0.84), rgba(3, 7, 18, 0.52) 50%, rgba(3, 7, 18, 0.05)),
+    linear-gradient(116deg, transparent 0 48%, rgba(255, 255, 255, 0.08) 50%, transparent 58%);
+}
+
+.leaderboard-ref-kill-card > p,
+.leaderboard-ref-kill-card > div {
+  position: relative;
+  z-index: 2;
+}
+
+.leaderboard-ref-kill-card--violet {
+  border-color: rgba(168, 85, 247, 0.7) !important;
+}
+
+.leaderboard-ref-kill-card--cyan {
+  border-color: rgba(14, 165, 233, 0.68) !important;
+}
+
+.leaderboard-ref-kill-card--orange {
+  border-color: rgba(249, 115, 22, 0.74) !important;
+}
+
+.leaderboard-ref-page .leaderboard-ref-kill-art {
+  position: absolute;
+  top: 0 !important;
+  right: -0.75rem !important;
+  z-index: 1;
+  width: min(58%, 18rem) !important;
+  height: 100% !important;
+  opacity: 0.96;
+  background-position: right center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  pointer-events: none;
+  transform: translateZ(0);
+  animation: refTracerShimmer 5.2s ease-in-out infinite;
+}
+
+.leaderboard-ref-page .leaderboard-ref-kill-art--projectile {
+  width: min(54%, 16rem) !important;
+  right: -0.35rem !important;
+}
+
+.leaderboard-ref-cta {
+  min-height: clamp(150px, 13vw, 198px) !important;
+  background:
+    linear-gradient(90deg, rgba(25, 8, 57, 0.92), rgba(2, 6, 23, 0.34) 62%, rgba(2, 6, 23, 0.7)),
+    url("/leaderboards/cta-survivor-scene.svg") center / cover no-repeat !important;
+}
+
+.leaderboard-ref-cta-title {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif !important;
+  font-size: clamp(2.15rem, 3.2vw, 3.45rem) !important;
+  font-style: italic;
+  transform: rotate(-4deg);
+  text-shadow:
+    0 0 18px rgba(168, 85, 247, 0.86),
+    0 4px 0 rgba(0, 0, 0, 0.72);
+}
+
+@keyframes refEmberDrift {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.42; }
+  50% { transform: translate3d(-0.6rem, 0.45rem, 0); opacity: 0.68; }
+}
+
+@keyframes refCardPulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.12); }
+}
+
+@keyframes refTracerShimmer {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); filter: saturate(1); }
+  50% { transform: translate3d(-0.3rem, 0.04rem, 0) scale(1.02); filter: saturate(1.2); }
+}
+
+@media (max-width: 980px) {
+  .leaderboard-ref-hero {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .leaderboard-ref-hero-intel {
+    position: static;
+    width: 100%;
+    padding-top: 1rem !important;
+  }
+
+  .leaderboard-ref-hero-copy {
+    max-width: 100%;
+  }
+
+  .leaderboard-ref-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "servers"
+      "longest"
+      "players"
+      "personal"
+      "cta" !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .leaderboard-ref-page {
+    padding: 0.45rem 0.55rem 0.75rem !important;
+  }
+
+  .leaderboard-ref-hero {
+    padding: 0.85rem !important;
+  }
+
+  .leaderboard-ref-title {
+    font-size: clamp(3.1rem, 15vw, 5rem) !important;
+  }
+
+  .leaderboard-ref-stats {
+    grid-template-columns: 1fr !important;
+  }
+
+  .leaderboard-ref-stat-card {
+    min-height: 104px !important;
+    align-items: flex-start !important;
+    padding-left: 1rem !important;
+    clip-path: polygon(8% 0, 92% 0, 100% 16%, 100% 84%, 92% 100%, 8% 100%, 0 84%, 0 16%);
+  }
+
+  .leaderboard-ref-table {
+    min-width: 680px !important;
+    table-layout: auto;
+  }
+
+  .leaderboard-ref-kill-art {
+    right: -2rem;
+    width: 60%;
+    opacity: 0.62;
+  }
+}
+
+@media (max-width: 460px) {
+  .leaderboard-ref-kill-card p,
+  .leaderboard-ref-kill-card div {
+    max-width: 72% !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leaderboard-ref-embers,
+  .leaderboard-ref-stat-card,
+  .leaderboard-ref-kill-art,
+  .leaderboard-ref-hero::before {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
 .dzn-brand {
   display: inline-flex;
   align-items: center;

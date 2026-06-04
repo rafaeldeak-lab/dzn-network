@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 190" role="img" aria-labelledby="title desc">
+  <title id="title">DZN bullet tracer accent</title>
+  <desc id="desc">Sharp brass projectile with orange tracer glow, ember trail, and spiral air ring.</desc>
+  <defs>
+    <radialGradient id="heat" cx="76%" cy="48%" r="55%">
+      <stop offset="0" stop-color="#fb923c" stop-opacity=".9"/>
+      <stop offset=".26" stop-color="#ef4444" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="casing" x1="135" x2="332" y1="0" y2="0">
+      <stop offset="0" stop-color="#4b1f0d"/>
+      <stop offset=".16" stop-color="#b76524"/>
+      <stop offset=".38" stop-color="#ffd58a"/>
+      <stop offset=".64" stop-color="#c56a22"/>
+      <stop offset="1" stop-color="#2a1209"/>
+    </linearGradient>
+    <linearGradient id="tip" x1="306" x2="477" y1="95" y2="95">
+      <stop offset="0" stop-color="#7c2d12"/>
+      <stop offset=".32" stop-color="#f97316"/>
+      <stop offset=".62" stop-color="#fff7c2"/>
+      <stop offset="1" stop-color="#ef4444"/>
+    </linearGradient>
+    <filter id="hotDrop" x="-40%" y="-80%" width="210%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#fb923c" flood-opacity=".82"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#ef4444" flood-opacity=".5"/>
+    </filter>
+    <filter id="ember" x="-200%" y="-200%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="1.3"/>
+    </filter>
+  </defs>
+  <rect width="520" height="190" fill="url(#heat)"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M76 111c86-48 180-74 285-78 49-2 88 3 118 14" stroke="#fb923c" stroke-opacity=".5" stroke-width="2"/>
+    <path d="M109 127c72-38 151-59 238-62 51-2 92 2 124 13" stroke="#f97316" stroke-opacity=".32" stroke-width="2"/>
+    <ellipse cx="374" cy="95" rx="116" ry="30" stroke="#fb923c" stroke-opacity=".32" stroke-width="2"/>
+  </g>
+  <g filter="url(#hotDrop)" transform="translate(40 7) rotate(-6 260 95)">
+    <path d="M136 69h206c28 0 55 10 78 26-23 16-50 26-78 26H136c-25 0-43-15-43-31s18-21 43-21z" fill="url(#casing)"/>
+    <path d="M316 69c55 4 109 15 163 26-54 11-108 22-163 26 22-26 22-62 0-95z" fill="url(#tip)"/>
+    <path d="M132 78h212c28 0 59 8 93 22-86-9-166-9-298-8-18 0-33 3-44 9 5-14 18-23 37-23z" fill="#fff7c2" opacity=".34"/>
+    <path d="M137 111h208c36 0 72-10 108-28-57 35-111 44-167 44H139c-23 0-39-9-47-24 13 7 26 8 45 8z" fill="#000" opacity=".34"/>
+    <ellipse cx="135" cy="95" rx="20" ry="30" fill="#2a1209" opacity=".82"/>
+    <ellipse cx="142" cy="95" rx="9" ry="19" fill="#c27931" opacity=".9"/>
+    <path d="M190 71c-12 22-12 54 0 76M228 71c-12 22-12 54 0 76M270 71c-12 22-12 54 0 76" fill="none" stroke="#2f140c" stroke-width="8" opacity=".76"/>
+    <path d="M205 72c-6 24-6 50 0 74M246 72c-6 24-6 50 0 74" fill="none" stroke="#ffe0a3" stroke-width="3" opacity=".62"/>
+  </g>
+  <g filter="url(#ember)">
+    <circle cx="62" cy="100" r="3" fill="#ffbf5f"/>
+    <circle cx="86" cy="76" r="2.5" fill="#fb923c"/>
+    <circle cx="108" cy="130" r="2" fill="#ef4444"/>
+    <circle cx="128" cy="58" r="1.8" fill="#ffbf5f"/>
+    <circle cx="162" cy="139" r="2.4" fill="#fb923c"/>
+    <circle cx="209" cy="51" r="1.7" fill="#ffbf5f"/>
+  </g>
+</svg>

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 230" role="img" aria-labelledby="title desc">
+  <title id="title">DZN survivor CTA scene</title>
+  <desc id="desc">Purple night scene with survivor silhouette, forest, tower, moon glow, and battlefield atmosphere.</desc>
+  <defs>
+    <radialGradient id="moonGlow" cx="76%" cy="24%" r="36%">
+      <stop offset="0" stop-color="#f0e7ff" stop-opacity=".84"/>
+      <stop offset=".2" stop-color="#a855f7" stop-opacity=".52"/>
+      <stop offset=".6" stop-color="#30115f" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sky" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#170a3d"/>
+      <stop offset=".44" stop-color="#25115d"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="fireGlow" cx="22%" cy="75%" r="34%">
+      <stop offset="0" stop-color="#fb923c" stop-opacity=".62"/>
+      <stop offset=".5" stop-color="#7c2d12" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="620" height="230" fill="url(#sky)"/>
+  <rect width="620" height="230" fill="url(#moonGlow)"/>
+  <rect width="620" height="230" fill="url(#fireGlow)"/>
+  <circle cx="472" cy="48" r="21" fill="#f5e8ff" opacity=".86"/>
+  <circle cx="481" cy="41" r="21" fill="#25115d" opacity=".55"/>
+  <g fill="#10072d" opacity=".8">
+    <path d="M0 128c51-33 106-22 160-47 58-26 118-1 169-14 74-18 148-59 259-10 39 17 63 26 92 31v142H0z"/>
+    <path d="M0 157c85-29 141-3 206-31 63-27 95-10 143-10 69 1 127-31 205-7 43 14 63 22 66 23v98H0z" fill="#050816"/>
+  </g>
+  <g fill="#020617">
+    <path d="M76 111h8v83h-8zM65 129h30v8H65zM58 152h42v7H58z"/>
+    <path d="M70 92h20l18 19H52z"/>
+    <path d="M62 111h49v8H62z"/>
+    <path d="M100 118l32 82h-10l-31-82zM61 118l-34 82h10l35-82z"/>
+  </g>
+  <g fill="#020617" opacity=".95">
+    <path d="M422 92c24 0 42 20 42 47v71h-96v-71c0-27 18-47 42-47z"/>
+    <path d="M399 81c4-13 15-21 28-18 15 4 24 20 18 37h-53c1-8 3-14 7-19z"/>
+    <path d="M368 139c-25 21-38 54-38 100h47l15-102z"/>
+    <path d="M460 135c33 22 50 55 50 100h-56l-14-97z"/>
+    <path d="M396 149h52l8 88h-73z" fill="#07111f"/>
+    <path d="M461 91l49 110" stroke="#020617" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <g fill="#020617">
+    <path d="M0 177c54-15 86-9 132-17 89-15 137 14 219 0 87-15 160-26 269 3v67H0z"/>
+    <path d="M0 197h620v33H0z"/>
+  </g>
+  <g opacity=".7" stroke="#c4b5fd" stroke-width="2">
+    <path d="M167 46h77M190 63h103M126 78h145" opacity=".35"/>
+    <path d="M507 70h52M485 87h81M457 104h53" opacity=".28"/>
+  </g>
+</svg>
