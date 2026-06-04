@@ -583,6 +583,7 @@ function EventsShell({ children }: { children: ReactNode }) {
     { href: "/", label: "Overview", icon: Home },
     { href: "/servers", label: "Servers", icon: Server },
     { href: "/leaderboards", label: "Leaderboards", icon: BarChart3 },
+    { href: "/seasons", label: "Seasons", icon: CalendarDays },
     { href: "/events", label: "Events", icon: Flag },
     { href: "/events/tournaments", label: "CTF Tournaments", icon: Trophy },
     { href: "/events/challenges", label: "Challenges", icon: Swords },

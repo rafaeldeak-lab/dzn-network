@@ -1,10 +1,16 @@
-import { getActiveSeasons } from "../_lib/dzn-seasons";
+import { getActiveSeasons, getPublicSeasons } from "../_lib/dzn-seasons";
 import { json, methodNotAllowed } from "../_lib/http";
 import type { PagesFunction } from "../_lib/types";
 
 export const onRequestGet: PagesFunction = async ({ env }) => {
-  const seasons = await getActiveSeasons(env);
-  return json({ ok: true, seasons });
+  const [activeSeasons, seasons] = await Promise.all([getActiveSeasons(env), getPublicSeasons(env)]);
+  return json({
+    ok: true,
+    seasons,
+    activeSeasons,
+    upcomingSeasons: seasons.filter((season) => ["registration_open", "upcoming"].includes(String(season.status).toLowerCase())),
+    completedSeasons: seasons.filter((season) => String(season.status).toLowerCase() === "completed"),
+  });
 };
 
 export const onRequestPost: PagesFunction = () => methodNotAllowed();

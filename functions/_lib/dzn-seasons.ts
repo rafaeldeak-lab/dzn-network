@@ -81,6 +81,32 @@ export async function getActiveSeasons(env: Env) {
   return (rows.results ?? []).map(toPublicSeason);
 }
 
+export async function getPublicSeasons(env: Env, limit = 100) {
+  if (!env.DB) return [];
+  await ensureDznSeasonSchema(env);
+  const capped = Math.max(1, Math.min(250, Math.round(limit)));
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT *
+       FROM dzn_seasons
+       ORDER BY
+         CASE lower(status)
+           WHEN 'live' THEN 0
+           WHEN 'active' THEN 1
+           WHEN 'registration_open' THEN 2
+           WHEN 'upcoming' THEN 3
+           WHEN 'completed' THEN 4
+           ELSE 5
+         END,
+         datetime(starts_at) DESC,
+         datetime(ends_at) DESC
+       LIMIT ?`,
+    )
+    .bind(capped)
+    .all<DznSeasonRow>();
+  return (rows.results ?? []).map(toPublicSeason);
+}
+
 export async function getSeasonBySlug(env: Env, slug: string) {
   if (!env.DB) return null;
   await ensureDznSeasonSchema(env);

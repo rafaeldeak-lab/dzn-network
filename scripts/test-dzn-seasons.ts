@@ -86,6 +86,7 @@ assert.equal(/DROP TABLE|DELETE FROM|TRUNCATE|CREATE TABLE IF NOT EXISTS player_
 const helper = source("functions/_lib/dzn-seasons.ts");
 includesAll(helper, [
   "getActiveSeasons",
+  "getPublicSeasons",
   "getSeasonBySlug",
   "getEligibleServersForSeason",
   "joinServerToSeason",
@@ -117,7 +118,7 @@ for (const route of [
 }
 
 const seasonsRoute = source("functions/api/seasons.ts");
-includesAll(seasonsRoute, ["getActiveSeasons", "methodNotAllowed"]);
+includesAll(seasonsRoute, ["getActiveSeasons", "getPublicSeasons", "activeSeasons", "upcomingSeasons", "completedSeasons", "methodNotAllowed"]);
 const seasonDetailRoute = source("functions/api/seasons/[slug].ts");
 includesAll(seasonDetailRoute, ["getSeasonBySlug", "SEASON_NOT_FOUND"]);
 const leaderboardRoute = source("functions/api/seasons/[slug]/leaderboard.ts");
@@ -137,6 +138,39 @@ includesAll(docs, [
   "It does not modify ADM ingestion",
   "fake stats are never invented",
 ]);
+
+for (const route of [
+  "app/seasons/page.tsx",
+  "app/seasons/[slug]/page.tsx",
+  "components/seasons/public-seasons.tsx",
+]) {
+  assert.equal(existsSync(route), true, `Expected public seasons UI route/component to exist: ${route}`);
+}
+
+const seasonsIndexPage = source("app/seasons/page.tsx");
+includesAll(seasonsIndexPage, ["SeasonsIndexPage"]);
+const seasonsSlugPage = source("app/seasons/[slug]/page.tsx");
+includesAll(seasonsSlugPage, ["SeasonDetailPage", "generateStaticParams", "params: Promise<{ slug: string }>"]);
+const publicSeasonsUi = source("components/seasons/public-seasons.tsx");
+includesAll(publicSeasonsUi, [
+  "Active Seasons",
+  "Upcoming Seasons",
+  "Completed Seasons",
+  "Servers only compete against the same category.",
+  "Deathmatch servers compete against Deathmatch servers only.",
+  "PvP servers compete against PvP servers only.",
+  "PvE servers compete against PvE servers only.",
+  "Survival servers compete against Survival servers only.",
+  "/api/seasons",
+  "/leaderboard",
+  "No servers have joined yet.",
+  "No active seasons are running right now.",
+  "Stored season snapshots",
+]);
+assert.equal(/fake server|fake score|demo server|demo score/i.test(publicSeasonsUi), false, "Public seasons UI must not show fake servers or fake scores.");
+
+const publicNetwork = source("components/network/public-network.tsx");
+includesAll(publicNetwork, ["href=\"/seasons\"", "Seasons"]);
 
 const publicPlans = getBillingPlanSummaries({} as Env);
 assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
