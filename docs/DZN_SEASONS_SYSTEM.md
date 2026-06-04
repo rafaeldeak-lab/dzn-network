@@ -34,8 +34,11 @@ Phase 7E adds protected refresh automation:
 
 - `POST /api/cron/seasons/refresh` requires the shared DZN cron secret and refreshes active seasons in a small batch.
 - `POST /api/admin/seasons/[seasonId]/refresh` requires a DZN admin, support, or dev user and refreshes one season in a small batch.
+- `GET /api/admin/seasons` requires a DZN admin, support, or dev user and returns season management summaries grouped by status.
 
 Refresh automation only reads existing stored aggregate stats and writes `dzn_season_score_snapshots` plus `dzn_season_entries` score/rank fields. It does not import ADM files, finalise seasons automatically, or change stored player/stat records.
+
+Phase 7F adds the protected `/dashboard/admin/seasons` panel for DZN admin/support/dev users. The panel lists active, upcoming, and completed seasons with entry counts, last score refresh, stored awards, and guarded actions for score refresh and manual finalisation. Finalisation requires explicit confirmation because it persists seasonal awards and can grant permanent seasonal badges.
 
 ## Awards and Badges
 

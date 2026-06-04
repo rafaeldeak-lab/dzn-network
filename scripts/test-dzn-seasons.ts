@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import { calculateSeasonScoreFromStats, normalizeSeasonCategory, refreshSeasonScores } from "../functions/_lib/dzn-seasons";
+import { onRequestGet as adminSeasonsGet } from "../functions/api/admin/seasons";
 import { onRequestPost as adminSeasonRefreshPost } from "../functions/api/admin/seasons/[seasonId]/refresh";
 import { onRequestPost as cronSeasonRefreshPost } from "../functions/api/cron/seasons/refresh";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -96,6 +97,7 @@ includesAll(helper, [
   "calculateSeasonScore",
   "refreshSeasonScores",
   "finaliseSeason",
+  "getAdminSeasonManagement",
   "getSeasonLeaderboard",
   "awardSeasonBadges",
   "getSeasonAwards",
@@ -126,6 +128,7 @@ for (const route of [
   "functions/api/seasons/[slug].ts",
   "functions/api/seasons/[slug]/leaderboard.ts",
   "functions/api/cron/seasons/refresh.ts",
+  "functions/api/admin/seasons.ts",
   "functions/api/admin/seasons/[seasonId]/refresh.ts",
   "functions/api/admin/seasons/[seasonId]/finalise.ts",
   "functions/api/servers/[serverId]/seasons/status.ts",
@@ -143,6 +146,8 @@ includesAll(leaderboardRoute, ["getSeasonLeaderboard", "leaderboard"]);
 assert.equal(leaderboardRoute.includes("refreshSeasonScores"), false, "Public leaderboard reads must not write score snapshots.");
 const cronRefreshRoute = source("functions/api/cron/seasons/refresh.ts");
 includesAll(cronRefreshRoute, ["requireCronSecret", "refreshActiveSeasonScores", "seasonsChecked", "entriesRefreshed", "snapshotsCreated", "warnings"]);
+const adminSeasonsRoute = source("functions/api/admin/seasons.ts");
+includesAll(adminSeasonsRoute, ["requireBadgeAdminUser", "getAdminSeasonManagement", "activeSeasons", "upcomingSeasons", "completedSeasons", "warnings", "GET, OPTIONS"]);
 const adminRefreshRoute = source("functions/api/admin/seasons/[seasonId]/refresh.ts");
 includesAll(adminRefreshRoute, ["requireBadgeAdminUser", "refreshSeasonScores", "allowCompleted: false", "refreshedEntries", "warnings"]);
 const seasonFinaliseRoute = source("functions/api/admin/seasons/[seasonId]/finalise.ts");
@@ -152,7 +157,7 @@ includesAll(ownerSeasonStatusRoute, ["resolveOwnerVisualLoadoutServer", "status:
 const joinRoute = source("functions/api/servers/[serverId]/seasons/[seasonId]/join.ts");
 includesAll(joinRoute, ["resolveOwnerVisualLoadoutServer", "status: access.status", "joinServerToSeason"]);
 assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events|sessions|subscriptions/i.test(joinRoute), false, "Season join route must not touch protected systems.");
-for (const routeSource of [cronRefreshRoute, adminRefreshRoute, leaderboardRoute]) {
+for (const routeSource of [cronRefreshRoute, adminSeasonsRoute, adminRefreshRoute, leaderboardRoute]) {
   assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events|subscriptions/i.test(routeSource), false, "Season refresh/read routes must not touch protected systems.");
 }
 
@@ -166,12 +171,16 @@ includesAll(docs, [
   "server_stats",
   "It does not modify ADM ingestion",
   "fake stats are never invented",
+  "GET /api/admin/seasons",
+  "/dashboard/admin/seasons",
 ]);
 
 for (const route of [
   "app/seasons/page.tsx",
   "app/seasons/[slug]/page.tsx",
+  "app/dashboard/admin/seasons/page.tsx",
   "components/seasons/public-seasons.tsx",
+  "components/seasons/admin-seasons-panel.tsx",
 ]) {
   assert.equal(existsSync(route), true, `Expected public seasons UI route/component to exist: ${route}`);
 }
@@ -203,6 +212,27 @@ includesAll(publicSeasonsUi, [
   "Winner awards will appear after this season is finalized.",
 ]);
 assert.equal(/fake server|fake score|demo server|demo score/i.test(publicSeasonsUi), false, "Public seasons UI must not show fake servers or fake scores.");
+
+const adminSeasonsPage = source("app/dashboard/admin/seasons/page.tsx");
+includesAll(adminSeasonsPage, ["AdminSeasonsPanel"]);
+const adminSeasonsPanel = source("components/seasons/admin-seasons-panel.tsx");
+includesAll(adminSeasonsPanel, [
+  "/api/admin/seasons",
+  "/refresh",
+  "/finalise",
+  "Active seasons",
+  "Upcoming seasons",
+  "Completed seasons",
+  "Refresh scores",
+  "View entries",
+  "View leaderboard",
+  "Finalise season",
+  "FINALISE",
+  "Finalise awards permanent seasonal badges",
+  "Finalise is blocked",
+  "Awards stored",
+]);
+assert.equal(/api\/sync|api\/debug\/nitrado|stripe\/webhook|player_profiles|kill_events|player_events|sessions|subscriptions/i.test(adminSeasonsPanel), false, "Admin seasons panel must not wire ADM, billing, auth, or protected stat tables.");
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, ["href=\"/seasons\"", "Seasons"]);
@@ -299,6 +329,40 @@ async function runRefreshAutomationChecks() {
     body: "{}",
   }), { DB: nonAdminDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-active" }));
   assert.equal(nonAdmin.status, 403, "Admin season refresh must return 403 for non-admin users.");
+
+  const unauthAdminList = await adminSeasonsGet(makeContext(new Request("https://dzn.test/api/admin/seasons", {
+    method: "GET",
+  }), { DB: createSeasonDb("active") as unknown as D1Database } as Env));
+  assert.equal(unauthAdminList.status, 401, "Admin seasons listing must return 401 for unauthenticated requests.");
+
+  const nonAdminListDb = createSeasonDb("active", {
+    id: "user-2",
+    discord_id: "not-admin",
+    username: "Owner",
+    avatar: null,
+  });
+  const nonAdminList = await adminSeasonsGet(makeContext(new Request("https://dzn.test/api/admin/seasons", {
+    method: "GET",
+    headers: { cookie: "dzn_session=session-token" },
+  }), { DB: nonAdminListDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  assert.equal(nonAdminList.status, 403, "Admin seasons listing must return 403 for non-admin users.");
+
+  const adminListDb = createSeasonDb("completed");
+  const adminList = await adminSeasonsGet(makeContext(new Request("https://dzn.test/api/admin/seasons?limit=10", {
+    method: "GET",
+    headers: { cookie: "dzn_session=session-token" },
+  }), { DB: adminListDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  assert.equal(adminList.status, 200);
+  const adminListJson = await adminList.json() as {
+    ok: boolean;
+    completedSeasons: Array<{ entryCount: number; awardsCount: number; awards: unknown[]; awardFinaliseStatus: string }>;
+  };
+  assert.equal(adminListJson.ok, true);
+  assert.equal(adminListJson.completedSeasons.length, 1, "Admin seasons listing should group completed seasons.");
+  assert.equal(adminListJson.completedSeasons[0]?.entryCount, 2, "Admin seasons listing should include entry counts.");
+  assert.equal(adminListJson.completedSeasons[0]?.awardsCount, 1, "Completed/finalised season should show stored awards.");
+  assert.equal(adminListJson.completedSeasons[0]?.awards.length, 1, "Admin seasons listing should expose stored season awards for inspection.");
+  assert.equal(adminListJson.completedSeasons[0]?.awardFinaliseStatus, "finalised_with_awards");
 }
 
 type TestSeasonStatus = "active" | "completed";
@@ -357,11 +421,22 @@ type TestSnapshotRow = {
   captured_at: string;
 };
 
+type TestAwardRow = {
+  id: string;
+  season_id: string;
+  server_id: string;
+  award_code: string;
+  rank: number | null;
+  awarded_at: string;
+  metadata_json: string | null;
+};
+
 class SeasonMemoryD1 {
   seasons: TestSeasonRow[];
   entries: TestEntryRow[];
   servers: TestServerRow[];
   snapshots: TestSnapshotRow[];
+  awards: TestAwardRow[];
   sessionUser: SessionUser | null;
 
   constructor(status: TestSeasonStatus, sessionUser: SessionUser | null) {
@@ -389,6 +464,9 @@ class SeasonMemoryD1 {
     ];
     this.snapshots = status === "completed"
       ? [{ id: "snapshot-completed", season_id: seasonId, server_id: "server-a", score: 500, rank: 1, metrics_json: "{}", captured_at: "2026-06-02T01:00:00.000Z" }]
+      : [];
+    this.awards = status === "completed"
+      ? [{ id: "award-completed", season_id: seasonId, server_id: "server-a", award_code: "season_champion", rank: 1, awarded_at: "2026-06-02T01:30:00.000Z", metadata_json: JSON.stringify({ badgeCode: "spring_champion" }) }]
       : [];
     this.sessionUser = sessionUser ?? {
       id: "admin-user",
@@ -474,8 +552,46 @@ class SeasonMemoryStatement {
 
   async all<T>() {
     const normalized = normalizeSql(this.sql);
+    if (normalized.startsWith("select dzn_seasons.*,")) {
+      const limit = Number(this.args[0] ?? 100);
+      const rows = this.db.seasons
+        .map((season) => {
+          const entries = this.db.entries.filter((entry) => entry.season_id === season.id && entry.status !== "withdrawn");
+          const snapshots = this.db.snapshots.filter((snapshot) => snapshot.season_id === season.id);
+          const awards = this.db.awards.filter((award) => award.season_id === season.id);
+          return {
+            ...season,
+            entry_count: entries.length,
+            scored_entry_count: entries.filter((entry) => entry.final_score !== null && entry.rank !== null).length,
+            score_snapshot_count: snapshots.length,
+            awards_count: awards.length,
+            last_score_refresh_at: latestIso(snapshots.map((snapshot) => snapshot.captured_at)),
+          };
+        })
+        .slice(0, limit);
+      return { results: rows as T[] };
+    }
     if (normalized.startsWith("select * from dzn_seasons where lower(status) in")) {
       return { results: this.db.seasons.filter((season) => ["registration_open", "active", "live", "upcoming"].includes(season.status)) as T[] };
+    }
+    if (normalized.startsWith("select dzn_season_entries.*,")) {
+      const seasonId = String(this.args[0]);
+      const rows = this.db.entries
+        .filter((entry) => entry.season_id === seasonId && entry.status !== "withdrawn")
+        .map((entry) => {
+          const snapshots = this.db.snapshots.filter((snapshot) => snapshot.season_id === entry.season_id && snapshot.server_id === entry.server_id);
+          return {
+            ...entry,
+            entry_last_score_refresh_at: latestIso(snapshots.map((snapshot) => snapshot.captured_at)),
+            entry_score_snapshot_count: snapshots.length,
+          };
+        })
+        .sort((left, right) => Number(left.rank ?? 9999) - Number(right.rank ?? 9999) || Number(right.final_score ?? 0) - Number(left.final_score ?? 0) || left.joined_at.localeCompare(right.joined_at));
+      return { results: rows as T[] };
+    }
+    if (normalized.startsWith("select * from dzn_season_awards")) {
+      const seasonId = String(this.args[0]);
+      return { results: this.db.awards.filter((award) => award.season_id === seasonId) as T[] };
     }
     if (normalized.startsWith("select * from dzn_season_entries where season_id = ?")) {
       const seasonId = String(this.args[0]);
@@ -547,6 +663,10 @@ function makeContext(request: Request, env: Env, params: Record<string, string> 
 
 function normalizeSql(sql: string) {
   return sql.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function latestIso(values: Array<string | null | undefined>) {
+  return values.filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
 }
 
 runRefreshAutomationChecks()

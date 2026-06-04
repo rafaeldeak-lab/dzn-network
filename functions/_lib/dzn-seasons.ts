@@ -83,6 +83,59 @@ export type DznSeasonRefreshOptions = {
   capturedAt?: string | null;
 };
 
+export type DznAdminSeasonEntry = {
+  id: string;
+  seasonId: string;
+  serverId: string;
+  category: DznSeasonCategory;
+  joinedAt: string;
+  status: string;
+  score: number | null;
+  rank: number | null;
+  lastScoreRefreshAt: string | null;
+  hasScoreSnapshot: boolean;
+};
+
+export type DznAdminSeasonAward = {
+  id: string;
+  seasonId: string;
+  serverId: string;
+  awardCode: string;
+  rank: number | null;
+  awardedAt: string;
+  metadata: Record<string, unknown>;
+};
+
+export type DznAdminSeasonSummary = {
+  id: string;
+  slug: string;
+  name: string;
+  category: DznSeasonCategory;
+  status: string;
+  startsAt: string;
+  endsAt: string;
+  entryCount: number;
+  scoredEntryCount: number;
+  scoreSnapshotCount: number;
+  awardsCount: number;
+  lastScoreRefreshAt: string | null;
+  awardFinaliseStatus: string;
+  canRefresh: boolean;
+  canFinalise: boolean;
+  warnings: string[];
+  entries: DznAdminSeasonEntry[];
+  awards: DznAdminSeasonAward[];
+};
+
+export type DznAdminSeasonManagement = {
+  ok: true;
+  seasons: DznAdminSeasonSummary[];
+  activeSeasons: DznAdminSeasonSummary[];
+  upcomingSeasons: DznAdminSeasonSummary[];
+  completedSeasons: DznAdminSeasonSummary[];
+  warnings: string[];
+};
+
 type DznSeasonWithScoreStatusRow = DznSeasonRow & {
   last_score_refresh_at?: string | null;
   score_snapshot_count?: number | null;
@@ -91,6 +144,14 @@ type DznSeasonWithScoreStatusRow = DznSeasonRow & {
 type DznSeasonEntryWithScoreStatusRow = DznSeasonEntryRow & {
   entry_last_score_refresh_at?: string | null;
   entry_score_snapshot_count?: number | null;
+};
+
+type DznAdminSeasonRow = DznSeasonRow & {
+  entry_count?: number | null;
+  scored_entry_count?: number | null;
+  score_snapshot_count?: number | null;
+  awards_count?: number | null;
+  last_score_refresh_at?: string | null;
 };
 
 type SeasonServerRow = {
@@ -626,6 +687,79 @@ export async function getSeasonAwards(env: Env, seasonId: string) {
   return (rows.results ?? []).map(toPublicSeasonAward);
 }
 
+export async function getAdminSeasonManagement(env: Env, limit = 100): Promise<DznAdminSeasonManagement> {
+  if (!env.DB) {
+    return {
+      ok: true,
+      seasons: [],
+      activeSeasons: [],
+      upcomingSeasons: [],
+      completedSeasons: [],
+      warnings: ["D1 DB binding is not configured."],
+    };
+  }
+  await ensureDznSeasonSchema(env);
+  const capped = Math.max(1, Math.min(250, Math.round(Number(limit) || 100)));
+  const seasonRows = await requireDb(env)
+    .prepare(
+      `SELECT dzn_seasons.*,
+              (SELECT COUNT(*)
+               FROM dzn_season_entries
+               WHERE dzn_season_entries.season_id = dzn_seasons.id
+                 AND dzn_season_entries.status != 'withdrawn') AS entry_count,
+              (SELECT COUNT(*)
+               FROM dzn_season_entries
+               WHERE dzn_season_entries.season_id = dzn_seasons.id
+                 AND dzn_season_entries.status != 'withdrawn'
+                 AND dzn_season_entries.final_score IS NOT NULL
+                 AND dzn_season_entries.rank IS NOT NULL) AS scored_entry_count,
+              (SELECT COUNT(*)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_seasons.id) AS score_snapshot_count,
+              (SELECT COUNT(*)
+               FROM dzn_season_awards
+               WHERE dzn_season_awards.season_id = dzn_seasons.id) AS awards_count,
+              (SELECT MAX(captured_at)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_seasons.id) AS last_score_refresh_at
+       FROM dzn_seasons
+       ORDER BY
+         CASE lower(status)
+           WHEN 'live' THEN 0
+           WHEN 'active' THEN 1
+           WHEN 'registration_open' THEN 2
+           WHEN 'upcoming' THEN 3
+           WHEN 'completed' THEN 4
+           WHEN 'finalised' THEN 5
+           WHEN 'finalized' THEN 5
+           ELSE 6
+         END,
+         datetime(starts_at) DESC,
+         datetime(ends_at) DESC
+       LIMIT ?`,
+    )
+    .bind(capped)
+    .all<DznAdminSeasonRow>();
+
+  const seasons: DznAdminSeasonSummary[] = [];
+  for (const row of seasonRows.results ?? []) {
+    const [entries, awards] = await Promise.all([
+      getAdminSeasonEntries(env, row.id),
+      getAdminSeasonAwards(env, row.id),
+    ]);
+    seasons.push(toAdminSeasonSummary(row, entries, awards));
+  }
+
+  return {
+    ok: true,
+    seasons,
+    activeSeasons: seasons.filter((season) => ["live", "active"].includes(String(season.status).toLowerCase())),
+    upcomingSeasons: seasons.filter((season) => ["registration_open", "upcoming"].includes(String(season.status).toLowerCase())),
+    completedSeasons: seasons.filter((season) => isCompletedSeasonStatus(season.status)),
+    warnings: [],
+  };
+}
+
 export async function ensureDznSeasonSchema(env: Env) {
   const db = requireDb(env);
   for (const statement of DZN_SEASON_SCHEMA_STATEMENTS) {
@@ -892,6 +1026,137 @@ function toPublicLeaderboardEntry(row: DznSeasonEntryRow & { server_name: string
     metrics: parseJsonObject(row.snapshot_current_json),
     lastScoreRefreshAt: row.entry_last_score_refresh_at ?? null,
   };
+}
+
+async function getAdminSeasonEntries(env: Env, seasonId: string): Promise<DznAdminSeasonEntry[]> {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT dzn_season_entries.*,
+              (SELECT MAX(captured_at)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_season_entries.season_id
+                 AND dzn_season_score_snapshots.server_id = dzn_season_entries.server_id) AS entry_last_score_refresh_at,
+              (SELECT COUNT(*)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_season_entries.season_id
+                 AND dzn_season_score_snapshots.server_id = dzn_season_entries.server_id) AS entry_score_snapshot_count
+       FROM dzn_season_entries
+       WHERE season_id = ?
+         AND status != 'withdrawn'
+       ORDER BY
+         CASE WHEN rank IS NULL THEN 1 ELSE 0 END,
+         rank ASC,
+         final_score DESC,
+         datetime(joined_at) ASC
+       LIMIT 250`,
+    )
+    .bind(seasonId)
+    .all<DznSeasonEntryWithScoreStatusRow>();
+  return (rows.results ?? []).map((row) => {
+    const snapshotCount = safeNumber(row.entry_score_snapshot_count);
+    return {
+      id: row.id,
+      seasonId: row.season_id,
+      serverId: row.server_id,
+      category: row.category,
+      joinedAt: row.joined_at,
+      status: row.status,
+      score: row.final_score === null || row.final_score === undefined ? null : safeNumber(row.final_score),
+      rank: row.rank,
+      lastScoreRefreshAt: row.entry_last_score_refresh_at ?? null,
+      hasScoreSnapshot: snapshotCount > 0,
+    };
+  });
+}
+
+async function getAdminSeasonAwards(env: Env, seasonId: string): Promise<DznAdminSeasonAward[]> {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT *
+       FROM dzn_season_awards
+       WHERE season_id = ?
+       ORDER BY
+         CASE WHEN rank IS NULL THEN 1 ELSE 0 END,
+         rank ASC,
+         datetime(awarded_at) DESC
+       LIMIT 250`,
+    )
+    .bind(seasonId)
+    .all<DznSeasonAwardRow>();
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    seasonId: row.season_id,
+    serverId: row.server_id,
+    awardCode: row.award_code,
+    rank: row.rank,
+    awardedAt: row.awarded_at,
+    metadata: parseJsonObject(row.metadata_json),
+  }));
+}
+
+function toAdminSeasonSummary(row: DznAdminSeasonRow, entries: DznAdminSeasonEntry[], awards: DznAdminSeasonAward[]): DznAdminSeasonSummary {
+  const entryCount = safeNumber(row.entry_count);
+  const scoredEntryCount = safeNumber(row.scored_entry_count);
+  const scoreSnapshotCount = safeNumber(row.score_snapshot_count);
+  const awardsCount = safeNumber(row.awards_count);
+  const completed = isCompletedSeasonStatus(row.status);
+  const ended = seasonEnded(row);
+  const canRefresh = !completed && entryCount > 0;
+  const canFinalise = !completed && ended && entryCount > 0 && scoredEntryCount > 0;
+  const warnings = adminSeasonWarnings({ row, entryCount, scoredEntryCount, canFinalise, completed });
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    category: row.category,
+    status: row.status,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    entryCount,
+    scoredEntryCount,
+    scoreSnapshotCount,
+    awardsCount,
+    lastScoreRefreshAt: row.last_score_refresh_at ?? null,
+    awardFinaliseStatus: adminAwardFinaliseStatus({ row, entryCount, scoredEntryCount, awardsCount, canFinalise, completed, ended }),
+    canRefresh,
+    canFinalise,
+    warnings,
+    entries,
+    awards,
+  };
+}
+
+function adminSeasonWarnings(input: {
+  row: DznAdminSeasonRow;
+  entryCount: number;
+  scoredEntryCount: number;
+  canFinalise: boolean;
+  completed: boolean;
+}) {
+  const warnings: string[] = [];
+  if (!input.completed && input.entryCount <= 0) warnings.push("No season entries yet.");
+  if (!input.completed && input.entryCount > 0 && input.scoredEntryCount <= 0) warnings.push("Refresh scores before finalising.");
+  if (input.canFinalise) warnings.push("Finalise awards permanent seasonal badges.");
+  if (input.completed && safeNumber(input.row.awards_count) <= 0) warnings.push("Season is completed with no stored awards.");
+  return warnings;
+}
+
+function adminAwardFinaliseStatus(input: {
+  row: DznAdminSeasonRow;
+  entryCount: number;
+  scoredEntryCount: number;
+  awardsCount: number;
+  canFinalise: boolean;
+  completed: boolean;
+  ended: boolean;
+}) {
+  if (input.completed && input.awardsCount > 0) return "finalised_with_awards";
+  if (input.completed) return "finalised_no_awards";
+  if (input.canFinalise) return "ready_to_finalise";
+  if (input.entryCount <= 0) return "no_entries";
+  if (input.scoredEntryCount <= 0) return "needs_score_refresh";
+  if (!input.ended) return "not_ended";
+  return "blocked";
 }
 
 async function insertSeasonScoreSnapshot(env: Env, input: {
