@@ -88,6 +88,7 @@ type PublicServerRow = {
   featured_label: string | null;
   plan_key: string | null;
   subscription_status: string | null;
+  active_promotions_json: string | null;
 };
 
 type PublicRecentEvent = {
@@ -101,6 +102,12 @@ type PublicRecentEvent = {
   distance: number | null;
   occurred_at: string | null;
   created_at: string | null;
+};
+
+type PublicPromotion = {
+  promotionType: string;
+  status: string;
+  endsAt: string | null;
 };
 
 export type RatingBreakdown = Record<1 | 2 | 3 | 4 | 5, number>;
@@ -177,6 +184,7 @@ type SafePublicServer = {
   isFeaturedEligible: boolean;
   isSpotlightEligible: boolean;
   visibilityExplanation: VisibilityExplanation;
+  activePromotions?: PublicPromotion[];
   reputation: ReputationSummary;
   achievement_showcase: AchievementShowcase;
   badges?: VisualBadge[];
@@ -412,6 +420,17 @@ async function queryPublicServersPreview(env: Env) {
         server_advertising_state.bump_period_end,
         server_advertising_state.featured_until,
         server_advertising_state.featured_label,
+        (
+          SELECT json_group_array(json_object(
+            'promotionType', server_promotions.promotion_type,
+            'status', server_promotions.status,
+            'endsAt', server_promotions.ends_at
+          ))
+          FROM server_promotions
+          WHERE server_promotions.server_id = linked_servers.id
+            AND server_promotions.status = 'active'
+            AND server_promotions.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ) AS active_promotions_json,
         COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
         server_subscriptions.status AS subscription_status
        FROM linked_servers
@@ -542,6 +561,17 @@ async function queryPublicServers(env: Env) {
       server_advertising_state.bump_period_end,
       server_advertising_state.featured_until,
       server_advertising_state.featured_label,
+      (
+        SELECT json_group_array(json_object(
+          'promotionType', server_promotions.promotion_type,
+          'status', server_promotions.status,
+          'endsAt', server_promotions.ends_at
+        ))
+        FROM server_promotions
+        WHERE server_promotions.server_id = linked_servers.id
+          AND server_promotions.status = 'active'
+          AND server_promotions.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      ) AS active_promotions_json,
       COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
       server_subscriptions.status AS subscription_status
     FROM linked_servers
@@ -770,6 +800,7 @@ async function toSafePublicServer(
     featured_until: row.featured_until,
     featured_label: row.featured_label,
   });
+  const activePromotions = parsePublicPromotions(row.active_promotions_json);
   const visualShowcase = getServerVisualShowcase({
     planKey,
     reputationTier: reputation.tier,
@@ -819,6 +850,7 @@ async function toSafePublicServer(
     earnedBadges: badgeCollection.earnedBadges,
     showcaseBadges: publicVisualLoadout.showcaseBadges,
     crowns: badgeCollection.crowns,
+    activePromotions,
     visualLoadout: {
       source: publicVisualLoadout.source,
       animationEnabled: publicVisualLoadout.animationEnabled,
@@ -881,6 +913,7 @@ async function toSafePublicServer(
     isFeaturedEligible: visibilityConfig.isFeaturedEligible,
     isSpotlightEligible: visibilityConfig.isSpotlightEligible,
     visibilityExplanation: explainServerVisibility(visibilityInput),
+    activePromotions,
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
@@ -1000,6 +1033,7 @@ async function toSafePublicServerPreview(
     featured_until: row.featured_until,
     featured_label: row.featured_label,
   });
+  const activePromotions = parsePublicPromotions(row.active_promotions_json);
   const badgeCollection = buildPublicBadgeCollection({
     row,
     stats,
@@ -1042,6 +1076,7 @@ async function toSafePublicServerPreview(
     earnedBadges: badgeCollection.earnedBadges,
     showcaseBadges: publicVisualLoadout.showcaseBadges,
     crowns: badgeCollection.crowns,
+    activePromotions,
     visualLoadout: {
       source: publicVisualLoadout.source,
       animationEnabled: publicVisualLoadout.animationEnabled,
@@ -1102,6 +1137,7 @@ async function toSafePublicServerPreview(
     isFeaturedEligible: visibilityConfig.isFeaturedEligible,
     isSpotlightEligible: visibilityConfig.isSpotlightEligible,
     visibilityExplanation: explainServerVisibility(visibilityInput),
+    activePromotions,
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
@@ -1664,6 +1700,30 @@ function parsePublicTags(value: string) {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parsePublicPromotions(value: string | null): PublicPromotion[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    const now = Date.now();
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const record = item as Record<string, unknown>;
+        const promotionType = String(record.promotionType ?? record.promotion_type ?? "").trim().toLowerCase();
+        if (!["directory_bump", "featured_rotation", "spotlight_boost"].includes(promotionType)) return null;
+        const status = String(record.status ?? "active").trim().toLowerCase();
+        if (status !== "active") return null;
+        const endsAt = firstString(record.endsAt, record.ends_at);
+        if (endsAt && dateValue(endsAt) > 0 && dateValue(endsAt) <= now) return null;
+        return { promotionType, status, endsAt };
+      })
+      .filter((promotion): promotion is PublicPromotion => Boolean(promotion));
   } catch {
     return [];
   }

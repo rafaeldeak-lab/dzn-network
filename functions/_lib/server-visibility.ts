@@ -70,6 +70,10 @@ export type ServerVisibilityInput = {
   earnedBadges?: unknown;
   showcaseBadges?: unknown;
   crowns?: unknown;
+  activePromotions?: unknown;
+  active_promotions?: unknown;
+  activePromotionsJson?: unknown;
+  active_promotions_json?: unknown;
   visualLoadout?: {
     source?: unknown;
     showcaseBadgeCodes?: unknown;
@@ -150,6 +154,7 @@ export function getServerDiscoveryScore(server: ServerVisibilityInput) {
   const profileScore = profileCompletenessPoints(server);
   const visualScore = visualCompletenessPoints(server);
   const activeScore = activeStatusPoints(server);
+  const promotionScore = promotionPoints(server);
   return Math.round(
     config.visibilityWeight * 120 +
     recentActivityScore +
@@ -157,7 +162,8 @@ export function getServerDiscoveryScore(server: ServerVisibilityInput) {
     badgeScore +
     profileScore +
     visualScore +
-    activeScore,
+    activeScore +
+    promotionScore,
   );
 }
 
@@ -181,6 +187,7 @@ export function explainServerVisibility(server: ServerVisibilityInput): Visibili
     profileCompletenessPoints(server) >= 30 ? "Complete public profile" : "Basic public profile",
     badgePoints(server) > 0 ? "Earned public badges" : "No earned badge boost yet",
     visualCompletenessPoints(server) > 0 ? "Visual loadout configured" : "Default visual loadout",
+    promotionPoints(server) > 0 ? "Active promotion boost for discovery freshness" : "No active promotion boost",
   ];
   return {
     summary: `${config.visibilityTier === "premium" ? "Premium" : config.visibilityTier === "enhanced" ? "Enhanced" : "Standard"} visibility for discovery surfaces.`,
@@ -399,9 +406,58 @@ function activeStatusPoints(server: ServerVisibilityInput) {
   return (syncActive ? 45 : 0) + (online ? 20 : 0);
 }
 
+function promotionPoints(server: ServerVisibilityInput) {
+  const promotions = activePromotionTypes(server);
+  const weights: Record<string, number> = {
+    directory_bump: 28,
+    featured_rotation: 45,
+    spotlight_boost: 70,
+    seasonal_push: 0,
+  };
+  return Math.min(90, promotions.reduce((total, promotionType) => total + (weights[promotionType] ?? 0), 0));
+}
+
+function activePromotionTypes(server: ServerVisibilityInput) {
+  const raw = server.activePromotions ?? server.active_promotions ?? server.activePromotionsJson ?? server.active_promotions_json;
+  const values = Array.isArray(raw) ? raw : parseJsonArray(raw);
+  const now = Date.now();
+  const result: string[] = [];
+  for (const item of values) {
+    if (typeof item === "string") {
+      const type = cleanPromotionType(item);
+      if (type) result.push(type);
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const status = String(record.status ?? "active").toLowerCase();
+    if (status && status !== "active") continue;
+    const endsAt = dateValue(record.endsAt ?? record.ends_at);
+    if (endsAt > 0 && endsAt <= now) continue;
+    const type = cleanPromotionType(record.promotionType ?? record.promotion_type);
+    if (type) result.push(type);
+  }
+  return Array.from(new Set(result));
+}
+
+function cleanPromotionType(value: unknown) {
+  const type = String(value ?? "").trim().toLowerCase();
+  return ["directory_bump", "featured_rotation", "spotlight_boost", "seasonal_push"].includes(type) ? type : "";
+}
+
 function countItems(value: unknown) {
   if (Array.isArray(value)) return value.length;
   return 0;
+}
+
+function parseJsonArray(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function parseTags(value: unknown) {
