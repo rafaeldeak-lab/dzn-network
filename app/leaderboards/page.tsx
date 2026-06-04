@@ -196,7 +196,7 @@ export default function LeaderboardsPage() {
   return (
     <main className="dzn-leaderboard-page relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-6 text-white sm:px-6 lg:px-8">
       <AnimatedBackground />
-      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] max-w-7xl flex-col">
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] max-w-[1540px] flex-col">
         <nav className="flex min-h-[104px] flex-wrap items-center justify-between gap-3">
           <DznLogo />
           <div className="flex items-center gap-3">
@@ -209,7 +209,7 @@ export default function LeaderboardsPage() {
           </div>
         </nav>
 
-        <section className="dzn-leaderboard-hero my-8">
+        <section className="dzn-leaderboard-hero my-5 lg:my-7">
           <div className="dzn-leaderboard-hero__copy">
             <div>
               <p className="dzn-leaderboard-live-badge inline-flex rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
@@ -227,15 +227,16 @@ export default function LeaderboardsPage() {
 
           <div className="dzn-leaderboard-hero__visual">
             <AnimatedBullet />
-            {!initialError ? (
-              <div className="dzn-leaderboard-stat-grid">
-                <MetricRow icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} />
-                <MetricRow icon={Crosshair} label="Kills Tracked" value={formatNumber(totalKills)} />
-                <MetricRow icon={Users} label="Ranked Players" value={String(totalPlayers)} />
-                <MetricRow icon={Trophy} label="Longest Kill" value={formatDistance(longestKill)} />
-              </div>
-            ) : null}
           </div>
+
+          {!initialError ? (
+            <div className="dzn-leaderboard-stat-grid">
+              <MetricRow icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} tone="violet" />
+              <MetricRow icon={Crosshair} label="Kills Tracked" value={formatNumber(totalKills)} tone="cyan" />
+              <MetricRow icon={Users} label="Ranked Players" value={String(totalPlayers)} tone="orange" />
+              <MetricRow icon={Trophy} label="Longest Kill" value={formatDistance(longestKill)} tone="red" />
+            </div>
+          ) : null}
         </section>
 
         {error ? <MessagePanel message={error} onRetry={() => setReloadNonce((value) => value + 1)} /> : null}
@@ -297,6 +298,7 @@ export default function LeaderboardsPage() {
                 <LongestKillsSection
                   bestOverall={payload.best_overall_kill}
                   latestKill={payload.latest_kill}
+                  oneShotKill={payload.personal_best_kills[0] ?? payload.longest_kills[0] ?? null}
                 />
               )}
               <LiveAdmIntelPanel updatedAt={payload.updated_at} loading={loading} />
@@ -311,11 +313,13 @@ export default function LeaderboardsPage() {
 function LongestKillsSection({
   bestOverall,
   latestKill,
+  oneShotKill,
 }: {
   bestOverall: Omit<LongestKill, "rank"> | null;
   latestKill: Omit<LongestKill, "rank"> | null;
+  oneShotKill: LongestKill | null;
 }) {
-  const hasKills = Boolean(bestOverall || latestKill);
+  const hasKills = Boolean(bestOverall || latestKill || oneShotKill);
   return (
     <section className="dzn-leaderboard-card dzn-longest-kills-card glass-surface animated-border rounded-lg p-5">
       <div className="relative z-10">
@@ -328,6 +332,7 @@ function LongestKillsSection({
           <div className="mt-5 grid gap-4">
             <KillHighlightCard title="Best Overall" kill={bestOverall} tone="violet" />
             <KillHighlightCard title="Latest Confirmed" kill={latestKill} tone="cyan" />
+            {oneShotKill ? <KillHighlightCard title="One Shot Kill" kill={oneShotKill} tone="orange" /> : null}
           </div>
         ) : (
           <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-5 text-sm font-bold text-zinc-400">
@@ -391,9 +396,10 @@ function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) 
   );
 }
 
-function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<LongestKill, "rank"> | null; tone: "violet" | "cyan" }) {
+function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<LongestKill, "rank"> | null; tone: "violet" | "cyan" | "orange" }) {
   return (
     <div className={`dzn-long-kill-card dzn-long-kill-card--${tone} rounded-lg border p-4`}>
+      <span className="dzn-kill-card-round" aria-hidden="true" />
       <p className="text-xs font-black uppercase tracking-[0.16em] opacity-80">{title}</p>
       {kill ? (
         <>
@@ -551,9 +557,9 @@ function LeaderboardTable({
   );
 }
 
-function MetricRow({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
+function MetricRow({ icon: Icon, label, value, tone }: { icon: typeof Activity; label: string; value: string; tone: "violet" | "cyan" | "orange" | "red" }) {
   return (
-    <div className="dzn-leaderboard-stat flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-black/24 p-3">
+    <div className={`dzn-leaderboard-stat dzn-leaderboard-stat--${tone} flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-black/24 p-3`}>
       <span className="inline-flex items-center gap-3 text-xs font-black uppercase text-zinc-400">
         <Icon className="h-4 w-4 text-cyan-200" />
         {label}
