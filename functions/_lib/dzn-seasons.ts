@@ -48,6 +48,51 @@ export type DznSeasonAwardRow = {
   metadata_json: string | null;
 };
 
+export type DznSeasonRefreshEntry = {
+  entryId: string;
+  seasonId: string;
+  serverId: string;
+  score: number;
+  rank: number | null;
+  capturedAt: string;
+  metrics: Record<string, number | string | boolean>;
+};
+
+export type DznSeasonRefreshResult = {
+  ok: true;
+  seasonId: string;
+  refreshed: number;
+  snapshotsCreated: number;
+  capturedAt: string;
+  warnings: string[];
+  entries: DznSeasonRefreshEntry[];
+};
+
+export type DznActiveSeasonRefreshResult = {
+  ok: true;
+  seasonsChecked: number;
+  entriesRefreshed: number;
+  snapshotsCreated: number;
+  warnings: string[];
+};
+
+export type DznSeasonRefreshOptions = {
+  limit?: number | null;
+  maxLimit?: number | null;
+  allowCompleted?: boolean | null;
+  capturedAt?: string | null;
+};
+
+type DznSeasonWithScoreStatusRow = DznSeasonRow & {
+  last_score_refresh_at?: string | null;
+  score_snapshot_count?: number | null;
+};
+
+type DznSeasonEntryWithScoreStatusRow = DznSeasonEntryRow & {
+  entry_last_score_refresh_at?: string | null;
+  entry_score_snapshot_count?: number | null;
+};
+
 type SeasonServerRow = {
   id: string;
   server_name: string | null;
@@ -75,19 +120,31 @@ export class DznSeasonError extends Error {
   }
 }
 
+export const SEASON_REFRESH_DEFAULT_LIMIT = 10;
+export const SEASON_REFRESH_MAX_LIMIT = 25;
+
 const ACTIVE_SEASON_STATUSES = ["registration_open", "active", "live", "upcoming"];
+const COMPLETED_SEASON_STATUSES = ["completed", "finalised", "finalized", "archived"];
+const INTERNAL_SEASON_REFRESH_MAX_LIMIT = 500;
+const PUBLIC_SEASON_SELECT = `dzn_seasons.*,
+              (SELECT MAX(captured_at)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_seasons.id) AS last_score_refresh_at,
+              (SELECT COUNT(*)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_seasons.id) AS score_snapshot_count`;
 
 export async function getActiveSeasons(env: Env) {
   if (!env.DB) return [];
   await ensureDznSeasonSchema(env);
   const rows = await requireDb(env)
     .prepare(
-      `SELECT *
+      `SELECT ${PUBLIC_SEASON_SELECT}
        FROM dzn_seasons
        WHERE lower(status) IN ('registration_open', 'active', 'live', 'upcoming')
        ORDER BY datetime(starts_at) ASC, datetime(ends_at) ASC`,
     )
-    .all<DznSeasonRow>();
+    .all<DznSeasonWithScoreStatusRow>();
   return (rows.results ?? []).map(toPublicSeason);
 }
 
@@ -97,7 +154,7 @@ export async function getPublicSeasons(env: Env, limit = 100) {
   const capped = Math.max(1, Math.min(250, Math.round(limit)));
   const rows = await requireDb(env)
     .prepare(
-      `SELECT *
+      `SELECT ${PUBLIC_SEASON_SELECT}
        FROM dzn_seasons
        ORDER BY
          CASE lower(status)
@@ -113,7 +170,7 @@ export async function getPublicSeasons(env: Env, limit = 100) {
        LIMIT ?`,
     )
     .bind(capped)
-    .all<DznSeasonRow>();
+    .all<DznSeasonWithScoreStatusRow>();
   return (rows.results ?? []).map(toPublicSeason);
 }
 
@@ -123,9 +180,9 @@ export async function getSeasonBySlug(env: Env, slug: string) {
   const clean = cleanSlug(slug);
   if (!clean) return null;
   const row = await requireDb(env)
-    .prepare("SELECT * FROM dzn_seasons WHERE slug = ? OR id = ? LIMIT 1")
+    .prepare(`SELECT ${PUBLIC_SEASON_SELECT} FROM dzn_seasons WHERE slug = ? OR id = ? LIMIT 1`)
     .bind(clean, clean)
-    .first<DznSeasonRow>();
+    .first<DznSeasonWithScoreStatusRow>();
   return row ? toPublicSeason(row) : null;
 }
 
@@ -220,7 +277,15 @@ export async function getServerSeasonStatus(env: Env, serverId: string) {
               dzn_seasons.name,
               dzn_seasons.status AS season_status,
               dzn_seasons.starts_at,
-              dzn_seasons.ends_at
+              dzn_seasons.ends_at,
+              (SELECT MAX(captured_at)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_season_entries.season_id
+                 AND dzn_season_score_snapshots.server_id = dzn_season_entries.server_id) AS entry_last_score_refresh_at,
+              (SELECT COUNT(*)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_season_entries.season_id
+                 AND dzn_season_score_snapshots.server_id = dzn_season_entries.server_id) AS entry_score_snapshot_count
        FROM dzn_season_entries
        JOIN dzn_seasons ON dzn_seasons.id = dzn_season_entries.season_id
        WHERE dzn_season_entries.server_id = ?
@@ -228,7 +293,7 @@ export async function getServerSeasonStatus(env: Env, serverId: string) {
        ORDER BY datetime(dzn_seasons.starts_at) DESC`,
     )
     .bind(server.id)
-    .all<DznSeasonEntryRow & {
+    .all<DznSeasonEntryWithScoreStatusRow & {
       slug: string;
       name: string;
       season_status: string;
@@ -282,45 +347,174 @@ export async function calculateSeasonScore(env: Env, serverId: string, season: D
   if (!server) throw new DznSeasonError("SERVER_NOT_FOUND", "Server not found.", 404);
   const category = normalizeSeasonCategory(season.category);
   if (!category) throw new DznSeasonError("SEASON_CATEGORY_INVALID", "Season category is invalid.", 400);
+  const serverCategory = normalizeSeasonCategory(server.server_category ?? server.server_type);
+  if (!serverCategory || serverCategory !== category) {
+    throw new DznSeasonError("CATEGORY_MISMATCH", "Servers can only refresh scores inside their joined season category.", 403);
+  }
   return calculateSeasonScoreFromStats(server, { ...season, category } as DznSeasonRow);
 }
 
-export async function refreshSeasonScores(env: Env, seasonId: string, limit = 50) {
+export async function refreshActiveSeasonScores(env: Env, limit = SEASON_REFRESH_DEFAULT_LIMIT): Promise<DznActiveSeasonRefreshResult> {
+  await ensureDznSeasonSchema(env);
+  const capped = capRefreshLimit(limit, SEASON_REFRESH_DEFAULT_LIMIT, SEASON_REFRESH_MAX_LIMIT);
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT *
+       FROM dzn_seasons
+       WHERE lower(status) IN ('registration_open', 'active', 'live', 'upcoming')
+       ORDER BY datetime(starts_at) ASC, datetime(ends_at) ASC`,
+    )
+    .all<DznSeasonRow>();
+
+  let seasonsChecked = 0;
+  let entriesRefreshed = 0;
+  let snapshotsCreated = 0;
+  let remaining = capped;
+  const warnings: string[] = [];
+
+  for (const season of rows.results ?? []) {
+    if (remaining <= 0) {
+      warnings.push(`Season refresh batch limit reached after ${entriesRefreshed} entries.`);
+      break;
+    }
+    seasonsChecked += 1;
+    const result = await refreshSeasonScores(env, season.id, {
+      limit: remaining,
+      maxLimit: SEASON_REFRESH_MAX_LIMIT,
+      allowCompleted: false,
+    });
+    entriesRefreshed += result.refreshed;
+    snapshotsCreated += result.snapshotsCreated;
+    remaining -= result.refreshed;
+    warnings.push(...result.warnings);
+  }
+
+  return { ok: true, seasonsChecked, entriesRefreshed, snapshotsCreated, warnings };
+}
+
+export async function refreshSeasonScores(env: Env, seasonId: string, limitOrOptions: number | DznSeasonRefreshOptions = 50): Promise<DznSeasonRefreshResult> {
   await ensureDznSeasonSchema(env);
   const season = await findSeason(env, seasonId);
   if (!season) throw new DznSeasonError("SEASON_NOT_FOUND", "Season not found.", 404);
-  const entries = await getSeasonEntries(env, season.id, limit);
-  const scored = [];
-  for (const entry of entries) {
-    const score = await calculateSeasonScore(env, entry.server_id, season);
-    scored.push({ entry, score });
-  }
-  scored.sort((a, b) => b.score.score - a.score.score || a.entry.joined_at.localeCompare(b.entry.joined_at));
+  const options = normalizeRefreshOptions(limitOrOptions);
+  const capturedAt = cleanCapturedAt(options.capturedAt) ?? new Date().toISOString();
+  const warnings: string[] = [];
 
-  const capturedAt = new Date().toISOString();
+  if (isCompletedSeasonStatus(season.status) && !options.allowCompleted) {
+    return {
+      ok: true,
+      seasonId: season.id,
+      refreshed: 0,
+      snapshotsCreated: 0,
+      capturedAt,
+      warnings: [`Season ${season.slug} is completed; score refresh skipped.`],
+      entries: [],
+    };
+  }
+  if (seasonEnded(season) && !isCompletedSeasonStatus(season.status)) {
+    warnings.push(`Season ${season.slug} has ended; scores refreshed only, finalisation is still manual.`);
+  }
+
+  const capped = capRefreshLimit(options.limit, 50, options.maxLimit ?? INTERNAL_SEASON_REFRESH_MAX_LIMIT);
+  const entries = await getSeasonEntriesForRefresh(env, season.id, capped);
+  const scored: Array<{ entry: DznSeasonEntryRow; score: DznSeasonScoreResult }> = [];
+  const seenServers = new Set<string>();
+  for (const entry of entries) {
+    if (seenServers.has(entry.server_id)) {
+      warnings.push(`Duplicate season entry skipped for server ${entry.server_id}.`);
+      continue;
+    }
+    seenServers.add(entry.server_id);
+    if (normalizeSeasonCategory(entry.category) !== season.category) {
+      warnings.push(`Entry ${entry.id} skipped because its category no longer matches season ${season.slug}.`);
+      continue;
+    }
+    try {
+      const score = await calculateSeasonScore(env, entry.server_id, season);
+      scored.push({ entry, score });
+    } catch (error) {
+      if (error instanceof DznSeasonError) {
+        warnings.push(`Entry ${entry.id} skipped: ${error.message}`);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  const refreshedByEntryId = new Map(scored.map((item) => [item.entry.id, item]));
+  const allEntries = await getSeasonEntries(env, season.id, INTERNAL_SEASON_REFRESH_MAX_LIMIT);
+  const ranked = allEntries
+    .map((entry) => {
+      const refreshed = refreshedByEntryId.get(entry.id);
+      return {
+        entry,
+        score: refreshed ? refreshed.score.score : safeNumber(entry.final_score),
+      };
+    })
+    .sort((a, b) => b.score - a.score || a.entry.joined_at.localeCompare(b.entry.joined_at));
+
+  const rankByEntryId = new Map<string, number>();
   let rank = 1;
-  for (const item of scored) {
-    await requireDb(env)
-      .prepare(
-        `INSERT INTO dzn_season_score_snapshots (id, season_id, server_id, score, rank, metrics_json, captured_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(crypto.randomUUID(), season.id, item.entry.server_id, item.score.score, rank, safeJson(item.score.metrics), capturedAt)
-      .run();
-    await requireDb(env)
-      .prepare("UPDATE dzn_season_entries SET snapshot_current_json = ?, final_score = ?, rank = ?, updated_at = ? WHERE id = ?")
-      .bind(safeJson(item.score.metrics), item.score.score, rank, capturedAt, item.entry.id)
-      .run();
+  for (const item of ranked) {
+    rankByEntryId.set(item.entry.id, rank);
     rank += 1;
   }
-  return { refreshed: scored.length, seasonId: season.id };
+
+  let snapshotsCreated = 0;
+  const refreshedEntries: DznSeasonRefreshEntry[] = [];
+  for (const item of scored) {
+    const nextRank = rankByEntryId.get(item.entry.id) ?? null;
+    const inserted = await insertSeasonScoreSnapshot(env, {
+      seasonId: season.id,
+      serverId: item.entry.server_id,
+      score: item.score.score,
+      rank: nextRank,
+      metrics: item.score.metrics,
+      capturedAt,
+    });
+    if (inserted) snapshotsCreated += 1;
+    else warnings.push(`Snapshot already exists for server ${item.entry.server_id} at ${capturedAt}; duplicate skipped.`);
+    await requireDb(env)
+      .prepare("UPDATE dzn_season_entries SET snapshot_current_json = ?, final_score = ?, rank = ?, updated_at = ? WHERE id = ?")
+      .bind(safeJson(item.score.metrics), item.score.score, nextRank, capturedAt, item.entry.id)
+      .run();
+    refreshedEntries.push({
+      entryId: item.entry.id,
+      seasonId: season.id,
+      serverId: item.entry.server_id,
+      score: item.score.score,
+      rank: nextRank,
+      capturedAt,
+      metrics: item.score.metrics,
+    });
+  }
+
+  for (const item of ranked) {
+    if (refreshedByEntryId.has(item.entry.id)) continue;
+    const nextRank = rankByEntryId.get(item.entry.id) ?? null;
+    if (item.entry.rank === nextRank) continue;
+    await requireDb(env)
+      .prepare("UPDATE dzn_season_entries SET rank = ? WHERE id = ?")
+      .bind(nextRank, item.entry.id)
+      .run();
+  }
+
+  return {
+    ok: true,
+    refreshed: scored.length,
+    seasonId: season.id,
+    snapshotsCreated,
+    capturedAt,
+    warnings,
+    entries: refreshedEntries,
+  };
 }
 
 export async function finaliseSeason(env: Env, seasonId: string) {
   await ensureDznSeasonSchema(env);
   const season = await findSeason(env, seasonId);
   if (!season) throw new DznSeasonError("SEASON_NOT_FOUND", "Season not found.", 404);
-  const refreshed = await refreshSeasonScores(env, season.id, 500);
+  const refreshed = await refreshSeasonScores(env, season.id, { limit: 500, maxLimit: 500, allowCompleted: true });
   const now = new Date().toISOString();
   await requireDb(env)
     .prepare("UPDATE dzn_seasons SET status = 'completed', updated_at = ? WHERE id = ?")
@@ -347,12 +541,15 @@ export async function getSeasonLeaderboard(env: Env, seasonId: string) {
   await ensureDznSeasonSchema(env);
   const season = await findSeason(env, seasonId);
   if (!season) throw new DznSeasonError("SEASON_NOT_FOUND", "Season not found.", 404);
-  await refreshSeasonScores(env, season.id, 100);
   const rows = await requireDb(env)
     .prepare(
       `SELECT dzn_season_entries.*,
               linked_servers.server_name,
-              linked_servers.public_slug
+              linked_servers.public_slug,
+              (SELECT MAX(captured_at)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_season_entries.season_id
+                 AND dzn_season_score_snapshots.server_id = dzn_season_entries.server_id) AS entry_last_score_refresh_at
        FROM dzn_season_entries
        JOIN linked_servers ON linked_servers.id = dzn_season_entries.server_id
        WHERE dzn_season_entries.season_id = ?
@@ -533,11 +730,77 @@ async function getSeasonEntries(env: Env, seasonId: string, limit: number) {
   return rows.results ?? [];
 }
 
+async function getSeasonEntriesForRefresh(env: Env, seasonId: string, limit: number) {
+  const capped = capRefreshLimit(limit, SEASON_REFRESH_DEFAULT_LIMIT, INTERNAL_SEASON_REFRESH_MAX_LIMIT);
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT *
+       FROM dzn_season_entries
+       WHERE season_id = ?
+         AND status != 'withdrawn'
+       ORDER BY datetime(COALESCE(updated_at, joined_at)) ASC, datetime(joined_at) ASC
+       LIMIT ?`,
+    )
+    .bind(seasonId, capped)
+    .all<DznSeasonEntryRow>();
+  return rows.results ?? [];
+}
+
 function seasonOpenForJoin(season: DznSeasonRow) {
   return ACTIVE_SEASON_STATUSES.includes(String(season.status ?? "").toLowerCase());
 }
 
+function isCompletedSeasonStatus(status: unknown) {
+  return COMPLETED_SEASON_STATUSES.includes(String(status ?? "").toLowerCase());
+}
+
+function seasonEnded(season: Pick<DznSeasonRow, "ends_at">) {
+  const endsAt = new Date(season.ends_at);
+  return !Number.isNaN(endsAt.getTime()) && endsAt.getTime() <= Date.now();
+}
+
+function seasonRefreshCopy(season: Pick<DznSeasonRow, "status" | "ends_at">) {
+  if (isCompletedSeasonStatus(season.status)) return null;
+  if (seasonEnded(season)) return "Final score refresh is available for DZN staff before manual finalisation.";
+  if (ACTIVE_SEASON_STATUSES.includes(String(season.status ?? "").toLowerCase())) return "Scores refresh automatically in small safe batches.";
+  return null;
+}
+
+function normalizeRefreshOptions(limitOrOptions: number | DznSeasonRefreshOptions): Required<DznSeasonRefreshOptions> {
+  if (typeof limitOrOptions === "number") {
+    return {
+      limit: limitOrOptions,
+      maxLimit: INTERNAL_SEASON_REFRESH_MAX_LIMIT,
+      allowCompleted: false,
+      capturedAt: null,
+    };
+  }
+  return {
+    limit: limitOrOptions.limit ?? 50,
+    maxLimit: limitOrOptions.maxLimit ?? INTERNAL_SEASON_REFRESH_MAX_LIMIT,
+    allowCompleted: limitOrOptions.allowCompleted === true,
+    capturedAt: limitOrOptions.capturedAt ?? null,
+  };
+}
+
+function capRefreshLimit(value: unknown, fallback: number, max: number) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(max, Math.round(parsed)));
+}
+
+function cleanCapturedAt(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function toPublicSeason(row: DznSeasonRow) {
+  const statusRow = row as DznSeasonWithScoreStatusRow;
+  const snapshotCount = safeNumber(statusRow.score_snapshot_count);
+  const lastScoreRefreshAt = statusRow.last_score_refresh_at ?? null;
   return {
     id: row.id,
     slug: row.slug,
@@ -547,6 +810,10 @@ function toPublicSeason(row: DznSeasonRow) {
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     scoringRules: parseJsonObject(row.scoring_rules_json),
+    lastScoreRefreshAt,
+    hasScoreSnapshots: snapshotCount > 0,
+    leaderboardState: snapshotCount > 0 ? "ready" : "waiting_for_first_score_snapshot",
+    nextRefreshCopy: seasonRefreshCopy(row),
   };
 }
 
@@ -560,6 +827,8 @@ function toPublicEligibleServer(row: SeasonServerRow) {
 }
 
 function toPublicSeasonEntry(row: DznSeasonEntryRow) {
+  const statusRow = row as DznSeasonEntryWithScoreStatusRow;
+  const snapshotCount = safeNumber(statusRow.entry_score_snapshot_count);
   return {
     id: row.id,
     seasonId: row.season_id,
@@ -567,9 +836,12 @@ function toPublicSeasonEntry(row: DznSeasonEntryRow) {
     category: row.category,
     joinedAt: row.joined_at,
     status: row.status,
-    finalScore: safeNumber(row.final_score),
+    finalScore: row.final_score === null || row.final_score === undefined ? null : safeNumber(row.final_score),
     rank: row.rank,
     snapshotCurrent: parseJsonObject(row.snapshot_current_json),
+    lastScoreRefreshAt: statusRow.entry_last_score_refresh_at ?? null,
+    hasScoreSnapshot: snapshotCount > 0,
+    leaderboardState: snapshotCount > 0 ? "ready" : "waiting_for_first_score_snapshot",
   };
 }
 
@@ -607,7 +879,7 @@ function toPublicSeasonAward(row: DznSeasonAwardRow & { server_name?: string | n
   };
 }
 
-function toPublicLeaderboardEntry(row: DznSeasonEntryRow & { server_name: string | null; public_slug: string | null }) {
+function toPublicLeaderboardEntry(row: DznSeasonEntryRow & { server_name: string | null; public_slug: string | null; entry_last_score_refresh_at?: string | null }) {
   return {
     entryId: row.id,
     seasonId: row.season_id,
@@ -618,7 +890,36 @@ function toPublicLeaderboardEntry(row: DznSeasonEntryRow & { server_name: string
     score: safeNumber(row.final_score),
     rank: row.rank,
     metrics: parseJsonObject(row.snapshot_current_json),
+    lastScoreRefreshAt: row.entry_last_score_refresh_at ?? null,
   };
+}
+
+async function insertSeasonScoreSnapshot(env: Env, input: {
+  seasonId: string;
+  serverId: string;
+  score: number;
+  rank: number | null;
+  metrics: Record<string, number | string | boolean>;
+  capturedAt: string;
+}) {
+  const existing = await requireDb(env)
+    .prepare(
+      `SELECT id
+       FROM dzn_season_score_snapshots
+       WHERE season_id = ? AND server_id = ? AND captured_at = ?
+       LIMIT 1`,
+    )
+    .bind(input.seasonId, input.serverId, input.capturedAt)
+    .first<{ id: string }>();
+  if (existing?.id) return false;
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO dzn_season_score_snapshots (id, season_id, server_id, score, rank, metrics_json, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), input.seasonId, input.serverId, input.score, input.rank, safeJson(input.metrics), input.capturedAt)
+    .run();
+  return true;
 }
 
 function seasonalChampionBadgeFor(season: Pick<DznSeasonRow, "name" | "slug" | "starts_at">) {

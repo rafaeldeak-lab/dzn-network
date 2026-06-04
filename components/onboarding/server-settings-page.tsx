@@ -278,8 +278,11 @@ type OwnerJoinedSeason = OwnerSeason & {
     category: string;
     joinedAt: string;
     status: string;
-    finalScore: number;
+    finalScore: number | null;
     rank: number | null;
+    lastScoreRefreshAt?: string | null;
+    hasScoreSnapshot?: boolean;
+    leaderboardState?: string;
     awards?: OwnerSeasonAward[];
   };
 };
@@ -1541,9 +1544,15 @@ function JoinedSeasonGroup({ seasons }: { seasons: OwnerJoinedSeason[] }) {
                 </span>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <InfoRow label="Current rank" value={season.entry.rank ? `#${season.entry.rank}` : "Pending"} />
-                <InfoRow label="Score" value={`${season.entry.finalScore ?? 0}`} />
+                <InfoRow label="Current rank" value={season.entry.hasScoreSnapshot && season.entry.rank ? `#${season.entry.rank}` : "Waiting"} />
+                <InfoRow label="Score" value={season.entry.hasScoreSnapshot && season.entry.finalScore !== null ? `${season.entry.finalScore}` : "Waiting"} />
+                <InfoRow label="Last refreshed" value={season.entry.lastScoreRefreshAt ? formatDate(season.entry.lastScoreRefreshAt) : "Pending"} />
               </div>
+              {!season.entry.hasScoreSnapshot ? (
+                <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold leading-5 text-amber-50">
+                  Waiting for first score snapshot.
+                </p>
+              ) : null}
               {season.entry.awards?.length ? (
                 <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
                   <p className="text-[10px] font-black uppercase text-amber-100">Season awards</p>

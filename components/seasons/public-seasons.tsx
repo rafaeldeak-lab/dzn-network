@@ -19,6 +19,10 @@ type PublicSeason = {
   startsAt: string;
   endsAt: string;
   scoringRules?: Record<string, unknown>;
+  lastScoreRefreshAt?: string | null;
+  hasScoreSnapshots?: boolean;
+  leaderboardState?: "ready" | "waiting_for_first_score_snapshot" | string;
+  nextRefreshCopy?: string | null;
 };
 
 type SeasonLeaderboardEntry = {
@@ -31,6 +35,7 @@ type SeasonLeaderboardEntry = {
   score: number;
   rank: number | null;
   metrics: Record<string, unknown>;
+  lastScoreRefreshAt?: string | null;
 };
 
 type SeasonAward = {
@@ -177,7 +182,7 @@ export function SeasonDetailPage({ slug }: { slug: string }) {
           <main className="space-y-6">
             <SeasonOverview season={season} />
             <SeasonWinners awards={awards} leaderboard={leaderboard} />
-            <SeasonLeaderboard leaderboard={leaderboard} />
+            <SeasonLeaderboard season={season} leaderboard={leaderboard} />
           </main>
           <aside className="space-y-6">
             <SeasonRules season={season} />
@@ -287,6 +292,7 @@ function SeasonCard({ season }: { season: PublicSeason }) {
 }
 
 function SeasonOverview({ season }: { season: PublicSeason }) {
+  const waitingForSnapshot = season.leaderboardState === "waiting_for_first_score_snapshot" || season.hasScoreSnapshots === false;
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="flex items-center gap-3 text-2xl font-black uppercase text-white">
@@ -300,6 +306,9 @@ function SeasonOverview({ season }: { season: PublicSeason }) {
         <MetricCard label="End" value={formatDate(season.endsAt)} />
         <MetricCard label="Eligible server type" value={`${categoryLabel(season.category)} servers only`} />
         <MetricCard label="Competition source" value="Stored season snapshots" />
+        <MetricCard label="Last score refresh" value={season.lastScoreRefreshAt ? formatDate(season.lastScoreRefreshAt) : "Waiting for first refresh"} />
+        <MetricCard label="Leaderboard status" value={waitingForSnapshot ? "Waiting for first score snapshot" : "Snapshot ready"} />
+        {season.nextRefreshCopy ? <MetricCard label="Next refresh" value={season.nextRefreshCopy} /> : null}
       </div>
     </section>
   );
@@ -401,14 +410,17 @@ function WinnerCard({ rank, serverName, publicSlug, label, badgeCode }: { rank: 
   );
 }
 
-function SeasonLeaderboard({ leaderboard }: { leaderboard: SeasonLeaderboardEntry[] }) {
+function SeasonLeaderboard({ season, leaderboard }: { season: PublicSeason; leaderboard: SeasonLeaderboardEntry[] }) {
+  const waitingForSnapshot = season.leaderboardState === "waiting_for_first_score_snapshot" || season.hasScoreSnapshots === false;
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.035] p-5">
       <h2 className="flex items-center gap-3 text-2xl font-black uppercase text-white">
         <Trophy className="h-6 w-6 text-violet-200" />
         Season Leaderboard
       </h2>
-      {leaderboard.length ? (
+      {waitingForSnapshot ? (
+        <EmptyPanel message="The leaderboard is waiting for its first protected score snapshot." />
+      ) : leaderboard.length ? (
         <div className="mt-5 overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-y-2 text-left">
             <thead>

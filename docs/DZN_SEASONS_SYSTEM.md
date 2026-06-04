@@ -30,6 +30,13 @@ Unavailable metrics are recorded as missing in `metrics_json`; fake stats are ne
 
 `refreshSeasonScores` recalculates entry scores from stored aggregates, writes a `dzn_season_score_snapshots` row, and updates entry rank and current snapshot. These ranks are season-specific and do not change public competitive leaderboards.
 
+Phase 7E adds protected refresh automation:
+
+- `POST /api/cron/seasons/refresh` requires the shared DZN cron secret and refreshes active seasons in a small batch.
+- `POST /api/admin/seasons/[seasonId]/refresh` requires a DZN admin, support, or dev user and refreshes one season in a small batch.
+
+Refresh automation only reads existing stored aggregate stats and writes `dzn_season_score_snapshots` plus `dzn_season_entries` score/rank fields. It does not import ADM files, finalise seasons automatically, or change stored player/stat records.
+
 ## Awards and Badges
 
 `finaliseSeason` completes the season, stores final ranks, writes `dzn_season_awards`, and calls the existing badge award helper for the rank-one seasonal champion badge. Award writes are idempotent through unique season/server/award keys and the existing badge award guard.
