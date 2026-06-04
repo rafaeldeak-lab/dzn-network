@@ -162,12 +162,18 @@ includesAll(leaderboards, [
   "data.data && !data.top_servers ? data.data : data",
   "Leaderboard data could not be loaded right now.",
   "KillProjectileAccent",
+  "AnimatedBullet",
   "leaderboard-ref-page",
+  "leaderboard-ref-nav",
+  "leaderboard-ref-brand",
+  "leaderboard-ref-nav-links",
+  "leaderboard-ref-nav-cta",
   "leaderboard-ref-hero-art",
   "leaderboard-ref-stats",
   "leaderboard-ref-grid",
   "leaderboard-ref-kill-card",
-  "leaderboard-ref-cta",
+  "leaderboard-ref-kill-card-bg",
+  "leaderboard-ref-kill-card-content",
   "leaderboard-reference-page",
   "leaderboard-reference-grid",
   "leaderboard-reference-stat-grid",
@@ -176,6 +182,10 @@ includesAll(leaderboards, [
   "dzn-leaderboard-hero__intel",
   "dzn-leaderboard-stat-grid",
   "Global Leaderboards",
+  "DZN Network",
+  "Home",
+  "Add Your Server",
+  "aria-current=\"page\"",
   "Servers Ranked",
   "Kills Tracked",
   "Ranked Players",
@@ -190,30 +200,37 @@ includesAll(leaderboards, [
 ]);
 assert.equal(leaderboards.includes("Live refresh recovering. Showing last known data."), false, "Leaderboards must not show stale-data warning when valid data is visible.");
 assert.equal(leaderboards.includes("Live data refresh failed. Showing last known leaderboard."), false, "Leaderboards refresh failures with visible data should stay silent.");
+assert.equal(leaderboards.includes("Real players."), false, "Leaderboards page must not render the redundant lower CTA card.");
+assert.equal(leaderboards.includes("Real action."), false, "Leaderboards page must not render the redundant lower CTA card.");
+assert.equal(leaderboards.includes("View full leaderboards"), false, "Leaderboards page must not render the redundant lower CTA button.");
+assert.equal(leaderboards.includes("leaderboard-ref-area--cta"), false, "Leaderboards grid must not reserve space for the removed CTA card.");
 for (const fakeStaticName of ["NukeTown DEATHMATCH", "PANDORA DayZ", "xAKA-MINI_KickAs", "MikeI-trives-esp"]) {
   assert.equal(leaderboards.includes(fakeStaticName), false, "Leaderboards page must not replace API data with static mock rows.");
 }
 
 const leaderboardAccent = source("components/leaderboards/animated-bullet.tsx");
 includesAll(leaderboardAccent, [
-  "leaderboard-ref-kill-art",
-  "leaderboard-ref-bullet-scene",
-  "leaderboard-ref-bullet-bg",
-  "leaderboard-ref-bullet-flight",
-  "leaderboard-ref-bullet-only",
-  "leaderboard-ref-bullet-trail",
-  "leaderboard-ref-bullet-ember",
-  "leaderboard-ref-bullet-shockwave",
+  "AnimatedBullet",
+  "leaderboard-ref-bullet-effects",
   "leaderboard-ref-bullet-glow",
+  "leaderboard-ref-bullet-heat",
+  "leaderboard-ref-bullet-spark spark-one",
+  "leaderboard-ref-bullet-wave wave-one",
+  "leaderboard-ref-kill-art",
   "/leaderboards/sniper-accent.png",
   "/leaderboards/rifle-accent.png",
-  "/leaderboards/bullet-tracer-accent.png",
 ]);
 
 const globals = source("app/globals.css");
 includesAll(globals, [
   ".leaderboard-ref-page",
   ".leaderboard-ref-shell",
+  ".leaderboard-ref-nav",
+  ".leaderboard-ref-brand",
+  ".leaderboard-ref-brand-mark",
+  ".leaderboard-ref-brand-copy",
+  ".leaderboard-ref-nav-links",
+  ".leaderboard-ref-nav-cta",
   ".leaderboard-ref-hero",
   ".leaderboard-ref-hero-art",
   ".leaderboard-ref-title",
@@ -228,15 +245,14 @@ includesAll(globals, [
   ".leaderboard-ref-longest",
   ".leaderboard-ref-kill-card",
   ".leaderboard-ref-kill-art",
-  ".leaderboard-ref-bullet-scene",
-  ".leaderboard-ref-bullet-bg",
-  ".leaderboard-ref-bullet-flight",
-  ".leaderboard-ref-bullet-only",
-  ".leaderboard-ref-bullet-trail",
-  ".leaderboard-ref-bullet-ember",
-  ".leaderboard-ref-bullet-shockwave",
+  ".leaderboard-ref-kill-card--bullet",
+  ".leaderboard-ref-kill-card-bg",
+  ".leaderboard-ref-kill-card-content",
+  ".leaderboard-ref-bullet-effects",
   ".leaderboard-ref-bullet-glow",
-  ".leaderboard-ref-cta",
+  ".leaderboard-ref-bullet-heat",
+  ".leaderboard-ref-bullet-spark",
+  ".leaderboard-ref-bullet-wave",
   ".leaderboard-ref-embers",
   ".leaderboard-reference-page",
   ".leaderboard-reference-hero",
@@ -254,21 +270,17 @@ includesAll(globals, [
   ".dzn-leaderboard-card",
   ".dzn-leaderboard-row:hover",
   "url(\"/leaderboards/leaderboard-hero-battlefield.png\")",
-  "url(\"/leaderboards/cta-survivor-scene.png\")",
   "url(\"/leaderboards/sniper-accent.png\")",
   "url(\"/leaderboards/rifle-accent.png\")",
   "url(\"/leaderboards/bullet-tracer-accent.png\")",
   "@keyframes refEmberDrift",
   "@keyframes refCardPulse",
   "@keyframes refTracerShimmer",
-  "@keyframes leaderboard-ref-bullet-flight",
-  "@keyframes leaderboard-ref-bullet-spin",
-  "@keyframes leaderboard-ref-bullet-spiral",
-  "@keyframes leaderboard-ref-tracer-flicker",
-  "@keyframes leaderboard-ref-trail-flicker",
-  "@keyframes leaderboard-ref-ember-drift",
-  "@keyframes leaderboard-ref-shockwave-pulse",
-  "@keyframes leaderboard-ref-orange-glow-pulse",
+  "@keyframes leaderboard-ref-bullet-bg-flicker",
+  "@keyframes leaderboard-ref-bullet-glow-pulse",
+  "@keyframes leaderboard-ref-bullet-heat-shimmer",
+  "@keyframes leaderboard-ref-bullet-spark-drift",
+  "@keyframes leaderboard-ref-bullet-wave-pulse",
   "@keyframes signalSweep",
   "@keyframes killRoundSpin",
   "@keyframes killTracerDrift",
@@ -283,12 +295,20 @@ for (const assetPath of [
   "public/leaderboards/bullet-tracer-accent.png",
   "public/leaderboards/cta-survivor-scene.png",
 ]) {
-  assert.equal(existsSync(assetPath), true, `${assetPath} must exist for the cinematic leaderboard reference rebuild.`);
+assert.equal(existsSync(assetPath), true, `${assetPath} must exist for the cinematic leaderboard reference rebuild.`);
 }
-assert.equal(leaderboards.includes("AnimatedBullet"), false, "Hero projectile component must not be rendered on the Global Leaderboards hero.");
+assert.equal(leaderboards.includes("LiveAdmIntelPanel"), false, "Leaderboards page must not keep the removed lower CTA component.");
+assert.equal(leaderboards.includes("leaderboard-reference-cta-card"), false, "Leaderboards page must not render the removed lower CTA card.");
 assert.equal(globals.includes(".dzn-bullet-wrap"), false, "Global Leaderboards hero must not keep the old giant bullet wrapper CSS.");
 assert.equal(leaderboardAccent.includes("leaderboard-ref-bullet-img"), false, "One Shot Kill must not render the full tracer PNG as the spinning foreground bullet.");
 assert.equal(globals.includes(".leaderboard-ref-bullet-img"), false, "The full tracer PNG must not keep the old spinning foreground CSS.");
+for (const removedBulletClass of ["leaderboard-ref-bullet-only", "leaderboard-ref-bullet-scene", "leaderboard-ref-bullet-flight", "leaderboard-ref-bullet-trail", "leaderboard-ref-bullet-ember", "leaderboard-ref-bullet-shockwave"]) {
+  assert.equal(leaderboardAccent.includes(removedBulletClass), false, `Animated bullet component must not render duplicate/generated bullet layer ${removedBulletClass}.`);
+  assert.equal(globals.includes(`.${removedBulletClass}`), false, `Global CSS must not keep duplicate/generated bullet layer ${removedBulletClass}.`);
+}
+for (const removedAnimation of ["leaderboard-ref-bullet-spin", "leaderboard-ref-bullet-spiral", "leaderboard-ref-bullet-flight", "leaderboard-ref-tracer-flicker"]) {
+  assert.equal(globals.includes(removedAnimation), false, `Global CSS must not keep old rotating bullet animation ${removedAnimation}.`);
+}
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, [

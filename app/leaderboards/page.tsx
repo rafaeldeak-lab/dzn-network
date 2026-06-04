@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Activity, ArrowRight, Crosshair, Lock, RadioTower, Skull, Trophy, Users } from "lucide-react";
 import Link from "next/link";
 
-import { KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
+import { AnimatedBullet, KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type LeaderboardServer = {
@@ -223,6 +223,8 @@ export default function LeaderboardsPage() {
     <main className="leaderboard-ref-page leaderboard-reference-page dzn-leaderboard-page relative min-h-screen overflow-hidden bg-[#02030a] px-3 py-2 text-white sm:px-4 lg:px-5">
       <span className="leaderboard-ref-embers" aria-hidden="true" />
       <div className="leaderboard-ref-shell leaderboard-reference-shell relative z-10 mx-auto flex min-h-screen max-w-[1500px] flex-col">
+        <LeaderboardNav />
+
         <section className="leaderboard-ref-hero leaderboard-reference-hero dzn-leaderboard-hero">
           <div className="leaderboard-ref-hero-art" aria-hidden="true" />
           <div className="leaderboard-ref-hero-copy leaderboard-reference-hero-copy dzn-leaderboard-hero__copy">
@@ -296,14 +298,34 @@ export default function LeaderboardsPage() {
             <div className="leaderboard-ref-main leaderboard-ref-area--personal leaderboard-reference-area leaderboard-reference-area--personal">
               {personalBestContent}
             </div>
-
-            <aside className="leaderboard-ref-side leaderboard-ref-area--cta leaderboard-reference-area leaderboard-reference-area--cta dzn-leaderboard-sidecar">
-              <LiveAdmIntelPanel updatedAt={payload.updated_at} loading={loading} />
-            </aside>
           </div>
         ) : null}
       </div>
     </main>
+  );
+}
+
+function LeaderboardNav() {
+  return (
+    <nav className="leaderboard-ref-nav" aria-label="DZN leaderboard navigation">
+      <Link href="/" className="leaderboard-ref-brand">
+        <span className="leaderboard-ref-brand-mark">DZN</span>
+        <span className="leaderboard-ref-brand-copy">
+          <strong>DZN Network</strong>
+          <small>Prove your server is the best.</small>
+        </span>
+      </Link>
+
+      <div className="leaderboard-ref-nav-links">
+        <Link href="/">Home</Link>
+        <Link href="/servers">Servers</Link>
+        <Link href="/leaderboards" aria-current="page">Leaderboards</Link>
+      </div>
+
+      <Link href="/setup" className="leaderboard-ref-nav-cta">
+        Add Your Server
+      </Link>
+    </nav>
   );
 }
 
@@ -399,46 +421,38 @@ function KillHighlightCard({
   tone: "violet" | "cyan" | "orange";
   variant: "sniper" | "rifle" | "projectile";
 }) {
+  const isBulletCard = variant === "projectile";
+
   return (
-    <div className={`leaderboard-ref-kill-card leaderboard-ref-kill-card--${tone} leaderboard-reference-longest-card leaderboard-reference-longest-card--${tone} dzn-long-kill-card dzn-long-kill-card--${tone} rounded border p-3`}>
-      <KillProjectileAccent tone={tone} variant={variant} />
-      <p className="text-[10px] font-black uppercase tracking-[0.16em] opacity-80">{title}</p>
-      {kill ? (
+    <div className={`leaderboard-ref-kill-card leaderboard-ref-kill-card--${tone} ${isBulletCard ? "leaderboard-ref-kill-card--bullet" : ""} leaderboard-reference-longest-card leaderboard-reference-longest-card--${tone} dzn-long-kill-card dzn-long-kill-card--${tone} rounded border p-3`}>
+      {isBulletCard ? (
         <>
-          <p className="mt-1 text-2xl font-black text-white">{formatDistance(kill.distance)}</p>
-          <p className="mt-1 max-w-[58%] text-[11px] font-bold leading-4 text-zinc-100">
-            {kill.player_name} eliminated {kill.victim_name} with {kill.weapon}
-          </p>
-          <div className="mt-2 flex max-w-[64%] flex-wrap items-center gap-2 text-[10px] font-bold text-zinc-300">
-            <ServerLink slug={kill.server_slug} label={kill.server_name} />
-            <span>{formatDateTime(kill.occurred_at)}</span>
-          </div>
+          <div className="leaderboard-ref-kill-card-bg" aria-hidden="true" />
+          <AnimatedBullet />
         </>
       ) : (
-        <p className="mt-2 max-w-[58%] text-[11px] font-bold leading-4 text-zinc-400">No confirmed kill yet.</p>
+        <KillProjectileAccent tone={tone} variant={variant} />
       )}
-    </div>
-  );
-}
-
-function LiveAdmIntelPanel({ updatedAt, loading }: { updatedAt: string | null; loading: boolean }) {
-  return (
-    <section className="leaderboard-ref-cta leaderboard-reference-cta-card dzn-live-intel-card dzn-leaderboard-card glass-surface animated-border rounded p-5">
-      <div className="relative z-10">
-        <p className="leaderboard-ref-cta-title leaderboard-reference-cta-title text-3xl font-black uppercase leading-none text-white">
-          Live data.<br />
-          Real players.<br />
-          <span>Real action.</span>
-        </p>
-        <p className="mt-3 text-[11px] font-bold text-violet-100">
-          {loading ? "Loading live feed" : updatedAt ? `Updated ${formatDateTime(updatedAt)}` : "Live ADM feed pending"}
-        </p>
-        <Link href="/login?returnTo=/leaderboards" className="mt-5 inline-flex items-center gap-2 rounded bg-violet-500 px-4 py-3 text-[11px] font-black uppercase text-white shadow-[0_0_28px_rgba(139,92,246,0.45)] transition hover:bg-violet-400">
-          View full leaderboards
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+      <div className="leaderboard-ref-kill-card-content">
+        <p className="text-[10px] font-black uppercase tracking-[0.16em] opacity-80">{title}</p>
+        {kill ? (
+          <>
+            <p className="mt-1 text-2xl font-black text-white">{formatDistance(kill.distance)}</p>
+            <p className="mt-1 max-w-[58%] text-[11px] font-bold leading-4 text-zinc-100">
+              {kill.player_name} eliminated {kill.victim_name} with {kill.weapon}
+            </p>
+            <div className="mt-2 flex max-w-[64%] flex-wrap items-center gap-2 text-[10px] font-bold text-zinc-300">
+              <ServerLink slug={kill.server_slug} label={kill.server_name} />
+              <span>{formatDateTime(kill.occurred_at)}</span>
+            </div>
+          </>
+        ) : (
+          <p className="mt-2 max-w-[58%] text-[11px] font-bold leading-4 text-zinc-400">
+            No confirmed kill yet.
+          </p>
+        )}
       </div>
-    </section>
+    </div>
   );
 }
 

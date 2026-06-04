@@ -1,10 +1,22 @@
 const ASSETS = {
   sniper: "/leaderboards/sniper-accent.png",
   rifle: "/leaderboards/rifle-accent.png",
-  projectile: "/leaderboards/bullet-tracer-accent.png",
 };
 
-const BULLET_EMBERS = Array.from({ length: 9 }, (_, index) => index + 1);
+export function AnimatedBullet() {
+  return (
+    <div className="leaderboard-ref-bullet-effects" aria-hidden="true">
+      <span className="leaderboard-ref-bullet-glow" />
+      <span className="leaderboard-ref-bullet-heat" />
+      <span className="leaderboard-ref-bullet-spark spark-one" />
+      <span className="leaderboard-ref-bullet-spark spark-two" />
+      <span className="leaderboard-ref-bullet-spark spark-three" />
+      <span className="leaderboard-ref-bullet-spark spark-four" />
+      <span className="leaderboard-ref-bullet-wave wave-one" />
+      <span className="leaderboard-ref-bullet-wave wave-two" />
+    </div>
+  );
+}
 
 export function KillProjectileAccent({
   tone,
@@ -14,25 +26,7 @@ export function KillProjectileAccent({
   variant?: "sniper" | "rifle" | "projectile";
 }) {
   if (variant === "projectile") {
-    return (
-      <span
-        className={`leaderboard-ref-kill-art leaderboard-ref-kill-art--projectile leaderboard-ref-bullet-scene leaderboard-reference-weapon-accent leaderboard-reference-weapon-accent--projectile dzn-kill-projectile dzn-kill-projectile--${tone}`}
-        aria-hidden="true"
-      >
-        <span className="leaderboard-ref-bullet-bg" />
-        <span className="leaderboard-ref-bullet-glow" />
-        <span className="leaderboard-ref-bullet-trail leaderboard-ref-bullet-trail--wide" />
-        <span className="leaderboard-ref-bullet-trail leaderboard-ref-bullet-trail--hot" />
-        <span className="leaderboard-ref-bullet-shockwave leaderboard-ref-bullet-shockwave--one" />
-        <span className="leaderboard-ref-bullet-shockwave leaderboard-ref-bullet-shockwave--two" />
-        {BULLET_EMBERS.map((ember) => (
-          <span key={ember} className={`leaderboard-ref-bullet-ember leaderboard-ref-bullet-ember--${ember}`} />
-        ))}
-        <span className="leaderboard-ref-bullet-flight">
-          <span className="leaderboard-ref-bullet-only" />
-        </span>
-      </span>
-    );
+    return <AnimatedBullet />;
   }
 
   return (
