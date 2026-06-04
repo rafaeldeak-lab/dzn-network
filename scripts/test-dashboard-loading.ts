@@ -162,6 +162,10 @@ includesAll(leaderboards, [
   "data.data && !data.top_servers ? data.data : data",
   "Leaderboard data could not be loaded right now.",
   "KillProjectileAccent",
+  "leaderboard-reference-page",
+  "leaderboard-reference-grid",
+  "leaderboard-reference-stat-grid",
+  "leaderboard-reference-longest-card",
   "dzn-leaderboard-hero",
   "dzn-leaderboard-hero__intel",
   "dzn-leaderboard-stat-grid",
@@ -186,7 +190,15 @@ for (const fakeStaticName of ["NukeTown DEATHMATCH", "PANDORA DayZ", "xAKA-MINI_
 
 const globals = source("app/globals.css");
 includesAll(globals, [
-  ".dzn-leaderboard-hero__signal",
+  ".leaderboard-reference-page",
+  ".leaderboard-reference-hero",
+  ".leaderboard-reference-grid",
+  ".leaderboard-reference-panel",
+  ".leaderboard-reference-stat",
+  ".leaderboard-reference-longest-card",
+  ".leaderboard-reference-rifle-svg",
+  ".leaderboard-reference-weapon-accent",
+  ".leaderboard-reference-tracer",
   ".dzn-kill-projectile",
   ".dzn-kill-projectile-svg",
   ".dzn-kill-tracer",

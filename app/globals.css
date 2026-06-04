@@ -644,6 +644,735 @@ body {
   }
 }
 
+.leaderboard-reference-page {
+  --ref-violet: #8b5cf6;
+  --ref-violet-hot: #a855f7;
+  --ref-blue: #0ea5e9;
+  --ref-cyan: #22d3ee;
+  --ref-orange: #f97316;
+  --ref-red: #ef4444;
+  --ref-panel: rgba(3, 7, 18, 0.78);
+  --ref-panel-deep: rgba(2, 4, 13, 0.88);
+  --ref-line: rgba(139, 92, 246, 0.34);
+  min-height: 100vh;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 45% 6%, rgba(168, 85, 247, 0.3), transparent 18rem),
+    radial-gradient(circle at 67% 17%, rgba(249, 115, 22, 0.24), transparent 18rem),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.98) 0%, rgba(2, 5, 17, 0.74) 48%, rgba(2, 3, 10, 0.92) 100%),
+    url("/media/dzn-cinematic-survivor.png") top center / min(1950px, 156vw) auto no-repeat,
+    #02030a;
+}
+
+.leaderboard-reference-page::before,
+.leaderboard-reference-page::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.leaderboard-reference-page::before {
+  background:
+    radial-gradient(circle at 14% 40%, rgba(249, 115, 22, 0.18), transparent 1.2rem),
+    radial-gradient(circle at 28% 22%, rgba(249, 115, 22, 0.22), transparent 0.95rem),
+    radial-gradient(circle at 61% 37%, rgba(249, 115, 22, 0.2), transparent 1rem),
+    radial-gradient(circle at 86% 34%, rgba(168, 85, 247, 0.2), transparent 1rem),
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 82px);
+  mix-blend-mode: screen;
+  opacity: 0.55;
+  animation: heroParallax 12s ease-in-out infinite;
+}
+
+.leaderboard-reference-page::after {
+  background:
+    linear-gradient(180deg, rgba(2, 3, 10, 0.04) 0%, rgba(2, 3, 10, 0.22) 46%, rgba(2, 3, 10, 0.86) 100%),
+    radial-gradient(circle at 45% 31%, transparent 0 18rem, rgba(2, 3, 10, 0.46) 40rem),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.9), transparent 18%, transparent 78%, rgba(2, 3, 10, 0.9));
+}
+
+.leaderboard-reference-shell {
+  gap: 0.65rem;
+}
+
+.leaderboard-reference-hero {
+  grid-template-columns: minmax(430px, 0.58fr) minmax(390px, 0.42fr);
+  min-height: 190px;
+  margin: 0;
+  padding: 1rem 0.7rem 0.8rem;
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 47% 8%, rgba(168, 85, 247, 0.3), transparent 13rem),
+    radial-gradient(circle at 63% 54%, rgba(249, 115, 22, 0.18), transparent 15rem),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.9) 0%, rgba(2, 4, 13, 0.52) 42%, rgba(2, 4, 13, 0.24) 62%, rgba(2, 3, 10, 0.72) 100%);
+  box-shadow: none;
+}
+
+.leaderboard-reference-hero::before {
+  background:
+    radial-gradient(circle at 47% 25%, rgba(255, 255, 255, 0.12), transparent 9rem),
+    radial-gradient(circle at 18% 75%, rgba(249, 115, 22, 0.2), transparent 11rem),
+    linear-gradient(113deg, transparent 0 42%, rgba(255, 255, 255, 0.08) 45%, transparent 49%);
+  opacity: 0.68;
+}
+
+.leaderboard-reference-hero::after {
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(2, 3, 10, 0.28) 62%, rgba(2, 3, 10, 0.68) 100%),
+    radial-gradient(circle at 68% 88%, rgba(249, 115, 22, 0.2), transparent 14rem);
+}
+
+.leaderboard-reference-hero-copy {
+  min-height: 168px;
+  align-items: start;
+  padding-left: 0.15rem;
+}
+
+.leaderboard-reference-live-badge {
+  border-radius: 0.25rem;
+  box-shadow:
+    0 0 18px rgba(168, 85, 247, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.leaderboard-reference-live-badge::before {
+  content: "";
+  margin-right: 0.35rem;
+  color: #e9d5ff;
+}
+
+.leaderboard-reference-title {
+  display: grid;
+  max-width: 9.8ch;
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  font-size: clamp(3.45rem, 5.55vw, 5.7rem);
+  line-height: 0.82;
+  letter-spacing: 0;
+  text-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.74),
+    0 0 28px rgba(168, 85, 247, 0.52);
+}
+
+.leaderboard-reference-title span:first-child {
+  color: #f8fafc;
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.28);
+}
+
+.leaderboard-reference-title span:last-child {
+  color: #a855f7;
+  text-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.78),
+    0 0 22px rgba(168, 85, 247, 0.78),
+    0 0 36px rgba(14, 165, 233, 0.18);
+}
+
+.leaderboard-reference-subtitle {
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.92);
+}
+
+.leaderboard-reference-updated {
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.92);
+}
+
+.leaderboard-reference-hero-intel {
+  align-content: start;
+  padding-top: 1rem;
+}
+
+.leaderboard-reference-stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.leaderboard-reference-stat {
+  min-height: 126px;
+  clip-path: polygon(10% 0, 90% 0, 100% 12%, 100% 88%, 90% 100%, 10% 100%, 0 88%, 0 12%);
+  border: 1px solid var(--dzn-stat-border);
+  background:
+    linear-gradient(145deg, rgba(7, 11, 30, 0.88), rgba(2, 4, 13, 0.8)),
+    radial-gradient(circle at 50% 0%, var(--dzn-stat-glow), transparent 52%);
+  box-shadow:
+    0 0 24px var(--dzn-stat-shadow),
+    inset 0 0 36px rgba(255, 255, 255, 0.035),
+    inset 0 0 24px var(--dzn-stat-shadow);
+}
+
+.leaderboard-reference-stat::before {
+  inset: 0.38rem;
+  border-color: var(--dzn-stat-border);
+  border-radius: 0;
+  clip-path: inherit;
+}
+
+.leaderboard-reference-stat svg {
+  width: 2.4rem;
+  height: 2.4rem;
+  color: var(--dzn-stat-icon);
+}
+
+.leaderboard-reference-stat-value {
+  font-size: clamp(1.55rem, 2.4vw, 2.35rem) !important;
+  line-height: 0.92;
+  text-shadow: 0 0 22px var(--dzn-stat-shadow);
+}
+
+.leaderboard-reference-stat-label {
+  max-width: 7.5rem;
+  font-size: 0.58rem !important;
+  line-height: 1.15;
+}
+
+.leaderboard-reference-stat span:last-child {
+  font-size: 0.58rem !important;
+  line-height: 1.15;
+}
+
+.leaderboard-reference-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(360px, 0.95fr);
+  grid-template-areas:
+    "servers longest"
+    "players longest"
+    "personal cta";
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.leaderboard-reference-area--servers { grid-area: servers; }
+.leaderboard-reference-area--longest { grid-area: longest; }
+.leaderboard-reference-area--players { grid-area: players; }
+.leaderboard-reference-area--personal { grid-area: personal; }
+.leaderboard-reference-area--cta { grid-area: cta; }
+
+.leaderboard-reference-panel,
+.dzn-longest-kills-card,
+.leaderboard-reference-cta-card,
+.leaderboard-reference-area .dzn-leaderboard-card {
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 0.38rem;
+  background:
+    linear-gradient(180deg, rgba(13, 10, 31, 0.76), rgba(2, 5, 17, 0.88)),
+    radial-gradient(circle at 8% 0%, rgba(168, 85, 247, 0.22), transparent 28%),
+    radial-gradient(circle at 100% 100%, rgba(14, 165, 233, 0.1), transparent 30%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0 26px rgba(139, 92, 246, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.leaderboard-reference-panel::after,
+.dzn-longest-kills-card::after,
+.leaderboard-reference-cta-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 90px),
+    linear-gradient(115deg, transparent 0 46%, rgba(168, 85, 247, 0.08) 48%, transparent 54%);
+  opacity: 0.65;
+}
+
+.leaderboard-reference-panel-header h2,
+.dzn-longest-kills-card h2 {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.leaderboard-reference-panel-action {
+  box-shadow: inset 0 0 18px rgba(139, 92, 246, 0.18);
+}
+
+.dzn-leaderboard-table {
+  min-width: 690px;
+}
+
+.dzn-leaderboard-table th {
+  padding: 0.38rem 0.6rem;
+  font-size: 0.57rem;
+  line-height: 1;
+  color: rgba(203, 213, 225, 0.62);
+}
+
+.dzn-leaderboard-row td {
+  padding-block: 0.42rem;
+  background:
+    linear-gradient(90deg, rgba(7, 12, 30, 0.82), rgba(2, 6, 23, 0.62)),
+    radial-gradient(circle at 100% 50%, rgba(139, 92, 246, 0.16), transparent 34%);
+}
+
+.dzn-leaderboard-row td:first-child {
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dzn-leaderboard-row td:last-child {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dzn-leaderboard-row td span:not(.dzn-rank-badge):not(.leaderboard-reference-player):not(.leaderboard-reference-avatar) {
+  font-size: 0.72rem;
+}
+
+.dzn-rank-badge {
+  min-width: 2.35rem;
+  padding: 0.26rem 0.42rem;
+  border-radius: 0.18rem;
+  font-size: 0.82rem;
+}
+
+.dzn-rank-badge--gold {
+  box-shadow:
+    0 0 0 1px rgba(251, 191, 36, 0.22),
+    0 0 14px rgba(251, 191, 36, 0.48),
+    inset 0 0 16px rgba(249, 115, 22, 0.2);
+}
+
+.leaderboard-reference-player {
+  min-width: 0;
+}
+
+.leaderboard-reference-avatar {
+  display: inline-grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.35), transparent 28%),
+    linear-gradient(135deg, rgba(31, 41, 55, 0.9), rgba(2, 6, 23, 0.9));
+  color: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 900;
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.26);
+}
+
+.leaderboard-reference-avatar--gold {
+  border-color: rgba(251, 191, 36, 0.55);
+  box-shadow: 0 0 16px rgba(251, 191, 36, 0.34);
+}
+
+.leaderboard-reference-avatar--cyan {
+  border-color: rgba(14, 165, 233, 0.55);
+  box-shadow: 0 0 16px rgba(14, 165, 233, 0.32);
+}
+
+.leaderboard-reference-avatar--orange {
+  border-color: rgba(249, 115, 22, 0.55);
+  box-shadow: 0 0 16px rgba(249, 115, 22, 0.34);
+}
+
+.dzn-longest-kills-card {
+  padding: 1rem;
+}
+
+.leaderboard-reference-longest-stack {
+  gap: 0.55rem;
+}
+
+.leaderboard-reference-longest-card {
+  min-height: 120px;
+  padding: 0.8rem;
+  border-radius: 0.32rem;
+}
+
+.leaderboard-reference-longest-card--violet {
+  background:
+    radial-gradient(circle at 68% 44%, rgba(168, 85, 247, 0.34), transparent 31%),
+    radial-gradient(circle at 92% 58%, rgba(249, 115, 22, 0.18), transparent 38%),
+    linear-gradient(135deg, rgba(46, 16, 101, 0.62), rgba(3, 7, 18, 0.88));
+}
+
+.leaderboard-reference-longest-card--cyan {
+  background:
+    radial-gradient(circle at 72% 48%, rgba(14, 165, 233, 0.34), transparent 34%),
+    linear-gradient(135deg, rgba(8, 47, 73, 0.68), rgba(3, 7, 18, 0.9));
+}
+
+.leaderboard-reference-longest-card--orange {
+  background:
+    radial-gradient(circle at 78% 54%, rgba(249, 115, 22, 0.42), transparent 34%),
+    radial-gradient(circle at 90% 70%, rgba(239, 68, 68, 0.22), transparent 36%),
+    linear-gradient(135deg, rgba(67, 20, 7, 0.7), rgba(3, 7, 18, 0.9));
+}
+
+.leaderboard-reference-weapon-accent {
+  right: -0.5rem;
+  top: 0.92rem;
+  width: 14.8rem;
+  height: 5.5rem;
+  opacity: 0.92;
+}
+
+.leaderboard-reference-weapon-accent--rifle {
+  transform: rotate(-8deg);
+}
+
+.leaderboard-reference-weapon-accent--projectile {
+  top: 2.5rem;
+  right: -0.3rem;
+  width: 12.4rem;
+  transform: rotate(-8deg);
+}
+
+.leaderboard-reference-rifle-svg {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 15rem;
+  overflow: visible;
+  filter:
+    drop-shadow(0 0 10px rgba(255, 255, 255, 0.18))
+    drop-shadow(0 0 22px var(--dzn-kill-shadow, rgba(14, 165, 233, 0.32)));
+}
+
+.leaderboard-reference-rifle {
+  animation: heatPulse 3.2s ease-in-out infinite;
+}
+
+.leaderboard-reference-weapon-accent--rifle .dzn-kill-tracer {
+  left: -0.8rem;
+  top: 58%;
+  width: 10rem;
+  opacity: 0.32;
+}
+
+.leaderboard-reference-tracer {
+  will-change: transform, opacity;
+}
+
+.leaderboard-reference-weapon-accent--projectile .dzn-kill-projectile-svg {
+  width: 9.2rem;
+}
+
+.leaderboard-reference-cta-card {
+  min-height: 210px;
+  background:
+    linear-gradient(90deg, rgba(25, 8, 57, 0.88), rgba(2, 6, 23, 0.34) 62%, rgba(2, 6, 23, 0.72)),
+    radial-gradient(circle at 50% 25%, rgba(168, 85, 247, 0.3), transparent 36%),
+    url("/media/dzn-cinematic-survivor.png") 68% 42% / 880px auto no-repeat;
+}
+
+.leaderboard-reference-cta-title {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  font-style: italic;
+  transform: rotate(-4deg);
+  text-shadow:
+    0 0 18px rgba(168, 85, 247, 0.8),
+    0 4px 0 rgba(0, 0, 0, 0.72);
+}
+
+.leaderboard-reference-cta-title span {
+  color: #a855f7;
+}
+
+@media (min-width: 1280px) {
+  .leaderboard-reference-area--cta {
+    position: static;
+  }
+}
+
+@media (max-width: 900px) {
+  .leaderboard-reference-hero {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .leaderboard-reference-hero-intel {
+    padding-top: 0;
+  }
+
+  .leaderboard-reference-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "servers"
+      "longest"
+      "players"
+      "personal"
+      "cta";
+  }
+}
+
+@media (max-width: 760px) {
+  .leaderboard-reference-page {
+    padding: 0.65rem;
+    background-size: 1520px auto;
+    background-position: top center;
+  }
+
+  .leaderboard-reference-title {
+    max-width: 100%;
+    font-size: clamp(3.35rem, 16vw, 5rem);
+  }
+
+  .leaderboard-reference-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .leaderboard-reference-stat {
+    min-height: 118px;
+  }
+
+  .leaderboard-reference-panel,
+  .dzn-longest-kills-card,
+  .leaderboard-reference-cta-card {
+    padding: 0.85rem;
+  }
+
+  .leaderboard-reference-panel-action {
+    display: none;
+  }
+}
+
+@media (max-width: 460px) {
+  .leaderboard-reference-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard-reference-weapon-accent {
+    opacity: 0.5;
+    right: -3.5rem;
+  }
+
+  .leaderboard-reference-longest-card p {
+    max-width: 72%;
+  }
+}
+
+.leaderboard-reference-page .leaderboard-reference-shell {
+  gap: 0.5rem;
+}
+
+.leaderboard-reference-page {
+  padding-top: 0.45rem !important;
+  background:
+    radial-gradient(circle at 45% 6%, rgba(168, 85, 247, 0.34), transparent 18rem),
+    radial-gradient(circle at 67% 17%, rgba(249, 115, 22, 0.28), transparent 18rem),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.92) 0%, rgba(2, 5, 17, 0.34) 46%, rgba(2, 3, 10, 0.74) 100%),
+    url("/media/dzn-cinematic-survivor.png") 43% top / min(1880px, 148vw) auto no-repeat,
+    #02030a;
+}
+
+.leaderboard-reference-page .leaderboard-reference-hero {
+  grid-template-columns: minmax(410px, 0.58fr) minmax(390px, 0.42fr);
+  min-height: 140px;
+  padding: 0.3rem 0.65rem 0.5rem;
+  background:
+    radial-gradient(circle at 47% 8%, rgba(168, 85, 247, 0.22), transparent 13rem),
+    radial-gradient(circle at 63% 54%, rgba(249, 115, 22, 0.16), transparent 15rem),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.74) 0%, rgba(2, 4, 13, 0.24) 42%, rgba(2, 4, 13, 0.05) 62%, rgba(2, 3, 10, 0.58) 100%);
+}
+
+.leaderboard-reference-page .leaderboard-reference-hero-copy {
+  min-height: 122px;
+}
+
+.leaderboard-reference-page .leaderboard-reference-live-badge {
+  padding: 0.24rem 0.58rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-live-badge::before {
+  content: "";
+  width: 0.55rem;
+  height: 0.42rem;
+  margin-right: 0.35rem;
+  border-left: 2px solid #e9d5ff;
+  border-right: 2px solid #a855f7;
+  transform: skewX(-12deg);
+  box-shadow: 0 0 8px rgba(216, 180, 254, 0.78);
+}
+
+.leaderboard-reference-page .leaderboard-reference-title {
+  margin-top: 0.36rem !important;
+  font-size: clamp(2.75rem, 4.55vw, 4.45rem);
+  line-height: 0.8;
+}
+
+.leaderboard-reference-page .leaderboard-reference-subtitle {
+  margin-top: 0.48rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-updated {
+  margin-top: 0.34rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-hero-intel {
+  padding-top: 0.46rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-stat-grid {
+  gap: 0.55rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-stat {
+  min-height: 112px;
+  padding: 0.62rem 0.5rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-stat svg {
+  width: 2rem;
+  height: 2rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-stat-value {
+  font-size: clamp(1.35rem, 2.05vw, 2.05rem) !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-stat-value--long {
+  max-width: 100%;
+  font-size: clamp(0.9rem, 1.35vw, 1.2rem) !important;
+  line-height: 1.02;
+  overflow-wrap: anywhere;
+}
+
+.leaderboard-reference-page .leaderboard-reference-stat-label,
+.leaderboard-reference-page .leaderboard-reference-stat span:last-child {
+  font-size: 0.52rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-grid {
+  gap: 0.55rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-panel,
+.leaderboard-reference-page .dzn-longest-kills-card,
+.leaderboard-reference-page .leaderboard-reference-cta-card,
+.leaderboard-reference-page .leaderboard-reference-area .dzn-leaderboard-card {
+  padding: 0.62rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-panel-header h2,
+.leaderboard-reference-page .dzn-longest-kills-card h2 {
+  font-size: 1.15rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-panel-action {
+  padding: 0.42rem 0.56rem !important;
+}
+
+.leaderboard-reference-page .dzn-leaderboard-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.leaderboard-reference-page .dzn-leaderboard-table th,
+.leaderboard-reference-page .dzn-leaderboard-table td {
+  overflow: hidden;
+  padding: 0.28rem 0.42rem !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-reference-page .dzn-leaderboard-table th {
+  font-size: 0.5rem;
+  line-height: 1;
+}
+
+.leaderboard-reference-page .dzn-leaderboard-row td span:not(.dzn-rank-badge):not(.leaderboard-reference-player):not(.leaderboard-reference-avatar) {
+  font-size: 0.64rem;
+  line-height: 1.05;
+}
+
+.leaderboard-reference-page .dzn-rank-badge {
+  min-width: 2rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 0.18rem;
+  font-size: 0.72rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-player {
+  max-width: 100%;
+}
+
+.leaderboard-reference-page .leaderboard-reference-player > span:last-child,
+.leaderboard-reference-page .dzn-leaderboard-table a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-reference-page .leaderboard-reference-avatar {
+  width: 1.28rem;
+  height: 1.28rem;
+  font-size: 0.58rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-longest-stack {
+  gap: 0.42rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-longest-card {
+  min-height: 91px;
+  padding: 0.58rem !important;
+}
+
+.leaderboard-reference-page .leaderboard-reference-weapon-accent {
+  right: -0.65rem;
+  top: 0.46rem;
+  width: 12.9rem;
+  height: 4.6rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-weapon-accent--projectile {
+  top: 1.82rem;
+  right: -0.3rem;
+  width: 10.3rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-rifle-svg {
+  width: 13.2rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-weapon-accent--rifle .dzn-kill-tracer {
+  width: 8.6rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-weapon-accent--projectile .dzn-kill-projectile-svg {
+  width: 8.1rem;
+}
+
+.leaderboard-reference-page .leaderboard-reference-cta-card {
+  min-height: 150px;
+}
+
+.leaderboard-reference-page .leaderboard-reference-cta-title {
+  font-size: 2.1rem !important;
+}
+
+@media (max-width: 900px) {
+  .leaderboard-reference-page .leaderboard-reference-hero {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .leaderboard-reference-page .dzn-leaderboard-table {
+    min-width: 680px;
+    table-layout: auto;
+  }
+
+  .leaderboard-reference-page .leaderboard-reference-stat {
+    min-height: 108px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leaderboard-reference-page::before,
+  .leaderboard-reference-page .leaderboard-reference-rifle,
+  .leaderboard-reference-page .leaderboard-reference-tracer,
+  .leaderboard-reference-page .dzn-kill-ember {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
 .dzn-brand {
   display: inline-flex;
   align-items: center;
