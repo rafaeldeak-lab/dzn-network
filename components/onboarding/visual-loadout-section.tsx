@@ -312,7 +312,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
             <div className="mt-4 flex flex-col gap-3 rounded-lg border border-white/10 bg-black/24 p-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="grid gap-1 text-sm font-bold text-zinc-300">
                 <span>{planLabel} can display {limits.maxShowcaseBadges} showcase badges. You are using {selectedCount} slot{selectedCount === 1 ? "" : "s"}.</span>
-                {limits.planKey !== "premium" ? <span className="text-amber-100">Premium unlocks 8 slots, animated frames, and all theme banners. Earned competitive badges still cannot be faked.</span> : <span className="text-cyan-100">Premium visual loadout unlocked: 8 slots, animations, premium frames, and premium themes.</span>}
+                {limits.planKey !== "premium" ? <span className="text-amber-100">Premium unlocks 8 slots, animated frames, all theme banners, and full visual loadout benefits. Earned competitive badges still cannot be faked.</span> : <span className="text-cyan-100">Premium visual loadout unlocked: 8 slots, animations, premium frames, premium themes, and stronger public presentation.</span>}
               </div>
               <SaveProgressButton
                 idleLabel="Save Visual Loadout"

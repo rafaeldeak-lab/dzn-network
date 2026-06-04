@@ -26,6 +26,7 @@ assert.equal(getPromotionConfigForPlan("pro").lockedPromotionTypes.some((type) =
 assert.equal(getPromotionConfigForPlan("premium").lockedPromotionTypes.some((type) => type.promotionType === "seasonal_push"), true);
 assert.equal(explainPromotionBenefits("starter").some((line) => /upgrade/i.test(line)), true);
 assert.equal(explainPromotionBenefits("premium").some((line) => /8 monthly/i.test(line)), true);
+assert.equal(explainPromotionBenefits("pro").some((line) => /Premium adds Spotlight boosts/i.test(line)), true);
 
 const baseDiscovery = getServerDiscoveryScore({
   planKey: "pro",
@@ -155,6 +156,7 @@ for (const snippet of [
   "Starter has 0 monthly credits",
   "Pro includes 2 monthly credits",
   "Premium includes 8 monthly credits",
+  "premium discovery priority",
 ]) {
   assert.equal(serverSettingsUi.includes(snippet), true, `Promotion credits UI should include ${snippet}.`);
 }

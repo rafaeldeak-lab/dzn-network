@@ -300,14 +300,17 @@ export function getVisibilityUpgradeBenefits(planKey: unknown) {
   if (normalized === "premium") return [];
   if (normalized === "pro") {
     return [
-      "Premium adds spotlight eligibility.",
-      "Premium adds premium discovery priority.",
+      "Premium adds spotlight eligibility and 8 monthly promotion credits.",
+      "Premium adds premium discovery priority for maximum public exposure.",
       "Premium unlocks premium visual treatment for public cards and profiles.",
+      "Premium keeps leaderboard and season rank based on competition results only.",
     ];
   }
   return [
     "Pro adds enhanced discovery and featured rotation eligibility.",
+    "Pro adds 2 monthly promotion credits and 5 showcase badges.",
     "Premium adds premium discovery priority and spotlight eligibility.",
+    "Premium adds 8 monthly promotion credits, animated visuals, and 8 showcase badges.",
     "Premium unlocks premium visual treatment for public cards and profiles.",
   ];
 }
@@ -325,8 +328,8 @@ export function getOwnerVisibilityRecommendedActions(input: {
   if (input.badgeShowcaseCompleteness.percent < 100) actions.push("Add earned badges to the showcase when available.");
 
   const normalized = normalizePublicPlanKey(input.planKey);
-  if (normalized === "starter") actions.push("Upgrade to Pro for enhanced discovery or Premium for spotlight eligibility.");
-  if (normalized === "pro") actions.push("Upgrade to Premium for spotlight eligibility and premium discovery priority.");
+  if (normalized === "starter") actions.push("Upgrade to Pro for enhanced discovery or Premium for maximum exposure, spotlight eligibility, and visual presentation.");
+  if (normalized === "pro") actions.push("Upgrade to Premium for spotlight eligibility, 8 monthly promotion credits, and premium discovery priority.");
   if (normalized === "premium" && input.isSpotlightEligible) actions.push("Premium spotlight eligibility is active; keep profile and activity quality high.");
 
   return actions.length ? actions : ["Visibility setup looks complete. Keep server activity and profile quality current."];

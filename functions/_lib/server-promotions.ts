@@ -358,7 +358,7 @@ export function explainPromotionBenefits(planKey: unknown) {
       "8 monthly promotion credits.",
       "Directory bumps refresh discovery freshness.",
       "Featured rotation bumps are priority eligible.",
-      "Spotlight boost eligibility is active.",
+      "Spotlight boost eligibility is active for Premium exposure.",
     ];
   }
   if (normalized === "pro") {
@@ -366,11 +366,12 @@ export function explainPromotionBenefits(planKey: unknown) {
       "2 monthly promotion credits.",
       "Directory bumps refresh discovery freshness.",
       "Featured rotation bumps are available.",
+      "Premium adds Spotlight boosts and more monthly promotion credits.",
     ];
   }
   return [
     "Promotion options are visible.",
-    "Upgrade to Pro or Premium to use monthly promotion credits.",
+    "Upgrade to Pro for 2 monthly promotion credits or Premium for 8 credits and Spotlight boosts.",
   ];
 }
 
@@ -494,10 +495,10 @@ function promotionLockedMessage(planKey: "starter" | "pro" | "premium", promotio
 
 function promotionUpgradeBenefits(planKey: "starter" | "pro" | "premium") {
   if (planKey === "premium") return [];
-  if (planKey === "pro") return ["Premium adds 8 monthly credits and spotlight boost eligibility."];
+  if (planKey === "pro") return ["Premium adds 8 monthly credits, Spotlight boosts, and premium discovery priority."];
   return [
     "Pro adds 2 monthly promotion credits and featured rotation bumps.",
-    "Premium adds 8 monthly credits, priority featured rotation, and spotlight boosts.",
+    "Premium adds 8 monthly credits, priority featured rotation, premium discovery priority, and Spotlight boosts.",
   ];
 }
 

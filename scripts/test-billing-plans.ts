@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
 import { getBillingPlanSummaries, getCheckoutConfigured, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
@@ -110,10 +111,54 @@ assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configur
 assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.configured, false);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
+assert.deepEqual(planSummaries.map((plan) => plan.name), ["Starter", "Pro", "Premium"]);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.features.includes("No monthly promotion credits"), true);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.features.includes("2 monthly promotion credits"), true);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.features.includes("8 monthly promotion credits"), true);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.features.includes("Premium animated frames and themes"), true);
 const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
 assert.equal(JSON.stringify(planSummaries).includes("sk_test"), false);
+
+const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
+const pricingSection = [
+  landingSource.slice(landingSource.indexOf("const pricingPlans"), landingSource.indexOf("function useHomeStats")),
+  landingSource.slice(landingSource.indexOf("function PricingUpgradeSection"), landingSource.indexOf("function GameModeGrid")),
+].join("\n");
+for (const snippet of [
+  "Starter",
+  "Pro",
+  "Premium",
+  "£4.99/month",
+  "£9.99/month",
+  "£19.99/month",
+  "Public publishing interval",
+  "Visibility tier",
+  "Promotion credits",
+  "Featured eligibility",
+  "Spotlight eligibility",
+  "Showcase badge limit",
+  "Frames/themes",
+  "Animated visuals",
+  "Seasons access",
+  "Badge/reputation showcase",
+  "Best for",
+  "Premium is built for server owners who want maximum exposure, faster public updates, premium visuals, spotlight eligibility and monthly promotion credits.",
+  "Does Premium affect leaderboard rank?",
+  "What does Premium improve?",
+  "Do Starter servers still compete?",
+  "Can badges be bought?",
+  "Can seasons be won by paying?",
+]) {
+  assert.equal(pricingSection.includes(snippet), true, `Public pricing section should include ${snippet}.`);
+}
+assert.equal(/Network|Partner/.test(pricingSection), false, "Public pricing section must not show Network/Partner plans.");
+assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Premium pricing copy must not claim paid leaderboard rank.");
+
+const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+assert.equal(dashboardSource.includes("Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits"), true, "Owner billing cards should explain Premium value.");
+assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
 
 const statements: string[] = [];
 const bindings: unknown[][] = [];

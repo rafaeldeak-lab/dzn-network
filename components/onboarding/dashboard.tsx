@@ -4200,9 +4200,9 @@ type DashboardReviewSummary = {
 };
 
 const billingPlans = [
-  { key: "starter", label: "Starter", price: "£4.99/month", detail: "Server listing, basic leaderboards, 24 hour public publishing" },
-  { key: "pro", label: "Pro", price: "£9.99/month", detail: "Featured rotation, enhanced discovery, 4 hour public publishing" },
-  { key: "premium", label: "Premium", price: "£19.99/month", detail: "Homepage featured placement, premium badge, real-time public publishing" },
+  { key: "starter", label: "Starter", price: "£4.99/month", detail: "Standard listing, basic leaderboard participation, 24 hour public updates" },
+  { key: "pro", label: "Pro", price: "£9.99/month", detail: "Enhanced discovery, featured rotation eligibility, 2 monthly promotion credits" },
+  { key: "premium", label: "Premium", price: "£19.99/month", detail: "Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits" },
 ] as const;
 
 function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; message: string; onRefresh: () => Promise<void> }) {
@@ -4252,7 +4252,7 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MiniInfo label="Servers Used" value={billing ? `${billing.linked_server_count} / ${billing.entitlements.max_linked_servers}` : "Loading"} />
         <MiniInfo label="Plan Status" value={billing?.plan_status ?? "Loading"} />
-        <MiniInfo label="Bumps / Month" value={String(billing?.entitlements.included_bumps_per_month ?? 0)} />
+        <MiniInfo label="Promo Credits" value={billing ? String(planPromotionCreditLimit(billing.plan_key)) : "Loading"} />
         <MiniInfo label={billing?.cancel_at_period_end ? "Cancels On" : "Renews"} value={billingRenewalLabel(billing)} />
       </div>
 
@@ -4266,9 +4266,13 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
                   {plan.max_linked_servers} server{plan.max_linked_servers === 1 ? "" : "s"} · {plan.stat_history_days} day stats · visibility weight {plan.visibility_weight}
                 </p>
                 <div className="mt-2 grid gap-1 text-[11px] leading-5 text-zinc-500">
+                  {plan.features.slice(0, 3).map((feature) => (
+                    <p key={feature}><span className="font-black uppercase text-zinc-400">Value:</span> {feature}</p>
+                  ))}
                   <p><span className="font-black uppercase text-zinc-400">Tracking:</span> ADM ingestion and statistics collection continue normally on every plan.</p>
                   <p><span className="font-black uppercase text-zinc-400">Public Publishing:</span> public profile, leaderboard, and discovery refresh every {formatPublishingInterval(plan.public_publish_interval_minutes)}.</p>
                   <p><span className="font-black uppercase text-zinc-400">Discovery:</span> visibility weight {plan.visibility_weight}; competitive rankings are not altered.</p>
+                  <p><span className="font-black uppercase text-zinc-400">Promotion Credits:</span> {planPromotionCreditLimit(plan.plan_key)} per month for discovery and featured promotion surfaces.</p>
                 </div>
                 <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                   {plan.configured ? "Checkout configured" : "Checkout not configured"}
@@ -7748,6 +7752,13 @@ function isNitradoLogSettingsComplete(settings: NitradoLogSettingsConfirmation |
 function billingRenewalLabel(billing: BillingStatus | null) {
   if (!billing) return "Loading";
   return billing.current_period_end_label || (billing.current_period_end ? formatDashboardDate(billing.current_period_end) : "Awaiting Stripe update");
+}
+
+function planPromotionCreditLimit(planKey: string) {
+  const normalized = planKey.toLowerCase();
+  if (normalized === "premium" || normalized === "network" || normalized === "partner") return 8;
+  if (normalized === "pro") return 2;
+  return 0;
 }
 
 function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSummary {

@@ -373,12 +373,14 @@ const navItems = [
   { label: "Features", href: "#features" },
   { label: "Leaderboards", href: "/leaderboards" },
   { label: "Servers", href: "/servers" },
+  { label: "Pricing", href: "#pricing" },
   { label: "Stats", href: "#stats" },
   { label: "Events", href: "/events" },
 ];
 
 const loggedOutNavItems = [
   { label: "About DZN", href: "#features" },
+  { label: "Pricing", href: "#pricing" },
 ];
 
 const fallbackTopServers = [
@@ -441,6 +443,70 @@ const featureCards = [
   icon: LucideIcon;
   accent: "purple" | "cyan" | "red" | "green" | "violet";
 }>;
+
+const pricingPlans = [
+  {
+    key: "starter",
+    name: "Starter",
+    price: "£4.99/month",
+    bestFor: "Best for new and small servers",
+    summary: "Standard discovery, basic leaderboard participation, earned badges, and 24 hour public updates.",
+    features: ["Standard listing", "Basic leaderboard participation", "Public updates every 24h", "Earned badges visible", "3 showcase badges", "No monthly promotion credits"],
+  },
+  {
+    key: "pro",
+    name: "Pro",
+    price: "£9.99/month",
+    bestFor: "Best for growing communities",
+    summary: "Enhanced discovery, featured rotation eligibility, 2 monthly promotion credits, and stronger public presentation.",
+    features: ["Public updates every 4h", "Enhanced discovery", "Featured rotation eligible", "2 monthly promotion credits", "5 showcase badges", "Standard themes and reputation frames"],
+  },
+  {
+    key: "premium",
+    name: "Premium",
+    price: "£19.99/month",
+    bestFor: "Best for serious servers wanting maximum exposure",
+    summary: "Premium discovery priority, Premium Spotlight eligibility, animated visuals, and 8 monthly promotion credits.",
+    features: ["Fastest/current publishing", "Premium discovery priority", "Premium Spotlight eligible", "8 monthly promotion credits", "Premium animated frames and themes", "8 showcase badges"],
+  },
+] as const;
+
+const pricingComparisonRows = [
+  { label: "Public publishing interval", starter: "Every 24h", pro: "Every 4h", premium: "Fastest/current" },
+  { label: "Visibility tier", starter: "Standard listing", pro: "Enhanced discovery", premium: "Premium discovery priority" },
+  { label: "Promotion credits", starter: "0 monthly credits", pro: "2 monthly credits", premium: "8 monthly credits" },
+  { label: "Featured eligibility", starter: "Standard listing only", pro: "Featured rotation eligible", premium: "Priority featured eligible" },
+  { label: "Spotlight eligibility", starter: "Not eligible", pro: "Not eligible", premium: "Premium Spotlight eligible" },
+  { label: "Showcase badge limit", starter: "3 badges", pro: "5 badges", premium: "8 badges" },
+  { label: "Frames/themes", starter: "Default frame and theme", pro: "Standard themes and reputation frames", premium: "Premium animated frames and themes" },
+  { label: "Animated visuals", starter: "Static visuals", pro: "Static visuals", premium: "Animated premium visuals" },
+  { label: "Seasons access", starter: "Same-category seasons", pro: "Same-category seasons", premium: "Same-category seasons" },
+  { label: "Badge/reputation showcase", starter: "Earned badges visible", pro: "5 badge showcase", premium: "Premium badge/status and 8 badge showcase" },
+  { label: "Best for", starter: "New and small servers", pro: "Growing communities", premium: "Maximum exposure and presentation" },
+] as const;
+
+const pricingFaqs = [
+  {
+    question: "Does Premium affect leaderboard rank?",
+    answer: "No. Premium improves discovery, visibility, promotion and presentation only. Competitive leaderboard rank remains based on gameplay and stored stats.",
+  },
+  {
+    question: "What does Premium improve?",
+    answer: "Premium improves public discovery priority, faster public updates, Premium Spotlight eligibility, monthly promotion credits, and visual presentation.",
+  },
+  {
+    question: "Do Starter servers still compete?",
+    answer: "Yes. Starter servers can appear in standard discovery, participate in basic leaderboards, show earned badges, and join normal same-category seasons.",
+  },
+  {
+    question: "Can badges be bought?",
+    answer: "No. Earned badges, crowns, reputation awards, event badges, and seasonal badges must be earned before they can be showcased.",
+  },
+  {
+    question: "Can seasons be won by paying?",
+    answer: "No. Season scores, ranks, wins, and seasonal awards come from season snapshots and competition results, not billing plan.",
+  },
+] as const;
 
 function useHomeStats() {
   const [data, setData] = useState<HomeStats>(() => loadLastGoodHomeStats() ?? emptyHomeStats);
@@ -733,6 +799,7 @@ export function DznLandingPage() {
               <EventLeaderboardPanel homeStats={displayHomeStats} />
             </>
           )}
+          <PricingUpgradeSection />
           <BottomCta isPreview={isPreviewMode} />
           <HomepageAuthDebug authState={authState} homeStats={liveStats.data} />
         </motion.main>
@@ -1346,6 +1413,108 @@ function FeatureStrip({ className = "", locked }: { className?: string; locked: 
           </motion.article>
         );
       })}
+    </motion.section>
+  );
+}
+
+function PricingUpgradeSection() {
+  return (
+    <motion.section
+      variants={fadeUp}
+      id="pricing"
+      className="scroll-mt-24 rounded-xl border border-white/10 bg-[#050914]/72 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl sm:p-5"
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
+          <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
+          <p className="mt-3 text-sm leading-6 text-zinc-300/86">
+            Starter, Pro, and Premium keep competition fair while giving server owners clearer options for public updates, discovery placement, promotion credits, and visual presentation.
+          </p>
+        </div>
+        <a
+          href="/login?returnTo=/setup"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-200/35 bg-cyan-300/10 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-100/60 hover:bg-cyan-300/16 sm:w-auto"
+        >
+          Start Setup <ChevronRight className="h-4 w-4" />
+        </a>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        {pricingPlans.map((plan) => (
+          <article
+            key={plan.key}
+            className={`rounded-lg border p-4 ${
+              plan.key === "premium"
+                ? "border-amber-300/25 bg-amber-300/[0.075] shadow-[0_0_34px_rgba(251,191,36,0.1)]"
+                : plan.key === "pro"
+                  ? "border-cyan-300/20 bg-cyan-300/[0.055]"
+                  : "border-white/10 bg-black/24"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-black uppercase text-white">{plan.name}</h3>
+                <p className="mt-1 text-2xl font-black text-white">{plan.price}</p>
+              </div>
+              <span className="rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] font-black uppercase text-zinc-200">
+                {plan.bestFor.replace(/^Best for /i, "")}
+              </span>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-zinc-300">{plan.summary}</p>
+            <ul className="mt-4 grid gap-2 text-sm leading-6 text-zinc-200">
+              {plan.features.map((feature) => (
+                <li key={feature} className="flex gap-2">
+                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-cyan-200" />
+                  <span>{feature}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+
+      <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.065] p-4">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Premium exposure</p>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-amber-50">
+          Premium is built for server owners who want maximum exposure, faster public updates, premium visuals, spotlight eligibility and monthly promotion credits.
+        </p>
+        <p className="mt-2 text-xs font-bold text-amber-100/82">
+          Premium improves discovery, visibility, promotion and presentation. It does not buy leaderboard rank, K/D rank, crown wins, or season wins.
+        </p>
+      </div>
+
+      <div className="mt-5 overflow-x-auto rounded-lg border border-white/10 bg-black/24">
+        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+          <thead className="bg-white/[0.04] text-[10px] font-black uppercase tracking-[0.14em] text-zinc-400">
+            <tr>
+              <th className="px-4 py-3">Feature</th>
+              <th className="px-4 py-3">Starter</th>
+              <th className="px-4 py-3">Pro</th>
+              <th className="px-4 py-3">Premium</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/8 text-zinc-300">
+            {pricingComparisonRows.map((row) => (
+              <tr key={row.label}>
+                <th className="px-4 py-3 text-xs font-black uppercase text-zinc-200">{row.label}</th>
+                <td className="px-4 py-3">{row.starter}</td>
+                <td className="px-4 py-3">{row.pro}</td>
+                <td className="px-4 py-3 text-amber-50">{row.premium}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {pricingFaqs.map((item) => (
+          <article key={item.question} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+            <h3 className="text-sm font-black text-white">{item.question}</h3>
+            <p className="mt-2 text-xs leading-5 text-zinc-400">{item.answer}</p>
+          </article>
+        ))}
+      </div>
     </motion.section>
   );
 }

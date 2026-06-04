@@ -497,7 +497,7 @@ const buildLeaderboardBlock = homepageSource.slice(
 );
 const featureCardsBlock = homepageSource.slice(
   homepageSource.indexOf("const featureCards"),
-  homepageSource.indexOf("function useHomeStats"),
+  homepageSource.indexOf("const pricingPlans"),
 );
 const featureStripBlock = homepageSource.slice(
   homepageSource.indexOf("function FeatureStrip"),

@@ -16,6 +16,7 @@ for (const text of [
   "Theme selector",
   "Animation level selector",
   "Premium unlocks 8 slots",
+  "full visual loadout benefits",
   "earned badges can be selected",
   "Earned competitive badges still cannot be faked",
   "Save Visual Loadout",

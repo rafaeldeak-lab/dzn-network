@@ -80,6 +80,7 @@ assert.match(explanation.fairness, /does not change competitive leaderboard rank
 assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /Pro adds enhanced discovery/i.test(benefit)), true, "Starter should see Pro upgrade benefits.");
 assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /Premium adds premium discovery priority/i.test(benefit)), true, "Starter should see Premium upgrade benefits.");
 assert.equal(getVisibilityUpgradeBenefits("pro").some((benefit) => /spotlight eligibility/i.test(benefit)), true, "Pro should see Premium spotlight benefits.");
+assert.equal(getVisibilityUpgradeBenefits("pro").some((benefit) => /8 monthly promotion credits/i.test(benefit)), true, "Pro should see Premium promotion credit benefits.");
 assert.deepEqual(getVisibilityUpgradeBenefits("premium"), [], "Premium should not see an upgrade nag.");
 
 const profileComplete = getProfileCompleteness({
@@ -168,6 +169,7 @@ for (const snippet of [
   "Premium visibility active",
   "No upgrade needed",
   "Discovery and promotion only. Competitive leaderboard rankings are unchanged.",
+  "Premium discovery, spotlight eligibility, and premium presentation are active. No upgrade needed.",
 ]) {
   assert.equal(serverSettingsUi.includes(snippet), true, `Server Settings promotion panel should include ${snippet}.`);
 }

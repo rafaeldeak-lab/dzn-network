@@ -1460,7 +1460,7 @@ function OwnerSeasonsPanel({
             <div className="mt-4 rounded-lg border border-violet-300/18 bg-violet-400/10 p-3">
               <p className="text-xs font-black uppercase text-violet-100">Plan note</p>
               <p className="mt-2 text-xs leading-5 text-zinc-300">
-                Starter can join normal seasons. Pro and Premium may improve public presentation, but paid plans do not improve season scores or rank.
+                Starter can join normal seasons. Pro and Premium improve public presentation and discovery around your server, but paid plans do not improve season scores or rank.
               </p>
             </div>
           </div>
@@ -1681,7 +1681,7 @@ function VisibilityPromotionPanel({
                   </ul>
                 ) : (
                   <p className="mt-3 text-sm leading-6 text-emerald-50">
-                    Premium discovery and spotlight eligibility are active. No upgrade needed.
+                    Premium discovery, spotlight eligibility, and premium presentation are active. No upgrade needed.
                   </p>
                 )}
               </div>
@@ -1858,7 +1858,7 @@ function PromotionCreditsPanel({
             </div>
 
             <p className="text-xs leading-5 text-zinc-500">
-              Starter has 0 monthly credits. Pro includes 2 monthly credits for directory and featured promotion. Premium includes 8 monthly credits and spotlight boost eligibility.
+              Starter has 0 monthly credits. Pro includes 2 monthly credits for directory and featured promotion. Premium includes 8 monthly credits, premium discovery priority, and spotlight boost eligibility.
             </p>
           </div>
         ) : null}
