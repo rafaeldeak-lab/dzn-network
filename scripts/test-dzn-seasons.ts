@@ -90,6 +90,7 @@ includesAll(helper, [
   "getSeasonBySlug",
   "getEligibleServersForSeason",
   "joinServerToSeason",
+  "getServerSeasonStatus",
   "calculateSeasonScore",
   "refreshSeasonScores",
   "finaliseSeason",
@@ -97,7 +98,11 @@ includesAll(helper, [
   "awardSeasonBadges",
   "normalizeSeasonCategory",
   "CATEGORY_MISMATCH",
+  "ALREADY_JOINED",
+  "This server has already joined that season.",
   "Servers can only join DZN seasons that match their category.",
+  "activeEntries",
+  "upcomingEligible",
   "server_stats",
   "INSERT INTO dzn_season_score_snapshots",
   "INSERT INTO dzn_season_awards",
@@ -112,6 +117,7 @@ for (const route of [
   "functions/api/seasons.ts",
   "functions/api/seasons/[slug].ts",
   "functions/api/seasons/[slug]/leaderboard.ts",
+  "functions/api/servers/[serverId]/seasons/status.ts",
   "functions/api/servers/[serverId]/seasons/[seasonId]/join.ts",
 ]) {
   assert.equal(existsSync(route), true, `Expected route to exist: ${route}`);
@@ -123,6 +129,8 @@ const seasonDetailRoute = source("functions/api/seasons/[slug].ts");
 includesAll(seasonDetailRoute, ["getSeasonBySlug", "SEASON_NOT_FOUND"]);
 const leaderboardRoute = source("functions/api/seasons/[slug]/leaderboard.ts");
 includesAll(leaderboardRoute, ["getSeasonLeaderboard", "leaderboard"]);
+const ownerSeasonStatusRoute = source("functions/api/servers/[serverId]/seasons/status.ts");
+includesAll(ownerSeasonStatusRoute, ["resolveOwnerVisualLoadoutServer", "status: access.status", "getServerSeasonStatus", "Season status is temporarily unavailable."]);
 const joinRoute = source("functions/api/servers/[serverId]/seasons/[seasonId]/join.ts");
 includesAll(joinRoute, ["resolveOwnerVisualLoadoutServer", "status: access.status", "joinServerToSeason"]);
 assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events|sessions|subscriptions/i.test(joinRoute), false, "Season join route must not touch protected systems.");
@@ -171,6 +179,19 @@ assert.equal(/fake server|fake score|demo server|demo score/i.test(publicSeasons
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, ["href=\"/seasons\"", "Seasons"]);
+
+const serverSettingsPage = source("components/onboarding/server-settings-page.tsx");
+includesAll(serverSettingsPage, [
+  "DZN Seasons & Competitions",
+  "/seasons/status",
+  "/seasons/${encodeURIComponent(seasonId)}/join",
+  "Servers only compete against the same category.",
+  "Deathmatch -> Deathmatch only. PvP -> PvP only. PvE -> PvE only. Survival -> Survival only.",
+  "Join Season",
+  "This server has not joined a DZN season yet.",
+  "Starter can join normal seasons.",
+  "paid plans do not improve season scores or rank",
+]);
 
 const publicPlans = getBillingPlanSummaries({} as Env);
 assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);

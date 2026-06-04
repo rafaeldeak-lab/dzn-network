@@ -23,6 +23,7 @@ import {
   Swords,
   Tags,
   Text,
+  Trophy,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -250,6 +251,51 @@ type PromotionActionState = {
   error: string | null;
 };
 
+type OwnerSeason = {
+  id: string;
+  slug: string;
+  name: string;
+  category: string;
+  status: string;
+  startsAt: string;
+  endsAt: string;
+};
+
+type OwnerJoinedSeason = OwnerSeason & {
+  entry: {
+    id: string;
+    seasonId: string;
+    serverId: string;
+    category: string;
+    joinedAt: string;
+    status: string;
+    finalScore: number;
+    rank: number | null;
+  };
+};
+
+type OwnerIneligibleSeason = OwnerSeason & {
+  reason: string;
+};
+
+type OwnerSeasonStatusResponse = {
+  ok: true;
+  serverCategory: string | null;
+  eligibleSeasons: OwnerSeason[];
+  joinedSeasons: OwnerJoinedSeason[];
+  ineligibleSeasons: OwnerIneligibleSeason[];
+  activeEntries: OwnerJoinedSeason[];
+  upcomingEligible: OwnerSeason[];
+  categorySafetyMessage: string;
+};
+
+type SeasonJoinActionState = {
+  seasonId: string | null;
+  busy: boolean;
+  message: string | null;
+  error: string | null;
+};
+
 const ADVANCED_EVENT_CHANNEL_TYPES: EventChannelType[] = ["event_announcements", "event_live_scoreboard", "event_results"];
 
 const CATEGORY_ICON: Record<CategoryValue, React.ReactNode> = {
@@ -313,6 +359,10 @@ export function ServerSettingsPage() {
   const [promotionAnalyticsLoading, setPromotionAnalyticsLoading] = useState(false);
   const [promotionAnalyticsError, setPromotionAnalyticsError] = useState<string | null>(null);
   const [promotionAction, setPromotionAction] = useState<PromotionActionState>({ promotionType: null, busy: false, message: null, error: null });
+  const [seasonStatus, setSeasonStatus] = useState<OwnerSeasonStatusResponse | null>(null);
+  const [seasonStatusLoading, setSeasonStatusLoading] = useState(false);
+  const [seasonStatusError, setSeasonStatusError] = useState<string | null>(null);
+  const [seasonJoinAction, setSeasonJoinAction] = useState<SeasonJoinActionState>({ seasonId: null, busy: false, message: null, error: null });
   const [advancedRoutingOpen, setAdvancedRoutingOpen] = useState(false);
   const [eventChannelIds, setEventChannelIds] = useState<Record<EventChannelType, string>>({
     default_event: "",
@@ -428,6 +478,16 @@ export function ServerSettingsPage() {
   useEffect(() => {
     if (!settings?.server.id) return;
     const timer = window.setTimeout(() => void refreshPromotionAnalytics(settings.server.id), 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+    // The refresh helper intentionally reads the current selected server state; this effect is only keyed to the loaded server id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.server.id]);
+
+  useEffect(() => {
+    if (!settings?.server.id) return;
+    const timer = window.setTimeout(() => void refreshSeasonStatus(settings.server.id), 0);
     return () => {
       window.clearTimeout(timer);
     };
@@ -633,6 +693,55 @@ export function ServerSettingsPage() {
         busy: false,
         message: null,
         error: safeErrorMessage(error, "Promotion credit could not be used right now."),
+      });
+    }
+  }
+
+  async function refreshSeasonStatus(serverId = settings?.server.id ?? selectedServerId) {
+    if (!serverId) return;
+    const endpoint = `/api/servers/${encodeURIComponent(serverId)}/seasons/status`;
+    setSeasonStatusLoading(true);
+    setSeasonStatusError(null);
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const data = await readApiResponse<OwnerSeasonStatusResponse>(response, endpoint, "DZN season status could not be loaded right now.");
+      setSeasonStatus(data);
+    } catch (error) {
+      setSeasonStatusError(safeErrorMessage(error, "DZN season status could not be loaded right now."));
+    } finally {
+      setSeasonStatusLoading(false);
+    }
+  }
+
+  async function joinSeason(seasonId: string) {
+    if (!settings || seasonJoinAction.busy) return;
+    const endpoint = `/api/servers/${encodeURIComponent(settings.server.id)}/seasons/${encodeURIComponent(seasonId)}/join`;
+    setSeasonJoinAction({ seasonId, busy: true, message: null, error: null });
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const data = await readApiResponse<{ message?: string }>(response, endpoint, "Season entry could not be completed right now.");
+      setSeasonJoinAction({
+        seasonId,
+        busy: false,
+        message: data.message ?? "Server joined the DZN season.",
+        error: null,
+      });
+      void refreshSeasonStatus(settings.server.id);
+    } catch (error) {
+      setSeasonJoinAction({
+        seasonId,
+        busy: false,
+        message: null,
+        error: safeErrorMessage(error, "Season entry could not be completed right now."),
       });
     }
   }
@@ -867,6 +976,16 @@ export function ServerSettingsPage() {
           void refreshPromotionAnalytics(settings.server.id);
         }}
         onUseCredit={activatePromotionCredit}
+      />
+
+      <OwnerSeasonsPanel
+        status={seasonStatus}
+        loading={seasonStatusLoading}
+        error={seasonStatusError}
+        fallbackCategory={settings.server.currentCategory}
+        actionState={seasonJoinAction}
+        onRetry={() => refreshSeasonStatus(settings.server.id)}
+        onJoin={joinSeason}
       />
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
@@ -1223,6 +1342,205 @@ function PageShell({ children, onLogout }: { children: React.ReactNode; onLogout
         {children}
       </div>
     </main>
+  );
+}
+
+function OwnerSeasonsPanel({
+  status,
+  loading,
+  error,
+  fallbackCategory,
+  actionState,
+  onRetry,
+  onJoin,
+}: {
+  status: OwnerSeasonStatusResponse | null;
+  loading: boolean;
+  error: string | null;
+  fallbackCategory: string | null;
+  actionState: SeasonJoinActionState;
+  onRetry: () => void;
+  onJoin: (seasonId: string) => void;
+}) {
+  const serverCategory = status?.serverCategory ?? fallbackCategory ?? null;
+  const eligible = status?.eligibleSeasons ?? [];
+  const joined = status?.joinedSeasons ?? [];
+  const ineligible = status?.ineligibleSeasons ?? [];
+  const activeEntries = status?.activeEntries ?? [];
+  return (
+    <section className="glass-surface animated-border mt-5 rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <SectionTitle icon={<Trophy className="h-5 w-5" />} title="DZN Seasons & Competitions" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+              Join same-category DZN seasons. Season rank is based on stored competition snapshots, not paid visibility.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={loading}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 disabled:opacity-55"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh Seasons
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <InfoRow label="Server category" value={serverCategory ? seasonCategoryLabel(serverCategory) : "Set category first"} />
+          <InfoRow label="Eligible seasons" value={loading && !status ? "Loading" : `${eligible.length}`} />
+          <InfoRow label="Active entries" value={`${activeEntries.length}`} />
+        </div>
+
+        <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-400/[0.055] p-4 text-sm font-bold text-cyan-50">
+          {status?.categorySafetyMessage ?? "Servers only compete against the same category."}
+          <span className="mt-2 block text-xs leading-5 text-cyan-100/80">
+            {"Deathmatch -> Deathmatch only. PvP -> PvP only. PvE -> PvE only. Survival -> Survival only."}
+          </span>
+        </div>
+
+        {error ? (
+          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3 text-sm font-bold text-amber-50">
+            {error}
+          </div>
+        ) : null}
+
+        {actionState.message || actionState.error ? (
+          <div className={`mt-4 rounded-lg border px-4 py-3 text-sm font-bold ${actionState.error ? "border-red-300/25 bg-red-400/10 text-red-50" : "border-emerald-300/25 bg-emerald-400/10 text-emerald-50"}`}>
+            {actionState.error ?? actionState.message}
+          </div>
+        ) : null}
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.72fr)]">
+          <div className="grid gap-4">
+            <SeasonDashboardGroup
+              title="Eligible seasons"
+              empty={serverCategory ? "No matching open seasons right now." : "Set your server category before joining DZN seasons."}
+              seasons={eligible}
+              actionState={actionState}
+              onJoin={onJoin}
+            />
+            <JoinedSeasonGroup seasons={joined} />
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+            <p className="text-xs font-black uppercase text-zinc-300">Ineligible seasons</p>
+            {ineligible.length ? (
+              <div className="mt-3 grid gap-2">
+                {ineligible.slice(0, 5).map((season) => (
+                  <div key={season.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-black text-white">{season.name}</p>
+                      <span className="shrink-0 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase text-zinc-300">
+                        {seasonCategoryLabel(season.category)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-zinc-400">{season.reason}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-zinc-400">No ineligible seasons to show.</p>
+            )}
+            <div className="mt-4 rounded-lg border border-violet-300/18 bg-violet-400/10 p-3">
+              <p className="text-xs font-black uppercase text-violet-100">Plan note</p>
+              <p className="mt-2 text-xs leading-5 text-zinc-300">
+                Starter can join normal seasons. Pro and Premium may improve public presentation, but paid plans do not improve season scores or rank.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SeasonDashboardGroup({
+  title,
+  empty,
+  seasons,
+  actionState,
+  onJoin,
+}: {
+  title: string;
+  empty: string;
+  seasons: OwnerSeason[];
+  actionState: SeasonJoinActionState;
+  onJoin: (seasonId: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+      <p className="text-xs font-black uppercase text-zinc-300">{title}</p>
+      {seasons.length ? (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {seasons.map((season) => {
+            const busy = actionState.busy && actionState.seasonId === season.id;
+            return (
+              <div key={season.id} className="rounded-lg border border-emerald-300/18 bg-emerald-400/10 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-white">{season.name}</p>
+                    <p className="mt-1 text-xs font-bold text-emerald-100/80">{seasonCategoryLabel(season.category)} only</p>
+                  </div>
+                  <span className="rounded-md border border-emerald-300/25 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase text-emerald-100">
+                    {formatSeasonStatus(season.status)}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 text-xs font-bold text-zinc-300">
+                  <span>Starts {formatDate(season.startsAt)}</span>
+                  <span>Ends {formatDate(season.endsAt)}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onJoin(season.id)}
+                  disabled={actionState.busy}
+                  aria-busy={busy}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-400/12 px-3 py-2 text-xs font-black uppercase text-emerald-50 disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trophy className="h-4 w-4" />}
+                  {busy ? "Joining..." : "Join Season"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm leading-6 text-zinc-400">{empty}</p>
+      )}
+    </div>
+  );
+}
+
+function JoinedSeasonGroup({ seasons }: { seasons: OwnerJoinedSeason[] }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+      <p className="text-xs font-black uppercase text-zinc-300">Joined seasons</p>
+      {seasons.length ? (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {seasons.map((season) => (
+            <div key={`${season.id}-${season.entry.id}`} className="rounded-lg border border-cyan-300/18 bg-cyan-400/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-white">{season.name}</p>
+                  <p className="mt-1 text-xs font-bold text-cyan-100/85">{seasonCategoryLabel(season.category)} season</p>
+                </div>
+                <span className="rounded-md border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+                  {season.entry.status}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <InfoRow label="Current rank" value={season.entry.rank ? `#${season.entry.rank}` : "Pending"} />
+                <InfoRow label="Score" value={`${season.entry.finalScore ?? 0}`} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm leading-6 text-zinc-400">This server has not joined a DZN season yet.</p>
+      )}
+    </div>
   );
 }
 
@@ -1734,6 +2052,19 @@ function stringOrNull(value: unknown) {
 function formatPlan(value: string) {
   if (!value) return "Free";
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function seasonCategoryLabel(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized === "deathmatch") return "Deathmatch";
+  if (normalized === "pvp") return "PvP";
+  if (normalized === "pve") return "PvE";
+  if (normalized === "survival") return "Survival";
+  return value ? formatPlan(value) : "Not set";
+}
+
+function formatSeasonStatus(value: string) {
+  return value.replace(/_/g, " ");
 }
 
 function formatVisibilityTier(value: string) {

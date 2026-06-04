@@ -160,6 +160,10 @@ export async function joinServerToSeason(env: Env, serverId: string, seasonId: s
   if (!serverCategory || serverCategory !== season.category) {
     throw new DznSeasonError("CATEGORY_MISMATCH", "Servers can only join DZN seasons that match their category.", 403);
   }
+  const existing = await getSeasonEntry(env, season.id, server.id);
+  if (existing && existing.status !== "withdrawn") {
+    throw new DznSeasonError("ALREADY_JOINED", "This server has already joined that season.", 409);
+  }
 
   const now = new Date().toISOString();
   const score = calculateSeasonScoreFromStats(server, season);
@@ -180,6 +184,83 @@ export async function joinServerToSeason(env: Env, serverId: string, seasonId: s
     .run();
   await refreshSeasonScores(env, season.id, 250);
   return getSeasonEntry(env, season.id, server.id);
+}
+
+export async function getServerSeasonStatus(env: Env, serverId: string) {
+  if (!env.DB) {
+    return {
+      serverCategory: null,
+      eligibleSeasons: [],
+      joinedSeasons: [],
+      ineligibleSeasons: [],
+      activeEntries: [],
+      upcomingEligible: [],
+      categorySafetyMessage: CATEGORY_SAFETY_MESSAGE,
+    };
+  }
+  await ensureDznSeasonSchema(env);
+  const server = await getSeasonServer(env, serverId);
+  if (!server) throw new DznSeasonError("SERVER_NOT_FOUND", "Server not found.", 404);
+  const serverCategory = normalizeSeasonCategory(server.server_category ?? server.server_type);
+  const seasons = await getPublicSeasons(env, 100);
+  const entryRows = await requireDb(env)
+    .prepare(
+      `SELECT dzn_season_entries.*,
+              dzn_seasons.slug,
+              dzn_seasons.name,
+              dzn_seasons.status AS season_status,
+              dzn_seasons.starts_at,
+              dzn_seasons.ends_at
+       FROM dzn_season_entries
+       JOIN dzn_seasons ON dzn_seasons.id = dzn_season_entries.season_id
+       WHERE dzn_season_entries.server_id = ?
+         AND dzn_season_entries.status != 'withdrawn'
+       ORDER BY datetime(dzn_seasons.starts_at) DESC`,
+    )
+    .bind(server.id)
+    .all<DznSeasonEntryRow & {
+      slug: string;
+      name: string;
+      season_status: string;
+      starts_at: string;
+      ends_at: string;
+    }>();
+  const entries = entryRows.results ?? [];
+  const entryBySeasonId = new Map(entries.map((entry) => [entry.season_id, toPublicOwnerSeasonEntry(entry)]));
+  const eligibleSeasons = [];
+  const joinedSeasons = [];
+  const ineligibleSeasons = [];
+
+  for (const season of seasons) {
+    const entry = entryBySeasonId.get(season.id);
+    if (entry) {
+      joinedSeasons.push({ ...season, entry });
+      continue;
+    }
+    if (!serverCategory) {
+      ineligibleSeasons.push({ ...season, reason: "Set a server category before joining same-category seasons." });
+      continue;
+    }
+    if (season.category !== serverCategory) {
+      ineligibleSeasons.push({ ...season, reason: `Only ${categoryLabel(season.category)} servers can join this season.` });
+      continue;
+    }
+    if (!seasonOpenForJoin({ ...season, starts_at: season.startsAt, ends_at: season.endsAt, scoring_rules_json: null, created_at: "", updated_at: "" } as DznSeasonRow)) {
+      ineligibleSeasons.push({ ...season, reason: "This season is not open for entry." });
+      continue;
+    }
+    eligibleSeasons.push(season);
+  }
+
+  return {
+    serverCategory,
+    eligibleSeasons,
+    joinedSeasons,
+    ineligibleSeasons,
+    activeEntries: joinedSeasons.filter((season) => ACTIVE_SEASON_STATUSES.includes(String(season.status).toLowerCase())),
+    upcomingEligible: eligibleSeasons.filter((season) => ["registration_open", "upcoming"].includes(String(season.status).toLowerCase())),
+    categorySafetyMessage: CATEGORY_SAFETY_MESSAGE,
+  };
 }
 
 export async function calculateSeasonScore(env: Env, serverId: string, season: DznSeasonRow | { id: string; category: string }) {
@@ -431,6 +512,23 @@ function toPublicSeasonEntry(row: DznSeasonEntryRow) {
   };
 }
 
+function toPublicOwnerSeasonEntry(row: DznSeasonEntryRow & {
+  slug: string;
+  name: string;
+  season_status: string;
+  starts_at: string;
+  ends_at: string;
+}) {
+  return {
+    ...toPublicSeasonEntry(row),
+    seasonSlug: row.slug,
+    seasonName: row.name,
+    seasonStatus: row.season_status,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+  };
+}
+
 function toPublicLeaderboardEntry(row: DznSeasonEntryRow & { server_name: string | null; public_slug: string | null }) {
   return {
     entryId: row.id,
@@ -492,6 +590,16 @@ function safeNumber(value: unknown) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
 }
+
+function categoryLabel(category: string) {
+  if (category === "deathmatch") return "Deathmatch";
+  if (category === "pvp") return "PvP";
+  if (category === "pve") return "PvE";
+  if (category === "survival") return "Survival";
+  return "same-category";
+}
+
+const CATEGORY_SAFETY_MESSAGE = "Servers only compete against the same category.";
 
 function cleanIdentifier(value: unknown) {
   const text = String(value ?? "").trim();
