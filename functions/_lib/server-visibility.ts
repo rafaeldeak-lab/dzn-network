@@ -8,6 +8,20 @@ export type VisibilityExplanation = {
   fairness: string;
 };
 
+export type VisibilityCompletenessItem = {
+  key: string;
+  label: string;
+  complete: boolean;
+  action: string;
+};
+
+export type VisibilityCompleteness = {
+  percent: number;
+  completed: number;
+  total: number;
+  items: VisibilityCompletenessItem[];
+};
+
 export type ServerVisibilityConfig = {
   planKey: "free" | "starter" | "pro" | "premium";
   visibilityWeight: number;
@@ -64,6 +78,23 @@ export type ServerVisibilityInput = {
     animationEnabled?: unknown;
     cardStyle?: unknown;
   } | null;
+};
+
+export type OwnerVisibilityCompletenessInput = ServerVisibilityInput & {
+  public_slug?: unknown;
+  publicSlug?: unknown;
+  server_category?: unknown;
+  serverCategory?: unknown;
+  listing_visibility?: unknown;
+  listingVisibility?: unknown;
+  savedVisualLoadout?: unknown;
+  profileFrameKey?: unknown;
+  themeBannerKey?: unknown;
+  animationEnabled?: unknown;
+  selectedShowcaseBadges?: unknown;
+  earnedShowcaseBadges?: unknown;
+  maxShowcaseBadges?: unknown;
+  animationsAllowed?: unknown;
 };
 
 export function getPlanVisibilityWeight(planKey: unknown) {
@@ -156,6 +187,142 @@ export function explainServerVisibility(server: ServerVisibilityInput): Visibili
     factors,
     fairness: "Visibility affects discovery, featured, recommended, and spotlight placement only. It does not change competitive leaderboard rank, kills, deaths, K/D, longest kill, crowns, tournament score, or ADM stats.",
   };
+}
+
+export function getProfileCompleteness(server: OwnerVisibilityCompletenessInput): VisibilityCompleteness {
+  return completenessFromItems([
+    {
+      key: "category",
+      label: "Server category",
+      complete: Boolean(stringValue(server.server_category ?? server.serverCategory)),
+      action: "Set a server category for category-matched discovery.",
+    },
+    {
+      key: "description",
+      label: "Public description",
+      complete: Boolean(stringValue(server.public_description ?? server.publicDescription)),
+      action: "Add a public description that explains the community.",
+    },
+    {
+      key: "tags",
+      label: "Listing tags",
+      complete: countItems(server.tags ?? parseTags(server.tags_json)) > 0,
+      action: "Add public tags so players can scan the listing quickly.",
+    },
+    {
+      key: "public_page",
+      label: "Public profile URL",
+      complete: Boolean(stringValue(server.public_slug ?? server.publicSlug)),
+      action: "Finish listing setup so the public profile URL is ready.",
+    },
+    {
+      key: "visibility",
+      label: "Public listing visibility",
+      complete: String(server.listing_visibility ?? server.listingVisibility ?? "public").toLowerCase() !== "hidden",
+      action: "Make the server public to participate in discovery surfaces.",
+    },
+  ]);
+}
+
+export function getVisualLoadoutCompleteness(server: OwnerVisibilityCompletenessInput): VisibilityCompleteness {
+  const animationsAllowed = Boolean(server.animationsAllowed);
+  const visualLoadout = server.visualLoadout;
+  const saved = Boolean(server.savedVisualLoadout || visualLoadout?.source === "saved");
+  return completenessFromItems([
+    {
+      key: "saved_loadout",
+      label: "Saved visual loadout",
+      complete: saved,
+      action: "Save a visual loadout for the public card and profile header.",
+    },
+    {
+      key: "profile_frame",
+      label: "Profile frame",
+      complete: Boolean(stringValue(server.profileFrameKey ?? visualLoadout?.profileFrameKey)),
+      action: "Choose an available profile frame.",
+    },
+    {
+      key: "theme_banner",
+      label: "Theme banner",
+      complete: Boolean(stringValue(server.themeBannerKey ?? visualLoadout?.themeBannerKey)),
+      action: "Choose an available theme banner.",
+    },
+    {
+      key: "animation",
+      label: "Animation setting",
+      complete: !animationsAllowed || Boolean(server.animationEnabled ?? visualLoadout?.animationEnabled),
+      action: "Enable Premium animation when available.",
+    },
+  ]);
+}
+
+export function getBadgeShowcaseCompleteness(server: OwnerVisibilityCompletenessInput): VisibilityCompleteness {
+  const selected = countItems(server.selectedShowcaseBadges ?? server.visualLoadout?.showcaseBadgeCodes);
+  const earned = countItems(server.earnedShowcaseBadges ?? server.showcaseBadges ?? server.badges ?? server.earnedBadges);
+  const maxShowcaseBadges = Math.max(1, numberValue(server.maxShowcaseBadges) || 3);
+  const target = Math.max(1, Math.min(maxShowcaseBadges, Math.max(earned, 1)));
+  return {
+    percent: Math.min(100, Math.round((selected / target) * 100)),
+    completed: selected,
+    total: target,
+    items: [
+      {
+        key: "earned_badges",
+        label: "Earned public badges",
+        complete: earned > 0,
+        action: "Earn badges through reputation, activity, seasonal, or status rewards.",
+      },
+      {
+        key: "selected_showcase",
+        label: "Selected showcase badges",
+        complete: selected > 0,
+        action: "Choose earned badges for the public showcase.",
+      },
+      {
+        key: "plan_allowance",
+        label: "Showcase allowance used",
+        complete: selected >= target,
+        action: `Use up to ${maxShowcaseBadges} showcase badges on this plan.`,
+      },
+    ],
+  };
+}
+
+export function getVisibilityUpgradeBenefits(planKey: unknown) {
+  const normalized = normalizePublicPlanKey(planKey);
+  if (normalized === "premium") return [];
+  if (normalized === "pro") {
+    return [
+      "Premium adds spotlight eligibility.",
+      "Premium adds premium discovery priority.",
+      "Premium unlocks premium visual treatment for public cards and profiles.",
+    ];
+  }
+  return [
+    "Pro adds enhanced discovery and featured rotation eligibility.",
+    "Premium adds premium discovery priority and spotlight eligibility.",
+    "Premium unlocks premium visual treatment for public cards and profiles.",
+  ];
+}
+
+export function getOwnerVisibilityRecommendedActions(input: {
+  planKey: unknown;
+  profileCompleteness: VisibilityCompleteness;
+  visualLoadoutCompleteness: VisibilityCompleteness;
+  badgeShowcaseCompleteness: VisibilityCompleteness;
+  isSpotlightEligible?: boolean;
+}) {
+  const actions: string[] = [];
+  if (input.profileCompleteness.percent < 100) actions.push("Complete public profile fields for stronger discovery quality.");
+  if (input.visualLoadoutCompleteness.percent < 100) actions.push("Save a visual loadout so public cards look more complete.");
+  if (input.badgeShowcaseCompleteness.percent < 100) actions.push("Add earned badges to the showcase when available.");
+
+  const normalized = normalizePublicPlanKey(input.planKey);
+  if (normalized === "starter") actions.push("Upgrade to Pro for enhanced discovery or Premium for spotlight eligibility.");
+  if (normalized === "pro") actions.push("Upgrade to Premium for spotlight eligibility and premium discovery priority.");
+  if (normalized === "premium" && input.isSpotlightEligible) actions.push("Premium spotlight eligibility is active; keep profile and activity quality high.");
+
+  return actions.length ? actions : ["Visibility setup looks complete. Keep server activity and profile quality current."];
 }
 
 function orderedByDiscovery<T extends ServerVisibilityInput>(servers: T[], limit = 10) {
@@ -261,4 +428,15 @@ function dateValue(value: unknown) {
   if (typeof value !== "string" || !value) return 0;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function completenessFromItems(items: VisibilityCompletenessItem[]): VisibilityCompleteness {
+  const completed = items.filter((item) => item.complete).length;
+  const total = Math.max(1, items.length);
+  return {
+    percent: Math.round((completed / total) * 100),
+    completed,
+    total,
+    items,
+  };
 }

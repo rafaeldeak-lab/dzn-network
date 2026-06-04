@@ -5,11 +5,16 @@ import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import {
   explainServerVisibility,
   getFeaturedServerCandidates,
+  getBadgeShowcaseCompleteness,
+  getOwnerVisibilityRecommendedActions,
   getPlanVisibilityWeight,
+  getProfileCompleteness,
   getRecommendedServers,
   getServerDiscoveryScore,
   getServerVisibilityConfig,
   getSpotlightEligibleServers,
+  getVisibilityUpgradeBenefits,
+  getVisualLoadoutCompleteness,
 } from "../functions/_lib/server-visibility";
 import { publicAdvertisingFromState } from "../functions/_lib/advertising";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
@@ -72,9 +77,47 @@ assert.equal(sorted.find((server) => server.id === "competitive-rank-one")?.scor
 
 const explanation = explainServerVisibility({ planKey: "premium" });
 assert.match(explanation.fairness, /does not change competitive leaderboard rank/i);
+assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /Pro adds enhanced discovery/i.test(benefit)), true, "Starter should see Pro upgrade benefits.");
+assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /Premium adds premium discovery priority/i.test(benefit)), true, "Starter should see Premium upgrade benefits.");
+assert.equal(getVisibilityUpgradeBenefits("pro").some((benefit) => /spotlight eligibility/i.test(benefit)), true, "Pro should see Premium spotlight benefits.");
+assert.deepEqual(getVisibilityUpgradeBenefits("premium"), [], "Premium should not see an upgrade nag.");
+
+const profileComplete = getProfileCompleteness({
+  server_category: "pvp",
+  public_description: "Competitive PvP listing.",
+  tags_json: JSON.stringify(["PvP"]),
+  public_slug: "test-server",
+  listing_visibility: "public",
+});
+assert.equal(profileComplete.percent, 100, "Complete public profile should score 100%.");
+
+const visualComplete = getVisualLoadoutCompleteness({
+  savedVisualLoadout: true,
+  profileFrameKey: "premium",
+  themeBannerKey: "space",
+  animationEnabled: true,
+  animationsAllowed: true,
+});
+assert.equal(visualComplete.percent, 100, "Saved Premium visual loadout should score 100%.");
+
+const badgeComplete = getBadgeShowcaseCompleteness({
+  selectedShowcaseBadges: ["premium_server", "diamond", "king_of_pvp"],
+  earnedShowcaseBadges: ["premium_server", "diamond", "king_of_pvp"],
+  maxShowcaseBadges: 3,
+});
+assert.equal(badgeComplete.percent, 100, "Filled badge showcase should score 100%.");
+assert.equal(getOwnerVisibilityRecommendedActions({
+  planKey: "premium",
+  profileCompleteness: profileComplete,
+  visualLoadoutCompleteness: visualComplete,
+  badgeShowcaseCompleteness: badgeComplete,
+  isSpotlightEligible: true,
+}).some((action) => /Premium spotlight eligibility is active/i.test(action)), true, "Premium owners should see active spotlight confirmation.");
 
 const publicServers = readFileSync("functions/api/public/servers.ts", "utf8");
 const publicNetwork = readFileSync("components/network/public-network.tsx", "utf8");
+const visibilityEndpoint = readFileSync("functions/api/servers/[serverId]/visibility-status.ts", "utf8");
+const serverSettingsUi = readFileSync("components/onboarding/server-settings-page.tsx", "utf8");
 for (const field of ["visibilityWeight", "discoveryScore", "visibilityTier", "isFeaturedEligible", "isSpotlightEligible", "visibilityExplanation"]) {
   assert.equal(publicServers.includes(field), true, `/api/public/servers should expose ${field}.`);
 }
@@ -92,6 +135,42 @@ assert.equal(publicNetwork.includes("All Public Servers"), true, "Standard serve
 assert.equal(publicNetwork.includes('tier === "premium" ? "Premium"'), true, "Premium label should only be used for premium visibility tier.");
 assert.equal(publicNetwork.includes("Spotlight Eligible"), true, "Spotlight eligible label should be available for eligible servers.");
 assert.equal(publicNetwork.includes("do not change competitive rank"), true, "Public UI copy should preserve competitive ranking fairness.");
+for (const snippet of [
+  "onRequestGet",
+  "resolveOwnerVisualLoadoutServer",
+  "getServerVisibilityConfig",
+  "getServerDiscoveryScore",
+  "profileCompleteness",
+  "visualLoadoutCompleteness",
+  "badgeShowcaseCompleteness",
+  "recommendedActions",
+  "upgradeBenefits",
+]) {
+  assert.equal(visibilityEndpoint.includes(snippet), true, `Visibility status endpoint should include ${snippet}.`);
+}
+assert.equal(visibilityEndpoint.includes("status: access.status"), true, "Visibility endpoint should preserve resolver 401/403 status.");
+assert.equal(visibilityEndpoint.includes("VISIBILITY_STATUS_UNAVAILABLE"), true, "Visibility endpoint should return structured errors.");
+assert.equal(/from\s+["'][^"']*(?:adm-sync|adm-import|adm-parser|nitrado|stripe\/webhook)[^"']*["']|adm_import_jobs|adm_sync_state|player_profiles/i.test(visibilityEndpoint.replace(/nitrado_service_id/g, "")), false, "Visibility endpoint must not import protected tracking or Stripe webhook systems.");
+
+for (const snippet of [
+  "Server Visibility & Promotion",
+  "/visibility-status",
+  "Current plan",
+  "Visibility tier",
+  "Discovery score",
+  "Featured Eligible",
+  "Spotlight Eligible",
+  "Profile completeness",
+  "Visual loadout completeness",
+  "Badge showcase completeness",
+  "Recommended actions",
+  "Upgrade benefits",
+  "Premium visibility active",
+  "No upgrade needed",
+  "Discovery and promotion only. Competitive leaderboard rankings are unchanged.",
+]) {
+  assert.equal(serverSettingsUi.includes(snippet), true, `Server Settings promotion panel should include ${snippet}.`);
+}
 
 const docs = readFileSync("docs/PREMIUM_VISIBILITY_SYSTEM.md", "utf8");
 for (const text of ["What It Affects", "What It Does Not Affect", "Spotlight Eligibility", "competitive leaderboards remain fair"]) {

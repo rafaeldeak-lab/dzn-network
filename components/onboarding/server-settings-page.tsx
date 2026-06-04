@@ -158,6 +158,38 @@ type DiscordEventChannelsResponse = {
   message?: string;
 };
 
+type VisibilityCompleteness = {
+  percent: number;
+  completed: number;
+  total: number;
+  items: Array<{
+    key: string;
+    label: string;
+    complete: boolean;
+    action: string;
+  }>;
+};
+
+type VisibilityStatusResponse = {
+  ok: true;
+  planKey: string;
+  visibilityTier: "standard" | "enhanced" | "premium";
+  visibilityWeight: number;
+  discoveryScore: number;
+  isFeaturedEligible: boolean;
+  isSpotlightEligible: boolean;
+  visibilityExplanation: {
+    summary: string;
+    factors: string[];
+    fairness: string;
+  };
+  profileCompleteness: VisibilityCompleteness;
+  visualLoadoutCompleteness: VisibilityCompleteness;
+  badgeShowcaseCompleteness: VisibilityCompleteness;
+  recommendedActions: string[];
+  upgradeBenefits: string[];
+};
+
 const ADVANCED_EVENT_CHANNEL_TYPES: EventChannelType[] = ["event_announcements", "event_live_scoreboard", "event_results"];
 
 const CATEGORY_ICON: Record<CategoryValue, React.ReactNode> = {
@@ -211,6 +243,9 @@ export function ServerSettingsPage() {
   const [visibility, setVisibility] = useState<ListingVisibility>("public");
   const [discordChannels, setDiscordChannels] = useState<DiscordEventChannelsResponse | null>(null);
   const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
+  const [visibilityStatus, setVisibilityStatus] = useState<VisibilityStatusResponse | null>(null);
+  const [visibilityStatusLoading, setVisibilityStatusLoading] = useState(false);
+  const [visibilityStatusError, setVisibilityStatusError] = useState<string | null>(null);
   const [advancedRoutingOpen, setAdvancedRoutingOpen] = useState(false);
   const [eventChannelIds, setEventChannelIds] = useState<Record<EventChannelType, string>>({
     default_event: "",
@@ -299,6 +334,16 @@ export function ServerSettingsPage() {
   useEffect(() => {
     if (!settings) return;
     void refreshDiscordEventChannels(settings.server.id, false);
+    // The refresh helper intentionally reads the current selected server state; this effect is only keyed to the loaded server id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.server.id]);
+
+  useEffect(() => {
+    if (!settings?.server.id) return;
+    const timer = window.setTimeout(() => void refreshVisibilityStatus(settings.server.id), 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
     // The refresh helper intentionally reads the current selected server state; this effect is only keyed to the loaded server id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.server.id]);
@@ -410,6 +455,26 @@ export function ServerSettingsPage() {
       if (showMessage) setSaveState({ area: null, message: null, error: details.message });
     } finally {
       setDiscordChannelsLoading(false);
+    }
+  }
+
+  async function refreshVisibilityStatus(serverId = settings?.server.id ?? selectedServerId) {
+    if (!serverId) return;
+    const endpoint = `/api/servers/${encodeURIComponent(serverId)}/visibility-status`;
+    setVisibilityStatusLoading(true);
+    setVisibilityStatusError(null);
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const data = await readApiResponse<VisibilityStatusResponse>(response, endpoint, "Visibility status could not be loaded right now.");
+      setVisibilityStatus(data);
+    } catch (error) {
+      setVisibilityStatusError(safeErrorMessage(error, "Visibility status could not be loaded right now."));
+    } finally {
+      setVisibilityStatusLoading(false);
     }
   }
 
@@ -620,6 +685,14 @@ export function ServerSettingsPage() {
           {saveState.error ?? saveState.message}
         </div>
       ) : null}
+
+      <VisibilityPromotionPanel
+        status={visibilityStatus}
+        loading={visibilityStatusLoading}
+        error={visibilityStatusError}
+        fallbackPlanKey={settings.plan.plan_key}
+        onRetry={() => refreshVisibilityStatus(settings.server.id)}
+      />
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <section id="category" className="glass-surface animated-border rounded-lg p-5">
@@ -978,6 +1051,152 @@ function PageShell({ children, onLogout }: { children: React.ReactNode; onLogout
   );
 }
 
+function VisibilityPromotionPanel({
+  status,
+  loading,
+  error,
+  fallbackPlanKey,
+  onRetry,
+}: {
+  status: VisibilityStatusResponse | null;
+  loading: boolean;
+  error: string | null;
+  fallbackPlanKey: string;
+  onRetry: () => void;
+}) {
+  const planKey = status?.planKey ?? fallbackPlanKey;
+  const upgradeBenefits = status?.upgradeBenefits ?? [];
+
+  return (
+    <section className="glass-surface animated-border mt-5 rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <SectionTitle icon={<Eye className="h-5 w-5" />} title="Server Visibility & Promotion" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+              See how this server appears in discovery, featured placement, recommendations, and spotlight surfaces.
+            </p>
+            <p className="mt-2 text-xs font-bold text-zinc-500">
+              Discovery and promotion only. Competitive leaderboard rankings are unchanged.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={loading}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 disabled:opacity-55"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+
+        {loading && !status ? (
+          <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">
+            Loading visibility status...
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4">
+            <p className="text-sm font-black text-amber-50">{error}</p>
+            <p className="mt-2 text-sm leading-6 text-amber-100/85">Server settings remain available. Retry visibility status when ready.</p>
+          </div>
+        ) : null}
+
+        {status ? (
+          <div className="mt-5 grid gap-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <InfoRow label="Current plan" value={formatPlan(planKey)} />
+              <InfoRow label="Visibility tier" value={formatVisibilityTier(status.visibilityTier)} />
+              <InfoRow label="Discovery score" value={status.discoveryScore.toLocaleString("en-GB")} />
+              <InfoRow label="Visibility weight" value={status.visibilityWeight} />
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <StatusChip tone={status.isFeaturedEligible ? "emerald" : "zinc"} icon={<ShieldCheck className="h-3.5 w-3.5" />}>
+                {status.isFeaturedEligible ? "Featured Eligible" : "Not Featured Eligible"}
+              </StatusChip>
+              <StatusChip tone={status.isSpotlightEligible ? "violet" : "zinc"} icon={<Eye className="h-3.5 w-3.5" />}>
+                {status.isSpotlightEligible ? "Spotlight Eligible" : "Not Spotlight Eligible"}
+              </StatusChip>
+              <StatusChip tone="cyan" icon={<Globe2 className="h-3.5 w-3.5" />}>
+                {status.visibilityExplanation.summary}
+              </StatusChip>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-3">
+              <CompletenessMeter title="Profile completeness" status={status.profileCompleteness} />
+              <CompletenessMeter title="Visual loadout completeness" status={status.visualLoadoutCompleteness} />
+              <CompletenessMeter title="Badge showcase completeness" status={status.badgeShowcaseCompleteness} />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+                <p className="text-xs font-black uppercase text-zinc-300">Recommended actions</p>
+                <ul className="mt-3 grid gap-2 text-sm leading-6 text-zinc-300">
+                  {status.recommendedActions.map((action) => (
+                    <li key={action} className="flex gap-2">
+                      <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-cyan-200" />
+                      <span>{action}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className={`rounded-lg border p-4 ${upgradeBenefits.length ? "border-violet-300/20 bg-violet-400/10" : "border-emerald-300/20 bg-emerald-400/10"}`}>
+                <p className="text-xs font-black uppercase text-zinc-200">{upgradeBenefits.length ? "Upgrade benefits" : "Premium visibility active"}</p>
+                {upgradeBenefits.length ? (
+                  <ul className="mt-3 grid gap-2 text-sm leading-6 text-violet-50">
+                    {upgradeBenefits.map((benefit) => (
+                      <li key={benefit} className="flex gap-2">
+                        <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-violet-100" />
+                        <span>{benefit}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-emerald-50">
+                    Premium discovery and spotlight eligibility are active. No upgrade needed.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <p className="text-xs leading-5 text-zinc-500">{status.visibilityExplanation.fairness}</p>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function CompletenessMeter({ title, status }: { title: string; status: VisibilityCompleteness }) {
+  const percent = clampPercent(status.percent);
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-zinc-300">{title}</p>
+          <p className="mt-1 text-xs font-bold text-zinc-500">{status.completed} of {status.total} complete</p>
+        </div>
+        <span className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 text-xs font-black text-cyan-100">{percent}%</span>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-violet-300" style={{ width: `${percent}%` }} />
+      </div>
+      <ul className="mt-3 grid gap-1.5 text-xs leading-5 text-zinc-400">
+        {status.items.slice(0, 3).map((item) => (
+          <li key={item.key} className="flex gap-2">
+            <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${item.complete ? "bg-emerald-300" : "bg-zinc-600"}`} />
+            <span>{item.complete ? item.label : item.action}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function LoadingScreen() {
   return (
     <PageShell onLogout={signOut}>
@@ -1097,6 +1316,16 @@ function stringOrNull(value: unknown) {
 function formatPlan(value: string) {
   if (!value) return "Free";
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatVisibilityTier(value: string) {
+  if (value === "premium") return "Premium discovery";
+  if (value === "enhanced") return "Enhanced discovery";
+  return "Standard discovery";
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(Number.isFinite(value) ? value : 0)));
 }
 
 function formatDate(value: string) {
