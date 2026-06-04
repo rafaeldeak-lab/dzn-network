@@ -74,6 +74,24 @@ export type BillingPlanSummary = PlanEntitlements & {
   features: string[];
 };
 
+export type BillingReadinessStatus = {
+  starterConfigured: boolean;
+  proConfigured: boolean;
+  premiumConfigured: boolean;
+  stripeSecretConfigured: boolean;
+  webhookSecretConfigured: boolean;
+  activePlans: Array<{
+    plan_key: PaidPlanKey;
+    name: string;
+    price_label: string;
+    monthly_price_gbp: number;
+    configured: boolean;
+  }>;
+  missingRequiredVars: string[];
+  legacyVarsDetected: string[];
+  modeHint: "test" | "live" | "unknown" | "not_configured";
+};
+
 export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
   free: {
     plan_key: "free",
@@ -194,7 +212,7 @@ export function normalizePlanKey(value: unknown): PlanKey {
 }
 
 export function paidPlanKey(value: unknown): PaidPlanKey | null {
-  const key = canonicalPlanKey(value);
+  const key = typeof value === "string" ? value.trim().toLowerCase() : "";
   return key === "starter" || key === "pro" || key === "premium" ? key : null;
 }
 
@@ -242,6 +260,39 @@ export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
     plan_key: planKey,
     configured: configured[planKey],
   }));
+}
+
+export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
+  const configured = getCheckoutConfigured(env);
+  const stripeSecretConfigured = Boolean(cleanEnvString(env.STRIPE_SECRET_KEY));
+  const webhookSecretConfigured = Boolean(cleanEnvString(env.STRIPE_WEBHOOK_SECRET));
+  const missingRequiredVars: string[] = [];
+
+  for (const planKey of PAID_PLAN_KEYS) {
+    if (!configured[planKey]) {
+      missingRequiredVars.push(PLAN_CONFIG[planKey].stripe_price_env_key ?? `STRIPE_PRICE_${planKey.toUpperCase()}`);
+    }
+  }
+  if (!stripeSecretConfigured) missingRequiredVars.push("STRIPE_SECRET_KEY");
+  if (!webhookSecretConfigured) missingRequiredVars.push("STRIPE_WEBHOOK_SECRET");
+
+  return {
+    starterConfigured: configured.starter,
+    proConfigured: configured.pro,
+    premiumConfigured: configured.premium,
+    stripeSecretConfigured,
+    webhookSecretConfigured,
+    activePlans: getBillingPlanSummaries(env).map((plan) => ({
+      plan_key: plan.plan_key,
+      name: plan.name,
+      price_label: plan.price_label,
+      monthly_price_gbp: plan.monthly_price_gbp,
+      configured: plan.configured,
+    })),
+    missingRequiredVars,
+    legacyVarsDetected: getDetectedLegacyStripeVars(env),
+    modeHint: getStripeModeHint(env),
+  };
 }
 
 export function hasPlanFeature(planKey: unknown, featureKey: PlanFeature) {
@@ -590,6 +641,21 @@ function stringOrNull(value: unknown) {
 
 function boolInt(value: boolean) {
   return value ? 1 : 0;
+}
+
+function getDetectedLegacyStripeVars(env: Env) {
+  const legacyVars: string[] = [];
+  if (cleanEnvString(env.STRIPE_PRICE_NETWORK)) legacyVars.push("STRIPE_PRICE_NETWORK");
+  if (cleanEnvString(env.STRIPE_PRICE_PARTNER)) legacyVars.push("STRIPE_PRICE_PARTNER");
+  return legacyVars;
+}
+
+function getStripeModeHint(env: Env): BillingReadinessStatus["modeHint"] {
+  const secret = cleanEnvString(env.STRIPE_SECRET_KEY);
+  if (!secret) return "not_configured";
+  if (secret.startsWith("sk_live_")) return "live";
+  if (secret.startsWith("sk_test_")) return "test";
+  return "unknown";
 }
 
 function cleanEnvString(value: unknown) {

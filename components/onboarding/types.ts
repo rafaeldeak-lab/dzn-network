@@ -10,6 +10,26 @@ export type AuthResponse = {
   linkedServers?: LinkedServer[];
 };
 
+export type BillingReadinessResponse = {
+  ok: boolean;
+  role?: "admin" | "support" | "dev";
+  starterConfigured: boolean;
+  proConfigured: boolean;
+  premiumConfigured: boolean;
+  stripeSecretConfigured: boolean;
+  webhookSecretConfigured: boolean;
+  activePlans: Array<{
+    plan_key: "starter" | "pro" | "premium";
+    name: string;
+    price_label: string;
+    monthly_price_gbp: number;
+    configured: boolean;
+  }>;
+  missingRequiredVars: string[];
+  legacyVarsDetected: string[];
+  modeHint?: "test" | "live" | "unknown" | "not_configured";
+};
+
 export type DiscordGuild = {
   id?: string;
   guild_id: string;

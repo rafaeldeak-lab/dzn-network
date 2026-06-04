@@ -7,6 +7,7 @@ import type {
   AdvertisingBumpStatus,
   AutomationHealth,
   BillingPlanSummary,
+  BillingReadinessResponse,
   BillingStatus,
   DiscordBotStatusResponse,
   DiscordGuild,
@@ -127,6 +128,10 @@ export async function getBillingStatus() {
 
 export async function getBillingPlans() {
   return request<{ plans: BillingPlanSummary[] }>("/api/billing/plans");
+}
+
+export async function getBillingReadiness() {
+  return request<BillingReadinessResponse>("/api/billing/readiness", { cache: "no-store" });
 }
 
 export async function createCheckoutSession(planKey: "starter" | "pro" | "premium", returnTo = "/dashboard") {

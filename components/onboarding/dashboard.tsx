@@ -36,10 +36,10 @@ import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
-import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingReadinessResponse, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 15000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
@@ -455,6 +455,7 @@ function ServerDashboard({
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [lastGoodBilling, setLastGoodBilling] = useState<BillingStatus | null>(null);
   const [billingPlans, setBillingPlans] = useState<BillingPlanSummary[]>([]);
+  const [billingReadiness, setBillingReadiness] = useState<BillingReadinessResponse | null>(null);
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
   const [postingSetups, setPostingSetups] = useState<PostingChannelSetup[]>([]);
   const [postingOptions, setPostingOptions] = useState<PostingOptionSummary[]>([]);
@@ -625,6 +626,8 @@ function ServerDashboard({
       if (advertising?.advertising) setAdvertisingStatus(advertising.advertising);
       const plans = await getBillingPlans().catch(() => null);
       if (plans?.plans?.length) setBillingPlans(plans.plans);
+      const readiness = await getBillingReadiness().catch(() => null);
+      setBillingReadiness(readiness);
       const posting = await getPostingDestinations(server.id).catch(() => null);
       if (posting?.setups) setPostingSetups(posting.setups);
       if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
@@ -3302,7 +3305,7 @@ function ServerDashboard({
 
         <aside className={activeTab === "discord-posts" || activeTab === "sync-health" ? "hidden" : "grid content-start gap-5"}>
           {activeTab === "billing" ? (
-          <BillingPlanPanel billing={effectiveBillingStatus} plans={billingPlans} message={billingMessage} onRefresh={refreshBillingWithAction} />
+          <BillingPlanPanel billing={effectiveBillingStatus} plans={billingPlans} readiness={billingReadiness} message={billingMessage} onRefresh={refreshBillingWithAction} />
           ) : null}
           {activeTab === "billing" ? (
           <AdvertisingBoostPanel
@@ -4205,7 +4208,7 @@ const billingPlans = [
   { key: "premium", label: "Premium", price: "£19.99/month", detail: "Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits" },
 ] as const;
 
-function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; message: string; onRefresh: () => Promise<void> }) {
+function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; readiness: BillingReadinessResponse | null; message: string; onRefresh: () => Promise<void> }) {
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const planKey = billing?.plan_key ?? "free";
@@ -4256,6 +4259,8 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
         <MiniInfo label={billing?.cancel_at_period_end ? "Cancels On" : "Renews"} value={billingRenewalLabel(billing)} />
       </div>
 
+      <BillingReadinessWarning readiness={readiness} />
+
       <div className="mt-4 grid gap-2">
         {displayPlans.map((plan) => (
           <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
@@ -4304,6 +4309,29 @@ function BillingPlanPanel({ billing, plans, message, onRefresh }: { billing: Bil
         Nitrado controls when fresh ADM logs are available. DZN checks automatically based on your plan, but ADM logs can appear 5-45 minutes after a restart.
       </p>
     </DashboardPanel>
+  );
+}
+
+function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
+  if (!readiness?.missingRequiredVars?.length) return null;
+  const legacyCopy = readiness.legacyVarsDetected.length
+    ? ` Legacy vars detected: ${readiness.legacyVarsDetected.join(", ")}.`
+    : "";
+  return (
+    <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" />
+        <div>
+          <p className="text-xs font-black uppercase text-amber-100">Admin billing readiness warning</p>
+          <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
+            Checkout is missing required Stripe configuration: {readiness.missingRequiredVars.join(", ")}.
+          </p>
+          <p className="mt-1 text-[11px] leading-5 text-amber-100/80">
+            Mode hint: {formatStripeModeHint(readiness.modeHint)}.{legacyCopy} Secret values are never shown here.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -7759,6 +7787,13 @@ function planPromotionCreditLimit(planKey: string) {
   if (normalized === "premium" || normalized === "network" || normalized === "partner") return 8;
   if (normalized === "pro") return 2;
   return 0;
+}
+
+function formatStripeModeHint(modeHint: BillingReadinessResponse["modeHint"]) {
+  if (modeHint === "live") return "live";
+  if (modeHint === "test") return "test";
+  if (modeHint === "not_configured") return "not configured";
+  return "unknown";
 }
 
 function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSummary {

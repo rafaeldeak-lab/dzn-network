@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
-import { getBillingPlanSummaries, getCheckoutConfigured, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
+import { getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
 import { onRequest as billingPlansHandler } from "../functions/api/billing/plans";
 import { onRequest as checkoutHandler } from "../functions/api/billing/create-checkout-session";
+import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
 import type { Env, PagesFunction } from "../functions/_lib/types";
@@ -121,6 +122,34 @@ assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
 assert.equal(JSON.stringify(planSummaries).includes("sk_test"), false);
 
+const missingPremiumReadiness = getBillingReadinessStatus({
+  STRIPE_PRICE_STARTER: "price_starter",
+  STRIPE_PRICE_PRO: "price_pro",
+  STRIPE_SECRET_KEY: "sk_test_readiness",
+  STRIPE_WEBHOOK_SECRET: "whsec_readiness",
+} as Env);
+assert.equal(missingPremiumReadiness.premiumConfigured, false);
+assert.equal(missingPremiumReadiness.missingRequiredVars.includes("STRIPE_PRICE_PREMIUM"), true);
+
+const completeReadiness = getBillingReadinessStatus({
+  STRIPE_PRICE_STARTER: "price_starter",
+  STRIPE_PRICE_PRO: "price_pro",
+  STRIPE_PRICE_PREMIUM: "price_premium",
+  STRIPE_PRICE_NETWORK: "price_network_legacy",
+  STRIPE_SECRET_KEY: "sk_live_secret_value_must_not_leak",
+  STRIPE_WEBHOOK_SECRET: "whsec_secret_value_must_not_leak",
+} as Env);
+assert.equal(completeReadiness.starterConfigured, true);
+assert.equal(completeReadiness.proConfigured, true);
+assert.equal(completeReadiness.premiumConfigured, true);
+assert.deepEqual(completeReadiness.activePlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+assert.deepEqual(completeReadiness.missingRequiredVars, []);
+assert.deepEqual(completeReadiness.legacyVarsDetected, ["STRIPE_PRICE_NETWORK"]);
+assert.equal(completeReadiness.modeHint, "live");
+assert.equal(JSON.stringify(completeReadiness).includes("sk_live_secret_value_must_not_leak"), false);
+assert.equal(JSON.stringify(completeReadiness).includes("whsec_secret_value_must_not_leak"), false);
+assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false);
+
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
 const pricingSection = [
   landingSource.slice(landingSource.indexOf("const pricingPlans"), landingSource.indexOf("function useHomeStats")),
@@ -159,6 +188,7 @@ assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits"), true, "Owner billing cards should explain Premium value.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
+assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
 
 const statements: string[] = [];
 const bindings: unknown[][] = [];
@@ -211,8 +241,53 @@ async function run() {
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("network"), false);
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("partner"), false);
 
+  const unauthReadiness = await billingReadinessHandler(makeContext(billingReadinessHandler, new Request("https://local.test/api/billing/readiness"), {} as Env));
+  assert.equal(unauthReadiness.status, 401);
+
+  const readinessResponse = await billingReadinessHandler(makeContext(
+    billingReadinessHandler,
+    new Request("https://local.test/api/billing/readiness"),
+    {
+      ...fakeEnv,
+      MOCK_AUTH: "true",
+      STRIPE_PRICE_STARTER: "price_starter_ready",
+      STRIPE_PRICE_PRO: "price_pro_ready",
+      STRIPE_SECRET_KEY: "sk_test_endpoint_secret_must_not_leak",
+      STRIPE_WEBHOOK_SECRET: "whsec_endpoint_secret_must_not_leak",
+    } as Env,
+  ));
+  assert.equal(readinessResponse.status, 200);
+  const readinessJson = await readinessResponse.json() as {
+    starterConfigured: boolean;
+    proConfigured: boolean;
+    premiumConfigured: boolean;
+    missingRequiredVars: string[];
+    activePlans: Array<{ plan_key: string }>;
+  };
+  assert.equal(readinessJson.starterConfigured, true);
+  assert.equal(readinessJson.proConfigured, true);
+  assert.equal(readinessJson.premiumConfigured, false);
+  assert.equal(readinessJson.missingRequiredVars.includes("STRIPE_PRICE_PREMIUM"), true);
+  assert.deepEqual(readinessJson.activePlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+  const readinessText = JSON.stringify(readinessJson);
+  assert.equal(readinessText.includes("sk_test_endpoint_secret_must_not_leak"), false);
+  assert.equal(readinessText.includes("whsec_endpoint_secret_must_not_leak"), false);
+  assert.equal(readinessText.includes("price_starter_ready"), false);
+
   const unauthCheckout = await checkoutHandler(makeContext(checkoutHandler, new Request("https://local.test/api/billing/create-checkout-session", { method: "POST" }), {} as Env));
   assert.equal(unauthCheckout.status, 401);
+
+  const invalidCheckout = await checkoutHandler(makeContext(
+    checkoutHandler,
+    new Request("https://local.test/api/billing/create-checkout-session", {
+      method: "POST",
+      body: JSON.stringify({ plan_key: "network" }),
+      headers: { "content-type": "application/json" },
+    }),
+    { ...fakeEnv, MOCK_AUTH: "true" } as Env,
+  ));
+  assert.equal(invalidCheckout.status, 400);
+  assert.match(await invalidCheckout.text(), /paid plan/i);
 
   const missingPriceCheckout = await checkoutHandler(makeContext(
     checkoutHandler,
@@ -255,6 +330,53 @@ async function run() {
     assert.match(capturedStripeBody, /line_items%5B0%5D%5Bprice%5D=price_1TY4dDJPrnZ0cnkH4OhfEHmW/);
     assert.match(capturedStripeBody, /metadata%5Bdiscord_user_id%5D=mock-discord-user/);
     assert.match(capturedStripeBody, /metadata%5Bplan_key%5D=pro/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const activeCheckoutPrices = {
+    starter: "price_starter_active",
+    pro: "price_pro_active",
+    premium: "price_premium_active",
+  } as const;
+  const capturedActiveCheckoutBodies: Record<keyof typeof activeCheckoutPrices, string> = {
+    starter: "",
+    pro: "",
+    premium: "",
+  };
+  globalThis.fetch = async (_input, init) => {
+    const body = String(init?.body ?? "");
+    const matchedPlan = (Object.keys(activeCheckoutPrices) as Array<keyof typeof activeCheckoutPrices>)
+      .find((planKey) => body.includes(`metadata%5Bplan_key%5D=${planKey}`));
+    if (matchedPlan) capturedActiveCheckoutBodies[matchedPlan] = body;
+    return new Response(JSON.stringify({ id: "cs_test", url: "https://checkout.stripe.test/session" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    for (const planKey of Object.keys(activeCheckoutPrices) as Array<keyof typeof activeCheckoutPrices>) {
+      const checkoutResponse = await checkoutHandler(makeContext(
+        checkoutHandler,
+        new Request("https://local.test/api/billing/create-checkout-session", {
+          method: "POST",
+          body: JSON.stringify({ plan_key: planKey, returnTo: "/dashboard" }),
+          headers: { "content-type": "application/json" },
+        }),
+        {
+          ...fakeEnv,
+          MOCK_AUTH: "true",
+          STRIPE_SECRET_KEY: "sk_test_placeholder",
+          STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
+          STRIPE_PRICE_PRO: activeCheckoutPrices.pro,
+          STRIPE_PRICE_PREMIUM: activeCheckoutPrices.premium,
+          NEXT_PUBLIC_APP_URL: "https://dzn-network.pages.dev",
+        } as Env,
+      ));
+      assert.equal(checkoutResponse.status, 200);
+      assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`line_items%5B0%5D%5Bprice%5D=${activeCheckoutPrices[planKey]}`));
+      assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`metadata%5Bplan_key%5D=${planKey}`));
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
