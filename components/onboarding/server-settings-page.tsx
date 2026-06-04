@@ -190,6 +190,47 @@ type VisibilityStatusResponse = {
   upgradeBenefits: string[];
 };
 
+type PromotionType = "directory_bump" | "featured_rotation" | "spotlight_boost" | "seasonal_push";
+
+type PromotionTypeStatus = {
+  promotionType: PromotionType;
+  label: string;
+  allowed: boolean;
+  reason: string | null;
+  durationHours: number;
+};
+
+type ActivePromotion = {
+  id: string;
+  promotionType: PromotionType;
+  status: string;
+  startsAt: string;
+  endsAt: string;
+  label: string;
+};
+
+type PromotionStatusResponse = {
+  ok: true;
+  planKey: string;
+  creditsAvailable: number;
+  creditsUsed: number;
+  periodStart: string;
+  periodEnd: string;
+  activePromotions: ActivePromotion[];
+  availablePromotionTypes: PromotionTypeStatus[];
+  lockedPromotionTypes: PromotionTypeStatus[];
+  promotionBenefits: string[];
+  upgradeBenefits: string[];
+  message?: string;
+};
+
+type PromotionActionState = {
+  promotionType: PromotionType | null;
+  busy: boolean;
+  message: string | null;
+  error: string | null;
+};
+
 const ADVANCED_EVENT_CHANNEL_TYPES: EventChannelType[] = ["event_announcements", "event_live_scoreboard", "event_results"];
 
 const CATEGORY_ICON: Record<CategoryValue, React.ReactNode> = {
@@ -246,6 +287,10 @@ export function ServerSettingsPage() {
   const [visibilityStatus, setVisibilityStatus] = useState<VisibilityStatusResponse | null>(null);
   const [visibilityStatusLoading, setVisibilityStatusLoading] = useState(false);
   const [visibilityStatusError, setVisibilityStatusError] = useState<string | null>(null);
+  const [promotionStatus, setPromotionStatus] = useState<PromotionStatusResponse | null>(null);
+  const [promotionStatusLoading, setPromotionStatusLoading] = useState(false);
+  const [promotionStatusError, setPromotionStatusError] = useState<string | null>(null);
+  const [promotionAction, setPromotionAction] = useState<PromotionActionState>({ promotionType: null, busy: false, message: null, error: null });
   const [advancedRoutingOpen, setAdvancedRoutingOpen] = useState(false);
   const [eventChannelIds, setEventChannelIds] = useState<Record<EventChannelType, string>>({
     default_event: "",
@@ -341,6 +386,16 @@ export function ServerSettingsPage() {
   useEffect(() => {
     if (!settings?.server.id) return;
     const timer = window.setTimeout(() => void refreshVisibilityStatus(settings.server.id), 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+    // The refresh helper intentionally reads the current selected server state; this effect is only keyed to the loaded server id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.server.id]);
+
+  useEffect(() => {
+    if (!settings?.server.id) return;
+    const timer = window.setTimeout(() => void refreshPromotionStatus(settings.server.id), 0);
     return () => {
       window.clearTimeout(timer);
     };
@@ -475,6 +530,57 @@ export function ServerSettingsPage() {
       setVisibilityStatusError(safeErrorMessage(error, "Visibility status could not be loaded right now."));
     } finally {
       setVisibilityStatusLoading(false);
+    }
+  }
+
+  async function refreshPromotionStatus(serverId = settings?.server.id ?? selectedServerId) {
+    if (!serverId) return;
+    const endpoint = `/api/servers/${encodeURIComponent(serverId)}/promotion-status`;
+    setPromotionStatusLoading(true);
+    setPromotionStatusError(null);
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const data = await readApiResponse<PromotionStatusResponse>(response, endpoint, "Promotion credits could not be loaded right now.");
+      setPromotionStatus(data);
+    } catch (error) {
+      setPromotionStatusError(safeErrorMessage(error, "Promotion credits could not be loaded right now."));
+    } finally {
+      setPromotionStatusLoading(false);
+    }
+  }
+
+  async function activatePromotionCredit(promotionType: PromotionType) {
+    if (!settings || promotionAction.busy) return;
+    const endpoint = `/api/servers/${encodeURIComponent(settings.server.id)}/promotions/use-credit`;
+    setPromotionAction({ promotionType, busy: true, message: null, error: null });
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ promotionType }),
+      });
+      const data = await readApiResponse<PromotionStatusResponse>(response, endpoint, "Promotion credit could not be used right now.");
+      setPromotionStatus(data);
+      setPromotionAction({
+        promotionType,
+        busy: false,
+        message: data.message ?? `${promotionTypeLabel(promotionType)} activated.`,
+        error: null,
+      });
+      void refreshVisibilityStatus(settings.server.id);
+    } catch (error) {
+      setPromotionAction({
+        promotionType,
+        busy: false,
+        message: null,
+        error: safeErrorMessage(error, "Promotion credit could not be used right now."),
+      });
     }
   }
 
@@ -692,6 +798,16 @@ export function ServerSettingsPage() {
         error={visibilityStatusError}
         fallbackPlanKey={settings.plan.plan_key}
         onRetry={() => refreshVisibilityStatus(settings.server.id)}
+      />
+
+      <PromotionCreditsPanel
+        status={promotionStatus}
+        loading={promotionStatusLoading}
+        error={promotionStatusError}
+        fallbackPlanKey={settings.plan.plan_key}
+        actionState={promotionAction}
+        onRetry={() => refreshPromotionStatus(settings.server.id)}
+        onUseCredit={activatePromotionCredit}
       />
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
@@ -1171,6 +1287,163 @@ function VisibilityPromotionPanel({
   );
 }
 
+function PromotionCreditsPanel({
+  status,
+  loading,
+  error,
+  fallbackPlanKey,
+  actionState,
+  onRetry,
+  onUseCredit,
+}: {
+  status: PromotionStatusResponse | null;
+  loading: boolean;
+  error: string | null;
+  fallbackPlanKey: string;
+  actionState: PromotionActionState;
+  onRetry: () => void;
+  onUseCredit: (promotionType: PromotionType) => void;
+}) {
+  const planKey = status?.planKey ?? fallbackPlanKey;
+  const upgradeBenefits = status?.upgradeBenefits ?? [];
+  const creditsAvailable = status?.creditsAvailable ?? 0;
+  const activeTypes = new Set((status?.activePromotions ?? []).map((promotion) => promotion.promotionType));
+  const promotionTypes = [
+    ...(status?.availablePromotionTypes ?? []),
+    ...(status?.lockedPromotionTypes ?? []),
+  ];
+
+  return (
+    <section className="glass-surface animated-border mt-5 rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <SectionTitle icon={<ArrowRight className="h-5 w-5" />} title="Server Promotion Credits" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+              Use monthly credits to refresh discovery placement, featured rotation, and Premium spotlight promotion.
+            </p>
+            <p className="mt-2 text-xs font-bold text-zinc-500">
+              Promotions affect discovery and visibility only. They do not change competitive leaderboard rankings.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={loading || actionState.busy}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 disabled:opacity-55"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+
+        {loading && !status ? (
+          <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">
+            Loading promotion credits...
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4">
+            <p className="text-sm font-black text-amber-50">{error}</p>
+            <p className="mt-2 text-sm leading-6 text-amber-100/85">Server settings remain available. Retry promotion status when ready.</p>
+          </div>
+        ) : null}
+
+        {status ? (
+          <div className="mt-5 grid gap-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <InfoRow label="Current plan" value={formatPlan(planKey)} />
+              <InfoRow label="Credits available" value={`${status.creditsAvailable}`} />
+              <InfoRow label="Credits used" value={`${status.creditsUsed}`} />
+              <InfoRow label="Current period" value={`${formatShortDate(status.periodStart)} - ${formatShortDate(status.periodEnd)}`} />
+            </div>
+
+            {actionState.message || actionState.error ? (
+              <div aria-live="polite" className={`rounded-lg border px-4 py-3 text-sm font-bold ${actionState.error ? "border-red-300/25 bg-red-400/10 text-red-50" : "border-emerald-300/25 bg-emerald-400/10 text-emerald-50"}`}>
+                {actionState.error ?? actionState.message}
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+                <p className="text-xs font-black uppercase text-zinc-300">Active promotions</p>
+                {status.activePromotions.length ? (
+                  <div className="mt-3 grid gap-2">
+                    {status.activePromotions.map((promotion) => (
+                      <div key={promotion.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2">
+                        <span className="text-sm font-black text-emerald-50">{promotion.label}</span>
+                        <span className="text-xs font-bold text-emerald-100/85">Ends {formatDate(promotion.endsAt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-zinc-400">No active promotions.</p>
+                )}
+              </div>
+
+              <div className={`rounded-lg border p-4 ${upgradeBenefits.length ? "border-violet-300/20 bg-violet-400/10" : "border-emerald-300/20 bg-emerald-400/10"}`}>
+                <p className="text-xs font-black uppercase text-zinc-200">{upgradeBenefits.length ? "Upgrade benefits" : "Promotion tools active"}</p>
+                <ul className="mt-3 grid gap-2 text-sm leading-6 text-zinc-100">
+                  {(upgradeBenefits.length ? upgradeBenefits : status.promotionBenefits).map((benefit) => (
+                    <li key={benefit} className="flex gap-2">
+                      <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-cyan-200" />
+                      <span>{benefit}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {promotionTypes.map((promotion) => {
+                const active = activeTypes.has(promotion.promotionType);
+                const busy = actionState.busy && actionState.promotionType === promotion.promotionType;
+                const disabled = actionState.busy || !promotion.allowed || creditsAvailable <= 0 || active;
+                const buttonLabel = active
+                  ? "Active"
+                  : busy
+                    ? "Activating..."
+                    : creditsAvailable <= 0
+                      ? "No Credits"
+                      : promotion.allowed
+                        ? "Use Credit"
+                        : "Locked";
+                return (
+                  <div key={promotion.promotionType} className={`rounded-lg border p-4 ${promotion.allowed ? "border-cyan-300/20 bg-cyan-400/10" : "border-white/10 bg-black/24"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-white">{promotion.label}</p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-400">{promotion.durationHours > 0 ? `${promotion.durationHours} hour visibility promotion` : "Reserved for future seasonal campaigns"}</p>
+                      </div>
+                      {!promotion.allowed ? <LockKeyhole className="h-4 w-4 shrink-0 text-zinc-500" /> : null}
+                    </div>
+                    {promotion.reason ? <p className="mt-3 text-xs font-bold text-amber-100">{promotion.reason}</p> : null}
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onUseCredit(promotion.promotionType)}
+                      aria-busy={busy}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : promotion.allowed ? <ArrowRight className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
+                      {buttonLabel}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className="text-xs leading-5 text-zinc-500">
+              Starter has 0 monthly credits. Pro includes 2 monthly credits for directory and featured promotion. Premium includes 8 monthly credits and spotlight boost eligibility.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function CompletenessMeter({ title, status }: { title: string; status: VisibilityCompleteness }) {
   const percent = clampPercent(status.percent);
   return (
@@ -1336,6 +1609,20 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(value));
+}
+
+function promotionTypeLabel(value: PromotionType) {
+  if (value === "directory_bump") return "Directory bump";
+  if (value === "featured_rotation") return "Featured rotation";
+  if (value === "spotlight_boost") return "Spotlight boost";
+  return "Seasonal push";
 }
 
 function channelIdsFromSettings(settings: SettingsResponse): Record<EventChannelType, string> {

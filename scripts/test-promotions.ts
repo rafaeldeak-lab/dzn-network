@@ -99,6 +99,32 @@ assert.equal(publicServers.includes("active_promotions_json"), true, "Public ser
 assert.equal(publicServers.includes("activePromotions"), true, "Public server API should expose active promotions safely.");
 assert.equal(publicServers.includes("rankA") && publicServers.includes("scoreDiff"), true, "Discovery sorting should retain competitive rank/score as fallback only.");
 
+const serverSettingsUi = readFileSync("components/onboarding/server-settings-page.tsx", "utf8");
+for (const snippet of [
+  "Server Promotion Credits",
+  "/promotion-status",
+  "/promotions/use-credit",
+  "creditsAvailable",
+  "creditsUsed",
+  "activePromotions",
+  "availablePromotionTypes",
+  "lockedPromotionTypes",
+  "Promotions affect discovery and visibility only. They do not change competitive leaderboard rankings.",
+  "Use Credit",
+  "No Credits",
+  "Locked",
+  "Spotlight boost",
+  "Starter has 0 monthly credits",
+  "Pro includes 2 monthly credits",
+  "Premium includes 8 monthly credits",
+]) {
+  assert.equal(serverSettingsUi.includes(snippet), true, `Promotion credits UI should include ${snippet}.`);
+}
+assert.equal(serverSettingsUi.includes("actionState.busy || !promotion.allowed || creditsAvailable <= 0 || active"), true, "Promotion buttons should disable when busy, locked, out of credits, or already active.");
+assert.equal(serverSettingsUi.includes("method: \"POST\""), true, "Use credit action should call POST endpoint.");
+assert.equal(serverSettingsUi.includes("safeErrorMessage(error, \"Promotion credit could not be used right now.\")"), true, "Use credit action should show API error messages.");
+assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events/i.test(serverSettingsUi.replace(/nitrado_service_id/g, "")), false, "Promotion UI must not touch protected tracking or Stripe webhook systems.");
+
 const publicPlans = getBillingPlanSummaries({} as Env);
 assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
 assert.equal(publicPlans.some((plan) => /network|partner/i.test(`${plan.plan_key} ${plan.name} ${plan.price_label}`)), false);
