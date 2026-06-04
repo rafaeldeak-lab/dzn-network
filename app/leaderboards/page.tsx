@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { DznLogo } from "@/components/dzn/dzn-logo";
+import { AnimatedBullet } from "@/components/leaderboards/animated-bullet";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type LeaderboardServer = {
@@ -193,10 +194,10 @@ export default function LeaderboardsPage() {
   const initialError = loadState === "error_initial";
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-6 text-white sm:px-6 lg:px-8">
+    <main className="dzn-leaderboard-page relative min-h-screen overflow-hidden bg-[#02030a] px-5 py-6 text-white sm:px-6 lg:px-8">
       <AnimatedBackground />
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] max-w-7xl flex-col">
-        <nav className="flex min-h-[104px] items-center justify-between">
+        <nav className="flex min-h-[104px] flex-wrap items-center justify-between gap-3">
           <DznLogo />
           <div className="flex items-center gap-3">
             <Link href="/servers" className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
@@ -208,29 +209,32 @@ export default function LeaderboardsPage() {
           </div>
         </nav>
 
-        <section className="py-12">
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end">
+        <section className="dzn-leaderboard-hero my-8">
+          <div className="dzn-leaderboard-hero__copy">
             <div>
-              <p className="inline-flex rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
+              <p className="dzn-leaderboard-live-badge inline-flex rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
                 Live ADM intelligence
               </p>
-              <h1 className="mt-5 text-4xl font-black uppercase tracking-normal text-white sm:text-6xl">Global Leaderboards</h1>
-              <p className="mt-4 max-w-3xl text-lg leading-8 text-zinc-300">
+              <h1 className="dzn-leaderboard-title mt-5 text-4xl font-black uppercase tracking-normal text-white sm:text-6xl">Global Leaderboards</h1>
+              <p className="mt-4 max-w-3xl text-base font-semibold leading-7 text-zinc-300 sm:text-lg sm:leading-8">
                 Ranked connected DayZ servers and players based on synced ADM activity.
               </p>
               <p className="mt-3 text-sm font-bold text-zinc-500">
                 Updated: {initialError ? "Unavailable" : payload.updated_at ? formatDateTime(payload.updated_at) : loading ? "Loading live data..." : "Live data pending"}
               </p>
             </div>
+          </div>
 
-            {!initialError ? <div className="glass-surface animated-border rounded-lg p-5">
-              <div className="relative z-10 grid gap-3">
+          <div className="dzn-leaderboard-hero__visual">
+            <AnimatedBullet />
+            {!initialError ? (
+              <div className="dzn-leaderboard-stat-grid">
                 <MetricRow icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} />
                 <MetricRow icon={Crosshair} label="Kills Tracked" value={formatNumber(totalKills)} />
                 <MetricRow icon={Users} label="Ranked Players" value={String(totalPlayers)} />
                 <MetricRow icon={Trophy} label="Longest Kill" value={formatDistance(longestKill)} />
               </div>
-            </div> : null}
+            ) : null}
           </div>
         </section>
 
@@ -241,31 +245,28 @@ export default function LeaderboardsPage() {
         {loading ? <LoadingGrid /> : null}
 
         {!loading && !initialError ? (
-          <div className="grid gap-6 pb-14">
-            <LeaderboardTable
-              title="Top Servers"
-              icon={Trophy}
-              empty="No ranked servers yet."
-              headers={["Rank", "Server", "Mode", "Kills", "Deaths", "K/D", "Longest", "Score"]}
-              rows={payload.top_servers.map((server) => [
-                `#${server.rank}`,
-                <ServerLink key="server" slug={server.slug} label={server.server_name} />,
-                server.mode,
-                formatNumber(server.kills),
-                formatNumber(server.deaths),
-                formatKd(server),
-                formatDistance(server.longest_kill),
-                <span key="score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
-              ])}
-            />
+          <div className="dzn-leaderboard-layout grid gap-6 pb-14 xl:grid-cols-[minmax(0,1fr)_390px]">
+            <div className="grid gap-6">
+              <LeaderboardTable
+                title="Top Servers"
+                icon={Trophy}
+                empty="No ranked servers yet."
+                headers={["Rank", "Server", "Mode", "Kills", "Deaths", "K/D", "Longest", "Score"]}
+                rows={payload.top_servers.map((server) => [
+                  `#${server.rank}`,
+                  <ServerLink key="server" slug={server.slug} label={server.server_name} />,
+                  server.mode,
+                  formatNumber(server.kills),
+                  formatNumber(server.deaths),
+                  formatKd(server),
+                  formatDistance(server.longest_kill),
+                  <span key="score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
+                ])}
+              />
 
-            {payload.is_locked ? (
-              <>
+              {payload.is_locked ? (
                 <LockedLeaderboardPanel title="Top Players" icon={Users} text="Log in with Discord to unlock ranked players, kills, deaths, K/D, and personal records." />
-                <LockedLeaderboardPanel title="Longest Kills" icon={Skull} text="Long-kill records and detailed kill tables are available to logged-in DZN members." />
-              </>
-            ) : (
-              <>
+              ) : (
                 <LeaderboardTable
                   title="Top Players"
                   icon={Users}
@@ -282,13 +283,24 @@ export default function LeaderboardsPage() {
                   ])}
                 />
 
+              )}
+
+              {!payload.is_locked ? (
+                <PersonalBestTable personalBests={payload.personal_best_kills.length ? payload.personal_best_kills : payload.longest_kills} />
+              ) : null}
+            </div>
+
+            <aside className="dzn-leaderboard-sidecar grid content-start gap-6">
+              {payload.is_locked ? (
+                <LockedLeaderboardPanel title="Longest Kills" icon={Skull} text="Long-kill records and detailed kill tables are available to logged-in DZN members." />
+              ) : (
                 <LongestKillsSection
                   bestOverall={payload.best_overall_kill}
                   latestKill={payload.latest_kill}
-                  personalBests={payload.personal_best_kills.length ? payload.personal_best_kills : payload.longest_kills}
                 />
-              </>
-            )}
+              )}
+              <LiveAdmIntelPanel updatedAt={payload.updated_at} loading={loading} />
+            </aside>
           </div>
         ) : null}
       </div>
@@ -299,15 +311,13 @@ export default function LeaderboardsPage() {
 function LongestKillsSection({
   bestOverall,
   latestKill,
-  personalBests,
 }: {
   bestOverall: Omit<LongestKill, "rank"> | null;
   latestKill: Omit<LongestKill, "rank"> | null;
-  personalBests: LongestKill[];
 }) {
-  const hasKills = Boolean(bestOverall || latestKill || personalBests.length);
+  const hasKills = Boolean(bestOverall || latestKill);
   return (
-    <section className="glass-surface animated-border rounded-lg p-5">
+    <section className="dzn-leaderboard-card dzn-longest-kills-card glass-surface animated-border rounded-lg p-5">
       <div className="relative z-10">
         <div className="flex items-center gap-3">
           <Skull className="h-6 w-6 text-violet-200" />
@@ -315,49 +325,10 @@ function LongestKillsSection({
         </div>
 
         {hasKills ? (
-          <>
-            <div className="mt-5 grid gap-4 lg:grid-cols-2">
-              <KillHighlightCard title="Best Overall" kill={bestOverall} tone="violet" />
-              <KillHighlightCard title="Latest Confirmed" kill={latestKill} tone="cyan" />
-            </div>
-
-            <div className="mt-6">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-black uppercase tracking-[0.16em] text-zinc-300">Personal Bests</h3>
-                <p className="text-xs font-bold uppercase text-zinc-500">One best kill per player</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-separate border-spacing-y-2 text-left">
-                  <thead>
-                    <tr>
-                      {["Rank", "Player", "Victim", "Server", "Weapon", "Best Distance", "Time"].map((header) => (
-                        <th key={header} className="px-3 py-2 text-xs font-black uppercase text-zinc-500">
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {personalBests.map((kill) => (
-                      <tr key={`${kill.rank}-${kill.player_name}-${kill.distance}`} className="rounded-lg bg-black/24">
-                        <td className="border-y border-l border-white/10 px-3 py-3 first:rounded-l-lg">
-                          <span className="inline-flex rounded-md border border-violet-300/25 bg-violet-400/10 px-2 py-1 text-xs font-black text-violet-100">#{kill.rank}</span>
-                        </td>
-                        <td className="border-y border-white/10 px-3 py-3 text-sm font-black text-white">{kill.player_name}</td>
-                        <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">{kill.victim_name}</td>
-                        <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">
-                          <ServerLink slug={kill.server_slug} label={kill.server_name} />
-                        </td>
-                        <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">{kill.weapon}</td>
-                        <td className="border-y border-white/10 px-3 py-3 text-sm font-black text-cyan-100">{formatDistance(kill.distance)}</td>
-                        <td className="rounded-r-lg border-y border-r border-white/10 px-3 py-3 text-sm font-bold text-zinc-300">{formatDateTime(kill.occurred_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
+          <div className="mt-5 grid gap-4">
+            <KillHighlightCard title="Best Overall" kill={bestOverall} tone="violet" />
+            <KillHighlightCard title="Latest Confirmed" kill={latestKill} tone="cyan" />
+          </div>
         ) : (
           <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-5 text-sm font-bold text-zinc-400">
             No confirmed long kills yet. Long-kill records will appear once connected servers sync PvP kills.
@@ -368,12 +339,61 @@ function LongestKillsSection({
   );
 }
 
-function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<LongestKill, "rank"> | null; tone: "violet" | "cyan" }) {
-  const toneClass = tone === "violet"
-    ? "border-violet-300/25 bg-violet-500/10 text-violet-100"
-    : "border-cyan-300/25 bg-cyan-400/10 text-cyan-100";
+function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) {
   return (
-    <div className={`rounded-lg border p-4 ${toneClass}`}>
+    <section className="dzn-leaderboard-card glass-surface animated-border rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex items-center gap-3">
+            <Trophy className="h-6 w-6 text-violet-200" />
+            <h2 className="text-2xl font-black uppercase text-white">Personal Bests</h2>
+          </div>
+          <p className="text-xs font-bold uppercase text-zinc-500">One best kill per player</p>
+        </div>
+        {personalBests.length ? (
+          <div className="dzn-leaderboard-table-wrap mt-5 overflow-x-auto">
+            <table className="dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
+              <thead>
+                <tr>
+                  {["Rank", "Player", "Victim", "Server", "Weapon", "Best Distance", "Time"].map((header) => (
+                    <th key={header} className="px-3 py-2 text-xs font-black uppercase text-zinc-500">
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {personalBests.map((kill, index) => (
+                  <tr key={`${kill.rank}-${kill.player_name}-${kill.distance}`} className="dzn-leaderboard-row rounded-lg bg-black/24">
+                    <td className="border-y border-l border-white/10 px-3 py-3 first:rounded-l-lg">
+                      <span className={`dzn-rank-badge dzn-rank-badge--${rankTone(index)}`}>#{kill.rank}</span>
+                    </td>
+                    <td className="border-y border-white/10 px-3 py-3 text-sm font-black text-white">{kill.player_name}</td>
+                    <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">{kill.victim_name}</td>
+                    <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">
+                      <ServerLink slug={kill.server_slug} label={kill.server_name} />
+                    </td>
+                    <td className="border-y border-white/10 px-3 py-3 text-sm font-bold text-zinc-200">{kill.weapon}</td>
+                    <td className="border-y border-white/10 px-3 py-3 text-sm font-black text-cyan-100">{formatDistance(kill.distance)}</td>
+                    <td className="rounded-r-lg border-y border-r border-white/10 px-3 py-3 text-sm font-bold text-zinc-300">{formatDateTime(kill.occurred_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-5 text-sm font-bold text-zinc-400">
+            No personal best long kills yet.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<LongestKill, "rank"> | null; tone: "violet" | "cyan" }) {
+  return (
+    <div className={`dzn-long-kill-card dzn-long-kill-card--${tone} rounded-lg border p-4`}>
       <p className="text-xs font-black uppercase tracking-[0.16em] opacity-80">{title}</p>
       {kill ? (
         <>
@@ -393,9 +413,39 @@ function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<Lo
   );
 }
 
+function LiveAdmIntelPanel({ updatedAt, loading }: { updatedAt: string | null; loading: boolean }) {
+  return (
+    <section className="dzn-live-intel-card dzn-leaderboard-card glass-surface animated-border rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex items-center gap-3">
+          <RadioTower className="h-5 w-5 text-cyan-100" />
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-100">Live ADM Intelligence</p>
+        </div>
+        <p className="mt-4 text-2xl font-black uppercase leading-tight text-white">
+          Live data. Real players. Real action.
+        </p>
+        <div className="mt-5 grid gap-2">
+          <StatusLine label="Source" value="Synced ADM activity" />
+          <StatusLine label="Refresh" value={loading ? "Loading" : "Automatic public feed"} />
+          <StatusLine label="Updated" value={updatedAt ? formatDateTime(updatedAt) : "Pending"} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StatusLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-white/10 py-2 last:border-b-0">
+      <span className="text-[10px] font-black uppercase text-zinc-500">{label}</span>
+      <span className="text-right text-xs font-black text-zinc-100">{value}</span>
+    </div>
+  );
+}
+
 function LockedLeaderboardBanner() {
   return (
-    <section className="mb-6 glass-surface animated-border rounded-lg p-5">
+    <section className="dzn-leaderboard-card mb-6 glass-surface animated-border rounded-lg p-5">
       <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex gap-3">
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-violet-300/25 bg-violet-500/15 text-violet-100">
@@ -420,7 +470,7 @@ function LockedLeaderboardBanner() {
 
 function LockedLeaderboardPanel({ title, icon: Icon, text }: { title: string; icon: typeof Activity; text: string }) {
   return (
-    <section className="glass-surface animated-border rounded-lg p-5">
+    <section className="dzn-leaderboard-card glass-surface animated-border rounded-lg p-5">
       <div className="relative z-10">
         <div className="flex items-center gap-3">
           <Icon className="h-6 w-6 text-violet-200" />
@@ -458,15 +508,15 @@ function LeaderboardTable({
   empty: string;
 }) {
   return (
-    <section className="glass-surface animated-border rounded-lg p-5">
+    <section className="dzn-leaderboard-card glass-surface animated-border rounded-lg p-5">
       <div className="relative z-10">
         <div className="flex items-center gap-3">
           <Icon className="h-6 w-6 text-violet-200" />
           <h2 className="text-2xl font-black uppercase text-white">{title}</h2>
         </div>
         {rows.length ? (
-          <div className="mt-5 overflow-x-auto">
-            <table className="min-w-full border-separate border-spacing-y-2 text-left">
+          <div className="dzn-leaderboard-table-wrap mt-5 overflow-x-auto">
+            <table className="dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
               <thead>
                 <tr>
                   {headers.map((header) => (
@@ -478,10 +528,10 @@ function LeaderboardTable({
               </thead>
               <tbody>
                 {rows.map((row, rowIndex) => (
-                  <tr key={rowIndex} className="rounded-lg bg-black/24">
+                  <tr key={rowIndex} className="dzn-leaderboard-row rounded-lg bg-black/24">
                     {row.map((cell, cellIndex) => (
                       <td key={cellIndex} className="border-y border-white/10 px-3 py-3 first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r">
-                        <span className={cellIndex === 0 ? "text-sm font-black text-violet-200" : "text-sm font-bold text-zinc-100"}>
+                        <span className={cellIndex === 0 ? `dzn-rank-badge dzn-rank-badge--${rankTone(rowIndex)}` : "text-sm font-bold text-zinc-100"}>
                           {cell}
                         </span>
                       </td>
@@ -503,7 +553,7 @@ function LeaderboardTable({
 
 function MetricRow({ icon: Icon, label, value }: { icon: typeof Activity; label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-black/24 p-3">
+    <div className="dzn-leaderboard-stat flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-black/24 p-3">
       <span className="inline-flex items-center gap-3 text-xs font-black uppercase text-zinc-400">
         <Icon className="h-4 w-4 text-cyan-200" />
         {label}
@@ -540,7 +590,7 @@ function LoadingGrid() {
   return (
     <div className="grid gap-6">
       {[0, 1, 2].map((item) => (
-        <div key={item} className="glass-surface rounded-lg p-5">
+        <div key={item} className="dzn-leaderboard-card glass-surface rounded-lg p-5">
           <div className="h-7 w-52 animate-pulse rounded bg-white/10" />
           <div className="mt-5 h-36 animate-pulse rounded-lg bg-white/10" />
         </div>
@@ -686,6 +736,13 @@ function formatDateTime(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Pending";
   return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function rankTone(index: number) {
+  if (index === 0) return "gold";
+  if (index === 1) return "cyan";
+  if (index === 2) return "orange";
+  return "standard";
 }
 
 function isScoreBreakdown(value: unknown): value is ScoreBreakdown {

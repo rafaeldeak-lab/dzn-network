@@ -156,13 +156,48 @@ includesAll(leaderboards, [
   "hasMeaningfulLeaderboard",
   "latestRequestId",
   "fetchJsonWithRetry<LeaderboardsPayload>",
+  "/api/public/leaderboards",
   "LEADERBOARD_LAST_GOOD_MAX_AGE_MS",
   "error_initial",
   "data.data && !data.top_servers ? data.data : data",
   "Leaderboard data could not be loaded right now.",
+  "AnimatedBullet",
+  "dzn-leaderboard-hero",
+  "dzn-leaderboard-stat-grid",
+  "Global Leaderboards",
+  "Servers Ranked",
+  "Kills Tracked",
+  "Ranked Players",
+  "Longest Kill",
+  "Top Servers",
+  "Top Players",
+  "Personal Bests",
+  "Longest Kills",
+  "payload.top_servers.map",
+  "payload.top_players.map",
 ]);
 assert.equal(leaderboards.includes("Live refresh recovering. Showing last known data."), false, "Leaderboards must not show stale-data warning when valid data is visible.");
 assert.equal(leaderboards.includes("Live data refresh failed. Showing last known leaderboard."), false, "Leaderboards refresh failures with visible data should stay silent.");
+for (const fakeStaticName of ["NukeTown DEATHMATCH", "PANDORA DayZ", "xAKA-MINI_KickAs", "MikeI-trives-esp"]) {
+  assert.equal(leaderboards.includes(fakeStaticName), false, "Leaderboards page must not replace API data with static mock rows.");
+}
+
+const globals = source("app/globals.css");
+includesAll(globals, [
+  ".dzn-bullet-wrap",
+  ".dzn-bullet-core",
+  ".dzn-bullet-tracer",
+  ".dzn-ember",
+  ".dzn-leaderboard-card",
+  ".dzn-leaderboard-row:hover",
+  "@keyframes bulletSpin",
+  "@keyframes tracerSpiral",
+  "@keyframes emberDrift",
+  "@keyframes heatPulse",
+  "@keyframes smokeFade",
+  "@keyframes heroParallax",
+  "@media (prefers-reduced-motion: reduce)",
+]);
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, [
