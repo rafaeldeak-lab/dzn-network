@@ -83,6 +83,48 @@ export type DznSeasonRefreshOptions = {
   capturedAt?: string | null;
 };
 
+export type DznSeasonScoringMetricRule = {
+  key: string;
+  label: string;
+  source: string;
+  available: boolean;
+  placeholder?: number;
+  weight?: number;
+  note?: string;
+};
+
+export type DznSeasonScoringRules = {
+  version: 1;
+  category: DznSeasonCategory;
+  metrics: DznSeasonScoringMetricRule[];
+  missingMetricPolicy: "safe_zero_placeholder";
+};
+
+export type DznAdminSeasonCreateInput = {
+  name?: unknown;
+  slug?: unknown;
+  category?: unknown;
+  startsAt?: unknown;
+  endsAt?: unknown;
+  scoringRules?: unknown;
+};
+
+export type DznAdminSeasonUpdateInput = {
+  name?: unknown;
+  slug?: unknown;
+  category?: unknown;
+  status?: unknown;
+  startsAt?: unknown;
+  endsAt?: unknown;
+  scoringRules?: unknown;
+};
+
+export type DznAdminSeasonMutationResult = {
+  ok: true;
+  season: DznAdminSeasonSummary;
+  warnings: string[];
+};
+
 export type DznAdminSeasonEntry = {
   id: string;
   seasonId: string;
@@ -114,6 +156,7 @@ export type DznAdminSeasonSummary = {
   status: string;
   startsAt: string;
   endsAt: string;
+  scoringRules: Record<string, unknown>;
   entryCount: number;
   scoredEntryCount: number;
   scoreSnapshotCount: number;
@@ -186,6 +229,7 @@ export const SEASON_REFRESH_MAX_LIMIT = 25;
 
 const ACTIVE_SEASON_STATUSES = ["registration_open", "active", "live", "upcoming"];
 const COMPLETED_SEASON_STATUSES = ["completed", "finalised", "finalized", "archived"];
+const ALLOWED_ADMIN_SEASON_STATUSES = new Set([...ACTIVE_SEASON_STATUSES, ...COMPLETED_SEASON_STATUSES]);
 const INTERNAL_SEASON_REFRESH_MAX_LIMIT = 500;
 const PUBLIC_SEASON_SELECT = `dzn_seasons.*,
               (SELECT MAX(captured_at)
@@ -760,6 +804,152 @@ export async function getAdminSeasonManagement(env: Env, limit = 100): Promise<D
   };
 }
 
+export function getDefaultScoringRulesForCategory(categoryInput: unknown): DznSeasonScoringRules {
+  const category = normalizeSeasonCategory(categoryInput);
+  if (!category) throw new DznSeasonError("SEASON_CATEGORY_INVALID", "Season category must be Deathmatch, PvP, PvE, or Survival.", 400);
+  const safe = (key: string, label: string, source: string, weight: number): DznSeasonScoringMetricRule => ({
+    key,
+    label,
+    source,
+    available: true,
+    weight,
+  });
+  const placeholder = (key: string, label: string, note: string): DznSeasonScoringMetricRule => ({
+    key,
+    label,
+    source: "aggregate_placeholder",
+    available: false,
+    placeholder: 0,
+    weight: 0,
+    note,
+  });
+  const shared = {
+    version: 1 as const,
+    category,
+    missingMetricPolicy: "safe_zero_placeholder" as const,
+  };
+  if (category === "deathmatch") {
+    return {
+      ...shared,
+      metrics: [
+        safe("total_kills", "Total kills", "server_stats.total_kills", 60),
+        safe("kd_ratio", "K/D", "derived:total_kills/total_deaths", 25),
+        safe("activity", "Activity", "server_stats.total_joins + unique_players", 15),
+      ],
+    };
+  }
+  if (category === "pvp") {
+    return {
+      ...shared,
+      metrics: [
+        safe("total_kills", "Total kills", "server_stats.total_kills", 45),
+        placeholder("longest_kill", "Longest kill", "Kept as safe zero until aggregate longest-kill input exists."),
+        safe("kd_ratio", "K/D", "derived:total_kills/total_deaths", 25),
+        safe("activity", "Activity", "server_stats.total_joins + unique_players", 15),
+      ],
+    };
+  }
+  if (category === "pve") {
+    return {
+      ...shared,
+      metrics: [
+        safe("activity", "Activity", "server_stats.total_joins + unique_players", 45),
+        placeholder("survival_time", "Survival time", "Kept as safe zero until aggregate survival-time input exists."),
+        safe("deaths_avoided", "Deaths avoided", "derived:activity - total_deaths", 25),
+      ],
+    };
+  }
+  return {
+    ...shared,
+    metrics: [
+      placeholder("longest_lived", "Longest lived", "Kept as safe zero until aggregate longest-lived input exists."),
+      safe("activity", "Activity", "server_stats.total_joins + unique_players", 45),
+      safe("deaths_avoided", "Deaths avoided", "derived:activity - total_deaths", 25),
+    ],
+  };
+}
+
+export async function createAdminSeason(env: Env, input: DznAdminSeasonCreateInput): Promise<DznAdminSeasonMutationResult> {
+  await ensureDznSeasonSchema(env);
+  const category = requireSeasonCategory(input.category);
+  const seasonInput = validateSeasonConfigInput({
+    name: input.name,
+    slug: input.slug,
+    category,
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+    scoringRules: input.scoringRules,
+    requireScoringRules: true,
+  });
+  const existing = await findSeason(env, seasonInput.slug);
+  if (existing) throw new DznSeasonError("SEASON_SLUG_EXISTS", "A season with this slug already exists.", 409);
+  const now = new Date().toISOString();
+  const id = `season_${crypto.randomUUID()}`;
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO dzn_seasons (
+        id, slug, name, category, status, starts_at, ends_at, scoring_rules_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'upcoming', ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, seasonInput.slug, seasonInput.name, seasonInput.category, seasonInput.startsAt, seasonInput.endsAt, safeJson(seasonInput.scoringRules), now, now)
+    .run();
+  const season = await getAdminSeasonSummaryById(env, id);
+  return { ok: true, season, warnings: [] };
+}
+
+export async function updateAdminSeason(env: Env, seasonId: string, input: DznAdminSeasonUpdateInput): Promise<DznAdminSeasonMutationResult> {
+  await ensureDznSeasonSchema(env);
+  const season = await findSeason(env, seasonId);
+  if (!season) throw new DznSeasonError("SEASON_NOT_FOUND", "Season not found.", 404);
+  const entryCount = await countSeasonEntries(env, season.id);
+  const completed = isCompletedSeasonStatus(season.status);
+  const nextName = input.name === undefined ? season.name : cleanSeasonName(input.name);
+  const nextSlug = input.slug === undefined ? season.slug : requireSeasonSlug(input.slug);
+  const requestedCategory = input.category === undefined ? season.category : requireSeasonCategory(input.category);
+  const requestedStatus = input.status === undefined ? season.status : requireSeasonStatus(input.status);
+  const requestedStartsAt = input.startsAt === undefined ? season.starts_at : requireSeasonDate(input.startsAt, "startsAt");
+  const requestedEndsAt = input.endsAt === undefined ? season.ends_at : requireSeasonDate(input.endsAt, "endsAt");
+  const requestedRules = input.scoringRules === undefined ? parseJsonObject(season.scoring_rules_json) : requireScoringRules(input.scoringRules, requestedCategory);
+
+  if (nextSlug !== season.slug) {
+    const existing = await findSeason(env, nextSlug);
+    if (existing && existing.id !== season.id) throw new DznSeasonError("SEASON_SLUG_EXISTS", "A season with this slug already exists.", 409);
+  }
+  if (requestedCategory !== season.category && entryCount > 0) {
+    throw new DznSeasonError("SEASON_CATEGORY_LOCKED", "Category cannot be changed after season entries exist.", 409);
+  }
+  if (completed) {
+    const destructiveEdit =
+      requestedCategory !== season.category ||
+      requestedStatus !== season.status ||
+      requestedStartsAt !== season.starts_at ||
+      requestedEndsAt !== season.ends_at ||
+      input.scoringRules !== undefined;
+    if (destructiveEdit) {
+      throw new DznSeasonError("COMPLETED_SEASON_LOCKED", "Completed seasons only allow name or slug display corrections.", 409);
+    }
+  }
+  ensureValidDateRange(requestedStartsAt, requestedEndsAt);
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `UPDATE dzn_seasons
+       SET name = ?,
+           slug = ?,
+           category = ?,
+           status = ?,
+           starts_at = ?,
+           ends_at = ?,
+           scoring_rules_json = ?,
+           updated_at = ?
+       WHERE id = ?`,
+    )
+    .bind(nextName, nextSlug, requestedCategory, requestedStatus, requestedStartsAt, requestedEndsAt, safeJson(requestedRules), now, season.id)
+    .run();
+  const updated = await getAdminSeasonSummaryById(env, season.id);
+  return { ok: true, season: updated, warnings: [] };
+}
+
 export async function ensureDznSeasonSchema(env: Env) {
   const db = requireDb(env);
   for (const statement of DZN_SEASON_SCHEMA_STATEMENTS) {
@@ -1112,6 +1302,7 @@ function toAdminSeasonSummary(row: DznAdminSeasonRow, entries: DznAdminSeasonEnt
     status: row.status,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
+    scoringRules: parseJsonObject(row.scoring_rules_json),
     entryCount,
     scoredEntryCount,
     scoreSnapshotCount,
@@ -1157,6 +1348,144 @@ function adminAwardFinaliseStatus(input: {
   if (input.scoredEntryCount <= 0) return "needs_score_refresh";
   if (!input.ended) return "not_ended";
   return "blocked";
+}
+
+async function getAdminSeasonSummaryById(env: Env, seasonId: string) {
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT dzn_seasons.*,
+              (SELECT COUNT(*)
+               FROM dzn_season_entries
+               WHERE dzn_season_entries.season_id = dzn_seasons.id
+                 AND dzn_season_entries.status != 'withdrawn') AS entry_count,
+              (SELECT COUNT(*)
+               FROM dzn_season_entries
+               WHERE dzn_season_entries.season_id = dzn_seasons.id
+                 AND dzn_season_entries.status != 'withdrawn'
+                 AND dzn_season_entries.final_score IS NOT NULL
+                 AND dzn_season_entries.rank IS NOT NULL) AS scored_entry_count,
+              (SELECT COUNT(*)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_seasons.id) AS score_snapshot_count,
+              (SELECT COUNT(*)
+               FROM dzn_season_awards
+               WHERE dzn_season_awards.season_id = dzn_seasons.id) AS awards_count,
+              (SELECT MAX(captured_at)
+               FROM dzn_season_score_snapshots
+               WHERE dzn_season_score_snapshots.season_id = dzn_seasons.id) AS last_score_refresh_at
+       FROM dzn_seasons
+       WHERE dzn_seasons.id = ?
+       LIMIT 1`,
+    )
+    .bind(seasonId)
+    .first<DznAdminSeasonRow>();
+  if (!row) throw new DznSeasonError("SEASON_NOT_FOUND", "Season not found.", 404);
+  const [entries, awards] = await Promise.all([
+    getAdminSeasonEntries(env, row.id),
+    getAdminSeasonAwards(env, row.id),
+  ]);
+  return toAdminSeasonSummary(row, entries, awards);
+}
+
+function validateSeasonConfigInput(input: {
+  name: unknown;
+  slug: unknown;
+  category: DznSeasonCategory;
+  startsAt: unknown;
+  endsAt: unknown;
+  scoringRules: unknown;
+  requireScoringRules: boolean;
+}) {
+  const startsAt = requireSeasonDate(input.startsAt, "startsAt");
+  const endsAt = requireSeasonDate(input.endsAt, "endsAt");
+  ensureValidDateRange(startsAt, endsAt);
+  return {
+    name: cleanSeasonName(input.name),
+    slug: requireSeasonSlug(input.slug),
+    category: input.category,
+    startsAt,
+    endsAt,
+    scoringRules: input.requireScoringRules ? requireScoringRules(input.scoringRules, input.category) : parseOptionalScoringRules(input.scoringRules, input.category),
+  };
+}
+
+async function countSeasonEntries(env: Env, seasonId: string) {
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM dzn_season_entries
+       WHERE season_id = ?
+         AND status != 'withdrawn'`,
+    )
+    .bind(seasonId)
+    .first<{ count: number | null }>();
+  return safeNumber(row?.count);
+}
+
+function cleanSeasonName(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (text.length < 3 || text.length > 120) throw new DznSeasonError("SEASON_NAME_INVALID", "Season name must be 3 to 120 characters.", 400);
+  return text;
+}
+
+function requireSeasonSlug(value: unknown) {
+  const slug = cleanSlug(value);
+  if (!slug) throw new DznSeasonError("SEASON_SLUG_INVALID", "Season slug must be 3 to 120 lowercase letters, numbers, dashes, or underscores.", 400);
+  return slug;
+}
+
+function requireSeasonCategory(value: unknown): DznSeasonCategory {
+  const category = normalizeSeasonCategory(value);
+  if (!category) throw new DznSeasonError("SEASON_CATEGORY_INVALID", "Season category must be Deathmatch, PvP, PvE, or Survival.", 400);
+  return category;
+}
+
+function requireSeasonStatus(value: unknown) {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (!ALLOWED_ADMIN_SEASON_STATUSES.has(status)) {
+    throw new DznSeasonError("SEASON_STATUS_INVALID", "Season status is invalid.", 400);
+  }
+  return status;
+}
+
+function requireSeasonDate(value: unknown, field: "startsAt" | "endsAt") {
+  const text = String(value ?? "").trim();
+  const date = new Date(text);
+  if (!text || Number.isNaN(date.getTime())) throw new DznSeasonError("SEASON_DATE_INVALID", `${field} must be a valid date.`, 400);
+  return date.toISOString();
+}
+
+function ensureValidDateRange(startsAt: string, endsAt: string) {
+  if (new Date(startsAt).getTime() >= new Date(endsAt).getTime()) {
+    throw new DznSeasonError("SEASON_DATE_RANGE_INVALID", "Season start must be before season end.", 400);
+  }
+}
+
+function parseOptionalScoringRules(value: unknown, category: DznSeasonCategory) {
+  if (value === undefined || value === null) return getDefaultScoringRulesForCategory(category);
+  return requireScoringRules(value, category);
+}
+
+function requireScoringRules(value: unknown, category: DznSeasonCategory): Record<string, unknown> {
+  const parsed = parseScoringRulesInput(value);
+  if (!parsed) throw new DznSeasonError("SEASON_SCORING_RULES_INVALID", "Scoring rules must be a valid JSON object.", 400);
+  return { ...parsed, category };
+}
+
+function parseScoringRulesInput(value: unknown) {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return isPlainObject(parsed) ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  }
+  return isPlainObject(value) ? value as Record<string, unknown> : null;
+}
+
+function isPlainObject(value: unknown) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 async function insertSeasonScoreSnapshot(env: Env, input: {

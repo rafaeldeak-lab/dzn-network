@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { AlertTriangle, Award, CalendarDays, CheckCircle, Crown, Eye, ListChecks, RefreshCw, ShieldCheck, Trophy } from "lucide-react";
+import { AlertTriangle, Award, CalendarDays, CheckCircle, Crown, Eye, ListChecks, Pencil, Plus, RefreshCw, Save, ShieldCheck, Trophy, X } from "lucide-react";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { fetchJsonWithRetry, FetchJsonError } from "@/lib/client-fetch";
@@ -38,6 +38,7 @@ type AdminSeason = {
   status: string;
   startsAt: string;
   endsAt: string;
+  scoringRules: Record<string, unknown>;
   entryCount: number;
   scoredEntryCount: number;
   scoreSnapshotCount: number;
@@ -77,8 +78,14 @@ type FinaliseResponse = {
   warnings?: string[];
 };
 
+type SeasonMutationResponse = {
+  ok?: boolean;
+  season?: AdminSeason;
+  warnings?: string[];
+};
+
 type LoadState = "loading" | "loaded" | "error";
-type ActionKind = "refresh" | "finalise";
+type ActionKind = "refresh" | "finalise" | "save";
 
 type ActionState = {
   seasonId: string | null;
@@ -87,7 +94,39 @@ type ActionState = {
   error: string | null;
 };
 
+type SeasonEditorState = {
+  mode: "create" | "edit";
+  season: AdminSeason | null;
+};
+
+type SeasonFormState = {
+  name: string;
+  slug: string;
+  category: string;
+  status: string;
+  startsAt: string;
+  endsAt: string;
+  scoringPreset: string;
+  scoringRulesText: string;
+};
+
 const FINALISE_CONFIRMATION = "FINALISE";
+const CREATE_ACTION_ID = "__create_season__";
+const SEASON_CATEGORIES = [
+  ["deathmatch", "Deathmatch"],
+  ["pvp", "PvP"],
+  ["pve", "PvE"],
+  ["survival", "Survival"],
+];
+const SEASON_STATUSES = [
+  ["upcoming", "Upcoming"],
+  ["registration_open", "Registration open"],
+  ["active", "Active"],
+  ["live", "Live"],
+  ["completed", "Completed"],
+  ["finalised", "Finalised"],
+  ["archived", "Archived"],
+];
 
 export function AdminSeasonsPanel() {
   const [payload, setPayload] = useState<AdminSeasonsResponse>({ seasons: [], activeSeasons: [], upcomingSeasons: [], completedSeasons: [] });
@@ -97,6 +136,8 @@ export function AdminSeasonsPanel() {
   const [confirmSeasonId, setConfirmSeasonId] = useState<string | null>(null);
   const [confirmationText, setConfirmationText] = useState("");
   const [action, setAction] = useState<ActionState>({ seasonId: null, kind: null, message: null, error: null });
+  const [editor, setEditor] = useState<SeasonEditorState | null>(null);
+  const [form, setForm] = useState<SeasonFormState>(() => createDefaultSeasonForm());
 
   useEffect(() => {
     void loadSeasons();
@@ -161,6 +202,96 @@ export function AdminSeasonsPanel() {
     }
   }
 
+  function openCreateSeason() {
+    setConfirmSeasonId(null);
+    setConfirmationText("");
+    setEditor({ mode: "create", season: null });
+    setForm(createDefaultSeasonForm());
+    setAction({ seasonId: null, kind: null, message: null, error: null });
+  }
+
+  function openEditSeason(season: AdminSeason) {
+    setConfirmSeasonId(null);
+    setConfirmationText("");
+    setEditor({ mode: "edit", season });
+    setForm(formFromSeason(season));
+    setAction({ seasonId: null, kind: null, message: null, error: null });
+  }
+
+  function closeEditor() {
+    if (action.seasonId) return;
+    setEditor(null);
+  }
+
+  function updateForm(patch: Partial<SeasonFormState>) {
+    setForm((current) => ({ ...current, ...patch }));
+  }
+
+  function applyScoringPreset(category: string) {
+    if (category === "custom") {
+      setForm((current) => ({ ...current, scoringPreset: "custom" }));
+      return;
+    }
+    const nextCategory = normalizeCategory(category);
+    setForm((current) => ({
+      ...current,
+      category: nextCategory,
+      scoringPreset: nextCategory,
+      scoringRulesText: JSON.stringify(defaultScoringRulesForCategory(nextCategory), null, 2),
+    }));
+  }
+
+  async function saveSeasonConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (action.seasonId || !editor) return;
+    const completedDisplayOnly = editor.mode === "edit" && isCompletedStatus(editor.season?.status);
+    let scoringRules: Record<string, unknown> | null = null;
+    if (!completedDisplayOnly) {
+      try {
+        const parsed = JSON.parse(form.scoringRulesText);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Scoring rules must be a JSON object.");
+        scoringRules = parsed as Record<string, unknown>;
+      } catch (saveError) {
+        setAction({ seasonId: null, kind: null, message: null, error: errorMessage(saveError, "Scoring rules must be valid JSON.") });
+        return;
+      }
+    }
+
+    const targetId = editor.mode === "create" ? CREATE_ACTION_ID : editor.season?.id ?? null;
+    if (!targetId) return;
+    setAction({ seasonId: targetId, kind: "save", message: null, error: null });
+    try {
+      const payload = completedDisplayOnly
+        ? { name: form.name, slug: form.slug }
+        : {
+            name: form.name,
+            slug: form.slug,
+            category: form.category,
+            status: form.status,
+            startsAt: dateInputToIso(form.startsAt),
+            endsAt: dateInputToIso(form.endsAt),
+            scoringRules,
+          };
+      const result = await requestJson<SeasonMutationResponse>(
+        editor.mode === "create" ? "/api/admin/seasons" : `/api/admin/seasons/${encodeURIComponent(targetId)}`,
+        {
+          method: editor.mode === "create" ? "POST" : "PUT",
+          body: JSON.stringify(editor.mode === "create" ? omitStatus(payload) : payload),
+        },
+      );
+      setEditor(null);
+      setAction({
+        seasonId: null,
+        kind: null,
+        message: editor.mode === "create" ? `Created ${result.season?.name ?? form.name}.` : `Saved ${result.season?.name ?? form.name}.`,
+        error: warningMessage(result.warnings),
+      });
+      await loadSeasons();
+    } catch (saveError) {
+      setAction({ seasonId: null, kind: null, message: null, error: errorMessage(saveError, "Season save failed.") });
+    }
+  }
+
   const grouped = useMemo(() => groupSeasons(payload), [payload]);
   const totalSeasons = payload.seasons?.length ?? 0;
 
@@ -191,17 +322,40 @@ export function AdminSeasonsPanel() {
                 Manage season score snapshots, entries, awards, and manual finalisation from protected admin/support tooling.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => loadSeasons()}
-              disabled={state === "loading" || Boolean(action.seasonId)}
-              className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <RefreshCw className={`h-4 w-4 ${state === "loading" ? "animate-spin" : ""}`} />
-              Reload
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={openCreateSeason}
+                disabled={Boolean(action.seasonId)}
+                className="inline-flex w-fit items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase text-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                Create Season
+              </button>
+              <button
+                type="button"
+                onClick={() => loadSeasons()}
+                disabled={state === "loading" || Boolean(action.seasonId)}
+                className="inline-flex w-fit items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${state === "loading" ? "animate-spin" : ""}`} />
+                Reload
+              </button>
+            </div>
           </div>
         </header>
+
+        {editor ? (
+          <SeasonEditorPanel
+            editor={editor}
+            form={form}
+            busy={action.seasonId === (editor.mode === "create" ? CREATE_ACTION_ID : editor.season?.id) && action.kind === "save"}
+            onSubmit={saveSeasonConfig}
+            onCancel={closeEditor}
+            onChange={updateForm}
+            onApplyPreset={applyScoringPreset}
+          />
+        ) : null}
 
         {action.message || action.error ? (
           <div className={`mt-5 rounded-lg border px-4 py-3 text-sm font-bold ${action.error ? "border-amber-300/25 bg-amber-400/10 text-amber-50" : "border-emerald-300/25 bg-emerald-400/10 text-emerald-50"}`}>
@@ -242,8 +396,155 @@ export function AdminSeasonsPanel() {
       onConfirmationTextChange: setConfirmationText,
       onRefresh: refreshSeason,
       onFinalise: finaliseSeason,
+      onEdit: openEditSeason,
     };
   }
+}
+
+function SeasonEditorPanel({
+  editor,
+  form,
+  busy,
+  onSubmit,
+  onCancel,
+  onChange,
+  onApplyPreset,
+}: {
+  editor: SeasonEditorState;
+  form: SeasonFormState;
+  busy: boolean;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCancel: () => void;
+  onChange: (patch: Partial<SeasonFormState>) => void;
+  onApplyPreset: (category: string) => void;
+}) {
+  const locked = editor.mode === "edit" && isCompletedStatus(editor.season?.status);
+  return (
+    <form onSubmit={onSubmit} className="mt-5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase text-emerald-100">{editor.mode === "create" ? "Create Season" : "Edit Season"}</p>
+          {locked ? <p className="mt-1 text-xs font-bold text-amber-100">Completed seasons only allow name or slug display corrections.</p> : null}
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-400/20 px-3 py-2 text-xs font-black uppercase text-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Save className="h-4 w-4" />
+            Save season
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-200 disabled:opacity-50"
+          >
+            <X className="h-4 w-4" />
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          Name
+          <input
+            required
+            value={form.name}
+            onChange={(event) => onChange({ name: event.target.value })}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case text-white outline-none focus:border-emerald-300/40"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          Slug
+          <input
+            required
+            value={form.slug}
+            onChange={(event) => onChange({ slug: event.target.value.toLowerCase() })}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-sm normal-case text-white outline-none focus:border-emerald-300/40"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          Category
+          <select
+            value={form.category}
+            onChange={(event) => {
+              const category = normalizeCategory(event.target.value);
+              onChange({
+                category,
+                scoringPreset: category,
+                scoringRulesText: JSON.stringify(defaultScoringRulesForCategory(category), null, 2),
+              });
+            }}
+            disabled={locked}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case text-white outline-none disabled:opacity-50"
+          >
+            {SEASON_CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          Status
+          <select
+            value={form.status}
+            onChange={(event) => onChange({ status: event.target.value })}
+            disabled={editor.mode === "create" || locked}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case text-white outline-none disabled:opacity-50"
+          >
+            {SEASON_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          Starts
+          <input
+            type="datetime-local"
+            required
+            value={form.startsAt}
+            onChange={(event) => onChange({ startsAt: event.target.value })}
+            disabled={locked}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case text-white outline-none disabled:opacity-50"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400">
+          Ends
+          <input
+            type="datetime-local"
+            required
+            value={form.endsAt}
+            onChange={(event) => onChange({ endsAt: event.target.value })}
+            disabled={locked}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case text-white outline-none disabled:opacity-50"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400 lg:col-span-2">
+          Scoring preset
+          <select
+            value={form.scoringPreset}
+            onChange={(event) => onApplyPreset(event.target.value)}
+            disabled={locked}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case text-white outline-none disabled:opacity-50"
+          >
+            <option value="deathmatch">Deathmatch preset</option>
+            <option value="pvp">PvP preset</option>
+            <option value="pve">PvE preset</option>
+            <option value="survival">Survival preset</option>
+            <option value="custom">Custom JSON</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-zinc-400 lg:col-span-2">
+          Scoring rules
+          <textarea
+            value={form.scoringRulesText}
+            onChange={(event) => onChange({ scoringRulesText: event.target.value, scoringPreset: "custom" })}
+            disabled={locked}
+            rows={10}
+            className="min-h-52 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs normal-case leading-5 text-white outline-none disabled:opacity-50"
+          />
+        </label>
+      </div>
+    </form>
+  );
 }
 
 function SeasonGroup({
@@ -260,6 +561,7 @@ function SeasonGroup({
   onConfirmationTextChange,
   onRefresh,
   onFinalise,
+  onEdit,
 }: {
   title: string;
   seasons: AdminSeason[];
@@ -274,6 +576,7 @@ function SeasonGroup({
   onConfirmationTextChange: (value: string) => void;
   onRefresh: (season: AdminSeason) => void;
   onFinalise: (season: AdminSeason) => void;
+  onEdit: (season: AdminSeason) => void;
 }) {
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
@@ -297,6 +600,7 @@ function SeasonGroup({
               onConfirmationTextChange={onConfirmationTextChange}
               onRefresh={onRefresh}
               onFinalise={onFinalise}
+              onEdit={onEdit}
             />
           ))}
         </div>
@@ -319,6 +623,7 @@ function SeasonAdminRow({
   onConfirmationTextChange,
   onRefresh,
   onFinalise,
+  onEdit,
 }: {
   season: AdminSeason;
   action: ActionState;
@@ -331,6 +636,7 @@ function SeasonAdminRow({
   onConfirmationTextChange: (value: string) => void;
   onRefresh: (season: AdminSeason) => void;
   onFinalise: (season: AdminSeason) => void;
+  onEdit: (season: AdminSeason) => void;
 }) {
   const busy = action.seasonId === season.id;
   const finaliseReady = confirmationText.trim() === FINALISE_CONFIRMATION;
@@ -363,6 +669,15 @@ function SeasonAdminRow({
 
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onEdit(season)}
+              disabled={Boolean(action.seasonId)}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase text-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit
+            </button>
             <button
               type="button"
               onClick={() => onRefresh(season)}
@@ -576,6 +891,108 @@ function FinaliseStatusPill({ status }: { status: string }) {
       {statusLabel(status)}
     </span>
   );
+}
+
+function createDefaultSeasonForm(): SeasonFormState {
+  const category = "deathmatch";
+  return {
+    name: "",
+    slug: "",
+    category,
+    status: "upcoming",
+    startsAt: dateTimeInputValue(new Date(Date.now() + 60 * 60 * 1000)),
+    endsAt: dateTimeInputValue(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
+    scoringPreset: category,
+    scoringRulesText: JSON.stringify(defaultScoringRulesForCategory(category), null, 2),
+  };
+}
+
+function formFromSeason(season: AdminSeason): SeasonFormState {
+  const category = normalizeCategory(season.category);
+  const rules = Object.keys(season.scoringRules ?? {}).length ? season.scoringRules : defaultScoringRulesForCategory(category);
+  return {
+    name: season.name,
+    slug: season.slug,
+    category,
+    status: String(season.status || "upcoming").toLowerCase(),
+    startsAt: dateTimeInputValue(season.startsAt),
+    endsAt: dateTimeInputValue(season.endsAt),
+    scoringPreset: "custom",
+    scoringRulesText: JSON.stringify(rules, null, 2),
+  };
+}
+
+function defaultScoringRulesForCategory(categoryInput: string) {
+  const category = normalizeCategory(categoryInput);
+  const safe = (key: string, label: string, source: string, weight: number) => ({ key, label, source, available: true, weight });
+  const placeholder = (key: string, label: string, note: string) => ({ key, label, source: "aggregate_placeholder", available: false, placeholder: 0, weight: 0, note });
+  const shared = { version: 1, category, missingMetricPolicy: "safe_zero_placeholder" };
+  if (category === "deathmatch") {
+    return {
+      ...shared,
+      metrics: [
+        safe("total_kills", "Total kills", "server_stats.total_kills", 60),
+        safe("kd_ratio", "K/D", "derived:total_kills/total_deaths", 25),
+        safe("activity", "Activity", "server_stats.total_joins + unique_players", 15),
+      ],
+    };
+  }
+  if (category === "pvp") {
+    return {
+      ...shared,
+      metrics: [
+        safe("total_kills", "Total kills", "server_stats.total_kills", 45),
+        placeholder("longest_kill", "Longest kill", "Safe zero until aggregate longest-kill input exists."),
+        safe("kd_ratio", "K/D", "derived:total_kills/total_deaths", 25),
+        safe("activity", "Activity", "server_stats.total_joins + unique_players", 15),
+      ],
+    };
+  }
+  if (category === "pve") {
+    return {
+      ...shared,
+      metrics: [
+        safe("activity", "Activity", "server_stats.total_joins + unique_players", 45),
+        placeholder("survival_time", "Survival time", "Safe zero until aggregate survival-time input exists."),
+        safe("deaths_avoided", "Deaths avoided", "derived:activity - total_deaths", 25),
+      ],
+    };
+  }
+  return {
+    ...shared,
+    metrics: [
+      placeholder("longest_lived", "Longest lived", "Safe zero until aggregate longest-lived input exists."),
+      safe("activity", "Activity", "server_stats.total_joins + unique_players", 45),
+      safe("deaths_avoided", "Deaths avoided", "derived:activity - total_deaths", 25),
+    ],
+  };
+}
+
+function dateTimeInputValue(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 16);
+}
+
+function dateInputToIso(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("Season dates must be valid.");
+  return date.toISOString();
+}
+
+function omitStatus<T extends { status?: unknown }>(value: T) {
+  const rest = { ...value };
+  delete rest.status;
+  return rest;
+}
+
+function isCompletedStatus(status: unknown) {
+  return ["completed", "finalised", "finalized", "archived"].includes(String(status ?? "").toLowerCase());
+}
+
+function normalizeCategory(category: string) {
+  const normalized = String(category).toLowerCase();
+  return SEASON_CATEGORIES.some(([value]) => value === normalized) ? normalized : "deathmatch";
 }
 
 function normalizePayload(payload: AdminSeasonsResponse): AdminSeasonsResponse {

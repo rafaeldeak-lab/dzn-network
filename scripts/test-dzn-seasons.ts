@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
-import { calculateSeasonScoreFromStats, normalizeSeasonCategory, refreshSeasonScores } from "../functions/_lib/dzn-seasons";
-import { onRequestGet as adminSeasonsGet } from "../functions/api/admin/seasons";
+import { calculateSeasonScoreFromStats, getDefaultScoringRulesForCategory, normalizeSeasonCategory, refreshSeasonScores } from "../functions/_lib/dzn-seasons";
+import { onRequestGet as adminSeasonsGet, onRequestPost as adminSeasonsPost } from "../functions/api/admin/seasons";
+import { onRequestPut as adminSeasonPut } from "../functions/api/admin/seasons/[seasonId]";
 import { onRequestPost as adminSeasonRefreshPost } from "../functions/api/admin/seasons/[seasonId]/refresh";
 import { onRequestPost as cronSeasonRefreshPost } from "../functions/api/cron/seasons/refresh";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -75,6 +76,17 @@ const survivalScore = calculateSeasonScoreFromStats({
 assert.equal(survivalScore.score > 0, true, "Survival scoring should use activity and deaths avoided safely.");
 assert.equal(survivalScore.missingMetrics.includes("longest_lived"), true);
 
+const deathmatchPreset = getDefaultScoringRulesForCategory("DEATHMATCH");
+const pvpPreset = getDefaultScoringRulesForCategory("PVP");
+const pvePreset = getDefaultScoringRulesForCategory("PVE");
+const survivalPreset = getDefaultScoringRulesForCategory("SURVIVAL");
+assert.equal(deathmatchPreset.metrics.some((metric) => metric.key === "total_kills"), true, "Deathmatch preset should include total kills.");
+assert.equal(deathmatchPreset.metrics.some((metric) => metric.key === "kd_ratio"), true, "Deathmatch preset should include K/D.");
+assert.equal(pvpPreset.metrics.some((metric) => metric.key === "longest_kill" && metric.available === false && metric.placeholder === 0), true, "PvP longest-kill preset must stay a safe placeholder.");
+assert.equal(pvePreset.metrics.some((metric) => metric.key === "survival_time" && metric.available === false && metric.placeholder === 0), true, "PvE survival-time preset must stay a safe placeholder.");
+assert.equal(survivalPreset.metrics.some((metric) => metric.key === "longest_lived" && metric.available === false && metric.placeholder === 0), true, "Survival longest-lived preset must stay a safe placeholder.");
+assert.equal([deathmatchPreset, pvpPreset, pvePreset, survivalPreset].every((preset) => preset.missingMetricPolicy === "safe_zero_placeholder"), true, "Scoring presets must use safe missing metric handling.");
+
 const migration = source("migrations/0050_dzn_seasons_competition.sql");
 includesAll(migration, [
   "CREATE TABLE IF NOT EXISTS dzn_seasons",
@@ -98,6 +110,9 @@ includesAll(helper, [
   "refreshSeasonScores",
   "finaliseSeason",
   "getAdminSeasonManagement",
+  "getDefaultScoringRulesForCategory",
+  "createAdminSeason",
+  "updateAdminSeason",
   "getSeasonLeaderboard",
   "awardSeasonBadges",
   "getSeasonAwards",
@@ -119,6 +134,8 @@ includesAll(helper, [
   "season_third_place",
   "permanentSeasonalBadge",
   "missingMetrics",
+  "SEASON_CATEGORY_LOCKED",
+  "COMPLETED_SEASON_LOCKED",
 ]);
 assert.equal(helper.includes("b.score - a.score"), true, "Season leaderboard refresh should rank by calculated score.");
 assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events|sessions|subscriptions/i.test(helper), false, "Season helper must not import ADM/Nitrado/Stripe webhook or touch protected row tables.");
@@ -129,6 +146,7 @@ for (const route of [
   "functions/api/seasons/[slug]/leaderboard.ts",
   "functions/api/cron/seasons/refresh.ts",
   "functions/api/admin/seasons.ts",
+  "functions/api/admin/seasons/[seasonId].ts",
   "functions/api/admin/seasons/[seasonId]/refresh.ts",
   "functions/api/admin/seasons/[seasonId]/finalise.ts",
   "functions/api/servers/[serverId]/seasons/status.ts",
@@ -147,7 +165,9 @@ assert.equal(leaderboardRoute.includes("refreshSeasonScores"), false, "Public le
 const cronRefreshRoute = source("functions/api/cron/seasons/refresh.ts");
 includesAll(cronRefreshRoute, ["requireCronSecret", "refreshActiveSeasonScores", "seasonsChecked", "entriesRefreshed", "snapshotsCreated", "warnings"]);
 const adminSeasonsRoute = source("functions/api/admin/seasons.ts");
-includesAll(adminSeasonsRoute, ["requireBadgeAdminUser", "getAdminSeasonManagement", "activeSeasons", "upcomingSeasons", "completedSeasons", "warnings", "GET, OPTIONS"]);
+includesAll(adminSeasonsRoute, ["requireBadgeAdminUser", "getAdminSeasonManagement", "createAdminSeason", "activeSeasons", "upcomingSeasons", "completedSeasons", "warnings", "GET, POST, OPTIONS"]);
+const adminSeasonUpdateRoute = source("functions/api/admin/seasons/[seasonId].ts");
+includesAll(adminSeasonUpdateRoute, ["requireBadgeAdminUser", "updateAdminSeason", "readJson", "PUT, OPTIONS"]);
 const adminRefreshRoute = source("functions/api/admin/seasons/[seasonId]/refresh.ts");
 includesAll(adminRefreshRoute, ["requireBadgeAdminUser", "refreshSeasonScores", "allowCompleted: false", "refreshedEntries", "warnings"]);
 const seasonFinaliseRoute = source("functions/api/admin/seasons/[seasonId]/finalise.ts");
@@ -157,7 +177,7 @@ includesAll(ownerSeasonStatusRoute, ["resolveOwnerVisualLoadoutServer", "status:
 const joinRoute = source("functions/api/servers/[serverId]/seasons/[seasonId]/join.ts");
 includesAll(joinRoute, ["resolveOwnerVisualLoadoutServer", "status: access.status", "joinServerToSeason"]);
 assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events|sessions|subscriptions/i.test(joinRoute), false, "Season join route must not touch protected systems.");
-for (const routeSource of [cronRefreshRoute, adminSeasonsRoute, adminRefreshRoute, leaderboardRoute]) {
+for (const routeSource of [cronRefreshRoute, adminSeasonsRoute, adminSeasonUpdateRoute, adminRefreshRoute, leaderboardRoute]) {
   assert.equal(/from\s+["'][^"']*(adm|nitrado|stripe\/webhook)[^"']*["']|player_profiles|kill_events|player_events|subscriptions/i.test(routeSource), false, "Season refresh/read routes must not touch protected systems.");
 }
 
@@ -172,6 +192,9 @@ includesAll(docs, [
   "It does not modify ADM ingestion",
   "fake stats are never invented",
   "GET /api/admin/seasons",
+  "POST /api/admin/seasons",
+  "PUT /api/admin/seasons/[seasonId]",
+  "blocks category changes once entries exist",
   "/dashboard/admin/seasons",
 ]);
 
@@ -223,6 +246,13 @@ includesAll(adminSeasonsPanel, [
   "Active seasons",
   "Upcoming seasons",
   "Completed seasons",
+  "Create Season",
+  "Edit",
+  "Save season",
+  "Deathmatch preset",
+  "PvP preset",
+  "PvE preset",
+  "Survival preset",
   "Refresh scores",
   "View entries",
   "View leaderboard",
@@ -363,9 +393,103 @@ async function runRefreshAutomationChecks() {
   assert.equal(adminListJson.completedSeasons[0]?.awardsCount, 1, "Completed/finalised season should show stored awards.");
   assert.equal(adminListJson.completedSeasons[0]?.awards.length, 1, "Admin seasons listing should expose stored season awards for inspection.");
   assert.equal(adminListJson.completedSeasons[0]?.awardFinaliseStatus, "finalised_with_awards");
+
+  const nonAdminCreateDb = createSeasonDb("upcoming", {
+    id: "user-3",
+    discord_id: "not-admin",
+    username: "Owner",
+    avatar: null,
+  });
+  const nonAdminCreate = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify(makeCreateSeasonBody("blocked-season")),
+  }), { DB: nonAdminCreateDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  assert.equal(nonAdminCreate.status, 403, "Non-admin users must not create seasons.");
+
+  const createDb = createSeasonDb("upcoming");
+  const createResponse = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify(makeCreateSeasonBody("summer-deathmatch")),
+  }), { DB: createDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  assert.equal(createResponse.status, 201, "Admin users should be able to create a season.");
+  const createJson = await createResponse.json() as { season: { slug: string; category: string; scoringRules: Record<string, unknown> } };
+  assert.equal(createJson.season.slug, "summer-deathmatch");
+  assert.equal(createJson.season.category, "deathmatch");
+  assert.equal(createDb.seasons.some((season) => season.slug === "summer-deathmatch"), true, "Create should insert only a dzn_seasons configuration row.");
+
+  const duplicateSlug = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify(makeCreateSeasonBody("summer-deathmatch")),
+  }), { DB: createDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  assert.equal(duplicateSlug.status, 409, "Duplicate season slugs must be rejected.");
+
+  const invalidCategory = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify({ ...makeCreateSeasonBody("bad-category"), category: "HYBRID" }),
+  }), { DB: createSeasonDb("upcoming") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  assert.equal(invalidCategory.status, 400, "Invalid season categories must be rejected.");
+
+  const invalidDateRange = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify({ ...makeCreateSeasonBody("bad-dates"), startsAt: "2026-09-01T00:00:00.000Z", endsAt: "2026-08-01T00:00:00.000Z" }),
+  }), { DB: createSeasonDb("upcoming") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  assert.equal(invalidDateRange.status, 400, "Invalid season date ranges must be rejected.");
+
+  const editDb = createSeasonDb("upcoming");
+  const editResponse = await adminSeasonPut(makeContext(new Request("https://dzn.test/api/admin/seasons/season-upcoming", {
+    method: "PUT",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify({
+      name: "Edited Upcoming Season",
+      slug: "edited-upcoming-season",
+      category: "DEATHMATCH",
+      status: "registration_open",
+      startsAt: "2026-08-01T00:00:00.000Z",
+      endsAt: "2026-09-01T00:00:00.000Z",
+      scoringRules: getDefaultScoringRulesForCategory("DEATHMATCH"),
+    }),
+  }), { DB: editDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-upcoming" }));
+  assert.equal(editResponse.status, 200, "Admin users should be able to edit an upcoming season.");
+  assert.equal(editDb.seasons[0]?.name, "Edited Upcoming Season");
+  assert.equal(editDb.seasons[0]?.status, "registration_open");
+
+  const categoryLocked = await adminSeasonPut(makeContext(new Request("https://dzn.test/api/admin/seasons/season-active", {
+    method: "PUT",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify({
+      name: "Active Season",
+      slug: "season-active",
+      category: "PVP",
+      status: "active",
+      startsAt: "2026-06-01T00:00:00.000Z",
+      endsAt: "2026-07-01T00:00:00.000Z",
+      scoringRules: getDefaultScoringRulesForCategory("PVP"),
+    }),
+  }), { DB: createSeasonDb("active") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-active" }));
+  assert.equal(categoryLocked.status, 409, "Category changes must be blocked when entries exist.");
+
+  const completedLocked = await adminSeasonPut(makeContext(new Request("https://dzn.test/api/admin/seasons/season-completed", {
+    method: "PUT",
+    headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
+    body: JSON.stringify({
+      name: "Completed Season",
+      slug: "season-completed",
+      category: "DEATHMATCH",
+      status: "active",
+      startsAt: "2026-06-01T00:00:00.000Z",
+      endsAt: "2026-07-01T00:00:00.000Z",
+      scoringRules: getDefaultScoringRulesForCategory("DEATHMATCH"),
+    }),
+  }), { DB: createSeasonDb("completed") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-completed" }));
+  assert.equal(completedLocked.status, 409, "Completed season destructive edits must be blocked.");
 }
 
-type TestSeasonStatus = "active" | "completed";
+type TestSeasonStatus = "active" | "completed" | "upcoming";
 
 type TestSeasonRow = {
   id: string;
@@ -440,21 +564,21 @@ class SeasonMemoryD1 {
   sessionUser: SessionUser | null;
 
   constructor(status: TestSeasonStatus, sessionUser: SessionUser | null) {
-    const seasonId = status === "completed" ? "season-completed" : "season-active";
+    const seasonId = status === "completed" ? "season-completed" : status === "upcoming" ? "season-upcoming" : "season-active";
     const now = "2026-06-04T10:00:00.000Z";
     this.seasons = [{
       id: seasonId,
       slug: seasonId,
-      name: status === "completed" ? "Completed Season" : "Active Season",
+      name: status === "completed" ? "Completed Season" : status === "upcoming" ? "Upcoming Season" : "Active Season",
       category: "deathmatch",
-      status: status === "completed" ? "completed" : "active",
-      starts_at: "2026-06-01T00:00:00.000Z",
-      ends_at: status === "completed" ? "2026-06-02T00:00:00.000Z" : "2026-07-01T00:00:00.000Z",
+      status: status === "completed" ? "completed" : status === "upcoming" ? "upcoming" : "active",
+      starts_at: status === "upcoming" ? "2026-08-01T00:00:00.000Z" : "2026-06-01T00:00:00.000Z",
+      ends_at: status === "completed" ? "2026-06-02T00:00:00.000Z" : status === "upcoming" ? "2026-09-01T00:00:00.000Z" : "2026-07-01T00:00:00.000Z",
       scoring_rules_json: null,
       created_at: now,
       updated_at: now,
     }];
-    this.entries = [
+    this.entries = status === "upcoming" ? [] : [
       makeEntry("entry-a", seasonId, "server-a", "2026-06-01T00:00:00.000Z", status === "completed" ? 500 : null, status === "completed" ? 1 : null),
       makeEntry("entry-b", seasonId, "server-b", "2026-06-01T00:05:00.000Z", status === "completed" ? 300 : null, status === "completed" ? 2 : null),
     ];
@@ -494,6 +618,21 @@ class SeasonMemoryStatement {
   async run() {
     const normalized = normalizeSql(this.sql);
     if (normalized.startsWith("create ")) return { success: true, meta: { changes: 0 } };
+    if (normalized.startsWith("insert into dzn_seasons")) {
+      this.db.seasons.push({
+        id: String(this.args[0]),
+        slug: String(this.args[1]),
+        name: String(this.args[2]),
+        category: String(this.args[3]),
+        status: "upcoming",
+        starts_at: String(this.args[4]),
+        ends_at: String(this.args[5]),
+        scoring_rules_json: String(this.args[6]),
+        created_at: String(this.args[7]),
+        updated_at: String(this.args[8]),
+      });
+      return { success: true, meta: { changes: 1 } };
+    }
     if (normalized.startsWith("insert into dzn_season_score_snapshots")) {
       this.db.snapshots.push({
         id: String(this.args[0]),
@@ -521,12 +660,35 @@ class SeasonMemoryStatement {
       if (entry) entry.rank = this.args[0] === null || this.args[0] === undefined ? null : Number(this.args[0]);
       return { success: true, meta: { changes: entry ? 1 : 0 } };
     }
+    if (normalized.startsWith("update dzn_seasons set")) {
+      const season = this.db.seasons.find((row) => row.id === String(this.args[8]));
+      if (season) {
+        season.name = String(this.args[0]);
+        season.slug = String(this.args[1]);
+        season.category = String(this.args[2]);
+        season.status = String(this.args[3]);
+        season.starts_at = String(this.args[4]);
+        season.ends_at = String(this.args[5]);
+        season.scoring_rules_json = String(this.args[6]);
+        season.updated_at = String(this.args[7]);
+      }
+      return { success: true, meta: { changes: season ? 1 : 0 } };
+    }
     return { success: true, meta: { changes: 0 } };
   }
 
   async first<T>() {
     const normalized = normalizeSql(this.sql);
     if (normalized.startsWith("select users.id, users.discord_id")) return this.db.sessionUser as T | null;
+    if (normalized.startsWith("select count(*) as count from dzn_season_entries")) {
+      const seasonId = String(this.args[0]);
+      return { count: this.db.entries.filter((entry) => entry.season_id === seasonId && entry.status !== "withdrawn").length } as T;
+    }
+    if (normalized.startsWith("select dzn_seasons.*,")) {
+      const seasonId = String(this.args[0]);
+      const season = this.db.seasons.find((row) => row.id === seasonId);
+      return (season ? makeAdminSeasonSummaryRow(this.db, season) : null) as T | null;
+    }
     if (normalized.startsWith("select * from dzn_seasons")) {
       const value = String(this.args[0]);
       return (this.db.seasons.find((season) => season.id === value || season.slug === value) ?? null) as T | null;
@@ -555,19 +717,7 @@ class SeasonMemoryStatement {
     if (normalized.startsWith("select dzn_seasons.*,")) {
       const limit = Number(this.args[0] ?? 100);
       const rows = this.db.seasons
-        .map((season) => {
-          const entries = this.db.entries.filter((entry) => entry.season_id === season.id && entry.status !== "withdrawn");
-          const snapshots = this.db.snapshots.filter((snapshot) => snapshot.season_id === season.id);
-          const awards = this.db.awards.filter((award) => award.season_id === season.id);
-          return {
-            ...season,
-            entry_count: entries.length,
-            scored_entry_count: entries.filter((entry) => entry.final_score !== null && entry.rank !== null).length,
-            score_snapshot_count: snapshots.length,
-            awards_count: awards.length,
-            last_score_refresh_at: latestIso(snapshots.map((snapshot) => snapshot.captured_at)),
-          };
-        })
+        .map((season) => makeAdminSeasonSummaryRow(this.db, season))
         .slice(0, limit);
       return { results: rows as T[] };
     }
@@ -613,6 +763,31 @@ class SeasonMemoryStatement {
 
 function createSeasonDb(status: TestSeasonStatus, sessionUser?: SessionUser | null) {
   return new SeasonMemoryD1(status, sessionUser ?? null);
+}
+
+function makeCreateSeasonBody(slug: string) {
+  return {
+    name: "Summer Deathmatch",
+    slug,
+    category: "DEATHMATCH",
+    startsAt: "2026-08-01T00:00:00.000Z",
+    endsAt: "2026-09-01T00:00:00.000Z",
+    scoringRules: getDefaultScoringRulesForCategory("DEATHMATCH"),
+  };
+}
+
+function makeAdminSeasonSummaryRow(db: SeasonMemoryD1, season: TestSeasonRow) {
+  const entries = db.entries.filter((entry) => entry.season_id === season.id && entry.status !== "withdrawn");
+  const snapshots = db.snapshots.filter((snapshot) => snapshot.season_id === season.id);
+  const awards = db.awards.filter((award) => award.season_id === season.id);
+  return {
+    ...season,
+    entry_count: entries.length,
+    scored_entry_count: entries.filter((entry) => entry.final_score !== null && entry.rank !== null).length,
+    score_snapshot_count: snapshots.length,
+    awards_count: awards.length,
+    last_score_refresh_at: latestIso(snapshots.map((snapshot) => snapshot.captured_at)),
+  };
 }
 
 function makeEntry(id: string, seasonId: string, serverId: string, joinedAt: string, score: number | null, rank: number | null): TestEntryRow {

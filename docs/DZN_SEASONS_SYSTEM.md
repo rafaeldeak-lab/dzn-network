@@ -40,6 +40,13 @@ Refresh automation only reads existing stored aggregate stats and writes `dzn_se
 
 Phase 7F adds the protected `/dashboard/admin/seasons` panel for DZN admin/support/dev users. The panel lists active, upcoming, and completed seasons with entry counts, last score refresh, stored awards, and guarded actions for score refresh and manual finalisation. Finalisation requires explicit confirmation because it persists seasonal awards and can grant permanent seasonal badges.
 
+Phase 7G adds admin/support/dev create and edit tools:
+
+- `POST /api/admin/seasons` creates a `dzn_seasons` configuration row after validating slug uniqueness, same-category season category, date range, and JSON scoring rules.
+- `PUT /api/admin/seasons/[seasonId]` updates allowed season configuration fields, blocks category changes once entries exist, and blocks destructive edits to completed/finalised seasons.
+
+Create/edit tools only write the `dzn_seasons` configuration row. They do not delete entries, awards, or snapshots, and they do not modify ADM files or player/stat records.
+
 ## Awards and Badges
 
 `finaliseSeason` completes the season, stores final ranks, writes `dzn_season_awards`, and calls the existing badge award helper for the rank-one seasonal champion badge. Award writes are idempotent through unique season/server/award keys and the existing badge award guard.
