@@ -6,7 +6,7 @@ import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { DznLogo } from "@/components/dzn/dzn-logo";
-import { AnimatedBullet } from "@/components/leaderboards/animated-bullet";
+import { KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type LeaderboardServer = {
@@ -225,18 +225,21 @@ export default function LeaderboardsPage() {
             </div>
           </div>
 
-          <div className="dzn-leaderboard-hero__visual">
-            <AnimatedBullet />
-          </div>
-
-          {!initialError ? (
-            <div className="dzn-leaderboard-stat-grid">
-              <MetricRow icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} tone="violet" />
-              <MetricRow icon={Crosshair} label="Kills Tracked" value={formatNumber(totalKills)} tone="cyan" />
-              <MetricRow icon={Users} label="Ranked Players" value={String(totalPlayers)} tone="orange" />
-              <MetricRow icon={Trophy} label="Longest Kill" value={formatDistance(longestKill)} tone="red" />
+          <div className="dzn-leaderboard-hero__intel">
+            {!initialError ? (
+              <div className="dzn-leaderboard-stat-grid">
+                <MetricRow icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} tone="violet" />
+                <MetricRow icon={Crosshair} label="Kills Tracked" value={formatNumber(totalKills)} tone="cyan" />
+                <MetricRow icon={Users} label="Ranked Players" value={String(totalPlayers)} tone="orange" />
+                <MetricRow icon={Trophy} label="Longest Kill" value={formatDistance(longestKill)} tone="red" />
+              </div>
+            ) : null}
+            <div className="dzn-leaderboard-hero__signal" aria-hidden="true">
+              <span />
+              <span />
+              <span />
             </div>
-          ) : null}
+          </div>
         </section>
 
         {error ? <MessagePanel message={error} onRetry={() => setReloadNonce((value) => value + 1)} /> : null}
@@ -293,7 +296,10 @@ export default function LeaderboardsPage() {
 
             <aside className="dzn-leaderboard-sidecar grid content-start gap-6">
               {payload.is_locked ? (
-                <LockedLeaderboardPanel title="Longest Kills" icon={Skull} text="Long-kill records and detailed kill tables are available to logged-in DZN members." />
+                <div className="grid gap-6">
+                  <LongestKillsSection bestOverall={null} latestKill={null} oneShotKill={null} />
+                  <LockedLeaderboardPanel title="Full Long-Kill Records" icon={Skull} text="Detailed long-kill records and confirmed kill tables are available to logged-in DZN members." />
+                </div>
               ) : (
                 <LongestKillsSection
                   bestOverall={payload.best_overall_kill}
@@ -328,17 +334,16 @@ function LongestKillsSection({
           <h2 className="text-2xl font-black uppercase text-white">Longest Kills</h2>
         </div>
 
-        {hasKills ? (
-          <div className="mt-5 grid gap-4">
-            <KillHighlightCard title="Best Overall" kill={bestOverall} tone="violet" />
-            <KillHighlightCard title="Latest Confirmed" kill={latestKill} tone="cyan" />
-            {oneShotKill ? <KillHighlightCard title="One Shot Kill" kill={oneShotKill} tone="orange" /> : null}
-          </div>
-        ) : (
-          <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-5 text-sm font-bold text-zinc-400">
-            No confirmed long kills yet. Long-kill records will appear once connected servers sync PvP kills.
-          </div>
-        )}
+        <div className="mt-5 grid gap-4">
+          <KillHighlightCard title="Best Overall" kill={bestOverall} tone="violet" />
+          <KillHighlightCard title="Latest Confirmed" kill={latestKill} tone="cyan" />
+          {oneShotKill ? <KillHighlightCard title="One Shot Kill" kill={oneShotKill} tone="orange" /> : null}
+        </div>
+        {!hasKills ? (
+          <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-400">
+            Long-kill records will appear once connected servers sync confirmed PvP kills.
+          </p>
+        ) : null}
       </div>
     </section>
   );
@@ -399,7 +404,7 @@ function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) 
 function KillHighlightCard({ title, kill, tone }: { title: string; kill: Omit<LongestKill, "rank"> | null; tone: "violet" | "cyan" | "orange" }) {
   return (
     <div className={`dzn-long-kill-card dzn-long-kill-card--${tone} rounded-lg border p-4`}>
-      <span className="dzn-kill-card-round" aria-hidden="true" />
+      <KillProjectileAccent tone={tone} />
       <p className="text-xs font-black uppercase tracking-[0.16em] opacity-80">{title}</p>
       {kill ? (
         <>

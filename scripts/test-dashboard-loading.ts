@@ -161,8 +161,9 @@ includesAll(leaderboards, [
   "error_initial",
   "data.data && !data.top_servers ? data.data : data",
   "Leaderboard data could not be loaded right now.",
-  "AnimatedBullet",
+  "KillProjectileAccent",
   "dzn-leaderboard-hero",
+  "dzn-leaderboard-hero__intel",
   "dzn-leaderboard-stat-grid",
   "Global Leaderboards",
   "Servers Ranked",
@@ -185,28 +186,23 @@ for (const fakeStaticName of ["NukeTown DEATHMATCH", "PANDORA DayZ", "xAKA-MINI_
 
 const globals = source("app/globals.css");
 includesAll(globals, [
-  ".dzn-bullet-wrap",
-  ".dzn-bullet-svg",
-  ".dzn-bullet-projectile",
-  ".dzn-bullet-ridge",
-  ".dzn-bullet-heat",
-  ".dzn-bullet-tracer",
-  ".dzn-ember",
-  ".dzn-kill-card-round",
+  ".dzn-leaderboard-hero__signal",
+  ".dzn-kill-projectile",
+  ".dzn-kill-projectile-svg",
+  ".dzn-kill-tracer",
+  ".dzn-kill-ember",
   ".dzn-leaderboard-card",
   ".dzn-leaderboard-row:hover",
   "url(\"/media/dzn-cinematic-survivor.png\")",
-  "@keyframes bulletSpin",
-  "@keyframes bulletSurge",
-  "@keyframes bulletGrooveRoll",
-  "@keyframes tracerSpiral",
-  "@keyframes emberDrift",
-  "@keyframes heatPulse",
-  "@keyframes smokeFade",
+  "@keyframes signalSweep",
+  "@keyframes killRoundSpin",
+  "@keyframes killTracerDrift",
+  "@keyframes killEmberDrift",
   "@keyframes heroParallax",
-  "@keyframes bulletParallax",
   "@media (prefers-reduced-motion: reduce)",
 ]);
+assert.equal(leaderboards.includes("AnimatedBullet"), false, "Hero projectile component must not be rendered on the Global Leaderboards hero.");
+assert.equal(globals.includes(".dzn-bullet-wrap"), false, "Global Leaderboards hero must not keep the old giant bullet wrapper CSS.");
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, [
