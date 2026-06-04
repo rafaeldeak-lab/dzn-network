@@ -1818,6 +1818,8 @@ body {
 .leaderboard-ref-page .leaderboard-ref-bullet-scene {
   top: 0 !important;
   right: -0.25rem !important;
+  bottom: auto !important;
+  left: auto !important;
   z-index: 1;
   width: min(40%, 16rem) !important;
   height: 100% !important;
