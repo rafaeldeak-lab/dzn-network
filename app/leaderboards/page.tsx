@@ -220,42 +220,37 @@ export default function LeaderboardsPage() {
   );
 
   return (
-    <main className="leaderboard-ref-page leaderboard-reference-page dzn-leaderboard-page relative min-h-screen overflow-hidden bg-[#02030a] px-3 py-2 text-white sm:px-4 lg:px-5">
+    <div className="leaderboard-ref-shell leaderboard-reference-shell dzn-leaderboard-page relative min-h-screen overflow-hidden bg-[#02030a] text-white">
       <span className="leaderboard-ref-embers" aria-hidden="true" />
-      <div className="leaderboard-ref-shell leaderboard-reference-shell relative z-10 mx-auto flex min-h-screen max-w-[1500px] flex-col">
+      <main className="leaderboard-ref-page leaderboard-reference-page relative z-10">
         <LeaderboardNav />
 
         <section className="leaderboard-ref-hero leaderboard-reference-hero dzn-leaderboard-hero">
-          <div className="leaderboard-ref-hero-art" aria-hidden="true" />
-          <div className="leaderboard-ref-hero-copy leaderboard-reference-hero-copy dzn-leaderboard-hero__copy">
-            <div>
-              <p className="leaderboard-ref-live-badge leaderboard-reference-live-badge dzn-leaderboard-live-badge inline-flex border border-violet-300/35 bg-violet-500/20 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-violet-50">
-                Live ADM intelligence
-              </p>
-              <h1 className="leaderboard-ref-title leaderboard-reference-title dzn-leaderboard-title mt-2 font-black uppercase tracking-normal" aria-label="Global Leaderboards">
-                <span>Global</span>
-                <span>Leaderboards</span>
-              </h1>
-              <p className="leaderboard-ref-subtitle leaderboard-reference-subtitle mt-3 max-w-3xl text-xs font-bold leading-5 text-zinc-100">
-                Ranked connected DayZ servers and players based on synced ADM activity.
-              </p>
-              <p className="leaderboard-ref-updated leaderboard-reference-updated mt-2 text-[11px] font-bold text-zinc-300">
-                Updated: {initialError ? "Unavailable" : payload.updated_at ? formatDateTime(payload.updated_at) : loading ? "Loading live data..." : "Live data pending"}
-              </p>
-            </div>
-          </div>
-
-          <div className="leaderboard-ref-hero-intel leaderboard-reference-hero-intel dzn-leaderboard-hero__intel">
-            {!initialError ? (
-              <div className="leaderboard-ref-stats leaderboard-reference-stat-grid dzn-leaderboard-stat-grid">
-                <StatCard icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} tone="violet" />
-                <StatCard icon={Skull} label="Kills Tracked" value={formatNumber(totalKills)} tone="cyan" />
-                <StatCard icon={Users} label="Ranked Players" value={String(totalPlayers)} tone="orange" />
-                <StatCard icon={Crosshair} label="Longest Kill" value={formatDistance(longestKill)} tone="red" />
-              </div>
-            ) : null}
+          <div className="leaderboard-ref-hero-content leaderboard-reference-hero-copy dzn-leaderboard-hero__copy">
+            <p className="leaderboard-ref-live-badge leaderboard-reference-live-badge dzn-leaderboard-live-badge">
+              Live ADM intelligence
+            </p>
+            <h1 className="leaderboard-ref-title leaderboard-reference-title dzn-leaderboard-title" aria-label="Global Leaderboards">
+              <span className="leaderboard-ref-title-global">Global</span>
+              <span className="leaderboard-ref-title-purple">Leaderboards</span>
+            </h1>
+            <p className="leaderboard-ref-hero-subtitle leaderboard-reference-subtitle">
+              Ranked connected DayZ servers and players based on synced ADM activity.
+            </p>
+            <p className="leaderboard-ref-hero-updated leaderboard-reference-updated">
+              Updated: {initialError ? "Unavailable" : payload.updated_at ? formatDateTime(payload.updated_at) : loading ? "Loading live data..." : "Live data pending"}
+            </p>
           </div>
         </section>
+
+        {!initialError ? (
+          <div className="leaderboard-ref-stats-row leaderboard-ref-stats leaderboard-reference-stat-grid dzn-leaderboard-stat-grid">
+            <StatCard icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} tone="violet" />
+            <StatCard icon={Skull} label="Kills Tracked" value={formatNumber(totalKills)} tone="cyan" />
+            <StatCard icon={Users} label="Ranked Players" value={String(totalPlayers)} tone="orange" />
+            <StatCard icon={Crosshair} label="Longest Kill" value={formatDistance(longestKill)} tone="red" />
+          </div>
+        ) : null}
 
         {error ? <MessagePanel message={error} onRetry={() => setReloadNonce((value) => value + 1)} /> : null}
         {loading ? <LoadingGrid /> : null}
@@ -300,31 +295,27 @@ export default function LeaderboardsPage() {
             </div>
           </div>
         ) : null}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
 
 function LeaderboardNav() {
   return (
-    <nav className="leaderboard-ref-nav" aria-label="DZN leaderboard navigation">
-      <Link href="/" className="leaderboard-ref-brand">
-        <span className="leaderboard-ref-brand-mark">DZN</span>
-        <span className="leaderboard-ref-brand-copy">
-          <strong>DZN Network</strong>
-          <small>Prove your server is the best.</small>
+    <nav className="leaderboard-ref-topbar" aria-label="DZN leaderboard navigation">
+      <Link href="/" className="leaderboard-ref-logo-link">
+        <span className="leaderboard-ref-logo-box">DZN</span>
+        <span className="leaderboard-ref-logo-copy">
+          <strong>DZN NETWORK</strong>
+          <small>PROVE YOUR SERVER IS THE BEST.</small>
         </span>
       </Link>
 
-      <div className="leaderboard-ref-nav-links">
+      <div className="leaderboard-ref-topbar-links">
         <Link href="/">Home</Link>
         <Link href="/servers">Servers</Link>
         <Link href="/leaderboards" aria-current="page">Leaderboards</Link>
       </div>
-
-      <Link href="/setup" className="leaderboard-ref-nav-cta">
-        Add Your Server
-      </Link>
     </nav>
   );
 }
