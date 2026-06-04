@@ -96,6 +96,7 @@ includesAll(helper, [
   "finaliseSeason",
   "getSeasonLeaderboard",
   "awardSeasonBadges",
+  "getSeasonAwards",
   "normalizeSeasonCategory",
   "CATEGORY_MISMATCH",
   "ALREADY_JOINED",
@@ -108,6 +109,11 @@ includesAll(helper, [
   "INSERT INTO dzn_season_awards",
   "ON CONFLICT(season_id, server_id, award_code) DO NOTHING",
   "awardBadge",
+  "badgesAwarded",
+  "awardsCreated",
+  "season_runner_up",
+  "season_third_place",
+  "permanentSeasonalBadge",
   "missingMetrics",
 ]);
 assert.equal(helper.includes("b.score.score - a.score.score"), true, "Season leaderboard refresh should rank by calculated score.");
@@ -117,6 +123,7 @@ for (const route of [
   "functions/api/seasons.ts",
   "functions/api/seasons/[slug].ts",
   "functions/api/seasons/[slug]/leaderboard.ts",
+  "functions/api/admin/seasons/[seasonId]/finalise.ts",
   "functions/api/servers/[serverId]/seasons/status.ts",
   "functions/api/servers/[serverId]/seasons/[seasonId]/join.ts",
 ]) {
@@ -126,9 +133,11 @@ for (const route of [
 const seasonsRoute = source("functions/api/seasons.ts");
 includesAll(seasonsRoute, ["getActiveSeasons", "getPublicSeasons", "activeSeasons", "upcomingSeasons", "completedSeasons", "methodNotAllowed"]);
 const seasonDetailRoute = source("functions/api/seasons/[slug].ts");
-includesAll(seasonDetailRoute, ["getSeasonBySlug", "SEASON_NOT_FOUND"]);
+includesAll(seasonDetailRoute, ["getSeasonBySlug", "getSeasonAwards", "awards", "SEASON_NOT_FOUND"]);
 const leaderboardRoute = source("functions/api/seasons/[slug]/leaderboard.ts");
 includesAll(leaderboardRoute, ["getSeasonLeaderboard", "leaderboard"]);
+const seasonFinaliseRoute = source("functions/api/admin/seasons/[seasonId]/finalise.ts");
+includesAll(seasonFinaliseRoute, ["requireBadgeAdminUser", "finaliseSeason", "entriesFinalised", "awardsCreated", "badgesAwarded", "warnings"]);
 const ownerSeasonStatusRoute = source("functions/api/servers/[serverId]/seasons/status.ts");
 includesAll(ownerSeasonStatusRoute, ["resolveOwnerVisualLoadoutServer", "status: access.status", "getServerSeasonStatus", "Season status is temporarily unavailable."]);
 const joinRoute = source("functions/api/servers/[serverId]/seasons/[seasonId]/join.ts");
@@ -174,6 +183,9 @@ includesAll(publicSeasonsUi, [
   "No servers have joined yet.",
   "No active seasons are running right now.",
   "Stored season snapshots",
+  "Winners & Awards",
+  "Awarded champion badge",
+  "Winner awards will appear after this season is finalized.",
 ]);
 assert.equal(/fake server|fake score|demo server|demo score/i.test(publicSeasonsUi), false, "Public seasons UI must not show fake servers or fake scores.");
 
@@ -189,6 +201,8 @@ includesAll(serverSettingsPage, [
   "Deathmatch -> Deathmatch only. PvP -> PvP only. PvE -> PvE only. Survival -> Survival only.",
   "Join Season",
   "This server has not joined a DZN season yet.",
+  "Season awards",
+  "Badge earned:",
   "Starter can join normal seasons.",
   "paid plans do not improve season scores or rank",
 ]);

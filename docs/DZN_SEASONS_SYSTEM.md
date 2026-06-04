@@ -34,6 +34,14 @@ Unavailable metrics are recorded as missing in `metrics_json`; fake stats are ne
 
 `finaliseSeason` completes the season, stores final ranks, writes `dzn_season_awards`, and calls the existing badge award helper for the rank-one seasonal champion badge. Award writes are idempotent through unique season/server/award keys and the existing badge award guard.
 
+Protected finalisation endpoint:
+
+```text
+POST /api/admin/seasons/[seasonId]/finalise
+```
+
+Only admin/support/dev users can call it. Rank 1 receives the mapped permanent seasonal champion badge when the season name/date maps to a known seasonal badge. Rank 2 and 3 receive persisted season award metadata without granting fake badge codes.
+
 ## Stats Read
 
 The season foundation reads:

@@ -1,4 +1,4 @@
-import { DznSeasonError, getSeasonBySlug } from "../../_lib/dzn-seasons";
+import { DznSeasonError, getSeasonAwards, getSeasonBySlug } from "../../_lib/dzn-seasons";
 import { json, methodNotAllowed } from "../../_lib/http";
 import type { PagesFunction } from "../../_lib/types";
 
@@ -6,7 +6,8 @@ export const onRequestGet: PagesFunction = async ({ env, params }) => {
   try {
     const season = await getSeasonBySlug(env, String(params.slug ?? ""));
     if (!season) return json(errorPayload("SEASON_NOT_FOUND", "Season not found."), { status: 404 });
-    return json({ ok: true, season });
+    const awards = await getSeasonAwards(env, season.id);
+    return json({ ok: true, season, awards });
   } catch (error) {
     if (error instanceof DznSeasonError) return json(errorPayload(error.errorCode, error.message), { status: error.status });
     return unavailable(error);

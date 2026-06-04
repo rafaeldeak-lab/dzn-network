@@ -33,6 +33,20 @@ type SeasonLeaderboardEntry = {
   metrics: Record<string, unknown>;
 };
 
+type SeasonAward = {
+  id: string;
+  seasonId: string;
+  serverId: string;
+  serverName: string;
+  publicSlug: string | null;
+  awardCode: string;
+  badgeCode: string | null;
+  label: string;
+  rank: number | null;
+  awardedAt: string;
+  metadata: Record<string, unknown>;
+};
+
 type SeasonsResponse = {
   ok?: boolean;
   seasons?: PublicSeason[];
@@ -47,6 +61,7 @@ type SeasonDetailResponse = {
   ok?: boolean;
   season?: PublicSeason;
   leaderboard?: SeasonLeaderboardEntry[];
+  awards?: SeasonAward[];
   error?: string;
   message?: string;
 };
@@ -116,6 +131,7 @@ export function SeasonsIndexPage() {
 export function SeasonDetailPage({ slug }: { slug: string }) {
   const [season, setSeason] = useState<PublicSeason | null>(null);
   const [leaderboard, setLeaderboard] = useState<SeasonLeaderboardEntry[]>([]);
+  const [awards, setAwards] = useState<SeasonAward[]>([]);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
 
@@ -132,6 +148,7 @@ export function SeasonDetailPage({ slug }: { slug: string }) {
         if (!active) return;
         setSeason(detail.season ?? standings.season ?? null);
         setLeaderboard(Array.isArray(standings.leaderboard) ? standings.leaderboard : []);
+        setAwards(Array.isArray(detail.awards) ? detail.awards : []);
         setState("loaded");
       } catch (loadError) {
         if (!active) return;
@@ -159,11 +176,12 @@ export function SeasonDetailPage({ slug }: { slug: string }) {
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
           <main className="space-y-6">
             <SeasonOverview season={season} />
+            <SeasonWinners awards={awards} leaderboard={leaderboard} />
             <SeasonLeaderboard leaderboard={leaderboard} />
           </main>
           <aside className="space-y-6">
             <SeasonRules season={season} />
-            <SeasonAwards season={season} />
+            <SeasonAwards season={season} awards={awards} />
           </aside>
         </div>
       ) : null}
@@ -303,7 +321,8 @@ function SeasonRules({ season }: { season: PublicSeason }) {
   );
 }
 
-function SeasonAwards({ season }: { season: PublicSeason }) {
+function SeasonAwards({ season, awards }: { season: PublicSeason; awards: SeasonAward[] }) {
+  const champion = awards.find((award) => Number(award.rank) === 1);
   return (
     <section className="rounded-xl border border-amber-300/20 bg-amber-400/8 p-5">
       <h2 className="flex items-center gap-2 text-sm font-black uppercase text-white">
@@ -313,8 +332,72 @@ function SeasonAwards({ season }: { season: PublicSeason }) {
       <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-zinc-300">
         <p>Top season finishers can receive permanent season awards after finalization.</p>
         <p>Champion badge preview: {seasonalBadgePreview(season)}</p>
+        {champion?.badgeCode ? (
+          <p className="rounded-lg border border-amber-300/20 bg-black/24 px-3 py-2 text-amber-50">
+            Awarded champion badge: {champion.label}
+          </p>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function SeasonWinners({ awards, leaderboard }: { awards: SeasonAward[]; leaderboard: SeasonLeaderboardEntry[] }) {
+  const topAwards = awards.filter((award) => Number(award.rank ?? 0) > 0 && Number(award.rank ?? 0) <= 3);
+  const fallbackTop = leaderboard.filter((entry) => Number(entry.rank ?? 0) > 0 && Number(entry.rank ?? 0) <= 3);
+  return (
+    <section className="rounded-xl border border-amber-300/20 bg-amber-400/8 p-5">
+      <h2 className="flex items-center gap-3 text-2xl font-black uppercase text-white">
+        <Crown className="h-6 w-6 text-amber-200" />
+        Winners & Awards
+      </h2>
+      {topAwards.length ? (
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          {topAwards.map((award) => (
+            <WinnerCard
+              key={award.id}
+              rank={award.rank}
+              serverName={award.serverName}
+              publicSlug={award.publicSlug}
+              label={award.label}
+              badgeCode={award.badgeCode}
+            />
+          ))}
+        </div>
+      ) : fallbackTop.length ? (
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          {fallbackTop.map((entry) => (
+            <WinnerCard
+              key={entry.entryId}
+              rank={entry.rank}
+              serverName={entry.serverName}
+              publicSlug={entry.publicSlug}
+              label="Awaiting finalisation"
+              badgeCode={null}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyPanel message="Winner awards will appear after this season is finalized." />
+      )}
+    </section>
+  );
+}
+
+function WinnerCard({ rank, serverName, publicSlug, label, badgeCode }: { rank: number | null; serverName: string; publicSlug: string | null; label: string; badgeCode: string | null }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/24 p-4">
+      <p className="text-xs font-black uppercase text-amber-100">Rank #{rank ?? "-"}</p>
+      <p className="mt-2 text-lg font-black text-white">
+        {publicSlug ? (
+          <Link href={`/servers/profile?slug=${encodeURIComponent(publicSlug)}`} className="transition hover:text-cyan-100">
+            {serverName}
+          </Link>
+        ) : serverName}
+      </p>
+      <p className="mt-2 text-sm font-bold text-zinc-300">{label}</p>
+      {badgeCode ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-black uppercase text-amber-100">{badgeCode.replace(/_/g, " ")}</p> : null}
+    </div>
   );
 }
 

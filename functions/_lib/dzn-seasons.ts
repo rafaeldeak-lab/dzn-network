@@ -38,6 +38,16 @@ export type DznSeasonScoreResult = {
   missingMetrics: string[];
 };
 
+export type DznSeasonAwardRow = {
+  id: string;
+  season_id: string;
+  server_id: string;
+  award_code: string;
+  rank: number | null;
+  awarded_at: string;
+  metadata_json: string | null;
+};
+
 type SeasonServerRow = {
   id: string;
   server_name: string | null;
@@ -226,7 +236,11 @@ export async function getServerSeasonStatus(env: Env, serverId: string) {
       ends_at: string;
     }>();
   const entries = entryRows.results ?? [];
-  const entryBySeasonId = new Map(entries.map((entry) => [entry.season_id, toPublicOwnerSeasonEntry(entry)]));
+  const awardsBySeasonId = await getServerSeasonAwardMap(env, server.id);
+  const entryBySeasonId = new Map(entries.map((entry) => [
+    entry.season_id,
+    { ...toPublicOwnerSeasonEntry(entry), awards: awardsBySeasonId.get(entry.season_id) ?? [] },
+  ]));
   const eligibleSeasons = [];
   const joinedSeasons = [];
   const ineligibleSeasons = [];
@@ -306,7 +320,7 @@ export async function finaliseSeason(env: Env, seasonId: string) {
   await ensureDznSeasonSchema(env);
   const season = await findSeason(env, seasonId);
   if (!season) throw new DznSeasonError("SEASON_NOT_FOUND", "Season not found.", 404);
-  await refreshSeasonScores(env, season.id, 500);
+  const refreshed = await refreshSeasonScores(env, season.id, 500);
   const now = new Date().toISOString();
   await requireDb(env)
     .prepare("UPDATE dzn_seasons SET status = 'completed', updated_at = ? WHERE id = ?")
@@ -317,7 +331,15 @@ export async function finaliseSeason(env: Env, seasonId: string) {
     .bind(now, season.id)
     .run();
   const awards = await awardSeasonBadges(env, season.id);
-  return { ok: true, seasonId: season.id, awards };
+  return {
+    ok: true,
+    seasonId: season.id,
+    entriesFinalised: refreshed.refreshed,
+    awardsCreated: awards.awardsCreated,
+    badgesAwarded: awards.badgesAwarded,
+    warnings: awards.warnings,
+    awards: awards.awards,
+  };
 }
 
 export async function getSeasonLeaderboard(env: Env, seasonId: string) {
@@ -349,23 +371,62 @@ export async function awardSeasonBadges(env: Env, seasonId: string) {
   const leaderboard = await getSeasonLeaderboard(env, season.id);
   const winners = leaderboard.filter((entry) => Number(entry.rank ?? 0) > 0 && Number(entry.rank ?? 0) <= 3);
   const awarded = [];
+  const warnings = [];
+  let awardsCreated = 0;
+  let badgesAwarded = 0;
   const now = new Date().toISOString();
   for (const entry of winners) {
-    const awardCode = Number(entry.rank) === 1 ? seasonalChampionBadgeFor(season) : `season_${season.slug}_rank_${entry.rank}`;
-    await requireDb(env)
+    const rank = Number(entry.rank);
+    const badgeCode = rank === 1 ? seasonalChampionBadgeFor(season) : null;
+    const awardCode = badgeCode ?? seasonAwardCodeForRank(rank);
+    const metadata = {
+      seasonSlug: season.slug,
+      seasonName: season.name,
+      score: entry.score,
+      badgeCode,
+      awardLabel: seasonAwardLabelForRank(rank, badgeCode),
+      permanentSeasonalBadge: Boolean(badgeCode && rank === 1),
+    };
+    const insert = await requireDb(env)
       .prepare(
         `INSERT INTO dzn_season_awards (id, season_id, server_id, award_code, rank, awarded_at, metadata_json)
          VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(season_id, server_id, award_code) DO NOTHING`,
       )
-      .bind(crypto.randomUUID(), season.id, entry.serverId, awardCode, entry.rank, now, safeJson({ seasonSlug: season.slug, score: entry.score }))
+      .bind(crypto.randomUUID(), season.id, entry.serverId, awardCode, rank, now, safeJson(metadata))
       .run();
-    if (Number(entry.rank) === 1) {
-      await awardBadge(env, entry.serverId, awardCode, "season", { seasonId: season.id, seasonSlug: season.slug, rank: entry.rank, score: entry.score });
+    if (Number((insert as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0) awardsCreated += 1;
+    let badgeAwarded = false;
+    if (rank === 1 && badgeCode) {
+      const hadBadge = await hasActiveSeasonBadge(env, entry.serverId, badgeCode);
+      await awardBadge(env, entry.serverId, badgeCode, "season", { seasonId: season.id, seasonSlug: season.slug, rank, score: entry.score, permanent: true });
+      badgeAwarded = !hadBadge;
+      if (badgeAwarded) badgesAwarded += 1;
     }
-    awarded.push({ serverId: entry.serverId, awardCode, rank: entry.rank });
+    if (rank === 1 && !badgeCode) warnings.push(`No seasonal badge mapping found for season ${season.slug}; champion award stored as metadata only.`);
+    awarded.push({ serverId: entry.serverId, awardCode, badgeCode, rank, badgeAwarded });
   }
-  return awarded;
+  return { awardsCreated, badgesAwarded, awards: awarded, warnings };
+}
+
+export async function getSeasonAwards(env: Env, seasonId: string) {
+  if (!env.DB) return [];
+  await ensureDznSeasonSchema(env);
+  const season = await findSeason(env, seasonId);
+  if (!season) throw new DznSeasonError("SEASON_NOT_FOUND", "Season not found.", 404);
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT dzn_season_awards.*,
+              linked_servers.server_name,
+              linked_servers.public_slug
+       FROM dzn_season_awards
+       LEFT JOIN linked_servers ON linked_servers.id = dzn_season_awards.server_id
+       WHERE dzn_season_awards.season_id = ?
+       ORDER BY dzn_season_awards.rank ASC, datetime(dzn_season_awards.awarded_at) ASC`,
+    )
+    .bind(season.id)
+    .all<DznSeasonAwardRow & { server_name: string | null; public_slug: string | null }>();
+  return (rows.results ?? []).map(toPublicSeasonAward);
 }
 
 export async function ensureDznSeasonSchema(env: Env) {
@@ -529,6 +590,23 @@ function toPublicOwnerSeasonEntry(row: DznSeasonEntryRow & {
   };
 }
 
+function toPublicSeasonAward(row: DznSeasonAwardRow & { server_name?: string | null; public_slug?: string | null }) {
+  const metadata = parseJsonObject(row.metadata_json);
+  return {
+    id: row.id,
+    seasonId: row.season_id,
+    serverId: row.server_id,
+    serverName: row.server_name ?? "Unnamed server",
+    publicSlug: row.public_slug ?? null,
+    awardCode: row.award_code,
+    badgeCode: typeof metadata.badgeCode === "string" ? metadata.badgeCode : (SEASONAL_BADGE_CODES.has(row.award_code) ? row.award_code : null),
+    label: typeof metadata.awardLabel === "string" ? metadata.awardLabel : seasonAwardLabelForRank(Number(row.rank ?? 0), null),
+    rank: row.rank,
+    awardedAt: row.awarded_at,
+    metadata,
+  };
+}
+
 function toPublicLeaderboardEntry(row: DznSeasonEntryRow & { server_name: string | null; public_slug: string | null }) {
   return {
     entryId: row.id,
@@ -553,11 +631,63 @@ function seasonalChampionBadgeFor(season: Pick<DznSeasonRow, "name" | "slug" | "
   if (text.includes("christmas")) return "christmas_champion";
   if (text.includes("easter")) return "easter_champion";
   if (text.includes("new_year") || text.includes("new-year") || text.includes("new year")) return "new_year_champion";
-  const month = new Date(season.starts_at).getUTCMonth();
+  const startsAt = new Date(season.starts_at);
+  if (Number.isNaN(startsAt.getTime())) return null;
+  const month = startsAt.getUTCMonth();
   if (month >= 2 && month <= 4) return "spring_champion";
   if (month >= 5 && month <= 7) return "summer_champion";
   if (month >= 8 && month <= 10) return "autumn_champion";
   return "winter_champion";
+}
+
+function seasonAwardCodeForRank(rank: number) {
+  if (rank === 1) return "season_champion";
+  if (rank === 2) return "season_runner_up";
+  if (rank === 3) return "season_third_place";
+  return "season_participant";
+}
+
+function seasonAwardLabelForRank(rank: number, badgeCode: string | null) {
+  if (badgeCode) return humanizeBadgeCode(badgeCode);
+  if (rank === 1) return "Season Champion";
+  if (rank === 2) return "Season Runner-up";
+  if (rank === 3) return "Season Third Place";
+  return "Season Award";
+}
+
+async function hasActiveSeasonBadge(env: Env, serverId: string, badgeCode: string) {
+  try {
+    const existing = await requireDb(env)
+      .prepare("SELECT id FROM server_badge_awards WHERE server_id = ? AND badge_code = ? AND is_active = 1 LIMIT 1")
+      .bind(serverId, badgeCode)
+      .first<{ id: string }>();
+    return Boolean(existing?.id);
+  } catch {
+    return false;
+  }
+}
+
+async function getServerSeasonAwardMap(env: Env, serverId: string) {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT *
+       FROM dzn_season_awards
+       WHERE server_id = ?
+       ORDER BY rank ASC, datetime(awarded_at) DESC`,
+    )
+    .bind(serverId)
+    .all<DznSeasonAwardRow>();
+  const bySeasonId = new Map<string, ReturnType<typeof toPublicSeasonAward>[]>();
+  for (const row of rows.results ?? []) {
+    const awards = bySeasonId.get(row.season_id) ?? [];
+    awards.push(toPublicSeasonAward(row));
+    bySeasonId.set(row.season_id, awards);
+  }
+  return bySeasonId;
+}
+
+function humanizeBadgeCode(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function result(score: number, metrics: Record<string, number | string | boolean>, missingMetrics: string[]): DznSeasonScoreResult {
@@ -600,6 +730,17 @@ function categoryLabel(category: string) {
 }
 
 const CATEGORY_SAFETY_MESSAGE = "Servers only compete against the same category.";
+
+const SEASONAL_BADGE_CODES = new Set([
+  "spring_champion",
+  "summer_champion",
+  "autumn_champion",
+  "winter_champion",
+  "halloween_champion",
+  "christmas_champion",
+  "easter_champion",
+  "new_year_champion",
+]);
 
 function cleanIdentifier(value: unknown) {
   const text = String(value ?? "").trim();

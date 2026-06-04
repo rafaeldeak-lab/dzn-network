@@ -261,6 +261,15 @@ type OwnerSeason = {
   endsAt: string;
 };
 
+type OwnerSeasonAward = {
+  id: string;
+  awardCode: string;
+  badgeCode: string | null;
+  label: string;
+  rank: number | null;
+  awardedAt: string;
+};
+
 type OwnerJoinedSeason = OwnerSeason & {
   entry: {
     id: string;
@@ -271,6 +280,7 @@ type OwnerJoinedSeason = OwnerSeason & {
     status: string;
     finalScore: number;
     rank: number | null;
+    awards?: OwnerSeasonAward[];
   };
 };
 
@@ -1534,6 +1544,18 @@ function JoinedSeasonGroup({ seasons }: { seasons: OwnerJoinedSeason[] }) {
                 <InfoRow label="Current rank" value={season.entry.rank ? `#${season.entry.rank}` : "Pending"} />
                 <InfoRow label="Score" value={`${season.entry.finalScore ?? 0}`} />
               </div>
+              {season.entry.awards?.length ? (
+                <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
+                  <p className="text-[10px] font-black uppercase text-amber-100">Season awards</p>
+                  <div className="mt-2 grid gap-1.5">
+                    {season.entry.awards.map((award) => (
+                      <p key={award.id} className="text-xs font-bold text-zinc-200">
+                        {award.label}{award.badgeCode ? ` - Badge earned: ${award.badgeCode.replace(/_/g, " ")}` : ""}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
