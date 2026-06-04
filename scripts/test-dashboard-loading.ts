@@ -198,8 +198,9 @@ const leaderboardAccent = source("components/leaderboards/animated-bullet.tsx");
 includesAll(leaderboardAccent, [
   "leaderboard-ref-kill-art",
   "leaderboard-ref-bullet-scene",
+  "leaderboard-ref-bullet-bg",
   "leaderboard-ref-bullet-flight",
-  "leaderboard-ref-bullet-img",
+  "leaderboard-ref-bullet-only",
   "leaderboard-ref-bullet-trail",
   "leaderboard-ref-bullet-ember",
   "leaderboard-ref-bullet-shockwave",
@@ -228,8 +229,9 @@ includesAll(globals, [
   ".leaderboard-ref-kill-card",
   ".leaderboard-ref-kill-art",
   ".leaderboard-ref-bullet-scene",
+  ".leaderboard-ref-bullet-bg",
   ".leaderboard-ref-bullet-flight",
-  ".leaderboard-ref-bullet-img",
+  ".leaderboard-ref-bullet-only",
   ".leaderboard-ref-bullet-trail",
   ".leaderboard-ref-bullet-ember",
   ".leaderboard-ref-bullet-shockwave",
@@ -262,6 +264,7 @@ includesAll(globals, [
   "@keyframes leaderboard-ref-bullet-flight",
   "@keyframes leaderboard-ref-bullet-spin",
   "@keyframes leaderboard-ref-bullet-spiral",
+  "@keyframes leaderboard-ref-tracer-flicker",
   "@keyframes leaderboard-ref-trail-flicker",
   "@keyframes leaderboard-ref-ember-drift",
   "@keyframes leaderboard-ref-shockwave-pulse",
@@ -284,6 +287,8 @@ for (const assetPath of [
 }
 assert.equal(leaderboards.includes("AnimatedBullet"), false, "Hero projectile component must not be rendered on the Global Leaderboards hero.");
 assert.equal(globals.includes(".dzn-bullet-wrap"), false, "Global Leaderboards hero must not keep the old giant bullet wrapper CSS.");
+assert.equal(leaderboardAccent.includes("leaderboard-ref-bullet-img"), false, "One Shot Kill must not render the full tracer PNG as the spinning foreground bullet.");
+assert.equal(globals.includes(".leaderboard-ref-bullet-img"), false, "The full tracer PNG must not keep the old spinning foreground CSS.");
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, [
