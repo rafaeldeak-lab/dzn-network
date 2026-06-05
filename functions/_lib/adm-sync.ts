@@ -6871,6 +6871,10 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
              WHERE adm_sync_file_state.linked_server_id = linked_servers.id
                AND adm_sync_file_state.status IN ('discovered', 'unreadable')
                AND adm_sync_file_state.ignored_at IS NULL
+               AND (
+                 adm_sync_state.last_processed_file IS NULL
+                 OR adm_sync_file_state.adm_file > adm_sync_state.last_processed_file
+               )
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
                AND (
                  adm_sync_file_state.status != 'unreadable'
@@ -6884,7 +6888,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                    AND completed_or_active.filename = adm_sync_file_state.adm_file
                    AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
                )
-             ORDER BY adm_sync_file_state.adm_file DESC
+             ORDER BY COALESCE(adm_sync_file_state.file_timestamp, adm_sync_file_state.adm_file) ASC, adm_sync_file_state.adm_file ASC
              LIMIT 1
            ) AS target_adm_file,
            (
@@ -6893,6 +6897,10 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
              WHERE adm_sync_file_state.linked_server_id = linked_servers.id
                AND adm_sync_file_state.status IN ('discovered', 'unreadable')
                AND adm_sync_file_state.ignored_at IS NULL
+               AND (
+                 adm_sync_state.last_processed_file IS NULL
+                 OR adm_sync_file_state.adm_file > adm_sync_state.last_processed_file
+               )
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
                AND (
                  adm_sync_file_state.status != 'unreadable'
@@ -6906,7 +6914,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                    AND completed_or_active.filename = adm_sync_file_state.adm_file
                    AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
                )
-             ORDER BY adm_sync_file_state.adm_file DESC
+             ORDER BY COALESCE(adm_sync_file_state.file_timestamp, adm_sync_file_state.adm_file) ASC, adm_sync_file_state.adm_file ASC
              LIMIT 1
            ) AS target_adm_path,
            (
@@ -6951,6 +6959,10 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                WHERE target_due.linked_server_id = linked_servers.id
                  AND target_due.status IN ('discovered', 'unreadable')
                  AND target_due.ignored_at IS NULL
+                 AND (
+                   adm_sync_state.last_processed_file IS NULL
+                   OR target_due.adm_file > adm_sync_state.last_processed_file
+                 )
                  AND COALESCE(target_due.retry_count, 0) < 5
                  AND (
                    target_due.status != 'unreadable'
