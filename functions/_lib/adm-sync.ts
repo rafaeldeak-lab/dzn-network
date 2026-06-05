@@ -6888,7 +6888,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                    AND completed_or_active.filename = adm_sync_file_state.adm_file
                    AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
                )
-             ORDER BY COALESCE(adm_sync_file_state.file_timestamp, adm_sync_file_state.adm_file) ASC, adm_sync_file_state.adm_file ASC
+             ORDER BY adm_sync_file_state.adm_file ASC
              LIMIT 1
            ) AS target_adm_file,
            (
@@ -6914,7 +6914,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                    AND completed_or_active.filename = adm_sync_file_state.adm_file
                    AND completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
                )
-             ORDER BY COALESCE(adm_sync_file_state.file_timestamp, adm_sync_file_state.adm_file) ASC, adm_sync_file_state.adm_file ASC
+             ORDER BY adm_sync_file_state.adm_file ASC
              LIMIT 1
            ) AS target_adm_path,
            (

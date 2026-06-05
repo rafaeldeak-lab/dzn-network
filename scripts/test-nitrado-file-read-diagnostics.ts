@@ -232,7 +232,7 @@ async function main() {
   assert.ok(admSyncSource.includes("FROM adm_sync_file_state target_due"));
   assert.ok(admSyncSource.includes("target_due_job.filename = target_due.adm_file"));
   assert.ok(admSyncSource.includes("adm_sync_state.last_processed_file IS NULL"));
-  assert.ok(admSyncSource.includes("ORDER BY COALESCE(adm_sync_file_state.file_timestamp, adm_sync_file_state.adm_file) ASC, adm_sync_file_state.adm_file ASC"));
+  assert.ok(admSyncSource.includes("ORDER BY adm_sync_file_state.adm_file ASC"));
   assert.ok(admSyncSource.includes("const selectionReason = selected.target_adm_file"), "Worker selection reason should record target ADM work ahead of stale metadata.");
   const metadataPriorityIndex = admSyncSource.indexOf("CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END");
   const activeJobPriorityIndex = admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END");
