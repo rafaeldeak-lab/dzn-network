@@ -27,6 +27,8 @@ const WORKER_NAME = "dzn-adm-sync-worker";
 const DZN_CRON_SECRET_HEADER = "x-dzn-cron-secret";
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 const CRON_ENDPOINT_TIMEOUT_MS = 55000;
+const SCHEDULED_WORKER_RUNTIME_BUDGET_MS = 22_000;
+const SCHEDULED_WORKER_MIN_REMAINING_MS = 2_500;
 const ADM_WORKER_CURSOR_KEY = "last_adm_linked_server_id";
 const ADM_WORKER_LAST_RECOVERY_KEY = "last_automation_lock_recovery_at";
 const ADM_WORKER_LAST_BUILD_REPARSE_KEY = "last_adm_build_reparse_at";
@@ -47,6 +49,11 @@ type AdmWorkerHeartbeatFinish = {
   selectedServerId?: string | null;
   action: string;
   recoverable: boolean;
+};
+
+type ScheduledRuntimeBudget = {
+  startedAtMs: number;
+  deadlineMs: number;
 };
 
 export async function scheduled(
@@ -82,6 +89,7 @@ export async function fetch(request: Request, env: Env, _ctx?: WorkerExecutionCo
 }
 
 export async function runAutomationCron(env: Env, options: { cron: string | null; scheduledTime: number }) {
+  const budget = createScheduledRuntimeBudget();
   await safeWriteAdmWorkerHeartbeatStarted(env).catch(() => null);
   const secret = getCronSecret(env);
   if (!secret) {
@@ -99,14 +107,24 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
   try {
     const baseUrl = appBaseUrl(env);
     const results = [];
-    results.push(await runDirectAdmSync(env, options));
-    await runHourlyPostAdmMaintenance(env).catch((error) => {
-      console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
-        message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "Unknown maintenance error",
+    results.push(await runDirectAdmSync(env, options, budget));
+    if (hasScheduledRuntimeBudget(budget, 5_000)) {
+      await runHourlyPostAdmMaintenance(env, budget).catch((error) => {
+        console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
+          message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "Unknown maintenance error",
+        });
       });
-    });
-    results.push(await runEventScoring(env));
-    results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));
+    } else {
+      console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
+        message: "scheduled worker runtime budget is low",
+      });
+    }
+    results.push(hasScheduledRuntimeBudget(budget, 5_000)
+      ? await runEventScoring(env)
+      : skippedForBudgetResult("event-scoring", "Event scoring skipped because the scheduled worker runtime budget is low."));
+    results.push(hasScheduledRuntimeBudget(budget, 6_000)
+      ? await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options, budget)
+      : skippedForBudgetResult(CRON_ENDPOINTS[0].label, "Discord post cron skipped because the scheduled worker runtime budget is low."));
 
     const heartbeat = classifyHeartbeatFromResults(results);
     await safeWriteAdmWorkerHeartbeatFinished(env, heartbeat).catch(() => null);
@@ -131,13 +149,15 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
   }
 }
 
-async function runDirectAdmSync(env: Env, options: { cron: string | null; scheduledTime: number }) {
+async function runDirectAdmSync(env: Env, options: { cron: string | null; scheduledTime: number }, budget: ScheduledRuntimeBudget) {
   const source = normalizeAutomationCronSource("cloudflare", options.cron ?? "cloudflare-worker");
   const startedAt = new Date().toISOString();
   try {
+    const maxRuntimeMs = Math.max(2_500, Math.min(10_000, remainingScheduledRuntimeBudgetMs(budget) - SCHEDULED_WORKER_MIN_REMAINING_MS));
     const result = await runAdmWorkerSyncTick(env, {
       cron: options.cron ?? "cloudflare-worker",
       maxLinesPerServer: 15000,
+      maxRuntimeMs,
       cursorKey: ADM_WORKER_CURSOR_KEY,
     });
     await safeRecordWorkerCronRun(env, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
@@ -373,7 +393,7 @@ function sanitizeHeartbeatMessage(value: unknown) {
     .slice(0, 500);
 }
 
-async function runHourlyPostAdmMaintenance(env: Env) {
+async function runHourlyPostAdmMaintenance(env: Env, budget: ScheduledRuntimeBudget) {
   const db = requireDb(env);
   const recoveryRow = await db
     .prepare("SELECT value FROM adm_worker_state WHERE key = ? LIMIT 1")
@@ -389,13 +409,13 @@ async function runHourlyPostAdmMaintenance(env: Env) {
   const buildReparseDue = !Number.isFinite(lastBuildReparseAt) || Date.now() - lastBuildReparseAt >= 60 * 60 * 1000;
   if (!recoveryDue && !buildReparseDue) return;
 
-  if (recoveryDue) {
+  if (recoveryDue && hasScheduledRuntimeBudget(budget, 4_000)) {
     await recoverStuckAutomationLocks(env);
     await updateAdmWorkerStateTimestamp(db, ADM_WORKER_LAST_RECOVERY_KEY);
   }
 
-  if (buildReparseDue) {
-    await processRecentAdmBuildReparse(env, { maxFiles: 1, maxRawLines: 1200, maxRuntimeMs: 5000 }).catch((error) => {
+  if (buildReparseDue && hasScheduledRuntimeBudget(budget, 6_000)) {
+    await processRecentAdmBuildReparse(env, { maxFiles: 1, maxRawLines: 1200, maxRuntimeMs: Math.min(3500, Math.max(1000, remainingScheduledRuntimeBudgetMs(budget) - SCHEDULED_WORKER_MIN_REMAINING_MS)) }).catch((error) => {
       console.warn("DZN ADM WORKER BUILD REPARSE SKIPPED", {
         message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "build reparse failed",
       });
@@ -447,9 +467,13 @@ async function runCronEndpoint(
   baseUrl: string,
   secret: string,
   options: { cron: string | null; scheduledTime: number },
+  budget?: ScheduledRuntimeBudget,
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CRON_ENDPOINT_TIMEOUT_MS);
+  const requestTimeoutMs = budget
+    ? Math.max(1_000, Math.min(CRON_ENDPOINT_TIMEOUT_MS, remainingScheduledRuntimeBudgetMs(budget) - 1_000))
+    : CRON_ENDPOINT_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
     const response = await globalThis.fetch(new URL(endpoint.path, baseUrl).toString(), {
       method: "POST",
@@ -517,6 +541,36 @@ function isHealthAuthorized(request: Request, env: Env) {
   if (!expected) return true;
   const authorization = request.headers.get("authorization");
   return authorization === `Bearer ${expected}`;
+}
+
+function createScheduledRuntimeBudget(maxRuntimeMs = SCHEDULED_WORKER_RUNTIME_BUDGET_MS): ScheduledRuntimeBudget {
+  const startedAtMs = Date.now();
+  return {
+    startedAtMs,
+    deadlineMs: startedAtMs + Math.max(5_000, maxRuntimeMs),
+  };
+}
+
+function remainingScheduledRuntimeBudgetMs(budget: ScheduledRuntimeBudget) {
+  return Math.max(0, budget.deadlineMs - Date.now());
+}
+
+function hasScheduledRuntimeBudget(budget: ScheduledRuntimeBudget, minimumRemainingMs = SCHEDULED_WORKER_MIN_REMAINING_MS) {
+  return remainingScheduledRuntimeBudgetMs(budget) > minimumRemainingMs;
+}
+
+function skippedForBudgetResult(label: string, message: string) {
+  console.warn("DZN ADM WORKER SIDE TASK SKIPPED", { label, message });
+  return {
+    label,
+    status: 200,
+    ok: true,
+    body: {
+      ok: true,
+      skipped: true,
+      warning: message,
+    },
+  };
 }
 
 function json(data: unknown, status = 200) {

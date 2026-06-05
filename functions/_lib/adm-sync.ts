@@ -3933,10 +3933,15 @@ export async function processNextAdmImportJobChunk(
 
 async function processAdmImportJobChunksById(env: Env, linkedServerId: string, jobId: string, maxChunks: number, deadlineMs = Number.POSITIVE_INFINITY) {
   const safeMaxChunks = clampPositiveInteger(maxChunks, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
+  if (Date.now() + 750 >= deadlineMs) {
+    const row = await getAdmImportJob(env, linkedServerId, jobId);
+    if (!row) throw new Error("ADM import job not found.");
+    return toAdmImportJobProgress(row);
+  }
   let progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
   await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), isCompletedAdmImportJobStatus(progress.status) ? "completed" : "processing_in_chunks");
   for (let index = 1; index < safeMaxChunks && !isCompletedAdmImportJobStatus(progress.status); index += 1) {
-    if (Date.now() >= deadlineMs) break;
+    if (Date.now() + 750 >= deadlineMs) break;
     progress = await processNextAdmImportJobChunk(env, { linkedServerId, jobId });
     await recordAdmImportJobProgressInSyncState(env, await getAdmImportJob(env, linkedServerId, jobId) ?? progressToImportJobRow(progress, linkedServerId), isCompletedAdmImportJobStatus(progress.status) ? "completed" : "processing_in_chunks");
   }
@@ -6351,6 +6356,22 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
   token_auth_tag: string | null;
 };
 
+type AdmWorkerMetadataRefreshServer = Pick<
+  AdmWorkerSelectedServer,
+  | "id"
+  | "user_id"
+  | "nitrado_service_id"
+  | "server_name"
+  | "display_name"
+  | "hostname"
+  | "nitrado_service_name"
+  | "current_players"
+  | "max_players"
+  | "player_count_status"
+  | "player_count_last_checked_at"
+  | "metadata_last_checked_at"
+>;
+
 export type AdmWorkerSyncTickResult = ScheduledAdmSyncResult & {
   worker_hot_path: true;
   selected_linked_server_id: string | null;
@@ -6368,6 +6389,7 @@ export async function runAdmWorkerSyncTick(
     cron?: string | null;
     cursorKey?: string;
     maxLinesPerServer?: number;
+    maxRuntimeMs?: number;
     linkedServerId?: string | null;
     force?: boolean;
     targetFileName?: string | null;
@@ -6377,19 +6399,29 @@ export async function runAdmWorkerSyncTick(
   admSchemaEnsureSkipDepth += 1;
   try {
     const budget = getAdmInvocationBudget(env);
+    const maxRuntimeMs = Math.max(2_500, Math.min(20_000, clampPositiveInteger(options.maxRuntimeMs ?? 10_000, 10_000)));
+    const deadlineMs = Date.now() + maxRuntimeMs;
+    const hasTickBudget = (minimumRemainingMs = 1_250) => Date.now() + minimumRemainingMs < deadlineMs;
     const explicitTargetFileName = sanitizeWorkerTargetAdmFilename(options.targetFileName);
     const explicitTargetPath = explicitTargetFileName
       ? sanitizeWorkerTargetAdmPath(options.targetFilePath, explicitTargetFileName)
       : null;
+    let metadata = emptyScheduledMetadataSyncResult();
+    let metadataRefreshedLinkedServerId: string | null = null;
+    if (!explicitTargetFileName && hasTickBudget(4_000)) {
+      metadata = await refreshOldestStaleAdmWorkerMetadata(env).catch(() => emptyScheduledMetadataSyncResult());
+      metadataRefreshedLinkedServerId = metadata.results[0]?.linked_server_id ?? null;
+    }
     const selected = await selectAdmWorkerServer(env, options.cursorKey ?? "last_adm_linked_server_id", {
       linkedServerId: options.linkedServerId,
       force: options.force,
     });
-    const metadata = emptyScheduledMetadataSyncResult();
     if (!selected) {
       return admWorkerResult({
         metadata,
-        message: "No due ADM server or pending scheduled ADM import job found for this Worker tick.",
+        message: metadata.processed > 0
+          ? "Refreshed stale server metadata; no due ADM server or pending scheduled ADM import job found for this Worker tick."
+          : "No due ADM server or pending scheduled ADM import job found for this Worker tick.",
       });
     }
 
@@ -6403,11 +6435,49 @@ export async function runAdmWorkerSyncTick(
             : "due_discovery";
     await recordAdmWorkerServiceSelection(env, selected, selectionReason).catch(() => null);
     let pendingJobs: PendingAdmImportJobsResult | undefined;
+
+    if (!explicitTargetFileName && selected.id !== metadataRefreshedLinkedServerId && isAdmWorkerMetadataStale(selected) && hasTickBudget(3_000)) {
+      const selectedMetadata = await refreshSelectedAdmWorkerMetadata(env, selected).catch((error) => ({
+        processed: 1,
+        succeeded: 0,
+        failed: 1,
+        skipped: 0,
+        updated_player_counts: 0,
+        results: [{
+          linked_server_id: selected.id,
+          service_id: selected.nitrado_service_id,
+          server_name: firstString(selected.display_name, selected.hostname, selected.server_name, selected.nitrado_service_name),
+          status: "failed" as const,
+          changed: false,
+          current_players: Number.isFinite(Number(selected.current_players)) ? Number(selected.current_players) : null,
+          max_players: Number.isFinite(Number(selected.max_players)) ? Number(selected.max_players) : null,
+          player_count_status: "unavailable" as const,
+          player_count_last_checked_at: selected.player_count_last_checked_at,
+          metadata_last_checked_at: selected.metadata_last_checked_at,
+          message: safeSyncErrorMessage(error),
+        }],
+      }));
+      metadata = mergeScheduledMetadataResults(metadata, selectedMetadata);
+    }
+
     if (activeImportJobs > 0 && !explicitTargetFileName) {
+      if (!hasTickBudget(1_750)) {
+        await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+        return admWorkerResult({
+          metadata,
+          selectedLinkedServerId: selected.id,
+          selectedServiceId: selected.nitrado_service_id,
+          selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
+          selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+          pendingJobs,
+          skippedNotDue: 1,
+          message: "ADM Worker paused before active import chunks to stay within the scheduled invocation budget. Work will continue next tick.",
+        });
+      }
       pendingJobs = await processAdmImportJobsUntilBudget(env, {
         maxJobs: 1,
         maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
-        maxRuntimeMs: 5_000,
+        maxRuntimeMs: Math.max(1_500, Math.min(5_000, deadlineMs - Date.now())),
         linkedServerId: selected.id,
         assumeSchemaReady: true,
       });
@@ -6433,13 +6503,18 @@ export async function runAdmWorkerSyncTick(
     }
 
     if (!explicitTargetFileName) {
-      if (isAdmWorkerMetadataStale(selected)) {
-        await refreshNitradoServerMetadata(env, {
-          linkedServerId: selected.id,
-          userId: selected.user_id,
-          force: true,
-          softFail: true,
-        }).catch(() => null);
+      if (!hasTickBudget(2_000)) {
+        await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+        return admWorkerResult({
+          metadata,
+          selectedLinkedServerId: selected.id,
+          selectedServiceId: selected.nitrado_service_id,
+          selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
+          selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+          pendingJobs,
+          skippedNotDue: 1,
+          message: "ADM Worker paused before ADM discovery to stay within the scheduled invocation budget. Work will continue next tick.",
+        });
       }
       const discoveryPlan = await planAdmBackfillJobsForServer(env, selected.user_id, selected.id, {
         triggerType: "scheduled_worker",
@@ -7029,6 +7104,91 @@ function isAdmWorkerMetadataStale(selected: AdmWorkerSelectedServer) {
   if (Number(selected.metadata_stale ?? 0) === 1) return true;
   const staleAfterMs = 10 * 60 * 1000;
   return isIsoOlderThan(selected.metadata_last_checked_at, staleAfterMs) || isIsoOlderThan(selected.player_count_last_checked_at, staleAfterMs);
+}
+
+async function refreshSelectedAdmWorkerMetadata(env: Env, selected: AdmWorkerMetadataRefreshServer): Promise<ScheduledMetadataSyncResult> {
+  const beforeCurrent = Number.isFinite(Number(selected.current_players)) ? Number(selected.current_players) : null;
+  const beforeMax = Number.isFinite(Number(selected.max_players)) ? Number(selected.max_players) : null;
+  const result = await refreshNitradoServerMetadata(env, {
+    linkedServerId: selected.id,
+    userId: selected.user_id,
+    force: true,
+    softFail: true,
+  });
+  const nextCurrent = Number.isFinite(Number(result.metadata?.current_players)) ? Number(result.metadata?.current_players) : null;
+  const nextMax = Number.isFinite(Number(result.metadata?.max_players)) ? Number(result.metadata?.max_players) : null;
+  const changed = beforeCurrent !== nextCurrent || beforeMax !== nextMax;
+  return {
+    processed: 1,
+    succeeded: result.ok ? 1 : 0,
+    failed: result.ok ? 0 : 1,
+    skipped: result.skipped ? 1 : 0,
+    updated_player_counts: changed ? 1 : 0,
+    results: [{
+      linked_server_id: selected.id,
+      service_id: selected.nitrado_service_id,
+      server_name: firstString(selected.display_name, selected.hostname, selected.server_name, selected.nitrado_service_name),
+      status: result.ok ? "succeeded" : "failed",
+      changed,
+      current_players: nextCurrent,
+      max_players: nextMax,
+      player_count_status: result.player_count_status,
+      player_count_last_checked_at: result.player_count_last_checked_at ?? null,
+      metadata_last_checked_at: result.metadata_last_checked_at ?? null,
+      message: result.message,
+    }],
+  };
+}
+
+async function refreshOldestStaleAdmWorkerMetadata(env: Env): Promise<ScheduledMetadataSyncResult> {
+  const metadataStaleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT
+         linked_servers.id,
+         linked_servers.user_id,
+         linked_servers.nitrado_service_id,
+         linked_servers.server_name,
+         linked_servers.display_name,
+         linked_servers.hostname,
+         linked_servers.nitrado_service_name,
+         linked_servers.current_players,
+         linked_servers.max_players,
+         linked_servers.player_count_status,
+         linked_servers.player_count_last_checked_at,
+         linked_servers.metadata_last_checked_at
+       FROM linked_servers
+       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+         AND linked_servers.nitrado_service_id IS NOT NULL
+         AND linked_servers.nitrado_service_id != ''
+         AND lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+         AND (
+           linked_servers.metadata_last_checked_at IS NULL
+           OR linked_servers.metadata_last_checked_at <= ?
+           OR linked_servers.player_count_last_checked_at IS NULL
+           OR linked_servers.player_count_last_checked_at <= ?
+         )
+       ORDER BY
+         COALESCE(linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
+         linked_servers.id ASC
+       LIMIT 1`,
+    )
+    .bind(metadataStaleBefore, metadataStaleBefore)
+    .first<AdmWorkerMetadataRefreshServer>();
+  return row ? refreshSelectedAdmWorkerMetadata(env, row) : emptyScheduledMetadataSyncResult();
+}
+
+function mergeScheduledMetadataResults(...values: ScheduledMetadataSyncResult[]): ScheduledMetadataSyncResult {
+  return values.reduce<ScheduledMetadataSyncResult>((merged, value) => ({
+    processed: merged.processed + value.processed,
+    succeeded: merged.succeeded + value.succeeded,
+    failed: merged.failed + value.failed,
+    skipped: merged.skipped + value.skipped,
+    updated_player_counts: merged.updated_player_counts + value.updated_player_counts,
+    results: [...merged.results, ...value.results],
+  }), emptyScheduledMetadataSyncResult());
 }
 
 function isIsoOlderThan(value: string | null | undefined, ageMs: number) {

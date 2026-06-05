@@ -87,9 +87,10 @@ assert.equal(workerSource.includes("runAdmWorkerSyncTick"), true);
 assert.equal(workerSource.includes("runScheduledAdmSync"), false);
 assert.equal(workerSource.includes("selectNextAdmLinkedServerForWorker"), false);
 assert.equal(workerSource.includes("/api/sync/adm/run"), false);
-assert.equal(workerSource.includes("results.push(await runDirectAdmSync(env, options));"), true);
+assert.equal(workerSource.includes("results.push(await runDirectAdmSync(env, options, budget));"), true);
 assert.equal(workerSource.includes("/api/sync/metadata/run"), false);
-assert.equal(workerSource.includes("results.push(await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options));"), true);
+assert.equal(workerSource.includes("runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options, budget)"), true);
+assert.equal(workerSource.includes("hasScheduledRuntimeBudget"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 assert.equal(workflowSource.includes("name: DZN ADM Worker Manual Trigger"), true);
