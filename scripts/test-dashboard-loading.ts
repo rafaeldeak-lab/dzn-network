@@ -83,6 +83,10 @@ includesAll(homeStatsRoute, [
   "live_query_failed_no_snapshot",
   "retry_after_seconds: 10",
   "HOME_STATS_NO_STORE_HEADERS",
+  "HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS",
+  "homeStatsResponseHeaders",
+  "isFreshPublicHomeStatsSnapshot",
+  "Updated from cached public ADM snapshot",
   "logPublicApiLoadFailed",
   "logPublicApiSnapshotFallbackServed",
 ]);

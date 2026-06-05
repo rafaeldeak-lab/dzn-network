@@ -6945,6 +6945,27 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
              OR
              COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
              OR COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
+             OR EXISTS (
+               SELECT 1
+               FROM adm_sync_file_state target_due
+               WHERE target_due.linked_server_id = linked_servers.id
+                 AND target_due.status IN ('discovered', 'unreadable')
+                 AND target_due.ignored_at IS NULL
+                 AND COALESCE(target_due.retry_count, 0) < 5
+                 AND (
+                   target_due.status != 'unreadable'
+                   OR target_due.next_retry_at IS NULL
+                   OR target_due.next_retry_at <= ?
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1
+                   FROM adm_import_jobs target_due_job
+                   WHERE target_due_job.server_id = linked_servers.id
+                     AND target_due_job.filename = target_due.adm_file
+                     AND target_due_job.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')
+                 )
+               LIMIT 1
+             )
              OR linked_servers.metadata_last_checked_at IS NULL
              OR linked_servers.metadata_last_checked_at <= ?
              OR linked_servers.player_count_last_checked_at IS NULL
@@ -6962,9 +6983,9 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
        SELECT *
        FROM eligible
        ORDER BY
-         CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END,
          CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END,
          CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END,
+         CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END,
          CASE WHEN last_worker_selected_at IS NULL THEN 0 ELSE 1 END,
          COALESCE(last_worker_selected_at, '1970-01-01T00:00:00.000Z') ASC,
          CASE WHEN id > COALESCE((SELECT value FROM cursor), '') THEN 0 ELSE 1 END,
@@ -6981,6 +7002,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
       linkedServerId,
       linkedServerId,
       force,
+      now,
       now,
       now,
       metadataStaleBefore,

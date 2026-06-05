@@ -142,20 +142,36 @@ const HOME_STATS_NO_STORE_HEADERS = {
   expires: "0",
   vary: "Cookie",
 };
+const HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS = 2 * 60 * 1000;
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
   const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
-  const headers = {
-    ...publicAccessCacheHeaders(viewerLoggedIn),
-    ...HOME_STATS_NO_STORE_HEADERS,
-  };
+  const headers = homeStatsResponseHeaders(viewerLoggedIn);
   const accessLevel = publicApiSnapshotAccess(viewerLoggedIn);
   const cacheKey = homeStatsCacheKey(viewerLoggedIn);
   const endpoint = "/api/public/home-stats";
   const requestId = request.headers.get("cf-ray");
 
   try {
+    if (!viewerLoggedIn) {
+      const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
+      if (cached && isFreshPublicHomeStatsSnapshot(cached.generated_at)) {
+        const payload = withHomeStatsEvidence(cached.payload, {
+          generatedAt: cached.generated_at,
+          source: "last_known",
+          statusMessage: "Updated from cached public ADM snapshot",
+        });
+        return json(withPublicApiMetadata(payload, {
+          generated_at: cached.generated_at,
+          source: "last_known",
+          stale: false,
+          snapshot_generated_at: cached.generated_at,
+          message: "Updated from cached public ADM snapshot.",
+        }), { headers });
+      }
+    }
+
     const generatedAt = new Date().toISOString();
     const data = withHomeStatsEvidence(await getPublicHomeStatsPayload(env, viewerLoggedIn), {
       generatedAt,
@@ -222,6 +238,20 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
 function homeStatsCacheKey(viewerLoggedIn: boolean) {
   return viewerLoggedIn ? HOME_STATS_SNAPSHOT_KEYS.full : HOME_STATS_SNAPSHOT_KEYS.preview;
+}
+
+function homeStatsResponseHeaders(viewerLoggedIn: boolean) {
+  return viewerLoggedIn
+    ? {
+        ...publicAccessCacheHeaders(viewerLoggedIn),
+        ...HOME_STATS_NO_STORE_HEADERS,
+      }
+    : publicAccessCacheHeaders(viewerLoggedIn);
+}
+
+function isFreshPublicHomeStatsSnapshot(generatedAt: string | null | undefined) {
+  const timestamp = Date.parse(generatedAt ?? "");
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS;
 }
 
 export async function getPublicHomeStatsPayload(env: Env, viewerLoggedIn: boolean) {

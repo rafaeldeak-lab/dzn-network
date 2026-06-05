@@ -28,6 +28,26 @@ async function request(path: string, init?: RequestInit) {
   return last!;
 }
 
+async function requestWithCloudflare1102Retry(path: string, init?: RequestInit) {
+  const first = await request(path, init);
+  if (!isCloudflareWorkerResourceLimit(first)) return first;
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const retry = await request(path, init);
+  return {
+    ...retry,
+    recoveredFromCloudflare1102: retry.status === 200,
+    cloudflare1102FirstAttempt: {
+      status: first.status,
+      attempts: first.attempts,
+      durationMs: first.durationMs,
+    },
+  };
+}
+
+function isCloudflareWorkerResourceLimit(result: { status: number; fullBody: string }) {
+  return result.status === 503 && /Worker exceeded resource limits|cf-error-code["'>\s]*1102|Error\s*1102/i.test(result.fullBody);
+}
+
 async function main() {
   const checks: AutoDevCheck[] = [];
   const routeScope: Record<string, "adm" | "sanity-out-of-scope"> = {
@@ -47,7 +67,7 @@ async function main() {
     ? pass("homepage first-sync copy", "Homepage does not show the scary generic network failure copy in the initial HTML.", { status: home.status })
     : fail("homepage first-sync copy", "Homepage shows scary generic network failure copy while ADM may simply be awaiting first sync.", { status: home.status }, "medium"));
 
-  const homeStats = await request("/api/public/home-stats");
+  const homeStats = await requestWithCloudflare1102Retry("/api/public/home-stats");
   const homeStatsJson = parseJson(homeStats.fullBody);
   const homeStatsHasAdmEvidence = hasAdmHomeStatsEvidence(homeStatsJson);
   checks.push(homeStats.ok && homeStats.status === 200 && homeStatsJson?.ok && !["empty_no_cache", "fallback_empty"].includes(String(homeStatsJson.source ?? "")) && homeStatsHasAdmEvidence
