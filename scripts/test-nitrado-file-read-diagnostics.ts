@@ -231,6 +231,7 @@ async function main() {
   assert.ok(admSyncSource.includes("completed_or_active.status IN ('queued', 'processing', 'parsing', 'writing', 'rebuilding', 'failed_retryable', 'completed', 'completed_with_warnings')"));
   assert.ok(admSyncSource.includes("FROM adm_sync_file_state target_due"));
   assert.ok(admSyncSource.includes("target_due_job.filename = target_due.adm_file"));
+  assert.ok(admSyncSource.includes("const selectionReason = selected.target_adm_file"), "Worker selection reason should record target ADM work ahead of stale metadata.");
   const metadataPriorityIndex = admSyncSource.indexOf("CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END");
   const activeJobPriorityIndex = admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END");
   const targetFilePriorityIndex = admSyncSource.indexOf("CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END");
@@ -238,9 +239,9 @@ async function main() {
     activeJobPriorityIndex >= 0
       && targetFilePriorityIndex >= 0
       && metadataPriorityIndex >= 0
-      && activeJobPriorityIndex < targetFilePriorityIndex
-      && targetFilePriorityIndex < metadataPriorityIndex,
-    "Active import jobs and discovered target ADM files must outrank stale metadata so noftp imports leave job/cursor evidence.",
+      && targetFilePriorityIndex < activeJobPriorityIndex
+      && activeJobPriorityIndex < metadataPriorityIndex,
+    "Discovered target ADM files must outrank active jobs and stale metadata so noftp imports leave job/cursor evidence.",
   );
   assert.ok(admSyncSource.includes("COALESCE(current_line, 0) >= COALESCE(total_lines, 0)"));
   assert.ok(admSyncSource.includes("promoteNewestDiscoveredAdmFileInSyncState"), "Completed older ADM chunk jobs must not move latest_adm_file behind the newest discovered ADM.");
