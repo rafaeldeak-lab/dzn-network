@@ -5,6 +5,7 @@ import { Activity, ArrowRight, Crosshair, Lock, RadioTower, Skull, Trophy, Users
 import Link from "next/link";
 
 import { AnimatedBullet, KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
+import { SiteHeader } from "@/components/site-header";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type LeaderboardServer = {
@@ -223,7 +224,7 @@ export default function LeaderboardsPage() {
     <main className="leaderboard-ref-page leaderboard-reference-page dzn-leaderboard-page relative min-h-screen overflow-hidden bg-[#02030a] px-3 py-2 text-white sm:px-4 lg:px-5">
       <span className="leaderboard-ref-embers" aria-hidden="true" />
       <div className="leaderboard-ref-shell leaderboard-reference-shell relative z-10 mx-auto flex min-h-screen max-w-[1500px] flex-col">
-        <LeaderboardNav />
+        <SiteHeader active="leaderboards" returnTo="/leaderboards" />
 
         <section className="leaderboard-ref-hero leaderboard-reference-hero dzn-leaderboard-hero">
           <div className="leaderboard-ref-hero-art" aria-hidden="true" />
@@ -302,30 +303,6 @@ export default function LeaderboardsPage() {
         ) : null}
       </div>
     </main>
-  );
-}
-
-function LeaderboardNav() {
-  return (
-    <nav className="leaderboard-ref-nav" aria-label="DZN leaderboard navigation">
-      <Link href="/" className="leaderboard-ref-brand">
-        <span className="leaderboard-ref-brand-mark">DZN</span>
-        <span className="leaderboard-ref-brand-copy">
-          <strong>DZN Network</strong>
-          <small>Prove your server is the best.</small>
-        </span>
-      </Link>
-
-      <div className="leaderboard-ref-nav-links">
-        <Link href="/">Home</Link>
-        <Link href="/servers">Servers</Link>
-        <Link href="/leaderboards" aria-current="page">Leaderboards</Link>
-      </div>
-
-      <Link href="/setup" className="leaderboard-ref-nav-cta">
-        Add Your Server
-      </Link>
-    </nav>
   );
 }
 

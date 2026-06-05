@@ -147,6 +147,12 @@ assert.equal(landing.includes("dataPending ? \"Loading\""), false, "Homepage sta
 assert.equal(landing.includes("setData(emptyHomeStats"), false, "Homepage refresh failures must not reset stats to empty defaults.");
 assert.equal(landing.includes("Live refresh recovering. Showing last known data."), false, "Homepage must not show stale-data warning when valid data is visible.");
 assert.equal(landing.includes("Network stats refresh failed. Showing last known values."), false, "Homepage refresh failures with visible data should stay silent.");
+includesAll(landing, [
+  "SiteHeader",
+  "authenticated={authState.status === \"logged_in\"}",
+  "checkingAccount={authState.status === \"loading\"}",
+]);
+assert.equal(landing.includes("function Navbar"), false, "Homepage must use the shared SiteHeader instead of the duplicate local navbar.");
 
 const leaderboards = source("app/leaderboards/page.tsx");
 includesAll(leaderboards, [
@@ -163,11 +169,9 @@ includesAll(leaderboards, [
   "Leaderboard data could not be loaded right now.",
   "KillProjectileAccent",
   "AnimatedBullet",
+  "SiteHeader",
+  "active=\"leaderboards\"",
   "leaderboard-ref-page",
-  "leaderboard-ref-nav",
-  "leaderboard-ref-brand",
-  "leaderboard-ref-nav-links",
-  "leaderboard-ref-nav-cta",
   "leaderboard-ref-hero-art",
   "leaderboard-ref-stats",
   "leaderboard-ref-grid",
@@ -182,10 +186,6 @@ includesAll(leaderboards, [
   "dzn-leaderboard-hero__intel",
   "dzn-leaderboard-stat-grid",
   "Global Leaderboards",
-  "DZN Network",
-  "Home",
-  "Add Your Server",
-  "aria-current=\"page\"",
   "Servers Ranked",
   "Kills Tracked",
   "Ranked Players",
@@ -200,6 +200,8 @@ includesAll(leaderboards, [
 ]);
 assert.equal(leaderboards.includes("Live refresh recovering. Showing last known data."), false, "Leaderboards must not show stale-data warning when valid data is visible.");
 assert.equal(leaderboards.includes("Live data refresh failed. Showing last known leaderboard."), false, "Leaderboards refresh failures with visible data should stay silent.");
+assert.equal(leaderboards.includes("function LeaderboardNav"), false, "Leaderboards page must use the shared SiteHeader instead of a duplicate local nav.");
+assert.equal(leaderboards.includes("leaderboard-ref-nav"), false, "Leaderboards page must not render the old local nav classes.");
 assert.equal(leaderboards.includes("Real players."), false, "Leaderboards page must not render the redundant lower CTA card.");
 assert.equal(leaderboards.includes("Real action."), false, "Leaderboards page must not render the redundant lower CTA card.");
 assert.equal(leaderboards.includes("View full leaderboards"), false, "Leaderboards page must not render the redundant lower CTA button.");
@@ -223,14 +225,15 @@ includesAll(leaderboardAccent, [
 
 const globals = source("app/globals.css");
 includesAll(globals, [
+  ".dzn-header-shell",
+  ".dzn-header-nav",
+  ".dzn-header-logo",
+  ".dzn-header-logo-frame",
+  ".dzn-header-links",
+  ".dzn-header-actions",
+  ".dzn-header-action",
   ".leaderboard-ref-page",
   ".leaderboard-ref-shell",
-  ".leaderboard-ref-nav",
-  ".leaderboard-ref-brand",
-  ".leaderboard-ref-brand-mark",
-  ".leaderboard-ref-brand-copy",
-  ".leaderboard-ref-nav-links",
-  ".leaderboard-ref-nav-cta",
   ".leaderboard-ref-hero",
   ".leaderboard-ref-hero-art",
   ".leaderboard-ref-title",
@@ -288,6 +291,28 @@ includesAll(globals, [
   "@keyframes heroParallax",
   "@media (prefers-reduced-motion: reduce)",
 ]);
+
+const siteHeader = source("components/site-header.tsx");
+includesAll(siteHeader, [
+  "SiteHeader",
+  "/media/dzn-logo.png",
+  "DZN_DISCORD_INVITE_URL",
+  "/#features",
+  "/leaderboards",
+  "/servers",
+  "/#pricing",
+  "/#stats",
+  "/events",
+  "/dashboard",
+  "/setup",
+  "logoutAndRedirect",
+  "dzn-header-shell",
+  "dzn-header-nav",
+  "dzn-header-logo",
+  "dzn-header-links",
+  "dzn-header-actions",
+]);
+
 for (const assetPath of [
   "public/leaderboards/leaderboard-hero-battlefield.png",
   "public/leaderboards/sniper-accent.png",
@@ -312,6 +337,8 @@ for (const removedAnimation of ["leaderboard-ref-bullet-spin", "leaderboard-ref-
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, [
+  "SiteHeader",
+  "active=\"servers\"",
   "dzn:lastGoodPublicNetwork:",
   "loadPublicNetworkCache",
   "savePublicNetworkCache",

@@ -455,10 +455,7 @@ const loggedOutNavBlock = homepageSource.slice(
   homepageSource.indexOf("const loggedOutNavItems"),
   homepageSource.indexOf("const fallbackTopServers"),
 );
-const navbarBlock = homepageSource.slice(
-  homepageSource.indexOf("function Navbar"),
-  homepageSource.indexOf("function DiscordIcon"),
-);
+const siteHeaderSource = readFileSync("components/site-header.tsx", "utf8");
 const landingRenderBlock = homepageSource.slice(
   homepageSource.indexOf("export function DznLandingPage"),
   homepageSource.indexOf("function HomeAliveBackground"),
@@ -542,11 +539,13 @@ assert.equal(loggedOutNavBlock.includes("Servers"), false);
 assert.equal(loggedOutNavBlock.includes("Leaderboards"), false);
 assert.equal(loggedOutNavBlock.includes("Stats"), false);
 assert.equal(loggedOutNavBlock.includes("Events"), false);
-assert.equal(navbarBlock.includes("authState.status === \"logged_in\""), true);
-assert.equal(navbarBlock.includes("Checking account..."), true);
-assert.equal(navbarBlock.includes("href=\"/login?returnTo=/\""), true);
-assert.equal(navbarBlock.includes("href=\"/setup\""), true);
-assert.equal((navbarBlock.match(/Add Your Server/g) ?? []).length, 1);
+assert.equal(homepageSource.includes("function Navbar"), false);
+assert.equal(landingRenderBlock.includes("authenticated={authState.status === \"logged_in\"}"), true);
+assert.equal(landingRenderBlock.includes("checkingAccount={authState.status === \"loading\"}"), true);
+assert.equal(siteHeaderSource.includes("Checking"), true);
+assert.equal(siteHeaderSource.includes("login?returnTo="), true);
+assert.equal(siteHeaderSource.includes("href=\"/setup\""), true);
+assert.equal((siteHeaderSource.match(/Add Your Server/g) ?? []).length, 1);
 assert.equal(landingRenderBlock.includes("isPreviewMode ? ("), true);
 assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={displayHomeStats} dataPending={homeStatsPending} />"), true);
 assert.equal(landingRenderBlock.includes("unlockHomeStatsForLoggedIn"), true);
@@ -564,9 +563,9 @@ assert.equal(homepageSource.includes("Network stats syncing. Latest server data 
 assert.equal(homepageSource.includes("DZN LOGGED OUT PREVIEW ACCESS TIGHTENED"), true);
 assert.equal(homepageSource.includes("DZN LOGGED OUT CTA CLEANUP COMPLETE"), true);
 assert.equal(homepageSource.includes("DZN HOMEPAGE ADD SERVER CTA DEDUPED"), true);
-assert.equal((homepageSource.match(/href="\/login\?returnTo=\/"/g) ?? []).length, 2);
-assert.equal((homepageSource.match(/Add Your Server/g) ?? []).length, 2);
-assert.equal(navbarBlock.includes("Login"), true);
+assert.equal((homepageSource.match(/href="\/login\?returnTo=\/"/g) ?? []).length, 1);
+assert.equal((homepageSource.match(/Add Your Server/g) ?? []).length, 1);
+assert.equal(siteHeaderSource.includes("Login"), true);
 assert.equal(heroBlock.includes("Login with Discord"), true);
 assert.equal(heroBlock.includes("Join DZN Discord"), true);
 assert.equal(heroBlock.includes("View Leaderboards"), true);

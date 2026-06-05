@@ -242,7 +242,7 @@ assert.equal(source("components/events/LeaderboardTeaser.tsx").includes("TOP 10 
 assert.equal(existsSync("functions/api/servers/[serverId]/ctf/dashboard.ts"), true, "Existing CTF dashboard route must still exist.");
 assert.equal(existsSync("functions/api/servers/[serverId]/ctf/matchmaking.ts"), true, "Existing CTF matchmaking route must still exist.");
 assert.equal(source("functions/api/leaderboards.ts").includes("./public/leaderboards"), true, "Existing /api/leaderboards alias must still work.");
-assert.equal(source("components/dzn/dzn-landing-page.tsx").includes('{ label: "Events", href: "/events" }'), true, "Top nav Events link must open the Events Hub.");
+assert.equal(source("components/site-header.tsx").includes('href="/events"'), true, "Top nav Events link must open the Events Hub.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to join events and matchmaking."), false, "Dashboard must not render the global category banner.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to enter category-matched events."), true, "Dashboard Event Hub must keep the contextual category warning.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes('href="/events/create"'), true, "Dashboard must expose event creation after category selection.");

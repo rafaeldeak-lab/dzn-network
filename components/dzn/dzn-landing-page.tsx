@@ -34,7 +34,7 @@ import type { Variants } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
-import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
+import { SiteHeader } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import { DznLogo } from "./dzn-logo";
@@ -368,20 +368,6 @@ const DznOperationalGlobe = dynamic(
     loading: () => <DznOperationalGlobePlaceholder />,
   },
 );
-
-const navItems = [
-  { label: "Features", href: "#features" },
-  { label: "Leaderboards", href: "/leaderboards" },
-  { label: "Servers", href: "/servers" },
-  { label: "Pricing", href: "#pricing" },
-  { label: "Stats", href: "#stats" },
-  { label: "Events", href: "/events" },
-];
-
-const loggedOutNavItems = [
-  { label: "About DZN", href: "#features" },
-  { label: "Pricing", href: "#pricing" },
-];
 
 const fallbackTopServers = [
   "Warlords Network",
@@ -771,7 +757,11 @@ export function DznLandingPage() {
       >
         <HomeAliveBackground reducedMotion={Boolean(reduceMotion)} />
         <LoadingOverlay isVisible={isLoading} />
-        <Navbar authState={authState} />
+        <SiteHeader
+          authenticated={authState.status === "logged_in"}
+          checkingAccount={authState.status === "loading"}
+          returnTo="/"
+        />
 
         <motion.main
           initial="hidden"
@@ -870,84 +860,6 @@ function LoadingOverlay({ isVisible }: { isVisible: boolean }) {
         </motion.div>
       ) : null}
     </AnimatePresence>
-  );
-}
-
-function Navbar({ authState }: { authState: HomepageAuthState }) {
-  const authenticated = authState.status === "logged_in";
-  const isCheckingAccount = authState.status === "loading";
-
-  async function signOut() {
-    clearClientAuthState();
-    await logoutAndRedirect();
-  }
-
-  return (
-    <motion.header
-      initial={{ opacity: 0, y: -18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.65, ease: "easeOut" }}
-      className="dzn-main-nav"
-    >
-      <div className="dzn-main-nav-inner">
-        <DznLogo compact className="dzn-main-nav-logo" />
-        <nav aria-label="Homepage sections" className="dzn-main-nav-links">
-          {(authenticated ? navItems : loggedOutNavItems).map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
-        <div className="dzn-main-nav-actions">
-          <a
-            href={DZN_DISCORD_INVITE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="dzn-nav-action dzn-nav-action--discord"
-          >
-            <DiscordIcon className="dzn-nav-discord-icon" />
-            <span>Discord</span>
-          </a>
-          {isCheckingAccount ? (
-            <span className="dzn-nav-action dzn-nav-action--login" aria-live="polite">
-              Checking account...
-            </span>
-          ) : authenticated ? (
-            <>
-              <a
-                href="/dashboard"
-                className="dzn-nav-action dzn-nav-action--dashboard"
-              >
-                Dashboard
-              </a>
-              <a
-                href="/setup"
-                className="dzn-nav-action dzn-nav-action--dashboard"
-              >
-                Add Your Server
-              </a>
-              <button
-                type="button"
-                onClick={signOut}
-                className="dzn-nav-action dzn-nav-action--logout"
-              >
-                Logout
-              </button>
-            </>
-          ) : (
-            <a
-              href="/login?returnTo=/"
-              className="dzn-nav-action dzn-nav-action--login"
-            >
-              Login
-            </a>
-          )}
-        </div>
-      </div>
-    </motion.header>
   );
 }
 

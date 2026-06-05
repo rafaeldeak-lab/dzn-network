@@ -17,7 +17,6 @@ import {
   Gamepad2,
   Globe2,
   Lock,
-  LogOut,
   Map,
   MapPin,
   Medal,
@@ -37,9 +36,8 @@ import {
 import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
-import { DznLogo } from "@/components/dzn/dzn-logo";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
-import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
+import { SiteHeader } from "@/components/site-header";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import type { PlanVisualTreatment, ProfileFrameVisual, ServerThemeBannerVisual, VisualBadge } from "@/lib/badges/visuals";
 import type { PublicLockedBadge } from "@/lib/badges/rules";
@@ -425,63 +423,17 @@ export function PublicNetwork() {
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
       <AnimatedBackground />
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-5 py-6 sm:px-6 lg:px-8">
-        <PublicNav />
-        {slug ? (
-          <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
-        ) : (
-          <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
-        )}
+      <div className="relative z-10 flex min-h-screen flex-col">
+        <SiteHeader active="servers" returnTo="/servers" />
+        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-5 py-6 sm:px-6 lg:px-8">
+          {slug ? (
+            <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
+          ) : (
+            <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
+          )}
+        </div>
       </div>
     </main>
-  );
-}
-
-function PublicNav() {
-  const [authenticated, setAuthenticated] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/auth/me", { cache: "no-store", credentials: "include" })
-      .then((response) => setAuthenticated(response.ok))
-      .catch(() => setAuthenticated(false));
-  }, []);
-
-  async function signOut() {
-    clearClientAuthState();
-    setAuthenticated(false);
-    await logoutAndRedirect();
-  }
-
-  return (
-    <nav className="flex min-h-[104px] items-center justify-between">
-      <DznLogo href="/" />
-      <div className="flex items-center gap-3">
-        <Link href="/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white lg:inline-flex">
-          Servers
-        </Link>
-        <Link href="/seasons" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white lg:inline-flex">
-          Seasons
-        </Link>
-        {authenticated ? (
-          <>
-            <Link href="/dashboard" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
-              Dashboard
-            </Link>
-            <button type="button" onClick={signOut} className="hidden items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white md:inline-flex">
-              <LogOut className="h-4 w-4" />
-              Logout
-            </button>
-          </>
-        ) : (
-          <Link href="/login?returnTo=/servers" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
-            Login
-          </Link>
-        )}
-        <Link href="/login?returnTo=/setup" className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_26px_rgba(139,92,246,0.35)] transition hover:bg-violet-400">
-          Add Your Server
-        </Link>
-      </div>
-    </nav>
   );
 }
 
@@ -524,6 +476,15 @@ function ServerBrowser({
         <p className="mt-4 max-w-2xl text-lg leading-8 text-zinc-300">
           Browse verified DayZ communities connected to DZN Network.
         </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link
+            href="/seasons"
+            className="inline-flex items-center gap-2 rounded-lg border border-purple-400/35 bg-purple-500/12 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-purple-100 shadow-[0_0_18px_rgba(168,85,247,0.16)] transition hover:border-purple-300/70 hover:bg-purple-500/20"
+          >
+            <Trophy className="h-4 w-4" aria-hidden="true" />
+            Seasons
+          </Link>
+        </div>
       </motion.header>
 
       {!initialError ? <StatsRow stats={stats} /> : null}
