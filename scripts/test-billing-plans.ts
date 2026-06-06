@@ -16,8 +16,10 @@ const premium = getPlanConfig("premium");
 
 assert.equal(starter.can_use_ad_bumps, false);
 assert.equal(pro.can_use_ad_bumps, true);
+assert.equal(pro.included_bumps_per_month, 2);
 assert.equal(pro.max_linked_servers, 3);
 assert.equal(premium.max_linked_servers, 10);
+assert.equal(premium.included_bumps_per_month, 8);
 assert.equal(premium.monthly_price, 19.99);
 assert.equal(Math.round(premium.monthly_price * 100), 1999);
 assert.equal(premium.visibility_weight, 4);
@@ -47,7 +49,7 @@ assert.deepEqual(
     entitlements: pro,
     state: {
       last_bumped_at: "2026-05-15T00:30:00.000Z",
-      bump_count_current_period: 3,
+      bump_count_current_period: 2,
     },
     now,
   }).code,
@@ -189,6 +191,8 @@ const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf
 assert.equal(dashboardSource.includes("Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits"), true, "Owner billing cards should explain Premium value.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
 assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
+assert.equal(dashboardSource.includes("included_bumps_per_month: 3"), false, "Dashboard fallback plans must not keep stale Pro 3 promotion credits.");
+assert.equal(dashboardSource.includes("included_bumps_per_month: 12"), false, "Dashboard fallback plans must not keep stale Premium 12 promotion credits.");
 
 const statements: string[] = [];
 const bindings: unknown[][] = [];

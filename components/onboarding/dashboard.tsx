@@ -41,7 +41,7 @@ import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
 import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingReadinessResponse, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
-const SYNC_POLL_INTERVAL_MS = 15000;
+const SYNC_POLL_INTERVAL_MS = 30000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
 const LAST_KNOWN_STAT_LABEL_THRESHOLD_MS = 60 * 60 * 1000;
 let hasLoggedMultiServerReady = false;
@@ -1216,7 +1216,7 @@ function ServerDashboard({
       }
     }, 0);
     const interval = window.setInterval(() => {
-      if (active) {
+      if (active && document.visibilityState !== "hidden") {
         void refreshSyncData({ warnOnError: true });
         void onRefreshRef.current();
       }
@@ -7820,7 +7820,7 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
     },
     pro: {
       max_linked_servers: 3,
-      included_bumps_per_month: 3,
+      included_bumps_per_month: 2,
       bump_cooldown_hours: 24,
       stat_history_days: 90,
       can_use_ad_bumps: true,
@@ -7840,7 +7840,7 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
     },
     premium: {
       max_linked_servers: 10,
-      included_bumps_per_month: 12,
+      included_bumps_per_month: 8,
       bump_cooldown_hours: 6,
       stat_history_days: 365,
       can_use_ad_bumps: true,

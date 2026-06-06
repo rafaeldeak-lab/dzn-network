@@ -18,7 +18,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       sanitizeLinkedServerId(url.searchParams.get("linked_server_id")),
       sanitizeLimit(url.searchParams.get("limit")),
     );
-    return json({ events });
+    return json({ events }, { headers: privateRecentEventsHeaders() });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Recent sync events unavailable" }, { status: 400 });
   }
@@ -42,6 +42,12 @@ function sanitizeLinkedServerId(value: unknown) {
 }
 
 function sanitizeLimit(value: unknown) {
-  const limit = typeof value === "string" ? Number(value) : 10;
-  return Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 25) : 10;
+  const limit = typeof value === "string" ? Number(value) : 8;
+  return Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 10) : 8;
+}
+
+function privateRecentEventsHeaders() {
+  return {
+    "cache-control": "private, max-age=10",
+  };
 }

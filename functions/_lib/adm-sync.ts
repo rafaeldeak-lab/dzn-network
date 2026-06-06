@@ -5697,9 +5697,32 @@ async function getAdmBackfillStatus(env: Env, linkedServerId: string): Promise<A
   };
 }
 
-export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?: string | null): Promise<AdmSyncStatus> {
-  await ensureAdmSyncSchema(env);
-  await ensureAutomationSchema(env);
+function emptyAdmBackfillStatus(): AdmBackfillStatus {
+  return {
+    missing_files_detected: 0,
+    queued_files: [],
+    active_file: null,
+    active_job: null,
+    completed_files_today: 0,
+    skipped_already_imported: 0,
+    oldest_missing_file: null,
+    newest_missing_file: null,
+    unreadable_files: [],
+    next_action: "Full ADM backfill planning is checked by the detailed dashboard health endpoint.",
+    last_planned_at: null,
+  };
+}
+
+export async function getAdmSyncStatus(
+  env: Env,
+  userId: string,
+  linkedServerId?: string | null,
+  options: { lightweight?: boolean } = {},
+): Promise<AdmSyncStatus> {
+  if (!options.lightweight) {
+    await ensureAdmSyncSchema(env);
+    await ensureAutomationSchema(env);
+  }
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
 
@@ -5771,17 +5794,17 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     .bind(linkedServer.id, userId)
     .first<Record<string, unknown>>();
   const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun, unreadableQueued, newestUnprocessed, activeImportJobRow, admBackfillStatus, canonicalStats] = await Promise.all([
-    getRecentSyncRuns(env, linkedServer.id, 5),
-    getLatestSyncRunByTrigger(env, linkedServer.id, "manual"),
-    getLatestSyncRunByTrigger(env, linkedServer.id, "scheduled"),
-    getLatestSuccessfulSyncRun(env, linkedServer.id),
+    getRecentSyncRuns(env, linkedServer.id, options.lightweight ? 3 : 5),
+    options.lightweight ? Promise.resolve(null) : getLatestSyncRunByTrigger(env, linkedServer.id, "manual"),
+    options.lightweight ? Promise.resolve(null) : getLatestSyncRunByTrigger(env, linkedServer.id, "scheduled"),
+    options.lightweight ? Promise.resolve(null) : getLatestSuccessfulSyncRun(env, linkedServer.id),
     countQueuedUnreadableAdmFiles(env, linkedServer.id),
     getNewestUnprocessedAdmFile(env, linkedServer.id),
     getActiveAdmImportJob(env, linkedServer.id),
-    getAdmBackfillStatus(env, linkedServer.id),
-    getCanonicalServerStats(db, linkedServer.id).catch(() => null),
+    options.lightweight ? Promise.resolve(emptyAdmBackfillStatus()) : getAdmBackfillStatus(env, linkedServer.id),
+    options.lightweight ? Promise.resolve(null) : getCanonicalServerStats(db, linkedServer.id).catch(() => null),
   ]);
-  const manualImportHistory = await getManualAdmImportHistory(env, linkedServer.id, 5);
+  const manualImportHistory = options.lightweight ? [] : await getManualAdmImportHistory(env, linkedServer.id, 5);
   const currentStatus = stringOrDefault(row?.last_sync_status, "not_started");
   const newestAvailableAdmTimestamp = typeof row?.newest_available_adm_timestamp === "string" ? row.newest_available_adm_timestamp : null;
   const observedAdmCadenceMinutes = nullablePositiveInteger(row?.observed_adm_cadence_minutes);
@@ -5873,7 +5896,7 @@ export async function getRecentAdmSyncEvents(
   if (!linkedServer) throw new Error("No linked server found");
 
   const db = requireDb(env);
-  const safeLimit = Math.min(Math.max(Math.trunc(limit) || 10, 1), 25);
+  const safeLimit = Math.min(Math.max(Math.trunc(limit) || 8, 1), 10);
   const result = await db
     .prepare(
       `SELECT source, event_type, player_name, killer_name, victim_name, weapon, distance, occurred_at, created_at, raw_line
@@ -5888,7 +5911,7 @@ export async function getRecentAdmSyncEvents(
            distance,
            occurred_at,
            created_at,
-           raw_line,
+           NULL AS raw_line,
            0 AS event_priority,
            COALESCE(occurred_at, created_at) AS sort_time
        FROM kill_events
@@ -5917,7 +5940,7 @@ export async function getRecentAdmSyncEvents(
            NULL AS distance,
            occurred_at,
            created_at,
-           raw_line,
+           NULL AS raw_line,
            CASE
              WHEN event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats') THEN 1
              WHEN event_type IN ('player_connected', 'player_disconnected', 'playerlist_snapshot') THEN 2
@@ -5948,7 +5971,7 @@ export async function getRecentAdmSyncEvents(
            NULL AS distance,
            occurred_at,
            created_at,
-           raw_line,
+           NULL AS raw_line,
            4 AS event_priority,
            COALESCE(occurred_at, created_at) AS sort_time
        FROM build_events
@@ -6456,6 +6479,10 @@ export async function runAdmWorkerSyncTick(
             : "due_discovery";
     await recordAdmWorkerServiceSelection(env, selected, selectionReason).catch(() => null);
     let pendingJobs: PendingAdmImportJobsResult | undefined;
+    const scheduledTargetFileName = explicitTargetFileName ? null : sanitizeWorkerTargetAdmFilename(selected.target_adm_file);
+    const scheduledTargetPath = scheduledTargetFileName
+      ? sanitizeWorkerTargetAdmPath(selected.target_adm_path, scheduledTargetFileName)
+      : null;
 
     if (!explicitTargetFileName && selected.id !== metadataRefreshedLinkedServerId && isAdmWorkerMetadataStale(selected) && hasTickBudget(3_000)) {
       const selectedMetadata = await refreshSelectedAdmWorkerMetadata(env, selected).catch((error) => ({
@@ -6523,7 +6550,7 @@ export async function runAdmWorkerSyncTick(
       });
     }
 
-    if (!explicitTargetFileName) {
+    if (!explicitTargetFileName && !scheduledTargetFileName) {
       if (!hasTickBudget(2_000)) {
         await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
         return admWorkerResult({
@@ -6566,6 +6593,20 @@ export async function runAdmWorkerSyncTick(
       });
     }
 
+    if (!explicitTargetFileName && scheduledTargetFileName && !hasTickBudget(2_500)) {
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
+        selectedAdmFile: scheduledTargetFileName,
+        selectedAdmPath: scheduledTargetPath ?? selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+        pendingJobs,
+        skippedNotDue: 1,
+        message: "ADM Worker paused before target ADM file read to stay within the scheduled invocation budget. Work will continue next tick.",
+      });
+    }
+
     const preferLatestAfterImportWork = false;
     const latestBackoffActive = isAdmUnreadableBackoffActive(selected.latest_adm_status, selected.latest_adm_next_retry_at)
       && options.force !== true
@@ -6586,6 +6627,7 @@ export async function runAdmWorkerSyncTick(
 
     const directFileName = firstString(
       explicitTargetFileName,
+      scheduledTargetFileName,
       ...(preferLatestAfterImportWork
         ? [
             selected.latest_adm_file,
@@ -6602,6 +6644,7 @@ export async function runAdmWorkerSyncTick(
     );
     const directPath = firstString(
       explicitTargetPath,
+      scheduledTargetPath,
       ...(preferLatestAfterImportWork
         ? [
             selected.latest_adm_path,

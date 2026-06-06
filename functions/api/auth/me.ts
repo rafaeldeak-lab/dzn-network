@@ -1,4 +1,4 @@
-import { ensureMockUser, getCurrentLinkedServer, getLinkedServersForUser, getSessionUser } from "../../_lib/db";
+import { ensureMockUser, getLinkedServersForUserSummary, getSessionUser } from "../../_lib/db";
 import { json } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
 import type { PagesFunction } from "../../_lib/types";
@@ -20,7 +20,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ authenticated: false }, { status: 401 });
   }
 
-  const linkedServer = await getCurrentLinkedServer(env, user.id);
-  const linkedServers = await getLinkedServersForUser(env, user.id);
-  return json({ authenticated: true, user, linkedServer, linkedServers });
+  const linkedServers = await getLinkedServersForUserSummary(env, user.id);
+  const linkedServer = linkedServers[0] ?? null;
+  return json({ authenticated: true, user, linkedServer, linkedServers }, {
+    headers: {
+      "cache-control": "private, max-age=15",
+    },
+  });
 };

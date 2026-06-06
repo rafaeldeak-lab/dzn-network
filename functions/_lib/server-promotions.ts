@@ -56,6 +56,7 @@ export type PromotionConfig = {
 type PromotionServerRow = {
   id: string;
   plan_key: string | null;
+  subscription_status: string | null;
 };
 
 type PromotionAnalyticsCountRow = {
@@ -83,6 +84,7 @@ export class PromotionError extends Error {
 }
 
 const PROMOTION_TYPES: PromotionType[] = ["directory_bump", "featured_rotation", "spotlight_boost", "seasonal_push"];
+const ACTIVE_PROMOTION_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
 const DURATION_HOURS: Record<PromotionType, number> = {
   directory_bump: 24,
   featured_rotation: 48,
@@ -113,6 +115,14 @@ export function getPromotionConfigForPlan(planKey: unknown): PromotionConfig {
   };
 }
 
+export function hasActivePromotionSubscription(status: unknown) {
+  return typeof status === "string" && ACTIVE_PROMOTION_SUBSCRIPTION_STATUSES.has(status.trim().toLowerCase());
+}
+
+export function getPromotionConfigForSubscription(planKey: unknown, subscriptionStatus: unknown): PromotionConfig {
+  return getPromotionConfigForPlan(hasActivePromotionSubscription(subscriptionStatus) ? planKey : "starter");
+}
+
 export async function getServerPromotionCredits(env: Env, serverId: string) {
   return ensurePromotionCreditsForCurrentPeriod(env, serverId);
 }
@@ -124,7 +134,7 @@ export async function ensurePromotionCreditsForCurrentPeriod(env: Env, serverId:
 
   const now = new Date();
   const period = currentPeriod(now);
-  const config = getPromotionConfigForPlan(server.plan_key);
+  const config = getPromotionConfigForSubscription(server.plan_key, server.subscription_status);
   const db = requireDb(env);
   const existing = await db
     .prepare("SELECT * FROM promotion_credits WHERE server_id = ? AND period_start = ? LIMIT 1")
@@ -508,18 +518,16 @@ async function findPromotionServer(env: Env, rawServerId: unknown): Promise<Prom
   return requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
-              COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key
+              COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
+              server_subscriptions.status AS subscription_status
        FROM linked_servers
-       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       LEFT JOIN server_subscriptions
+         ON server_subscriptions.guild_id = linked_servers.guild_id
+        AND lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing')
        WHERE (linked_servers.id = ? OR linked_servers.nitrado_service_id = ? OR linked_servers.public_slug = ?)
          AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-       ORDER BY CASE lower(COALESCE(server_subscriptions.status, ''))
-          WHEN 'active' THEN 0
-          WHEN 'trialing' THEN 1
-          ELSE 2
-        END,
-        server_subscriptions.updated_at DESC,
+       ORDER BY server_subscriptions.updated_at DESC,
         server_subscriptions.created_at DESC
        LIMIT 1`,
     )

@@ -208,6 +208,115 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
   return servers?.[0] ?? null;
 }
 
+export async function getLinkedServersForUserSummary(env: Env, userId: string) {
+  if (!env.DB) return [];
+  const result = await env.DB
+    .prepare(
+      `SELECT
+        linked_servers.id,
+        linked_servers.guild_id,
+        linked_servers.discord_guild_id,
+        discord_guilds.name AS guild_name,
+        discord_guilds.icon_url AS guild_icon_url,
+        linked_servers.nitrado_service_id,
+        linked_servers.nitrado_service_name,
+        linked_servers.server_name,
+        linked_servers.server_type,
+        linked_servers.server_category,
+        linked_servers.tags_json,
+        linked_servers.region,
+        linked_servers.game,
+        linked_servers.platform,
+        linked_servers.ip_address,
+        linked_servers.player_slots,
+        linked_servers.status,
+        linked_servers.created_at,
+        linked_servers.updated_at,
+        linked_servers.public_slug,
+        linked_servers.display_name,
+        linked_servers.hostname,
+        linked_servers.description,
+        linked_servers.max_players,
+        linked_servers.current_players,
+        linked_servers.game_port,
+        linked_servers.query_port,
+        linked_servers.map_name,
+        linked_servers.mission,
+        linked_servers.server_status,
+        linked_servers.is_online,
+        linked_servers.server_mode,
+        linked_servers.server_mode_source,
+        linked_servers.metadata_hash,
+        linked_servers.metadata_last_checked_at,
+        linked_servers.metadata_last_changed_at,
+        linked_servers.player_count_last_checked_at,
+        linked_servers.player_count_source,
+        linked_servers.player_count_status,
+        linked_servers.public_short_description,
+        linked_servers.public_description,
+        linked_servers.public_discord_invite,
+        linked_servers.public_website_url,
+        linked_servers.public_rules,
+        linked_servers.public_language,
+        linked_servers.public_region_label,
+        linked_servers.public_listing_updated_at,
+        linked_servers.category_changed_at,
+        linked_servers.category_cooldown_until,
+        linked_servers.category_effective_at,
+        linked_servers.category_first_set_at,
+        linked_servers.category_first_grace_used_at,
+        linked_servers.category_locked_until,
+        linked_servers.category_lock_reason,
+        linked_servers.listing_visibility,
+        linked_servers.tags_changed_at,
+        linked_servers.tags_cooldown_until,
+        server_log_config.adm_path AS adm_path,
+        onboarding_checks.adm_logs_found AS adm_logs_found,
+        onboarding_checks.last_tested_at AS adm_last_checked_at
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+       WHERE linked_servers.user_id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY
+         CASE WHEN lower(COALESCE(linked_servers.status, 'pending')) = 'live' THEN 0 ELSE 1 END,
+         linked_servers.updated_at DESC,
+         linked_servers.created_at DESC,
+         linked_servers.id DESC
+       LIMIT 20`,
+    )
+    .bind(userId)
+    .all<Record<string, unknown>>();
+
+  const servers = result.results ?? [];
+  for (const server of servers) {
+    const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
+    server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
+    server.adm_status = Number(server.adm_logs_found) === 1
+      ? "Connected"
+      : rawAdmPath
+        ? "Discovered, read pending"
+        : "Needs review";
+    if (rawAdmPath) server.adm_path = maskNitradoApiPath(rawAdmPath);
+    server.original_owner_is_current_user = true;
+    server.global_rank = null;
+    server.rank = null;
+    server.server_score = 0;
+    server.score = 0;
+    server.score_label = "Pending";
+    server.score_breakdown = null;
+    server.kd = null;
+    server.kd_label = "Awaiting data";
+    server.longest_kill = 0;
+    server.stats_sync_active = false;
+  }
+
+  return servers;
+}
+
 export async function getLinkedServersForUser(env: Env, userId: string, options: { includePrivateAdmPath?: boolean } = {}) {
   if (!env.DB) return [];
   await ensureLinkedServerMetadataColumns(env);

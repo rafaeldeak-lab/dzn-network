@@ -203,6 +203,51 @@ includesAll(leaderboards, [
   "payload.top_servers.map",
   "payload.top_players.map",
 ]);
+
+const authMeRoute = source("functions/api/auth/me.ts");
+includesAll(authMeRoute, [
+  "getLinkedServersForUserSummary",
+  "private, max-age=15",
+]);
+assert.equal(authMeRoute.includes("getLinkedServersForUser("), false, "Auth me must not run the full ranked linked-server loader on every dashboard poll.");
+assert.equal(authMeRoute.includes("getCanonicalServerStats"), false, "Auth me must not compute canonical stats.");
+
+const dbSource = source("functions/_lib/db.ts");
+includesAll(dbSource, [
+  "getLinkedServersForUserSummary",
+  "LIMIT 20",
+  "server.adm_path = maskNitradoApiPath(rawAdmPath)",
+]);
+
+const syncStatusRoute = source("functions/api/sync/status.ts");
+includesAll(syncStatusRoute, [
+  "{ lightweight: true }",
+  "private, max-age=10",
+  "status: 401",
+]);
+
+const syncRecentEventsRoute = source("functions/api/sync/recent-events.ts");
+includesAll(syncRecentEventsRoute, [
+  "private, max-age=10",
+  "Math.min(Math.max(Math.trunc(limit), 1), 10)",
+  "status: 401",
+]);
+
+const admSyncSource = source("functions/_lib/adm-sync.ts");
+includesAll(admSyncSource, [
+  "options: { lightweight?: boolean } = {}",
+  "options.lightweight ? Promise.resolve(emptyAdmBackfillStatus())",
+  "options.lightweight ? [] : await getManualAdmImportHistory",
+  "NULL AS raw_line",
+]);
+
+const logSettingsRoute = source("functions/api/servers/[serverId]/nitrado-log-settings.ts");
+includesAll(logSettingsRoute, [
+  "isRecentNitradoLogSettingsCheck",
+  "15 * 60 * 1000",
+  "private, max-age=30",
+  "cached: true",
+]);
 assert.equal(leaderboards.includes("Live refresh recovering. Showing last known data."), false, "Leaderboards must not show stale-data warning when valid data is visible.");
 assert.equal(leaderboards.includes("Live data refresh failed. Showing last known leaderboard."), false, "Leaderboards refresh failures with visible data should stay silent.");
 assert.equal(leaderboards.includes("function LeaderboardNav"), false, "Leaderboards page must use the shared SiteHeader instead of a duplicate local nav.");

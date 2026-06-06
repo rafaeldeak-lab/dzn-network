@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import {
   explainPromotionBenefits,
+  getPromotionConfigForSubscription,
   getPromotionConfigForPlan,
+  hasActivePromotionSubscription,
   recordPromotionClick,
   recordPromotionImpression,
 } from "../functions/_lib/server-promotions";
@@ -18,6 +20,21 @@ assert.equal(getPromotionConfigForPlan("pro").monthlyCredits, 2);
 assert.equal(getPromotionConfigForPlan("premium").monthlyCredits, 8);
 assert.equal(getPromotionConfigForPlan("network").monthlyCredits, 8);
 assert.equal(getPromotionConfigForPlan("partner").monthlyCredits, 8);
+assert.equal(hasActivePromotionSubscription("active"), true);
+assert.equal(hasActivePromotionSubscription("trialing"), true);
+for (const inactiveStatus of ["canceled", "cancelled", "past_due", "unpaid", "incomplete", "incomplete_expired", "paused", "expired", null, undefined]) {
+  assert.equal(hasActivePromotionSubscription(inactiveStatus), false, `${inactiveStatus} must not unlock paid promotion credits.`);
+}
+assert.equal(getPromotionConfigForSubscription("pro", "active").monthlyCredits, 2);
+assert.equal(getPromotionConfigForSubscription("pro", "trialing").monthlyCredits, 2);
+assert.equal(getPromotionConfigForSubscription("premium", "active").monthlyCredits, 8);
+assert.equal(getPromotionConfigForSubscription("premium", "trialing").monthlyCredits, 8);
+assert.equal(getPromotionConfigForSubscription("network", "active").monthlyCredits, 8);
+assert.equal(getPromotionConfigForSubscription("partner", "trialing").monthlyCredits, 8);
+assert.equal(getPromotionConfigForSubscription("pro", "canceled").monthlyCredits, 0);
+assert.equal(getPromotionConfigForSubscription("premium", "past_due").monthlyCredits, 0);
+assert.equal(getPromotionConfigForSubscription("network", "unpaid").monthlyCredits, 0);
+assert.equal(getPromotionConfigForSubscription("partner", null).monthlyCredits, 0);
 
 assert.deepEqual(getPromotionConfigForPlan("starter").allowedPromotionTypes, []);
 assert.deepEqual(getPromotionConfigForPlan("pro").allowedPromotionTypes, ["directory_bump", "featured_rotation"]);
@@ -76,6 +93,8 @@ assert.equal(/DROP TABLE|DELETE FROM|TRUNCATE|player_stats|player_profiles|kill_
 const helper = readFileSync("functions/_lib/server-promotions.ts", "utf8");
 for (const snippet of [
   "getPromotionConfigForPlan",
+  "getPromotionConfigForSubscription",
+  "hasActivePromotionSubscription",
   "getServerPromotionCredits",
   "ensurePromotionCreditsForCurrentPeriod",
   "usePromotionCredit",
@@ -95,6 +114,7 @@ for (const snippet of [
   "ORDER BY occurred_at DESC",
   "PROMOTION_ALREADY_ACTIVE",
   "credits_available > 0",
+  "lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing')",
 ]) {
   assert.equal(helper.includes(snippet), true, `Promotion helper should include ${snippet}.`);
 }

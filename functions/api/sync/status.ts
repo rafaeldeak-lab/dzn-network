@@ -12,8 +12,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const url = new URL(request.url);
   try {
-    const status = await getAdmSyncStatus(env, user.id, sanitizeLinkedServerId(url.searchParams.get("linked_server_id")));
-    return json({ status });
+    const status = await getAdmSyncStatus(env, user.id, sanitizeLinkedServerId(url.searchParams.get("linked_server_id")), { lightweight: true });
+    return json({ status }, { headers: privateStatusHeaders() });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Sync status unavailable" }, { status: 400 });
   }
@@ -34,4 +34,10 @@ async function resolveUser(env: Env, request: Request): Promise<SessionUser | nu
 
 function sanitizeLinkedServerId(value: unknown) {
   return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
+}
+
+function privateStatusHeaders() {
+  return {
+    "cache-control": "private, max-age=10",
+  };
 }

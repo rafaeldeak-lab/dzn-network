@@ -35,9 +35,16 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   if (request.method === "GET") {
     const shouldCheck = new URL(request.url).searchParams.get("check") === "1";
+    const savedSettings = await getNitradoLogSettingsConfirmation(env, server.guild_id);
     if (!shouldCheck) {
-      const savedSettings = await getNitradoLogSettingsConfirmation(env, server.guild_id);
-      return json(buildSavedNitradoLogSettingsResponse(savedSettings));
+      return json(buildSavedNitradoLogSettingsResponse(savedSettings), { headers: privateLogSettingsHeaders() });
+    }
+
+    if (isRecentNitradoLogSettingsCheck(savedSettings.nitrado_log_settings_last_checked_at)) {
+      return json({
+        ...buildSavedNitradoLogSettingsResponse(savedSettings),
+        cached: true,
+      }, { headers: privateLogSettingsHeaders() });
     }
 
     const checkedAt = new Date().toISOString();
@@ -76,7 +83,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
           settings: verification.settings,
         }),
         saved_settings: savedSettings,
-      });
+      }, { headers: privateLogSettingsHeaders() });
     } catch (error) {
       const reason = logSettingsVerificationFallbackReason(error);
       const savedSettings = await recordNitradoLogSettingsVerification(env, {
@@ -117,7 +124,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
           settings: UNKNOWN_NITRADO_LOG_SETTINGS,
         }),
         saved_settings: savedSettings,
-      });
+      }, { headers: privateLogSettingsHeaders() });
     }
   }
   if (request.method !== "POST") return methodNotAllowed();
@@ -255,6 +262,18 @@ async function requireOwnedServer(env: Env, userId: string, linkedServerId: stri
 
 function sanitizeLinkedServerId(value: unknown) {
   return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
+}
+
+function isRecentNitradoLogSettingsCheck(value: string | null | undefined) {
+  if (!value) return false;
+  const checkedAt = Date.parse(value);
+  return Number.isFinite(checkedAt) && Date.now() - checkedAt < 15 * 60 * 1000;
+}
+
+function privateLogSettingsHeaders() {
+  return {
+    "cache-control": "private, max-age=30",
+  };
 }
 
 async function getNitradoTokenForLinkedServer(
