@@ -151,7 +151,7 @@ const playerCountsSource = readFileSync("functions/_lib/player-counts.ts", "utf8
 
 assert.equal(homeStatsSource.includes("PUBLIC_CURRENT_PLAYERS_SQL"), true, "Home stats must use the shared fresh player count SQL.");
 assert.equal(homeStatsSource.includes("PUBLIC_PLAYER_COUNT_FRESH_SQL"), true, "Home stats must count fresh/stale player sources explicitly.");
-assert.equal(homeStatsSource.includes("refreshHomeStatsPlayerCounts"), true, "Cached home-stats snapshots must receive a fresh player-count overlay.");
+assert.equal(homeStatsSource.includes("refreshHomeStatsLiveCounters"), true, "Cached home-stats snapshots must receive fresh player-count and ADM stat overlays.");
 assert.equal(publicServersSource.includes("PUBLIC_CURRENT_PLAYERS_SQL"), true, "Public servers must use the shared fresh player count SQL.");
 assert.equal(publicServersSource.includes("PUBLIC_PLAYER_COUNT_STATUS_SQL"), true, "Public servers must expose computed freshness status.");
 assert.equal(serverMetadataSource.includes("syncPublicCacheFromMetadataRefresh"), true, "Metadata refresh should keep public cache in sync.");

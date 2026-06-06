@@ -4,6 +4,7 @@ import { json, methodNotAllowed } from "../../../../_lib/http";
 import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../../../../_lib/plans";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import { calculateServerScore } from "../../../../_lib/server-ranking";
+import { getCanonicalServerStats } from "../../../../_lib/server-stats";
 import type { PagesFunction } from "../../../../_lib/types";
 
 type ServerRow = {
@@ -303,7 +304,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     ]);
 
     if (!server) return dashboardHealthError(404, "server_not_found", "Server not found.");
-    const [latestDiagnostic, latestCompletedImport, preferredSourceState] = await Promise.all([
+    const [latestDiagnostic, latestCompletedImport, preferredSourceState, canonicalStats] = await Promise.all([
       db.prepare(
         `SELECT file_name, file_path, method, endpoint_kind, status, http_status, error_code, error_message, created_at
          FROM nitrado_file_read_attempts
@@ -326,18 +327,19 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
          ORDER BY preferred DESC, works DESC, COALESCE(last_tested_at, updated_at) DESC
          LIMIT 1`,
       ).bind(server.nitrado_service_id ?? "").first<SourceStateRow>().catch(() => null),
+      getCanonicalServerStats(db, linkedServerId).catch(() => null),
     ]);
     const latestReadTruth = normalizeLatestReadTruth(latestReadIssue, latestDiagnostic);
 
     const planKey = normalizePlanKey(server.plan_key);
     const currentPlan = effectiveEntitlementPlan(planKey, server.subscription_status);
-    const statsSnapshot = statsFromRow(stats, server);
+    const statsSnapshot = canonicalStats ? statsFromCanonical(canonicalStats, server) : statsFromRow(stats, server);
     const score = calculateServerScore({
       kills: statsSnapshot.kills,
       deaths: statsSnapshot.deaths,
       uniquePlayers: statsSnapshot.unique_players,
       joins: statsSnapshot.joins,
-      longestKill: numberOrZero(stats?.longest_kill),
+      longestKill: canonicalStats ? canonicalStats.longestKill : numberOrZero(stats?.longest_kill),
       statsSyncActive: Boolean(server.last_processed_adm_filename || activeJob || statsSnapshot.kills || statsSnapshot.joins),
     });
     const events = (recentEvents.results ?? []).map(normalizeRecentEvent);
@@ -531,6 +533,17 @@ export const onRequestOptions: PagesFunction = () => new Response(null, { status
 function sanitizeId(value: unknown) {
   const id = Array.isArray(value) ? value[0] : value;
   return typeof id === "string" && /^[a-zA-Z0-9_-]{3,128}$/.test(id) ? id : null;
+}
+
+function statsFromCanonical(stats: Awaited<ReturnType<typeof getCanonicalServerStats>>, server: ServerRow) {
+  return {
+    players: numberOrZero(server.current_players),
+    kills: stats.kills,
+    deaths: stats.deaths,
+    joins: stats.joins,
+    disconnects: stats.disconnects,
+    unique_players: stats.uniquePlayers,
+  };
 }
 
 function statsFromRow(stats: StatsRow | null, server: ServerRow) {

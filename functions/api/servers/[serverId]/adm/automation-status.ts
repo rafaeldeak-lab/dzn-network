@@ -3,6 +3,7 @@ import { json, methodNotAllowed } from "../../../../_lib/http";
 import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../../../../_lib/plans";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import { calculateServerScore } from "../../../../_lib/server-ranking";
+import { getCanonicalServerStats } from "../../../../_lib/server-stats";
 import type { PagesFunction } from "../../../../_lib/types";
 
 type CronRow = {
@@ -101,7 +102,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
 
     const db = requireDb(env);
     const now = new Date().toISOString();
-    const [server, cronRows, activeJob, queuedJobsResult, completedJobsResult, fileStatesResult, stats, recentEvents, discordQueue] = await Promise.all([
+    const [server, cronRows, activeJob, queuedJobsResult, completedJobsResult, fileStatesResult, stats, recentEvents, discordQueue, canonicalStats] = await Promise.all([
       db
         .prepare(
           `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.public_slug,
@@ -228,13 +229,14 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         .bind(access.server?.guild_id ?? "")
         .first<{ count: number | null }>()
         .catch(() => ({ count: 0 })),
+      getCanonicalServerStats(db, linkedServerId).catch(() => null),
     ]);
 
     if (!server) return automationStatusError(404, "server_not_found", "Server not found.");
 
     const planKey = normalizePlanKey(server.plan_key);
     const effectivePlanKey = effectiveEntitlementPlan(planKey, server.subscription_status);
-    const statsSnapshot = buildStatsSnapshot(stats);
+    const statsSnapshot = canonicalStats ? buildStatsSnapshotFromCanonical(canonicalStats) : buildStatsSnapshot(stats);
     const completedJobs = completedJobsResult.results ?? [];
     const completedFiles = new Set(completedJobs.map((job) => job.filename));
     if (server.last_processed_adm_filename) completedFiles.add(server.last_processed_adm_filename);
@@ -324,7 +326,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
           deaths: statsSnapshot.deaths,
           uniquePlayers: statsSnapshot.unique_players,
           joins: statsSnapshot.joins,
-          longestKill: numberOrZero(stats?.longest_kill),
+          longestKill: canonicalStats ? canonicalStats.longestKill : numberOrZero(stats?.longest_kill),
           statsSyncActive: Boolean(server.last_processed_adm_filename || completedJobs.length || activeJobSnapshot),
         }),
       },
@@ -350,6 +352,16 @@ export const onRequestPost: PagesFunction = () => methodNotAllowed();
 export const onRequestPut: PagesFunction = () => methodNotAllowed();
 export const onRequestDelete: PagesFunction = () => methodNotAllowed();
 export const onRequestOptions: PagesFunction = () => new Response(null, { status: 204, headers: { Allow: "GET, OPTIONS" } });
+
+function buildStatsSnapshotFromCanonical(stats: Awaited<ReturnType<typeof getCanonicalServerStats>>) {
+  return {
+    kills: stats.kills,
+    deaths: stats.deaths,
+    joins: stats.joins,
+    disconnects: stats.disconnects,
+    unique_players: stats.uniquePlayers,
+  };
+}
 
 function buildStatsSnapshot(stats: StatsRow | null) {
   return {

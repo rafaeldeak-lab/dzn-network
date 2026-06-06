@@ -42,6 +42,10 @@ import {
 } from "./server-metadata";
 import { getActiveNitradoRateLimit } from "./nitrado-diagnostics";
 import { normalizePlanKey, type PlanKey } from "./plans";
+import {
+  getCanonicalServerStats,
+  patchHomeStatsAdmStatsFromCanonicalEvents,
+} from "./server-stats";
 import type { Env } from "./types";
 
 export type SyncLinkedServer = {
@@ -2239,6 +2243,13 @@ export async function importReadableAdmLinesIntoDatabase(
       lastEventAt,
     });
     await rebuildServerStats(env, context.linkedServerId);
+    if (eventsCreated > 0 || buildEventsStored > 0) {
+      await withManualAdmPhaseTimeout(
+        patchHomeStatsAdmStatsFromCanonicalEvents(env),
+        "home stats ADM snapshot refresh",
+        4000,
+      ).catch(() => undefined);
+    }
 
     if (input.updatePublicCache && input.guildId && input.planKey) {
       try {
@@ -4122,6 +4133,15 @@ async function finalizeAdmImportJob(
       warnings.push(`${row.filename}: Public cache update failed after ADM rows were written. ${safeSyncErrorMessage(error)}`);
     }
   }
+  if (statAffectingWrites > 0) {
+    await withManualAdmPhaseTimeout(
+      patchHomeStatsAdmStatsFromCanonicalEvents(env),
+      "home stats ADM snapshot refresh",
+      4000,
+    ).catch((error) => {
+      warnings.push(`${row.filename}: Home stats ADM snapshot refresh failed after ADM rows were written. ${safeSyncErrorMessage(error)}`);
+    });
+  }
 
   if (server.guild_id && isActiveSubscriptionStatus(server.subscription_status) && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0))) {
     try {
@@ -5750,7 +5770,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     )
     .bind(linkedServer.id, userId)
     .first<Record<string, unknown>>();
-  const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun, unreadableQueued, newestUnprocessed, activeImportJobRow, admBackfillStatus] = await Promise.all([
+  const [recentRuns, lastManualRun, lastScheduledRun, lastSuccessfulRun, unreadableQueued, newestUnprocessed, activeImportJobRow, admBackfillStatus, canonicalStats] = await Promise.all([
     getRecentSyncRuns(env, linkedServer.id, 5),
     getLatestSyncRunByTrigger(env, linkedServer.id, "manual"),
     getLatestSyncRunByTrigger(env, linkedServer.id, "scheduled"),
@@ -5759,6 +5779,7 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     getNewestUnprocessedAdmFile(env, linkedServer.id),
     getActiveAdmImportJob(env, linkedServer.id),
     getAdmBackfillStatus(env, linkedServer.id),
+    getCanonicalServerStats(db, linkedServer.id).catch(() => null),
   ]);
   const manualImportHistory = await getManualAdmImportHistory(env, linkedServer.id, 5);
   const currentStatus = stringOrDefault(row?.last_sync_status, "not_started");
@@ -5777,11 +5798,11 @@ export async function getAdmSyncStatus(env: Env, userId: string, linkedServerId?
     last_processed_file: typeof row?.last_processed_file === "string" ? row.last_processed_file : null,
     last_processed_line: numberOrZero(row?.last_processed_line),
     last_sync_at: typeof row?.last_sync_at === "string" ? row.last_sync_at : null,
-    total_kills: numberOrZero(row?.total_kills),
-    total_deaths: numberOrZero(row?.total_deaths),
-    total_joins: numberOrZero(row?.total_joins),
-    total_disconnects: numberOrZero(row?.total_disconnects),
-    unique_players: numberOrZero(row?.unique_players),
+    total_kills: canonicalStats?.kills ?? numberOrZero(row?.total_kills),
+    total_deaths: canonicalStats?.deaths ?? numberOrZero(row?.total_deaths),
+    total_joins: canonicalStats?.joins ?? numberOrZero(row?.total_joins),
+    total_disconnects: canonicalStats?.disconnects ?? numberOrZero(row?.total_disconnects),
+    unique_players: canonicalStats?.uniquePlayers ?? numberOrZero(row?.unique_players),
     last_lines_read: numberOrZero(row?.last_lines_read),
     last_lines_processed: numberOrZero(row?.last_lines_processed),
     last_raw_events_stored: numberOrZero(row?.last_raw_events_stored),

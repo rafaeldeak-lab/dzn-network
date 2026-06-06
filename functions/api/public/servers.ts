@@ -393,11 +393,14 @@ async function queryPublicServersPreview(env: Env) {
         adm_sync_state.last_sync_status AS adm_sync_status,
         adm_sync_state.last_sync_message AS adm_sync_message,
         adm_sync_state.last_sync_at AS adm_sync_at,
-        COALESCE(server_stats.total_kills, 0) AS total_kills,
-        COALESCE(server_stats.total_deaths, 0) AS total_deaths,
-        COALESCE(server_stats.total_joins, 0) AS total_joins,
-        COALESCE(server_stats.total_disconnects, 0) AS total_disconnects,
-        COALESCE(server_stats.unique_players, 0) AS unique_players,
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS total_kills,
+        (
+          (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL)
+          + (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats'))
+        ) AS total_deaths,
+        (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_connected') AS total_joins,
+        (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_disconnected') AS total_disconnects,
+        (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id) AS unique_players,
         server_stats.updated_at AS server_stats_updated_at,
         server_public_cache.updated_at AS public_cache_updated_at,
         CASE
@@ -451,7 +454,8 @@ async function queryPublicServersPreview(env: Env) {
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
          CASE
-           WHEN COALESCE(server_stats.total_kills, 0) > 0 OR COALESCE(server_stats.total_joins, 0) > 0 THEN 0
+           WHEN EXISTS (SELECT 1 FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id LIMIT 1)
+             OR EXISTS (SELECT 1 FROM player_events WHERE player_events.linked_server_id = linked_servers.id LIMIT 1) THEN 0
            WHEN COALESCE(server_public_cache.last_adm_update_at, '') <> '' THEN 1
            ELSE 2
          END ASC,
@@ -523,10 +527,13 @@ async function queryPublicServers(env: Env) {
       adm_sync_state.last_sync_message AS adm_sync_message,
       adm_sync_state.last_sync_at AS adm_sync_at,
       (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS total_kills,
-      (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL) AS total_deaths,
-      server_stats.total_joins,
-      server_stats.total_disconnects,
-      server_stats.unique_players,
+      (
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL)
+        + (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats'))
+      ) AS total_deaths,
+      (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_connected') AS total_joins,
+      (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_disconnected') AS total_disconnects,
+      (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id) AS unique_players,
       server_stats.updated_at AS server_stats_updated_at,
       server_public_cache.updated_at AS public_cache_updated_at,
       (

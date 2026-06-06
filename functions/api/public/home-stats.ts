@@ -23,6 +23,10 @@ import {
   writePublicApiCache,
 } from "../../_lib/public-api-cache";
 import { getRankedPublicServers } from "../../_lib/public-leaderboards";
+import {
+  applyPublicAdmStatsSummaryToHomeStats,
+  getPublicAdmStatsSummary,
+} from "../../_lib/server-stats";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type TotalsRow = {
@@ -164,8 +168,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     if (!viewerLoggedIn) {
       const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
       if (cached && isFreshPublicHomeStatsSnapshot(cached.generated_at)) {
-        const payloadWithFreshPlayerCounts = await refreshHomeStatsPlayerCounts(env, cached.payload).catch(() => cached.payload);
-        const payload = withHomeStatsEvidence(payloadWithFreshPlayerCounts, {
+        const payloadWithFreshCounters = await refreshHomeStatsLiveCounters(env, cached.payload).catch(() => cached.payload);
+        const payload = withHomeStatsEvidence(payloadWithFreshCounters, {
           generatedAt: cached.generated_at,
           source: "last_known",
           statusMessage: "Updated from cached public ADM snapshot",
@@ -182,7 +186,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
     const generatedAt = new Date().toISOString();
     const livePayload = await getPublicHomeStatsPayload(env, viewerLoggedIn);
-    const payloadWithFreshPlayerCounts = await refreshHomeStatsPlayerCounts(env, livePayload).catch(() => livePayload);
+    const payloadWithFreshPlayerCounts = await refreshHomeStatsLiveCounters(env, livePayload).catch(() => livePayload);
     const data = withHomeStatsEvidence(payloadWithFreshPlayerCounts, {
       generatedAt,
       source: "live",
@@ -200,7 +204,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
     if (cached) {
       logPublicApiSnapshotFallbackServed(endpoint, cacheKey, requestId);
-      const payloadWithFreshPlayerCounts = await refreshHomeStatsPlayerCounts(env, cached.payload).catch(() => cached.payload);
+      const payloadWithFreshPlayerCounts = await refreshHomeStatsLiveCounters(env, cached.payload).catch(() => cached.payload);
       const payload = withHomeStatsEvidence(payloadWithFreshPlayerCounts, {
         generatedAt: cached.generated_at,
         source: "last_known",
@@ -265,15 +269,19 @@ function isFreshPublicHomeStatsSnapshot(generatedAt: string | null | undefined) 
   return Number.isFinite(timestamp) && Date.now() - timestamp <= HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS;
 }
 
-async function refreshHomeStatsPlayerCounts<T extends {
+async function refreshHomeStatsLiveCounters<T extends {
   totals?: Record<string, unknown> | null;
   playersOnline?: unknown;
   currentPlayersOnline?: unknown;
   playerCountSummary?: unknown;
 }>(env: Env, payload: T) {
   if (!env.DB) return payload;
-  const summary = await getPublicPlayerCountSummary(requireDb(env));
-  return applyPublicPlayerCountSummaryToHomeStats(payload, summary);
+  const db = requireDb(env);
+  const [playerSummary, admSummary] = await Promise.all([
+    getPublicPlayerCountSummary(db),
+    getPublicAdmStatsSummary(db),
+  ]);
+  return applyPublicAdmStatsSummaryToHomeStats(applyPublicPlayerCountSummaryToHomeStats(payload, playerSummary), admSummary);
 }
 
 export async function getPublicHomeStatsPayload(env: Env, viewerLoggedIn: boolean) {
@@ -406,14 +414,15 @@ function withHomeStatsEvidence<T extends {
 
 async function buildPreviewHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, topServers, gameModes, mapNodes, lastSuccessfulAdmImportAt] = await Promise.all([
+  const [totals, topServers, gameModes, mapNodes, lastSuccessfulAdmImportAt, admSummary] = await Promise.all([
     getPreviewTotals(db),
     getPreviewTopServers(db),
     getGameModes(db).catch(() => ({ pvp: 0, pve: 0, deathmatch: 0, pvpPve: 0 })),
     getPreviewMapNodes(db),
     getLastSuccessfulAdmImportAt(db),
+    getPublicAdmStatsSummary(db),
   ]);
-  const totalEventsTracked = await getMonotonicNetworkEventTotal(env, approximateNetworkEventTotalFromTotals(totals));
+  const totalEventsTracked = await getMonotonicNetworkEventTotal(env, admSummary.totalEventsTracked);
   const syncActive = numberOrZero(totals.statsActiveServers);
   const serversLinked = numberOrZero(totals.serversLinked);
   const recentActivity = buildPreviewRecentActivity(topServers);
@@ -433,10 +442,10 @@ async function buildPreviewHomeStats(env: Env) {
       maxPlayersCapacity: numberOrZero(totals.maxPlayersCapacity),
       playerCountFreshServers: numberOrZero(totals.playerCountFreshServers),
       playerCountStaleServers: numberOrZero(totals.playerCountStaleServers),
-      killsTracked: numberOrZero(totals.killsTracked),
-      deathsTracked: numberOrZero(totals.deathsTracked),
-      joinsTracked: numberOrZero(totals.joinsTracked),
-      longestKill: numberOrZero(totals.longestKill),
+      killsTracked: admSummary.killsTracked,
+      deathsTracked: admSummary.deathsTracked,
+      joinsTracked: admSummary.joinsTracked,
+      longestKill: admSummary.longestKill,
       totalEventsTracked,
       recentEventsCount,
       structuresBuilt: numberOrZero(totals.structuresBuilt),
@@ -521,7 +530,7 @@ async function getPreviewTotals(db: D1Database) {
 
 async function buildHomeStats(env: Env) {
   const db = requireDb(env);
-  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers, lastSuccessfulAdmImportAt] = await Promise.all([
+  const [totals, profileCount, recentEventsCount, gameModes, topServers, topPlayers, recentActivity, mapNodes, topBuildServers, lastSuccessfulAdmImportAt, admSummary] = await Promise.all([
     getTotals(db),
     getPlayerProfileCount(db),
     getRecentEventsCount(db),
@@ -532,8 +541,9 @@ async function buildHomeStats(env: Env) {
     getMapNodes(db),
     getRankedBuildServers(env, 10),
     getLastSuccessfulAdmImportAt(db),
+    getPublicAdmStatsSummary(db),
   ]);
-  const totalEventsTracked = await getMonotonicNetworkEventTotal(env, Math.max(approximateNetworkEventTotalFromTotals(totals), recentEventsCount));
+  const totalEventsTracked = await getMonotonicNetworkEventTotal(env, admSummary.totalEventsTracked);
   const buildLeaderboardRows = await buildBuildLeaderboardRows(db, topBuildServers);
 
   const playersSeen = Math.max(numberOrZero(totals.playersSeenFromStats), profileCount);
@@ -553,10 +563,10 @@ async function buildHomeStats(env: Env) {
       playerCountFreshServers: numberOrZero(totals.playerCountFreshServers),
       playerCountStaleServers: numberOrZero(totals.playerCountStaleServers),
       playersSeen,
-      killsTracked: numberOrZero(totals.killsTracked),
-      deathsTracked: numberOrZero(totals.deathsTracked),
-      joinsTracked: numberOrZero(totals.joinsTracked),
-      longestKill: numberOrZero(totals.longestKill),
+      killsTracked: admSummary.killsTracked,
+      deathsTracked: admSummary.deathsTracked,
+      joinsTracked: admSummary.joinsTracked,
+      longestKill: admSummary.longestKill,
       totalEventsTracked,
       recentEventsCount,
       structuresBuilt: numberOrZero(totals.structuresBuilt),
@@ -1060,15 +1070,6 @@ async function getServerStatsNetworkEventTotal(db: D1Database) {
     .first<{ count: number | null }>()
     .catch(() => null);
   return numberOrZero(row?.count);
-}
-
-function approximateNetworkEventTotalFromTotals(totals: Partial<TotalsRow>) {
-  const kills = numberOrZero(totals.killsTracked);
-  const deaths = numberOrZero(totals.deathsTracked);
-  const joins = numberOrZero(totals.joinsTracked);
-  const killJoinDisconnectTotal = numberOrZero(totals.recentEventsCount);
-  const inferredDisconnects = Math.max(0, killJoinDisconnectTotal - kills - joins);
-  return Math.max(killJoinDisconnectTotal, kills + deaths + joins + inferredDisconnects);
 }
 
 function extractHomeStatsEventTotal(payload: unknown): number {

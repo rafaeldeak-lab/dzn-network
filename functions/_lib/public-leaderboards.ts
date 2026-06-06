@@ -236,17 +236,18 @@ export async function getRankedPublicServers(env: Env, limit: number) {
         linked_servers.public_slug AS slug,
         COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type, 'UNKNOWN') AS mode,
         (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS kills,
-        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL) AS deaths,
-        COALESCE(server_stats.unique_players, (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id), 0) AS unique_players,
-        COALESCE(server_stats.total_joins, 0) AS total_joins,
-        COALESCE(server_stats.total_disconnects, 0) AS total_disconnects,
+        (
+          (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL)
+          + (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats'))
+        ) AS deaths,
+        (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id) AS unique_players,
+        (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_connected') AS total_joins,
+        (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_disconnected') AS total_disconnects,
         COALESCE((SELECT MAX(distance) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill,
         CASE
-          WHEN COALESCE(server_stats.total_joins, 0) > 0
-            OR COALESCE(server_stats.total_disconnects, 0) > 0
-            OR COALESCE(server_stats.total_deaths, 0) > 0
-            OR COALESCE(server_stats.total_kills, 0) > 0
-            OR COALESCE(server_stats.unique_players, 0) > 0
+          WHEN EXISTS (SELECT 1 FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id LIMIT 1)
+            OR EXISTS (SELECT 1 FROM player_events WHERE player_events.linked_server_id = linked_servers.id LIMIT 1)
+            OR EXISTS (SELECT 1 FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id LIMIT 1)
             OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
             OR EXISTS (
               SELECT 1
