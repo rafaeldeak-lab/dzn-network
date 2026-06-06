@@ -750,15 +750,6 @@ async function main() {
     } else {
       pass(label, `Metadata is fresh enough. Current players ${Number(server.current_players ?? 0)} / ${Number(server.max_players ?? 0)}.`);
     }
-    if (isOlderThan(server.last_worker_selected_at, 30)) {
-      fail(label, "ADM Worker has not selected this service within 30 minutes.", {
-        lastWorkerSelectedAt: server.last_worker_selected_at,
-        lastSelectionReason: server.last_selection_reason,
-      });
-    } else {
-      pass(label, `Worker selected service recently for ${server.last_selection_reason ?? "unknown reason"}.`);
-    }
-
     const serviceSources = sources.filter((source) => source.service_id === serviceId);
     const serviceFiles = fileStates.filter((row) => row.source_service_id === serviceId || row.linked_server_id === server.id);
     const latestFile = newestFile(serviceFiles);
@@ -766,6 +757,28 @@ async function main() {
     const noftp = serviceSources.find((source) => source.source_name === NOFTP_SOURCE_NAME);
     const noftpFileEvidence = noftpSourceEvidenceFromFiles(serviceFiles, serviceJobs, latestFile);
     const noftpDiscoveryRetryEvidence = noftpDiscoveryRecoverableEvidence(serviceSources, serviceFiles, serviceJobs, latestFile);
+    const workerSelectionEvidence = latestFile && (hasCurrentFileStateEvidence(latestFile, serviceJobs) || isFuture(latestFile.next_retry_at))
+      ? `current ADM evidence for ${latestFile.adm_file}`
+      : noftpFileEvidence
+        ? `noftp file evidence for ${noftpFileEvidence.file}`
+        : noftpDiscoveryRetryEvidence
+          ? `recoverable noftp evidence for ${noftpDiscoveryRetryEvidence.latestFile?.file ?? latestFile?.adm_file ?? "latest ADM"}`
+          : null;
+    if (isOlderThan(server.last_worker_selected_at, 30)) {
+      if (workerSelectionEvidence) {
+        warn(label, `ADM Worker selection is older than 30 minutes, but D1 has ${workerSelectionEvidence}.`, {
+          lastWorkerSelectedAt: server.last_worker_selected_at,
+          lastSelectionReason: server.last_selection_reason,
+        });
+      } else {
+        fail(label, "ADM Worker has not selected this service within 30 minutes and no current ADM job/cursor/retry evidence was found.", {
+          lastWorkerSelectedAt: server.last_worker_selected_at,
+          lastSelectionReason: server.last_selection_reason,
+        });
+      }
+    } else {
+      pass(label, `Worker selected service recently for ${server.last_selection_reason ?? "unknown reason"}.`);
+    }
     if (noftp?.works === 1 && noftp.preferred !== 1) {
       fail(label, "Nitrado noftp source works but is not preferred.", noftp);
     } else if (noftp?.works === 1) {

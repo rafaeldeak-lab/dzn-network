@@ -1,5 +1,6 @@
 import { decryptToken, sha256 } from "./crypto";
 import {
+  getAutomationContextForLinkedServer,
   getDueStatusAutomationServers,
   markStatusCheckStarted,
   queueDiscordPostUpdatesForGuild,
@@ -301,6 +302,9 @@ export async function refreshNitradoServerMetadata(
   }
 
   console.log("DZN SERVER METADATA AUTO SYNC COMPLETE");
+  await syncPublicCacheFromMetadataRefresh(env, linkedServer.id, displayName, metadata).catch((error) => {
+    console.warn("DZN SERVER PUBLIC CACHE METADATA REFRESH SKIPPED", error instanceof Error ? error.message : "public cache update failed");
+  });
 
   return {
     ok: true,
@@ -335,6 +339,22 @@ export async function refreshNitradoServerMetadata(
       changed_fields: changes.map((change) => change.field),
     },
   };
+}
+
+async function syncPublicCacheFromMetadataRefresh(env: Env, linkedServerId: string, displayName: string, metadata: LinkedServerMetadata) {
+  if (metadata.player_count_status !== "fresh") return;
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  if (!context) return;
+  await upsertServerPublicCache(env, {
+    guildId: context.guildId,
+    planKey: context.planKey,
+    publicServerName: displayName,
+    currentPlayers: metadata.current_players,
+    maxPlayers: metadata.max_players,
+    serverOnline: metadataOnlineValue(metadata),
+    serverStatus: metadata.server_status,
+    lastStatusUpdateAt: metadata.player_count_last_checked_at,
+  });
 }
 
 async function updatePlayerCountFreshness(

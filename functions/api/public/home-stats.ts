@@ -6,6 +6,11 @@ import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import {
+  PUBLIC_CURRENT_PLAYERS_SQL,
+  PUBLIC_MAX_PLAYERS_SQL,
+  PUBLIC_PLAYER_COUNT_FRESH_SQL,
+} from "../../_lib/player-counts";
+import {
   logPublicApi503RootCause,
   logPublicApiLoadFailed,
   logPublicApiSnapshotFallbackServed,
@@ -437,11 +442,11 @@ async function getPreviewTotals(db: D1Database) {
     .prepare(
       `SELECT
         COUNT(linked_servers.id) AS serversLinked,
-        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS players_online,
-        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS currentPlayersOnline,
-        SUM(COALESCE(server_public_cache.max_player_count, linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
-        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NOT NULL THEN 1 ELSE 0 END) AS playerCountFreshServers,
-        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NULL THEN 1 ELSE 0 END) AS playerCountStaleServers,
+        SUM(COALESCE(${PUBLIC_CURRENT_PLAYERS_SQL}, 0)) AS players_online,
+        SUM(COALESCE(${PUBLIC_CURRENT_PLAYERS_SQL}, 0)) AS currentPlayersOnline,
+        SUM(COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, 0)) AS maxPlayersCapacity,
+        SUM(CASE WHEN ${PUBLIC_PLAYER_COUNT_FRESH_SQL} THEN 1 ELSE 0 END) AS playerCountFreshServers,
+        SUM(CASE WHEN ${PUBLIC_PLAYER_COUNT_FRESH_SQL} THEN 0 ELSE 1 END) AS playerCountStaleServers,
         SUM(
           CASE
             WHEN COALESCE(server_stats.total_joins, 0) > 0
@@ -571,11 +576,11 @@ async function getTotals(db: D1Database) {
     .prepare(
       `SELECT
         COUNT(linked_servers.id) AS serversLinked,
-        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS players_online,
-        SUM(COALESCE(server_public_cache.current_player_count, linked_servers.current_players, 0)) AS currentPlayersOnline,
-        SUM(COALESCE(server_public_cache.max_player_count, linked_servers.max_players, linked_servers.player_slots, 0)) AS maxPlayersCapacity,
-        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NOT NULL THEN 1 ELSE 0 END) AS playerCountFreshServers,
-        SUM(CASE WHEN COALESCE(server_public_cache.last_status_update_at, linked_servers.player_count_last_checked_at) IS NULL THEN 1 ELSE 0 END) AS playerCountStaleServers,
+        SUM(COALESCE(${PUBLIC_CURRENT_PLAYERS_SQL}, 0)) AS players_online,
+        SUM(COALESCE(${PUBLIC_CURRENT_PLAYERS_SQL}, 0)) AS currentPlayersOnline,
+        SUM(COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, 0)) AS maxPlayersCapacity,
+        SUM(CASE WHEN ${PUBLIC_PLAYER_COUNT_FRESH_SQL} THEN 1 ELSE 0 END) AS playerCountFreshServers,
+        SUM(CASE WHEN ${PUBLIC_PLAYER_COUNT_FRESH_SQL} THEN 0 ELSE 1 END) AS playerCountStaleServers,
         SUM(
           CASE
             WHEN COALESCE(server_stats.total_joins, 0) > 0
