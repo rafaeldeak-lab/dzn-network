@@ -10,6 +10,7 @@ import {
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { geolocateServerIp, shouldRefreshServerGeo } from "./geoip";
 import { isMockNitrado } from "./mock";
+import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
 import type { Env } from "./types";
 
 const NITRADO_API = "https://api.nitrado.net";
@@ -354,6 +355,9 @@ async function syncPublicCacheFromMetadataRefresh(env: Env, linkedServerId: stri
     serverOnline: metadataOnlineValue(metadata),
     serverStatus: metadata.server_status,
     lastStatusUpdateAt: metadata.player_count_last_checked_at,
+  });
+  await patchHomeStatsPlayerCountsFromFreshMetadata(env).catch((error) => {
+    console.warn("DZN HOME STATS PLAYER COUNT SNAPSHOT PATCH SKIPPED", error instanceof Error ? error.message : "home-stats player count patch failed");
   });
 }
 

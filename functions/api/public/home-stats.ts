@@ -6,6 +6,8 @@ import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import {
+  applyPublicPlayerCountSummaryToHomeStats,
+  getPublicPlayerCountSummary,
   PUBLIC_CURRENT_PLAYERS_SQL,
   PUBLIC_MAX_PLAYERS_SQL,
   PUBLIC_PLAYER_COUNT_FRESH_SQL,
@@ -162,7 +164,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     if (!viewerLoggedIn) {
       const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
       if (cached && isFreshPublicHomeStatsSnapshot(cached.generated_at)) {
-        const payload = withHomeStatsEvidence(cached.payload, {
+        const payloadWithFreshPlayerCounts = await refreshHomeStatsPlayerCounts(env, cached.payload).catch(() => cached.payload);
+        const payload = withHomeStatsEvidence(payloadWithFreshPlayerCounts, {
           generatedAt: cached.generated_at,
           source: "last_known",
           statusMessage: "Updated from cached public ADM snapshot",
@@ -178,7 +181,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     }
 
     const generatedAt = new Date().toISOString();
-    const data = withHomeStatsEvidence(await getPublicHomeStatsPayload(env, viewerLoggedIn), {
+    const livePayload = await getPublicHomeStatsPayload(env, viewerLoggedIn);
+    const payloadWithFreshPlayerCounts = await refreshHomeStatsPlayerCounts(env, livePayload).catch(() => livePayload);
+    const data = withHomeStatsEvidence(payloadWithFreshPlayerCounts, {
       generatedAt,
       source: "live",
     });
@@ -195,7 +200,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
     if (cached) {
       logPublicApiSnapshotFallbackServed(endpoint, cacheKey, requestId);
-      const payload = withHomeStatsEvidence(cached.payload, {
+      const payloadWithFreshPlayerCounts = await refreshHomeStatsPlayerCounts(env, cached.payload).catch(() => cached.payload);
+      const payload = withHomeStatsEvidence(payloadWithFreshPlayerCounts, {
         generatedAt: cached.generated_at,
         source: "last_known",
         statusMessage: "Updated from last synced ADM",
@@ -257,6 +263,17 @@ function homeStatsResponseHeaders(viewerLoggedIn: boolean) {
 function isFreshPublicHomeStatsSnapshot(generatedAt: string | null | undefined) {
   const timestamp = Date.parse(generatedAt ?? "");
   return Number.isFinite(timestamp) && Date.now() - timestamp <= HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS;
+}
+
+async function refreshHomeStatsPlayerCounts<T extends {
+  totals?: Record<string, unknown> | null;
+  playersOnline?: unknown;
+  currentPlayersOnline?: unknown;
+  playerCountSummary?: unknown;
+}>(env: Env, payload: T) {
+  if (!env.DB) return payload;
+  const summary = await getPublicPlayerCountSummary(requireDb(env));
+  return applyPublicPlayerCountSummaryToHomeStats(payload, summary);
 }
 
 export async function getPublicHomeStatsPayload(env: Env, viewerLoggedIn: boolean) {
@@ -411,6 +428,11 @@ async function buildPreviewHomeStats(env: Env) {
       ...data.totals,
       serversLinked,
       statsActiveServers: syncActive,
+      players_online: numberOrZero(totals.players_online ?? totals.currentPlayersOnline),
+      currentPlayersOnline: numberOrZero(totals.players_online ?? totals.currentPlayersOnline),
+      maxPlayersCapacity: numberOrZero(totals.maxPlayersCapacity),
+      playerCountFreshServers: numberOrZero(totals.playerCountFreshServers),
+      playerCountStaleServers: numberOrZero(totals.playerCountStaleServers),
       killsTracked: numberOrZero(totals.killsTracked),
       deathsTracked: numberOrZero(totals.deathsTracked),
       joinsTracked: numberOrZero(totals.joinsTracked),
@@ -1668,14 +1690,9 @@ export function applyHomeStatsAccess<T extends {
     loggedIn: false,
     previewMode: true,
     sections: previewHomeStatsSections(),
-    totals: data.totals
+        totals: data.totals
       ? {
           ...data.totals,
-          players_online: 0,
-          currentPlayersOnline: 0,
-          maxPlayersCapacity: 0,
-          playerCountFreshServers: 0,
-          playerCountStaleServers: 0,
           playersSeen: 0,
         }
       : data.totals,
