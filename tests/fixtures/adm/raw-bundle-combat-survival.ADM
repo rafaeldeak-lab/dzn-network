@@ -1,0 +1,41 @@
+******************************************************************************
+AdminLog started on 2026-05-20 at 18:24:00
+18:24:17 | Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4499.1, 10355.3, 339.2>) is connected
+18:24:17 | Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4519.9, 10374.8, 339.4>) is connected
+18:24:37 | Player "elli_pirelli_20" (DEAD) (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4505.8, 10363.5, 339.3>)[HP: 0] hit by Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4515.2, 10370.2, 339.4>) into Torso(30) for 23.8686 damage (Bullet_545x39) with KA-74 from 11.5999 meters 
+18:24:37 | Player "elli_pirelli_20" (DEAD) (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4505.8, 10363.5, 339.3>) killed by Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4515.2, 10370.2, 339.4>) with KA-74 from 11.5999 meters 
+18:24:41 | Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4482.6, 10326.4, 339.3>) is connected
+18:24:56 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4519.9, 10373, 339.4>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4490.3, 10344, 339.2>) into Head(0) for 37.5 damage (Bullet_308Win) with M70 Tundra from 41.434 meters 
+18:24:56 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4519.9, 10373, 339.4>) killed by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4490.3, 10344, 339.2>) with M70 Tundra from 41.434 meters 
+18:25:02 | Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4473.2, 10347.6, 339.3>) is connected
+18:25:07 | Player "elli_pirelli_20" (DEAD) (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4511.8, 10371.5, 339.4>)[HP: 0] hit by Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4477.4, 10342.8, 339.3>) into Head(0) for 29.3953 damage (Bullet_308Win) with LAR from 44.7526 meters 
+18:25:07 | Player "elli_pirelli_20" (DEAD) (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4511.8, 10371.5, 339.4>) killed by Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4477.4, 10342.8, 339.3>) with LAR from 44.7526 meters 
+18:25:23 | Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4472.2, 10347.6, 339.3>) is connected
+18:25:18 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4471.7, 10346.8, 339.3>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4485.0, 10336, 339.2>) into Torso(7) for 23.6427 damage (Bullet_545x39) with KA-74 from 17.1609 meters 
+18:25:18 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4471.7, 10346.8, 339.3>) killed by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4485.0, 10336, 339.2>) with KA-74 from 17.1609 meters 
+18:25:18 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4471.5, 10346.9, 339.3>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4485, 10335.9, 339.2>) into Torso(36) for 23.6379 damage (Bullet_545x39) with KA-74 from 17.3402 meters 
+18:25:18 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4471.5, 10346.9, 339.3>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4484.9, 10335.7, 339.2>) into Torso(6) for 23.6399 damage (Bullet_545x39) with KA-74 from 17.4263 meters 
+18:25:18 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4471.5, 10346.9, 339.3>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4484.8, 10335.5, 339.2>) into Torso(12) for 23.6179 damage (Bullet_545x39) with KA-74 from 17.4882 meters 
+18:25:18 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4471.5, 10346.9, 339.3>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4484.8, 10335.4, 339.2>) into Torso(12) for 23.6183 damage (Bullet_545x39) with KA-74 from 17.5265 meters 
+18:25:50 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4479.5, 10349.2, 339.2>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4477.7, 10350.6, 339.3>) into RightArm(17) for 122.883 damage (Bullet_308Win) with LAR from 2.2649 meters 
+18:25:50 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4479.5, 10349.2, 339.2>) killed by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4477.7, 10350.6, 339.3>) with LAR from 2.2649 meters 
+18:25:50 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4479.8, 10349, 339.2>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4478.2, 10350.8, 339.3>) into Torso(16) for 36.8688 damage (Bullet_308Win) with LAR from 2.36485 meters 
+18:26:05 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4479.6, 10333.9, 339.3>)[HP: 0] hit by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4519.1, 10375.3, 339.4>) into Head(0) for 37.1017 damage (Bullet_308Win) with M70 Tundra from 57.2489 meters 
+18:26:05 | Player "nick-game12321" (DEAD) (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4479.6, 10333.9, 339.3>) killed by Player "elli_pirelli_20" (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4519.1, 10375.3, 339.4>) with M70 Tundra from 57.2489 meters 
+18:26:30 | Player "elli_pirelli_20" (DEAD) (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4488.7, 10359.7, 339.2>)[HP: 0] hit by Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4489.9, 10359.9, 339.1>) into Head(0) for 22.49 damage (Bullet_762x39) with KA-M from 1.29474 meters 
+18:26:30 | Player "elli_pirelli_20" (DEAD) (id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU= pos=<4488.7, 10359.7, 339.2>) killed by Player "nick-game12321" (id=uW3hy7hXDq6Mbx7E0XIOBHhPG0Ur2bc0nUAUAT0WBjU= pos=<4489.9, 10359.9, 339.1>) with KA-M from 1.29474 meters 
+16:07:53 | Player "xIIIIIxGoPassive" (DEAD) (id=N2bniEY_7rLtxDMWNcJ2gsuBE_eP9HoKaBooG26hifA= pos=<12945, 9597, 6.7>) died. Stats> Water: 598.983 Energy: 598.983 Bleed sources: 1
+17:18:41 | Player "MAF_alexGR" (id=bdmqY3Cf6lpdVPsH-14mb6tCd7E7NqJxsMurQA3T0v8= pos=<2285.4, 6011.9, 307.1>) is unconscious
+17:19:07 | Player "MAF_alexGR" (id=bdmqY3Cf6lpdVPsH-14mb6tCd7E7NqJxsMurQA3T0v8= pos=<2284.3, 6013.1, 307.3>) regained consciousness
+17:28:28 | Player "MAF_alexGR" (DEAD) (id=bdmqY3Cf6lpdVPsH-14mb6tCd7E7NqJxsMurQA3T0v8= pos=<2268.6, 6016.1, 309.4>)[HP: 0] hit by Player "shot_boyhood4" (id=YhTc7vW7zgSU3lVL_hRtz6k_Tvukq0cS748Bq3cL5T4= pos=<2408.2, 5733.6, 292.6>) into Brain(37) for 122.469 damage (Bullet_308Win) with DMR from 315.555 meters 
+16:09:06 | ##### PlayerList log: 6 players
+16:09:06 | Player "YT-Claws" (id=JzHQA8Rg3ra-mZuTGf_YrWPd1IMRYxw-WCRw8Is2D28= pos=<4307.5, 5282.5, 294.1>)
+16:09:06 | Player "shot_boyhood4" (id=YhTc7vW7zgSU3lVL_hRtz6k_Tvukq0cS748Bq3cL5T4= pos=<2398.9, 5750.6, 281.7>)
+16:09:06 | Player "beverland" (id=-U3yRnzpaVOf0LHS_mZycdcOSCN1m-vJToISRGCNIXE= pos=<3594.9, 13175.5, 202.9>)
+16:09:06 | #####
+16:14:06 | ##### PlayerList log: 9 players
+16:14:06 | Player "YT-Claws" (id=JzHQA8Rg3ra-mZuTGf_YrWPd1IMRYxw-WCRw8Is2D28= pos=<4316.0, 5293.2, 294.0>)
+16:14:06 | Player "shot_boyhood4" (id=YhTc7vW7zgSU3lVL_hRtz6k_Tvukq0cS748Bq3cL5T4= pos=<2423.8, 5726.8, 282.5>)
+16:14:06 | Player "beverland" (id=-U3yRnzpaVOf0LHS_mZycdcOSCN1m-vJToISRGCNIXE= pos=<4297.2, 13868.7, 206.4>)
+16:14:06 | #####
+18:26:35 | Player "elli_pirelli_20"(id=o9NqQMkj39E3QfVkaBBt-MKS47BK1r6og_pXq8szYrU=) has been disconnected

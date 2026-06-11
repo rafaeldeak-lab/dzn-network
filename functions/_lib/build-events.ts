@@ -2,8 +2,29 @@ import type { ParsedAdmEvent } from "./adm-parser";
 import { requireDb } from "./db";
 import type { Env } from "./types";
 
-export type BuildEventType = "built" | "placed" | "dismantled" | "folded" | "flag_raised" | "flag_lowered";
-export type BuildCategory = "structure" | "build_kit" | "storage" | "trap" | "utility" | "territory" | "deployable" | "none";
+export type BuildEventType =
+  | "built"
+  | "placed"
+  | "dismantled"
+  | "folded"
+  | "repaired"
+  | "mounted"
+  | "unmounted"
+  | "destroyed"
+  | "flag_raised"
+  | "flag_lowered";
+export type BuildCategory =
+  | "structure"
+  | "build_kit"
+  | "storage"
+  | "trap"
+  | "utility"
+  | "territory"
+  | "deployable"
+  | "maintenance"
+  | "raid"
+  | "defence"
+  | "none";
 
 export type ParsedBuildActivity = {
   eventType: BuildEventType;
@@ -110,7 +131,14 @@ const STORAGE_CLASSES = [
   "carTent",
 ].map((value) => value.toLowerCase());
 
-const TRAP_CLASSES = new Set(["landminetrap", "beartrap", "tripwiretrap"]);
+const TRAP_CLASSES = new Set([
+  "landminetrap",
+  "beartrap",
+  "tripwiretrap",
+  "improvisedexplosive",
+  "claymoremine",
+  "fireworkslauncher",
+]);
 const UTILITY_CLASSES = new Set(["spotlight", "constructionlight"]);
 
 export function classifyParsedBuildEvent(parsed: ParsedAdmEvent): ParsedBuildActivity | null {
@@ -132,7 +160,7 @@ export function classifyParsedBuildEvent(parsed: ParsedAdmEvent): ParsedBuildAct
   if (parsed.eventType === "player_dismantled_structure") {
     return {
       eventType: "dismantled",
-      category: "none",
+      category: "raid",
       buildPart: normalizeBuildPart(parsed.buildPart),
       targetObject: normalizeText(parsed.targetObject),
       tool: normalizeText(parsed.tool),
@@ -142,10 +170,49 @@ export function classifyParsedBuildEvent(parsed: ParsedAdmEvent): ParsedBuildAct
     };
   }
 
+  if (parsed.eventType === "player_repaired_structure") {
+    return {
+      eventType: "repaired",
+      category: "maintenance",
+      buildPart: normalizeBuildPart(parsed.buildPart ?? parsed.targetObject ?? parsed.objectType),
+      targetObject: normalizeText(parsed.targetObject ?? parsed.objectType),
+      tool: normalizeText(parsed.tool),
+      placedObject: null,
+      placedClass: null,
+      score: 1,
+    };
+  }
+
+  if (parsed.eventType === "player_mounted_object" || parsed.eventType === "player_unmounted_object") {
+    return {
+      eventType: parsed.eventType === "player_mounted_object" ? "mounted" : "unmounted",
+      category: "defence",
+      buildPart: normalizeBuildPart(parsed.buildPart ?? parsed.placedObject),
+      targetObject: normalizeText(parsed.targetObject ?? parsed.objectType),
+      tool: null,
+      placedObject: normalizeText(parsed.placedObject ?? parsed.buildPart),
+      placedClass: normalizeClass(parsed.placedClass ?? parsed.placedObject ?? parsed.buildPart),
+      score: parsed.eventType === "player_mounted_object" ? 2 : 0,
+    };
+  }
+
+  if (parsed.eventType === "player_destroyed_object") {
+    return {
+      eventType: "destroyed",
+      category: "raid",
+      buildPart: normalizeBuildPart(parsed.buildPart ?? parsed.targetObject ?? parsed.objectType),
+      targetObject: normalizeText(parsed.targetObject ?? parsed.objectType),
+      tool: normalizeText(parsed.tool),
+      placedObject: null,
+      placedClass: null,
+      score: 5,
+    };
+  }
+
   if (parsed.eventType === "player_folded_structure") {
     return {
       eventType: "folded",
-      category: "none",
+      category: "maintenance",
       buildPart: normalizeBuildPart(parsed.buildPart ?? parsed.targetObject ?? parsed.objectType),
       targetObject: normalizeText(parsed.targetObject ?? parsed.objectType),
       tool: normalizeText(parsed.tool),

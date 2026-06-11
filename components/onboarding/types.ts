@@ -30,6 +30,65 @@ export type BillingReadinessResponse = {
   modeHint?: "test" | "live" | "unknown" | "not_configured";
 };
 
+export type DashboardAdvancedStatsResult = {
+  ok?: boolean;
+  generated_at?: string;
+  access?: {
+    effectivePlan?: string;
+    dashboardAnalytics?: boolean;
+    publicServerTop15?: boolean;
+    publicExplorationSummary?: boolean;
+    publicMapOverlay?: boolean;
+    lockedModules?: Array<{ key: string; requiredPlan: string; reason: string }>;
+  };
+  summary?: {
+    kills: number;
+    deaths: number;
+    joins: number;
+    disconnects: number;
+    uniquePlayers: number;
+    eventsTracked: number;
+    buildScore: number;
+    structuresBuilt: number;
+    raidScore: number;
+    totalDistanceM: number;
+    onFootDistanceM: number;
+    fastTravelEstimatedDistanceM: number;
+    explorationPercent: number;
+    estimated: boolean;
+    lastUpdatedAt: string | null;
+  };
+  boards?: Array<{
+    metricKey: string;
+    title: string;
+    description: string;
+    category: string;
+    packageRequired: "free" | "starter" | "pro" | "premium";
+    locked?: boolean;
+    lockedReason?: string | null;
+    estimated?: boolean;
+    rows: Array<{
+      rank: number;
+      playerName?: string | null;
+      serverName?: string | null;
+      displayValue: string;
+      estimated?: boolean;
+      supportingStats?: Record<string, number | string | null | boolean>;
+    }>;
+  }>;
+  exploration?: {
+    supported: boolean;
+    mapDisplayName: string | null;
+    exploredCellsCount: number;
+    totalExplorableCells: number;
+    explorationPercent: number;
+    activeExplorersCount: number;
+    topExplorerName: string | null;
+    estimated: boolean;
+  };
+  notes?: string[];
+};
+
 export type DiscordGuild = {
   id?: string;
   guild_id: string;

@@ -32,6 +32,7 @@ import type {
   AdmBackfillApiResult,
   AdmAutomationStatusApiResult,
   DashboardHealthApiResult,
+  DashboardAdvancedStatsResult,
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
@@ -363,6 +364,12 @@ export async function getAdmAutomationStatus(linkedServerId: string) {
 
 export async function getDashboardHealth(linkedServerId: string) {
   return request<DashboardHealthApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/health`, {
+    cache: "no-store",
+  });
+}
+
+export async function getDashboardAdvancedStats(linkedServerId: string) {
+  return request<DashboardAdvancedStatsResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/advanced-stats`, {
     cache: "no-store",
   });
 }

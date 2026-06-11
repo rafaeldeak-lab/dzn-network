@@ -103,12 +103,12 @@ assert.equal(workflowSource.includes("DZN_CRON_SECRET"), true);
 assert.equal(workflowSource.includes('CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"'), true);
 assert.equal(workflowSource.includes("https://dzn-network.pages.dev"), true);
 
-const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
-const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
+const automationSource = readFileSync("functions/_lib/automation.ts", "utf8").replace(/\r\n/g, "\n");
+const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8").replace(/\r\n/g, "\n");
 assert.equal(admSyncSource.includes("const scheduledTargetFileName = explicitTargetFileName ? null : sanitizeWorkerTargetAdmFilename(selected.target_adm_file);"), true);
 assert.equal(admSyncSource.includes("ADM Worker paused before target ADM file read"), true);
-assert.equal(admSyncSource.includes("explicitTargetFileName,\n      scheduledTargetFileName"), true);
-assert.equal(admSyncSource.includes("explicitTargetPath,\n      scheduledTargetPath"), true);
+assert.equal(admSyncSource.includes("const directFileName = firstString(\n      explicitTargetFileName,\n      scheduledTargetFileName"), true);
+assert.equal(admSyncSource.includes("const directPath = firstString(\n      explicitTargetPath,\n      scheduledTargetPath"), true);
 assert.equal(automationSource.includes("automation_cron_runs"), true);
 assert.equal(automationSource.includes("job_type"), true);
 assert.equal(automationSource.includes("started_at"), true);
