@@ -8044,7 +8044,7 @@ async function recordAdmFileAttempt(
         adm_path = COALESCE(excluded.adm_path, adm_sync_file_state.adm_path),
         status = CASE
           WHEN adm_sync_file_state.ignored_at IS NOT NULL THEN adm_sync_file_state.status
-          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'processed', 'partial', 'failed_unreadable', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed') THEN adm_sync_file_state.status
+          WHEN excluded.status = 'discovered' AND adm_sync_file_state.status IN ('queued', 'unreadable', 'processed', 'partial', 'failed_unreadable', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed') THEN adm_sync_file_state.status
           WHEN excluded.status IN ('queued', 'unreadable') AND adm_sync_file_state.status IN ('processed', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed')
             AND excluded.latest_known_line_count <= MAX(COALESCE(adm_sync_file_state.latest_known_line_count, 0), COALESCE(adm_sync_file_state.imported_line_count, 0), COALESCE(adm_sync_file_state.cursor_line, 0), COALESCE(adm_sync_file_state.line_count, 0))
           THEN adm_sync_file_state.status
@@ -10304,7 +10304,7 @@ async function markExpiredUnreadableAdmFilesFailed(env: Env, scope: AdmSyncConte
            updated_at = ?
        WHERE linked_server_id = ?
          AND source_service_id = ?
-         AND status = 'unreadable'
+         AND status IN ('unreadable', 'discovered')
          AND COALESCE(retry_count, 0) >= ?`,
     )
     .bind(
