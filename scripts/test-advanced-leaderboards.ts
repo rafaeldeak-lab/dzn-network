@@ -10,7 +10,8 @@ const previewSeed = readFileSync("scripts/seed-advanced-showcase-preview.ts", "u
 
 assert.match(advancedSource, /getCanonicalServerStats/);
 assert.match(advancedSource, /queryPositionSamples/);
-assert.match(advancedSource, /limit: 15_000/);
+assert.match(advancedSource, /PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT = 4_000/);
+assert.match(advancedSource, /cachedAdvancedPayload/);
 assert.match(advancedSource, /raw player coordinates and exact routes are not exposed/i);
 assert.match(advancedSource, /access\.publicMapOverlay \|\| ownerScoped/);
 assert.match(advancedSource, /canShowMapOverlay \? exploration : \{ \.\.\.exploration, overlayCells: \[\] \}/);

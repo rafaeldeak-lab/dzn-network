@@ -134,6 +134,7 @@ type CachedAdvancedValue = {
 const PUBLIC_ADVANCED_CACHE_TTL_MS = 15_000;
 const SERVER_ADVANCED_CACHE_TTL_MS = 30_000;
 const MAX_ADVANCED_CACHE_ENTRIES = 80;
+const PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT = 4_000;
 const publicAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
 const serverAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
 
@@ -151,7 +152,7 @@ async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit
     queryPvpServerBoards(env, limit),
     queryBuildServerBoards(env, limit),
     queryHybridServerBoards(env, limit),
-    queryPositionSamples(env, { limit: 15_000 }),
+    queryPositionSamples(env, { limit: PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT }),
   ]);
   const metaById = new Map(serverMeta.map((server) => [server.id, server]));
   const travelBoards = buildTravelServerBoards(samples, metaById, limit);
