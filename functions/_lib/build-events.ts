@@ -131,7 +131,14 @@ const STORAGE_CLASSES = [
   "carTent",
 ].map((value) => value.toLowerCase());
 
-const TRAP_CLASSES = new Set(["landminetrap", "beartrap", "tripwiretrap"]);
+const TRAP_CLASSES = new Set([
+  "landminetrap",
+  "beartrap",
+  "tripwiretrap",
+  "improvisedexplosive",
+  "claymoremine",
+  "fireworkslauncher",
+]);
 const UTILITY_CLASSES = new Set(["spotlight", "constructionlight"]);
 
 export function classifyParsedBuildEvent(parsed: ParsedAdmEvent): ParsedBuildActivity | null {
