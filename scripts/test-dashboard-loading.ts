@@ -102,8 +102,24 @@ assert.equal(previewAccessSource.includes("killsTracked: 0"), false, "Homepage p
 assert.equal(previewAccessSource.includes("recentEventsCount: 0"), false, "Homepage preview must not replace real aggregate event totals with fake zeroes.");
 assert.equal(previewAccessSource.includes("totalEventsTracked: 0"), false, "Homepage preview must not replace monotonic all-time event totals with fake zeroes.");
 
+const leaderboardsRoute = source("functions/api/public/leaderboards.ts");
+includesAll(leaderboardsRoute, [
+  "readPublicApiCache",
+  "writePublicApiCache",
+  "live_query_failed_using_snapshot",
+  "live_query_failed_no_snapshot",
+  "emptyPublicLeaderboards",
+  "applyLeaderboardsAccess",
+  "source: \"empty_no_cache\"",
+  "publicApiSnapshotFallbackHeaders(viewerLoggedIn)",
+  "Leaderboard data is temporarily unavailable. Showing an empty safe fallback while live refresh recovers.",
+  "logPublicApiLoadFailed",
+  "logPublicApiSnapshotFallbackServed",
+]);
+assert.equal(leaderboardsRoute.includes("status: 503"), false, "Core leaderboards must render a controlled empty fallback instead of failing the whole page with 503.");
+assert.equal(leaderboardsRoute.includes("publicApiErrorHeaders()"), false, "Core leaderboards should not return an error payload for recoverable no-snapshot fallback.");
+
 for (const route of [
-  "functions/api/public/leaderboards.ts",
   "functions/api/public/server-leaderboard.ts",
   "functions/api/public/servers.ts",
 ]) {

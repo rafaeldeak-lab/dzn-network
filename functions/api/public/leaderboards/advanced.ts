@@ -3,6 +3,20 @@ import { json, methodNotAllowed } from "../../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../../_lib/public-auth";
 import type { PagesFunction } from "../../../_lib/types";
 
+const ADVANCED_CATEGORIES = [
+  "overall",
+  "pvp",
+  "deathmatch",
+  "pve",
+  "hybrid",
+  "builds",
+  "survival",
+  "travel",
+  "exploration",
+  "weapons",
+  "premium_showcase",
+];
+
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
 
@@ -16,12 +30,17 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   } catch (error) {
     console.warn("DZN ADVANCED LEADERBOARDS LOAD FAILED", safeError(error));
     return json({
-      ok: false,
-      error: "advanced_leaderboards_load_failed",
-      message: "Advanced leaderboard data could not be loaded right now.",
+      ok: true,
       generated_at: new Date().toISOString(),
+      categories: ADVANCED_CATEGORIES,
       boards: [],
-    }, { headers: publicApiErrorHeaders(), status: 503 });
+      notes: [
+        "Advanced Showcase is temporarily unavailable. Core leaderboards remain live.",
+        "Retry shortly; public advanced routes never expose raw coordinates or exact player routes.",
+      ],
+      stale: true,
+      fallback_reason: "advanced_live_query_failed_no_snapshot",
+    }, { headers: publicApiErrorHeaders() });
   }
 };
 
