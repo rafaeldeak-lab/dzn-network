@@ -126,7 +126,23 @@ type PlayerMetricRow = {
   last_event_at?: string | null;
 };
 
+type CachedAdvancedValue = {
+  expiresAt: number;
+  promise: Promise<unknown>;
+};
+
+const PUBLIC_ADVANCED_CACHE_TTL_MS = 15_000;
+const SERVER_ADVANCED_CACHE_TTL_MS = 30_000;
+const MAX_ADVANCED_CACHE_ENTRIES = 80;
+const publicAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
+const serverAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
+
 export async function getPublicAdvancedLeaderboardsPayload(env: Env, options: { limit?: number } = {}) {
+  const limit = safeLimit(options.limit, 8, 20);
+  return cachedAdvancedPayload(publicAdvancedPayloadCache, `public:${limit}`, PUBLIC_ADVANCED_CACHE_TTL_MS, () => buildPublicAdvancedLeaderboardsPayload(env, { limit }));
+}
+
+async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit?: number } = {}) {
   if (!env.DB) return emptyAdvancedLeaderboardsPayload();
   await ensureAdvancedReadSchema(env);
   const limit = safeLimit(options.limit, 8, 20);
@@ -155,6 +171,19 @@ export async function getPublicAdvancedLeaderboardsPayload(env: Env, options: { 
 }
 
 export async function getServerAdvancedShowcasePayload(
+  env: Env,
+  serverRef: string,
+  options: { ownerScoped?: boolean; overlayLimit?: number } = {},
+): Promise<ServerAdvancedShowcasePayload | null> {
+  const overlayLimit = safeLimit(options.overlayLimit, 220, 500);
+  const cacheKey = `${options.ownerScoped ? "owner" : "public"}:${serverRef}:${overlayLimit}`;
+  return cachedAdvancedPayload(serverAdvancedPayloadCache, cacheKey, SERVER_ADVANCED_CACHE_TTL_MS, () => buildServerAdvancedShowcasePayload(env, serverRef, {
+    ...options,
+    overlayLimit,
+  }));
+}
+
+async function buildServerAdvancedShowcasePayload(
   env: Env,
   serverRef: string,
   options: { ownerScoped?: boolean; overlayLimit?: number } = {},
@@ -240,6 +269,40 @@ export async function getServerAdvancedShowcasePayload(
       "Map bounds are configurable and currently marked estimated where licensed map masks/assets are not present.",
     ],
   };
+}
+
+function cachedAdvancedPayload<T>(
+  cache: Map<string, CachedAdvancedValue>,
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<T>,
+): Promise<T> {
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && hit.expiresAt > now) return hit.promise as Promise<T>;
+
+  pruneAdvancedCache(cache, now);
+  const entry: CachedAdvancedValue = {
+    expiresAt: now + ttlMs,
+    promise: Promise.resolve(null),
+  };
+  entry.promise = loader().catch((error) => {
+    if (cache.get(key) === entry) cache.delete(key);
+    throw error;
+  });
+  cache.set(key, entry);
+  return entry.promise as Promise<T>;
+}
+
+function pruneAdvancedCache(cache: Map<string, CachedAdvancedValue>, now: number) {
+  for (const [key, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(key);
+  }
+  while (cache.size >= MAX_ADVANCED_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
 }
 
 export async function queryPositionSamples(env: Env, options: { linkedServerId?: string | null; limit?: number } = {}): Promise<TravelPositionSample[]> {
