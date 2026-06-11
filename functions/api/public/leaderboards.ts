@@ -1,6 +1,6 @@
-import { getPublicLeaderboardsPayload } from "../../_lib/public-leaderboards";
+import { applyLeaderboardsAccess, emptyPublicLeaderboards, getPublicLeaderboardsPayload } from "../../_lib/public-leaderboards";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
+import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import {
   logPublicApi503RootCause,
   logPublicApiLoadFailed,
@@ -54,16 +54,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       }), { headers: publicApiSnapshotFallbackHeaders(viewerLoggedIn) });
     }
     logPublicApi503RootCause(endpoint, error, requestId, "leaderboards_live_query");
-    return json({
-      ok: false,
-      error: "public_leaderboards_load_failed",
-      message: "Leaderboard data could not be loaded right now.",
-      generated_at: new Date().toISOString(),
+    const generatedAt = new Date().toISOString();
+    const emptyPayload = applyLeaderboardsAccess(emptyPublicLeaderboards(leaderboardOptions), viewerLoggedIn);
+    return json(withPublicApiMetadata(emptyPayload, {
+      generated_at: generatedAt,
       source: "empty_no_cache",
       stale: true,
       fallback_reason: "live_query_failed_no_snapshot",
-      retry_after_seconds: 10,
-    }, { headers: publicApiErrorHeaders(), status: 503 });
+      message: "Leaderboard data is temporarily unavailable. Showing an empty safe fallback while live refresh recovers.",
+    }), { headers: publicApiSnapshotFallbackHeaders(viewerLoggedIn) });
   }
 };
 

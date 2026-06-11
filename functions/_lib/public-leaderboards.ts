@@ -947,14 +947,16 @@ export function applyServerLeaderboardAccess<T extends { players: PublicLeaderbo
   };
 }
 
-function emptyPublicLeaderboards() {
+export function emptyPublicLeaderboards(options: PublicLeaderboardsOptions = {}) {
+  const requestOptions = normalizePublicLeaderboardOptions(options);
+  const limit = requestOptions.full ? requestOptions.pageSize : 10;
   return {
     ok: true,
-    full: false,
-    leaderboard_limit: 10,
-    page: 1,
-    page_size: 10,
-    selected_metric: "total_kills" as PublicLeaderboardMetric,
+    full: requestOptions.full,
+    leaderboard_limit: limit,
+    page: requestOptions.full ? requestOptions.page : 1,
+    page_size: limit,
+    selected_metric: requestOptions.metric,
     top_servers: [],
     top_players: [],
     best_overall_kill: null,

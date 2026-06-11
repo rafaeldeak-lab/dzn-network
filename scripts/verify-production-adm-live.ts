@@ -405,6 +405,8 @@ type AdmHealthService = {
     lastHttpStatus?: number | null;
     lastEndpointKind?: string | null;
     lastMethod?: string | null;
+    retryCount?: number | null;
+    lastError?: string | null;
   } | null;
 };
 
@@ -516,7 +518,7 @@ async function verifyFromAdmHealth() {
     const fileState = service.latestFileState ?? null;
     const cursor = Math.max(Number(fileState?.cursorLine ?? 0), Number(fileState?.importedLineCount ?? 0), Number(fileState?.lineCount ?? 0));
     if (service.lastSuccessfulImportAt || cursor > 0 || Number(service.recentEventCount ?? 0) > 0) hasPermanentAdmData = true;
-    if (service.activeImportJob || cursor > 0 || ["caught_up_waiting_for_growth", "processed", "queued", "discovered"].includes(String(fileState?.status ?? ""))) {
+    if (service.activeImportJob || cursor > 0 || ["caught_up_waiting_for_growth", "processed", "queued", "discovered"].includes(String(fileState?.status ?? "")) || healthFileHasDurableAttemptEvidence(fileState)) {
       pass(label, `Current ADM has scheduled job/cursor evidence for ${fileState?.fileName ?? service.latestAdmFile ?? "latest ADM"}.`, {
         importJobStatus: service.importJobStatus,
         fileStatus: fileState?.status,
@@ -543,6 +545,7 @@ function getHealthServiceEvidence(service: AdmHealthService) {
   const noftp = service.sourceMatrix?.find((source) => source.sourceName === NOFTP_SOURCE_NAME);
   if (noftp?.works && noftp.preferred && cursor > 0) return `noftp preferred with cursor ${cursor}`;
   if (service.activeImportJob && !isTerminalHealthImportJob(service.activeImportJob)) return `active job ${service.activeImportJob.status ?? "unknown"}`;
+  if (healthFileHasDurableAttemptEvidence(fileState)) return `durable file-state evidence for ${fileState?.fileName ?? "latest ADM"}`;
   if (service.lastSuccessfulImportAt || service.recentEventCount || service.importJobStatus === "completed_with_warnings") return "successful import history";
   if (isFuture(fileState?.nextRetryAt ?? service.nextRetryAt)) return `retry scheduled for ${fileState?.nextRetryAt ?? service.nextRetryAt}`;
   return null;
@@ -561,7 +564,7 @@ function getHealthNoftpEvidence(service: AdmHealthService) {
   const retryAt = fileState?.nextRetryAt ?? service.nextRetryAt ?? noftp?.nextTestAt ?? null;
   const serviceEvidence = getHealthServiceEvidence(service);
   const sourceRecoverable = Boolean(noftp && !isAuthNoftpFailure(noftp) && (isFuture(noftp.nextTestAt) || Number(noftp.lastHttpStatus ?? 0) >= 500 || isRecoverableNoftpError(noftp.lastErrorCode)));
-  if (fileHasNoftp && (cursor > 0 || service.activeImportJob || service.lastSuccessfulImportAt || isFuture(retryAt))) {
+  if (fileHasNoftp && (cursor > 0 || service.activeImportJob || service.lastSuccessfulImportAt || isFuture(retryAt) || healthFileHasDurableAttemptEvidence(fileState))) {
     return {
       sourceState: noftp ?? null,
       fileEvidence: {
@@ -584,6 +587,20 @@ function getHealthNoftpEvidence(service: AdmHealthService) {
     };
   }
   return null;
+}
+
+function healthFileHasDurableAttemptEvidence(file: AdmHealthService["latestFileState"]) {
+  if (!file) return false;
+  const status = String(file.status ?? "").toLowerCase();
+  if (!["unreadable", "failed_unreadable", "parser_error", "write_error", "partial"].includes(status)) return false;
+  return Boolean(
+    file.nextRetryAt ||
+    file.lastError ||
+    Number(file.lastHttpStatus ?? 0) > 0 ||
+    Number(file.retryCount ?? 0) > 0 ||
+    Number(file.latestKnownLineCount ?? 0) > 0 ||
+    Number(file.lineCount ?? 0) > 0,
+  );
 }
 
 function healthFileHasNoftpEvidence(file: AdmHealthService["latestFileState"]) {
