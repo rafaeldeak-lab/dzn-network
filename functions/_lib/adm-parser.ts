@@ -28,6 +28,10 @@ export type AdmEventType =
   | "player_built_structure"
   | "player_dismantled_structure"
   | "player_folded_structure"
+  | "player_repaired_structure"
+  | "player_mounted_object"
+  | "player_unmounted_object"
+  | "player_destroyed_object"
   | "playerlist_snapshot"
   | "playerlist_delimiter"
   | "playerlist_entry"
@@ -284,6 +288,10 @@ export function classifyAdmEvent(rawLine: string, context: AdmParseContext = {})
   if (/\bhas\s+lowered\s+\S+\s+on\s+.+?\s+at\s+</i.test(body)) return "territory_flag_lowered";
   if (/\bBuilt\s+.+?\s+on\s+/i.test(body)) return "player_built_structure";
   if (/\bDismantled\s+.+?\s+(?:from|on)\s+/i.test(body)) return "player_dismantled_structure";
+  if (/\brepaired\s+.+?\s+with\s+/i.test(body)) return "player_repaired_structure";
+  if (/\bMounted\s+.+?\s+on\s+/i.test(body)) return "player_mounted_object";
+  if (/\bUnmounted\s+.+?\s+from\s+/i.test(body)) return "player_unmounted_object";
+  if (/\bdestroyed\s+.+?\s+with\s+/i.test(body)) return "player_destroyed_object";
   if (/\bfolded\s+.+$/i.test(body)) return "player_folded_structure";
   if (/\bis choosing to respawn\b/i.test(body)) return "player_choosing_respawn";
   if (/\bplaced\b/i.test(body)) return "player_placed_object";
@@ -508,6 +516,56 @@ function parseSinglePlayerEvent(
       targetObject: dismantled?.[2]?.trim() ?? null,
       tool: normaliseWeaponName(dismantled?.[3]) ?? null,
       objectType: dismantled?.[2]?.trim() ?? null,
+    };
+  }
+
+  if (eventType === "player_repaired_structure") {
+    const repaired = /\brepaired\s+(.+?)(?:\s+with\s+(.+))?$/i.exec(timestamp.body);
+    const targetObject = repaired?.[1]?.trim() ?? null;
+    return {
+      ...base,
+      action: "repaired",
+      buildPart: targetObject,
+      targetObject,
+      tool: normaliseWeaponName(repaired?.[2]) ?? null,
+      objectType: targetObject,
+    };
+  }
+
+  if (eventType === "player_mounted_object") {
+    const mounted = /\bMounted\s+(.+?)\s+on\s+(.+?)$/i.exec(timestamp.body);
+    return {
+      ...base,
+      action: "mounted",
+      buildPart: mounted?.[1]?.trim() ?? null,
+      targetObject: mounted?.[2]?.trim() ?? null,
+      objectType: mounted?.[2]?.trim() ?? null,
+      placedObject: mounted?.[1]?.trim() ?? null,
+    };
+  }
+
+  if (eventType === "player_unmounted_object") {
+    const unmounted = /\bUnmounted\s+(.+?)\s+from\s+(.+?)$/i.exec(timestamp.body);
+    return {
+      ...base,
+      action: "unmounted",
+      buildPart: unmounted?.[1]?.trim() ?? null,
+      targetObject: unmounted?.[2]?.trim() ?? null,
+      objectType: unmounted?.[2]?.trim() ?? null,
+      placedObject: unmounted?.[1]?.trim() ?? null,
+    };
+  }
+
+  if (eventType === "player_destroyed_object") {
+    const destroyed = /\bdestroyed\s+(.+?)(?:\s+with\s+(.+))?$/i.exec(timestamp.body);
+    const targetObject = destroyed?.[1]?.trim() ?? null;
+    return {
+      ...base,
+      action: "destroyed",
+      buildPart: targetObject,
+      targetObject,
+      tool: normaliseWeaponName(destroyed?.[2]) ?? null,
+      objectType: targetObject,
     };
   }
 

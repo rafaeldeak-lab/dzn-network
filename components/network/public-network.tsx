@@ -9,6 +9,7 @@ import {
   BarChart3,
   CheckCircle2,
   Clock3,
+  Compass,
   Crosshair,
   Crown,
   ExternalLink,
@@ -16,12 +17,14 @@ import {
   Gauge,
   Gamepad2,
   Globe2,
+  Hammer,
   Lock,
   Map,
   MapPin,
   Medal,
   MessageSquare,
   RadioTower,
+  Route,
   Search,
   ShieldCheck,
   Skull,
@@ -148,6 +151,74 @@ type PublicServer = {
   access_level?: "full" | "preview";
   is_locked?: boolean;
   locked_reason?: string | null;
+};
+
+type AdvancedBoardRow = {
+  rank: number;
+  serverName?: string | null;
+  playerName?: string | null;
+  serverMode?: string | null;
+  mapName?: string | null;
+  value: number | string | null;
+  displayValue: string;
+  topPlayer?: string | null;
+  supportingStats?: Record<string, number | string | null | boolean>;
+  dataFreshness?: string | null;
+  estimated?: boolean;
+};
+
+type AdvancedBoard = {
+  metricKey: string;
+  title: string;
+  description: string;
+  category: string;
+  packageRequired: "free" | "starter" | "pro" | "premium";
+  rows: AdvancedBoardRow[];
+  locked?: boolean;
+  lockedReason?: string | null;
+  estimated?: boolean;
+};
+
+type ServerAdvancedPayload = {
+  ok?: boolean;
+  generated_at?: string;
+  access?: {
+    effectivePlan?: string;
+    dashboardAnalytics?: boolean;
+    publicServerTop15?: boolean;
+    publicExplorationSummary?: boolean;
+    publicMapOverlay?: boolean;
+    lockedModules?: Array<{ key: string; requiredPlan: string; reason: string }>;
+  };
+  summary?: {
+    kills: number;
+    deaths: number;
+    eventsTracked: number;
+    buildScore: number;
+    structuresBuilt: number;
+    raidScore: number;
+    totalDistanceM: number;
+    onFootDistanceM: number;
+    fastTravelEstimatedDistanceM: number;
+    explorationPercent: number;
+    estimated: boolean;
+    lastUpdatedAt: string | null;
+  };
+  boards?: AdvancedBoard[];
+  exploration?: {
+    supported: boolean;
+    mapDisplayName: string | null;
+    boundsConfidence: "verified" | "estimated" | null;
+    gridSize: number | null;
+    exploredCellsCount: number;
+    totalExplorableCells: number;
+    explorationPercent: number;
+    activeExplorersCount: number;
+    topExplorerName: string | null;
+    overlayCells: Array<{ cellX: number; cellY: number; visits: number }>;
+    estimated: boolean;
+  };
+  notes?: string[];
 };
 
 type ReputationSummary = {
@@ -1148,10 +1219,41 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const visualCardStyle = server.cardStyle ?? server.visualLoadout?.cardStyle ?? server.planVisualTreatment?.cardTreatment ?? "standard";
   const visualAccent = server.accentColour ?? server.visualLoadout?.accentColour ?? server.profileFrame?.glowColour ?? null;
   const profileAccentStyle: VisualAccentStyle | undefined = visualAccent ? { "--dzn-profile-accent": visualAccent } : undefined;
+  const [advancedPayload, setAdvancedPayload] = useState<ServerAdvancedPayload | null>(null);
+  const [advancedLoading, setAdvancedLoading] = useState(true);
+  const [advancedError, setAdvancedError] = useState("");
 
   useEffect(() => {
     console.log("DZN LIVE SERVER PROFILE LOADED");
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAdvancedShowcase() {
+      setAdvancedLoading(true);
+      try {
+        const data = await fetchJsonWithRetry<ServerAdvancedPayload>(`/api/public/servers/${encodeURIComponent(server.linked_server_id)}/leaderboards`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+        });
+        if (!active) return;
+        setAdvancedPayload(data);
+        setAdvancedError("");
+      } catch (error) {
+        if (!active) return;
+        setAdvancedError(error instanceof Error ? error.message : "Advanced showcase data could not be loaded right now.");
+      } finally {
+        if (active) setAdvancedLoading(false);
+      }
+    }
+
+    loadAdvancedShowcase();
+    return () => {
+      active = false;
+    };
+  }, [server.linked_server_id]);
 
   return (
     <div className="relative pb-12 pt-6">
@@ -1256,6 +1358,8 @@ function ServerProfile({ server }: { server: PublicServer }) {
             )}
           </div>
 
+          <ServerAdvancedShowcasePanel payload={advancedPayload} loading={advancedLoading} error={advancedError} server={server} />
+
           <div className="grid gap-5 md:grid-cols-2">
             <FeaturePreviewPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." variant="faction" />
             <ServerAchievementPanel server={server} />
@@ -1277,6 +1381,154 @@ function ServerProfile({ server }: { server: PublicServer }) {
           )}
         </aside>
       </section>
+    </div>
+  );
+}
+
+function ServerAdvancedShowcasePanel({
+  payload,
+  loading,
+  error,
+  server,
+}: {
+  payload: ServerAdvancedPayload | null;
+  loading: boolean;
+  error: string;
+  server: PublicServer;
+}) {
+  const boards = (payload?.boards ?? []).filter((board) => board.rows.length > 0 || board.locked).slice(0, 6);
+  const summary = payload?.summary;
+  const exploration = payload?.exploration;
+
+  return (
+    <section className="dzn-advanced-showcase dzn-advanced-showcase--server glass-surface animated-border rounded-lg p-5" aria-labelledby="server-advanced-showcase-title">
+      <div className="dzn-advanced-showcase__header">
+        <div>
+          <p className="dzn-advanced-showcase__eyebrow">Advanced Showcase</p>
+          <h2 id="server-advanced-showcase-title">{server.server_name} Top 15 boards</h2>
+          <p>
+            Package-gated combat, build, travel, and exploration boards derived from imported ADM events. Travel and exploration are estimated and raw coordinates stay hidden.
+          </p>
+        </div>
+        <div className="dzn-advanced-showcase__meta">
+          <span>{payload?.access?.effectivePlan ? `${payload.access.effectivePlan.toUpperCase()} package` : "Package pending"}</span>
+          <span>{summary?.lastUpdatedAt ? `Updated ${formatRelativeTime(summary.lastUpdatedAt)}` : "Awaiting data"}</span>
+        </div>
+      </div>
+
+      {summary ? (
+        <div className="dzn-advanced-summary">
+          <AdvancedSummaryStat label="Build Score" value={formatNumber(summary.buildScore)} icon={Hammer} />
+          <AdvancedSummaryStat label="Raid Score" value={formatNumber(summary.raidScore)} icon={ShieldCheck} />
+          <AdvancedSummaryStat label="Distance" value={formatAdvancedDistance(summary.totalDistanceM)} icon={Route} />
+          <AdvancedSummaryStat label="Explored" value={`${summary.explorationPercent.toFixed(2)}%`} icon={Compass} />
+        </div>
+      ) : null}
+
+      {exploration?.supported ? (
+        <div className="dzn-exploration-preview" aria-label="Aggregate map exploration preview">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Map Exploration</p>
+            <h3>{exploration.mapDisplayName ?? "Supported map"}</h3>
+            <p>
+              {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} aggregate cells explored.
+              {exploration.estimated ? " Bounds are estimated until verified map masks/assets are added." : ""}
+            </p>
+          </div>
+          <ExplorationMiniGrid exploration={exploration} />
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="dzn-advanced-state">Loading advanced showcase...</div>
+      ) : error ? (
+        <div className="dzn-advanced-state">{error}</div>
+      ) : boards.length ? (
+        <div className="dzn-advanced-grid dzn-advanced-grid--compact">
+          {boards.map((board) => (
+            <ServerAdvancedBoardCard key={board.metricKey} board={board} />
+          ))}
+        </div>
+      ) : (
+        <div className="dzn-advanced-state">Advanced showcase data is awaiting enough imported ADM events.</div>
+      )}
+    </section>
+  );
+}
+
+function AdvancedSummaryStat({ label, value, icon: Icon }: { label: string; value: string; icon: typeof Activity }) {
+  return (
+    <div className="dzn-advanced-summary__stat">
+      <Icon className="h-4 w-4 text-cyan-100" />
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ServerAdvancedBoardCard({ board }: { board: AdvancedBoard }) {
+  return (
+    <article className={`dzn-advanced-board dzn-advanced-board--${board.packageRequired}`}>
+      <div className="dzn-advanced-board__head">
+        <AdvancedBoardIcon category={board.category} />
+        <div>
+          <h3>{board.title}</h3>
+          <p>{board.description}</p>
+        </div>
+      </div>
+      <div className="dzn-advanced-board__badges">
+        <span>{formatAdvancedCategory(board.category)}</span>
+        <span>{board.packageRequired === "free" ? "Core" : `${board.packageRequired.toUpperCase()}+`}</span>
+        {board.estimated ? <span>Estimated</span> : null}
+      </div>
+      {board.locked ? (
+        <div className="dzn-advanced-board__locked">
+          <Lock className="h-4 w-4" />
+          <span>{board.lockedReason ?? "A higher DZN package is required."}</span>
+        </div>
+      ) : board.rows.length ? (
+        <ol className="dzn-advanced-board__rows">
+          {board.rows.slice(0, 5).map((row) => (
+            <li key={`${board.metricKey}-${row.rank}-${row.playerName ?? row.serverName ?? row.displayValue}`}>
+              <span className={`dzn-rank-badge dzn-rank-badge--${rankTone(row.rank - 1)}`}>#{row.rank}</span>
+              <div>
+                <strong>{row.playerName ?? row.serverName ?? "Awaiting data"}</strong>
+                <small>{[row.topPlayer ? `Top: ${row.topPlayer}` : null, row.estimated ? "Estimated" : null].filter(Boolean).join(" · ")}</small>
+              </div>
+              <b>{row.displayValue}</b>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="dzn-advanced-board__locked">Awaiting enough data.</div>
+      )}
+    </article>
+  );
+}
+
+function AdvancedBoardIcon({ category }: { category: string }) {
+  if (category === "builds" || category === "pve") return <Hammer className="h-5 w-5" />;
+  if (category === "travel") return <Route className="h-5 w-5" />;
+  if (category === "exploration") return <Map className="h-5 w-5" />;
+  if (category === "hybrid" || category === "overall") return <Compass className="h-5 w-5" />;
+  return <Crosshair className="h-5 w-5" />;
+}
+
+function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerAdvancedPayload["exploration"]> }) {
+  const gridSize = exploration.gridSize ?? 128;
+  const cells = exploration.overlayCells.slice(0, 120);
+  return (
+    <div className="dzn-exploration-mini-grid">
+      {cells.map((cell) => (
+        <span
+          key={`${cell.cellX}:${cell.cellY}`}
+          style={{
+            left: `${(cell.cellX / Math.max(1, gridSize)) * 100}%`,
+            top: `${(cell.cellY / Math.max(1, gridSize)) * 100}%`,
+            "--dzn-cell-alpha": Math.min(0.88, 0.24 + cell.visits / 12),
+          } as CSSProperties}
+        />
+      ))}
     </div>
   );
 }
@@ -2312,6 +2564,24 @@ function formatNumber(value: number) {
   const number = Number(value ?? 0);
   if (!Number.isFinite(number)) return "0";
   return Intl.NumberFormat("en-GB", { notation: number >= 10000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(number);
+}
+
+function formatAdvancedDistance(value: number) {
+  const number = Number(value ?? 0);
+  if (!Number.isFinite(number) || number <= 0) return "Awaiting data";
+  if (number >= 1000) return `${(number / 1000).toFixed(1)} km`;
+  return `${Math.round(number)} m`;
+}
+
+function formatAdvancedCategory(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function rankTone(index: number) {
+  if (index === 0) return "gold";
+  if (index === 1) return "cyan";
+  if (index === 2) return "orange";
+  return "standard";
 }
 
 function publicEventDetail(event: PublicRecentEvent) {

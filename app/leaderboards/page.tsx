@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, Crosshair, Lock, RadioTower, Skull, Trophy, Users } from "lucide-react";
+import { Activity, ArrowRight, Compass, Crosshair, Hammer, Lock, Map, RadioTower, Route, Shield, Skull, Trophy, Users } from "lucide-react";
 import Link from "next/link";
 
 import { AnimatedBullet, KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
@@ -82,6 +82,45 @@ type LeaderboardsPayload = {
   error?: string;
 };
 
+type AdvancedBoardRow = {
+  rank: number;
+  serverId?: string;
+  serverSlug?: string | null;
+  serverName?: string | null;
+  serverMode?: string | null;
+  mapName?: string | null;
+  playerName?: string | null;
+  value: number | string | null;
+  displayValue: string;
+  topPlayer?: string | null;
+  supportingStats?: Record<string, number | string | null | boolean>;
+  dataFreshness?: string | null;
+  isPremiumShowcase?: boolean;
+  estimated?: boolean;
+};
+
+type AdvancedBoard = {
+  metricKey: string;
+  title: string;
+  description: string;
+  category: string;
+  packageRequired: "free" | "starter" | "pro" | "premium";
+  rows: AdvancedBoardRow[];
+  locked?: boolean;
+  lockedReason?: string | null;
+  estimated?: boolean;
+};
+
+type AdvancedLeaderboardsPayload = {
+  ok?: boolean;
+  generated_at?: string;
+  categories?: string[];
+  boards?: AdvancedBoard[];
+  notes?: string[];
+  error?: string;
+  message?: string;
+};
+
 const emptyPayload = {
   top_servers: [],
   top_players: [],
@@ -119,6 +158,9 @@ export default function LeaderboardsPage() {
   const latestRequestId = useRef(0);
   const visiblePayloadRef = useRef(hasMeaningfulLeaderboard(payload));
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [advancedPayload, setAdvancedPayload] = useState<AdvancedLeaderboardsPayload | null>(null);
+  const [advancedLoading, setAdvancedLoading] = useState(true);
+  const [advancedError, setAdvancedError] = useState("");
 
   useEffect(() => {
     console.log("DZN LIVE LEADERBOARDS LOADED");
@@ -186,6 +228,34 @@ export default function LeaderboardsPage() {
       window.clearInterval(interval);
     };
   }, [reloadNonce]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAdvanced() {
+      setAdvancedLoading(true);
+      try {
+        const data = await fetchJsonWithRetry<AdvancedLeaderboardsPayload>("/api/public/leaderboards/advanced", {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+        });
+        if (!active) return;
+        setAdvancedPayload(data);
+        setAdvancedError("");
+      } catch (loadError) {
+        if (!active) return;
+        setAdvancedError(loadError instanceof Error ? loadError.message : "Advanced showcase data could not be loaded right now.");
+      } finally {
+        if (active) setAdvancedLoading(false);
+      }
+    }
+
+    loadAdvanced();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const totalKills = useMemo(() => payload.top_servers.reduce((total, server) => total + server.kills, 0), [payload.top_servers]);
   const totalPlayers = payload.top_players.length;
@@ -301,9 +371,127 @@ export default function LeaderboardsPage() {
             </div>
           </div>
         ) : null}
+
+        {!initialError ? (
+          <AdvancedShowcaseSection payload={advancedPayload} loading={advancedLoading} error={advancedError} />
+        ) : null}
       </div>
     </main>
   );
+}
+
+function AdvancedShowcaseSection({ payload, loading, error }: { payload: AdvancedLeaderboardsPayload | null; loading: boolean; error: string }) {
+  const boards = (payload?.boards ?? []).filter((board) => board.rows.length > 0 || board.locked).slice(0, 10);
+  const categories = payload?.categories?.length
+    ? payload.categories
+    : ["overall", "pvp", "builds", "travel", "exploration", "premium_showcase"];
+
+  return (
+    <section className="dzn-advanced-showcase leaderboard-ref-panel glass-surface animated-border rounded p-4" aria-labelledby="advanced-showcase-title">
+      <div className="dzn-advanced-showcase__header">
+        <div>
+          <p className="dzn-advanced-showcase__eyebrow">Premium Advanced Showcase</p>
+          <h2 id="advanced-showcase-title">Server-first ADM intelligence beyond K/D</h2>
+          <p>
+            Global server boards for combat, builds, hybrid activity, travel, and exploration. Travel and map coverage are estimated from bounded ADM position samples.
+          </p>
+        </div>
+        <div className="dzn-advanced-showcase__meta">
+          <span>Raw coordinates hidden</span>
+          <span>Bounded queries</span>
+          <span>{payload?.generated_at ? `Updated ${formatDateTime(payload.generated_at)}` : "Awaiting snapshot"}</span>
+        </div>
+      </div>
+
+      <div className="dzn-advanced-tabs" aria-label="Advanced showcase categories">
+        {categories.map((category) => (
+          <span key={category}>{formatCategory(category)}</span>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="dzn-advanced-grid">
+          {[0, 1, 2].map((item) => (
+            <div key={item} className="dzn-advanced-board dzn-advanced-board--loading" />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="dzn-advanced-state">{error}</div>
+      ) : boards.length ? (
+        <div className="dzn-advanced-grid">
+          {boards.map((board) => (
+            <AdvancedBoardCard key={board.metricKey} board={board} />
+          ))}
+        </div>
+      ) : (
+        <div className="dzn-advanced-state">Advanced ADM showcase data is awaiting enough imported events.</div>
+      )}
+
+      {payload?.notes?.length ? (
+        <div className="dzn-advanced-notes">
+          {payload.notes.map((note) => (
+            <span key={note}>{note}</span>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AdvancedBoardCard({ board }: { board: AdvancedBoard }) {
+  return (
+    <article className={`dzn-advanced-board dzn-advanced-board--${board.packageRequired}`}>
+      <div className="dzn-advanced-board__head">
+        <AdvancedCategoryIcon category={board.category} />
+        <div>
+          <h3>{board.title}</h3>
+          <p>{board.description}</p>
+        </div>
+      </div>
+      <div className="dzn-advanced-board__badges">
+        <span>{formatCategory(board.category)}</span>
+        <span>{board.packageRequired === "free" ? "Core" : `${board.packageRequired.toUpperCase()}+`}</span>
+        {board.estimated ? <span>Estimated</span> : null}
+      </div>
+      {board.locked ? (
+        <div className="dzn-advanced-board__locked">
+          <Lock className="h-4 w-4" />
+          <span>{board.lockedReason ?? "A higher DZN package is required."}</span>
+        </div>
+      ) : board.rows.length ? (
+        <ol className="dzn-advanced-board__rows">
+          {board.rows.slice(0, 5).map((row) => (
+            <li key={`${board.metricKey}-${row.rank}-${row.serverId ?? row.playerName ?? row.serverName}`}>
+              <span className={`leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rankTone(row.rank - 1)}`}>#{row.rank}</span>
+              <div>
+                <strong>{row.serverName ?? row.playerName ?? "Awaiting data"}</strong>
+                <small>
+                  {[row.serverMode, row.mapName, row.topPlayer ? `Top: ${row.topPlayer}` : null].filter(Boolean).join(" · ")}
+                </small>
+              </div>
+              <b>{row.displayValue}</b>
+              {row.serverSlug ? (
+                <Link href={`/servers/profile?slug=${encodeURIComponent(row.serverSlug)}`} aria-label={`View ${row.serverName ?? "server"} advanced stats`}>
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="dzn-advanced-board__locked">Awaiting enough data.</div>
+      )}
+    </article>
+  );
+}
+
+function AdvancedCategoryIcon({ category }: { category: string }) {
+  if (category === "builds" || category === "pve") return <Hammer className="h-5 w-5" />;
+  if (category === "travel") return <Route className="h-5 w-5" />;
+  if (category === "exploration") return <Map className="h-5 w-5" />;
+  if (category === "premium_showcase") return <Shield className="h-5 w-5" />;
+  if (category === "hybrid" || category === "overall") return <Compass className="h-5 w-5" />;
+  return <Crosshair className="h-5 w-5" />;
 }
 
 function LongestKillsSection({
@@ -730,6 +918,10 @@ function rankTone(index: number) {
   if (index === 1) return "cyan";
   if (index === 2) return "orange";
   return "standard";
+}
+
+function formatCategory(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function isScoreBreakdown(value: unknown): value is ScoreBreakdown {

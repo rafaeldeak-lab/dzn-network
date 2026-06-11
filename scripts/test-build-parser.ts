@@ -13,6 +13,10 @@ const admLines = [
   '20:03:27 | Player "Builder" (id=builder-1 pos=<22.4, 7891.5, 303.1>) placed Barrel<Barrel_Green>',
   '20:04:27 | Player "Builder" (id=builder-1 pos=<22.4, 7891.5, 303.1>) placed Land Mine<LandMineTrap>',
   '20:05:27 | Player "Builder" (id=builder-1 pos=<22.4, 7891.5, 303.1>) placed Fireplace',
+  '20:06:27 | Player "Builder" (id=builder-1 pos=<22.4, 7891.5, 303.1>) repaired Fence with Hatchet',
+  '20:07:27 | Player "Builder" (id=builder-1 pos=<22.4, 7891.5, 303.1>) Mounted BarbedWire on Fence',
+  '20:08:27 | Player "Builder" (id=builder-1 pos=<22.4, 7891.5, 303.1>) Dismantled Upper Frame from Fence with Hatchet',
+  '20:09:27 | Player "Builder" (id=builder-1 pos=<22.4, 7891.5, 303.1>) destroyed Gate with Chainsaw',
 ];
 
 const parsed = parseAdmLines(admLines);
@@ -20,7 +24,7 @@ const buildEvents = parsed
   .map((event) => classifyParsedBuildEvent(event))
   .filter((event): event is NonNullable<typeof event> => Boolean(event));
 
-assert.equal(buildEvents.length, 7);
+assert.equal(buildEvents.length, 11);
 assert.equal(buildEvents[0]?.eventType, "placed");
 assert.equal(buildEvents[0]?.placedObject, "Fence Kit");
 assert.equal(buildEvents[0]?.placedClass, "fencekit");
@@ -34,6 +38,17 @@ assert.equal(buildEvents[3]?.score, 15);
 assert.equal(buildEvents[4]?.category, "storage");
 assert.equal(buildEvents[5]?.category, "storage");
 assert.equal(buildEvents[6]?.category, "trap");
+assert.equal(buildEvents[7]?.eventType, "repaired");
+assert.equal(buildEvents[7]?.category, "maintenance");
+assert.equal(buildEvents[7]?.score, 1);
+assert.equal(buildEvents[8]?.eventType, "mounted");
+assert.equal(buildEvents[8]?.category, "defence");
+assert.equal(buildEvents[8]?.score, 2);
+assert.equal(buildEvents[9]?.eventType, "dismantled");
+assert.equal(buildEvents[9]?.category, "raid");
+assert.equal(buildEvents[10]?.eventType, "destroyed");
+assert.equal(buildEvents[10]?.category, "raid");
+assert.equal(buildEvents[10]?.score, 5);
 
 const stats = summarizeBuildStats(buildEvents);
 assert.deepEqual(stats, {

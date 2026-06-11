@@ -9,6 +9,7 @@ import {
   Bell,
   ChevronDown,
   CircleCheck,
+  Compass,
   Crosshair,
   DatabaseZap,
   Download,
@@ -16,10 +17,12 @@ import {
   Flag,
   Gamepad2,
   Gauge,
+  Hammer,
   LifeBuoy,
   ListChecks,
   LogOut,
   RefreshCw,
+  Route,
   Server,
   Settings,
   ShieldCheck,
@@ -36,10 +39,10 @@ import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardAdvancedStats, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
-import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingReadinessResponse, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingReadinessResponse, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardAdvancedStatsResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 30000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
@@ -514,6 +517,9 @@ function ServerDashboard({
   const [dashboardAction, setDashboardAction] = useState<DashboardActionProgress | null>(() => loadDashboardActionState(serverProp.id));
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const [badgeStatus, setBadgeStatus] = useState<ServerBadgeStatusResponse | null>(null);
+  const [advancedStats, setAdvancedStats] = useState<DashboardAdvancedStatsResult | null>(null);
+  const [advancedStatsError, setAdvancedStatsError] = useState("");
+  const [advancedStatsLoading, setAdvancedStatsLoading] = useState(true);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const dashboardHealthRequestIdRef = useRef(0);
@@ -567,6 +573,30 @@ function ServerDashboard({
       saveDashboardActionState(server.id, dashboardAction);
     }
   }, [dashboardAction, server.id]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAdvancedStats() {
+      setAdvancedStatsLoading(true);
+      try {
+        const data = await getDashboardAdvancedStats(server.id);
+        if (!active) return;
+        setAdvancedStats(data);
+        setAdvancedStatsError("");
+      } catch (error) {
+        if (!active) return;
+        setAdvancedStatsError(error instanceof Error ? error.message : "Advanced showcase data could not be loaded right now.");
+      } finally {
+        if (active) setAdvancedStatsLoading(false);
+      }
+    }
+
+    loadAdvancedStats();
+    return () => {
+      active = false;
+    };
+  }, [server.id]);
 
   const tags = useMemo(() => {
     try {
@@ -2769,6 +2799,11 @@ function ServerDashboard({
         <DashboardStatTile icon={<Gauge className="h-5 w-5" />} label="Server Score" value={scoreLabel} detail="Score" tone="violet" />
         <DashboardStatTile icon={<BarChart3 className="h-5 w-5" />} label="Global Rank" value={globalRankLabel} detail="Rank" tone="orange" />
       </section>
+      <DashboardAdvancedShowcasePanel
+        stats={advancedStats}
+        loading={advancedStatsLoading}
+        error={advancedStatsError}
+      />
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)_minmax(320px,0.72fr)]">
         <DashboardPanel className="p-4">
           <div className="flex items-center justify-between gap-3">
@@ -3415,6 +3450,81 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
     <section className={`glass-surface animated-border rounded-lg ${className}`}>
       <div className="relative z-10">{children}</div>
     </section>
+  );
+}
+
+function DashboardAdvancedShowcasePanel({
+  stats,
+  loading,
+  error,
+}: {
+  stats: DashboardAdvancedStatsResult | null;
+  loading: boolean;
+  error: string;
+}) {
+  const summary = stats?.summary;
+  const boards = stats?.boards ?? [];
+  const firstUnlockedBoard = boards.find((board) => !board.locked && board.rows.length > 0);
+  const lockedModules = stats?.access?.lockedModules ?? [];
+
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <PanelHeader icon={<Compass className="h-5 w-5" />} title="Advanced Showcase Preview" />
+        <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
+          <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">{stats?.access?.effectivePlan ? `${stats.access.effectivePlan} plan` : "Plan pending"}</span>
+          <span className="rounded border border-violet-300/20 bg-violet-400/10 px-2 py-1 text-violet-100">No raw coordinates</span>
+          <span className="rounded border border-orange-300/20 bg-orange-400/10 px-2 py-1 text-orange-100">Estimated travel</span>
+        </div>
+      </div>
+      {loading ? (
+        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Loading advanced showcase data...</p>
+      ) : error ? (
+        <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">{error}</p>
+      ) : summary ? (
+        <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MiniInfo label="Build Score" value={formatNullableDashboardNumber(summary.buildScore)} />
+            <MiniInfo label="Raid Score" value={formatNullableDashboardNumber(summary.raidScore)} />
+            <MiniInfo label="Distance" value={formatDashboardDistance(summary.totalDistanceM)} />
+            <MiniInfo label="Map Explored" value={`${summary.explorationPercent.toFixed(2)}%`} />
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.44fr)]">
+            <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+              <div className="flex items-center gap-2">
+                <Hammer className="h-4 w-4 text-violet-100" />
+                <p className="text-xs font-black uppercase text-white">{firstUnlockedBoard?.title ?? "Top 15 boards awaiting data"}</p>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {firstUnlockedBoard?.rows?.length ? firstUnlockedBoard.rows.slice(0, 5).map((row) => (
+                  <div key={`${firstUnlockedBoard.metricKey}-${row.rank}-${row.playerName ?? row.serverName ?? row.displayValue}`} className="flex items-center justify-between gap-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <span className="min-w-0 truncate text-sm font-black text-zinc-100">#{row.rank} {row.playerName ?? row.serverName ?? "Awaiting data"}</span>
+                    <span className="shrink-0 text-sm font-black text-cyan-100">{row.displayValue}</span>
+                  </div>
+                )) : (
+                  <p className="text-sm font-bold text-zinc-400">Import more ADM activity to populate server Top 15 boards.</p>
+                )}
+              </div>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+              <div className="flex items-center gap-2">
+                <Route className="h-4 w-4 text-cyan-100" />
+                <p className="text-xs font-black uppercase text-white">Package Gates</p>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {lockedModules.length ? lockedModules.slice(0, 3).map((module) => (
+                  <p key={module.key} className="rounded border border-violet-300/15 bg-violet-400/10 px-3 py-2 text-xs font-bold leading-5 text-violet-50">{module.reason}</p>
+                )) : (
+                  <p className="rounded border border-emerald-300/15 bg-emerald-400/10 px-3 py-2 text-xs font-bold leading-5 text-emerald-50">Advanced dashboard analytics are unlocked for this server.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Advanced showcase data is awaiting enough imported ADM events.</p>
+      )}
+    </DashboardPanel>
   );
 }
 
@@ -7486,6 +7596,14 @@ function formatDueOrDashboardDate(value: string) {
 
 function formatNullableDashboardNumber(value: number | null) {
   return value === null ? "Loading" : value.toLocaleString();
+}
+
+function formatDashboardDistance(value: number | null) {
+  if (value === null) return "Loading";
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "Awaiting data";
+  if (number >= 1000) return `${(number / 1000).toFixed(1)} km`;
+  return `${Math.round(number)} m`;
 }
 
 function dashboardStatsCacheKey(serverId: string) {
