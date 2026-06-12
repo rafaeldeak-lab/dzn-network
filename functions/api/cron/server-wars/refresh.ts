@@ -29,8 +29,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const result = await runServerWarAutomationTick(env, {
       maxEvents: numberParam(body.maxEvents ?? body.max_events, SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT, SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT),
       maxFinalizations: numberParam(body.maxFinalizations ?? body.max_finalizations, SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT, SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT),
-      maxChallengeExpirations: numberParam(body.maxChallengeExpirations ?? body.max_challenge_expirations, 20, 50),
-      deadlineMs: numberParam(body.deadlineMs ?? body.deadline_ms, SERVER_WAR_AUTOMATION_DEFAULT_DEADLINE_MS, 10_000),
+      maxChallengeExpirations: numberParam(body.maxChallengeExpirations ?? body.max_challenge_expirations, 10, 20),
+      deadlineMs: numberParam(body.deadlineMs ?? body.deadline_ms, SERVER_WAR_AUTOMATION_DEFAULT_DEADLINE_MS, 5_000),
       source: typeof body.source === "string" ? body.source : "cron",
     });
     return json(result, { headers: { "cache-control": "no-store" } });

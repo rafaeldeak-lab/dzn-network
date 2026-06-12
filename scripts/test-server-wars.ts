@@ -57,6 +57,7 @@ for (const source of [publicServerWars, publicDetail, publicServerRecord]) {
   assert.match(source, /ok: true/);
   assert.doesNotMatch(source, /position_x|position_y|pos_x|pos_y|raw_line|exact player routes/i);
 }
+assert.doesNotMatch(publicServerWars, /isPublicViewerLoggedIn/, "Public Server Wars list should not do auth/session work on the hot path.");
 
 const serverWarsLib = readFileSync("functions/_lib/server-wars.ts", "utf8");
 for (const snippet of [
@@ -71,6 +72,10 @@ for (const snippet of [
   "canRespond",
   "rawCoordinatesExposed: false",
   "exactRoutesExposed: false",
+  "PUBLIC_SERVER_WARS_CACHE_MS",
+  "emptyPublicServerWarsPayload",
+  "isMissingServerWarsSchemaError",
+  "skipSchemaEnsure: true",
 ]) {
   assert.equal(serverWarsLib.includes(snippet), true, `Expected helper to include ${snippet}.`);
 }

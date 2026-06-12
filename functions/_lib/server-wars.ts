@@ -34,6 +34,26 @@ export type PublicServerWarEvent = {
   awaitingSnapshot: boolean;
 };
 
+export type PublicChampionTitle = {
+  serverId: string;
+  serverName: string;
+  serverSlug: string | null;
+  title: string;
+  category: string | null;
+  awardedAt: string | null;
+};
+
+export type PublicServerWarsPayload = {
+  ok: true;
+  generated_at: string;
+  rulesets: ReturnType<typeof getServerWarRulesetOptions>;
+  events: PublicServerWarEvent[];
+  champions: PublicChampionTitle[];
+  notes: string[];
+  empty?: boolean;
+  warnings?: string[];
+};
+
 export type ServerWarsAccess = {
   configuredPlan: ServerWarsPlan;
   effectivePlan: ServerWarsPlan;
@@ -82,12 +102,33 @@ type ServerWarServerRow = {
   subscription_status: string | null;
 };
 
-export async function getPublicServerWarsPayload(env: Env, options: { limit?: number } = {}) {
-  await ensureServerWarsSchema(env);
+const PUBLIC_SERVER_WARS_CACHE_MS = 10_000;
+const publicServerWarsPayloadCache = new Map<number, {
+  expiresAt: number;
+  promise: Promise<PublicServerWarsPayload>;
+}>();
+
+export async function getPublicServerWarsPayload(env: Env, options: { limit?: number } = {}): Promise<PublicServerWarsPayload> {
   const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 12), 30));
+  const nowMs = Date.now();
+  const cached = publicServerWarsPayloadCache.get(limit);
+  if (cached && cached.expiresAt > nowMs) return cached.promise;
+  const promise = readPublicServerWarsPayload(env, limit).catch((error) => {
+    publicServerWarsPayloadCache.delete(limit);
+    throw error;
+  });
+  publicServerWarsPayloadCache.set(limit, { expiresAt: nowMs + PUBLIC_SERVER_WARS_CACHE_MS, promise });
+  return promise;
+}
+
+async function readPublicServerWarsPayload(env: Env, limit: number): Promise<PublicServerWarsPayload> {
+  let eventRows: WarEventRow[] = [];
+  const warnings: string[] = [];
   const rows = await requireDb(env)
     .prepare(
-      `SELECT *
+      `SELECT id, slug, title, description, event_type, category, eligible_categories,
+              status, scoring_ruleset_key, starts_at, ends_at, visibility,
+              package_required, finalized_at
        FROM server_war_events
        WHERE lower(visibility) = 'public'
          AND status IN ('scheduled', 'live', 'completed', 'finalizing')
@@ -102,12 +143,41 @@ export async function getPublicServerWarsPayload(env: Env, options: { limit?: nu
          starts_at DESC
        LIMIT ${limit}`,
     )
-    .all<WarEventRow>();
-  const events: PublicServerWarEvent[] = [];
-  for (const row of rows.results ?? []) {
-    events.push(await eventRowToPublicEvent(env, row, { publicOnly: true, standingsLimit: 8 }));
+    .all<WarEventRow>()
+    .catch((error) => {
+      if (isMissingServerWarsSchemaError(error)) return { results: [] as WarEventRow[] };
+      throw error;
+    });
+  eventRows = rows.results ?? [];
+  if (eventRows.length === 0) {
+    return emptyPublicServerWarsPayload(true);
   }
-  const champions = await getCurrentChampionTitles(env, { limit: 8 });
+
+  const events: PublicServerWarEvent[] = [];
+  for (const row of eventRows) {
+    try {
+      events.push(await eventRowToPublicEvent(env, row, {
+        publicOnly: true,
+        standingsLimit: 8,
+        skipSchemaEnsure: true,
+      }));
+    } catch (error) {
+      warnings.push(`event_${row.id}_unavailable`);
+      console.warn("DZN SERVER WAR PUBLIC EVENT LOAD SKIPPED", {
+        eventId: row.id,
+        message: error instanceof Error ? error.message : "unknown event load error",
+      });
+    }
+  }
+  let champions: PublicChampionTitle[] = [];
+  try {
+    champions = await getCurrentChampionTitles(env, { limit: 8 });
+  } catch (error) {
+    warnings.push("champions_unavailable");
+    console.warn("DZN SERVER WAR CHAMPIONS LOAD SKIPPED", {
+      message: error instanceof Error ? error.message : "unknown champion load error",
+    });
+  }
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -118,6 +188,7 @@ export async function getPublicServerWarsPayload(env: Env, options: { limit?: nu
       "Server Wars scores are event-window snapshots from real ADM-derived data.",
       "Plans affect hosting and presentation only, never score formulas.",
     ],
+    ...(warnings.length ? { warnings } : {}),
   };
 }
 
@@ -384,10 +455,12 @@ function toServerWarsPlan(value: unknown): ServerWarsPlan {
 async function eventRowToPublicEvent(
   env: Env,
   row: WarEventRow,
-  options: { publicOnly: boolean; standingsLimit: number },
+  options: { publicOnly: boolean; standingsLimit: number; skipSchemaEnsure?: boolean },
 ): Promise<PublicServerWarEvent> {
   const ruleset = getServerWarRuleset(row.scoring_ruleset_key);
-  let standings = await getLatestServerWarStandings(env, row.id, options.standingsLimit);
+  let standings = await getLatestServerWarStandings(env, row.id, options.standingsLimit, {
+    skipSchemaEnsure: options.skipSchemaEnsure,
+  });
   if (options.publicOnly) {
     const eligible = await publicEligibleServerIds(env, standings.map((standing) => standing.serverId));
     standings = standings.filter((standing) => eligible.has(standing.serverId));
@@ -913,4 +986,24 @@ function parseJsonObject(value: string | null | undefined): Record<string, unkno
   } catch {
     return {};
   }
+}
+
+function emptyPublicServerWarsPayload(empty: boolean): PublicServerWarsPayload {
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    rulesets: getServerWarRulesetOptions(),
+    events: [],
+    champions: [],
+    empty,
+    notes: [
+      "Server Wars scores are event-window snapshots from real ADM-derived data.",
+      "Plans affect hosting and presentation only, never score formulas.",
+    ],
+  };
+}
+
+function isMissingServerWarsSchemaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no such table:\s*server_war_|no such column:\s*(event_type|scoring_ruleset_key|eligible_categories)/i.test(message);
 }

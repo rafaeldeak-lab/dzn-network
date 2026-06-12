@@ -4,11 +4,11 @@ import { refreshServerWarEventSnapshot } from "./server-war-snapshots";
 import { ensureServerWarsSchema } from "./server-war-schema";
 import type { Env } from "./types";
 
-export const SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT = 2;
-export const SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT = 5;
-export const SERVER_WAR_AUTOMATION_DEFAULT_CHALLENGE_LIMIT = 20;
-export const SERVER_WAR_AUTOMATION_MAX_CHALLENGE_LIMIT = 50;
-export const SERVER_WAR_AUTOMATION_DEFAULT_DEADLINE_MS = 4_500;
+export const SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT = 1;
+export const SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT = 3;
+export const SERVER_WAR_AUTOMATION_DEFAULT_CHALLENGE_LIMIT = 10;
+export const SERVER_WAR_AUTOMATION_MAX_CHALLENGE_LIMIT = 20;
+export const SERVER_WAR_AUTOMATION_DEFAULT_DEADLINE_MS = 2_500;
 
 export type ServerWarAutomationOptions = {
   now?: string | Date;

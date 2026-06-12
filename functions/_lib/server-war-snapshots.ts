@@ -117,8 +117,15 @@ export async function refreshServerWarEventSnapshot(env: Env, eventId: string): 
   };
 }
 
-export async function getLatestServerWarStandings(env: Env, eventId: string, limit = 50): Promise<ServerWarStanding[]> {
-  await ensureServerWarsSchema(env);
+export async function getLatestServerWarStandings(
+  env: Env,
+  eventId: string,
+  limit = 50,
+  options: { skipSchemaEnsure?: boolean } = {},
+): Promise<ServerWarStanding[]> {
+  if (!options.skipSchemaEnsure) {
+    await ensureServerWarsSchema(env);
+  }
   const safeLimit = Math.max(1, Math.min(Math.trunc(limit), 100));
   const rows = await requireDb(env)
     .prepare(
