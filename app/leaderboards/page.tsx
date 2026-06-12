@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { AnimatedBullet, KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
 import { SiteHeader } from "@/components/site-header";
+import { ServerWarsTeaser } from "@/components/server-wars/server-wars-platform";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type LeaderboardServer = {
@@ -371,6 +372,8 @@ export default function LeaderboardsPage() {
             </div>
           </div>
         ) : null}
+
+        {!initialError ? <ServerWarsTeaser /> : null}
 
         {!initialError ? (
           <AdvancedShowcaseSection payload={advancedPayload} loading={advancedLoading} error={advancedError} />

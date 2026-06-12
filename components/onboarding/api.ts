@@ -33,6 +33,7 @@ import type {
   AdmAutomationStatusApiResult,
   DashboardHealthApiResult,
   DashboardAdvancedStatsResult,
+  DashboardServerWarsResult,
   ManualAdmParsePreviewApiResult,
 } from "./types";
 
@@ -370,6 +371,12 @@ export async function getDashboardHealth(linkedServerId: string) {
 
 export async function getDashboardAdvancedStats(linkedServerId: string) {
   return request<DashboardAdvancedStatsResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/advanced-stats`, {
+    cache: "no-store",
+  });
+}
+
+export async function getDashboardServerWars(linkedServerId: string) {
+  return request<DashboardServerWarsResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/wars`, {
     cache: "no-store",
   });
 }

@@ -89,6 +89,52 @@ export type DashboardAdvancedStatsResult = {
   notes?: string[];
 };
 
+export type DashboardServerWarsResult = {
+  ok: boolean;
+  generated_at?: string;
+  server?: {
+    id: string;
+    name: string;
+    publicSlug: string | null;
+    category: string | null;
+    status: string | null;
+    listingVisibility: string | null;
+  };
+  access?: {
+    effectivePlan: string;
+    canCreateChallenge: boolean;
+    canCreateFeatured: boolean;
+    lockedReason: string | null;
+  };
+  eligibility?: {
+    category: string | null;
+    eligibleRulesets: Array<{
+      key: string;
+      title: string;
+      category: string;
+      eligibleCategories: string[];
+      packageRequired: string;
+    }>;
+    lockedReason: string | null;
+  };
+  events?: Array<{
+    id: string;
+    slug: string;
+    title: string;
+    status: string;
+    scoringRulesetTitle: string;
+    awaitingSnapshot: boolean;
+  }>;
+  pendingChallenges?: Array<Record<string, unknown>>;
+  trophies?: Array<{
+    trophyKey: string;
+    title: string;
+    category: string | null;
+    awardedAt: string;
+  }>;
+  currentChampionTitles?: Array<Record<string, unknown>>;
+};
+
 export type DiscordGuild = {
   id?: string;
   guild_id: string;
