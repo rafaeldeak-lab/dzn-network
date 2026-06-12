@@ -6438,6 +6438,7 @@ export async function runAdmWorkerSyncTick(
     force?: boolean;
     targetFileName?: string | null;
     targetFilePath?: string | null;
+    skipMetadataRefresh?: boolean;
   } = {},
 ): Promise<AdmWorkerSyncTickResult> {
   admSchemaEnsureSkipDepth += 1;
@@ -6450,9 +6451,10 @@ export async function runAdmWorkerSyncTick(
     const explicitTargetPath = explicitTargetFileName
       ? sanitizeWorkerTargetAdmPath(options.targetFilePath, explicitTargetFileName)
       : null;
+    const shouldRefreshMetadata = options.skipMetadataRefresh !== true;
     let metadata = emptyScheduledMetadataSyncResult();
     let metadataRefreshedLinkedServerId: string | null = null;
-    if (!explicitTargetFileName && hasTickBudget(4_000)) {
+    if (shouldRefreshMetadata && !explicitTargetFileName && hasTickBudget(4_000)) {
       metadata = await refreshOldestStaleAdmWorkerMetadata(env).catch(() => emptyScheduledMetadataSyncResult());
       metadataRefreshedLinkedServerId = metadata.results[0]?.linked_server_id ?? null;
     }
@@ -6484,7 +6486,21 @@ export async function runAdmWorkerSyncTick(
       ? sanitizeWorkerTargetAdmPath(selected.target_adm_path, scheduledTargetFileName)
       : null;
 
-    if (!explicitTargetFileName && selected.id !== metadataRefreshedLinkedServerId && isAdmWorkerMetadataStale(selected) && hasTickBudget(3_000)) {
+    if (!shouldRefreshMetadata && selectionReason === "stale_metadata" && !explicitTargetFileName) {
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
+        selectedAdmFile: selected.target_adm_file ?? selected.latest_adm_file,
+        selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+        pendingJobs,
+        skippedNotDue: 1,
+        message: "ADM Worker skipped metadata-only refresh to preserve scheduled CPU budget; dedicated metadata cron should handle player metadata.",
+      });
+    }
+
+    if (shouldRefreshMetadata && !explicitTargetFileName && selected.id !== metadataRefreshedLinkedServerId && isAdmWorkerMetadataStale(selected) && hasTickBudget(3_000)) {
       const selectedMetadata = await refreshSelectedAdmWorkerMetadata(env, selected).catch((error) => ({
         processed: 1,
         succeeded: 0,

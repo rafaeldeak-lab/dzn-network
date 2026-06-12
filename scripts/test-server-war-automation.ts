@@ -50,6 +50,7 @@ assert.doesNotMatch(cronRouteSource, /getSessionUser|requireServerOwnerOrDznAdmi
 assert.match(workerSource, /\/api\/cron\/server-wars\/refresh/, "ADM Worker should keep the protected Server Wars cron route configured.");
 assert.match(workerSource, /label: "server-wars"/, "Worker cron endpoint should be labelled server-wars.");
 assert.match(workerSource, /SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false/, "Server Wars Worker side task should stay disabled until ADM Worker CPU headroom is proven stable.");
+assert.match(workerSource, /skipMetadataRefresh: true/, "ADM Worker should leave metadata refresh to the dedicated cron path during this CPU hotfix.");
 assert.match(workerSource, /max_events: 1/, "Worker Server Wars batch should stay small if re-enabled.");
 assert.match(workerSource, /deadline_ms: 2500/, "Worker Server Wars endpoint should have a tight deadline if re-enabled.");
 assert.match(workerSource, /cron-route-only to preserve ADM Worker CPU budget/, "Worker should keep Server Wars automation on the protected cron route for this hotfix.");

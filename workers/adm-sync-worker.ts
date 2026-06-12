@@ -172,6 +172,7 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
       maxLinesPerServer: 5000,
       maxRuntimeMs,
       cursorKey: ADM_WORKER_CURSOR_KEY,
+      skipMetadataRefresh: true,
     });
     await safeRecordWorkerCronRun(env, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
       processedCount: result.processing_processed_count,
