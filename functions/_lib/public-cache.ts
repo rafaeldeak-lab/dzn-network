@@ -278,7 +278,7 @@ async function readPublicCacheRows(env: Env, linkedServerId: string): Promise<Pu
     db.prepare("SELECT * FROM adm_sync_state WHERE linked_server_id = ? LIMIT 1").bind(linkedServerId).first<Record<string, unknown>>(),
     db
       .prepare(
-        `SELECT id, event_type, killer_name, victim_name, weapon, distance, occurred_at, created_at
+        `SELECT id, 'player_killed' AS event_type, killer_name, victim_name, weapon, distance, occurred_at, created_at
          FROM kill_events
          WHERE linked_server_id = ?
          ORDER BY COALESCE(occurred_at, created_at) DESC
