@@ -18,7 +18,7 @@ type WorkerExecutionContext = {
 };
 
 type CronEndpoint = {
-  label: "discord-posts";
+  label: "discord-posts" | "server-wars";
   path: string;
   body: Record<string, unknown>;
 };
@@ -34,6 +34,11 @@ const ADM_WORKER_LAST_RECOVERY_KEY = "last_automation_lock_recovery_at";
 const ADM_WORKER_LAST_BUILD_REPARSE_KEY = "last_adm_build_reparse_at";
 
 const CRON_ENDPOINTS: CronEndpoint[] = [
+  {
+    label: "server-wars",
+    path: "/api/cron/server-wars/refresh",
+    body: { source: "cloudflare-worker", max_events: 2, max_finalizations: 2, max_challenge_expirations: 20, deadline_ms: 3500 },
+  },
   {
     label: "discord-posts",
     path: "/api/sync/discord-posts/run",
@@ -122,9 +127,12 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
     results.push(hasScheduledRuntimeBudget(budget, 5_000)
       ? await runEventScoring(env)
       : skippedForBudgetResult("event-scoring", "Event scoring skipped because the scheduled worker runtime budget is low."));
-    results.push(hasScheduledRuntimeBudget(budget, 6_000)
+    results.push(hasScheduledRuntimeBudget(budget, 7_000)
       ? await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options, budget)
-      : skippedForBudgetResult(CRON_ENDPOINTS[0].label, "Discord post cron skipped because the scheduled worker runtime budget is low."));
+      : skippedForBudgetResult(CRON_ENDPOINTS[0].label, "Server Wars automation skipped because the scheduled worker runtime budget is low."));
+    results.push(hasScheduledRuntimeBudget(budget, 6_000)
+      ? await runCronEndpoint(CRON_ENDPOINTS[1], baseUrl, secret, options, budget)
+      : skippedForBudgetResult(CRON_ENDPOINTS[1].label, "Discord post cron skipped because the scheduled worker runtime budget is low."));
 
     const heartbeat = classifyHeartbeatFromResults(results);
     await safeWriteAdmWorkerHeartbeatFinished(env, heartbeat).catch(() => null);

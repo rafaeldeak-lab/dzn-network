@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -26,6 +26,7 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  Swords,
   Trash2,
   Upload,
   Users,
@@ -39,10 +40,10 @@ import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner 
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
-import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardAdvancedStats, getDashboardHealth, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
+import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardAdvancedStats, getDashboardHealth, getDashboardServerWars, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
-import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingReadinessResponse, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardAdvancedStatsResult, DashboardHealthResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
+import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingReadinessResponse, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardAdvancedStatsResult, DashboardHealthResult, DashboardServerWarsResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
 const SYNC_POLL_INTERVAL_MS = 30000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
@@ -520,6 +521,9 @@ function ServerDashboard({
   const [advancedStats, setAdvancedStats] = useState<DashboardAdvancedStatsResult | null>(null);
   const [advancedStatsError, setAdvancedStatsError] = useState("");
   const [advancedStatsLoading, setAdvancedStatsLoading] = useState(true);
+  const [serverWars, setServerWars] = useState<DashboardServerWarsResult | null>(null);
+  const [serverWarsError, setServerWarsError] = useState("");
+  const [serverWarsLoading, setServerWarsLoading] = useState(true);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const dashboardHealthRequestIdRef = useRef(0);
@@ -593,6 +597,30 @@ function ServerDashboard({
     }
 
     loadAdvancedStats();
+    return () => {
+      active = false;
+    };
+  }, [server.id]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadServerWars() {
+      setServerWarsLoading(true);
+      try {
+        const data = await getDashboardServerWars(server.id);
+        if (!active) return;
+        setServerWars(data);
+        setServerWarsError("");
+      } catch (error) {
+        if (!active) return;
+        setServerWarsError(error instanceof Error ? error.message : "Server Wars data could not be loaded right now.");
+      } finally {
+        if (active) setServerWarsLoading(false);
+      }
+    }
+
+    loadServerWars();
     return () => {
       active = false;
     };
@@ -2804,6 +2832,11 @@ function ServerDashboard({
         loading={advancedStatsLoading}
         error={advancedStatsError}
       />
+      <DashboardServerWarsPanel
+        wars={serverWars}
+        loading={serverWarsLoading}
+        error={serverWarsError}
+      />
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)_minmax(320px,0.72fr)]">
         <DashboardPanel className="p-4">
           <div className="flex items-center justify-between gap-3">
@@ -3450,6 +3483,180 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
     <section className={`glass-surface animated-border rounded-lg ${className}`}>
       <div className="relative z-10">{children}</div>
     </section>
+  );
+}
+
+function DashboardServerWarsPanel({ wars, loading, error }: {
+  wars: DashboardServerWarsResult | null;
+  loading: boolean;
+  error: string;
+}) {
+  const [opponentServerId, setOpponentServerId] = useState("");
+  const [rulesetKey, setRulesetKey] = useState("deathmatch_war");
+  const [challengeTitle, setChallengeTitle] = useState("");
+  const [challengeBusy, setChallengeBusy] = useState(false);
+  const [challengeMessage, setChallengeMessage] = useState("");
+  const canCreateChallenge = Boolean(wars?.access?.canCreateChallenge);
+  const activeEvents = wars?.events?.filter((event) => ["pending_acceptance", "scheduled", "live", "finalizing"].includes(event.status)) ?? [];
+  const trophies = wars?.trophies ?? [];
+  const pendingChallenges = wars?.pendingChallenges ?? [];
+  const serverId = wars?.server?.id ?? "";
+  const rulesets = wars?.eligibility?.eligibleRulesets ?? [];
+
+  async function submitChallenge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!serverId || !opponentServerId.trim() || challengeBusy) return;
+    setChallengeBusy(true);
+    setChallengeMessage("");
+    try {
+      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/wars/challenges`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          opponentServerId: opponentServerId.trim(),
+          rulesetKey,
+          title: challengeTitle.trim() || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as { message?: string; error?: string };
+      if (!response.ok) throw new Error(data.message || data.error || `Request failed: ${response.status}`);
+      setChallengeMessage("Challenge created. The opponent owner can accept or decline from their dashboard.");
+      setOpponentServerId("");
+      setChallengeTitle("");
+    } catch (submitError) {
+      setChallengeMessage(submitError instanceof Error ? submitError.message : "Challenge creation failed.");
+    } finally {
+      setChallengeBusy(false);
+    }
+  }
+
+  async function resolveChallenge(challengeId: string, action: "accept" | "decline") {
+    if (!serverId || challengeBusy) return;
+    setChallengeBusy(true);
+    setChallengeMessage("");
+    try {
+      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/wars/challenges/${encodeURIComponent(challengeId)}/${action}`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
+      setChallengeMessage(`Challenge ${action === "accept" ? "accepted" : "declined"}. Refresh the dashboard to see the latest state.`);
+    } catch (resolveError) {
+      setChallengeMessage(resolveError instanceof Error ? resolveError.message : "Challenge update failed.");
+    } finally {
+      setChallengeBusy(false);
+    }
+  }
+
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <PanelHeader icon={<Swords className="h-5 w-5" />} title="Server Wars" />
+          <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-zinc-400">
+            Server VS Server challenges use event-window score snapshots. Players contribute to server scores; plan tier does not affect scoring.
+          </p>
+        </div>
+        <Link href="/events/server-wars" className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50">
+          Public Wars
+        </Link>
+      </div>
+      {loading ? (
+        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Loading Server Wars module...</p>
+      ) : error ? (
+        <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm font-bold text-cyan-50">{error}</p>
+      ) : null}
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <DashboardMiniMetric label="Plan Access" value={wars?.access?.effectivePlan ?? "free"} />
+        <DashboardMiniMetric label="Eligible Rules" value={String(wars?.eligibility?.eligibleRulesets?.length ?? 0)} />
+        <DashboardMiniMetric label="Active Wars" value={String(activeEvents.length)} />
+        <DashboardMiniMetric label="Trophies" value={String(trophies.length)} />
+      </div>
+      {!canCreateChallenge ? (
+        <div className="mt-4 rounded-lg border border-violet-300/20 bg-violet-400/10 p-4 text-sm font-bold leading-6 text-violet-50">
+          {wars?.access?.lockedReason ?? "Pro or Premium is required to create Server VS Server challenges."}
+        </div>
+      ) : (
+        <form onSubmit={submitChallenge} className="mt-4 grid gap-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4">
+          <p className="text-sm font-bold leading-6 text-emerald-50">
+            Challenge creation is available for this server. Opponents must be eligible live public servers in the same category.
+          </p>
+          <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/70">
+              Opponent server id or slug
+              <input value={opponentServerId} onChange={(event) => setOpponentServerId(event.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50" placeholder="server id or public slug" />
+            </label>
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/70">
+              Ruleset
+              <select value={rulesetKey} onChange={(event) => setRulesetKey(event.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50">
+                {(rulesets.length ? rulesets : [{ key: "deathmatch_war", title: "Deathmatch War" }]).map((ruleset) => (
+                  <option key={ruleset.key} value={ruleset.key}>{ruleset.title}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="grid gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/70">
+            Challenge title
+            <input value={challengeTitle} onChange={(event) => setChallengeTitle(event.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50" placeholder="optional" />
+          </label>
+          <button type="submit" disabled={challengeBusy || !opponentServerId.trim()} className="w-fit rounded-lg border border-cyan-300/30 bg-cyan-400/12 px-4 py-2 text-xs font-black uppercase text-cyan-50 disabled:cursor-not-allowed disabled:opacity-50">
+            {challengeBusy ? "Working" : "Create Challenge"}
+          </button>
+        </form>
+      )}
+      {challengeMessage ? (
+        <p className="mt-3 rounded-lg border border-white/10 bg-black/24 p-3 text-sm font-bold text-zinc-200">{challengeMessage}</p>
+      ) : null}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Active Events</p>
+          <div className="mt-3 space-y-2">
+            {activeEvents.length ? activeEvents.slice(0, 4).map((event) => (
+              <Link key={event.id} href={`/events/server-wars?event=${encodeURIComponent(event.slug)}`} className="block rounded-lg border border-white/10 bg-white/[0.03] p-3 transition hover:border-cyan-300/30">
+                <p className="text-sm font-black text-white">{event.title}</p>
+                <p className="mt-1 text-xs font-bold uppercase text-zinc-500">{event.status} · {event.scoringRulesetTitle}</p>
+              </Link>
+            )) : (
+              <p className="text-sm font-bold text-zinc-400">No active Server Wars yet.</p>
+            )}
+          </div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Pending Challenges</p>
+          <div className="mt-3 space-y-2">
+            {pendingChallenges.length ? pendingChallenges.slice(0, 4).map((challenge, index) => (
+              <div key={String(challenge.id ?? index)} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-sm font-black text-white">{String(challenge.title ?? "Server War Challenge")}</p>
+                <p className="mt-1 text-xs font-bold uppercase text-zinc-500">
+                  {String(challenge.status ?? "pending")} · {challenge.canRespond ? "Response needed" : "Awaiting opponent"}
+                </p>
+                {challenge.id && challenge.canRespond ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => resolveChallenge(String(challenge.id), "accept")} disabled={challengeBusy} className="rounded-lg border border-emerald-300/30 px-3 py-2 text-[10px] font-black uppercase text-emerald-50 disabled:opacity-50">Accept</button>
+                    <button type="button" onClick={() => resolveChallenge(String(challenge.id), "decline")} disabled={challengeBusy} className="rounded-lg border border-rose-300/30 px-3 py-2 text-[10px] font-black uppercase text-rose-50 disabled:opacity-50">Decline</button>
+                  </div>
+                ) : null}
+              </div>
+            )) : (
+              <p className="text-sm font-bold text-zinc-400">No pending challenges.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function DashboardMiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</p>
+      <p className="mt-1 text-lg font-black uppercase text-white">{value}</p>
+    </div>
   );
 }
 

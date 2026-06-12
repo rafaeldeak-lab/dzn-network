@@ -30,6 +30,7 @@ import {
   Skull,
   Sparkles,
   Star,
+  Swords,
   Target,
   Trophy,
   UserRound,
@@ -219,6 +220,38 @@ type ServerAdvancedPayload = {
     estimated: boolean;
   };
   notes?: string[];
+};
+
+type ServerWarRecordPayload = {
+  ok?: boolean;
+  activeEvents?: Array<{
+    id: string;
+    slug: string;
+    title: string;
+    status: string;
+    scoringRulesetTitle: string;
+    awaitingSnapshot?: boolean;
+  }>;
+  completedEvents?: Array<{
+    id: string;
+    slug: string;
+    title: string;
+    status: string;
+    scoringRulesetTitle: string;
+  }>;
+  trophies?: Array<{
+    trophyKey: string;
+    title: string;
+    category: string | null;
+    awardedAt: string;
+  }>;
+  currentChampionTitles?: Array<{
+    title?: string;
+    category?: string | null;
+    awarded_at?: string;
+    awardedAt?: string;
+  }>;
+  message?: string;
 };
 
 type ReputationSummary = {
@@ -1222,6 +1255,9 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const [advancedPayload, setAdvancedPayload] = useState<ServerAdvancedPayload | null>(null);
   const [advancedLoading, setAdvancedLoading] = useState(true);
   const [advancedError, setAdvancedError] = useState("");
+  const [serverWarsPayload, setServerWarsPayload] = useState<ServerWarRecordPayload | null>(null);
+  const [serverWarsLoading, setServerWarsLoading] = useState(true);
+  const [serverWarsError, setServerWarsError] = useState("");
 
   useEffect(() => {
     console.log("DZN LIVE SERVER PROFILE LOADED");
@@ -1250,6 +1286,36 @@ function ServerProfile({ server }: { server: PublicServer }) {
     }
 
     loadAdvancedShowcase();
+    return () => {
+      active = false;
+    };
+  }, [server.linked_server_id]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadServerWarsRecord() {
+      setServerWarsLoading(true);
+      try {
+        const data = await fetchJsonWithRetry<ServerWarRecordPayload>(`/api/public/servers/${encodeURIComponent(server.linked_server_id)}/wars`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+          retries: 1,
+          timeoutMs: 10_000,
+        });
+        if (!active) return;
+        setServerWarsPayload(data);
+        setServerWarsError(data.message ?? "");
+      } catch (error) {
+        if (!active) return;
+        setServerWarsError(error instanceof Error ? error.message : "Server Wars record could not be loaded right now.");
+      } finally {
+        if (active) setServerWarsLoading(false);
+      }
+    }
+
+    loadServerWarsRecord();
     return () => {
       active = false;
     };
@@ -1359,6 +1425,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
           </div>
 
           <ServerAdvancedShowcasePanel payload={advancedPayload} loading={advancedLoading} error={advancedError} server={server} />
+          <ServerWarsProfilePanel payload={serverWarsPayload} loading={serverWarsLoading} error={serverWarsError} />
 
           <div className="grid gap-5 md:grid-cols-2">
             <FeaturePreviewPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." variant="faction" />
@@ -1453,6 +1520,66 @@ function ServerAdvancedShowcasePanel({
         <div className="dzn-advanced-state">Advanced showcase data is awaiting enough imported ADM events.</div>
       )}
     </section>
+  );
+}
+
+function ServerWarsProfilePanel({ payload, loading, error }: { payload: ServerWarRecordPayload | null; loading: boolean; error: string }) {
+  const activeEvents = payload?.activeEvents ?? [];
+  const trophies = payload?.trophies ?? [];
+  const titles = payload?.currentChampionTitles ?? [];
+  return (
+    <GlassPanel title="Server Wars Trophy Cabinet" icon={Swords}>
+      {loading ? (
+        <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm font-bold text-zinc-300">
+          Loading Server Wars record...
+        </div>
+      ) : error ? (
+        <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm font-bold text-cyan-50">
+          {error}
+        </div>
+      ) : null}
+      <div className="grid gap-3 md:grid-cols-3">
+        <AdvancedSummaryStat label="Active Wars" value={formatNumber(activeEvents.length)} icon={Swords} />
+        <AdvancedSummaryStat label="Trophies" value={formatNumber(trophies.length)} icon={Trophy} />
+        <AdvancedSummaryStat label="Titles" value={formatNumber(titles.length)} icon={Crown} />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Active Events</p>
+          <div className="mt-3 space-y-2">
+            {activeEvents.length ? activeEvents.slice(0, 4).map((event) => (
+              <Link key={event.id} href={`/events/server-wars?event=${encodeURIComponent(event.slug)}`} className="block rounded-lg border border-white/10 bg-white/[0.03] p-3 transition hover:border-cyan-300/30">
+                <p className="text-sm font-black text-white">{event.title}</p>
+                <p className="mt-1 text-xs font-bold uppercase text-zinc-500">{event.status} · {event.scoringRulesetTitle}</p>
+              </Link>
+            )) : (
+              <p className="text-sm font-bold text-zinc-400">No active Server Wars for this server yet.</p>
+            )}
+          </div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Trophies & Titles</p>
+          <div className="mt-3 space-y-2">
+            {titles.length ? titles.slice(0, 3).map((title, index) => (
+              <div key={`${title.title ?? "title"}-${index}`} className="rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-3">
+                <p className="text-sm font-black text-white">{title.title ?? "Current Champion"}</p>
+                <p className="mt-1 text-xs font-bold uppercase text-amber-100/70">{title.category ?? "overall"}</p>
+              </div>
+            )) : trophies.length ? trophies.slice(0, 3).map((trophy) => (
+              <div key={trophy.trophyKey} className="rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-3">
+                <p className="text-sm font-black text-white">{trophy.title}</p>
+                <p className="mt-1 text-xs font-bold uppercase text-amber-100/70">{trophy.category ?? "overall"}</p>
+              </div>
+            )) : (
+              <p className="text-sm font-bold text-zinc-400">Completed Server Wars will award permanent trophies here.</p>
+            )}
+          </div>
+        </div>
+      </div>
+      <p className="mt-4 text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
+        Server Wars scores use event-window snapshots. Plans never boost score.
+      </p>
+    </GlassPanel>
   );
 }
 

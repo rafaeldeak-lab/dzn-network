@@ -49,6 +49,7 @@ import { ServerCategoryBadge } from "./ServerCategoryBadge";
 import { ServerEventProfile } from "./ServerEventProfile";
 import { TournamentCard } from "./TournamentCard";
 import { TournamentTable } from "./TournamentTable";
+import { ServerWarsTeaser } from "@/components/server-wars/server-wars-platform";
 
 type LoadState = "loading" | "loaded" | "stale";
 type TournamentStatusFilter = "all" | "upcoming" | "active" | "completed" | string;
@@ -344,6 +345,7 @@ export function EventsHubPage() {
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
+          <ServerWarsTeaser />
           <SectionHeader title="Active Tournaments" href="/events/tournaments?status=active" />
           <div className="grid gap-4 lg:grid-cols-3">
             {(active.length ? active : data.events.slice(0, 3)).slice(0, 3).map((event) => <TournamentCard key={event.id} event={event} />)}

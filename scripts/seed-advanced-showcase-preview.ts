@@ -76,6 +76,25 @@ const servers: PreviewServer[] = [
     updatedAt: "2026-06-06T18:05:00.000Z",
   },
   {
+    id: `${PREVIEW_PREFIX}other-deathmatch`,
+    guildId: `${PREVIEW_PREFIX}guild-other-deathmatch`,
+    guildDbId: `${PREVIEW_PREFIX}discord-guild-other-deathmatch`,
+    userId: `${PREVIEW_PREFIX}other-owner`,
+    ownerDiscordId: `${PREVIEW_PREFIX}other-discord`,
+    serviceId: "900008",
+    slug: "advanced-other-deathmatch",
+    name: "Advanced Other Deathmatch",
+    planKey: "premium",
+    subscriptionStatus: "trialing",
+    mode: "DEATHMATCH",
+    category: "deathmatch",
+    mapName: "ChernarusPlus",
+    currentPlayers: 5,
+    maxPlayers: 44,
+    listingVisibility: "public",
+    updatedAt: "2026-06-06T18:04:30.000Z",
+  },
+  {
     id: `${PREVIEW_PREFIX}pro-pve`,
     guildId: `${PREVIEW_PREFIX}guild-pro-pve`,
     guildDbId: `${PREVIEW_PREFIX}discord-guild-pro-pve`,
@@ -333,6 +352,7 @@ for (const server of servers) {
 }
 
 seedProfilesAndEvents();
+seedServerWarsPreview();
 
 const sqlFile = join(tmpdir(), "dzn-advanced-showcase-preview-seed.sql");
 writeFileSync(sqlFile, `${statements.join("\n")}\n`, "utf8");
@@ -408,6 +428,317 @@ function seedProfilesAndEvents() {
       source_service_id: server.serviceId,
     }));
   }
+}
+
+function seedServerWarsPreview() {
+  const premium = servers.find((server) => server.id.endsWith("premium-dm"))!;
+  const opponent = servers.find((server) => server.id.endsWith("other-deathmatch"))!;
+  const proPve = servers.find((server) => server.id.endsWith("pro-pve"))!;
+
+  addServerWarEvent({
+    id: `${PREVIEW_PREFIX}war-live-deathmatch`,
+    slug: "preview-live-deathmatch-war",
+    title: "Preview Live Deathmatch War",
+    description: "Local preview Server Wars event using deterministic ADM-derived snapshot data.",
+    eventType: "deathmatch_war",
+    category: "deathmatch",
+    eligibleCategories: ["deathmatch"],
+    status: "live",
+    ruleset: "deathmatch_war",
+    startsAt: "2026-06-06T17:00:00.000Z",
+    endsAt: "2026-06-06T20:00:00.000Z",
+    createdByUserId: premium.userId,
+    createdByServerId: premium.id,
+    visibility: "public",
+    packageRequired: "pro",
+  });
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-live-deathmatch`, premium, "joined");
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-live-deathmatch`, opponent, "joined");
+  addServerWarSnapshot(`${PREVIEW_PREFIX}war-live-deathmatch`, premium, 1, 612, {
+    kills: 32,
+    deaths: 24,
+    uniqueFighters: 8,
+    longestKillM: 187.7,
+    kdRatio: 1.33,
+    thresholds: { kdBonus: true, fullEligibility: true },
+  });
+  addServerWarSnapshot(`${PREVIEW_PREFIX}war-live-deathmatch`, opponent, 2, 488, {
+    kills: 24,
+    deaths: 21,
+    uniqueFighters: 7,
+    longestKillM: 154.4,
+    kdRatio: 1.14,
+    thresholds: { kdBonus: false, fullEligibility: true },
+  });
+
+  addServerWarEvent({
+    id: `${PREVIEW_PREFIX}war-auto-scheduled`,
+    slug: "preview-auto-start-server-war",
+    title: "Preview Auto-Started Server War",
+    description: "Local preview event that automation promotes from scheduled to live and snapshots automatically.",
+    eventType: "deathmatch_war",
+    category: "deathmatch",
+    eligibleCategories: ["deathmatch"],
+    status: "scheduled",
+    ruleset: "deathmatch_war",
+    startsAt: "2026-06-06T13:00:00.000Z",
+    endsAt: "2035-06-06T20:00:00.000Z",
+    createdByUserId: premium.userId,
+    createdByServerId: premium.id,
+    visibility: "public",
+    packageRequired: "pro",
+  });
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-auto-scheduled`, premium, "joined");
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-auto-scheduled`, opponent, "joined");
+
+  addServerWarEvent({
+    id: `${PREVIEW_PREFIX}war-auto-ended`,
+    slug: "preview-auto-finalized-server-war",
+    title: "Preview Auto-Finalized Server War",
+    description: "Local preview event that automation finalizes into frozen results, trophy, and current title.",
+    eventType: "deathmatch_war",
+    category: "deathmatch",
+    eligibleCategories: ["deathmatch"],
+    status: "live",
+    ruleset: "deathmatch_war",
+    startsAt: "2026-06-06T13:00:00.000Z",
+    endsAt: "2026-06-06T19:00:00.000Z",
+    createdByUserId: premium.userId,
+    createdByServerId: premium.id,
+    visibility: "public",
+    packageRequired: "pro",
+  });
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-auto-ended`, premium, "joined");
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-auto-ended`, opponent, "joined");
+
+  addServerWarEvent({
+    id: `${PREVIEW_PREFIX}war-pending-challenge`,
+    slug: "preview-pending-challenge",
+    title: "Preview Pending Challenge",
+    description: "Local preview head-to-head challenge awaiting opponent response.",
+    eventType: "deathmatch_war",
+    category: "deathmatch",
+    eligibleCategories: ["deathmatch"],
+    status: "pending_acceptance",
+    ruleset: "deathmatch_war",
+    startsAt: "2026-06-06T19:00:00.000Z",
+    endsAt: "2026-06-06T21:00:00.000Z",
+    createdByUserId: premium.userId,
+    createdByServerId: premium.id,
+    visibility: "public",
+    packageRequired: "pro",
+  });
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-pending-challenge`, premium, "accepted");
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-pending-challenge`, opponent, "pending");
+  statements.push(insert("server_war_challenges", {
+    id: `${PREVIEW_PREFIX}challenge-pending`,
+    event_id: `${PREVIEW_PREFIX}war-pending-challenge`,
+    challenger_server_id: premium.id,
+    opponent_server_id: opponent.id,
+    challenger_owner_user_id: premium.userId,
+    opponent_owner_user_id: opponent.userId,
+    status: "pending",
+    message: "Local preview pending same-category Server Wars challenge.",
+    expires_at: "2026-06-07T18:00:00.000Z",
+    accepted_at: null,
+    declined_at: null,
+    created_at: NOW,
+    updated_at: NOW,
+  }));
+
+  addServerWarEvent({
+    id: `${PREVIEW_PREFIX}war-expired-challenge`,
+    slug: "preview-expired-challenge",
+    title: "Preview Expired Challenge",
+    description: "Local preview challenge that automation marks expired without awarding trophies.",
+    eventType: "deathmatch_war",
+    category: "deathmatch",
+    eligibleCategories: ["deathmatch"],
+    status: "pending_acceptance",
+    ruleset: "deathmatch_war",
+    startsAt: "2026-06-08T19:00:00.000Z",
+    endsAt: "2026-06-08T21:00:00.000Z",
+    createdByUserId: premium.userId,
+    createdByServerId: premium.id,
+    visibility: "public",
+    packageRequired: "pro",
+  });
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-expired-challenge`, premium, "accepted");
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-expired-challenge`, opponent, "pending");
+  statements.push(insert("server_war_challenges", {
+    id: `${PREVIEW_PREFIX}challenge-expired`,
+    event_id: `${PREVIEW_PREFIX}war-expired-challenge`,
+    challenger_server_id: premium.id,
+    opponent_server_id: opponent.id,
+    challenger_owner_user_id: premium.userId,
+    opponent_owner_user_id: opponent.userId,
+    status: "pending",
+    message: "Local preview expired same-category Server Wars challenge.",
+    expires_at: "2026-06-09T18:00:00.000Z",
+    accepted_at: null,
+    declined_at: null,
+    created_at: NOW,
+    updated_at: NOW,
+  }));
+
+  addServerWarEvent({
+    id: `${PREVIEW_PREFIX}war-completed-builders`,
+    slug: "preview-completed-builder-cup",
+    title: "Preview Completed Builder Cup",
+    description: "Local preview completed Server Wars event with frozen results and trophy records.",
+    eventType: "pve_builder_cup",
+    category: "pve",
+    eligibleCategories: ["pve", "pvp_pve"],
+    status: "completed",
+    ruleset: "pve_builder_cup",
+    startsAt: "2026-06-05T17:00:00.000Z",
+    endsAt: "2026-06-05T20:00:00.000Z",
+    createdByUserId: proPve.userId,
+    createdByServerId: proPve.id,
+    visibility: "public",
+    packageRequired: "pro",
+    finalizedAt: "2026-06-05T20:05:00.000Z",
+  });
+  addServerWarParticipant(`${PREVIEW_PREFIX}war-completed-builders`, proPve, "joined", 1, 355);
+  addServerWarSnapshot(`${PREVIEW_PREFIX}war-completed-builders`, proPve, 1, 355, {
+    buildScore: 96,
+    structuresBuilt: 10,
+    repairs: 1,
+    activeBuilders: 4,
+    raidScore: 8,
+  }, "2026-06-05T20:00:00.000Z");
+  statements.push(insert("server_war_results", {
+    id: `${PREVIEW_PREFIX}result-builders-pro`,
+    event_id: `${PREVIEW_PREFIX}war-completed-builders`,
+    server_id: proPve.id,
+    final_rank: 1,
+    final_score: 355,
+    metric_breakdown: JSON.stringify({
+      buildScore: 96,
+      structuresBuilt: 10,
+      repairs: 1,
+      activeBuilders: 4,
+      raidScore: 8,
+    }),
+    top_contributors: JSON.stringify([{ name: "Builder PRO", contribution: "Top builder", value: 96 }]),
+    finalized_at: "2026-06-05T20:05:00.000Z",
+    created_at: "2026-06-05T20:05:00.000Z",
+  }));
+  statements.push(insert("server_trophies", {
+    id: `${PREVIEW_PREFIX}trophy-builders-pro`,
+    server_id: proPve.id,
+    event_id: `${PREVIEW_PREFIX}war-completed-builders`,
+    trophy_key: "pve_builder_cup_champion",
+    title: "PVE Builder Cup Champion",
+    description: "Winner of the local preview Builder Cup.",
+    category: "pve",
+    reward_type: "permanent",
+    awarded_at: "2026-06-05T20:05:00.000Z",
+    expires_at: null,
+    is_current_title: 0,
+    metadata: JSON.stringify({ source: "local-preview", score: 355 }),
+    created_at: "2026-06-05T20:05:00.000Z",
+  }));
+  statements.push(insert("server_champion_titles", {
+    id: `${PREVIEW_PREFIX}champion-builders-pro`,
+    server_id: proPve.id,
+    event_id: `${PREVIEW_PREFIX}war-completed-builders`,
+    title_key: "current_pve_builder_champion",
+    title: "Current PVE Builder Champion",
+    category: "pve",
+    awarded_at: "2026-06-05T20:05:00.000Z",
+    expires_at: "2026-07-05T20:05:00.000Z",
+    active: 1,
+    created_at: "2026-06-05T20:05:00.000Z",
+    updated_at: "2026-06-05T20:05:00.000Z",
+  }));
+}
+
+function addServerWarEvent(event: {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  eventType: string;
+  category: string;
+  eligibleCategories: string[];
+  status: string;
+  ruleset: string;
+  startsAt: string;
+  endsAt: string;
+  createdByUserId: string;
+  createdByServerId: string;
+  visibility: string;
+  packageRequired: string;
+  finalizedAt?: string;
+}) {
+  statements.push(insert("server_war_events", {
+    id: event.id,
+    slug: event.slug,
+    title: event.title,
+    description: event.description,
+    event_type: event.eventType,
+    category: event.category,
+    eligible_categories: JSON.stringify(event.eligibleCategories),
+    status: event.status,
+    scoring_ruleset_key: event.ruleset,
+    starts_at: event.startsAt,
+    ends_at: event.endsAt,
+    created_by_user_id: event.createdByUserId,
+    created_by_server_id: event.createdByServerId,
+    visibility: event.visibility,
+    package_required: event.packageRequired,
+    created_at: NOW,
+    updated_at: NOW,
+    finalized_at: event.finalizedAt ?? null,
+  }));
+}
+
+function addServerWarParticipant(eventId: string, server: PreviewServer, status: string, finalRank: number | null = null, finalScore: number | null = null) {
+  statements.push(insert("server_war_participants", {
+    id: `${eventId}-${server.id}-participant`,
+    event_id: eventId,
+    server_id: server.id,
+    owner_user_id: server.userId,
+    category_at_entry: server.category,
+    status,
+    joined_at: status === "joined" || status === "accepted" ? NOW : null,
+    accepted_at: status === "joined" || status === "accepted" ? NOW : null,
+    declined_at: null,
+    final_rank: finalRank,
+    final_score: finalScore,
+    created_at: NOW,
+    updated_at: NOW,
+  }));
+}
+
+function addServerWarSnapshot(eventId: string, server: PreviewServer, rank: number, score: number, metricBreakdown: Record<string, unknown>, snapshotAt = "2026-06-06T18:00:00.000Z") {
+  statements.push(insert("server_war_score_snapshots", {
+    id: `${eventId}-${server.id}-snapshot`,
+    event_id: eventId,
+    server_id: server.id,
+    snapshot_at: snapshotAt,
+    score,
+    rank,
+    metric_breakdown: JSON.stringify({
+      ...metricBreakdown,
+      score,
+      rank,
+      dataSource: "local-preview-snapshot",
+    }),
+    contributor_summary: JSON.stringify({
+      topContributors: [
+        { name: "Raptor", role: "Combat contributor", value: Number(metricBreakdown.kills ?? metricBreakdown.buildScore ?? 0) },
+        { name: "Builder", role: "Support contributor", value: Number(metricBreakdown.uniqueFighters ?? metricBreakdown.structuresBuilt ?? 0) },
+      ],
+      rawCoordinatesExposed: false,
+      exactRoutesExposed: false,
+    }),
+    data_window_start: "2026-06-06T17:00:00.000Z",
+    data_window_end: "2026-06-06T20:00:00.000Z",
+    computed_at: snapshotAt,
+    created_at: snapshotAt,
+  }));
 }
 
 function addKill(server: PreviewServer, index: number, names: string[]) {
