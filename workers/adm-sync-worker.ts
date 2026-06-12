@@ -29,6 +29,7 @@ const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 const CRON_ENDPOINT_TIMEOUT_MS = 55000;
 const SCHEDULED_WORKER_RUNTIME_BUDGET_MS = 22_000;
 const SCHEDULED_WORKER_MIN_REMAINING_MS = 2_500;
+const SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false;
 const ADM_WORKER_CURSOR_KEY = "last_adm_linked_server_id";
 const ADM_WORKER_LAST_RECOVERY_KEY = "last_automation_lock_recovery_at";
 const ADM_WORKER_LAST_BUILD_REPARSE_KEY = "last_adm_build_reparse_at";
@@ -37,7 +38,7 @@ const CRON_ENDPOINTS: CronEndpoint[] = [
   {
     label: "server-wars",
     path: "/api/cron/server-wars/refresh",
-    body: { source: "cloudflare-worker", max_events: 2, max_finalizations: 2, max_challenge_expirations: 20, deadline_ms: 3500 },
+    body: { source: "cloudflare-worker", max_events: 1, max_finalizations: 1, max_challenge_expirations: 10, deadline_ms: 2500 },
   },
   {
     label: "discord-posts",
@@ -113,7 +114,7 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
     const baseUrl = appBaseUrl(env);
     const results = [];
     results.push(await runDirectAdmSync(env, options, budget));
-    if (hasScheduledRuntimeBudget(budget, 5_000)) {
+    if (hasScheduledRuntimeBudget(budget, 7_000)) {
       await runHourlyPostAdmMaintenance(env, budget).catch((error) => {
         console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
           message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "Unknown maintenance error",
@@ -124,13 +125,13 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
         message: "scheduled worker runtime budget is low",
       });
     }
-    results.push(hasScheduledRuntimeBudget(budget, 5_000)
+    results.push(hasScheduledRuntimeBudget(budget, 9_000)
       ? await runEventScoring(env)
       : skippedForBudgetResult("event-scoring", "Event scoring skipped because the scheduled worker runtime budget is low."));
-    results.push(hasScheduledRuntimeBudget(budget, 7_000)
+    results.push(SERVER_WARS_WORKER_SIDE_TASK_ENABLED && hasScheduledRuntimeBudget(budget, 10_000)
       ? await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options, budget)
-      : skippedForBudgetResult(CRON_ENDPOINTS[0].label, "Server Wars automation skipped because the scheduled worker runtime budget is low."));
-    results.push(hasScheduledRuntimeBudget(budget, 6_000)
+      : skippedForBudgetResult(CRON_ENDPOINTS[0].label, "Server Wars automation is temporarily cron-route-only to preserve ADM Worker CPU budget."));
+    results.push(hasScheduledRuntimeBudget(budget, 9_000)
       ? await runCronEndpoint(CRON_ENDPOINTS[1], baseUrl, secret, options, budget)
       : skippedForBudgetResult(CRON_ENDPOINTS[1].label, "Discord post cron skipped because the scheduled worker runtime budget is low."));
 
@@ -161,10 +162,14 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
   const source = normalizeAutomationCronSource("cloudflare", options.cron ?? "cloudflare-worker");
   const startedAt = new Date().toISOString();
   try {
-    const maxRuntimeMs = Math.max(2_500, Math.min(10_000, remainingScheduledRuntimeBudgetMs(budget) - SCHEDULED_WORKER_MIN_REMAINING_MS));
+    const availableRuntimeMs = remainingScheduledRuntimeBudgetMs(budget) - SCHEDULED_WORKER_MIN_REMAINING_MS;
+    if (availableRuntimeMs < 2_500) {
+      return skippedForBudgetResult("adm", "ADM sync skipped because the scheduled worker runtime budget is too low to start safely.");
+    }
+    const maxRuntimeMs = Math.max(2_500, Math.min(3_500, availableRuntimeMs));
     const result = await runAdmWorkerSyncTick(env, {
       cron: options.cron ?? "cloudflare-worker",
-      maxLinesPerServer: 15000,
+      maxLinesPerServer: 5000,
       maxRuntimeMs,
       cursorKey: ADM_WORKER_CURSOR_KEY,
     });

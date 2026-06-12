@@ -1,16 +1,15 @@
 import { json, methodNotAllowed } from "../../../_lib/http";
 import { getPublicServerWarsPayload } from "../../../_lib/server-wars";
-import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../../_lib/public-auth";
+import { publicAccessCacheHeaders, publicApiErrorHeaders } from "../../../_lib/public-auth";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
-  const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
   const url = new URL(request.url);
   const limit = numberParam(url.searchParams.get("limit"), 12);
   try {
     const payload = await getPublicServerWarsPayload(env, { limit });
-    return json(payload, { headers: publicAccessCacheHeaders(viewerLoggedIn) });
+    return json(payload, { headers: publicAccessCacheHeaders(false) });
   } catch (error) {
     console.warn("DZN SERVER WARS PUBLIC LOAD FAILED", safeError(error));
     return json({

@@ -138,7 +138,25 @@ const SERVER_WAR_SCHEMA_STATEMENTS = [
   "CREATE INDEX IF NOT EXISTS idx_server_champion_titles_active_category ON server_champion_titles(active, category)",
 ] as const;
 
+let serverWarsSchemaEnsurePromise: Promise<void> | null = null;
+let serverWarsSchemaEnsured = false;
+
 export async function ensureServerWarsSchema(env: Env) {
+  if (serverWarsSchemaEnsured) return;
+  if (!serverWarsSchemaEnsurePromise) {
+    serverWarsSchemaEnsurePromise = runServerWarsSchemaEnsure(env)
+      .then(() => {
+        serverWarsSchemaEnsured = true;
+      })
+      .catch((error) => {
+        serverWarsSchemaEnsurePromise = null;
+        throw error;
+      });
+  }
+  await serverWarsSchemaEnsurePromise;
+}
+
+async function runServerWarsSchemaEnsure(env: Env) {
   const db = requireDb(env);
   for (const statement of SERVER_WAR_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();

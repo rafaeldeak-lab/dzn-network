@@ -47,11 +47,12 @@ assert.match(cronRouteSource, /methodNotAllowed/, "Cron route should reject unsa
 assert.match(cronRouteSource, /cache-control[\s\S]*no-store/, "Cron route must not be cached.");
 assert.doesNotMatch(cronRouteSource, /getSessionUser|requireServerOwnerOrDznAdmin|position_x|raw_line|TOKEN_ENCRYPTION_KEY|STRIPE_SECRET/i);
 
-assert.match(workerSource, /\/api\/cron\/server-wars\/refresh/, "ADM Worker should schedule Server Wars automation as a side task.");
+assert.match(workerSource, /\/api\/cron\/server-wars\/refresh/, "ADM Worker should keep the protected Server Wars cron route configured.");
 assert.match(workerSource, /label: "server-wars"/, "Worker cron endpoint should be labelled server-wars.");
-assert.match(workerSource, /max_events: 2/, "Worker Server Wars batch should stay small.");
-assert.match(workerSource, /deadline_ms: 3500/, "Worker Server Wars endpoint should have a tight deadline.");
-assert.match(workerSource, /Server Wars automation skipped because the scheduled worker runtime budget is low/, "Worker should skip Server Wars when budget is low.");
+assert.match(workerSource, /SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false/, "Server Wars Worker side task should stay disabled until ADM Worker CPU headroom is proven stable.");
+assert.match(workerSource, /max_events: 1/, "Worker Server Wars batch should stay small if re-enabled.");
+assert.match(workerSource, /deadline_ms: 2500/, "Worker Server Wars endpoint should have a tight deadline if re-enabled.");
+assert.match(workerSource, /cron-route-only to preserve ADM Worker CPU budget/, "Worker should keep Server Wars automation on the protected cron route for this hotfix.");
 assert.equal(
   workerSource.indexOf("runEventScoring(env)") < workerSource.indexOf("CRON_ENDPOINTS[0]"),
   true,

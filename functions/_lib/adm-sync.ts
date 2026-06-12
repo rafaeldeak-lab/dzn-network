@@ -6551,7 +6551,7 @@ export async function runAdmWorkerSyncTick(
     }
 
     if (!explicitTargetFileName && !scheduledTargetFileName) {
-      if (!hasTickBudget(2_000)) {
+      if (!hasTickBudget(3_000)) {
         await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
         return admWorkerResult({
           metadata,
@@ -6568,7 +6568,7 @@ export async function runAdmWorkerSyncTick(
         triggerType: "scheduled_worker",
         chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
         processImmediately: false,
-        maxJobsToCreate: Math.max(1, Math.min(budget.maxFilesPerInvocation, getAdmBackfillQueueLimit(selected.plan_key))),
+        maxJobsToCreate: 1,
         scheduledBudgeted: true,
         skipMetadataRefresh: true,
       });
@@ -6593,7 +6593,7 @@ export async function runAdmWorkerSyncTick(
       });
     }
 
-    if (!explicitTargetFileName && scheduledTargetFileName && !hasTickBudget(2_500)) {
+    if (!explicitTargetFileName && scheduledTargetFileName && !hasTickBudget(3_000)) {
       await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       return admWorkerResult({
         metadata,
@@ -6705,7 +6705,7 @@ export async function runAdmWorkerSyncTick(
         currentFileMaxPathVariants: explicitTargetFileName ? 2 : Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
         trySeekWithoutRaw: true,
         maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
-        maxChunkedReadChunks: budget.maxChunkedReadChunks,
+        maxChunkedReadChunks: Math.max(1, Math.min(4, budget.maxChunkedReadChunks)),
         diagnostics: {
           db: requireDb(env),
           serverId: selected.id,
