@@ -154,6 +154,7 @@ const HOME_STATS_NO_STORE_HEADERS = {
   vary: "Cookie",
 };
 const HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS = 2 * 60 * 1000;
+const HOME_STATS_AUTH_FAST_PATH_MAX_AGE_MS = 5 * 60 * 1000;
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
@@ -165,23 +166,21 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const requestId = request.headers.get("cf-ray");
 
   try {
-    if (!viewerLoggedIn) {
-      const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
-      if (cached && isFreshPublicHomeStatsSnapshot(cached.generated_at)) {
-        const payloadWithFreshCounters = await refreshHomeStatsLiveCounters(env, cached.payload).catch(() => cached.payload);
-        const payload = withHomeStatsEvidence(payloadWithFreshCounters, {
-          generatedAt: cached.generated_at,
-          source: "last_known",
-          statusMessage: "Updated from cached public ADM snapshot",
-        });
-        return json(withPublicApiMetadata(payload, {
-          generated_at: cached.generated_at,
-          source: "last_known",
-          stale: false,
-          snapshot_generated_at: cached.generated_at,
-          message: "Updated from cached public ADM snapshot.",
-        }), { headers });
-      }
+    const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
+    if (cached && isFreshHomeStatsSnapshot(cached.generated_at, viewerLoggedIn)) {
+      const payloadWithFreshCounters = await refreshHomeStatsLiveCounters(env, cached.payload).catch(() => cached.payload);
+      const payload = withHomeStatsEvidence(payloadWithFreshCounters, {
+        generatedAt: cached.generated_at,
+        source: "last_known",
+        statusMessage: "Updated from cached public ADM snapshot",
+      });
+      return json(withPublicApiMetadata(payload, {
+        generated_at: cached.generated_at,
+        source: "last_known",
+        stale: false,
+        snapshot_generated_at: cached.generated_at,
+        message: "Updated from cached public ADM snapshot.",
+      }), { headers });
     }
 
     const generatedAt = new Date().toISOString();
@@ -265,8 +264,13 @@ function homeStatsResponseHeaders(viewerLoggedIn: boolean) {
 }
 
 function isFreshPublicHomeStatsSnapshot(generatedAt: string | null | undefined) {
+  return isFreshHomeStatsSnapshot(generatedAt, false);
+}
+
+function isFreshHomeStatsSnapshot(generatedAt: string | null | undefined, viewerLoggedIn: boolean) {
   const timestamp = Date.parse(generatedAt ?? "");
-  return Number.isFinite(timestamp) && Date.now() - timestamp <= HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS;
+  const maxAgeMs = viewerLoggedIn ? HOME_STATS_AUTH_FAST_PATH_MAX_AGE_MS : HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS;
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= maxAgeMs;
 }
 
 async function refreshHomeStatsLiveCounters<T extends {
