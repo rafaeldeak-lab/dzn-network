@@ -6,6 +6,7 @@ import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
 type DiscordPostRunBody = {
   max_jobs?: number;
+  deadline_ms?: number;
   cron?: string;
   source?: string;
 };
@@ -34,15 +35,16 @@ export async function handleDiscordPostRun(
   { request, env }: PagesContext,
   handlers: DiscordPostRunHandlers = DEFAULT_HANDLERS,
 ) {
-  const body = await readJson<DiscordPostRunBody>(request);
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
+  const body = await readJson<DiscordPostRunBody>(request);
   const source = normalizeAutomationCronSource(body.source, body.cron);
   const startedAt = new Date().toISOString();
   let result: Awaited<ReturnType<typeof dispatchQueuedDiscordPostUpdates>>;
   try {
     result = await handlers.dispatch(env, {
-      maxJobs: sanitizePositiveInteger(body.max_jobs, 25),
+      maxJobs: sanitizePositiveInteger(body.max_jobs, 2, 10),
+      deadlineMs: sanitizePositiveInteger(body.deadline_ms, 2500, 5000),
     });
     await safeRecordCronRun(env, source, result.failed > 0 && (result.posted > 0 || result.skipped > 0) ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
       processedCount: result.processed,
@@ -64,9 +66,9 @@ export function isDiscordPostCronAuthorized(request: Request, env: Env) {
   return isCronSecretAuthorized(request, env);
 }
 
-function sanitizePositiveInteger(value: unknown, fallback: number) {
+function sanitizePositiveInteger(value: unknown, fallback: number, max = 100000) {
   const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), 100000) : fallback;
+  return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), max) : fallback;
 }
 
 async function safeRecordCronRun(

@@ -1,0 +1,107 @@
+name: DZN Auto Update Schedulers
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+concurrency:
+  group: dzn-auto-update-schedulers
+  cancel-in-progress: false
+
+jobs:
+  auto-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run protected auto-update routes
+        env:
+          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET"
+            exit 1
+          fi
+          APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
+
+          {
+            echo "## DZN Auto Update Schedulers"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          call_dzn() {
+            local name="$1"
+            local path="$2"
+            local payload="$3"
+            local body_file
+            body_file="$(mktemp)"
+            local curl_exit=0
+            local http_code
+            http_code="$(curl --silent --show-error --max-time 25 \
+              --output "$body_file" \
+              --write-out "%{http_code}" \
+              -X POST "${APP_URL}${path}" \
+              -H "x-dzn-cron-secret: ${CRON_SECRET}" \
+              -H "x-sync-cron-secret: ${CRON_SECRET}" \
+              -H "x-cron-secret: ${CRON_SECRET}" \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              -H "Content-Type: application/json" \
+              --data "${payload}")" || curl_exit=$?
+            local body
+            body="$(cat "$body_file")"
+            rm -f "$body_file"
+            if [ "$curl_exit" -ne 0 ]; then
+              echo "::error::${name} curl failed with exit ${curl_exit}."
+              exit "$curl_exit"
+            fi
+            node - "$name" "$http_code" "$body" <<'NODE'
+          const fs = require("node:fs");
+          const [name, codeText, body] = process.argv.slice(2);
+          const code = Number(codeText);
+          let parsed = {};
+          try {
+            parsed = body ? JSON.parse(body) : {};
+          } catch {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${name}: HTTP ${code}; invalid JSON response\n`);
+            process.exit(2);
+          }
+          const safe = {
+            ok: parsed.ok,
+            processed: parsed.processed ?? parsed.processedCount ?? parsed.processed_count ?? 0,
+            succeeded: parsed.succeeded ?? 0,
+            skipped: parsed.skipped ?? parsed.skippedCount ?? parsed.skipped_count ?? 0,
+            failed: parsed.failed ?? parsed.failedCount ?? parsed.failed_count ?? 0,
+            updatedPlayerCounts: parsed.updated_player_counts ?? 0,
+            budgetExhausted: parsed.budgetExhausted ?? false,
+            snapshots: Array.isArray(parsed.snapshots) ? parsed.snapshots.length : 0,
+            finalized: Array.isArray(parsed.finalized) ? parsed.finalized.length : 0,
+            expiredChallenges: parsed.transitions?.expiredChallenges ?? 0,
+          };
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `- ${name}: HTTP ${code}; ok=${safe.ok}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}\n`,
+          );
+          console.log(`${name}: HTTP ${code}; ok=${safe.ok}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}`);
+          if (code === 401 || code === 403) {
+            console.error(`${name}: cron auth failed.`);
+            process.exit(1);
+          }
+          if (code < 200 || code >= 300) {
+            console.error(`${name}: endpoint returned HTTP ${code}.`);
+            process.exit(1);
+          }
+          NODE
+          }
+
+          call_dzn "Metadata/player-count refresh" "/api/sync/metadata/run" '{"source":"github-scheduled","cron":"dzn-auto-update-schedulers","max_servers":2}'
+          call_dzn "Server Wars refresh" "/api/cron/server-wars/refresh" '{"source":"github-scheduled","max_events":1,"max_finalizations":1,"max_challenge_expirations":10,"deadline_ms":2500}'
+          call_dzn "Discord posts dispatch" "/api/sync/discord-posts/run" '{"source":"github-scheduled","cron":"dzn-auto-update-schedulers","max_jobs":2,"deadline_ms":2500}'
+
+          {
+            echo ""
+            echo "Overall: success"
+          } >> "$GITHUB_STEP_SUMMARY"
