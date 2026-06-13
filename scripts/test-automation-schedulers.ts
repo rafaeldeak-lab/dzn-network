@@ -29,8 +29,8 @@ assert.equal(workflow.includes("echo \"$CRON_SECRET\""), false);
 assert.equal(workflow.includes("echo \"${CRON_SECRET}\""), false);
 
 assert.equal(workflow.includes("/api/sync/metadata/run"), true);
-assert.equal(workflow.includes('"max_servers":1'), true);
-assert.equal(workflow.includes('"deadline_ms":20000'), true);
+assert.equal(workflow.includes('"max_servers":3'), true);
+assert.equal(workflow.includes('"deadline_ms":25000'), true);
 assert.equal(workflow.includes('"async":true'), true);
 assert.equal(workflow.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(workflow.includes('"max_events":1'), true);
