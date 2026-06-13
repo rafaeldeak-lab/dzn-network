@@ -10,6 +10,9 @@ const metadataCron = readFileSync("functions/api/sync/metadata/run.ts", "utf8");
 
 assert.equal(workflow.includes("name: DZN Auto Update Schedulers"), true);
 assert.equal(workflow.includes("workflow_dispatch:"), true);
+assert.equal(workflow.includes("push:"), true);
+assert.equal(workflow.includes("branches:"), true);
+assert.equal(workflow.includes("- main"), true);
 assert.equal(workflow.includes("schedule:"), true);
 assert.equal(workflow.includes('cron: "*/5 * * * *"'), true);
 assert.equal(workflow.includes("concurrency:"), true);
