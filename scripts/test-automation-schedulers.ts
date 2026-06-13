@@ -48,6 +48,7 @@ assert.equal(workflow.includes("STRIPE_SECRET_KEY"), false);
 assert.equal(metadataCron.includes("requireCronSecret"), true);
 assert.equal(metadataCron.includes("refreshLivePlayerCountsForActiveServers"), true);
 assert.equal(metadataCron.includes("queueDiscordUpdates: false"), true);
+assert.equal(metadataCron.includes("skipAutomationMaintenance: true"), true);
 assert.equal(metadataCron.includes("deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 60_000)"), true);
 assert.equal(metadataCron.includes("body.async === true"), true);
 assert.equal(metadataCron.includes("waitUntil(runMetadataRefresh"), true);

@@ -54,6 +54,7 @@ export async function handleMetadataSyncRun(
     deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 60_000),
     includeResults: true,
     queueDiscordUpdates: false,
+    skipAutomationMaintenance: true,
   };
 
   if (body.async === true) {

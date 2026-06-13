@@ -36,6 +36,7 @@ async function run() {
       assert.equal(options.deadlineMs, 20000);
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
+      assert.equal(options.skipAutomationMaintenance, true);
       return {
         processed: 3,
         succeeded: 3,
@@ -108,6 +109,7 @@ async function run() {
       assert.equal(options.deadlineMs, 20000);
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
+      assert.equal(options.skipAutomationMaintenance, true);
       return {
         processed: 1,
         succeeded: 1,

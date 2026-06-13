@@ -1,5 +1,6 @@
 import { decryptToken, sha256 } from "./crypto";
 import {
+  type AutomationSyncServer,
   getAutomationContextForLinkedServer,
   getDueStatusAutomationServers,
   markStatusCheckStarted,
@@ -423,7 +424,7 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
 
 export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
-  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; queueDiscordUpdates?: boolean } = {},
+  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean } = {},
 ): Promise<ScheduledMetadataSyncResult> {
   await ensureLinkedServerMetadataColumns(env);
   const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
@@ -432,7 +433,9 @@ export async function refreshLivePlayerCountsForActiveServers(
   const skipFreshWithinMs = typeof options.skipFreshWithinMs === "number" && Number.isFinite(options.skipFreshWithinMs)
     ? Math.max(0, options.skipFreshWithinMs)
     : null;
-  const rows = await getDueStatusAutomationServers(env, maxServers);
+  const rows = options.skipAutomationMaintenance === true
+    ? await getDueMetadataRefreshServersFast(env, maxServers)
+    : await getDueStatusAutomationServers(env, maxServers);
 
   let processed = 0;
   let succeeded = 0;
@@ -580,6 +583,47 @@ export async function refreshLivePlayerCountsForActiveServers(
     budget_exhausted: budgetExhausted,
     results,
   };
+}
+
+async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): Promise<AutomationSyncServer[]> {
+  const now = new Date().toISOString();
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+              linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
+              linked_servers.server_name, linked_servers.nitrado_service_name,
+              linked_servers.current_players, linked_servers.max_players,
+              linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
+              linked_servers.player_count_status, server_subscriptions.plan_key,
+              server_subscriptions.status AS subscription_status,
+              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+              server_sync_state.next_adm_pull_due_at
+       FROM linked_servers
+       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
+       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+         AND linked_servers.nitrado_service_id IS NOT NULL
+         AND linked_servers.nitrado_service_id != ''
+         AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
+         AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY
+         CASE lower(COALESCE(server_subscriptions.plan_key, 'free'))
+           WHEN 'premium' THEN 4
+           WHEN 'network' THEN 4
+           WHEN 'partner' THEN 4
+           WHEN 'pro' THEN 3
+           WHEN 'starter' THEN 2
+           ELSE 1
+         END DESC,
+         COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') ASC,
+         linked_servers.updated_at DESC
+       LIMIT ?`,
+    )
+    .bind(now, maxServers)
+    .all<AutomationSyncServer>();
+  return rows.results ?? [];
 }
 
 export function detectServerModeFromText(values: Array<string | null | undefined>) {
