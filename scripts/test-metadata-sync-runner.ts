@@ -28,12 +28,14 @@ async function run() {
       "x-dzn-cron-secret": "unit-test-secret",
       "content-type": "application/json",
     },
-    body: JSON.stringify({ cron: "github-actions", max_servers: 25 }),
+    body: JSON.stringify({ cron: "github-actions", max_servers: 2, deadline_ms: 20000 }),
   }), env), {
     refreshMetadata: async (_env, options = {}) => {
       refreshCalled = true;
-      assert.equal(options.maxServers, 25);
+      assert.equal(options.maxServers, 2);
+      assert.equal(options.deadlineMs, 20000);
       assert.equal(options.includeResults, true);
+      assert.equal(options.queueDiscordUpdates, false);
       return {
         processed: 3,
         succeeded: 3,

@@ -6,6 +6,7 @@ import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
 type MetadataSyncRunBody = {
   cron?: string;
+  deadline_ms?: number;
   source?: string;
   max_servers?: number;
 };
@@ -50,8 +51,10 @@ export async function handleMetadataSyncRun(
   let result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>;
   try {
     result = await handlers.refreshMetadata(env, {
-      maxServers: sanitizePositiveInteger(body.max_servers, 25),
+      maxServers: sanitizePositiveInteger(body.max_servers, 1, 5),
+      deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 30_000),
       includeResults: true,
+      queueDiscordUpdates: false,
     });
     await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
       processedCount: result.processed,
@@ -89,9 +92,9 @@ export function isMetadataCronAuthorized(request: Request, env: Env) {
   return isCronSecretAuthorized(request, env);
 }
 
-function sanitizePositiveInteger(value: unknown, fallback: number) {
+function sanitizePositiveInteger(value: unknown, fallback: number, max = 100000) {
   const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), 100000) : fallback;
+  return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), max) : fallback;
 }
 
 async function safeRecordCronRun(

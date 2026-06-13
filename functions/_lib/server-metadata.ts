@@ -37,6 +37,7 @@ export type ScheduledMetadataSyncResult = {
   failed: number;
   skipped: number;
   updated_player_counts: number;
+  budget_exhausted?: boolean;
   results: ScheduledMetadataSyncServerResult[];
 };
 
@@ -422,21 +423,44 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
 
 export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
-  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean } = {},
+  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; queueDiscordUpdates?: boolean } = {},
 ): Promise<ScheduledMetadataSyncResult> {
   await ensureLinkedServerMetadataColumns(env);
   const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
+  const deadlineAtMs = Date.now() + Math.max(500, Math.min(Math.trunc(Number(options.deadlineMs ?? 20_000)) || 20_000, 30_000));
+  const shouldQueueDiscordUpdates = options.queueDiscordUpdates !== false;
   const skipFreshWithinMs = typeof options.skipFreshWithinMs === "number" && Number.isFinite(options.skipFreshWithinMs)
     ? Math.max(0, options.skipFreshWithinMs)
     : null;
   const rows = await getDueStatusAutomationServers(env, maxServers);
 
+  let processed = 0;
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
+  let budgetExhausted = false;
   let updatedPlayerCounts = 0;
   const results: ScheduledMetadataSyncServerResult[] = [];
   for (const row of rows) {
+    if (Date.now() >= deadlineAtMs - 750) {
+      budgetExhausted = true;
+      skipped += 1;
+      results.push({
+        linked_server_id: row.id,
+        service_id: row.nitrado_service_id,
+        server_name: firstString(row.display_name, row.hostname, row.server_name, row.nitrado_service_name),
+        status: "skipped",
+        changed: false,
+        current_players: cleanNumber(row.current_players),
+        max_players: cleanNumber(row.max_players),
+        player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        player_count_last_checked_at: row.player_count_last_checked_at,
+        metadata_last_checked_at: row.metadata_last_checked_at,
+        message: "Metadata refresh budget exhausted before this server",
+      });
+      break;
+    }
+    processed += 1;
     const serverName = firstString(row.display_name, row.hostname, row.server_name, row.nitrado_service_name);
     const previousCheckedAt = row.player_count_last_checked_at ?? row.metadata_last_checked_at;
     if (skipFreshWithinMs !== null && !isMetadataStale(previousCheckedAt, skipFreshWithinMs)) {
@@ -493,7 +517,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         serverStatus: result.metadata?.server_status ?? null,
         lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
       });
-      if (result.ok) {
+      if (result.ok && shouldQueueDiscordUpdates) {
         await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], changed ? "status-change" : "status-check");
       }
       results.push({
@@ -534,11 +558,12 @@ export async function refreshLivePlayerCountsForActiveServers(
   }
 
   const summary = {
-    processed: rows.length,
+    processed,
     succeeded,
     failed,
     skipped,
     updated_player_counts: updatedPlayerCounts,
+    budget_exhausted: budgetExhausted,
   };
 
   console.log("DZN LIVE PLAYER COUNT AUTO SYNC READY", summary);
@@ -547,11 +572,12 @@ export async function refreshLivePlayerCountsForActiveServers(
   console.log("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM", summary);
 
   return {
-    processed: rows.length,
+    processed,
     succeeded,
     failed,
     skipped,
     updated_player_counts: updatedPlayerCounts,
+    budget_exhausted: budgetExhausted,
     results,
   };
 }

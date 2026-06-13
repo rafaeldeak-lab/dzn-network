@@ -29,7 +29,8 @@ assert.equal(workflow.includes("echo \"$CRON_SECRET\""), false);
 assert.equal(workflow.includes("echo \"${CRON_SECRET}\""), false);
 
 assert.equal(workflow.includes("/api/sync/metadata/run"), true);
-assert.equal(workflow.includes('"max_servers":2'), true);
+assert.equal(workflow.includes('"max_servers":1'), true);
+assert.equal(workflow.includes('"deadline_ms":20000'), true);
 assert.equal(workflow.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(workflow.includes('"max_events":1'), true);
 assert.equal(workflow.includes('"max_finalizations":1'), true);
@@ -46,6 +47,8 @@ assert.equal(workflow.includes("STRIPE_SECRET_KEY"), false);
 
 assert.equal(metadataCron.includes("requireCronSecret"), true);
 assert.equal(metadataCron.includes("refreshLivePlayerCountsForActiveServers"), true);
+assert.equal(metadataCron.includes("queueDiscordUpdates: false"), true);
+assert.equal(metadataCron.includes("deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 30_000)"), true);
 assert.equal(serverWarsCron.includes("requireCronSecret"), true);
 assert.equal(serverWarsCron.includes("runServerWarAutomationTick"), true);
 assert.equal(discordRoute.includes("requireCronSecret"), true);
