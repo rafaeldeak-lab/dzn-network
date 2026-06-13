@@ -7,9 +7,11 @@ function read(path: string) {
 
 const admWorkflow = read(".github/workflows/dzn-adm-sync.yml");
 const diagnosticsWorkflow = read(".github/workflows/dzn-nitrado-diagnostics.yml");
+const autoUpdateWorkflow = read(".github/workflows/dzn-auto-update-schedulers.yml");
 const workflows = [
   [".github/workflows/dzn-adm-sync.yml", admWorkflow],
   [".github/workflows/dzn-nitrado-diagnostics.yml", diagnosticsWorkflow],
+  [".github/workflows/dzn-auto-update-schedulers.yml", autoUpdateWorkflow],
 ] as const;
 
 assert.equal(admWorkflow.includes("name: DZN ADM Worker Manual Trigger"), true);
@@ -25,6 +27,14 @@ assert.equal(admWorkflow.includes("/api/sync/ctf-scorecards/run"), false);
 assert.equal(diagnosticsWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(diagnosticsWorkflow.includes("schedule:"), false);
 assert.equal(diagnosticsWorkflow.includes("- cron:"), false);
+
+assert.equal(autoUpdateWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(autoUpdateWorkflow.includes("schedule:"), true);
+assert.equal(autoUpdateWorkflow.includes('cron: "*/5 * * * *"'), true);
+assert.equal(autoUpdateWorkflow.includes("/api/sync/metadata/run"), true);
+assert.equal(autoUpdateWorkflow.includes("/api/cron/server-wars/refresh"), true);
+assert.equal(autoUpdateWorkflow.includes("/api/sync/discord-posts/run"), true);
+assert.equal(autoUpdateWorkflow.includes("/api/sync/adm/run"), false);
 
 const runtimeOnlySecretPatterns = [
   /secrets\.DISCORD_BOT_TOKEN/,

@@ -153,9 +153,15 @@ class DiscordDeliveryError extends Error {
   }
 }
 
-export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJobs?: number } = {}) {
+type DiscordDispatchBudget = {
+  startedAtMs: number;
+  deadlineAtMs: number;
+};
+
+export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJobs?: number; deadlineMs?: number } = {}) {
   await ensureAutomationSchema(env);
-  const maxJobs = Math.max(1, Math.min(Math.trunc(Number(options.maxJobs ?? 25)) || 25, 100));
+  const maxJobs = Math.max(1, Math.min(Math.trunc(Number(options.maxJobs ?? 2)) || 2, 10));
+  const budget = createDiscordDispatchBudget(options.deadlineMs);
   const db = requireDb(env);
   const now = new Date().toISOString();
   const jobs = await db
@@ -177,9 +183,14 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
   let sent = 0;
   let skipped = 0;
   let failed = 0;
+  let budgetExhausted = false;
   const results: DiscordPostDispatchDetail[] = [];
 
   for (const job of jobs.results ?? []) {
+    if (isDiscordDispatchBudgetLow(budget)) {
+      budgetExhausted = true;
+      break;
+    }
     processed += 1;
     await db.prepare("UPDATE automation_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ?").bind(now, job.id).run();
     try {
@@ -209,19 +220,27 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
     }
   }
 
-  const due = await processDuePostingDestinations(env, {
-    maxJobs: Math.max(1, maxJobs - processed),
-  });
-  processed += due.processed;
-  edited += due.edited;
-  sent += due.sent;
-  skipped += due.skipped;
-  failed += due.failed;
-  results.push(...due.results);
+  if (processed < maxJobs) {
+    if (!isDiscordDispatchBudgetLow(budget)) {
+      const due = await processDuePostingDestinations(env, {
+        maxJobs: Math.max(1, maxJobs - processed),
+        budget,
+      });
+      processed += due.processed;
+      edited += due.edited;
+      sent += due.sent;
+      skipped += due.skipped;
+      failed += due.failed;
+      budgetExhausted = budgetExhausted || due.budgetExhausted;
+      results.push(...due.results);
+    } else {
+      budgetExhausted = true;
+    }
+  }
 
   const posted = edited + sent;
-  console.log("DZN DISCORD AUTO POST DISPATCH READY", { processed, edited, sent, posted, skipped, failed });
-  return { ok: true, processed, edited, sent, posted, skipped, failed, results };
+  console.log("DZN DISCORD AUTO POST DISPATCH READY", { processed, edited, sent, posted, skipped, failed, budgetExhausted });
+  return { ok: failed === 0, processed, edited, sent, posted, skipped, failed, budgetExhausted, results };
 }
 
 async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPostDispatchDetail> {
@@ -357,7 +376,7 @@ async function processConfiguredPostingDestination(
   }
 }
 
-async function processDuePostingDestinations(env: Env, options: { maxJobs: number; guildId?: string; force?: boolean }) {
+async function processDuePostingDestinations(env: Env, options: { maxJobs: number; guildId?: string; force?: boolean; budget?: DiscordDispatchBudget }) {
   const db = requireDb(env);
   const rows = await db
     .prepare(
@@ -385,9 +404,14 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   let sent = 0;
   let skipped = 0;
   let failed = 0;
+  let budgetExhausted = false;
   const results: DiscordPostDispatchDetail[] = [];
 
   for (const row of rows.results ?? []) {
+    if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
+      budgetExhausted = true;
+      break;
+    }
     if (processed >= options.maxJobs) break;
     const planKey = normalizePlanKey(row.plan_key);
     if (!options.force && !isAutoPostDue(row.post_type, planKey, row.last_edited_at)) continue;
@@ -411,7 +435,7 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
     }
   }
 
-  return { processed, edited, sent, posted: edited + sent, skipped, failed, results };
+  return { processed, edited, sent, posted: edited + sent, skipped, failed, budgetExhausted, results };
 }
 
 export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, options: { maxJobs?: number; force?: boolean } = {}) {
@@ -428,6 +452,20 @@ export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, op
     failed: result.failed,
     results: result.results,
   };
+}
+
+function createDiscordDispatchBudget(deadlineMs: unknown): DiscordDispatchBudget {
+  const parsed = Math.trunc(Number(deadlineMs));
+  const budgetMs = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 5000) : 2500;
+  const startedAtMs = Date.now();
+  return {
+    startedAtMs,
+    deadlineAtMs: startedAtMs + Math.max(500, budgetMs),
+  };
+}
+
+function isDiscordDispatchBudgetLow(budget: DiscordDispatchBudget) {
+  return Date.now() >= budget.deadlineAtMs - 350;
 }
 
 export async function sendDiscordTestPost(env: Env, destination: {

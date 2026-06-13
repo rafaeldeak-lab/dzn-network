@@ -30,6 +30,7 @@ const CRON_ENDPOINT_TIMEOUT_MS = 55000;
 const SCHEDULED_WORKER_RUNTIME_BUDGET_MS = 22_000;
 const SCHEDULED_WORKER_MIN_REMAINING_MS = 2_500;
 const SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false;
+const DISCORD_POSTS_WORKER_SIDE_TASK_ENABLED = false;
 const ADM_WORKER_CURSOR_KEY = "last_adm_linked_server_id";
 const ADM_WORKER_LAST_RECOVERY_KEY = "last_automation_lock_recovery_at";
 const ADM_WORKER_LAST_BUILD_REPARSE_KEY = "last_adm_build_reparse_at";
@@ -131,9 +132,9 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
     results.push(SERVER_WARS_WORKER_SIDE_TASK_ENABLED && hasScheduledRuntimeBudget(budget, 10_000)
       ? await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options, budget)
       : skippedForBudgetResult(CRON_ENDPOINTS[0].label, "Server Wars automation is temporarily cron-route-only to preserve ADM Worker CPU budget."));
-    results.push(hasScheduledRuntimeBudget(budget, 9_000)
+    results.push(DISCORD_POSTS_WORKER_SIDE_TASK_ENABLED && hasScheduledRuntimeBudget(budget, 9_000)
       ? await runCronEndpoint(CRON_ENDPOINTS[1], baseUrl, secret, options, budget)
-      : skippedForBudgetResult(CRON_ENDPOINTS[1].label, "Discord post cron skipped because the scheduled worker runtime budget is low."));
+      : skippedForBudgetResult(CRON_ENDPOINTS[1].label, "Discord posts automation is cron-route-only to preserve ADM Worker and Pages CPU budget."));
 
     const heartbeat = classifyHeartbeatFromResults(results);
     await safeWriteAdmWorkerHeartbeatFinished(env, heartbeat).catch(() => null);
