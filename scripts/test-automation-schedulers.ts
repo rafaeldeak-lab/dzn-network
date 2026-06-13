@@ -30,7 +30,7 @@ assert.equal(workflow.includes("echo \"${CRON_SECRET}\""), false);
 
 assert.equal(workflow.includes("/api/sync/metadata/run"), true);
 assert.equal(workflow.includes('"max_servers":2'), true);
-assert.equal(workflow.includes('"deadline_ms":55000'), true);
+assert.equal(workflow.includes('"deadline_ms":12000'), true);
 assert.equal(workflow.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(workflow.includes('"max_events":1'), true);
 assert.equal(workflow.includes('"max_finalizations":1'), true);
@@ -50,6 +50,9 @@ assert.equal(metadataCron.includes("refreshLivePlayerCountsForActiveServers"), t
 assert.equal(metadataCron.includes("queueDiscordUpdates: false"), true);
 assert.equal(metadataCron.includes("skipAutomationMaintenance: true"), true);
 assert.equal(metadataCron.includes("deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 60_000)"), true);
+assert.equal(metadataCron.includes("raceMetadataRefreshWithTimeout"), true);
+assert.equal(metadataCron.includes("timed_out: timedOut"), true);
+assert.equal(metadataCron.includes("budget_exhausted: true"), true);
 assert.equal(metadataCron.includes("body.async === true"), true);
 assert.equal(metadataCron.includes("waitUntil(runMetadataRefresh"), true);
 assert.equal(serverWarsCron.includes("requireCronSecret"), true);
@@ -67,6 +70,9 @@ assert.equal(discordPosting.includes("Math.min(Math.trunc(Number(options.maxJobs
 
 assert.equal(worker.includes("const SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false;"), true);
 assert.equal(worker.includes("const DISCORD_POSTS_WORKER_SIDE_TASK_ENABLED = false;"), true);
+assert.equal(worker.includes("const POST_ADM_MAINTENANCE_WORKER_SIDE_TASK_ENABLED = false;"), true);
+assert.equal(worker.includes("const EVENT_SCORING_WORKER_SIDE_TASK_ENABLED = false;"), true);
+assert.equal(worker.includes("ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS = 2_500"), true);
 assert.equal(worker.includes("Server Wars automation is temporarily cron-route-only"), true);
 assert.equal(worker.includes("Discord posts automation is cron-route-only"), true);
 

@@ -56,6 +56,7 @@ export async function handleMetadataSyncRun(
     queueDiscordUpdates: false,
     skipAutomationMaintenance: true,
   };
+  const responseTimeoutMs = Math.max(250, Math.min(refreshOptions.deadlineMs, 12_000));
 
   if (body.async === true) {
     waitUntil(runMetadataRefresh(env, source, startedAt, refreshOptions, handlers).catch((error) => {
@@ -71,12 +72,11 @@ export async function handleMetadataSyncRun(
     }, { status: 202 });
   }
 
-  let result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>;
-  try {
-    result = await runMetadataRefresh(env, source, startedAt, refreshOptions, handlers);
-  } catch (error) {
-    throw error;
-  }
+  const refreshPromise = runMetadataRefresh(env, source, startedAt, refreshOptions, handlers);
+  refreshPromise.catch((error) => {
+    console.warn("DZN METADATA CRON REFRESH FINISHED AFTER RESPONSE", error instanceof Error ? error.message : "metadata refresh failed");
+  });
+  const { result, timedOut } = await raceMetadataRefreshWithTimeout(refreshPromise, responseTimeoutMs);
 
   console.log("DZN LIVE PLAYER COUNT AUTO SYNC READY", {
     processed: result.processed,
@@ -95,9 +95,40 @@ export async function handleMetadataSyncRun(
   return json({
     ok: true,
     ...result,
+    timed_out: timedOut,
     source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
   });
+}
+
+async function raceMetadataRefreshWithTimeout(
+  promise: Promise<Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>>,
+  timeoutMs: number,
+) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise.then((result) => ({ result, timedOut: false })),
+      new Promise<{ result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>; timedOut: true }>((resolve) => {
+        timeout = setTimeout(() => {
+          resolve({
+            timedOut: true,
+            result: {
+              processed: 0,
+              succeeded: 0,
+              failed: 0,
+              skipped: 0,
+              updated_player_counts: 0,
+              budget_exhausted: true,
+              results: [],
+            },
+          });
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function runMetadataRefresh(

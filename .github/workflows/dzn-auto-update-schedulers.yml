@@ -100,7 +100,7 @@ jobs:
           NODE
           }
 
-          call_dzn "Metadata/player-count refresh" "/api/sync/metadata/run" '{"source":"github-scheduled","cron":"dzn-auto-update-schedulers","max_servers":2,"deadline_ms":55000}'
+          call_dzn "Metadata/player-count refresh" "/api/sync/metadata/run" '{"source":"github-scheduled","cron":"dzn-auto-update-schedulers","max_servers":2,"deadline_ms":12000}'
           call_dzn "Server Wars refresh" "/api/cron/server-wars/refresh" '{"source":"github-scheduled","max_events":1,"max_finalizations":1,"max_challenge_expirations":10,"deadline_ms":2500}'
           call_dzn "Discord posts dispatch" "/api/sync/discord-posts/run" '{"source":"github-scheduled","cron":"dzn-auto-update-schedulers","max_jobs":2,"deadline_ms":2500}'
 

@@ -125,6 +125,38 @@ async function run() {
   await waitUntilPromise;
   assert.equal(asyncRefreshCalled, true);
 
+  const timeoutResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
+    method: "POST",
+    headers: {
+      "x-dzn-cron-secret": "unit-test-secret",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ cron: "github-actions", max_servers: 2, deadline_ms: 100 }),
+  }), env), {
+    refreshMetadata: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return {
+        processed: 1,
+        succeeded: 1,
+        failed: 0,
+        skipped: 0,
+        updated_player_counts: 1,
+        results: [],
+      };
+    },
+  });
+  assert.equal(timeoutResponse.status, 200);
+  const timeoutJson = await timeoutResponse.json() as {
+    ok: boolean;
+    timed_out: boolean;
+    budget_exhausted: boolean;
+    processed: number;
+  };
+  assert.equal(timeoutJson.ok, true);
+  assert.equal(timeoutJson.timed_out, true);
+  assert.equal(timeoutJson.budget_exhausted, true);
+  assert.equal(timeoutJson.processed, 0);
+
   const unauthorizedResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
     method: "POST",
     headers: { "x-dzn-cron-secret": "wrong" },
