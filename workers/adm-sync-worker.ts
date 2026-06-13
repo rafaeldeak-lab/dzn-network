@@ -29,6 +29,9 @@ const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 const CRON_ENDPOINT_TIMEOUT_MS = 55000;
 const SCHEDULED_WORKER_RUNTIME_BUDGET_MS = 22_000;
 const SCHEDULED_WORKER_MIN_REMAINING_MS = 2_500;
+const ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS = 2_500;
+const POST_ADM_MAINTENANCE_WORKER_SIDE_TASK_ENABLED = false;
+const EVENT_SCORING_WORKER_SIDE_TASK_ENABLED = false;
 const SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false;
 const DISCORD_POSTS_WORKER_SIDE_TASK_ENABLED = false;
 const ADM_WORKER_CURSOR_KEY = "last_adm_linked_server_id";
@@ -115,7 +118,7 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
     const baseUrl = appBaseUrl(env);
     const results = [];
     results.push(await runDirectAdmSync(env, options, budget));
-    if (hasScheduledRuntimeBudget(budget, 7_000)) {
+    if (POST_ADM_MAINTENANCE_WORKER_SIDE_TASK_ENABLED && hasScheduledRuntimeBudget(budget, 7_000)) {
       await runHourlyPostAdmMaintenance(env, budget).catch((error) => {
         console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
           message: error instanceof Error ? sanitizeHeartbeatMessage(error.message) : "Unknown maintenance error",
@@ -123,12 +126,14 @@ export async function runAutomationCron(env: Env, options: { cron: string | null
       });
     } else {
       console.warn("DZN ADM WORKER POST-READ MAINTENANCE SKIPPED", {
-        message: "scheduled worker runtime budget is low",
+        message: POST_ADM_MAINTENANCE_WORKER_SIDE_TASK_ENABLED
+          ? "scheduled worker runtime budget is low"
+          : "post-ADM maintenance is handled outside the ADM Worker to preserve scheduled CPU budget",
       });
     }
-    results.push(hasScheduledRuntimeBudget(budget, 9_000)
+    results.push(EVENT_SCORING_WORKER_SIDE_TASK_ENABLED && hasScheduledRuntimeBudget(budget, 9_000)
       ? await runEventScoring(env)
-      : skippedForBudgetResult("event-scoring", "Event scoring skipped because the scheduled worker runtime budget is low."));
+      : skippedForBudgetResult("event-scoring", "Event scoring is handled outside the ADM Worker to preserve scheduled CPU budget."));
     results.push(SERVER_WARS_WORKER_SIDE_TASK_ENABLED && hasScheduledRuntimeBudget(budget, 10_000)
       ? await runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options, budget)
       : skippedForBudgetResult(CRON_ENDPOINTS[0].label, "Server Wars automation is temporarily cron-route-only to preserve ADM Worker CPU budget."));
@@ -167,7 +172,7 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
     if (availableRuntimeMs < 2_500) {
       return skippedForBudgetResult("adm", "ADM sync skipped because the scheduled worker runtime budget is too low to start safely.");
     }
-    const maxRuntimeMs = Math.max(2_500, Math.min(3_500, availableRuntimeMs));
+    const maxRuntimeMs = Math.max(2_500, Math.min(ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS, availableRuntimeMs));
     const result = await runAdmWorkerSyncTick(env, {
       cron: options.cron ?? "cloudflare-worker",
       maxLinesPerServer: 5000,
