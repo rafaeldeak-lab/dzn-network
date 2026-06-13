@@ -90,6 +90,39 @@ async function run() {
     message: "Server info updated from Nitrado",
   });
 
+  let waitUntilPromise: Promise<unknown> | null = null;
+  let asyncRefreshCalled = false;
+  const asyncResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
+    method: "POST",
+    headers: {
+      "x-dzn-cron-secret": "unit-test-secret",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ cron: "github-actions", max_servers: 1, deadline_ms: 20000, async: true }),
+  }), env, (promise) => {
+    waitUntilPromise = promise;
+  }), {
+    refreshMetadata: async (_env, options = {}) => {
+      asyncRefreshCalled = true;
+      assert.equal(options.maxServers, 1);
+      assert.equal(options.deadlineMs, 20000);
+      assert.equal(options.includeResults, true);
+      assert.equal(options.queueDiscordUpdates, false);
+      return {
+        processed: 1,
+        succeeded: 1,
+        failed: 0,
+        skipped: 0,
+        updated_player_counts: 1,
+        results: [],
+      };
+    },
+  });
+  assert.equal(asyncResponse.status, 202);
+  assert.ok(waitUntilPromise);
+  await waitUntilPromise;
+  assert.equal(asyncRefreshCalled, true);
+
   const unauthorizedResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
     method: "POST",
     headers: { "x-dzn-cron-secret": "wrong" },
@@ -114,12 +147,12 @@ async function run() {
   assert.equal(optionsResponse.headers.get("allow"), "POST, OPTIONS");
 }
 
-function makeContext(request: Request, testEnv: Env): PagesContext {
+function makeContext(request: Request, testEnv: Env, waitUntil: PagesContext["waitUntil"] = () => undefined): PagesContext {
   return {
     request,
     env: testEnv,
     params: {},
-    waitUntil: () => undefined,
+    waitUntil,
     next: async () => new Response(null, { status: 404 }),
     data: {},
   };
