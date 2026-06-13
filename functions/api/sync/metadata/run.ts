@@ -51,7 +51,7 @@ export async function handleMetadataSyncRun(
   const startedAt = new Date().toISOString();
   const refreshOptions = {
     maxServers: sanitizePositiveInteger(body.max_servers, 1, 5),
-    deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 30_000),
+    deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 60_000),
     includeResults: true,
     queueDiscordUpdates: false,
   };
