@@ -1,0 +1,110 @@
+name: DZN Auto Update Worker Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: dzn-auto-update-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-auto-update-worker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+      SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Validate deployment secrets
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET GitHub secret."
+            exit 1
+          fi
+          echo "::add-mask::$CRON_SECRET"
+
+          if [ -n "${DZN_CRON_SECRET:-}" ]; then
+            echo "cron_secret_name=DZN_CRON_SECRET" >> "$GITHUB_ENV"
+          else
+            echo "cron_secret_name=SYNC_CRON_SECRET" >> "$GITHUB_ENV"
+          fi
+      - name: Run auto-update Worker tests
+        run: |
+          set -euo pipefail
+          npm run test:auto-update-worker
+          npm run worker:auto-update:dry-run
+      - name: Deploy auto-update Worker
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config wrangler.auto-update.toml
+      - name: Provision cron secret into auto-update Worker
+        run: |
+          set -euo pipefail
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          echo "::add-mask::$CRON_SECRET"
+          printf "%s" "$CRON_SECRET" | npx wrangler secret put DZN_CRON_SECRET --config wrangler.auto-update.toml
+      - name: Verify Worker secret and schedule
+        run: |
+          set -euo pipefail
+
+          npx wrangler secret list --config wrangler.auto-update.toml > worker-secrets.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const secrets = JSON.parse(fs.readFileSync("worker-secrets.json", "utf8"));
+          if (!secrets.some((secret) => secret.name === "DZN_CRON_SECRET")) {
+            console.error("DZN_CRON_SECRET was not provisioned on dzn-auto-update-worker.");
+            process.exit(1);
+          }
+          console.log("Verified dzn-auto-update-worker has DZN_CRON_SECRET configured.");
+          NODE
+
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/dzn-auto-update-worker/schedules" \
+            > worker-schedules.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const response = JSON.parse(fs.readFileSync("worker-schedules.json", "utf8"));
+          if (!response.success) {
+            console.error("Cloudflare schedules API did not return success.");
+            process.exit(1);
+          }
+          const schedules = Array.isArray(response.result) ? response.result : [];
+          if (!schedules.some((schedule) => schedule.cron === "*/5 * * * *")) {
+            console.error("dzn-auto-update-worker scheduled trigger */5 * * * * was not found.");
+            process.exit(1);
+          }
+          console.log("Verified dzn-auto-update-worker scheduled trigger */5 * * * *.");
+          NODE
+      - name: Deployment summary
+        run: |
+          {
+            echo "## DZN Auto Update Worker Deploy"
+            echo ""
+            echo "- Worker: dzn-auto-update-worker"
+            echo "- Config: wrangler.auto-update.toml"
+            echo "- Schedule: */5 * * * *"
+            echo "- Cron secret provisioned as: DZN_CRON_SECRET"
+            echo "- Source secret used: ${cron_secret_name}"
+          } >> "$GITHUB_STEP_SUMMARY"

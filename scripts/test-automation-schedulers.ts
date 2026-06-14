@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const workflow = readFileSync(".github/workflows/dzn-auto-update-schedulers.yml", "utf8");
+const deployWorkflow = readFileSync(".github/workflows/dzn-auto-update-worker-deploy.yml", "utf8");
 const worker = readFileSync("workers/adm-sync-worker.ts", "utf8");
 const autoUpdateWorker = readFileSync("workers/dzn-auto-update-worker.ts", "utf8");
 const autoUpdateConfig = readFileSync("wrangler.auto-update.toml", "utf8");
@@ -48,6 +49,22 @@ assert.equal(workflow.includes("/api/sync/adm/run"), false, "The scheduler workf
 assert.equal(workflow.includes("TOKEN_ENCRYPTION_KEY"), false);
 assert.equal(workflow.includes("DISCORD_BOT_TOKEN"), false);
 assert.equal(workflow.includes("STRIPE_SECRET_KEY"), false);
+
+assert.equal(deployWorkflow.includes("name: DZN Auto Update Worker Deploy"), true);
+assert.equal(deployWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(deployWorkflow.includes("push:"), false);
+assert.equal(deployWorkflow.includes("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}"), true);
+assert.equal(deployWorkflow.includes("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}"), true);
+assert.equal(deployWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
+assert.equal(deployWorkflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
+assert.equal(deployWorkflow.includes("printf \"%s\" \"$CRON_SECRET\" | npx wrangler secret put DZN_CRON_SECRET --config wrangler.auto-update.toml"), true);
+assert.equal(deployWorkflow.includes("echo \"$CRON_SECRET\""), false);
+assert.equal(deployWorkflow.includes("wrangler.auto-update.toml"), true);
+assert.equal(deployWorkflow.includes("/workers/scripts/dzn-auto-update-worker/schedules"), true);
+assert.equal(deployWorkflow.includes("*/5 * * * *"), true);
+assert.equal(deployWorkflow.includes("TOKEN_ENCRYPTION_KEY"), false);
+assert.equal(deployWorkflow.includes("DISCORD_BOT_TOKEN"), false);
+assert.equal(deployWorkflow.includes("STRIPE_SECRET_KEY"), false);
 
 assert.equal(metadataCron.includes("requireCronSecret"), true);
 assert.equal(metadataCron.includes("refreshLivePlayerCountsForActiveServers"), true);

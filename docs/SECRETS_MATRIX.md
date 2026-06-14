@@ -21,6 +21,12 @@ Current allowed GitHub Actions secrets:
 - `OPENAI_API_KEY`
   Only if the ADM Codex Safe Fix workflow is explicitly enabled.
 
+- `CLOUDFLARE_API_TOKEN`
+  Only for the manual `DZN Auto Update Worker Deploy` workflow. Scope it narrowly to deploy `dzn-auto-update-worker`, manage that Worker secret, and read Worker schedules.
+
+- `CLOUDFLARE_ACCOUNT_ID`
+  Only for the manual `DZN Auto Update Worker Deploy` workflow. This may be a repository variable instead of a secret.
+
 Do not copy all Cloudflare runtime secrets into GitHub.
 
 Do not add these to GitHub unless a workflow explicitly requires them:
@@ -65,6 +71,20 @@ Optional:
 
 The ADM Worker also requires the D1 DB binding.
 
+## Cloudflare auto-update Worker secrets
+
+The Cloudflare auto-update Worker owns only the cron secret needed to call protected Pages routes.
+
+Required:
+
+- `DZN_CRON_SECRET`
+
+Optional fallback in code:
+
+- `SYNC_CRON_SECRET`
+
+Do not add `TOKEN_ENCRYPTION_KEY`, Discord tokens, Stripe secrets, session secrets, or Nitrado tokens to the auto-update Worker. It calls protected Pages routes and does not decrypt Nitrado tokens directly.
+
 ## Automatic ADM sync
 
 Automatic ADM sync runs through the Cloudflare Worker:
@@ -76,3 +96,13 @@ Automatic ADM sync runs through the Cloudflare Worker:
 GitHub Actions is not the primary ADM auto-sync runner.
 
 GitHub Actions may be used only for manual health checks or manual backup triggers.
+
+## Automatic metadata, Server Wars, and Discord automation
+
+Automatic metadata/player-count refresh, Server Wars score refresh/finalization/challenge expiry, and Discord post dispatch run through the Cloudflare auto-update Worker:
+
+- Worker name: `dzn-auto-update-worker`
+- Config: `wrangler.auto-update.toml`
+- Cron: `*/5 * * * *`
+
+GitHub Actions is backup/monitoring for these routes, not the primary five-minute scheduler.
