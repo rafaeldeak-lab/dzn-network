@@ -151,7 +151,7 @@ assert.equal(autoUpdateWorker.includes("/api/sync/adm/run"), false, "Auto-update
 assert.equal(autoUpdateWorker.includes("TOKEN_ENCRYPTION_KEY"), false, "Auto-update Worker must not handle Nitrado token decryption.");
 assert.equal(serverMetadata.includes("UPDATE server_public_cache SET"), true, "Fresh metadata refresh should directly update the public cache row.");
 assert.equal(serverMetadata.includes("WHERE guild_id = ?"), true, "Public cache sync must target the existing guild row.");
-assert.equal(serverMetadata.includes("skipPublicCacheSideEffects: true"), true, "Cron metadata refresh should clear status before optional cache side effects.");
-assert.equal(serverMetadata.includes("skipPublicCacheSideEffects !== true"), true, "Per-minute metadata cron should not block on home-stats cache patching.");
+assert.equal(serverMetadata.includes("refreshNitradoServerPlayerCountOnly"), true, "Cron metadata refresh must use the lightweight live-count path.");
+assert.equal(serverMetadata.includes("fetchNitradoOnlinePlayerCount"), true, "Cron metadata refresh must use the dedicated Nitrado player-count endpoint.");
 
 console.log("Automation scheduler tests passed.");

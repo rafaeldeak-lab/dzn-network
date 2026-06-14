@@ -459,6 +459,148 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
   return refreshNitradoServerMetadata(env, { linkedServerId, userId, force: false, softFail: true }).catch(() => null);
 }
 
+async function refreshNitradoServerPlayerCountOnly(
+  env: Env,
+  row: AutomationSyncServer,
+  now: string,
+) {
+  const db = requireDb(env);
+  const linkedServer: LinkedServerMetadataRow = {
+    id: row.id,
+    user_id: row.user_id,
+    nitrado_service_id: row.nitrado_service_id,
+    nitrado_service_name: row.nitrado_service_name,
+    server_name: row.server_name,
+    server_type: null,
+    tags_json: null,
+    region: null,
+    platform: null,
+    display_name: row.display_name,
+    hostname: row.hostname,
+    max_players: cleanNumber(row.max_players),
+    current_players: cleanNumber(row.current_players),
+    ip_address: null,
+    server_status: null,
+    server_mode: null,
+    server_mode_source: null,
+    metadata_hash: null,
+    metadata_last_checked_at: row.metadata_last_checked_at,
+    metadata_last_changed_at: null,
+    player_count_last_checked_at: row.player_count_last_checked_at,
+    player_count_source: "nitrado",
+    player_count_status: row.player_count_status,
+    geo_latitude: null,
+    geo_longitude: null,
+    geo_country: null,
+    geo_region: null,
+    geo_city: null,
+    geo_timezone: null,
+    geo_source: null,
+    geo_last_checked_at: null,
+  };
+  try {
+    const livePlayerCount = isMockNitrado(env.MOCK_NITRADO)
+      ? {
+          currentPlayers: cleanNumber(row.current_players) ?? 0,
+          source: "gameservers_games_players" as const,
+          sampledAt: now,
+        }
+      : await fetchNitradoOnlinePlayerCount(await getNitradoTokenForLinkedServer(env, linkedServer), row.nitrado_service_id ?? "", now);
+    if (!livePlayerCount) {
+      await updatePlayerCountFreshness(db, row.id, {
+        checkedAt: now,
+        source: "nitrado",
+        status: "unavailable",
+      });
+      return {
+        ok: false,
+        changed: false,
+        skipped: false,
+        message: "Nitrado live player count endpoint unavailable; keeping previous count",
+        metadata_last_checked_at: now,
+        metadata_last_changed_at: null,
+        metadata_source: "nitrado",
+        player_count_last_checked_at: now,
+        player_count_source: "nitrado",
+        player_count_status: "unavailable" as const,
+        metadata: {
+          ...rowToMetadata(linkedServer),
+          current_players: cleanNumber(row.current_players),
+          max_players: cleanNumber(row.max_players),
+          metadata_last_checked_at: now,
+          player_count_last_checked_at: now,
+          player_count_source: "nitrado",
+          player_count_status: "unavailable" as const,
+        },
+      };
+    }
+    const currentPlayers = cleanNumber(livePlayerCount.currentPlayers);
+    const maxPlayers = cleanNumber(row.max_players);
+    await db
+      .prepare(
+        `UPDATE linked_servers SET
+          current_players = ?,
+          max_players = COALESCE(?, max_players),
+          player_count_last_checked_at = ?,
+          player_count_source = ?,
+          player_count_status = 'fresh',
+          metadata_last_checked_at = ?,
+          updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+      )
+      .bind(currentPlayers, maxPlayers, now, "nitrado", now, row.id)
+      .run();
+    return {
+      ok: true,
+      changed: currentPlayers !== cleanNumber(row.current_players) || maxPlayers !== cleanNumber(row.max_players),
+      skipped: false,
+      message: "Live player count refreshed from Nitrado",
+      metadata_last_checked_at: now,
+      metadata_last_changed_at: null,
+      metadata_source: "nitrado",
+      player_count_last_checked_at: now,
+      player_count_source: "nitrado",
+      player_count_status: "fresh" as const,
+      metadata: {
+        ...rowToMetadata(linkedServer),
+        current_players: currentPlayers,
+        max_players: maxPlayers,
+        metadata_last_checked_at: now,
+        player_count_last_checked_at: now,
+        player_count_source: "nitrado",
+        player_count_status: "fresh" as const,
+      },
+    };
+  } catch (error) {
+    await updatePlayerCountFreshness(db, row.id, {
+      checkedAt: now,
+      source: "nitrado",
+      status: "unavailable",
+    }).catch(() => null);
+    return {
+      ok: false,
+      changed: false,
+      skipped: false,
+      message: error instanceof Error ? error.message : "Nitrado live player count refresh failed",
+      metadata_last_checked_at: now,
+      metadata_last_changed_at: null,
+      metadata_source: "nitrado",
+      player_count_last_checked_at: now,
+      player_count_source: "nitrado",
+      player_count_status: "unavailable" as const,
+      metadata: {
+        ...rowToMetadata(linkedServer),
+        current_players: cleanNumber(row.current_players),
+        max_players: cleanNumber(row.max_players),
+        metadata_last_checked_at: now,
+        player_count_last_checked_at: now,
+        player_count_source: "nitrado",
+        player_count_status: "unavailable" as const,
+      },
+    };
+  }
+}
+
 export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
   options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; livePlayerCountStaleMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean; debugServiceId?: string | null } = {},
@@ -528,13 +670,7 @@ export async function refreshLivePlayerCountsForActiveServers(
       await markStatusCheckStarted(env, row.guild_id);
       const beforeCurrent = cleanNumber(row.current_players);
       const beforeMax = cleanNumber(row.max_players);
-      const result = await refreshNitradoServerMetadata(env, {
-        linkedServerId: row.id,
-        userId: row.user_id,
-        force: true,
-        softFail: true,
-        skipPublicCacheSideEffects: true,
-      });
+      const result = await refreshNitradoServerPlayerCountOnly(env, row, new Date().toISOString());
       if (result.ok) succeeded += 1;
       else failed += 1;
       const nextCurrent = cleanNumber(result.metadata?.current_players);
