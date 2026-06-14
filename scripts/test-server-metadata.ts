@@ -14,6 +14,21 @@ assert.deepEqual(parseNitradoPlayerCountPair("0 / 22"), { current: 0, max: 22 })
 assert.equal(extractNitradoOnlinePlayerCount({ data: { players: [{ name: "hidden" }] } }), 1);
 assert.equal(extractNitradoOnlinePlayerCount({ data: { players: { "player-id": { name: "hidden" } } } }), 1);
 assert.equal(extractNitradoOnlinePlayerCount({ data: { players: [] } }), 0);
+assert.equal(
+  extractNitradoOnlinePlayerCount({ data: { current_players: 0, players: [{ name: "hidden" }] } }),
+  1,
+  "The online-player-list endpoint must prefer an explicit player list over stale numeric summary fields.",
+);
+assert.equal(
+  extractNitradoOnlinePlayerCount({ data: { player_count: 0, playerlist: { "player-id": { name: "hidden" } } } }),
+  1,
+  "Player-list objects must not be overridden by a stale numeric zero.",
+);
+assert.equal(
+  extractNitradoOnlinePlayerCount({ data: { players: { current: 0, max: 10 } } }),
+  0,
+  "Count-like player summary objects should still resolve through numeric fields, not object-key count.",
+);
 assert.equal(extractNitradoOnlinePlayerCount({ data: { current_players: 3 } }), 3);
 assert.equal(extractNitradoOnlinePlayerCount({ data: { player_count: "4 / 10" } }), 4);
 assert.deepEqual(resolveLivePlayerCounts({

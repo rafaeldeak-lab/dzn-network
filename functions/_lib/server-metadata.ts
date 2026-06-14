@@ -1344,6 +1344,8 @@ export function parseNitradoPlayerCountPair(...values: unknown[]): { current: nu
 }
 
 export function extractNitradoOnlinePlayerCount(payload: unknown): number | null {
+  const explicitListCount = countExplicitOnlinePlayerList(payload);
+  if (explicitListCount !== null) return explicitListCount;
   const directNumber = firstNumberFromPlayerCountKeys(payload);
   if (directNumber !== null) return directNumber;
   return countPlayerList(payload);
@@ -1405,6 +1407,32 @@ function firstNumberFromPlayerCountKeys(value: unknown): number | null {
     if (nested !== null) return nested;
   }
   return null;
+}
+
+function countExplicitOnlinePlayerList(value: unknown): number | null {
+  if (Array.isArray(value)) return value.length;
+  if (!isRecord(value)) return null;
+  for (const [key, child] of Object.entries(value)) {
+    if (!/^(players|playerlist|player_list|online_players)$/i.test(key)) continue;
+    const count = countLikelyPlayerList(child);
+    if (count !== null) return count;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (!/^(data|gameserver|players|playerlist|player_list|online_players)$/i.test(key)) continue;
+    const nested = countExplicitOnlinePlayerList(child);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+function countLikelyPlayerList(value: unknown): number | null {
+  if (Array.isArray(value)) return value.length;
+  if (!isRecord(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length === 0) return 0;
+  const countLikeKeys = entries.filter(([key]) => /^(current|online|players?|player_count|current_players|players_online|max|max_players|maxplayers|slots|status)$/i.test(key));
+  if (countLikeKeys.length === entries.length) return null;
+  return entries.length;
 }
 
 function countPlayerList(value: unknown): number | null {
