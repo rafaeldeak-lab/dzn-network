@@ -115,6 +115,9 @@ assert.equal(autoUpdateWorker.includes("WORKER_NAME = \"dzn-auto-update-worker\"
 assert.equal(autoUpdateWorker.includes("/api/sync/metadata/run"), true);
 assert.equal(autoUpdateWorker.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(autoUpdateWorker.includes("/api/sync/discord-posts/run"), true);
+assert.equal(autoUpdateWorker.includes("async: true"), true);
+assert.equal(autoUpdateWorker.includes("deadline_ms: 20_000"), true);
+assert.equal(autoUpdateWorker.includes("timeoutMs: 10_000"), true);
 assert.equal(autoUpdateWorker.includes("for (const task of TASKS)"), true);
 assert.equal(autoUpdateWorker.includes("AbortController"), true);
 assert.equal(autoUpdateWorker.includes("recordAutomationCronRun"), true);

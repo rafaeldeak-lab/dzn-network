@@ -34,14 +34,15 @@ const TASKS: SchedulerTask[] = [
     body: {
       source: "cloudflare-scheduled",
       cron: "dzn-auto-update-worker",
+      async: true,
       max_servers: 2,
-      deadline_ms: 2_500,
+      deadline_ms: 20_000,
     },
   },
   {
     label: "server-wars",
     path: "/api/cron/server-wars/refresh",
-    timeoutMs: 4_000,
+    timeoutMs: 10_000,
     body: {
       source: "cloudflare-scheduled",
       max_events: 1,
@@ -53,7 +54,7 @@ const TASKS: SchedulerTask[] = [
   {
     label: "discord-posts",
     path: "/api/sync/discord-posts/run",
-    timeoutMs: 4_000,
+    timeoutMs: 10_000,
     body: {
       source: "cloudflare-scheduled",
       cron: "dzn-auto-update-worker",

@@ -71,7 +71,8 @@ async function main() {
       assert.equal(call.headers.get("x-cron-secret"), "unit-test-secret");
       assert.equal(call.headers.get("authorization"), "Bearer unit-test-secret");
     }
-    assert.equal((calls[0].body as { deadline_ms: number }).deadline_ms, 2500);
+    assert.equal((calls[0].body as { async: boolean }).async, true);
+    assert.equal((calls[0].body as { deadline_ms: number }).deadline_ms, 20000);
     assert.equal((calls[0].body as { max_servers: number }).max_servers, 2);
     assert.equal((calls[1].body as { max_events: number }).max_events, 1);
     assert.equal((calls[2].body as { max_jobs: number }).max_jobs, 2);
