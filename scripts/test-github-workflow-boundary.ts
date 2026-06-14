@@ -8,6 +8,7 @@ function read(path: string) {
 const admWorkflow = read(".github/workflows/dzn-adm-sync.yml");
 const diagnosticsWorkflow = read(".github/workflows/dzn-nitrado-diagnostics.yml");
 const autoUpdateWorkflow = read(".github/workflows/dzn-auto-update-schedulers.yml");
+const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
 const workflows = [
   [".github/workflows/dzn-adm-sync.yml", admWorkflow],
   [".github/workflows/dzn-nitrado-diagnostics.yml", diagnosticsWorkflow],
@@ -30,11 +31,14 @@ assert.equal(diagnosticsWorkflow.includes("- cron:"), false);
 
 assert.equal(autoUpdateWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(autoUpdateWorkflow.includes("schedule:"), true);
-assert.equal(autoUpdateWorkflow.includes('cron: "*/5 * * * *"'), true);
+assert.equal(autoUpdateWorkflow.includes('cron: "17 * * * *"'), true);
+assert.equal(autoUpdateWorkflow.includes("DZN Auto Update Schedulers Backup"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/sync/metadata/run"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/sync/discord-posts/run"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/sync/adm/run"), false);
+assert.equal(autoUpdateWorkerConfig.includes('name = "dzn-auto-update-worker"'), true);
+assert.equal(autoUpdateWorkerConfig.includes('crons = ["*/5 * * * *"]'), true);
 
 const runtimeOnlySecretPatterns = [
   /secrets\.DISCORD_BOT_TOKEN/,

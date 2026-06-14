@@ -1,6 +1,7 @@
 import { refreshLivePlayerCountsForActiveServers } from "../../../_lib/server-metadata";
 import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
 import { isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
+import { requireDb } from "../../../_lib/db";
 import { json, readJson } from "../../../_lib/http";
 import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
@@ -77,6 +78,7 @@ export async function handleMetadataSyncRun(
     console.warn("DZN METADATA CRON REFRESH FINISHED AFTER RESPONSE", error instanceof Error ? error.message : "metadata refresh failed");
   });
   const { result, timedOut } = await raceMetadataRefreshWithTimeout(refreshPromise, responseTimeoutMs);
+  const staleRemainingCount = await countStaleMetadataRemaining(env).catch(() => null);
 
   console.log("DZN LIVE PLAYER COUNT AUTO SYNC READY", {
     processed: result.processed,
@@ -96,6 +98,9 @@ export async function handleMetadataSyncRun(
     ok: true,
     ...result,
     timed_out: timedOut,
+    stale_remaining_count: staleRemainingCount,
+    next_recommended_run_seconds: staleRemainingCount && staleRemainingCount > 0 ? 60 : 300,
+    warnings: buildMetadataWarnings(result, timedOut, staleRemainingCount),
     source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
   });
@@ -150,6 +155,43 @@ async function runMetadataRefresh(
     await safeRecordCronRun(env, source, "failed", startedAt, error);
     throw error;
   }
+}
+
+async function countStaleMetadataRemaining(env: Env) {
+  const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM linked_servers
+       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+         AND linked_servers.nitrado_service_id IS NOT NULL
+         AND linked_servers.nitrado_service_id != ''
+         AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+         AND (
+           linked_servers.metadata_last_checked_at IS NULL
+           OR linked_servers.metadata_last_checked_at <= ?
+           OR linked_servers.player_count_last_checked_at IS NULL
+           OR linked_servers.player_count_last_checked_at <= ?
+         )`,
+    )
+    .bind(cutoff, cutoff)
+    .first<{ count: number | null }>();
+  return Number(row?.count ?? 0);
+}
+
+function buildMetadataWarnings(
+  result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>,
+  timedOut: boolean,
+  staleRemainingCount: number | null,
+) {
+  const warnings: string[] = [];
+  if (timedOut || result.budget_exhausted) warnings.push("Metadata refresh reached its response/runtime budget; remaining servers will continue next run.");
+  if (staleRemainingCount !== null && staleRemainingCount > 0) warnings.push(`${staleRemainingCount} stale metadata server${staleRemainingCount === 1 ? "" : "s"} remain queued for the next scheduler tick.`);
+  const failed = result.results.filter((item) => item.status === "failed");
+  if (failed.length > 0) warnings.push(`${failed.length} metadata refresh attempt${failed.length === 1 ? "" : "s"} failed; previous player counts remain protected by freshness rules.`);
+  return warnings;
 }
 
 export function isMetadataCronAuthorized(request: Request, env: Env) {

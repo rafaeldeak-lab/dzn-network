@@ -3238,15 +3238,15 @@ export async function planAdmBackfillJobsForServer(
     readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: scheduledBudgeted ? admBudget.maxFilesPerInvocation : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
-    lookbackFiles: scheduledBudgeted ? 10 : 12,
+    maxFiles: scheduledBudgeted ? Math.max(1, Math.min(1, admBudget.maxFilesPerInvocation)) : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
+    lookbackFiles: scheduledBudgeted ? 4 : 12,
     directPreferredFirst: scheduledBudgeted ? false : true,
     adminLogsFirst: scheduledBudgeted ? false : undefined,
-    maxListDirs: scheduledBudgeted ? 2 : 8,
+    maxListDirs: scheduledBudgeted ? 1 : 8,
     maxListSearches: scheduledBudgeted ? 1 : 3,
-    currentFileMaxPathVariants: scheduledBudgeted ? Math.max(1, Math.min(2, admBudget.maxReadAttemptsPerFile)) : 6,
+    currentFileMaxPathVariants: scheduledBudgeted ? 1 : 6,
     trySeekWithoutRaw: scheduledBudgeted ? false : true,
-    maxReadAttemptsPerFile: scheduledBudgeted ? Math.max(1, Math.min(2, admBudget.maxReadAttemptsPerFile)) : admBudget.maxReadAttemptsPerFile,
+    maxReadAttemptsPerFile: scheduledBudgeted ? 1 : admBudget.maxReadAttemptsPerFile,
     broadLogFallback: scheduledBudgeted ? false : true,
     budget: admBudget,
   });
@@ -3309,7 +3309,7 @@ export async function planAdmBackfillJobsForServer(
       planKey: linkedServer.plan_key,
       maxJobsToCreate,
     });
-    const exactReadLimit = Math.max(1, Math.min(3, Math.trunc(Number(maxJobsToCreate))));
+    const exactReadLimit = scheduledBudgeted ? 1 : Math.max(1, Math.min(3, Math.trunc(Number(maxJobsToCreate))));
     const exactReadNames = preliminaryPlan.activeJobFilename
       ? []
       : preliminaryPlan.missingFiles
@@ -6444,9 +6444,9 @@ export async function runAdmWorkerSyncTick(
   admSchemaEnsureSkipDepth += 1;
   try {
     const budget = getAdmInvocationBudget(env);
-    const maxRuntimeMs = Math.max(2_500, Math.min(20_000, clampPositiveInteger(options.maxRuntimeMs ?? 10_000, 10_000)));
+    const maxRuntimeMs = Math.max(1_000, Math.min(20_000, clampPositiveInteger(options.maxRuntimeMs ?? 10_000, 10_000)));
     const deadlineMs = Date.now() + maxRuntimeMs;
-    const hasTickBudget = (minimumRemainingMs = 1_250) => Date.now() + minimumRemainingMs < deadlineMs;
+    const hasTickBudget = (minimumRemainingMs = 900) => Date.now() + minimumRemainingMs < deadlineMs;
     const explicitTargetFileName = sanitizeWorkerTargetAdmFilename(options.targetFileName);
     const explicitTargetPath = explicitTargetFileName
       ? sanitizeWorkerTargetAdmPath(options.targetFilePath, explicitTargetFileName)
@@ -6525,7 +6525,7 @@ export async function runAdmWorkerSyncTick(
     }
 
     if (activeImportJobs > 0 && !explicitTargetFileName) {
-      if (!hasTickBudget(1_750)) {
+      if (!hasTickBudget(1_250)) {
         await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
         return admWorkerResult({
           metadata,
@@ -6541,7 +6541,7 @@ export async function runAdmWorkerSyncTick(
       pendingJobs = await processAdmImportJobsUntilBudget(env, {
         maxJobs: 1,
         maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
-        maxRuntimeMs: Math.max(1_500, Math.min(5_000, deadlineMs - Date.now())),
+        maxRuntimeMs: Math.max(900, Math.min(1_500, deadlineMs - Date.now())),
         linkedServerId: selected.id,
         assumeSchemaReady: true,
       });
@@ -6567,7 +6567,7 @@ export async function runAdmWorkerSyncTick(
     }
 
     if (!explicitTargetFileName && !scheduledTargetFileName) {
-      if (!hasTickBudget(3_000)) {
+      if (!hasTickBudget(1_500)) {
         await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
         return admWorkerResult({
           metadata,
@@ -6609,7 +6609,7 @@ export async function runAdmWorkerSyncTick(
       });
     }
 
-    if (!explicitTargetFileName && scheduledTargetFileName && !hasTickBudget(3_000)) {
+    if (!explicitTargetFileName && scheduledTargetFileName && !hasTickBudget(1_500)) {
       await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       return admWorkerResult({
         metadata,
@@ -6708,7 +6708,34 @@ export async function runAdmWorkerSyncTick(
       });
     }
 
+    if (!hasTickBudget(1_250)) {
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
+        selectedAdmFile: directFileName,
+        selectedAdmPath: directPath ?? `dayzps/config/${directFileName}`,
+        pendingJobs,
+        skippedNotDue: 1,
+        message: "ADM Worker paused before direct ADM file read to stay within the scheduled invocation budget. Work will continue next tick.",
+      });
+    }
+
     const token = await decryptToken(selected.encrypted_token, selected.token_iv, selected.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+    if (!hasTickBudget(1_000)) {
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
+        selectedAdmFile: directFileName,
+        selectedAdmPath: directPath ?? `dayzps/config/${directFileName}`,
+        pendingJobs,
+        skippedNotDue: 1,
+        message: "ADM Worker paused after token preparation to stay within the scheduled invocation budget. Work will continue next tick.",
+      });
+    }
     const read = await readAdmFileTextWithFallback({
       token,
       serviceId: selected.nitrado_service_id,
@@ -6716,12 +6743,12 @@ export async function runAdmWorkerSyncTick(
       originalPath: directPath ?? `dayzps/config/${directFileName}`,
       options: {
         mode: "full",
-        fullDownloadFallback: true,
-        maxPathVariants: explicitTargetFileName ? 2 : Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
-        currentFileMaxPathVariants: explicitTargetFileName ? 2 : Math.max(1, Math.min(2, budget.maxReadAttemptsPerFile)),
+        fullDownloadFallback: explicitTargetFileName ? true : false,
+        maxPathVariants: explicitTargetFileName ? 2 : 1,
+        currentFileMaxPathVariants: explicitTargetFileName ? 2 : 1,
         trySeekWithoutRaw: true,
         maxTokenizedAttempts: budget.maxTokenizedAttemptsPerFile,
-        maxChunkedReadChunks: Math.max(1, Math.min(4, budget.maxChunkedReadChunks)),
+        maxChunkedReadChunks: explicitTargetFileName ? Math.max(1, Math.min(2, budget.maxChunkedReadChunks)) : 1,
         diagnostics: {
           db: requireDb(env),
           serverId: selected.id,

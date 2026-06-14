@@ -20,7 +20,7 @@ export const AUTOMATION_MIGRATION_WARNING =
   "Automation is running, but D1 migration history needs attention. Rerun npm run db:migrate:remote once Cloudflare account permissions are fixed.";
 
 export type AutomationCronSource = typeof AUTOMATION_CRON_SOURCES[number];
-export type AutomationCronJobType = "metadata" | "adm" | "discord-posts";
+export type AutomationCronJobType = "metadata" | "adm" | "discord-posts" | "server-wars";
 export type AutomationCronStatus = "started" | "success" | "failed" | "partial";
 
 type AutomationCronRunRow = {
@@ -153,6 +153,8 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
 export function normalizeAutomationCronSource(source: unknown, cron?: unknown): AutomationCronSource {
   const explicit = typeof source === "string" ? source.trim().toLowerCase() : "";
   if (explicit === "cloudflare" || explicit === "github-backup" || explicit === "manual") return explicit;
+  if (explicit.includes("cloudflare")) return "cloudflare";
+  if (explicit.includes("github")) return "github-backup";
   const cronValue = typeof cron === "string" ? cron.trim().toLowerCase() : "";
   if (cronValue.includes("github")) return "github-backup";
   if (cronValue.includes("cloudflare") || cronValue === "* * * * *") return "cloudflare";

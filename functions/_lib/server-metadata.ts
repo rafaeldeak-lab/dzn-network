@@ -609,6 +609,19 @@ async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): P
          AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
+         CASE
+           WHEN linked_servers.player_count_last_checked_at IS NULL
+             OR linked_servers.player_count_last_checked_at <= ?
+             OR linked_servers.metadata_last_checked_at IS NULL
+             OR linked_servers.metadata_last_checked_at <= ?
+           THEN 0 ELSE 1
+         END ASC,
+         CASE lower(COALESCE(linked_servers.listing_visibility, 'public'))
+           WHEN 'public' THEN 0
+           WHEN 'listed' THEN 0
+           ELSE 1
+         END ASC,
+         COALESCE(linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
          CASE lower(COALESCE(server_subscriptions.plan_key, 'free'))
            WHEN 'premium' THEN 4
            WHEN 'network' THEN 4
@@ -621,7 +634,7 @@ async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): P
          linked_servers.updated_at DESC
        LIMIT ?`,
     )
-    .bind(now, maxServers)
+    .bind(now, now, now, maxServers)
     .all<AutomationSyncServer>();
   return rows.results ?? [];
 }
