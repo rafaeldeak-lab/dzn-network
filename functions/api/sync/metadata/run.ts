@@ -62,7 +62,7 @@ export async function handleMetadataSyncRun(
     skipAutomationMaintenance: true,
     debugServiceId,
   };
-  const responseTimeoutMs = Math.max(250, Math.min(refreshOptions.deadlineMs, 12_000));
+  const responseTimeoutMs = Math.max(250, Math.min(refreshOptions.deadlineMs, 25_000));
 
   if (body.async === true) {
     waitUntil(runMetadataRefresh(env, source, startedAt, refreshOptions, handlers).catch((error) => {

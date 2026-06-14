@@ -83,6 +83,7 @@ assert.equal(metadataCron.includes("deadlineMs: sanitizePositiveInteger(body.dea
 assert.equal(metadataCron.includes("raceMetadataRefreshWithTimeout"), true);
 assert.equal(metadataCron.includes("timed_out: timedOut"), true);
 assert.equal(metadataCron.includes("budget_exhausted: true"), true);
+assert.equal(metadataCron.includes("Math.min(refreshOptions.deadlineMs, 25_000)"), true);
 assert.equal(metadataCron.includes("body.async === true"), true);
 assert.equal(metadataCron.includes("waitUntil(runMetadataRefresh"), true);
 assert.equal(serverMetadata.includes("staleStatusLockCutoff"), true);
