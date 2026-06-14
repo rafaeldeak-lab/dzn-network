@@ -1,9 +1,5 @@
-import { refreshLivePlayerCountsForActiveServers } from "../../../_lib/server-metadata";
-import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
-import { isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
-import { requireDb } from "../../../_lib/db";
-import { json, readJson } from "../../../_lib/http";
 import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
+import { isCronSecretAuthorized, requireCronSecret } from "../../../_lib/cron-auth";
 
 type MetadataSyncRunBody = {
   async?: boolean;
@@ -16,11 +12,39 @@ type MetadataSyncRunBody = {
 };
 
 type MetadataSyncRunHandlers = {
-  refreshMetadata: typeof refreshLivePlayerCountsForActiveServers;
+  refreshMetadata: (env: Env, options?: Record<string, unknown>) => Promise<MetadataRefreshResult>;
 };
 
-const DEFAULT_HANDLERS: MetadataSyncRunHandlers = {
-  refreshMetadata: refreshLivePlayerCountsForActiveServers,
+type MetadataRefreshResult = {
+  processed: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  updated_player_counts: number;
+  budget_exhausted?: boolean;
+  results: Array<{
+    linked_server_id: string;
+    service_id: string | null;
+    server_name: string | null;
+    status: "succeeded" | "failed" | "skipped";
+    changed: boolean;
+    current_players: number | null;
+    max_players: number | null;
+    player_count_status: string;
+    player_count_last_checked_at: string | null;
+    metadata_last_checked_at: string | null;
+    message: string;
+  }>;
+};
+
+type MetadataRefreshOptions = {
+  maxServers: number;
+  deadlineMs: number;
+  livePlayerCountStaleMs: number;
+  includeResults: boolean;
+  queueDiscordUpdates: boolean;
+  skipAutomationMaintenance: boolean;
+  debugServiceId: string | null;
 };
 
 export const onRequestPost: PagesFunction = (context) => handleMetadataSyncRun(context);
@@ -44,7 +68,7 @@ export const onRequestGet: PagesFunction = () => json(
 
 export async function handleMetadataSyncRun(
   { request, env, waitUntil }: PagesContext,
-  handlers: MetadataSyncRunHandlers = DEFAULT_HANDLERS,
+  handlers?: MetadataSyncRunHandlers,
 ) {
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
@@ -80,7 +104,7 @@ export async function handleMetadataSyncRun(
     }, { status: 202 });
   }
 
-  const refreshPromise = runMetadataRefresh(env, source, startedAt, refreshOptions, handlers);
+  const refreshPromise = runMetadataRefresh(env, source, startedAt, refreshOptions, handlers ?? await defaultHandlers());
   refreshPromise.catch((error) => {
     console.warn("DZN METADATA CRON REFRESH FINISHED AFTER RESPONSE", error instanceof Error ? error.message : "metadata refresh failed");
   });
@@ -118,14 +142,14 @@ export async function handleMetadataSyncRun(
 }
 
 async function raceMetadataRefreshWithTimeout(
-  promise: Promise<Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>>,
+  promise: Promise<MetadataRefreshResult>,
   timeoutMs: number,
 ) {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
       promise.then((result) => ({ result, timedOut: false })),
-      new Promise<{ result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>; timedOut: true }>((resolve) => {
+      new Promise<{ result: MetadataRefreshResult; timedOut: true }>((resolve) => {
         timeout = setTimeout(() => {
           resolve({
             timedOut: true,
@@ -151,11 +175,12 @@ async function runMetadataRefresh(
   env: Env,
   source: ReturnType<typeof normalizeAutomationCronSource>,
   startedAt: string,
-  options: Parameters<typeof refreshLivePlayerCountsForActiveServers>[1],
-  handlers: MetadataSyncRunHandlers,
+  options: MetadataRefreshOptions,
+  handlers?: MetadataSyncRunHandlers,
 ) {
   try {
-    const result = await handlers.refreshMetadata(env, options);
+    const activeHandlers = handlers ?? await defaultHandlers();
+    const result = await activeHandlers.refreshMetadata(env, options);
     await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
       processedCount: result.processed,
       skippedCount: result.skipped,
@@ -170,7 +195,8 @@ async function runMetadataRefresh(
 
 async function countStaleMetadataRemaining(env: Env, staleMs = 90_000) {
   const cutoff = new Date(Date.now() - Math.max(30_000, Math.min(staleMs, 30 * 60 * 1000))).toISOString();
-  const row = await requireDb(env)
+  const db = await requireDbLazy(env);
+  const row = await db
     .prepare(
       `SELECT COUNT(*) AS count
        FROM linked_servers
@@ -194,7 +220,8 @@ async function countStaleMetadataRemaining(env: Env, staleMs = 90_000) {
 
 async function readMetadataDiagnostics(env: Env, staleMs = 90_000) {
   const cutoff = new Date(Date.now() - Math.max(30_000, Math.min(staleMs, 30 * 60 * 1000))).toISOString();
-  const row = await requireDb(env)
+  const db = await requireDbLazy(env);
+  const row = await db
     .prepare(
       `SELECT
          COUNT(*) AS stale_remaining_count,
@@ -219,7 +246,7 @@ async function readMetadataDiagnostics(env: Env, staleMs = 90_000) {
     .bind(cutoff, cutoff)
     .first<{ stale_remaining_count: number | null; oldest_public_metadata_age_seconds: number | null }>();
 
-  const tracked = await requireDb(env)
+  const tracked = await db
     .prepare(
       `SELECT nitrado_service_id, display_name, current_players, max_players,
               player_count_status, player_count_last_checked_at
@@ -254,7 +281,7 @@ async function readMetadataDiagnostics(env: Env, staleMs = 90_000) {
 }
 
 function buildSafeMetadataDiagnostics(
-  result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>,
+  result: MetadataRefreshResult,
   diagnostics: Awaited<ReturnType<typeof readMetadataDiagnostics>> | null,
   debugServiceId: string | null,
 ) {
@@ -280,7 +307,7 @@ function buildSafeMetadataDiagnostics(
 }
 
 function buildMetadataWarnings(
-  result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>,
+  result: MetadataRefreshResult,
   timedOut: boolean,
   staleRemainingCount: number | null,
 ) {
@@ -321,6 +348,7 @@ async function safeRecordCronRun(
 ) {
   const finishedAt = new Date().toISOString();
   try {
+    const { recordAutomationCronRun } = await import("../../../_lib/automation");
     await recordAutomationCronRun(env, {
       source,
       jobType: "metadata",
@@ -337,4 +365,47 @@ async function safeRecordCronRun(
       message: error instanceof Error ? error.message : "record failed",
     });
   }
+}
+
+async function defaultHandlers(): Promise<MetadataSyncRunHandlers> {
+  const { refreshLivePlayerCountsForActiveServers } = await import("../../../_lib/server-metadata");
+  return {
+    refreshMetadata: (env, options = {}) => refreshLivePlayerCountsForActiveServers(env, options),
+  };
+}
+
+async function requireDbLazy(env: Env): Promise<D1Database> {
+  const { requireDb } = await import("../../../_lib/db");
+  return requireDb(env);
+}
+
+function normalizeAutomationCronSource(source: unknown, cron?: unknown) {
+  const explicit = typeof source === "string" ? source.trim().toLowerCase() : "";
+  if (explicit === "cloudflare" || explicit === "github-backup" || explicit === "manual") return explicit;
+  if (explicit.includes("cloudflare")) return "cloudflare";
+  if (explicit.includes("github")) return "github-backup";
+  const cronValue = typeof cron === "string" ? cron.trim().toLowerCase() : "";
+  if (cronValue.includes("github")) return "github-backup";
+  if (cronValue.includes("cloudflare") || cronValue === "* * * * *") return "cloudflare";
+  return "manual";
+}
+
+async function readJson<T>(request: Request): Promise<T> {
+  if (!request.body) return {} as T;
+  try {
+    return await request.json() as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+function json(data: unknown, init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("cache-control", "no-store");
+  headers.set("x-content-type-options", "nosniff");
+  return new Response(JSON.stringify(data), {
+    ...init,
+    headers,
+  });
 }

@@ -138,7 +138,7 @@ assert.equal(autoUpdateWorker.includes('cadence: "every-minute"'), true);
 assert.equal(autoUpdateWorker.includes('cadence: "every-five-minutes"'), true);
 assert.equal(autoUpdateWorker.includes("isFiveMinuteTick"), true);
 assert.equal(autoUpdateWorker.includes("metadata\",\n    path: \"/api/sync/metadata/run\""), true);
-assert.equal(autoUpdateWorker.includes("async: true,\n      max_servers: 1"), false, "Metadata refresh must not be fire-and-forget; stale locks and public cache cleanup must finish.");
+assert.equal(autoUpdateWorker.includes("async: true,\n      max_servers: 1"), true, "Metadata refresh should acknowledge quickly and finish through the protected waitUntil path.");
 assert.equal(autoUpdateWorker.includes("source: \"cloudflare-live-metadata\""), true);
 assert.equal(autoUpdateWorker.includes("max_servers: 1"), true);
 assert.equal(autoUpdateWorker.includes("deadline_ms: 20_000"), true);

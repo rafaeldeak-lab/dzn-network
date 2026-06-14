@@ -74,7 +74,7 @@ async function main() {
       assert.equal(call.headers.get("x-cron-secret"), "unit-test-secret");
       assert.equal(call.headers.get("authorization"), "Bearer unit-test-secret");
     }
-    assert.equal("async" in (calls[0].body as Record<string, unknown>), false, "Metadata refresh should complete synchronously so locks and public cache cleanup finish.");
+    assert.equal((calls[0].body as { async: boolean }).async, true, "Metadata refresh should be acknowledged quickly and finish through waitUntil to avoid Pages CPU 503s.");
     assert.equal((calls[0].body as { source: string }).source, "cloudflare-live-metadata");
     assert.equal((calls[0].body as { deadline_ms: number }).deadline_ms, 20000);
     assert.equal((calls[0].body as { max_servers: number }).max_servers, 1);

@@ -36,6 +36,7 @@ const TASKS: SchedulerTask[] = [
     body: {
       source: "cloudflare-live-metadata",
       cron: "dzn-auto-update-worker",
+      async: true,
       max_servers: 1,
       deadline_ms: 20_000,
       player_count_stale_ms: 60_000,
