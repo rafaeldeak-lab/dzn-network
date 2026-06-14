@@ -551,11 +551,6 @@ export async function refreshLivePlayerCountsForActiveServers(
         serverStatus: result.metadata?.server_status ?? null,
         error: result.ok ? null : result.message,
       });
-      if (result.ok && result.metadata?.player_count_status === "fresh") {
-        await syncPublicCacheFromMetadataRefresh(env, row.id, serverName ?? "DayZ Server", result.metadata as LinkedServerMetadata, { patchHomeStats: false }).catch((error) => {
-          console.warn("DZN SERVER PUBLIC CACHE METADATA REFRESH SKIPPED", error instanceof Error ? error.message : "public cache update failed");
-        });
-      }
       await upsertServerPublicCache(env, {
         guildId: row.guild_id,
         planKey: row.plan_key,

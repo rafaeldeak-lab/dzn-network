@@ -454,6 +454,28 @@ export async function recordStatusCheckResult(env: Env, values: {
       values.guildId,
     )
     .run();
+  await db
+    .prepare(
+      `UPDATE server_public_cache SET
+        current_player_count = COALESCE(?, current_player_count),
+        max_player_count = COALESCE(?, max_player_count),
+        server_online = COALESCE(?, server_online),
+        server_status = COALESCE(?, server_status),
+        last_status_update_at = CASE WHEN ? THEN ? ELSE last_status_update_at END,
+        updated_at = ?
+       WHERE guild_id = ?`,
+    )
+    .bind(
+      values.currentPlayers ?? null,
+      values.maxPlayers ?? null,
+      values.serverOnline === true || values.serverOnline === 1 ? 1 : values.serverOnline === false || values.serverOnline === 0 ? 0 : null,
+      values.serverStatus ?? null,
+      values.ok ? 1 : 0,
+      now,
+      now,
+      values.guildId,
+    )
+    .run();
 }
 
 export async function getDueAdmAutomationServers(env: Env, maxServers: number, minSyncIntervalMs: number, linkedServerId?: string | null): Promise<AutomationSyncServer[]> {

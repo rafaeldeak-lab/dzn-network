@@ -11,6 +11,7 @@ const discordPosting = readFileSync("functions/_lib/discord-posting.ts", "utf8")
 const serverWarsCron = readFileSync("functions/api/cron/server-wars/refresh.ts", "utf8");
 const metadataCron = readFileSync("functions/api/sync/metadata/run.ts", "utf8");
 const serverMetadata = readFileSync("functions/_lib/server-metadata.ts", "utf8");
+const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
 
 assert.equal(workflow.includes("name: DZN Auto Update Schedulers"), true);
 assert.equal(workflow.includes("workflow_dispatch:"), true);
@@ -99,6 +100,8 @@ assert.equal(metadataCron.includes("selected_service_ids"), true);
 assert.equal(metadataCron.includes("skipped_service_ids"), true);
 assert.equal(metadataCron.includes("oldest_public_metadata_age_seconds"), true);
 assert.equal(serverMetadata.includes("/gameservers/games/players"), true);
+assert.equal(automationSource.includes("UPDATE server_public_cache SET"), true, "Status result recording must refresh public cache player counts.");
+assert.equal(automationSource.includes("last_status_update_at = CASE WHEN ? THEN ? ELSE last_status_update_at END"), true, "Failed status checks must not overwrite fresh public cache timestamps.");
 assert.equal(serverWarsCron.includes("requireCronSecret"), true);
 assert.equal(serverWarsCron.includes("runServerWarAutomationTick"), true);
 assert.equal(serverWarsCron.includes("body.async === true"), true);
@@ -149,6 +152,6 @@ assert.equal(autoUpdateWorker.includes("TOKEN_ENCRYPTION_KEY"), false, "Auto-upd
 assert.equal(serverMetadata.includes("UPDATE server_public_cache SET"), true, "Fresh metadata refresh should directly update the public cache row.");
 assert.equal(serverMetadata.includes("WHERE guild_id = ?"), true, "Public cache sync must target the existing guild row.");
 assert.equal(serverMetadata.includes("skipPublicCacheSideEffects: true"), true, "Cron metadata refresh should clear status before optional cache side effects.");
-assert.equal(serverMetadata.includes("patchHomeStats: false"), true, "Per-minute metadata cron should not block on home-stats cache patching.");
+assert.equal(serverMetadata.includes("skipPublicCacheSideEffects !== true"), true, "Per-minute metadata cron should not block on home-stats cache patching.");
 
 console.log("Automation scheduler tests passed.");
