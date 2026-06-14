@@ -173,7 +173,29 @@ export async function recordAutomationCronRun(env: Env, input: {
   skippedCount?: number | null;
   failedCount?: number | null;
 }) {
+  try {
+    await insertAutomationCronRun(env, input);
+    return;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    if (!/no such table|no such column|has no column|syntax error/i.test(message)) throw error;
+  }
   await ensureAutomationSchema(env);
+  await insertAutomationCronRun(env, input);
+}
+
+async function insertAutomationCronRun(env: Env, input: {
+  source: AutomationCronSource;
+  jobType: AutomationCronJobType;
+  status: AutomationCronStatus;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  errorMessage?: string | null;
+  durationMs?: number | null;
+  processedCount?: number | null;
+  skippedCount?: number | null;
+  failedCount?: number | null;
+}) {
   const now = new Date().toISOString();
   const startedAt = input.startedAt ?? now;
   const finishedAt = input.finishedAt ?? now;
