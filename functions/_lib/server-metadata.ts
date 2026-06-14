@@ -42,6 +42,12 @@ export type ScheduledMetadataSyncResult = {
   results: ScheduledMetadataSyncServerResult[];
 };
 
+type NitradoLivePlayerCountProbe = {
+  currentPlayers: number;
+  source: "gameservers_games_players";
+  sampledAt: string;
+};
+
 export type LinkedServerMetadata = {
   hostname: string | null;
   description: string | null;
@@ -424,7 +430,7 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
 
 export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
-  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; livePlayerCountStaleMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean } = {},
+  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; livePlayerCountStaleMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean; debugServiceId?: string | null } = {},
 ): Promise<ScheduledMetadataSyncResult> {
   await ensureLinkedServerMetadataColumns(env);
   const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
@@ -437,7 +443,7 @@ export async function refreshLivePlayerCountsForActiveServers(
     ? Math.max(30_000, Math.min(Math.trunc(options.livePlayerCountStaleMs), 30 * 60 * 1000))
     : METADATA_STALE_MS;
   const rows = options.skipAutomationMaintenance === true
-    ? await getDueMetadataRefreshServersFast(env, maxServers, livePlayerCountStaleMs)
+    ? await getDueMetadataRefreshServersFast(env, maxServers, livePlayerCountStaleMs, options.debugServiceId)
     : await getDueStatusAutomationServers(env, maxServers);
 
   let processed = 0;
@@ -588,12 +594,17 @@ export async function refreshLivePlayerCountsForActiveServers(
   };
 }
 
-async function getDueMetadataRefreshServersFast(env: Env, maxServers: number, livePlayerCountStaleMs = METADATA_STALE_MS): Promise<AutomationSyncServer[]> {
+async function getDueMetadataRefreshServersFast(
+  env: Env,
+  maxServers: number,
+  livePlayerCountStaleMs = METADATA_STALE_MS,
+  debugServiceId?: string | null,
+): Promise<AutomationSyncServer[]> {
   const now = new Date().toISOString();
-  const staleStatusLockCutoff = new Date(Date.now() - Math.max(livePlayerCountStaleMs, 90_000)).toISOString();
+  const staleStatusLockCutoff = new Date(Date.now() - Math.max(Math.min(livePlayerCountStaleMs, 90_000), 60_000)).toISOString();
   const livePlayerCountCutoff = new Date(Date.now() - livePlayerCountStaleMs).toISOString();
-  const rows = await requireDb(env)
-    .prepare(
+  const db = requireDb(env);
+  const selectDueServersSql =
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
               linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
               linked_servers.server_name, linked_servers.nitrado_service_name,
@@ -646,11 +657,38 @@ async function getDueMetadataRefreshServersFast(env: Env, maxServers: number, li
          END DESC,
          COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') ASC,
          linked_servers.updated_at DESC
-       LIMIT ?`,
-    )
+       LIMIT ?`;
+  const rows = await db
+    .prepare(selectDueServersSql)
     .bind(staleStatusLockCutoff, now, livePlayerCountCutoff, livePlayerCountCutoff, maxServers)
     .all<AutomationSyncServer>();
-  return rows.results ?? [];
+  const dueRows = rows.results ?? [];
+  const sanitizedDebugServiceId = cleanServiceId(debugServiceId);
+  if (!sanitizedDebugServiceId) return dueRows;
+  if (dueRows.some((row) => row.nitrado_service_id === sanitizedDebugServiceId)) return dueRows;
+  const debugRow = await db
+    .prepare(
+      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+              linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
+              linked_servers.server_name, linked_servers.nitrado_service_name,
+              linked_servers.current_players, linked_servers.max_players,
+              linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
+              linked_servers.player_count_status, server_subscriptions.plan_key,
+              server_subscriptions.status AS subscription_status,
+              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+              server_sync_state.next_adm_pull_due_at
+       FROM linked_servers
+       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
+       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+         AND linked_servers.nitrado_service_id = ?
+         AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       LIMIT 1`,
+    )
+    .bind(sanitizedDebugServiceId)
+    .first<AutomationSyncServer>();
+  return debugRow ? [debugRow, ...dueRows].slice(0, maxServers) : dueRows;
 }
 
 export function detectServerModeFromText(values: Array<string | null | undefined>) {
@@ -705,11 +743,12 @@ async function resolveGeoUpdate(linkedServer: LinkedServerMetadataRow, ipAddress
 
 async function fetchNitradoServerMetadata(env: Env, linkedServer: LinkedServerMetadataRow, now: string) {
   const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+  const serviceId = linkedServer.nitrado_service_id ?? "";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
   try {
     const response = await fetch(
-      `${NITRADO_API}/services/${encodeURIComponent(linkedServer.nitrado_service_id ?? "")}/gameservers`,
+      `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers`,
       {
         headers: { authorization: `Bearer ${token}`, accept: "application/json" },
         signal: controller.signal,
@@ -718,7 +757,46 @@ async function fetchNitradoServerMetadata(env: Env, linkedServer: LinkedServerMe
     if (response.status === 401 || response.status === 403) throw new Error("Nitrado token cannot access this service");
     if (!response.ok) throw new Error("Nitrado metadata fetch failed");
     const payload = await response.json().catch(() => null);
-    return normalizeNitradoMetadata(payload, linkedServer, now);
+    const livePlayerCount = await fetchNitradoOnlinePlayerCount(token, serviceId, now).catch((error) => {
+      console.warn("DZN LIVE NITRADO PLAYER COUNT ENDPOINT SKIPPED", {
+        linkedServerId: linkedServer.id,
+        serviceId,
+        message: error instanceof Error ? error.message : "live player endpoint unavailable",
+      });
+      return null;
+    });
+    return normalizeNitradoMetadata(payload, linkedServer, now, livePlayerCount);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchNitradoOnlinePlayerCount(
+  token: string,
+  serviceId: string,
+  now: string,
+): Promise<NitradoLivePlayerCountProbe | null> {
+  if (!serviceId) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch(
+      `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers/games/players`,
+      {
+        headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+        signal: controller.signal,
+      },
+    );
+    if (response.status === 404 || response.status === 405) return null;
+    if (response.status === 401 || response.status === 403) return null;
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => null);
+    const currentPlayers = extractNitradoOnlinePlayerCount(payload);
+    return currentPlayers === null ? null : {
+      currentPlayers,
+      source: "gameservers_games_players",
+      sampledAt: now,
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -748,7 +826,12 @@ async function mockMetadata(linkedServer: LinkedServerMetadataRow, now: string) 
   });
 }
 
-function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMetadataRow, now: string): Promise<LinkedServerMetadata> | LinkedServerMetadata {
+function normalizeNitradoMetadata(
+  payload: unknown,
+  linkedServer: LinkedServerMetadataRow,
+  now: string,
+  livePlayerCount: NitradoLivePlayerCountProbe | null = null,
+): Promise<LinkedServerMetadata> | LinkedServerMetadata {
   const gameserver = findRecordByKey(payload, "gameserver") ?? {};
   const details = record(gameserver.details);
   const settings = record(gameserver.settings);
@@ -801,7 +884,7 @@ function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMe
     statusQuery.max_players,
     playerCountPair?.max,
   );
-  const currentPlayers = firstNumber(
+  const gameserverCurrentPlayers = firstNumber(
     query.player_current,
     query.current_players,
     query.players_current,
@@ -839,6 +922,7 @@ function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMe
     statusQuery.players,
     playerCountPair?.current,
   );
+  const currentPlayers = livePlayerCount?.currentPlayers ?? gameserverCurrentPlayers;
   const ipAddress = normalizeIpAddress(firstString(gameserver.ip, gameserver.address, query.ip, query.address, details.address));
   const gamePort = firstNumber(gameserver.port, config.port, query.port, details.port, portList.game, portList.port);
   const queryPort = firstNumber(gameserver.query_port, config.query_port, query.query_port, details.query_port, portList.query);
@@ -870,6 +954,8 @@ function normalizeNitradoMetadata(payload: unknown, linkedServer: LinkedServerMe
       description,
       maxPlayers,
       currentPlayers,
+      playerCountSource: livePlayerCount?.source ?? "gameservers",
+      livePlayerCountObservedAt: livePlayerCount?.sampledAt ?? null,
       ipAddress,
       gamePort,
       queryPort,
@@ -1087,6 +1173,12 @@ export function parseNitradoPlayerCountPair(...values: unknown[]): { current: nu
   return null;
 }
 
+export function extractNitradoOnlinePlayerCount(payload: unknown): number | null {
+  const directNumber = firstNumberFromPlayerCountKeys(payload);
+  if (directNumber !== null) return directNumber;
+  return countPlayerList(payload);
+}
+
 export function resolveLivePlayerCounts(values: {
   currentPlayers: number | null | undefined;
   maxPlayers: number | null | undefined;
@@ -1110,6 +1202,55 @@ export function resolveLivePlayerCounts(values: {
 function normalizePlayerCountStatus(value: unknown): PlayerCountStatus {
   if (value === "fresh" || value === "stale" || value === "unavailable" || value === "unknown") return value;
   return "unknown";
+}
+
+function firstNumberFromPlayerCountKeys(value: unknown): number | null {
+  if (!isRecord(value)) return null;
+  const explicitPair = parseNitradoPlayerCountPair(
+    value.players,
+    value.player_count,
+    value.playerCount,
+    value.current,
+    value.online,
+  );
+  if (explicitPair) return explicitPair.current;
+  const direct = firstNumber(
+    value.current_players,
+    value.currentPlayers,
+    value.players_online,
+    value.playersOnline,
+    value.online_players,
+    value.onlinePlayers,
+    value.player_current,
+    value.playerCurrent,
+    value.player_count,
+    value.playerCount,
+    value.current,
+    value.online,
+  );
+  if (direct !== null) return direct;
+  for (const [key, child] of Object.entries(value)) {
+    if (!/^(data|gameserver|query|status|players|playerlist|player_list|online_players|current_players)$/i.test(key)) continue;
+    const nested = firstNumberFromPlayerCountKeys(child);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+function countPlayerList(value: unknown): number | null {
+  if (Array.isArray(value)) return value.length;
+  if (!isRecord(value)) return null;
+  for (const [key, child] of Object.entries(value)) {
+    if (!/^(players|playerlist|player_list|online_players)$/i.test(key)) continue;
+    if (Array.isArray(child)) return child.length;
+    if (isRecord(child)) return Object.keys(child).length;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (!/^(data|gameserver|players|playerlist|player_list|online_players)$/i.test(key)) continue;
+    const nested = countPlayerList(child);
+    if (nested !== null) return nested;
+  }
+  return null;
 }
 
 function metadataOnlineValue(value: unknown) {
@@ -1174,6 +1315,10 @@ function isSensitiveKey(key: string) {
 
 function cleanString(value: string | null | undefined) {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 500) : null;
+}
+
+function cleanServiceId(value: unknown) {
+  return typeof value === "string" && /^\d{3,32}$/.test(value.trim()) ? value.trim() : null;
 }
 
 function cleanNumber(value: number | null | undefined) {

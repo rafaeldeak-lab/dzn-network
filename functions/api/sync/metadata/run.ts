@@ -8,6 +8,7 @@ import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 type MetadataSyncRunBody = {
   async?: boolean;
   cron?: string;
+  debug_service_id?: string;
   deadline_ms?: number;
   player_count_stale_ms?: number;
   source?: string;
@@ -51,6 +52,7 @@ export async function handleMetadataSyncRun(
 
   const source = normalizeAutomationCronSource(body.source, body.cron);
   const startedAt = new Date().toISOString();
+  const debugServiceId = sanitizeServiceId(body.debug_service_id);
   const refreshOptions = {
     maxServers: sanitizePositiveInteger(body.max_servers, 1, 5),
     deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 60_000),
@@ -58,6 +60,7 @@ export async function handleMetadataSyncRun(
     includeResults: true,
     queueDiscordUpdates: false,
     skipAutomationMaintenance: true,
+    debugServiceId,
   };
   const responseTimeoutMs = Math.max(250, Math.min(refreshOptions.deadlineMs, 12_000));
 
@@ -73,6 +76,7 @@ export async function handleMetadataSyncRun(
       max_servers: refreshOptions.maxServers,
       deadline_ms: refreshOptions.deadlineMs,
       player_count_stale_ms: refreshOptions.livePlayerCountStaleMs,
+      debug_service_id: debugServiceId,
     }, { status: 202 });
   }
 
@@ -81,7 +85,10 @@ export async function handleMetadataSyncRun(
     console.warn("DZN METADATA CRON REFRESH FINISHED AFTER RESPONSE", error instanceof Error ? error.message : "metadata refresh failed");
   });
   const { result, timedOut } = await raceMetadataRefreshWithTimeout(refreshPromise, responseTimeoutMs);
-  const staleRemainingCount = await countStaleMetadataRemaining(env).catch(() => null);
+  const [staleRemainingCount, diagnostics] = await Promise.all([
+    countStaleMetadataRemaining(env, refreshOptions.livePlayerCountStaleMs).catch(() => null),
+    readMetadataDiagnostics(env, refreshOptions.livePlayerCountStaleMs).catch(() => null),
+  ]);
 
   console.log("DZN LIVE PLAYER COUNT AUTO SYNC READY", {
     processed: result.processed,
@@ -103,6 +110,7 @@ export async function handleMetadataSyncRun(
     timed_out: timedOut,
     stale_remaining_count: staleRemainingCount,
     next_recommended_run_seconds: staleRemainingCount && staleRemainingCount > 0 ? 60 : 300,
+    diagnostics: buildSafeMetadataDiagnostics(result, diagnostics, debugServiceId),
     warnings: buildMetadataWarnings(result, timedOut, staleRemainingCount),
     source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
@@ -160,8 +168,8 @@ async function runMetadataRefresh(
   }
 }
 
-async function countStaleMetadataRemaining(env: Env) {
-  const cutoff = new Date(Date.now() - 90 * 1000).toISOString();
+async function countStaleMetadataRemaining(env: Env, staleMs = 90_000) {
+  const cutoff = new Date(Date.now() - Math.max(30_000, Math.min(staleMs, 30 * 60 * 1000))).toISOString();
   const row = await requireDb(env)
     .prepare(
       `SELECT COUNT(*) AS count
@@ -184,6 +192,93 @@ async function countStaleMetadataRemaining(env: Env) {
   return Number(row?.count ?? 0);
 }
 
+async function readMetadataDiagnostics(env: Env, staleMs = 90_000) {
+  const cutoff = new Date(Date.now() - Math.max(30_000, Math.min(staleMs, 30 * 60 * 1000))).toISOString();
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT
+         COUNT(*) AS stale_remaining_count,
+         MAX(CASE WHEN linked_servers.player_count_last_checked_at IS NOT NULL THEN
+           (strftime('%s', 'now') - strftime('%s', linked_servers.player_count_last_checked_at))
+         ELSE NULL END) AS oldest_public_metadata_age_seconds
+       FROM linked_servers
+       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) IN ('public', 'listed')
+         AND linked_servers.nitrado_service_id IS NOT NULL
+         AND linked_servers.nitrado_service_id != ''
+         AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+         AND (
+           linked_servers.metadata_last_checked_at IS NULL
+           OR linked_servers.metadata_last_checked_at <= ?
+           OR linked_servers.player_count_last_checked_at IS NULL
+           OR linked_servers.player_count_last_checked_at <= ?
+         )`,
+    )
+    .bind(cutoff, cutoff)
+    .first<{ stale_remaining_count: number | null; oldest_public_metadata_age_seconds: number | null }>();
+
+  const tracked = await requireDb(env)
+    .prepare(
+      `SELECT nitrado_service_id, display_name, current_players, max_players,
+              player_count_status, player_count_last_checked_at
+       FROM linked_servers
+       WHERE nitrado_service_id IN ('18765761', '17428528')
+       ORDER BY nitrado_service_id`,
+    )
+    .all<{
+      nitrado_service_id: string | null;
+      display_name: string | null;
+      current_players: number | null;
+      max_players: number | null;
+      player_count_status: string | null;
+      player_count_last_checked_at: string | null;
+    }>();
+
+  return {
+    stale_remaining_count: Number(row?.stale_remaining_count ?? 0),
+    oldest_public_metadata_age_seconds: row?.oldest_public_metadata_age_seconds === null || row?.oldest_public_metadata_age_seconds === undefined
+      ? null
+      : Number(row.oldest_public_metadata_age_seconds),
+    tracked_public_servers: (tracked.results ?? []).map((server) => ({
+      service_id: server.nitrado_service_id,
+      server_name: server.display_name,
+      current_players: server.current_players,
+      max_players: server.max_players,
+      player_count_status: server.player_count_status,
+      player_count_last_checked_at: server.player_count_last_checked_at,
+      age_seconds: ageSeconds(server.player_count_last_checked_at),
+    })),
+  };
+}
+
+function buildSafeMetadataDiagnostics(
+  result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>,
+  diagnostics: Awaited<ReturnType<typeof readMetadataDiagnostics>> | null,
+  debugServiceId: string | null,
+) {
+  return {
+    debug_service_id: debugServiceId,
+    selected_service_ids: result.results.map((item) => item.service_id).filter((value): value is string => typeof value === "string" && value.length > 0),
+    skipped_service_ids: result.results
+      .filter((item) => item.status === "skipped")
+      .map((item) => ({
+        service_id: item.service_id,
+        reason: item.message,
+      })),
+    failed_service_ids: result.results
+      .filter((item) => item.status === "failed")
+      .map((item) => ({
+        service_id: item.service_id,
+        reason: item.message,
+      })),
+    stale_remaining_count: diagnostics?.stale_remaining_count ?? null,
+    oldest_public_metadata_age_seconds: diagnostics?.oldest_public_metadata_age_seconds ?? null,
+    tracked_public_servers: diagnostics?.tracked_public_servers ?? [],
+  };
+}
+
 function buildMetadataWarnings(
   result: Awaited<ReturnType<typeof refreshLivePlayerCountsForActiveServers>>,
   timedOut: boolean,
@@ -204,6 +299,16 @@ export function isMetadataCronAuthorized(request: Request, env: Env) {
 function sanitizePositiveInteger(value: unknown, fallback: number, max = 100000) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.min(Math.trunc(number), max) : fallback;
+}
+
+function sanitizeServiceId(value: unknown) {
+  return typeof value === "string" && /^\d{3,32}$/.test(value.trim()) ? value.trim() : null;
+}
+
+function ageSeconds(value: string | null | undefined) {
+  const checkedAt = Date.parse(value ?? "");
+  if (!Number.isFinite(checkedAt)) return null;
+  return Math.max(0, Math.trunc((Date.now() - checkedAt) / 1000));
 }
 
 async function safeRecordCronRun(
