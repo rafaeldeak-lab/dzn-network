@@ -74,9 +74,9 @@ async function main() {
       assert.equal(call.headers.get("x-cron-secret"), "unit-test-secret");
       assert.equal(call.headers.get("authorization"), "Bearer unit-test-secret");
     }
-    assert.equal((calls[0].body as { async: boolean }).async, true);
+    assert.equal("async" in (calls[0].body as Record<string, unknown>), false, "Metadata refresh should complete synchronously so locks and public cache cleanup finish.");
     assert.equal((calls[0].body as { source: string }).source, "cloudflare-live-metadata");
-    assert.equal((calls[0].body as { deadline_ms: number }).deadline_ms, 2500);
+    assert.equal((calls[0].body as { deadline_ms: number }).deadline_ms, 8000);
     assert.equal((calls[0].body as { max_servers: number }).max_servers, 3);
     assert.equal((calls[0].body as { player_count_stale_ms: number }).player_count_stale_ms, 60000);
     assert.equal((calls[1].body as { async: boolean }).async, true);

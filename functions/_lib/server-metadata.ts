@@ -364,6 +364,27 @@ async function syncPublicCacheFromMetadataRefresh(env: Env, linkedServerId: stri
     serverStatus: metadata.server_status,
     lastStatusUpdateAt: metadata.player_count_last_checked_at,
   });
+  await requireDb(env)
+    .prepare(
+      `UPDATE server_public_cache SET
+        current_player_count = ?,
+        max_player_count = ?,
+        server_online = ?,
+        server_status = COALESCE(?, server_status),
+        last_status_update_at = ?,
+        updated_at = ?
+       WHERE guild_id = ?`,
+    )
+    .bind(
+      metadata.current_players,
+      metadata.max_players,
+      metadataOnlineValue(metadata),
+      metadata.server_status ?? null,
+      metadata.player_count_last_checked_at,
+      metadata.player_count_last_checked_at,
+      context.guildId,
+    )
+    .run();
   await patchHomeStatsPlayerCountsFromFreshMetadata(env).catch((error) => {
     console.warn("DZN HOME STATS PLAYER COUNT SNAPSHOT PATCH SKIPPED", error instanceof Error ? error.message : "home-stats player count patch failed");
   });
