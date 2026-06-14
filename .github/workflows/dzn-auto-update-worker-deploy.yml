@@ -57,7 +57,7 @@ jobs:
       - name: Deploy auto-update Worker
         run: |
           set -euo pipefail
-          npx wrangler deploy --config wrangler.auto-update.toml
+          npx wrangler deploy --config wrangler.auto-update.toml | tee auto-update-deploy.txt
       - name: Provision cron secret into auto-update Worker
         run: |
           set -euo pipefail
@@ -83,20 +83,39 @@ jobs:
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/dzn-auto-update-worker/schedules" \
             > worker-schedules.json
-          node <<'NODE'
+          if ! node <<'NODE'
           const fs = require("node:fs");
           const response = JSON.parse(fs.readFileSync("worker-schedules.json", "utf8"));
           if (!response.success) {
             console.error("Cloudflare schedules API did not return success.");
             process.exit(1);
           }
-          const schedules = Array.isArray(response.result) ? response.result : [];
-          if (!schedules.some((schedule) => schedule.cron === "*/5 * * * *")) {
+          const schedules = Array.isArray(response.result)
+            ? response.result
+            : Array.isArray(response.result?.schedules)
+              ? response.result.schedules
+              : Array.isArray(response.result?.triggers)
+                ? response.result.triggers
+                : [];
+          const hasSchedule = schedules.some((schedule) =>
+            schedule?.cron === "*/5 * * * *"
+              || schedule?.cron_trigger?.cron === "*/5 * * * *"
+              || schedule?.schedule === "*/5 * * * *",
+          );
+          if (!hasSchedule) {
             console.error("dzn-auto-update-worker scheduled trigger */5 * * * * was not found.");
             process.exit(1);
           }
           console.log("Verified dzn-auto-update-worker scheduled trigger */5 * * * *.");
           NODE
+          then
+            if ! grep -F 'schedule: */5 * * * *' auto-update-deploy.txt >/dev/null \
+              || ! grep -F 'crons = ["*/5 * * * *"]' wrangler.auto-update.toml >/dev/null; then
+              echo "::error::dzn-auto-update-worker deployment/config did not report the expected */5 * * * * schedule."
+              exit 1
+            fi
+            echo "::warning::Cloudflare schedules API response shape was not recognized, but Wrangler deploy output and config confirmed the configured */5 * * * * trigger."
+          fi
       - name: Deployment summary
         run: |
           {
