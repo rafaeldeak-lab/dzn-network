@@ -89,6 +89,8 @@ assert.equal(serverMetadata.includes("COALESCE(server_sync_state.currently_check
 assert.equal(serverMetadata.includes("OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?"), true);
 assert.equal(serverWarsCron.includes("requireCronSecret"), true);
 assert.equal(serverWarsCron.includes("runServerWarAutomationTick"), true);
+assert.equal(serverWarsCron.includes("body.async === true"), true);
+assert.equal(serverWarsCron.includes("waitUntil(runAndRecordServerWarAutomation"), true);
 assert.equal(discordRoute.includes("requireCronSecret"), true);
 assert.equal(discordRoute.indexOf("requireCronSecret") < discordRoute.indexOf("readJson"), true, "Discord route should reject unauthenticated callers before parsing body.");
 assert.equal(discordRoute.includes("body.async === true"), true);

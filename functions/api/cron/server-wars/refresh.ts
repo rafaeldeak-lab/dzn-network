@@ -7,9 +7,10 @@ import {
   SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT,
   SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT,
 } from "../../../_lib/server-war-automation";
-import type { PagesFunction } from "../../../_lib/types";
+import type { Env, PagesFunction } from "../../../_lib/types";
 
 type ServerWarCronBody = {
+  async?: unknown;
   maxEvents?: unknown;
   max_events?: unknown;
   maxFinalizations?: unknown;
@@ -21,7 +22,15 @@ type ServerWarCronBody = {
   source?: unknown;
 };
 
-export const onRequestPost: PagesFunction = async ({ request, env }) => {
+type ServerWarCronOptions = {
+  maxEvents: number;
+  maxFinalizations: number;
+  maxChallengeExpirations: number;
+  deadlineMs: number;
+  source: string;
+};
+
+export const onRequestPost: PagesFunction = async ({ request, env, waitUntil }) => {
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
 
@@ -29,27 +38,29 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const body = await readJson<ServerWarCronBody>(request);
     const startedAt = new Date().toISOString();
     const source = typeof body.source === "string" ? body.source : "cron";
-    const result = await runServerWarAutomationTick(env, {
+    const options = {
       maxEvents: numberParam(body.maxEvents ?? body.max_events, SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT, SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT),
       maxFinalizations: numberParam(body.maxFinalizations ?? body.max_finalizations, SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT, SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT),
       maxChallengeExpirations: numberParam(body.maxChallengeExpirations ?? body.max_challenge_expirations, 10, 20),
       deadlineMs: numberParam(body.deadlineMs ?? body.deadline_ms, SERVER_WAR_AUTOMATION_DEFAULT_DEADLINE_MS, 5_000),
       source,
-    });
-    await recordAutomationCronRun(env, {
-      source: normalizeAutomationCronSource(source, source),
-      jobType: "server-wars",
-      status: result.warnings.length && result.snapshots.length + result.finalized.length === 0 ? "partial" : "success",
-      startedAt,
-      finishedAt: new Date().toISOString(),
-      processedCount: result.snapshots.length + result.finalized.length + result.transitions.expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing,
-      skippedCount: result.budgetExhausted ? 1 : 0,
-      failedCount: [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length,
-    }).catch((error) => {
-      console.warn("DZN Server Wars cron run record skipped", {
-        message: error instanceof Error ? error.message : "record failed",
-      });
-    });
+    } satisfies ServerWarCronOptions;
+    if (body.async === true) {
+      waitUntil(runAndRecordServerWarAutomation(env, startedAt, options).catch((error) => {
+        console.warn("DZN async cron Server Wars refresh failed", error instanceof Error ? error.message : "unknown");
+      }));
+      return json({
+        ok: true,
+        accepted: true,
+        source,
+        max_events: options.maxEvents,
+        max_finalizations: options.maxFinalizations,
+        max_challenge_expirations: options.maxChallengeExpirations,
+        deadline_ms: options.deadlineMs,
+      }, { status: 202, headers: { "cache-control": "no-store" } });
+    }
+
+    const result = await runAndRecordServerWarAutomation(env, startedAt, options);
     return json(result, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const requestId = crypto.randomUUID();
@@ -80,4 +91,27 @@ export const onRequestOptions: PagesFunction = () => new Response(null, {
 function numberParam(value: unknown, fallback: number, max: number) {
   const parsed = Math.trunc(Number(value));
   return Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, max)) : fallback;
+}
+
+async function runAndRecordServerWarAutomation(
+  env: Env,
+  startedAt: string,
+  options: ServerWarCronOptions,
+) {
+  const result = await runServerWarAutomationTick(env, options);
+  await recordAutomationCronRun(env, {
+    source: normalizeAutomationCronSource(options.source, options.source),
+    jobType: "server-wars",
+    status: result.warnings.length && result.snapshots.length + result.finalized.length === 0 ? "partial" : "success",
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    processedCount: result.snapshots.length + result.finalized.length + result.transitions.expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing,
+    skippedCount: result.budgetExhausted ? 1 : 0,
+    failedCount: [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length,
+  }).catch((error) => {
+    console.warn("DZN Server Wars cron run record skipped", {
+      message: error instanceof Error ? error.message : "record failed",
+    });
+  });
+  return result;
 }

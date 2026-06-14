@@ -45,6 +45,7 @@ const TASKS: SchedulerTask[] = [
     timeoutMs: 10_000,
     body: {
       source: "cloudflare-scheduled",
+      async: true,
       max_events: 1,
       max_finalizations: 1,
       max_challenge_expirations: 10,
