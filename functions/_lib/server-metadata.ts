@@ -587,6 +587,7 @@ export async function refreshLivePlayerCountsForActiveServers(
 
 async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): Promise<AutomationSyncServer[]> {
   const now = new Date().toISOString();
+  const staleStatusLockCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
@@ -605,7 +606,10 @@ async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): P
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
-         AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
+         AND (
+           COALESCE(server_sync_state.currently_checking_status, 0) = 0
+           OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
+         )
          AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
@@ -634,7 +638,7 @@ async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): P
          linked_servers.updated_at DESC
        LIMIT ?`,
     )
-    .bind(now, now, now, maxServers)
+    .bind(staleStatusLockCutoff, now, now, now, maxServers)
     .all<AutomationSyncServer>();
   return rows.results ?? [];
 }

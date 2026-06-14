@@ -10,6 +10,7 @@ const discordRoute = readFileSync("functions/api/sync/discord-posts/run.ts", "ut
 const discordPosting = readFileSync("functions/_lib/discord-posting.ts", "utf8");
 const serverWarsCron = readFileSync("functions/api/cron/server-wars/refresh.ts", "utf8");
 const metadataCron = readFileSync("functions/api/sync/metadata/run.ts", "utf8");
+const serverMetadata = readFileSync("functions/_lib/server-metadata.ts", "utf8");
 
 assert.equal(workflow.includes("name: DZN Auto Update Schedulers"), true);
 assert.equal(workflow.includes("workflow_dispatch:"), true);
@@ -82,6 +83,10 @@ assert.equal(metadataCron.includes("timed_out: timedOut"), true);
 assert.equal(metadataCron.includes("budget_exhausted: true"), true);
 assert.equal(metadataCron.includes("body.async === true"), true);
 assert.equal(metadataCron.includes("waitUntil(runMetadataRefresh"), true);
+assert.equal(serverMetadata.includes("staleStatusLockCutoff"), true);
+assert.equal(serverMetadata.includes("server_sync_state.status_sync_started_at"), true);
+assert.equal(serverMetadata.includes("COALESCE(server_sync_state.currently_checking_status, 0) = 0"), true);
+assert.equal(serverMetadata.includes("OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?"), true);
 assert.equal(serverWarsCron.includes("requireCronSecret"), true);
 assert.equal(serverWarsCron.includes("runServerWarAutomationTick"), true);
 assert.equal(discordRoute.includes("requireCronSecret"), true);
