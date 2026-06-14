@@ -135,9 +135,9 @@ assert.equal(autoUpdateWorker.includes('cadence: "every-minute"'), true);
 assert.equal(autoUpdateWorker.includes('cadence: "every-five-minutes"'), true);
 assert.equal(autoUpdateWorker.includes("isFiveMinuteTick"), true);
 assert.equal(autoUpdateWorker.includes("metadata\",\n    path: \"/api/sync/metadata/run\""), true);
-assert.equal(autoUpdateWorker.includes("async: true,\n      max_servers: 2"), false, "Metadata refresh must not be fire-and-forget; stale locks and public cache cleanup must finish.");
+assert.equal(autoUpdateWorker.includes("async: true,\n      max_servers: 1"), false, "Metadata refresh must not be fire-and-forget; stale locks and public cache cleanup must finish.");
 assert.equal(autoUpdateWorker.includes("source: \"cloudflare-live-metadata\""), true);
-assert.equal(autoUpdateWorker.includes("max_servers: 2"), true);
+assert.equal(autoUpdateWorker.includes("max_servers: 1"), true);
 assert.equal(autoUpdateWorker.includes("deadline_ms: 20_000"), true);
 assert.equal(autoUpdateWorker.includes("player_count_stale_ms: 60_000"), true);
 assert.equal(autoUpdateWorker.includes("timeoutMs: 25_000"), true);
@@ -148,5 +148,7 @@ assert.equal(autoUpdateWorker.includes("/api/sync/adm/run"), false, "Auto-update
 assert.equal(autoUpdateWorker.includes("TOKEN_ENCRYPTION_KEY"), false, "Auto-update Worker must not handle Nitrado token decryption.");
 assert.equal(serverMetadata.includes("UPDATE server_public_cache SET"), true, "Fresh metadata refresh should directly update the public cache row.");
 assert.equal(serverMetadata.includes("WHERE guild_id = ?"), true, "Public cache sync must target the existing guild row.");
+assert.equal(serverMetadata.includes("skipPublicCacheSideEffects: true"), true, "Cron metadata refresh should clear status before optional cache side effects.");
+assert.equal(serverMetadata.includes("patchHomeStats: false"), true, "Per-minute metadata cron should not block on home-stats cache patching.");
 
 console.log("Automation scheduler tests passed.");

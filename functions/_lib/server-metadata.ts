@@ -108,7 +108,7 @@ type LinkedServerMetadataRow = {
 
 export async function refreshNitradoServerMetadata(
   env: Env,
-  options: { linkedServerId: string; userId?: string | null; force?: boolean; softFail?: boolean },
+  options: { linkedServerId: string; userId?: string | null; force?: boolean; softFail?: boolean; skipPublicCacheSideEffects?: boolean },
 ) {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
@@ -311,9 +311,11 @@ export async function refreshNitradoServerMetadata(
   }
 
   console.log("DZN SERVER METADATA AUTO SYNC COMPLETE");
-  await syncPublicCacheFromMetadataRefresh(env, linkedServer.id, displayName, metadata).catch((error) => {
-    console.warn("DZN SERVER PUBLIC CACHE METADATA REFRESH SKIPPED", error instanceof Error ? error.message : "public cache update failed");
-  });
+  if (options.skipPublicCacheSideEffects !== true) {
+    await syncPublicCacheFromMetadataRefresh(env, linkedServer.id, displayName, metadata).catch((error) => {
+      console.warn("DZN SERVER PUBLIC CACHE METADATA REFRESH SKIPPED", error instanceof Error ? error.message : "public cache update failed");
+    });
+  }
 
   return {
     ok: true,
@@ -350,7 +352,13 @@ export async function refreshNitradoServerMetadata(
   };
 }
 
-async function syncPublicCacheFromMetadataRefresh(env: Env, linkedServerId: string, displayName: string, metadata: LinkedServerMetadata) {
+async function syncPublicCacheFromMetadataRefresh(
+  env: Env,
+  linkedServerId: string,
+  displayName: string,
+  metadata: LinkedServerMetadata,
+  options: { patchHomeStats?: boolean } = {},
+) {
   if (metadata.player_count_status !== "fresh") return;
   const context = await getAutomationContextForLinkedServer(env, linkedServerId);
   if (!context) return;
@@ -385,9 +393,11 @@ async function syncPublicCacheFromMetadataRefresh(env: Env, linkedServerId: stri
       context.guildId,
     )
     .run();
-  await patchHomeStatsPlayerCountsFromFreshMetadata(env).catch((error) => {
-    console.warn("DZN HOME STATS PLAYER COUNT SNAPSHOT PATCH SKIPPED", error instanceof Error ? error.message : "home-stats player count patch failed");
-  });
+  if (options.patchHomeStats !== false) {
+    await patchHomeStatsPlayerCountsFromFreshMetadata(env).catch((error) => {
+      console.warn("DZN HOME STATS PLAYER COUNT SNAPSHOT PATCH SKIPPED", error instanceof Error ? error.message : "home-stats player count patch failed");
+    });
+  }
 }
 
 async function updatePlayerCountFreshness(
@@ -523,6 +533,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         userId: row.user_id,
         force: true,
         softFail: true,
+        skipPublicCacheSideEffects: true,
       });
       if (result.ok) succeeded += 1;
       else failed += 1;
@@ -540,6 +551,11 @@ export async function refreshLivePlayerCountsForActiveServers(
         serverStatus: result.metadata?.server_status ?? null,
         error: result.ok ? null : result.message,
       });
+      if (result.ok && result.metadata?.player_count_status === "fresh") {
+        await syncPublicCacheFromMetadataRefresh(env, row.id, serverName ?? "DayZ Server", result.metadata as LinkedServerMetadata, { patchHomeStats: false }).catch((error) => {
+          console.warn("DZN SERVER PUBLIC CACHE METADATA REFRESH SKIPPED", error instanceof Error ? error.message : "public cache update failed");
+        });
+      }
       await upsertServerPublicCache(env, {
         guildId: row.guild_id,
         planKey: row.plan_key,
