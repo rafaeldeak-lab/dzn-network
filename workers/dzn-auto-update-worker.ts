@@ -58,6 +58,7 @@ const TASKS: SchedulerTask[] = [
     body: {
       source: "cloudflare-scheduled",
       cron: "dzn-auto-update-worker",
+      async: true,
       max_jobs: 2,
       deadline_ms: 2_500,
     },

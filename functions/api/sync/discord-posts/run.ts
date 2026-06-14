@@ -5,6 +5,7 @@ import { json, readJson } from "../../../_lib/http";
 import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 
 type DiscordPostRunBody = {
+  async?: boolean;
   max_jobs?: number;
   deadline_ms?: number;
   cron?: string;
@@ -32,7 +33,7 @@ export const onRequestGet: PagesFunction = () => json(
 );
 
 export async function handleDiscordPostRun(
-  { request, env }: PagesContext,
+  { request, env, waitUntil }: PagesContext,
   handlers: DiscordPostRunHandlers = DEFAULT_HANDLERS,
 ) {
   const unauthorized = requireCronSecret(request, env);
@@ -40,26 +41,52 @@ export async function handleDiscordPostRun(
   const body = await readJson<DiscordPostRunBody>(request);
   const source = normalizeAutomationCronSource(body.source, body.cron);
   const startedAt = new Date().toISOString();
-  let result: Awaited<ReturnType<typeof dispatchQueuedDiscordPostUpdates>>;
-  try {
-    result = await handlers.dispatch(env, {
-      maxJobs: sanitizePositiveInteger(body.max_jobs, 2, 10),
-      deadlineMs: sanitizePositiveInteger(body.deadline_ms, 2500, 5000),
-    });
-    await safeRecordCronRun(env, source, result.failed > 0 && (result.posted > 0 || result.skipped > 0) ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
-      processedCount: result.processed,
-      skippedCount: result.skipped,
-      failedCount: result.failed,
-    });
-  } catch (error) {
-    await safeRecordCronRun(env, source, "failed", startedAt, error);
-    throw error;
+  const runOptions = {
+    maxJobs: sanitizePositiveInteger(body.max_jobs, 2, 10),
+    deadlineMs: sanitizePositiveInteger(body.deadline_ms, 2500, 5000),
+  };
+
+  if (body.async === true) {
+    waitUntil(runDiscordPostDispatch(env, source, startedAt, runOptions, handlers).catch((error) => {
+      console.warn("DZN DISCORD POST ASYNC CRON RUN FAILED", error instanceof Error ? error.message : "discord post sync failed");
+    }));
+    return json({
+      ok: true,
+      accepted: true,
+      source,
+      cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
+      max_jobs: runOptions.maxJobs,
+      deadline_ms: runOptions.deadlineMs,
+    }, { status: 202 });
   }
+
+  const result = await runDiscordPostDispatch(env, source, startedAt, runOptions, handlers);
   return json({
     ...result,
     source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
   });
+}
+
+async function runDiscordPostDispatch(
+  env: Env,
+  source: ReturnType<typeof normalizeAutomationCronSource>,
+  startedAt: string,
+  options: { maxJobs: number; deadlineMs: number },
+  handlers: DiscordPostRunHandlers,
+) {
+  try {
+    const result = await handlers.dispatch(env, options);
+    await safeRecordCronRun(env, source, result.failed > 0 && (result.posted > 0 || result.skipped > 0) ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
+      processedCount: result.processed,
+      skippedCount: result.skipped,
+      failedCount: result.failed,
+    });
+    return result;
+  } catch (error) {
+    await safeRecordCronRun(env, source, "failed", startedAt, error);
+    throw error;
+  }
 }
 
 export function isDiscordPostCronAuthorized(request: Request, env: Env) {

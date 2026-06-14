@@ -91,6 +91,8 @@ assert.equal(serverWarsCron.includes("requireCronSecret"), true);
 assert.equal(serverWarsCron.includes("runServerWarAutomationTick"), true);
 assert.equal(discordRoute.includes("requireCronSecret"), true);
 assert.equal(discordRoute.indexOf("requireCronSecret") < discordRoute.indexOf("readJson"), true, "Discord route should reject unauthenticated callers before parsing body.");
+assert.equal(discordRoute.includes("body.async === true"), true);
+assert.equal(discordRoute.includes("waitUntil(runDiscordPostDispatch"), true);
 assert.equal(discordRoute.includes("maxJobs: sanitizePositiveInteger(body.max_jobs, 2, 10)"), true);
 assert.equal(discordRoute.includes("deadlineMs: sanitizePositiveInteger(body.deadline_ms, 2500, 5000)"), true);
 
