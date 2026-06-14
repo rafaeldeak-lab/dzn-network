@@ -886,20 +886,21 @@ function ServerDashboard({
   const isOriginalOwner = server.original_owner_is_current_user !== false;
   const metadataCheckedLabel = server.metadata_last_checked_at ? formatRelativeTime(server.metadata_last_checked_at) : "not checked yet";
   const metadataChangedLabel = server.metadata_last_changed_at ? formatRelativeTime(server.metadata_last_changed_at) : null;
-  const playerCountCheckedLabel = server.player_count_last_checked_at ? formatRelativeTime(server.player_count_last_checked_at) : "not checked yet";
-  const playerCountStatusLabel = formatPlayerCountStatus(server.player_count_status);
-  const currentPlayers = server.current_players ?? effectiveDashboardHealth?.server.current_players ?? cachedDashboardStats?.stats.players ?? null;
-  const maxPlayers = server.max_players ?? server.player_slots ?? effectiveDashboardHealth?.server.max_players ?? null;
+  const dashboardPlayerCount = pickFreshestDashboardPlayerCount(server, effectiveDashboardHealth?.server ?? null);
+  const playerCountCheckedLabel = dashboardPlayerCount.checkedAt ? formatRelativeTime(dashboardPlayerCount.checkedAt) : "not checked yet";
+  const playerCountStatusLabel = formatPlayerCountStatus(dashboardPlayerCount.status);
+  const currentPlayers = dashboardPlayerCount.currentPlayers ?? cachedDashboardStats?.stats.players ?? null;
+  const maxPlayers = dashboardPlayerCount.maxPlayers;
   const playerSlotsLabel = formatDashboardPlayerSlots(
     currentPlayers,
     maxPlayers,
-    server.player_count_last_checked_at,
+    dashboardPlayerCount.checkedAt,
   );
   const playerCountFreshnessDetail = formatPlayerCountFreshnessDetail(
     currentPlayers,
     maxPlayers,
-    server.player_count_last_checked_at,
-    server.player_count_status,
+    dashboardPlayerCount.checkedAt,
+    dashboardPlayerCount.status,
   );
   const effectiveBillingStatus = billingStatus ?? lastGoodBilling;
   const effectivePlanLabel = effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : effectiveDashboardHealth?.current_plan ? planLabel(effectiveDashboardHealth.current_plan) : "Loading";
@@ -8245,6 +8246,36 @@ function formatDashboardPlayerSlots(
   return shouldShowLastKnownPlayerCountLabel(checkedAt) ? `Last known: ${fraction}` : fraction;
 }
 
+type DashboardPlayerCountSource = {
+  current_players?: number | null;
+  max_players?: number | null;
+  player_slots?: number | null;
+  player_count_last_checked_at?: string | null;
+  player_count_status?: string | null;
+};
+
+function pickFreshestDashboardPlayerCount(
+  server: DashboardPlayerCountSource,
+  healthServer: DashboardPlayerCountSource | null,
+) {
+  const serverCheckedAt = timestampMs(server.player_count_last_checked_at);
+  const healthCheckedAt = timestampMs(healthServer?.player_count_last_checked_at);
+  const source = healthServer && (
+    healthCheckedAt > serverCheckedAt
+    || (!server.player_count_last_checked_at && healthServer.player_count_last_checked_at)
+    || (server.current_players === null || server.current_players === undefined)
+  )
+    ? healthServer
+    : server;
+
+  return {
+    currentPlayers: numberOrNull(source.current_players),
+    maxPlayers: numberOrNull(source.max_players) ?? numberOrNull(source.player_slots) ?? null,
+    checkedAt: stringOrNull(source.player_count_last_checked_at),
+    status: stringOrNull(source.player_count_status),
+  };
+}
+
 function formatPlayerCountFreshnessDetail(
   current: number | null | undefined,
   max: number | null | undefined,
@@ -8276,6 +8307,11 @@ function isLivePlayerCountWarning(checkedAt: string | null | undefined, status: 
 
 function shouldShowLastKnownPlayerCountLabel(checkedAt: string | null | undefined) {
   return isOlderThanMs(checkedAt, LAST_KNOWN_STAT_LABEL_THRESHOLD_MS);
+}
+
+function timestampMs(value: string | null | undefined) {
+  const timestamp = Date.parse(value ?? "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function formatPlayerSlots(current: number | null | undefined, max: number | null | undefined) {

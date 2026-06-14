@@ -28,12 +28,13 @@ async function run() {
       "x-dzn-cron-secret": "unit-test-secret",
       "content-type": "application/json",
     },
-    body: JSON.stringify({ cron: "github-actions", max_servers: 2, deadline_ms: 20000 }),
+    body: JSON.stringify({ cron: "github-actions", max_servers: 2, deadline_ms: 20000, debug_service_id: "18765761" }),
   }), env), {
     refreshMetadata: async (_env, options = {}) => {
       refreshCalled = true;
       assert.equal(options.maxServers, 2);
       assert.equal(options.deadlineMs, 20000);
+      assert.equal(options.debugServiceId, "18765761");
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
       assert.equal(options.skipAutomationMaintenance, true);
@@ -70,6 +71,11 @@ async function run() {
     succeeded: number;
     failed: number;
     updated_player_counts: number;
+    diagnostics: {
+      debug_service_id: string | null;
+      selected_service_ids: string[];
+      skipped_service_ids: Array<{ service_id: string | null; reason: string }>;
+    };
     results: Array<{ current_players: number; max_players: number }>;
   };
   assert.equal(successJson.ok, true);
@@ -77,6 +83,9 @@ async function run() {
   assert.equal(successJson.succeeded, 3);
   assert.equal(successJson.failed, 0);
   assert.equal(successJson.updated_player_counts, 2);
+  assert.equal(successJson.diagnostics.debug_service_id, "18765761");
+  assert.deepEqual(successJson.diagnostics.selected_service_ids, ["17428528"]);
+  assert.deepEqual(successJson.diagnostics.skipped_service_ids, []);
   assert.deepEqual(successJson.results[0], {
     linked_server_id: "server-1",
     service_id: "17428528",
@@ -107,6 +116,7 @@ async function run() {
       asyncRefreshCalled = true;
       assert.equal(options.maxServers, 1);
       assert.equal(options.deadlineMs, 20000);
+      assert.equal(options.debugServiceId, null);
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
       assert.equal(options.skipAutomationMaintenance, true);

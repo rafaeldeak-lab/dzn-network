@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { detectServerModeFromText, parseNitradoPlayerCountPair, resolveLivePlayerCounts } from "../functions/_lib/server-metadata";
+import { detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveLivePlayerCounts } from "../functions/_lib/server-metadata";
 
 assert.equal(detectServerModeFromText(["NukeTown DEATHMATCH"]), "DEATHMATCH");
 assert.equal(detectServerModeFromText(["Weekend raids KOS faction wars"]), "PVP");
@@ -11,6 +11,11 @@ assert.equal(detectServerModeFromText(["quiet community server"]), "SURVIVAL");
 
 assert.deepEqual(parseNitradoPlayerCountPair("2/10"), { current: 2, max: 10 });
 assert.deepEqual(parseNitradoPlayerCountPair("0 / 22"), { current: 0, max: 22 });
+assert.equal(extractNitradoOnlinePlayerCount({ data: { players: [{ name: "hidden" }] } }), 1);
+assert.equal(extractNitradoOnlinePlayerCount({ data: { players: { "player-id": { name: "hidden" } } } }), 1);
+assert.equal(extractNitradoOnlinePlayerCount({ data: { players: [] } }), 0);
+assert.equal(extractNitradoOnlinePlayerCount({ data: { current_players: 3 } }), 3);
+assert.equal(extractNitradoOnlinePlayerCount({ data: { player_count: "4 / 10" } }), 4);
 assert.deepEqual(resolveLivePlayerCounts({
   currentPlayers: 2,
   maxPlayers: 10,
@@ -62,8 +67,12 @@ assert.equal(serverMetadataSource.includes("DZN EXPLICIT ZERO PLAYER COUNT HANDL
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM"), true);
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT METADATA MISSING"), true);
 assert.equal(serverMetadataSource.includes("player_count_status: PlayerCountStatus"), true);
+assert.equal(serverMetadataSource.includes("/gameservers/games/players"), true, "Live player count should use Nitrado's online player endpoint when available.");
+assert.equal(serverMetadataSource.includes("gameservers_games_players"), true, "Live player count source should be recorded without storing player lists.");
+assert.equal(serverMetadataSource.includes("extractNitradoOnlinePlayerCount"), true, "Online player endpoint payloads should be reduced to a count only.");
 assert.equal(serverMetadataSource.includes("currentMissing = rawCurrent === null"), true);
 assert.equal(serverMetadataSource.includes("skipFreshWithinMs"), true);
+assert.equal(serverMetadataSource.includes("debugServiceId"), true);
 const metadataRunSource = readFileSync("functions/api/sync/metadata/run.ts", "utf8");
 assert.equal(metadataRunSource.includes("onRequestPost"), true);
 assert.equal(metadataRunSource.includes("isMetadataCronAuthorized"), true);
@@ -72,6 +81,10 @@ assert.equal(metadataRunSource.includes("DZN LIVE PLAYER COUNT AUTO SYNC READY")
 assert.equal(metadataRunSource.includes("DZN METADATA SYNC INDEPENDENT OF ADM READY"), true);
 assert.equal(metadataRunSource.includes("player_count_stale_ms"), true);
 assert.equal(metadataRunSource.includes("livePlayerCountStaleMs"), true);
+assert.equal(metadataRunSource.includes("debug_service_id"), true);
+assert.equal(metadataRunSource.includes("selected_service_ids"), true);
+assert.equal(metadataRunSource.includes("skipped_service_ids"), true);
+assert.equal(metadataRunSource.includes("oldest_public_metadata_age_seconds"), true);
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 const admCallIndex = workflowSource.indexOf("/api/sync/adm/run");
 assert.equal(workflowSource.includes("/api/sync/metadata/run"), false);
@@ -81,6 +94,7 @@ assert.equal(workflowSource.includes("Metadata sync: skipped; status=handled by 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Player Count Freshness"), true);
 assert.equal(dashboardSource.includes("formatDashboardPlayerSlots"), true);
+assert.equal(dashboardSource.includes("pickFreshestDashboardPlayerCount"), true);
 assert.equal(dashboardSource.includes("Last known:"), true);
 assert.equal(dashboardSource.includes("Live player count stale."), true);
 assert.equal(dashboardSource.includes("void onRefreshRef.current()"), true);
