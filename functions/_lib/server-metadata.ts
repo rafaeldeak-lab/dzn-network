@@ -590,7 +590,7 @@ export async function refreshLivePlayerCountsForActiveServers(
 
 async function getDueMetadataRefreshServersFast(env: Env, maxServers: number, livePlayerCountStaleMs = METADATA_STALE_MS): Promise<AutomationSyncServer[]> {
   const now = new Date().toISOString();
-  const staleStatusLockCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const staleStatusLockCutoff = new Date(Date.now() - Math.max(livePlayerCountStaleMs, 90_000)).toISOString();
   const livePlayerCountCutoff = new Date(Date.now() - livePlayerCountStaleMs).toISOString();
   const rows = await requireDb(env)
     .prepare(

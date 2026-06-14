@@ -88,6 +88,7 @@ assert.equal(metadataCron.includes("waitUntil(runMetadataRefresh"), true);
 assert.equal(serverMetadata.includes("staleStatusLockCutoff"), true);
 assert.equal(serverMetadata.includes("livePlayerCountStaleMs"), true);
 assert.equal(serverMetadata.includes("livePlayerCountCutoff"), true);
+assert.equal(serverMetadata.includes("Math.max(livePlayerCountStaleMs, 90_000)"), true);
 assert.equal(serverMetadata.includes("linked_servers.player_count_last_checked_at <= ?"), true);
 assert.equal(serverMetadata.includes("server_sync_state.status_sync_started_at"), true);
 assert.equal(serverMetadata.includes("COALESCE(server_sync_state.currently_checking_status, 0) = 0"), true);
