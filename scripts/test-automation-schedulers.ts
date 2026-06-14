@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const workflow = readFileSync(".github/workflows/dzn-auto-update-schedulers.yml", "utf8");
+const deployWorkflow = readFileSync(".github/workflows/dzn-auto-update-worker-deploy.yml", "utf8");
 const worker = readFileSync("workers/adm-sync-worker.ts", "utf8");
+const autoUpdateWorker = readFileSync("workers/dzn-auto-update-worker.ts", "utf8");
+const autoUpdateConfig = readFileSync("wrangler.auto-update.toml", "utf8");
 const discordRoute = readFileSync("functions/api/sync/discord-posts/run.ts", "utf8");
 const discordPosting = readFileSync("functions/_lib/discord-posting.ts", "utf8");
 const serverWarsCron = readFileSync("functions/api/cron/server-wars/refresh.ts", "utf8");
@@ -14,7 +17,8 @@ assert.equal(workflow.includes("push:"), true);
 assert.equal(workflow.includes("branches:"), true);
 assert.equal(workflow.includes("- main"), true);
 assert.equal(workflow.includes("schedule:"), true);
-assert.equal(workflow.includes('cron: "*/5 * * * *"'), true);
+assert.equal(workflow.includes('cron: "17 * * * *"'), true);
+assert.equal(workflow.includes("DZN Auto Update Schedulers Backup"), true);
 assert.equal(workflow.includes("concurrency:"), true);
 
 assert.equal(workflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
@@ -30,7 +34,8 @@ assert.equal(workflow.includes("echo \"${CRON_SECRET}\""), false);
 
 assert.equal(workflow.includes("/api/sync/metadata/run"), true);
 assert.equal(workflow.includes('"max_servers":2'), true);
-assert.equal(workflow.includes('"deadline_ms":12000'), true);
+assert.equal(workflow.includes('"deadline_ms":2500'), true);
+assert.equal(workflow.includes('"source":"github-backup"'), true);
 assert.equal(workflow.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(workflow.includes('"max_events":1'), true);
 assert.equal(workflow.includes('"max_finalizations":1'), true);
@@ -44,6 +49,22 @@ assert.equal(workflow.includes("/api/sync/adm/run"), false, "The scheduler workf
 assert.equal(workflow.includes("TOKEN_ENCRYPTION_KEY"), false);
 assert.equal(workflow.includes("DISCORD_BOT_TOKEN"), false);
 assert.equal(workflow.includes("STRIPE_SECRET_KEY"), false);
+
+assert.equal(deployWorkflow.includes("name: DZN Auto Update Worker Deploy"), true);
+assert.equal(deployWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(deployWorkflow.includes("push:"), false);
+assert.equal(deployWorkflow.includes("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}"), true);
+assert.equal(deployWorkflow.includes("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}"), true);
+assert.equal(deployWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
+assert.equal(deployWorkflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
+assert.equal(deployWorkflow.includes("printf \"%s\" \"$CRON_SECRET\" | npx wrangler secret put DZN_CRON_SECRET --config wrangler.auto-update.toml"), true);
+assert.equal(deployWorkflow.includes("echo \"$CRON_SECRET\""), false);
+assert.equal(deployWorkflow.includes("wrangler.auto-update.toml"), true);
+assert.equal(deployWorkflow.includes("/workers/scripts/dzn-auto-update-worker/schedules"), true);
+assert.equal(deployWorkflow.includes("*/5 * * * *"), true);
+assert.equal(deployWorkflow.includes("TOKEN_ENCRYPTION_KEY"), false);
+assert.equal(deployWorkflow.includes("DISCORD_BOT_TOKEN"), false);
+assert.equal(deployWorkflow.includes("STRIPE_SECRET_KEY"), false);
 
 assert.equal(metadataCron.includes("requireCronSecret"), true);
 assert.equal(metadataCron.includes("refreshLivePlayerCountsForActiveServers"), true);
@@ -72,8 +93,21 @@ assert.equal(worker.includes("const SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false
 assert.equal(worker.includes("const DISCORD_POSTS_WORKER_SIDE_TASK_ENABLED = false;"), true);
 assert.equal(worker.includes("const POST_ADM_MAINTENANCE_WORKER_SIDE_TASK_ENABLED = false;"), true);
 assert.equal(worker.includes("const EVENT_SCORING_WORKER_SIDE_TASK_ENABLED = false;"), true);
-assert.equal(worker.includes("ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS = 2_500"), true);
+assert.equal(worker.includes("ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS = 1_500"), true);
 assert.equal(worker.includes("Server Wars automation is temporarily cron-route-only"), true);
 assert.equal(worker.includes("Discord posts automation is cron-route-only"), true);
+
+assert.equal(autoUpdateConfig.includes('name = "dzn-auto-update-worker"'), true);
+assert.equal(autoUpdateConfig.includes('crons = ["*/5 * * * *"]'), true);
+assert.equal(autoUpdateConfig.includes('DZN_APP_URL = "https://dzn-network.pages.dev"'), true);
+assert.equal(autoUpdateWorker.includes("WORKER_NAME = \"dzn-auto-update-worker\""), true);
+assert.equal(autoUpdateWorker.includes("/api/sync/metadata/run"), true);
+assert.equal(autoUpdateWorker.includes("/api/cron/server-wars/refresh"), true);
+assert.equal(autoUpdateWorker.includes("/api/sync/discord-posts/run"), true);
+assert.equal(autoUpdateWorker.includes("for (const task of TASKS)"), true);
+assert.equal(autoUpdateWorker.includes("AbortController"), true);
+assert.equal(autoUpdateWorker.includes("recordAutomationCronRun"), true);
+assert.equal(autoUpdateWorker.includes("/api/sync/adm/run"), false, "Auto-update Worker must never run ADM imports.");
+assert.equal(autoUpdateWorker.includes("TOKEN_ENCRYPTION_KEY"), false, "Auto-update Worker must not handle Nitrado token decryption.");
 
 console.log("Automation scheduler tests passed.");

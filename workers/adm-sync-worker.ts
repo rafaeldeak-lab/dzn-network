@@ -27,9 +27,9 @@ const WORKER_NAME = "dzn-adm-sync-worker";
 const DZN_CRON_SECRET_HEADER = "x-dzn-cron-secret";
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 const CRON_ENDPOINT_TIMEOUT_MS = 55000;
-const SCHEDULED_WORKER_RUNTIME_BUDGET_MS = 22_000;
-const SCHEDULED_WORKER_MIN_REMAINING_MS = 2_500;
-const ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS = 2_500;
+const SCHEDULED_WORKER_RUNTIME_BUDGET_MS = 12_000;
+const SCHEDULED_WORKER_MIN_REMAINING_MS = 1_500;
+const ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS = 1_500;
 const POST_ADM_MAINTENANCE_WORKER_SIDE_TASK_ENABLED = false;
 const EVENT_SCORING_WORKER_SIDE_TASK_ENABLED = false;
 const SERVER_WARS_WORKER_SIDE_TASK_ENABLED = false;
@@ -169,10 +169,10 @@ async function runDirectAdmSync(env: Env, options: { cron: string | null; schedu
   const startedAt = new Date().toISOString();
   try {
     const availableRuntimeMs = remainingScheduledRuntimeBudgetMs(budget) - SCHEDULED_WORKER_MIN_REMAINING_MS;
-    if (availableRuntimeMs < 2_500) {
+    if (availableRuntimeMs < 1_500) {
       return skippedForBudgetResult("adm", "ADM sync skipped because the scheduled worker runtime budget is too low to start safely.");
     }
-    const maxRuntimeMs = Math.max(2_500, Math.min(ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS, availableRuntimeMs));
+    const maxRuntimeMs = Math.max(1_000, Math.min(ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS, availableRuntimeMs));
     const result = await runAdmWorkerSyncTick(env, {
       cron: options.cron ?? "cloudflare-worker",
       maxLinesPerServer: 5000,

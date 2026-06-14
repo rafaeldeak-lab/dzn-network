@@ -1,4 +1,5 @@
 import { requireCronSecret } from "../../../_lib/cron-auth";
+import { normalizeAutomationCronSource, recordAutomationCronRun } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import {
   runServerWarAutomationTick,
@@ -26,12 +27,28 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
   try {
     const body = await readJson<ServerWarCronBody>(request);
+    const startedAt = new Date().toISOString();
+    const source = typeof body.source === "string" ? body.source : "cron";
     const result = await runServerWarAutomationTick(env, {
       maxEvents: numberParam(body.maxEvents ?? body.max_events, SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT, SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT),
       maxFinalizations: numberParam(body.maxFinalizations ?? body.max_finalizations, SERVER_WAR_AUTOMATION_DEFAULT_EVENT_LIMIT, SERVER_WAR_AUTOMATION_MAX_EVENT_LIMIT),
       maxChallengeExpirations: numberParam(body.maxChallengeExpirations ?? body.max_challenge_expirations, 10, 20),
       deadlineMs: numberParam(body.deadlineMs ?? body.deadline_ms, SERVER_WAR_AUTOMATION_DEFAULT_DEADLINE_MS, 5_000),
-      source: typeof body.source === "string" ? body.source : "cron",
+      source,
+    });
+    await recordAutomationCronRun(env, {
+      source: normalizeAutomationCronSource(source, source),
+      jobType: "server-wars",
+      status: result.warnings.length && result.snapshots.length + result.finalized.length === 0 ? "partial" : "success",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      processedCount: result.snapshots.length + result.finalized.length + result.transitions.expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing,
+      skippedCount: result.budgetExhausted ? 1 : 0,
+      failedCount: [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length,
+    }).catch((error) => {
+      console.warn("DZN Server Wars cron run record skipped", {
+        message: error instanceof Error ? error.message : "record failed",
+      });
     });
     return json(result, { headers: { "cache-control": "no-store" } });
   } catch (error) {
