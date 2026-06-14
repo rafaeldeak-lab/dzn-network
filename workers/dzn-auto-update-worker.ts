@@ -18,6 +18,7 @@ type WorkerExecutionContext = {
 type SchedulerTask = {
   label: AutomationCronJobType;
   path: string;
+  cadence: "every-minute" | "every-five-minutes";
   timeoutMs: number;
   body: Record<string, unknown>;
 };
@@ -30,18 +31,21 @@ const TASKS: SchedulerTask[] = [
   {
     label: "metadata",
     path: "/api/sync/metadata/run",
+    cadence: "every-minute",
     timeoutMs: 6_000,
     body: {
-      source: "cloudflare-scheduled",
+      source: "cloudflare-live-metadata",
       cron: "dzn-auto-update-worker",
       async: true,
-      max_servers: 2,
-      deadline_ms: 20_000,
+      max_servers: 3,
+      deadline_ms: 2_500,
+      player_count_stale_ms: 60_000,
     },
   },
   {
     label: "server-wars",
     path: "/api/cron/server-wars/refresh",
+    cadence: "every-five-minutes",
     timeoutMs: 10_000,
     body: {
       source: "cloudflare-scheduled",
@@ -55,6 +59,7 @@ const TASKS: SchedulerTask[] = [
   {
     label: "discord-posts",
     path: "/api/sync/discord-posts/run",
+    cadence: "every-five-minutes",
     timeoutMs: 10_000,
     body: {
       source: "cloudflare-scheduled",
@@ -72,7 +77,7 @@ export async function scheduled(
   ctx: WorkerExecutionContext,
 ) {
   ctx.waitUntil(runAutoUpdateTick(env, {
-    cron: event.cron ?? "*/5 * * * *",
+    cron: event.cron ?? "* * * * *",
     scheduledTime: event.scheduledTime ?? Date.now(),
   }));
 }
@@ -83,8 +88,9 @@ export async function fetch(request: Request, env: Env): Promise<Response> {
     return json({
       ok: true,
       worker: WORKER_NAME,
-      cron: "*/5 * * * *",
+      cron: "* * * * *",
       tasks: TASKS.map((task) => task.label),
+      task_cadence: TASKS.map((task) => ({ label: task.label, cadence: task.cadence })),
     });
   }
 
@@ -103,13 +109,14 @@ export async function fetch(request: Request, env: Env): Promise<Response> {
 
 export async function runAutoUpdateTick(env: Env, options: { cron: string | null; scheduledTime: number }) {
   const secret = getCronSecret(env);
+  const dueTasks = getDueTasks(options);
   if (!secret) {
     console.warn("DZN AUTO UPDATE WORKER SECRET MISSING", { worker: WORKER_NAME });
     return {
       ok: false,
       worker: WORKER_NAME,
       error: "DZN_CRON_SECRET is not configured for auto-update Worker.",
-      results: TASKS.map((task) => ({
+      results: dueTasks.map((task) => ({
         label: task.label,
         ok: false,
         status: 0,
@@ -121,7 +128,7 @@ export async function runAutoUpdateTick(env: Env, options: { cron: string | null
 
   const baseUrl = appBaseUrl(env);
   const results = [];
-  for (const task of TASKS) {
+  for (const task of dueTasks) {
     const startedAt = new Date().toISOString();
     const result = await runTask(task, baseUrl, secret, options);
     results.push(result);
@@ -145,6 +152,17 @@ export async function runAutoUpdateTick(env: Env, options: { cron: string | null
     })),
   });
   return { ok, worker: WORKER_NAME, results };
+}
+
+function getDueTasks(options: { cron: string | null; scheduledTime: number }) {
+  return TASKS.filter((task) => task.cadence === "every-minute" || isFiveMinuteTick(options));
+}
+
+function isFiveMinuteTick(options: { cron: string | null; scheduledTime: number }) {
+  const cron = String(options.cron ?? "").trim().toLowerCase();
+  if (cron.includes("*/5") || cron.includes("manual")) return true;
+  const minute = new Date(options.scheduledTime).getUTCMinutes();
+  return Number.isFinite(minute) && minute % 5 === 0;
 }
 
 async function runTask(

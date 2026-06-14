@@ -40,7 +40,7 @@ assert.equal(autoUpdateWorkflow.includes("/api/cron/server-wars/refresh"), true)
 assert.equal(autoUpdateWorkflow.includes("/api/sync/discord-posts/run"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/sync/adm/run"), false);
 assert.equal(autoUpdateWorkerConfig.includes('name = "dzn-auto-update-worker"'), true);
-assert.equal(autoUpdateWorkerConfig.includes('crons = ["*/5 * * * *"]'), true);
+assert.equal(autoUpdateWorkerConfig.includes('crons = ["* * * * *"]'), true);
 
 assert.equal(autoUpdateWorkerDeployWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(autoUpdateWorkerDeployWorkflow.includes("push:"), false);

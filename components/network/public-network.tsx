@@ -400,6 +400,7 @@ type ReviewsResponse = {
 const filters = ["All", "PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
 const PUBLIC_NETWORK_LAST_GOOD_PREFIX = "dzn:lastGoodPublicNetwork:";
 const PUBLIC_NETWORK_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const PUBLIC_NETWORK_LIVE_REFRESH_MS = 45_000;
 type PublicLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "empty_real_data" | "error_initial";
 let hasLoggedBoostedServerDisplayPolished = false;
 
@@ -436,6 +437,22 @@ export function PublicNetwork() {
   useEffect(() => {
     visibleDataRef.current = slug ? Boolean(server) : servers.length > 0 || Boolean(stats);
   }, [server, servers.length, slug, stats]);
+
+  useEffect(() => {
+    const refreshVisiblePublicCounts = () => {
+      if (document.visibilityState === "hidden") return;
+      setReloadNonce((value) => value + 1);
+    };
+    const interval = window.setInterval(refreshVisiblePublicCounts, PUBLIC_NETWORK_LIVE_REFRESH_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "hidden") refreshVisiblePublicCounts();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();

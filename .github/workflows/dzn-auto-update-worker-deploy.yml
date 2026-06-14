@@ -98,23 +98,23 @@ jobs:
                 ? response.result.triggers
                 : [];
           const hasSchedule = schedules.some((schedule) =>
-            schedule?.cron === "*/5 * * * *"
-              || schedule?.cron_trigger?.cron === "*/5 * * * *"
-              || schedule?.schedule === "*/5 * * * *",
+            schedule?.cron === "* * * * *"
+              || schedule?.cron_trigger?.cron === "* * * * *"
+              || schedule?.schedule === "* * * * *",
           );
           if (!hasSchedule) {
-            console.error("dzn-auto-update-worker scheduled trigger */5 * * * * was not found.");
+            console.error("dzn-auto-update-worker scheduled trigger * * * * * was not found.");
             process.exit(1);
           }
-          console.log("Verified dzn-auto-update-worker scheduled trigger */5 * * * *.");
+          console.log("Verified dzn-auto-update-worker scheduled trigger * * * * *.");
           NODE
           then
-            if ! grep -F 'schedule: */5 * * * *' auto-update-deploy.txt >/dev/null \
-              || ! grep -F 'crons = ["*/5 * * * *"]' wrangler.auto-update.toml >/dev/null; then
-              echo "::error::dzn-auto-update-worker deployment/config did not report the expected */5 * * * * schedule."
+            if ! grep -F 'schedule: * * * * *' auto-update-deploy.txt >/dev/null \
+              || ! grep -F 'crons = ["* * * * *"]' wrangler.auto-update.toml >/dev/null; then
+              echo "::error::dzn-auto-update-worker deployment/config did not report the expected * * * * * schedule."
               exit 1
             fi
-            echo "::warning::Cloudflare schedules API response shape was not recognized, but Wrangler deploy output and config confirmed the configured */5 * * * * trigger."
+            echo "::warning::Cloudflare schedules API response shape was not recognized, but Wrangler deploy output and config confirmed the configured * * * * * trigger."
           fi
       - name: Deployment summary
         run: |
@@ -123,7 +123,9 @@ jobs:
             echo ""
             echo "- Worker: dzn-auto-update-worker"
             echo "- Config: wrangler.auto-update.toml"
-            echo "- Schedule: */5 * * * *"
+            echo "- Schedule: * * * * *"
+            echo "- Metadata cadence: every minute"
+            echo "- Server Wars and Discord cadence: every five minutes"
             echo "- Cron secret provisioned as: DZN_CRON_SECRET"
             echo "- Source secret used: ${cron_secret_name}"
           } >> "$GITHUB_STEP_SUMMARY"

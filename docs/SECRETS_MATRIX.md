@@ -103,6 +103,7 @@ Automatic metadata/player-count refresh, Server Wars score refresh/finalization/
 
 - Worker name: `dzn-auto-update-worker`
 - Config: `wrangler.auto-update.toml`
-- Cron: `*/5 * * * *`
+- Cron: `* * * * *`
+- Metadata/player counts run every minute; Server Wars and Discord tasks run every five minutes inside the Worker.
 
 GitHub Actions is backup/monitoring for these routes, not the primary five-minute scheduler.
