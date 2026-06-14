@@ -3,7 +3,7 @@ main = "workers/dzn-auto-update-worker.ts"
 compatibility_date = "2026-05-13"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 [vars]
 DZN_APP_URL = "https://dzn-network.pages.dev"

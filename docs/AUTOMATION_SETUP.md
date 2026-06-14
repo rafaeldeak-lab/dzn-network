@@ -31,7 +31,7 @@ DZN_CRON_SECRET=the-same-long-random-secret
 DZN_APP_URL=https://dzn-network.pages.dev
 ```
 
-The auto-update Worker runs every five minutes and calls protected Pages routes for metadata/player counts, Server Wars refresh/finalization/challenge expiry, and Discord post dispatch. It must not run ADM imports and it does not need `TOKEN_ENCRYPTION_KEY`.
+The auto-update Worker runs every minute. It calls the protected metadata/player-count route on every tick, and calls Server Wars refresh/finalization/challenge expiry plus Discord post dispatch only on five-minute ticks. It must not run ADM imports and it does not need `TOKEN_ENCRYPTION_KEY`.
 
 The manual deployment workflow `.github/workflows/dzn-auto-update-worker-deploy.yml` can deploy `dzn-auto-update-worker` and provision `DZN_CRON_SECRET` into that Worker from GitHub Actions without printing the secret. It requires a narrowly scoped `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 

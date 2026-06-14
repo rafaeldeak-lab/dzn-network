@@ -70,6 +70,8 @@ assert.equal(metadataRunSource.includes("isMetadataCronAuthorized"), true);
 assert.equal(metadataRunSource.includes("Authorization"), false);
 assert.equal(metadataRunSource.includes("DZN LIVE PLAYER COUNT AUTO SYNC READY"), true);
 assert.equal(metadataRunSource.includes("DZN METADATA SYNC INDEPENDENT OF ADM READY"), true);
+assert.equal(metadataRunSource.includes("player_count_stale_ms"), true);
+assert.equal(metadataRunSource.includes("livePlayerCountStaleMs"), true);
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 const admCallIndex = workflowSource.indexOf("/api/sync/adm/run");
 assert.equal(workflowSource.includes("/api/sync/metadata/run"), false);
@@ -106,6 +108,9 @@ const publicServersSource = readFileSync("functions/api/public/servers.ts", "utf
 assert.equal(publicServersSource.includes("player_count_last_checked_at"), true);
 assert.equal(publicServersSource.includes("player_count_status"), true);
 assert.equal(publicServersSource.includes("server_public_cache"), true);
+const publicNetworkSource = readFileSync("components/network/public-network.tsx", "utf8");
+assert.equal(publicNetworkSource.includes("PUBLIC_NETWORK_LIVE_REFRESH_MS"), true);
+assert.equal(publicNetworkSource.includes("setReloadNonce((value) => value + 1)"), true);
 const auditSource = readFileSync("scripts/adm-audit-health.ts", "utf8");
 assert.equal(auditSource.includes("Player count last checked"), true);
 assert.equal(auditSource.includes("player_count_status"), true);

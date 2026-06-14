@@ -9,6 +9,7 @@ type MetadataSyncRunBody = {
   async?: boolean;
   cron?: string;
   deadline_ms?: number;
+  player_count_stale_ms?: number;
   source?: string;
   max_servers?: number;
 };
@@ -53,6 +54,7 @@ export async function handleMetadataSyncRun(
   const refreshOptions = {
     maxServers: sanitizePositiveInteger(body.max_servers, 1, 5),
     deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 60_000),
+    livePlayerCountStaleMs: sanitizePositiveInteger(body.player_count_stale_ms, 90_000, 30 * 60 * 1000),
     includeResults: true,
     queueDiscordUpdates: false,
     skipAutomationMaintenance: true,
@@ -70,6 +72,7 @@ export async function handleMetadataSyncRun(
       cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
       max_servers: refreshOptions.maxServers,
       deadline_ms: refreshOptions.deadlineMs,
+      player_count_stale_ms: refreshOptions.livePlayerCountStaleMs,
     }, { status: 202 });
   }
 
@@ -158,7 +161,7 @@ async function runMetadataRefresh(
 }
 
 async function countStaleMetadataRemaining(env: Env) {
-  const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - 90 * 1000).toISOString();
   const row = await requireDb(env)
     .prepare(
       `SELECT COUNT(*) AS count

@@ -424,7 +424,7 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
 
 export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
-  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean } = {},
+  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; livePlayerCountStaleMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean } = {},
 ): Promise<ScheduledMetadataSyncResult> {
   await ensureLinkedServerMetadataColumns(env);
   const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
@@ -433,8 +433,11 @@ export async function refreshLivePlayerCountsForActiveServers(
   const skipFreshWithinMs = typeof options.skipFreshWithinMs === "number" && Number.isFinite(options.skipFreshWithinMs)
     ? Math.max(0, options.skipFreshWithinMs)
     : null;
+  const livePlayerCountStaleMs = typeof options.livePlayerCountStaleMs === "number" && Number.isFinite(options.livePlayerCountStaleMs)
+    ? Math.max(30_000, Math.min(Math.trunc(options.livePlayerCountStaleMs), 30 * 60 * 1000))
+    : METADATA_STALE_MS;
   const rows = options.skipAutomationMaintenance === true
-    ? await getDueMetadataRefreshServersFast(env, maxServers)
+    ? await getDueMetadataRefreshServersFast(env, maxServers, livePlayerCountStaleMs)
     : await getDueStatusAutomationServers(env, maxServers);
 
   let processed = 0;
@@ -585,9 +588,10 @@ export async function refreshLivePlayerCountsForActiveServers(
   };
 }
 
-async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): Promise<AutomationSyncServer[]> {
+async function getDueMetadataRefreshServersFast(env: Env, maxServers: number, livePlayerCountStaleMs = METADATA_STALE_MS): Promise<AutomationSyncServer[]> {
   const now = new Date().toISOString();
   const staleStatusLockCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const livePlayerCountCutoff = new Date(Date.now() - livePlayerCountStaleMs).toISOString();
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
@@ -610,20 +614,26 @@ async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): P
            COALESCE(server_sync_state.currently_checking_status, 0) = 0
            OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
          )
-         AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+         AND (
+           COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+           OR linked_servers.player_count_last_checked_at IS NULL
+           OR linked_servers.player_count_last_checked_at <= ?
+         )
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
          CASE
            WHEN linked_servers.player_count_last_checked_at IS NULL
              OR linked_servers.player_count_last_checked_at <= ?
-             OR linked_servers.metadata_last_checked_at IS NULL
-             OR linked_servers.metadata_last_checked_at <= ?
            THEN 0 ELSE 1
          END ASC,
          CASE lower(COALESCE(linked_servers.listing_visibility, 'public'))
            WHEN 'public' THEN 0
            WHEN 'listed' THEN 0
            ELSE 1
+         END ASC,
+         CASE lower(COALESCE(linked_servers.player_count_status, 'unknown'))
+           WHEN 'unavailable' THEN 1
+           ELSE 0
          END ASC,
          COALESCE(linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
          CASE lower(COALESCE(server_subscriptions.plan_key, 'free'))
@@ -638,7 +648,7 @@ async function getDueMetadataRefreshServersFast(env: Env, maxServers: number): P
          linked_servers.updated_at DESC
        LIMIT ?`,
     )
-    .bind(staleStatusLockCutoff, now, now, now, maxServers)
+    .bind(staleStatusLockCutoff, now, livePlayerCountCutoff, livePlayerCountCutoff, maxServers)
     .all<AutomationSyncServer>();
   return rows.results ?? [];
 }
