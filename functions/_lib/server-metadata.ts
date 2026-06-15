@@ -47,7 +47,7 @@ export type ScheduledMetadataSyncResult = {
 type NitradoLivePlayerCountProbe = {
   currentPlayers: number;
   maxPlayers: number | null;
-  source: "webinterface_get_stats" | "gameservers_games_players";
+  source: "gameservers_stats" | "webinterface_get_stats" | "gameservers_games_players";
   sampledAt: string;
   observedAt: string | null;
 };
@@ -952,9 +952,44 @@ async function fetchPreferredNitradoLivePlayerCount(
   serviceId: string,
   now: string,
 ): Promise<NitradoLivePlayerCountProbe | null> {
+  const apiStats = await fetchNitradoApiStatsPlayerCount(token, serviceId, now).catch(() => null);
+  if (apiStats) return apiStats;
   const webinterfaceStats = await fetchNitradoWebinterfaceStatsPlayerCount(token, serviceId, now).catch(() => null);
   if (webinterfaceStats) return webinterfaceStats;
   return fetchNitradoOnlinePlayerCount(token, serviceId, now);
+}
+
+async function fetchNitradoApiStatsPlayerCount(
+  token: string,
+  serviceId: string,
+  now: string,
+): Promise<NitradoLivePlayerCountProbe | null> {
+  if (!serviceId) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch(
+      `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers/stats`,
+      {
+        headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+        signal: controller.signal,
+      },
+    );
+    if (response.status === 404 || response.status === 405) return null;
+    if (response.status === 401 || response.status === 403) return null;
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => null);
+    const playerCount = extractNitradoStatsPlayerCount(payload, { nowMs: Date.parse(now) });
+    return playerCount === null ? null : {
+      currentPlayers: playerCount.currentPlayers,
+      maxPlayers: playerCount.maxPlayers,
+      source: "gameservers_stats",
+      sampledAt: now,
+      observedAt: playerCount.observedAt,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function fetchNitradoWebinterfaceStatsPlayerCount(
