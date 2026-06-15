@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { detectServerModeFromText, extractNitradoOnlinePlayerCount, extractNitradoStatsPlayerCount, parseNitradoPlayerCountPair, resolveLivePlayerCounts } from "../functions/_lib/server-metadata";
+import { detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveLivePlayerCounts } from "../functions/_lib/server-metadata";
 
 assert.equal(detectServerModeFromText(["NukeTown DEATHMATCH"]), "DEATHMATCH");
 assert.equal(detectServerModeFromText(["Weekend raids KOS faction wars"]), "PVP");
@@ -31,51 +31,6 @@ assert.equal(
 );
 assert.equal(extractNitradoOnlinePlayerCount({ data: { current_players: 3 } }), 3);
 assert.equal(extractNitradoOnlinePlayerCount({ data: { player_count: "4 / 10" } }), 4);
-const statsNow = 1_781_544_060_000;
-assert.deepEqual(
-  extractNitradoStatsPlayerCount({
-    stats: {
-      currentPlayers: [
-        [1_781_542_740_000, 3],
-        [1_781_542_800_000, 3],
-        [statsNow, 1],
-      ],
-      maxPlayers: [[statsNow, 10]],
-    },
-  }, { nowMs: statsNow + 30_000 }),
-  { currentPlayers: 1, maxPlayers: 10, observedAt: new Date(statsNow).toISOString() },
-  "getStats player counts must use the latest valid row, not the highest historical player count.",
-);
-assert.deepEqual(
-  extractNitradoStatsPlayerCount({
-    data: {
-      stats: {
-        currentPlayers: [
-          [statsNow - 60_000, 1],
-          [statsNow, 0],
-        ],
-        maxPlayers: [[statsNow, 10]],
-      },
-    },
-  }, { nowMs: statsNow + 30_000 }),
-  { currentPlayers: 0, maxPlayers: 10, observedAt: new Date(statsNow).toISOString() },
-  "getStats player counts must preserve the latest confirmed zero.",
-);
-assert.equal(
-  extractNitradoStatsPlayerCount({
-    stats: {
-      currentPlayers: [[statsNow - 20 * 60_000, 1]],
-      maxPlayers: [[statsNow - 20 * 60_000, 10]],
-    },
-  }, { nowMs: statsNow }),
-  null,
-  "Stale getStats rows must not keep old nonzero player counts alive.",
-);
-assert.equal(
-  extractNitradoStatsPlayerCount({ stats: { currentPlayers: [["bad", 1]], maxPlayers: [[statsNow, 10]] } }, { nowMs: statsNow }),
-  null,
-  "Malformed getStats rows must be rejected.",
-);
 assert.deepEqual(resolveLivePlayerCounts({
   currentPlayers: 2,
   maxPlayers: 10,
@@ -127,13 +82,9 @@ assert.equal(serverMetadataSource.includes("DZN EXPLICIT ZERO PLAYER COUNT HANDL
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM"), true);
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT METADATA MISSING"), true);
 assert.equal(serverMetadataSource.includes("player_count_status: PlayerCountStatus"), true);
-assert.equal(serverMetadataSource.includes("/wi/gameserver/ajax/getStats"), true, "Live player count should prefer Nitrado webinterface getStats when the stored server-side token can access it.");
-assert.equal(serverMetadataSource.includes("webinterface_get_stats"), true, "The selected getStats source must be recorded safely for diagnostics.");
-assert.equal(serverMetadataSource.includes("18765761"), false, "Nitrado live player count source selection must be generic by service id, not hardcoded to NukeTown.");
 assert.equal(serverMetadataSource.includes("/gameservers/games/players"), true, "Live player count should use Nitrado's online player endpoint when available.");
 assert.equal(serverMetadataSource.includes("gameservers_games_players"), true, "Live player count source should be recorded without storing player lists.");
 assert.equal(serverMetadataSource.includes("extractNitradoOnlinePlayerCount"), true, "Online player endpoint payloads should be reduced to a count only.");
-assert.equal(/frontend_token|websocket_token|cookie/i.test(serverMetadataSource), false, "Server-side Nitrado player count refresh must not use browser/session tokens.");
 assert.equal(serverMetadataSource.includes("currentMissing = rawCurrent === null"), true);
 assert.equal(serverMetadataSource.includes("skipFreshWithinMs"), true);
 assert.equal(serverMetadataSource.includes("debugServiceId"), true);

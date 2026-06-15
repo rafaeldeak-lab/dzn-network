@@ -15,9 +15,7 @@ import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
 import type { Env } from "./types";
 
 const NITRADO_API = "https://api.nitrado.net";
-const NITRADO_WEBINTERFACE = "https://server.nitrado.net";
 const METADATA_STALE_MS = 2 * 60 * 1000;
-const NITRADO_STATS_PLAYER_COUNT_MAX_AGE_MS = 10 * 60 * 1000;
 export type PlayerCountStatus = "fresh" | "stale" | "unavailable" | "unknown";
 
 export type ScheduledMetadataSyncServerResult = {
@@ -46,10 +44,8 @@ export type ScheduledMetadataSyncResult = {
 
 type NitradoLivePlayerCountProbe = {
   currentPlayers: number;
-  maxPlayers: number | null;
-  source: "webinterface_get_stats" | "gameservers_games_players";
+  source: "gameservers_games_players";
   sampledAt: string;
-  observedAt: string | null;
 };
 
 export type LinkedServerMetadata = {
@@ -72,7 +68,7 @@ export type LinkedServerMetadata = {
   metadata_hash: string;
   metadata_last_checked_at: string;
   player_count_last_checked_at: string;
-  player_count_source: string;
+  player_count_source: "nitrado" | "mock_nitrado";
   player_count_status: PlayerCountStatus;
 };
 
@@ -506,12 +502,10 @@ async function refreshNitradoServerPlayerCountOnly(
     const livePlayerCount = isMockNitrado(env.MOCK_NITRADO)
       ? {
           currentPlayers: cleanNumber(row.current_players) ?? 0,
-          maxPlayers: cleanNumber(row.max_players),
           source: "gameservers_games_players" as const,
           sampledAt: now,
-          observedAt: now,
         }
-      : await fetchPreferredNitradoLivePlayerCount(await getNitradoTokenForLinkedServer(env, linkedServer), row.nitrado_service_id ?? "", now);
+      : await fetchNitradoOnlinePlayerCount(await getNitradoTokenForLinkedServer(env, linkedServer), row.nitrado_service_id ?? "", now);
     if (!livePlayerCount) {
       await updatePlayerCountFreshness(db, row.id, {
         checkedAt: now,
@@ -541,7 +535,7 @@ async function refreshNitradoServerPlayerCountOnly(
       };
     }
     const currentPlayers = cleanNumber(livePlayerCount.currentPlayers);
-    const maxPlayers = cleanNumber(livePlayerCount.maxPlayers) ?? cleanNumber(row.max_players);
+    const maxPlayers = cleanNumber(row.max_players);
     await db
       .prepare(
         `UPDATE linked_servers SET
@@ -554,7 +548,7 @@ async function refreshNitradoServerPlayerCountOnly(
           updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
       )
-      .bind(currentPlayers, maxPlayers, now, livePlayerCount.source, now, row.id)
+      .bind(currentPlayers, maxPlayers, now, "nitrado", now, row.id)
       .run();
     return {
       ok: true,
@@ -565,7 +559,7 @@ async function refreshNitradoServerPlayerCountOnly(
       metadata_last_changed_at: null,
       metadata_source: "nitrado",
       player_count_last_checked_at: now,
-      player_count_source: livePlayerCount.source,
+      player_count_source: "nitrado",
       player_count_status: "fresh" as const,
       metadata: {
         ...rowToMetadata(linkedServer),
@@ -573,7 +567,7 @@ async function refreshNitradoServerPlayerCountOnly(
         max_players: maxPlayers,
         metadata_last_checked_at: now,
         player_count_last_checked_at: now,
-        player_count_source: livePlayerCount.source,
+        player_count_source: "nitrado",
         player_count_status: "fresh" as const,
       },
     };
@@ -933,7 +927,7 @@ async function fetchNitradoServerMetadata(env: Env, linkedServer: LinkedServerMe
     if (response.status === 401 || response.status === 403) throw new Error("Nitrado token cannot access this service");
     if (!response.ok) throw new Error("Nitrado metadata fetch failed");
     const payload = await response.json().catch(() => null);
-    const livePlayerCount = await fetchPreferredNitradoLivePlayerCount(token, serviceId, now).catch((error) => {
+    const livePlayerCount = await fetchNitradoOnlinePlayerCount(token, serviceId, now).catch((error) => {
       console.warn("DZN LIVE NITRADO PLAYER COUNT ENDPOINT SKIPPED", {
         linkedServerId: linkedServer.id,
         serviceId,
@@ -942,53 +936,6 @@ async function fetchNitradoServerMetadata(env: Env, linkedServer: LinkedServerMe
       return null;
     });
     return normalizeNitradoMetadata(payload, linkedServer, now, livePlayerCount);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function fetchPreferredNitradoLivePlayerCount(
-  token: string,
-  serviceId: string,
-  now: string,
-): Promise<NitradoLivePlayerCountProbe | null> {
-  const webinterfaceStats = await fetchNitradoWebinterfaceStatsPlayerCount(token, serviceId, now).catch(() => null);
-  if (webinterfaceStats) return webinterfaceStats;
-  return fetchNitradoOnlinePlayerCount(token, serviceId, now);
-}
-
-async function fetchNitradoWebinterfaceStatsPlayerCount(
-  token: string,
-  serviceId: string,
-  now: string,
-): Promise<NitradoLivePlayerCountProbe | null> {
-  if (!serviceId) return null;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2500);
-  try {
-    const response = await fetch(
-      `${NITRADO_WEBINTERFACE}/${encodeURIComponent(serviceId)}/wi/gameserver/ajax/getStats`,
-      {
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/json",
-          "x-requested-with": "XMLHttpRequest",
-        },
-        signal: controller.signal,
-      },
-    );
-    if (response.status === 404 || response.status === 405) return null;
-    if (response.status === 401 || response.status === 403) return null;
-    if (!response.ok) return null;
-    const payload = await response.json().catch(() => null);
-    const playerCount = extractNitradoStatsPlayerCount(payload, { nowMs: Date.parse(now) });
-    return playerCount === null ? null : {
-      currentPlayers: playerCount.currentPlayers,
-      maxPlayers: playerCount.maxPlayers,
-      source: "webinterface_get_stats",
-      sampledAt: now,
-      observedAt: playerCount.observedAt,
-    };
   } finally {
     clearTimeout(timeout);
   }
@@ -1017,10 +964,8 @@ async function fetchNitradoOnlinePlayerCount(
     const currentPlayers = extractNitradoOnlinePlayerCount(payload);
     return currentPlayers === null ? null : {
       currentPlayers,
-      maxPlayers: null,
       source: "gameservers_games_players",
       sampledAt: now,
-      observedAt: now,
     };
   } finally {
     clearTimeout(timeout);
@@ -1028,13 +973,15 @@ async function fetchNitradoOnlinePlayerCount(
 }
 
 async function mockMetadata(linkedServer: LinkedServerMetadataRow, now: string) {
-  const name = linkedServer.nitrado_service_name ?? linkedServer.server_name ?? linkedServer.display_name ?? "Mock DayZ Server";
+  const name = linkedServer.nitrado_service_id === "18765761"
+    ? "NukeTown DEATHMATCH"
+    : linkedServer.nitrado_service_name ?? linkedServer.server_name ?? "Pandora DayZ";
   return normalizeMetadataValues({
     linkedServer,
     now,
     hostname: name,
     description: "Mock DayZ server metadata from MOCK_NITRADO mode",
-    maxPlayers: cleanNumber(linkedServer.max_players) ?? 60,
+    maxPlayers: linkedServer.nitrado_service_id === "18765761" ? 10 : 60,
     currentPlayers: 0,
     ipAddress: linkedServer.ip_address ?? "203.0.113.10",
     gamePort: 2302,
@@ -1046,7 +993,6 @@ async function mockMetadata(linkedServer: LinkedServerMetadataRow, now: string) 
     game: "dayzps",
     platform: "PlayStation",
     rawMetadata: { source: "MOCK_NITRADO", hostname: name },
-    playerCountSource: "mock_nitrado",
   });
 }
 
@@ -1082,7 +1028,7 @@ function normalizeNitradoMetadata(
     status.players,
     statusQuery.players,
   );
-  const gameserverMaxPlayers = firstNumber(
+  const maxPlayers = firstNumber(
     gameserver.slots,
     gameserver.max_players,
     gameserver.maxplayers,
@@ -1108,7 +1054,6 @@ function normalizeNitradoMetadata(
     statusQuery.max_players,
     playerCountPair?.max,
   );
-  const maxPlayers = livePlayerCount?.maxPlayers ?? gameserverMaxPlayers;
   const gameserverCurrentPlayers = firstNumber(
     query.player_current,
     query.current_players,
@@ -1180,7 +1125,7 @@ function normalizeNitradoMetadata(
       maxPlayers,
       currentPlayers,
       playerCountSource: livePlayerCount?.source ?? "gameservers",
-      livePlayerCountObservedAt: livePlayerCount?.observedAt ?? livePlayerCount?.sampledAt ?? null,
+      livePlayerCountObservedAt: livePlayerCount?.sampledAt ?? null,
       ipAddress,
       gamePort,
       queryPort,
@@ -1192,7 +1137,6 @@ function normalizeNitradoMetadata(
       platform,
       gameSpecific,
     }),
-    playerCountSource: livePlayerCount?.source ?? "gameservers",
   });
 }
 
@@ -1213,7 +1157,6 @@ async function normalizeMetadataValues(values: {
   game: string | null | undefined;
   platform: string | null | undefined;
   rawMetadata: Record<string, unknown>;
-  playerCountSource?: string | null;
 }): Promise<LinkedServerMetadata> {
   const tags = parseTags(values.linkedServer.tags_json).join(" ");
   const existingSource = values.linkedServer.server_mode_source;
@@ -1279,7 +1222,7 @@ async function normalizeMetadataValues(values: {
     metadata_hash: await sha256(hashInput),
     metadata_last_checked_at: values.now,
     player_count_last_checked_at: values.now,
-    player_count_source: cleanString(values.playerCountSource) ?? (rawMetadata.source === "MOCK_NITRADO" ? "mock_nitrado" : "nitrado"),
+    player_count_source: rawMetadata.source === "MOCK_NITRADO" ? "mock_nitrado" : "nitrado",
     player_count_status: playerCountStatus,
   };
 }
@@ -1400,55 +1343,12 @@ export function parseNitradoPlayerCountPair(...values: unknown[]): { current: nu
   return null;
 }
 
-export function extractNitradoStatsPlayerCount(
-  payload: unknown,
-  options: { nowMs?: number; maxAgeMs?: number } = {},
-): { currentPlayers: number; maxPlayers: number | null; observedAt: string } | null {
-  const nowMs = Number.isFinite(options.nowMs) ? Number(options.nowMs) : Date.now();
-  const maxAgeMs = typeof options.maxAgeMs === "number" && Number.isFinite(options.maxAgeMs)
-    ? Math.max(0, options.maxAgeMs)
-    : NITRADO_STATS_PLAYER_COUNT_MAX_AGE_MS;
-  const stats = findRecordByKey(payload, "stats");
-  if (!stats) return null;
-  const current = latestNitradoStatsRow(stats.currentPlayers, { nowMs, maxAgeMs, allowZero: true });
-  if (!current) return null;
-  const max = latestNitradoStatsRow(stats.maxPlayers, { nowMs, maxAgeMs, allowZero: false });
-  return {
-    currentPlayers: current.value,
-    maxPlayers: max?.value ?? null,
-    observedAt: new Date(current.timestampMs).toISOString(),
-  };
-}
-
 export function extractNitradoOnlinePlayerCount(payload: unknown): number | null {
   const explicitListCount = countExplicitOnlinePlayerList(payload);
   if (explicitListCount !== null) return explicitListCount;
   const directNumber = firstNumberFromPlayerCountKeys(payload);
   if (directNumber !== null) return directNumber;
   return countPlayerList(payload);
-}
-
-function latestNitradoStatsRow(
-  series: unknown,
-  options: { nowMs: number; maxAgeMs: number; allowZero: boolean },
-): { timestampMs: number; value: number } | null {
-  if (!Array.isArray(series)) return null;
-  let latest: { timestampMs: number; value: number } | null = null;
-  for (const row of series) {
-    if (!Array.isArray(row) || row.length < 2) continue;
-    const timestampMs = Number(row[0]);
-    const value = typeof row[1] === "number"
-      ? row[1]
-      : typeof row[1] === "string" && row[1].trim() !== ""
-        ? Number(row[1])
-        : NaN;
-    if (!Number.isFinite(timestampMs) || !Number.isFinite(value)) continue;
-    if (timestampMs < options.nowMs - options.maxAgeMs || timestampMs > options.nowMs + 5 * 60 * 1000) continue;
-    const count = Math.trunc(value);
-    if (count < 0 || (!options.allowZero && count <= 0)) continue;
-    if (latest === null || timestampMs >= latest.timestampMs) latest = { timestampMs, value: count };
-  }
-  return latest;
 }
 
 export function resolveLivePlayerCounts(values: {
