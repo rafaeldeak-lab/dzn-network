@@ -127,9 +127,7 @@ assert.equal(serverMetadataSource.includes("DZN EXPLICIT ZERO PLAYER COUNT HANDL
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT REFRESH INDEPENDENT OF ADM"), true);
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT METADATA MISSING"), true);
 assert.equal(serverMetadataSource.includes("player_count_status: PlayerCountStatus"), true);
-assert.equal(serverMetadataSource.includes("/gameservers/stats"), true, "Live player count should prefer Nitrado's server-side getStats-equivalent API when available.");
-assert.equal(serverMetadataSource.includes("gameservers_stats"), true, "The selected API stats source must be recorded safely for diagnostics.");
-assert.equal(serverMetadataSource.includes("/wi/gameserver/ajax/getStats"), true, "Live player count should also try Nitrado webinterface getStats when the stored server-side token can access it.");
+assert.equal(serverMetadataSource.includes("/wi/gameserver/ajax/getStats"), true, "Live player count should prefer Nitrado webinterface getStats when the stored server-side token can access it.");
 assert.equal(serverMetadataSource.includes("webinterface_get_stats"), true, "The selected getStats source must be recorded safely for diagnostics.");
 assert.equal(serverMetadataSource.includes("18765761"), false, "Nitrado live player count source selection must be generic by service id, not hardcoded to NukeTown.");
 assert.equal(serverMetadataSource.includes("/gameservers/games/players"), true, "Live player count should use Nitrado's online player endpoint when available.");
