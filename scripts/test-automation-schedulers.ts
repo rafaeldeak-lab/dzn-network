@@ -99,7 +99,10 @@ assert.equal(metadataCron.includes("debug_service_id"), true);
 assert.equal(metadataCron.includes("selected_service_ids"), true);
 assert.equal(metadataCron.includes("skipped_service_ids"), true);
 assert.equal(metadataCron.includes("oldest_public_metadata_age_seconds"), true);
+assert.equal(serverMetadata.includes("/wi/gameserver/ajax/getStats"), true, "Cron metadata refresh should prefer Nitrado getStats when available server-side.");
+assert.equal(serverMetadata.includes("webinterface_get_stats"), true, "Cron metadata refresh should record getStats as the source when selected.");
 assert.equal(serverMetadata.includes("/gameservers/games/players"), true);
+assert.equal(/frontend_token|websocket_token|cookie/i.test(serverMetadata), false, "Metadata refresh must not rely on browser/session tokens.");
 assert.equal(automationSource.includes("UPDATE server_public_cache SET"), true, "Status result recording must refresh public cache player counts.");
 assert.equal(automationSource.includes("last_status_update_at = CASE WHEN ? THEN ? ELSE last_status_update_at END"), true, "Failed status checks must not overwrite fresh public cache timestamps.");
 assert.equal(serverWarsCron.includes("requireCronSecret"), true);
@@ -152,6 +155,7 @@ assert.equal(autoUpdateWorker.includes("TOKEN_ENCRYPTION_KEY"), false, "Auto-upd
 assert.equal(serverMetadata.includes("UPDATE server_public_cache SET"), true, "Fresh metadata refresh should directly update the public cache row.");
 assert.equal(serverMetadata.includes("WHERE guild_id = ?"), true, "Public cache sync must target the existing guild row.");
 assert.equal(serverMetadata.includes("refreshNitradoServerPlayerCountOnly"), true, "Cron metadata refresh must use the lightweight live-count path.");
-assert.equal(serverMetadata.includes("fetchNitradoOnlinePlayerCount"), true, "Cron metadata refresh must use the dedicated Nitrado player-count endpoint.");
+assert.equal(serverMetadata.includes("fetchPreferredNitradoLivePlayerCount"), true, "Cron metadata refresh must use the preferred Nitrado player-count source chain.");
+assert.equal(serverMetadata.includes("fetchNitradoOnlinePlayerCount"), true, "Cron metadata refresh must keep the dedicated Nitrado player-count endpoint as a fallback.");
 
 console.log("Automation scheduler tests passed.");
