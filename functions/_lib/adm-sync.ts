@@ -468,6 +468,8 @@ export type PendingAdmImportJobsResult = {
   completedJobs: number;
   chunksProcessed: number;
   failedJobs: number;
+  attemptedJobs?: number;
+  noProgressJobs?: number;
   results: AdmImportJobProgressResult[];
 };
 
@@ -3134,7 +3136,7 @@ export async function processPendingAdmImportJobs(
   const maxJobs = clampPositiveInteger(options.maxJobs ?? 5, 5);
   const maxChunksPerJob = clampPositiveInteger(options.maxChunksPerJob ?? SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
   const maxRuntimeMs = clampPositiveInteger(options.maxRuntimeMs ?? 20_000, 20_000);
-  const deadline = Date.now() + Math.max(1000, maxRuntimeMs - 1000);
+  const deadline = Date.now() + Math.max(1500, maxRuntimeMs - 250);
   const source = options.source ?? SCHEDULED_ADM_IMPORT_SOURCE;
   await recoverStaleAdmImportJobs(env, source);
   await cleanupExpiredAdmImportJobText(env, source).catch(() => null);
@@ -3160,17 +3162,31 @@ export async function processPendingAdmImportJobs(
   const results: AdmImportJobProgressResult[] = [];
   const processedServerIds = new Set<string>();
   let chunksProcessed = 0;
+  let progressedJobs = 0;
   let completedJobs = 0;
   let failedJobs = 0;
+  let attemptedJobs = 0;
+  let noProgressJobs = 0;
   for (const row of rows.results ?? []) {
     if (Date.now() >= deadline) break;
     if (processedServerIds.has(row.server_id) || processedServerIds.size >= maxJobs) continue;
     processedServerIds.add(row.server_id);
+    attemptedJobs += 1;
     try {
+      const previousCurrentLine = Number(row.current_line ?? 0);
       const previousChunksProcessed = Number(row.chunks_processed ?? 0);
       const result = await processAdmImportJobChunksById(env, row.server_id, row.id, maxChunksPerJob, deadline);
-      chunksProcessed += Math.max(0, result.chunks_processed - previousChunksProcessed);
-      if (result.status === "completed" || result.status === "completed_with_warnings") completedJobs += 1;
+      const chunkDelta = Math.max(0, result.chunks_processed - previousChunksProcessed);
+      const lineDelta = Math.max(0, result.current_line - previousCurrentLine);
+      const completed = result.status === "completed" || result.status === "completed_with_warnings";
+      chunksProcessed += chunkDelta;
+      if (completed) completedJobs += 1;
+      if (chunkDelta > 0 || lineDelta > 0 || completed) {
+        progressedJobs += 1;
+      } else {
+        noProgressJobs += 1;
+        await recordAdmImportJobProgressInSyncState(env, progressToImportJobRow(result, row.server_id), "processing_in_chunks", "ADM import job was selected but no line or chunk progress was made before the runtime budget guard. Worker will reserve a larger chunk budget next tick.").catch(() => null);
+      }
       results.push(result);
     } catch (error) {
       failedJobs += 1;
@@ -3183,10 +3199,12 @@ export async function processPendingAdmImportJobs(
   }
 
   return {
-    processedJobs: results.length,
+    processedJobs: progressedJobs,
     completedJobs,
     chunksProcessed,
     failedJobs,
+    attemptedJobs,
+    noProgressJobs,
     results,
   };
 }
@@ -3949,7 +3967,7 @@ export async function processNextAdmImportJobChunk(
 
 async function processAdmImportJobChunksById(env: Env, linkedServerId: string, jobId: string, maxChunks: number, deadlineMs = Number.POSITIVE_INFINITY) {
   const safeMaxChunks = clampPositiveInteger(maxChunks, SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK);
-  if (Date.now() + 750 >= deadlineMs) {
+  if (Date.now() + 1_250 >= deadlineMs) {
     const row = await getAdmImportJob(env, linkedServerId, jobId);
     if (!row) throw new Error("ADM import job not found.");
     return toAdmImportJobProgress(row);
@@ -6392,6 +6410,8 @@ export type ScheduledAdmSyncResult = {
   pending_import_jobs_processed: number;
   pending_import_chunks_processed: number;
   pending_import_jobs_completed: number;
+  pending_import_jobs_attempted?: number;
+  pending_import_jobs_no_progress?: number;
   cron: string | null;
   maxServers: number;
   maxLinesPerServer: number;
@@ -6552,7 +6572,7 @@ export async function runAdmWorkerSyncTick(
     }
 
     if (activeImportJobs > 0 && !explicitTargetFileName) {
-      if (!hasTickBudget(2_750)) {
+      if (!hasTickBudget(2_500)) {
         await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
         return admWorkerResult({
           metadata,
@@ -6568,7 +6588,7 @@ export async function runAdmWorkerSyncTick(
       pendingJobs = await processAdmImportJobsUntilBudget(env, {
         maxJobs: 1,
         maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
-        maxRuntimeMs: Math.max(2_500, Math.min(3_500, deadlineMs - Date.now())),
+        maxRuntimeMs: Math.max(3_250, Math.min(4_500, deadlineMs - Date.now() - 250)),
         source: OWNER_SUPPLIED_ADM_RECOVERY_SOURCE,
         linkedServerId: selected.id,
         assumeSchemaReady: true,
@@ -6577,14 +6597,14 @@ export async function runAdmWorkerSyncTick(
         pendingJobs = await processAdmImportJobsUntilBudget(env, {
           maxJobs: 1,
           maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
-          maxRuntimeMs: Math.max(1_500, Math.min(2_500, deadlineMs - Date.now())),
+          maxRuntimeMs: Math.max(3_250, Math.min(4_500, deadlineMs - Date.now() - 250)),
           linkedServerId: selected.id,
           assumeSchemaReady: true,
         });
       }
     }
 
-    const pendingJobWorkCompleted = Boolean(pendingJobs && (pendingJobs.processedJobs > 0 || pendingJobs.chunksProcessed > 0 || pendingJobs.completedJobs > 0));
+    const pendingJobWorkCompleted = Boolean(pendingJobs && (pendingJobs.chunksProcessed > 0 || pendingJobs.completedJobs > 0));
     if (pendingJobWorkCompleted && !explicitTargetFileName) {
       await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       const latestJob = pendingJobs?.results.at(-1) ?? null;
@@ -6600,6 +6620,23 @@ export async function runAdmWorkerSyncTick(
           : latestJob
             ? `Processed scheduled ADM import chunk ${latestJob.display_current_chunk ?? latestJob.chunks_processed}/${latestJob.total_chunks} for ${latestJob.filename}. Next chunk continues automatically on the next Worker tick.`
             : "Processed scheduled ADM import work. Next Worker tick will continue automatic discovery or import.",
+      });
+    }
+
+    if (activeImportJobs > 0 && pendingJobs && Number(pendingJobs.attemptedJobs ?? 0) > 0 && !explicitTargetFileName) {
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      const latestJob = pendingJobs.results.at(-1) ?? null;
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
+        selectedAdmFile: latestJob?.filename ?? selected.target_adm_file ?? selected.latest_adm_file,
+        selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+        pendingJobs,
+        skippedNotDue: 1,
+        message: latestJob
+          ? `ADM Worker selected active import job ${latestJob.filename}, but no import line advanced before the runtime budget guard. Worker skipped discovery and will retry the queued job next tick.`
+          : "ADM Worker selected active import work, but no import line advanced before the runtime budget guard. Worker skipped discovery and will retry next tick.",
       });
     }
 
@@ -7381,6 +7418,8 @@ function admWorkerResult(values: {
     completedJobs: 0,
     chunksProcessed: 0,
     failedJobs: 0,
+    attemptedJobs: 0,
+    noProgressJobs: 0,
     results: [],
   };
   return {
@@ -7415,6 +7454,8 @@ function admWorkerResult(values: {
     pending_import_jobs_processed: pendingJobs.processedJobs,
     pending_import_chunks_processed: pendingJobs.chunksProcessed,
     pending_import_jobs_completed: pendingJobs.completedJobs,
+    pending_import_jobs_attempted: pendingJobs.attemptedJobs ?? pendingJobs.results.length,
+    pending_import_jobs_no_progress: pendingJobs.noProgressJobs ?? 0,
     cron: null,
     maxServers: 1,
     maxLinesPerServer: 15000,
@@ -7592,6 +7633,8 @@ export async function runScheduledAdmSync(
     pending_import_jobs_processed: pendingJobs.processedJobs,
     pending_import_chunks_processed: pendingJobs.chunksProcessed,
     pending_import_jobs_completed: pendingJobs.completedJobs,
+    pending_import_jobs_attempted: pendingJobs.attemptedJobs ?? pendingJobs.results.length,
+    pending_import_jobs_no_progress: pendingJobs.noProgressJobs ?? 0,
     cron: options.cron ?? null,
     maxServers,
     maxLinesPerServer,
