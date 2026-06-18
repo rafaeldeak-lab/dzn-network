@@ -15,6 +15,8 @@ const expectedKillsByFile = new Map<string, number>([
   ["DayZServer_PS4_x64_2026-06-18_12-02-41.ADM", 21],
 ]);
 
+const backlogFixture = "DayZServer_PS4_x64_2026-06-18_17-02-14.ADM";
+
 if (!existsSync(fixtureRoot)) {
   console.log("Latest ADM recovery raw fixture tests skipped: raw owner-supplied bundle is not present locally.");
   process.exit(0);
@@ -38,8 +40,40 @@ for (const [filename, expectedKills] of expectedKillsByFile.entries()) {
 
 assert.equal(totalKills, 46);
 
+const backlogFixturePath = join(fixtureRoot, backlogFixture);
+if (existsSync(backlogFixturePath)) {
+  const raw = readFileSync(backlogFixturePath, "utf8");
+  const physicalLines = raw.split(/\r?\n/).length;
+  const lines = raw.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
+  const parsed = parseAdmLines(lines, { admDate: extractAdmDate(backlogFixture) ?? undefined });
+  const creditedKills = parsed.filter((event) => event.eventType === "player_killed" && event.isCreditedKill);
+  const hitLines = parsed.filter((event) => event.eventType === "player_hit");
+  const unknownAttackerHitLines = parsed.filter((event) => event.eventType === "player_hit_unknown_attacker");
+  const connections = parsed.filter((event) => event.eventType === "player_connected");
+  const disconnects = parsed.filter((event) => event.eventType === "player_disconnected");
+  const playerlistSnapshots = parsed.filter((event) => event.eventType === "playerlist_snapshot");
+  const environmentalDeaths = parsed.filter((event) => event.eventType === "player_died_stats" || event.eventType === "player_killed_environment");
+
+  assert.equal(physicalLines === 323 || physicalLines === 324, true, `${backlogFixture} physical line count should only vary by trailing newline interpretation`);
+  assert.equal(lines.length, 321, `${backlogFixture} non-empty line count`);
+  assert.equal(creditedKills.length, 31, `${backlogFixture} credited kill count`);
+  assert.equal(hitLines.length, 164, `${backlogFixture} player_hit line count`);
+  assert.equal(unknownAttackerHitLines.length, 10, `${backlogFixture} unknown-attacker hit line count`);
+  assert.equal(connections.length, 44, `${backlogFixture} connection count`);
+  assert.equal(disconnects.length, 7, `${backlogFixture} disconnect count`);
+  assert.equal(playerlistSnapshots.length, 4, `${backlogFixture} PlayerList snapshot count`);
+  assert.equal(environmentalDeaths.length, 6, `${backlogFixture} environmental death count`);
+  assert.equal(hitLines.some((event) => event.isCreditedKill), false, `${backlogFixture} hit lines must not be credited kills`);
+  assert.equal(unknownAttackerHitLines.some((event) => event.isCreditedKill), false, `${backlogFixture} unknown-attacker hit lines must not be credited kills`);
+  assert.equal(environmentalDeaths.some((event) => event.eventType === "player_killed"), false, `${backlogFixture} environmental deaths must not become PvP kills`);
+  totalKills += creditedKills.length;
+}
+
+assert.equal(totalKills, existsSync(backlogFixturePath) ? 77 : 46);
+
 console.log("Latest owner-supplied ADM fixture parser tests passed.", {
   files: expectedKillsByFile.size,
+  backlogFixturePresent: existsSync(backlogFixturePath),
   totalKills,
 });
 

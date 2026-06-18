@@ -67,6 +67,7 @@ type JobRow = {
   joins: number | null;
   disconnects: number | null;
   playerlist_snapshots: number | null;
+  created_at: string | null;
   updated_at: string | null;
   completed_at: string | null;
 };
@@ -720,7 +721,7 @@ async function main() {
   const jobs = d1<JobRow>(`
     SELECT server_id, source_service_id, filename, source, status, current_line, total_lines,
            chunks_processed, total_chunks, parsed_kills, written_kills, joins, disconnects,
-           playerlist_snapshots, updated_at, completed_at
+           playerlist_snapshots, created_at, updated_at, completed_at
     FROM adm_import_jobs
     WHERE source_service_id IN (${inClause}) OR server_id IN (${linkedServerIds.map(sqlString).join(", ") || "''"})
     ORDER BY COALESCE(updated_at, created_at) DESC
@@ -871,6 +872,24 @@ async function main() {
     const activeOrderedBackfillFiles = recentFilesAfterLastProcessed
       .filter((file) => file.adm_file !== latestFile.adm_file)
       .filter((file) => hasActiveOrderedBackfill(file, serviceJobs));
+    const readableLineZeroQueuedJobs = recentFilesAfterLastProcessed
+      .map((file) => ({ file, job: scheduledJobForFile(file, serviceJobs) }))
+      .filter((item): item is { file: FileStateRow; job: JobRow } => {
+        const { file, job } = item;
+        if (!job) return false;
+        const status = String(job.status ?? "").toLowerCase();
+        if (!["queued", "processing", "parsing", "writing", "rebuilding", "failed_retryable"].includes(status)) return false;
+        const currentLine = Number(job.current_line ?? 0);
+        const chunksProcessed = Number(job.chunks_processed ?? 0);
+        const totalLines = Math.max(Number(job.total_lines ?? 0), Number(file.latest_known_line_count ?? 0), Number(file.line_count ?? 0));
+        const readable = ["queued", "partial", "caught_up_waiting_for_growth", "processed"].includes(String(file.status ?? "").toLowerCase())
+          || Number(file.line_count ?? 0) > 0
+          || Number(file.latest_known_line_count ?? 0) > 0
+          || Boolean(file.last_read_at);
+        return readable && totalLines > 0 && currentLine === 0 && chunksProcessed === 0;
+      });
+    const hardStuckLineZeroJobs = readableLineZeroQueuedJobs.filter(({ job }) => isOlderThan(job.updated_at ?? job.created_at, 15));
+    const warningLineZeroJobs = readableLineZeroQueuedJobs.filter(({ job }) => !isOlderThan(job.updated_at ?? job.created_at, 15) && isOlderThan(job.updated_at ?? job.created_at, 5));
     if (skippedIntermediateFiles.length) {
       fail(label, "Recent noftp ADM files newer than the last completed import lack job/cursor evidence before the current latest ADM.", skippedIntermediateFiles.map((file) => ({
         file: file.adm_file,
@@ -887,6 +906,29 @@ async function main() {
       pass(label, "Recent ADM files after the last processed file have import/cursor evidence or retry state in timestamp order.", {
         files: recentFilesAfterLastProcessed.map((file) => file.adm_file),
       });
+    }
+    if (hardStuckLineZeroJobs.length) {
+      fail(label, "Readable scheduled ADM import jobs are stuck at line 0 beyond the hard threshold.", hardStuckLineZeroJobs.map(({ file, job }) => ({
+        file: file.adm_file,
+        fileStatus: file.status,
+        jobStatus: job.status,
+        currentLine: job.current_line,
+        totalLines: job.total_lines,
+        chunksProcessed: job.chunks_processed,
+        createdAt: job.created_at,
+        updatedAt: job.updated_at,
+      })));
+    } else if (warningLineZeroJobs.length) {
+      warn(label, "Readable scheduled ADM import jobs are still at line 0 beyond the warning threshold.", warningLineZeroJobs.map(({ file, job }) => ({
+        file: file.adm_file,
+        fileStatus: file.status,
+        jobStatus: job.status,
+        currentLine: job.current_line,
+        totalLines: job.total_lines,
+        chunksProcessed: job.chunks_processed,
+        createdAt: job.created_at,
+        updatedAt: job.updated_at,
+      })));
     }
     if (serviceJobs.some((job) => job.source === "scheduled_nitrado" && /completed/i.test(job.status)) || Math.max(Number(latestFile.cursor_line ?? 0), Number(latestFile.imported_line_count ?? 0), Number(latestFile.line_count ?? 0)) > 0) {
       permanentAdmDataDetected = true;
