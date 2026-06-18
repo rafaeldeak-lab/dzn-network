@@ -79,14 +79,14 @@ export async function handleMetadataSyncRun(
   const debugServiceId = sanitizeServiceId(body.debug_service_id);
   const refreshOptions = {
     maxServers: sanitizePositiveInteger(body.max_servers, 1, 5),
-    deadlineMs: sanitizePositiveInteger(body.deadline_ms, 20_000, 60_000),
+    deadlineMs: sanitizePositiveInteger(body.deadline_ms, 2_500, 5_000),
     livePlayerCountStaleMs: sanitizePositiveInteger(body.player_count_stale_ms, 90_000, 30 * 60 * 1000),
     includeResults: true,
     queueDiscordUpdates: false,
     skipAutomationMaintenance: true,
     debugServiceId,
   };
-  const responseTimeoutMs = Math.max(250, Math.min(refreshOptions.deadlineMs, 25_000));
+  const responseTimeoutMs = Math.max(250, Math.min(refreshOptions.deadlineMs, 5_000));
 
   if (body.async === true) {
     waitUntil(runMetadataRefresh(env, source, startedAt, refreshOptions, handlers).catch((error) => {

@@ -119,10 +119,7 @@ includesAll(leaderboardsRoute, [
 assert.equal(leaderboardsRoute.includes("status: 503"), false, "Core leaderboards must render a controlled empty fallback instead of failing the whole page with 503.");
 assert.equal(leaderboardsRoute.includes("publicApiErrorHeaders()"), false, "Core leaderboards should not return an error payload for recoverable no-snapshot fallback.");
 
-for (const route of [
-  "functions/api/public/server-leaderboard.ts",
-  "functions/api/public/servers.ts",
-]) {
+for (const route of ["functions/api/public/server-leaderboard.ts"]) {
   const routeSource = source(route);
   includesAll(routeSource, [
     "readPublicApiCache",
@@ -136,6 +133,20 @@ for (const route of [
     "logPublicApiSnapshotFallbackServed",
   ]);
 }
+
+const publicServersRoute = source("functions/api/public/servers.ts");
+includesAll(publicServersRoute, [
+  "readPublicApiCache",
+  "writePublicApiCache",
+  "live_query_failed_using_snapshot",
+  "live_query_failed_no_snapshot",
+  "status: 200",
+  "servers: []",
+  "retry_after_seconds: 10",
+  "publicApiErrorHeaders()",
+  "logPublicApiLoadFailed",
+  "logPublicApiSnapshotFallbackServed",
+]);
 
 const landing = source("components/dzn/dzn-landing-page.tsx");
 includesAll(landing, [

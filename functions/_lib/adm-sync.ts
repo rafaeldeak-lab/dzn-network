@@ -3238,12 +3238,12 @@ export async function planAdmBackfillJobsForServer(
     readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: scheduledBudgeted ? Math.max(1, Math.min(1, admBudget.maxFilesPerInvocation)) : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
-    lookbackFiles: scheduledBudgeted ? 4 : 12,
+    maxFiles: scheduledBudgeted ? Math.max(1, Math.min(4, Math.max(admBudget.maxFilesPerInvocation, 4))) : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
+    lookbackFiles: scheduledBudgeted ? 12 : 12,
     directPreferredFirst: scheduledBudgeted ? false : true,
     adminLogsFirst: scheduledBudgeted ? false : undefined,
-    maxListDirs: scheduledBudgeted ? 1 : 8,
-    maxListSearches: scheduledBudgeted ? 1 : 3,
+    maxListDirs: scheduledBudgeted ? 4 : 8,
+    maxListSearches: scheduledBudgeted ? 2 : 3,
     currentFileMaxPathVariants: scheduledBudgeted ? 1 : 6,
     trySeekWithoutRaw: scheduledBudgeted ? false : true,
     maxReadAttemptsPerFile: scheduledBudgeted ? 1 : admBudget.maxReadAttemptsPerFile,
@@ -7051,18 +7051,13 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
              SELECT adm_file
              FROM adm_sync_file_state
              WHERE adm_sync_file_state.linked_server_id = linked_servers.id
-               AND adm_sync_file_state.status IN ('discovered', 'unreadable')
+               AND adm_sync_file_state.status = 'discovered'
                AND adm_sync_file_state.ignored_at IS NULL
                AND (
                  adm_sync_state.last_processed_file IS NULL
                  OR adm_sync_file_state.adm_file > adm_sync_state.last_processed_file
                )
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
-               AND (
-                 adm_sync_file_state.status != 'unreadable'
-                 OR adm_sync_file_state.next_retry_at IS NULL
-                 OR adm_sync_file_state.next_retry_at <= ?
-               )
                AND NOT EXISTS (
                  SELECT 1
                  FROM adm_import_jobs completed_or_active
@@ -7077,18 +7072,13 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
              SELECT adm_path
              FROM adm_sync_file_state
              WHERE adm_sync_file_state.linked_server_id = linked_servers.id
-               AND adm_sync_file_state.status IN ('discovered', 'unreadable')
+               AND adm_sync_file_state.status = 'discovered'
                AND adm_sync_file_state.ignored_at IS NULL
                AND (
                  adm_sync_state.last_processed_file IS NULL
                  OR adm_sync_file_state.adm_file > adm_sync_state.last_processed_file
                )
                AND COALESCE(adm_sync_file_state.retry_count, 0) < 5
-               AND (
-                 adm_sync_file_state.status != 'unreadable'
-                 OR adm_sync_file_state.next_retry_at IS NULL
-                 OR adm_sync_file_state.next_retry_at <= ?
-               )
                AND NOT EXISTS (
                  SELECT 1
                  FROM adm_import_jobs completed_or_active
@@ -7139,18 +7129,13 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                SELECT 1
                FROM adm_sync_file_state target_due
                WHERE target_due.linked_server_id = linked_servers.id
-                 AND target_due.status IN ('discovered', 'unreadable')
+                 AND target_due.status = 'discovered'
                  AND target_due.ignored_at IS NULL
                  AND (
                    adm_sync_state.last_processed_file IS NULL
                    OR target_due.adm_file > adm_sync_state.last_processed_file
                  )
                  AND COALESCE(target_due.retry_count, 0) < 5
-                 AND (
-                   target_due.status != 'unreadable'
-                   OR target_due.next_retry_at IS NULL
-                   OR target_due.next_retry_at <= ?
-                 )
                  AND NOT EXISTS (
                    SELECT 1
                    FROM adm_import_jobs target_due_job
@@ -7190,13 +7175,10 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
       cursorKey,
       metadataStaleBefore,
       metadataStaleBefore,
-      now,
-      now,
       SCHEDULED_ADM_IMPORT_SOURCE,
       linkedServerId,
       linkedServerId,
       force,
-      now,
       now,
       now,
       metadataStaleBefore,

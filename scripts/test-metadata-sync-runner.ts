@@ -28,12 +28,12 @@ async function run() {
       "x-dzn-cron-secret": "unit-test-secret",
       "content-type": "application/json",
     },
-    body: JSON.stringify({ cron: "github-actions", max_servers: 2, deadline_ms: 20000, debug_service_id: "18765761" }),
+    body: JSON.stringify({ cron: "github-actions", max_servers: 2, deadline_ms: 5000, debug_service_id: "18765761" }),
   }), env), {
     refreshMetadata: async (_env, options = {}) => {
       refreshCalled = true;
       assert.equal(options.maxServers, 2);
-      assert.equal(options.deadlineMs, 20000);
+      assert.equal(options.deadlineMs, 5000);
       assert.equal(options.debugServiceId, "18765761");
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
@@ -108,14 +108,14 @@ async function run() {
       "x-dzn-cron-secret": "unit-test-secret",
       "content-type": "application/json",
     },
-    body: JSON.stringify({ cron: "github-actions", max_servers: 1, deadline_ms: 20000, async: true }),
+    body: JSON.stringify({ cron: "github-actions", max_servers: 1, deadline_ms: 5000, async: true }),
   }), env, (promise) => {
     waitUntilPromise = promise;
   }), {
     refreshMetadata: async (_env, options = {}) => {
       asyncRefreshCalled = true;
       assert.equal(options.maxServers, 1);
-      assert.equal(options.deadlineMs, 20000);
+      assert.equal(options.deadlineMs, 5000);
       assert.equal(options.debugServiceId, null);
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
