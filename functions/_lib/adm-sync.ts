@@ -6525,7 +6525,7 @@ export async function runAdmWorkerSyncTick(
     }
 
     if (activeImportJobs > 0 && !explicitTargetFileName) {
-      if (!hasTickBudget(1_250)) {
+      if (!hasTickBudget(2_750)) {
         await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
         return admWorkerResult({
           metadata,
@@ -6541,7 +6541,7 @@ export async function runAdmWorkerSyncTick(
       pendingJobs = await processAdmImportJobsUntilBudget(env, {
         maxJobs: 1,
         maxChunksPerJob: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
-        maxRuntimeMs: Math.max(900, Math.min(1_500, deadlineMs - Date.now())),
+        maxRuntimeMs: Math.max(2_500, Math.min(3_500, deadlineMs - Date.now())),
         linkedServerId: selected.id,
         assumeSchemaReady: true,
       });

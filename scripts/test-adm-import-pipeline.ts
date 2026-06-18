@@ -151,6 +151,8 @@ async function main() {
   assert.match(packageSource, /"check:adm-automation": "tsx scripts\/check-adm-automation\.ts"/);
   assert.match(admSyncSource, /SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1/);
   assert.match(admSyncSource, /processAdmImportJobsUntilBudget/);
+  assert.match(admSyncSource, /hasTickBudget\(2_750\)/);
+  assert.match(admSyncSource, /maxRuntimeMs: Math\.max\(2_500, Math\.min\(3_500, deadlineMs - Date\.now\(\)\)\)/);
   assert.match(admSyncSource, /pendingJobWorkCompleted/);
   assert.match(admSyncSource, /planAdmBackfillJobsForServer\(env, selected\.user_id, selected\.id/);
   assert.match(admSyncSource, /processImmediately: false/);
