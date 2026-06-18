@@ -280,15 +280,26 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     }
     logPublicApi503RootCause(endpoint, error, requestId, slug ? "server_profile_live_query" : "server_listing_live_query");
     return json({
-      ok: false,
+      ok: true,
+      servers: [],
+      featured: [],
+      recommended: [],
+      spotlight: [],
+      stats: {
+        total_servers: 0,
+        online_servers: 0,
+        total_players: 0,
+        total_kills: 0,
+      },
       error: slug ? "public_server_profile_load_failed" : "public_servers_load_failed",
       message: slug ? "Unable to load this public server right now." : "Unable to load public servers right now.",
+      server: slug ? null : undefined,
       generated_at: new Date().toISOString(),
       source: "empty_no_cache",
       stale: true,
       fallback_reason: "live_query_failed_no_snapshot",
       retry_after_seconds: 10,
-    }, { headers: publicApiErrorHeaders(), status: 503 });
+    }, { headers: publicApiErrorHeaders(), status: 200 });
   }
 };
 

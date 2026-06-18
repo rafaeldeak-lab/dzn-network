@@ -687,18 +687,16 @@ export async function refreshLivePlayerCountsForActiveServers(
         serverStatus: result.metadata?.server_status ?? null,
         error: result.ok ? null : result.message,
       });
-      if (options.skipAutomationMaintenance !== true) {
-        await upsertServerPublicCache(env, {
-          guildId: row.guild_id,
-          planKey: row.plan_key,
-          publicServerName: serverName,
-          currentPlayers: nextCurrent,
-          maxPlayers: nextMax,
-          serverOnline: metadataOnlineValue(result.metadata),
-          serverStatus: result.metadata?.server_status ?? null,
-          lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
-        });
-      }
+      await upsertServerPublicCache(env, {
+        guildId: row.guild_id,
+        planKey: row.plan_key,
+        publicServerName: serverName,
+        currentPlayers: nextCurrent,
+        maxPlayers: nextMax,
+        serverOnline: metadataOnlineValue(result.metadata),
+        serverStatus: result.metadata?.server_status ?? null,
+        lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
+      });
       if (result.ok && shouldQueueDiscordUpdates) {
         await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], changed ? "status-change" : "status-check");
       }

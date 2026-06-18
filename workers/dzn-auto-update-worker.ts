@@ -36,9 +36,8 @@ const TASKS: SchedulerTask[] = [
     body: {
       source: "cloudflare-live-metadata",
       cron: "dzn-auto-update-worker",
-      async: true,
       max_servers: 1,
-      deadline_ms: 20_000,
+      deadline_ms: 2_500,
       player_count_stale_ms: 60_000,
     },
   },
@@ -49,7 +48,6 @@ const TASKS: SchedulerTask[] = [
     timeoutMs: 10_000,
     body: {
       source: "cloudflare-scheduled",
-      async: true,
       max_events: 1,
       max_finalizations: 1,
       max_challenge_expirations: 10,
@@ -64,7 +62,6 @@ const TASKS: SchedulerTask[] = [
     body: {
       source: "cloudflare-scheduled",
       cron: "dzn-auto-update-worker",
-      async: true,
       max_jobs: 2,
       deadline_ms: 2_500,
     },

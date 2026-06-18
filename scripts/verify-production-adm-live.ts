@@ -799,10 +799,18 @@ async function main() {
     if (noftp?.works === 1 && noftp.preferred !== 1) {
       fail(label, "Nitrado noftp source works but is not preferred.", noftp);
     } else if (noftp?.works === 1) {
-      pass(label, "Nitrado Log Files/noftp source is preferred and working.", {
-        lastTestedAt: noftp.last_tested_at,
-        status: noftp.last_status,
-      });
+      if (isOlderThan(noftp.last_tested_at, 30) && !isFuture(noftp.next_test_at)) {
+        fail(label, "Nitrado Log Files/noftp source is preferred but discovery evidence is older than 30 minutes.", {
+          lastTestedAt: noftp.last_tested_at,
+          status: noftp.last_status,
+          nextTestAt: noftp.next_test_at,
+        });
+      } else {
+        pass(label, "Nitrado Log Files/noftp source is preferred, working, and recently verified.", {
+          lastTestedAt: noftp.last_tested_at,
+          status: noftp.last_status,
+        });
+      }
     } else if (noftpFileEvidence) {
       pass(label, "Nitrado Log Files/noftp source is backed by current file-state/job evidence.", {
         sourceState: noftp ?? null,
