@@ -82,6 +82,8 @@ web_modules/
 out
 .wrangler/
 .autodev/reports/
+tests/fixtures/adm/recovery-june-2026/raw/
+tests/fixtures/adm/recovery-june-2026/*.zip
 
 # Nuxt.js build / generate output
 .nuxt

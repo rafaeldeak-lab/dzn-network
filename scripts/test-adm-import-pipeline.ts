@@ -13,6 +13,7 @@ import {
   importAdmTextForServer,
   importReadableAdmLinesIntoDatabase,
   isAdmFileNewerThan,
+  OWNER_SUPPLIED_ADM_RECOVERY_SOURCE,
   processPendingAdmImportJobs,
   processAdmImportJobLineChunk,
   processNextAdmImportJobChunk,
@@ -159,9 +160,9 @@ async function main() {
   assert.match(admSyncSource, /target_due\.status = 'discovered'/);
   assert.doesNotMatch(admSyncSource, /target_due\.status IN \('discovered', 'unreadable'\)/);
   assert.ok(
-    admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END") <
-      admSyncSource.indexOf("CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END"),
-    "ADM Worker must prioritize active scheduled import jobs before discovering more target files.",
+    admSyncSource.indexOf("CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END") <
+      admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END"),
+    "ADM Worker must prioritize discovered target files before active scheduled import jobs so readable backlog cannot be skipped.",
   );
   assert.match(admSyncSource, /maxFiles: scheduledBudgeted \? Math\.max\(1, Math\.min\(12/);
   assert.match(admSyncSource, /maxListDirs: scheduledBudgeted \? 4 : 8/);
@@ -382,6 +383,36 @@ async function main() {
   assert.equal(repeatedManualResult.parsed_kills, 10);
   assert.equal(repeatedManualResult.written_kills, 0);
   assert.equal(repeatedManualResult.duplicate_skips > 0, true);
+
+  const recoveryDb = new MemoryD1();
+  const recoveryEnv = makeEnv(recoveryDb);
+  const recoveryJob = await createAdmImportJobForServer(recoveryEnv, {
+    linkedServerId,
+    filename: fixtureName,
+    admText: manualText,
+    source: OWNER_SUPPLIED_ADM_RECOVERY_SOURCE,
+    chunkSize: 25,
+  });
+  let recoveryPending = await processPendingAdmImportJobs(recoveryEnv, {
+    source: OWNER_SUPPLIED_ADM_RECOVERY_SOURCE,
+    maxJobs: 1,
+    maxChunksPerJob: 1,
+  });
+  for (let guard = 0; recoveryPending.completedJobs === 0 && guard < 10; guard += 1) {
+    recoveryPending = await processPendingAdmImportJobs(recoveryEnv, {
+      source: OWNER_SUPPLIED_ADM_RECOVERY_SOURCE,
+      maxJobs: 1,
+      maxChunksPerJob: 1,
+    });
+  }
+  assert.equal(recoveryPending.completedJobs, 1);
+  assert.equal(recoveryDb.killEvents.length, 10);
+  assert.equal(recoveryDb.admImportJobs.get(recoveryJob.job_id)?.status, "completed");
+  assert.equal(recoveryDb.admSyncState.has(linkedServerId), false, "owner recovery must not alter normal ADM sync cursor");
+  assert.equal(recoveryDb.admSyncFileState.size, 0, "owner recovery must not overwrite Nitrado file-state evidence");
+  assert.equal(recoveryDb.syncRuns.at(-1)?.trigger_type, OWNER_SUPPLIED_ADM_RECOVERY_SOURCE);
+  const recoveryResultJson = String(recoveryDb.admImportJobs.get(recoveryJob.job_id)?.result_json ?? "");
+  assert.match(recoveryResultJson, /owner_supplied_adm_recovery/);
 
   const singleLinePreview = previewManualAdmText({
     filename: demonchaserFixtureName,
