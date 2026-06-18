@@ -4,6 +4,7 @@ import {
   type AutomationCronJobType,
   type AutomationCronStatus,
 } from "../functions/_lib/automation";
+import { runServerWarAutomationTick } from "../functions/_lib/server-war-automation";
 import type { Env } from "../functions/_lib/types";
 
 type WorkerScheduledController = {
@@ -60,6 +61,7 @@ const TASKS: SchedulerTask[] = [
     cadence: "every-five-minutes",
     timeoutMs: 10_000,
     body: {
+      async: true,
       source: "cloudflare-scheduled",
       cron: "dzn-auto-update-worker",
       max_jobs: 2,
@@ -127,7 +129,7 @@ export async function runAutoUpdateTick(env: Env, options: { cron: string | null
   const results = [];
   for (const task of dueTasks) {
     const startedAt = new Date().toISOString();
-    const result = await runTask(task, baseUrl, secret, options);
+    const result = await runTask(env, task, baseUrl, secret, options);
     results.push(result);
     await safeRecordTask(env, task.label, result.ok ? "success" : "failed", startedAt, result).catch((error) => {
       console.warn("DZN AUTO UPDATE WORKER CRON RUN RECORD SKIPPED", {
@@ -163,11 +165,16 @@ function isFiveMinuteTick(options: { cron: string | null; scheduledTime: number 
 }
 
 async function runTask(
+  env: Env,
   task: SchedulerTask,
   baseUrl: string,
   secret: string,
   options: { cron: string | null; scheduledTime: number },
 ) {
+  if (task.label === "server-wars") {
+    return runServerWarsTask(env, task);
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), task.timeoutMs);
   try {
@@ -214,6 +221,42 @@ async function runTask(
     };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function runServerWarsTask(env: Env, task: SchedulerTask) {
+  try {
+    const result = await runServerWarAutomationTick(env, {
+      source: "cloudflare-scheduled",
+      maxEvents: numberMetric(task.body.max_events) || 1,
+      maxFinalizations: numberMetric(task.body.max_finalizations) || 1,
+      maxChallengeExpirations: numberMetric(task.body.max_challenge_expirations) || 10,
+      deadlineMs: numberMetric(task.body.deadline_ms) || 2500,
+    });
+    const failed = [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length;
+    return {
+      label: task.label,
+      ok: failed === 0,
+      status: 200,
+      processed: result.snapshots.length + result.finalized.length + result.transitions.expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing,
+      skipped: result.budgetExhausted ? 1 : 0,
+      failed,
+      body: sanitizeTaskBody(result as unknown as Record<string, unknown>),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "server wars automation failed";
+    console.warn("DZN AUTO UPDATE WORKER DIRECT SERVER WARS TASK FAILED", {
+      message: sanitizeMessage(message),
+    });
+    return {
+      label: task.label,
+      ok: false,
+      status: 0,
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+      body: { ok: false, error: sanitizeMessage(message) },
+    };
   }
 }
 

@@ -14,6 +14,7 @@ assert.equal(workerSource.includes("runAutoUpdateTick"), true);
 assert.equal(workerSource.includes("/api/sync/metadata/run"), true);
 assert.equal(workerSource.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(workerSource.includes("/api/sync/discord-posts/run"), true);
+assert.equal(workerSource.includes("runServerWarAutomationTick"), true, "Server Wars scheduled work should run directly in the auto-update Worker.");
 assert.equal(workerSource.includes("for (const task of dueTasks)"), true, "Due auto-update tasks should run sequentially.");
 assert.equal(workerSource.includes('cadence: "every-minute"'), true, "Metadata should run every scheduled tick.");
 assert.equal(workerSource.includes('cadence: "every-five-minutes"'), true, "Heavier optional tasks should stay on five-minute cadence.");
@@ -37,21 +38,13 @@ async function main() {
 
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; body: unknown; headers: Headers }> = [];
-  let callIndex = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    callIndex += 1;
     const headers = new Headers(init?.headers);
     calls.push({
       url: String(input),
       body: init?.body ? JSON.parse(String(init.body)) : null,
       headers,
     });
-    if (callIndex === 2) {
-      return new Response(JSON.stringify({ ok: false, failed: 1, error: "temporary server wars failure" }), {
-        status: 503,
-        headers: { "content-type": "application/json" },
-      });
-    }
     return new Response(JSON.stringify({ ok: true, processed: 1, skipped: 0, failed: 0 }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -64,10 +57,9 @@ async function main() {
       DZN_APP_URL: "https://dzn.test",
     } as Env, { cron: "unit-test", scheduledTime: 12345 });
     assert.equal(result.ok, true, "One failed optional task should not fail the whole scheduler tick.");
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].url, "https://dzn.test/api/sync/metadata/run");
-    assert.equal(calls[1].url, "https://dzn.test/api/cron/server-wars/refresh");
-    assert.equal(calls[2].url, "https://dzn.test/api/sync/discord-posts/run");
+    assert.equal(calls[1].url, "https://dzn.test/api/sync/discord-posts/run");
     for (const call of calls) {
       assert.equal(call.headers.get("x-dzn-cron-secret"), "unit-test-secret");
       assert.equal(call.headers.get("x-sync-cron-secret"), "unit-test-secret");
@@ -79,16 +71,13 @@ async function main() {
     assert.equal((calls[0].body as { deadline_ms: number }).deadline_ms, 2500);
     assert.equal((calls[0].body as { max_servers: number }).max_servers, 1);
     assert.equal((calls[0].body as { player_count_stale_ms: number }).player_count_stale_ms, 60000);
-    assert.equal("async" in (calls[1].body as Record<string, unknown>), false);
-    assert.equal((calls[1].body as { max_events: number }).max_events, 1);
-    assert.equal("async" in (calls[2].body as Record<string, unknown>), false);
-    assert.equal((calls[2].body as { max_jobs: number }).max_jobs, 2);
+    assert.equal((calls[1].body as { async: boolean }).async, true);
+    assert.equal((calls[1].body as { max_jobs: number }).max_jobs, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }
 
   calls.length = 0;
-  callIndex = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({
       url: String(input),
