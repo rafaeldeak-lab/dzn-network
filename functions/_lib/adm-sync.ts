@@ -3238,7 +3238,7 @@ export async function planAdmBackfillJobsForServer(
     readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: scheduledBudgeted ? Math.max(1, Math.min(4, Math.max(admBudget.maxFilesPerInvocation, 4))) : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
+    maxFiles: scheduledBudgeted ? Math.max(1, Math.min(12, Math.max(admBudget.maxFilesPerInvocation, 12))) : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
     lookbackFiles: scheduledBudgeted ? 12 : 12,
     directPreferredFirst: scheduledBudgeted ? false : true,
     adminLogsFirst: scheduledBudgeted ? false : undefined,

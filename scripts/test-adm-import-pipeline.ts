@@ -156,7 +156,7 @@ async function main() {
   assert.match(admSyncSource, /processImmediately: false/);
   assert.match(admSyncSource, /target_due\.status = 'discovered'/);
   assert.doesNotMatch(admSyncSource, /target_due\.status IN \('discovered', 'unreadable'\)/);
-  assert.match(admSyncSource, /maxFiles: scheduledBudgeted \? Math\.max\(1, Math\.min\(4/);
+  assert.match(admSyncSource, /maxFiles: scheduledBudgeted \? Math\.max\(1, Math\.min\(12/);
   assert.match(admSyncSource, /maxListDirs: scheduledBudgeted \? 4 : 8/);
   assert.match(admSyncSource, /maxListSearches: scheduledBudgeted \? 2 : 3/);
   assert.equal(admSyncSource.includes("prioritizedLiveCurrentJobKey"), false);
