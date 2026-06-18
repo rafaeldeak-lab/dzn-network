@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const workflow = readFileSync(".github/workflows/dzn-auto-update-schedulers.yml", "utf8");
 const deployWorkflow = readFileSync(".github/workflows/dzn-auto-update-worker-deploy.yml", "utf8");
 const worker = readFileSync("workers/adm-sync-worker.ts", "utf8");
+const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
 const autoUpdateWorker = readFileSync("workers/dzn-auto-update-worker.ts", "utf8");
 const autoUpdateConfig = readFileSync("wrangler.auto-update.toml", "utf8");
 const discordRoute = readFileSync("functions/api/sync/discord-posts/run.ts", "utf8");
@@ -124,6 +125,8 @@ assert.equal(worker.includes("const DISCORD_POSTS_WORKER_SIDE_TASK_ENABLED = fal
 assert.equal(worker.includes("const POST_ADM_MAINTENANCE_WORKER_SIDE_TASK_ENABLED = false;"), true);
 assert.equal(worker.includes("const EVENT_SCORING_WORKER_SIDE_TASK_ENABLED = false;"), true);
 assert.equal(worker.includes("ADM_WORKER_DIRECT_SYNC_MAX_RUNTIME_MS = 6_000"), true);
+assert.equal(admSyncSource.includes("const shouldRefreshMetadata = false;"), true, "ADM Worker must not run metadata refresh work.");
+assert.equal(admSyncSource.includes("OR linked_servers.metadata_last_checked_at IS NULL"), false, "ADM Worker selection must not be driven by stale metadata.");
 assert.equal(worker.includes("Server Wars automation is temporarily cron-route-only"), true);
 assert.equal(worker.includes("Discord posts automation is cron-route-only"), true);
 
@@ -137,7 +140,7 @@ assert.equal(autoUpdateWorker.includes("/api/sync/discord-posts/run"), true);
 assert.equal(autoUpdateWorker.includes('cadence: "every-minute"'), true);
 assert.equal(autoUpdateWorker.includes('cadence: "every-five-minutes"'), true);
 assert.equal(autoUpdateWorker.includes("isFiveMinuteTick"), true);
-assert.equal(autoUpdateWorker.includes("metadata\",\n    path: \"/api/sync/metadata/run\""), true);
+assert.equal(autoUpdateWorker.includes('path: "/api/sync/metadata/run"'), true);
 assert.equal(autoUpdateWorker.includes("async: true,\n      max_servers: 1"), false, "Auto-update Worker must not start long Pages waitUntil metadata tasks.");
 assert.equal(autoUpdateWorker.includes("source: \"cloudflare-live-metadata\""), true);
 assert.equal(autoUpdateWorker.includes("max_servers: 1"), true);

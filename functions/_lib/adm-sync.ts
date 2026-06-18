@@ -6451,7 +6451,7 @@ export async function runAdmWorkerSyncTick(
     const explicitTargetPath = explicitTargetFileName
       ? sanitizeWorkerTargetAdmPath(options.targetFilePath, explicitTargetFileName)
       : null;
-    const shouldRefreshMetadata = options.skipMetadataRefresh !== true;
+    const shouldRefreshMetadata = false;
     let metadata = emptyScheduledMetadataSyncResult();
     let metadataRefreshedLinkedServerId: string | null = null;
     if (shouldRefreshMetadata && !explicitTargetFileName && hasTickBudget(4_000)) {
@@ -7145,10 +7145,6 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
                  )
                LIMIT 1
              )
-             OR linked_servers.metadata_last_checked_at IS NULL
-             OR linked_servers.metadata_last_checked_at <= ?
-             OR linked_servers.player_count_last_checked_at IS NULL
-             OR linked_servers.player_count_last_checked_at <= ?
              OR EXISTS (
                SELECT 1
                FROM adm_import_jobs
@@ -7164,7 +7160,6 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
        ORDER BY
          CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END,
          CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END,
-         CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END,
          CASE WHEN last_worker_selected_at IS NULL THEN 0 ELSE 1 END,
          COALESCE(last_worker_selected_at, '1970-01-01T00:00:00.000Z') ASC,
          CASE WHEN id > COALESCE((SELECT value FROM cursor), '') THEN 0 ELSE 1 END,
@@ -7181,8 +7176,6 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
       force,
       now,
       now,
-      metadataStaleBefore,
-      metadataStaleBefore,
       SCHEDULED_ADM_IMPORT_SOURCE,
     )
     .first<AdmWorkerSelectedServer>();
