@@ -168,9 +168,12 @@ async function main() {
       admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END"),
     "ADM Worker must prioritize discovered target files before active scheduled import jobs so readable backlog cannot be skipped.",
   );
-  assert.match(admSyncSource, /maxFiles: scheduledBudgeted \? Math\.max\(1, Math\.min\(12/);
-  assert.match(admSyncSource, /maxListDirs: scheduledBudgeted \? 4 : 8/);
-  assert.match(admSyncSource, /maxListSearches: scheduledBudgeted \? 2 : 3/);
+  assert.match(admSyncSource, /const scheduledDiscoveryFileLimit = Math\.max\(1, Math\.min\(3, admBudget\.maxFilesPerInvocation\)\)/);
+  assert.match(admSyncSource, /maxFiles: scheduledBudgeted \? scheduledDiscoveryFileLimit/);
+  assert.match(admSyncSource, /lookbackFiles: scheduledBudgeted \? scheduledDiscoveryFileLimit/);
+  assert.match(admSyncSource, /maxListDirs: scheduledBudgeted \? 1 : 8/);
+  assert.match(admSyncSource, /maxListSearches: scheduledBudgeted \? 1 : 3/);
+  assert.match(admSyncSource, /limit: scheduledBudgeted \? scheduledUnreadableRetryLimit/);
   assert.equal(admSyncSource.includes("prioritizedLiveCurrentJobKey"), false);
   assert.match(admSyncSource, /preliminaryPlan\.missingFiles/);
   assert.match(admSyncSource, /status IN \('queued', 'failed_retryable'\)/);

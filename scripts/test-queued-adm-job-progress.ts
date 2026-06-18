@@ -54,6 +54,48 @@ assert.match(
 
 assert.match(
   admSyncSource,
+  /const scheduledDiscoveryFileLimit = Math\.max\(1, Math\.min\(3, admBudget\.maxFilesPerInvocation\)\)/,
+  "Scheduled ADM discovery must use a narrow file window instead of a broad scan inside the Worker tick.",
+);
+
+assert.match(
+  admSyncSource,
+  /maxFiles: scheduledBudgeted \? scheduledDiscoveryFileLimit/,
+  "Scheduled ADM discovery must respect the bounded discovery file limit.",
+);
+
+assert.match(
+  admSyncSource,
+  /lookbackFiles: scheduledBudgeted \? scheduledDiscoveryFileLimit/,
+  "Scheduled ADM discovery lookback must stay aligned with the bounded file limit.",
+);
+
+assert.match(
+  admSyncSource,
+  /maxListDirs: scheduledBudgeted \? 1 : 8/,
+  "Scheduled ADM discovery must inspect only one directory unit per Worker tick.",
+);
+
+assert.match(
+  admSyncSource,
+  /maxListSearches: scheduledBudgeted \? 1 : 3/,
+  "Scheduled ADM discovery must inspect only one search unit per Worker tick.",
+);
+
+assert.match(
+  admSyncSource,
+  /const scheduledUnreadableRetryLimit = Math\.min\(1, admBudget\.maxUnreadableRetriesPerInvocation\)/,
+  "Scheduled ADM discovery must not retry multiple unreadable files in one Worker tick.",
+);
+
+assert.match(
+  admSyncSource,
+  /worker_phase_elapsed_ms/,
+  "ADM Worker results must include phase timing diagnostics for future CPU attribution.",
+);
+
+assert.match(
+  admSyncSource,
   /ADM Worker selected active import job .* no import line advanced/,
   "ADM Worker must surface no-progress active import selections instead of treating them as successful work.",
 );
