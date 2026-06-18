@@ -7162,8 +7162,8 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
        SELECT *
        FROM eligible
        ORDER BY
-         CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END,
          CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END,
+         CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END,
          CASE WHEN COALESCE(metadata_stale, 0) = 1 THEN 0 ELSE 1 END,
          CASE WHEN last_worker_selected_at IS NULL THEN 0 ELSE 1 END,
          COALESCE(last_worker_selected_at, '1970-01-01T00:00:00.000Z') ASC,

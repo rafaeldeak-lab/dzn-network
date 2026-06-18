@@ -156,6 +156,11 @@ async function main() {
   assert.match(admSyncSource, /processImmediately: false/);
   assert.match(admSyncSource, /target_due\.status = 'discovered'/);
   assert.doesNotMatch(admSyncSource, /target_due\.status IN \('discovered', 'unreadable'\)/);
+  assert.ok(
+    admSyncSource.indexOf("CASE WHEN COALESCE(active_import_jobs, 0) > 0 THEN 0 ELSE 1 END") <
+      admSyncSource.indexOf("CASE WHEN target_adm_file IS NOT NULL THEN 0 ELSE 1 END"),
+    "ADM Worker must prioritize active scheduled import jobs before discovering more target files.",
+  );
   assert.match(admSyncSource, /maxFiles: scheduledBudgeted \? Math\.max\(1, Math\.min\(12/);
   assert.match(admSyncSource, /maxListDirs: scheduledBudgeted \? 4 : 8/);
   assert.match(admSyncSource, /maxListSearches: scheduledBudgeted \? 2 : 3/);
