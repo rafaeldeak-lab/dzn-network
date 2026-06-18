@@ -3256,17 +3256,19 @@ export async function planAdmBackfillJobsForServer(
   const existingState = await getSyncState(env, scope.linkedServerId);
   const isMock = isMockNitrado(env.MOCK_NITRADO);
   const preferredAdmPath = existingState?.latest_adm_path ?? linkedServer.adm_path ?? null;
+  const scheduledDiscoveryFileLimit = Math.max(1, Math.min(3, admBudget.maxFilesPerInvocation));
+  const scheduledUnreadableRetryLimit = Math.min(1, admBudget.maxUnreadableRetriesPerInvocation);
   const batch = await getReadableAdmFilesForLinkedServer(env, linkedServer, {
     isMock,
     readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: scheduledBudgeted ? Math.max(1, Math.min(12, Math.max(admBudget.maxFilesPerInvocation, 12))) : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
-    lookbackFiles: scheduledBudgeted ? 12 : 12,
+    maxFiles: scheduledBudgeted ? scheduledDiscoveryFileLimit : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
+    lookbackFiles: scheduledBudgeted ? scheduledDiscoveryFileLimit : 12,
     directPreferredFirst: scheduledBudgeted ? false : true,
     adminLogsFirst: scheduledBudgeted ? false : undefined,
-    maxListDirs: scheduledBudgeted ? 4 : 8,
-    maxListSearches: scheduledBudgeted ? 2 : 3,
+    maxListDirs: scheduledBudgeted ? 1 : 8,
+    maxListSearches: scheduledBudgeted ? 1 : 3,
     currentFileMaxPathVariants: scheduledBudgeted ? 1 : 6,
     trySeekWithoutRaw: scheduledBudgeted ? false : true,
     maxReadAttemptsPerFile: scheduledBudgeted ? 1 : admBudget.maxReadAttemptsPerFile,
@@ -3296,7 +3298,7 @@ export async function planAdmBackfillJobsForServer(
       }
     : await retryUnreadableAdmFileStatesForServer(env, linkedServer, scope, {
         handledFilenames,
-        limit: scheduledBudgeted ? admBudget.maxUnreadableRetriesPerInvocation : Math.min(MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN, admBudget.maxUnreadableRetriesPerInvocation),
+        limit: scheduledBudgeted ? scheduledUnreadableRetryLimit : Math.min(MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN, admBudget.maxUnreadableRetriesPerInvocation),
         onlyLatest: scheduledBudgeted,
         budget: admBudget,
       });
@@ -6469,6 +6471,10 @@ export type AdmWorkerSyncTickResult = ScheduledAdmSyncResult & {
   selected_service_id: string | null;
   selected_adm_file: string | null;
   selected_adm_path: string | null;
+  worker_phase: string | null;
+  worker_phase_started_at: string | null;
+  worker_phase_elapsed_ms: number;
+  operation_skipped_due_budget: boolean;
   pre_read_d1_queries_estimate: number;
   pre_read_outbound_fetches_estimate: number;
   message: string;
@@ -6654,6 +6660,13 @@ export async function runAdmWorkerSyncTick(
           message: "ADM Worker paused before ADM discovery to stay within the scheduled invocation budget. Work will continue next tick.",
         });
       }
+      const phaseStartedAtMs = Date.now();
+      console.log("DZN ADM WORKER PHASE START", {
+        phase: "due_discovery",
+        selectedServiceId: selected.nitrado_service_id,
+        selectedServerId: selected.id,
+        remainingBudgetMs: Math.max(0, deadlineMs - phaseStartedAtMs),
+      });
       const discoveryPlan = await planAdmBackfillJobsForServer(env, selected.user_id, selected.id, {
         triggerType: "scheduled_worker",
         chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
@@ -6671,6 +6684,8 @@ export async function runAdmWorkerSyncTick(
         selectedServiceId: selected.nitrado_service_id,
         selectedAdmFile: selectedFile,
         selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+        workerPhase: "due_discovery",
+        workerPhaseStartedAtMs: phaseStartedAtMs,
         pendingJobs,
         succeeded: discoveryPlan.created_jobs.length > 0 || Boolean(discoveryPlan.active_job) ? 1 : 0,
         unavailable: discoveryPlan.status === "latest_adm_unreadable" ? 1 : 0,
@@ -7411,6 +7426,9 @@ function admWorkerResult(values: {
   latestAdmUnreadableCount?: number;
   newAdmReadableCount?: number;
   processingProcessed?: number;
+  workerPhase?: string | null;
+  workerPhaseStartedAtMs?: number | null;
+  operationSkippedDueBudget?: boolean;
   message: string;
 }): AdmWorkerSyncTickResult {
   const pendingJobs = values.pendingJobs ?? {
@@ -7429,6 +7447,10 @@ function admWorkerResult(values: {
     selected_service_id: values.selectedServiceId ?? null,
     selected_adm_file: values.selectedAdmFile ?? null,
     selected_adm_path: values.selectedAdmPath ?? null,
+    worker_phase: values.workerPhase ?? null,
+    worker_phase_started_at: values.workerPhaseStartedAtMs ? new Date(values.workerPhaseStartedAtMs).toISOString() : null,
+    worker_phase_elapsed_ms: values.workerPhaseStartedAtMs ? Math.max(0, Date.now() - values.workerPhaseStartedAtMs) : 0,
+    operation_skipped_due_budget: values.operationSkippedDueBudget ?? /budget/i.test(values.message),
     pre_read_d1_queries_estimate: values.selectedLinkedServerId ? 1 : 1,
     pre_read_outbound_fetches_estimate: values.selectedAdmFile ? 1 : 0,
     message: values.message,
