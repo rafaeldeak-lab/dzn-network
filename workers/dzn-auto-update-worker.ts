@@ -283,7 +283,7 @@ async function safeRecordTask(
     status,
     startedAt,
     finishedAt,
-    errorMessage: ["failed", "timed_out", "accepted", "warning"].includes(status) ? errorMessageFromBody(result.body) : null,
+    errorMessage: ["failed", "timed_out", "accepted", "warning", "no_op"].includes(status) ? errorMessageFromBody(result.body) : null,
     durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
     processedCount: result.processed,
     skippedCount: result.skipped,

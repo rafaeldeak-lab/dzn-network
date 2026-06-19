@@ -198,7 +198,7 @@ function normalizeAutomationCronRunInput(input: {
   failedCount?: number | null;
 }) {
   const failed = input.status === "failed" || input.status === "timed_out";
-  const needsMessage = failed || (input.status === "warning" && hasPositiveMetric(input.failedCount));
+  const needsMessage = failed || input.status === "no_op" || (input.status === "warning" && hasPositiveMetric(input.failedCount));
   const message = sanitizeAutomationError(input.errorMessage);
   return {
     ...input,
