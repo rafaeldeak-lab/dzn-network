@@ -20,8 +20,17 @@ type LinkedServerRow = {
   subscription_status: string | null;
   current_players: number | null;
   max_players: number | null;
+  player_count_status: string | null;
+  player_count_source: string | null;
   player_count_last_checked_at: string | null;
   metadata_last_checked_at: string | null;
+  last_status_check_at: string | null;
+  last_successful_status_check_at: string | null;
+  last_failed_status_check_at: string | null;
+  last_status_error: string | null;
+  status_data_freshness: string | null;
+  currently_checking_status: number | null;
+  status_sync_started_at: string | null;
   latest_adm_file: string | null;
   last_processed_file: string | null;
   last_sync_status: string | null;
@@ -168,6 +177,59 @@ function newestFile(rows: FileStateRow[]) {
 function isOlderThan(value: string | null | undefined, minutes: number) {
   const time = Date.parse(String(value ?? ""));
   return !Number.isFinite(time) || Date.now() - time > minutes * 60 * 1000;
+}
+
+function newestIso(...values: Array<string | null | undefined>) {
+  let newest: string | null = null;
+  let newestTime = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!value) continue;
+    const time = Date.parse(value);
+    if (!Number.isFinite(time)) continue;
+    if (time > newestTime) {
+      newest = value;
+      newestTime = time;
+    }
+  }
+  return newest;
+}
+
+function isUnavailablePlayerCountStatus(server: Pick<LinkedServerRow, "player_count_status" | "status_data_freshness" | "last_status_error">) {
+  const status = String(server.player_count_status ?? "").toLowerCase();
+  const freshness = String(server.status_data_freshness ?? "").toLowerCase();
+  const error = String(server.last_status_error ?? "").toLowerCase();
+  return status === "unavailable"
+    || freshness === "failed"
+    || /unavailable|nitrado|endpoint|token|service/.test(error);
+}
+
+function metadataAttemptEvidence(server: LinkedServerRow) {
+  const latestAttemptAt = newestIso(
+    server.last_status_check_at,
+    server.last_failed_status_check_at,
+    server.last_successful_status_check_at,
+    server.metadata_last_checked_at,
+    server.player_count_last_checked_at,
+  );
+  const latestNumericSuccessAt = newestIso(
+    server.last_successful_status_check_at,
+    server.player_count_status === "fresh" ? server.metadata_last_checked_at : null,
+    server.player_count_status === "fresh" ? server.player_count_last_checked_at : null,
+  );
+  const latestUnavailableAt = isUnavailablePlayerCountStatus(server)
+    ? newestIso(server.last_failed_status_check_at, server.last_status_check_at, server.metadata_last_checked_at, server.player_count_last_checked_at)
+    : null;
+  return {
+    latestAttemptAt,
+    latestNumericSuccessAt,
+    latestUnavailableAt,
+    playerCountStatus: server.player_count_status,
+    playerCountSource: server.player_count_source,
+    lastStatusError: server.last_status_error,
+    statusDataFreshness: server.status_data_freshness,
+    currentlyCheckingStatus: server.currently_checking_status,
+    statusSyncStartedAt: server.status_sync_started_at,
+  };
 }
 
 function isFuture(value: string | null | undefined) {
@@ -680,8 +742,17 @@ async function main() {
            server_subscriptions.status AS subscription_status,
            linked_servers.current_players,
            linked_servers.max_players,
+           linked_servers.player_count_status,
+           linked_servers.player_count_source,
            linked_servers.player_count_last_checked_at,
            linked_servers.metadata_last_checked_at,
+           server_sync_state.last_status_check_at,
+           server_sync_state.last_successful_status_check_at,
+           server_sync_state.last_failed_status_check_at,
+           server_sync_state.last_status_error,
+           server_sync_state.status_data_freshness,
+           server_sync_state.currently_checking_status,
+           server_sync_state.status_sync_started_at,
            adm_sync_state.latest_adm_file,
            adm_sync_state.last_processed_file,
            adm_sync_state.last_sync_status,
@@ -692,6 +763,7 @@ async function main() {
            rate_limits.rate_limited_until
     FROM linked_servers
     LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+    LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
     LEFT JOIN adm_worker_selection_state selection ON selection.linked_server_id = linked_servers.id
     LEFT JOIN nitrado_rate_limits rate_limits ON rate_limits.service_id = linked_servers.nitrado_service_id
@@ -760,13 +832,25 @@ async function main() {
       warn(label, `Subscription state is ${server.subscription_status ?? "unknown"}; skipping active tracking freshness gates.`);
       continue;
     }
-    if (isOlderThan(server.metadata_last_checked_at ?? server.player_count_last_checked_at, 30)) {
-      fail(label, "Nitrado metadata/player count is older than 30 minutes.", {
-        metadataLastCheckedAt: server.metadata_last_checked_at,
-        playerCountLastCheckedAt: server.player_count_last_checked_at,
-      });
+    const metadataEvidence = metadataAttemptEvidence(server);
+    if (isUnavailablePlayerCountStatus(server)) {
+      if (isOlderThan(metadataEvidence.latestAttemptAt, 30)) {
+        fail(label, "Nitrado metadata/player count has no recent attempt and no current numeric value.", metadataEvidence);
+      } else {
+        warn(
+          label,
+          "Recent metadata attempt explicitly returned unavailable; automation is running, but no current numeric player count is available.",
+          metadataEvidence,
+        );
+      }
+    } else if (isOlderThan(metadataEvidence.latestNumericSuccessAt, 30)) {
+      if (!isOlderThan(metadataEvidence.latestAttemptAt, 30)) {
+        warn(label, "Metadata automation attempted recently, but the latest successful numeric player count is stale.", metadataEvidence);
+      } else {
+        fail(label, "Nitrado metadata/player count is older than 30 minutes and no recent attempt evidence was found.", metadataEvidence);
+      }
     } else {
-      pass(label, `Metadata is fresh enough. Current players ${Number(server.current_players ?? 0)} / ${Number(server.max_players ?? 0)}.`);
+      pass(label, `Metadata numeric player count is fresh enough. Current players ${Number(server.current_players ?? 0)} / ${Number(server.max_players ?? 0)}.`, metadataEvidence);
     }
     const serviceSources = sources.filter((source) => source.service_id === serviceId);
     const serviceFiles = fileStates.filter((row) => row.source_service_id === serviceId || row.linked_server_id === server.id);

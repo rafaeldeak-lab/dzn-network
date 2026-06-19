@@ -105,6 +105,7 @@ assert.equal(workflowSource.includes("https://dzn-network.pages.dev"), true);
 
 const automationSource = readFileSync("functions/_lib/automation.ts", "utf8").replace(/\r\n/g, "\n");
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8").replace(/\r\n/g, "\n");
+const verifyAdmLiveSource = readFileSync("scripts/verify-production-adm-live.ts", "utf8").replace(/\r\n/g, "\n");
 assert.equal(admSyncSource.includes("const scheduledTargetFileName = explicitTargetFileName ? null : sanitizeWorkerTargetAdmFilename(selected.target_adm_file);"), true);
 assert.equal(admSyncSource.includes("ADM Worker paused before target ADM file read"), true);
 assert.equal(admSyncSource.includes("const directFileName = firstString(\n      explicitTargetFileName,\n      scheduledTargetFileName"), true);
@@ -129,6 +130,15 @@ assert.equal(automationSource.includes("processed_count"), true);
 assert.equal(automationSource.includes("buildAutomationCronHealth"), true);
 assert.equal(automationSource.includes("cron_secret_mismatch"), true);
 assert.equal(automationSource.includes("recoverStuckSyncLocksForServer"), true);
+assert.equal(verifyAdmLiveSource.includes("last_status_check_at"), true, "verify:adm-live must read metadata attempt evidence separately from numeric success timestamps.");
+assert.equal(verifyAdmLiveSource.includes("last_successful_status_check_at"), true, "verify:adm-live must distinguish latest successful numeric metadata from attempts.");
+assert.equal(verifyAdmLiveSource.includes("last_failed_status_check_at"), true, "verify:adm-live must preserve explicit unavailable/error attempt evidence.");
+assert.equal(verifyAdmLiveSource.includes("isUnavailablePlayerCountStatus"), true, "verify:adm-live must classify explicit unavailable metadata attempts.");
+assert.equal(verifyAdmLiveSource.includes("Recent metadata attempt explicitly returned unavailable"), true, "verify:adm-live must warn, not pass as fresh numeric data, when Nitrado returns unavailable.");
+assert.equal(verifyAdmLiveSource.includes("Metadata numeric player count is fresh enough"), true, "verify:adm-live numeric freshness pass must only be used for current numeric metadata.");
+assert.equal(verifyAdmLiveSource.includes("Nitrado metadata/player count has no recent attempt"), true, "verify:adm-live must still fail when stale metadata has no recent attempt evidence.");
+assert.equal(verifyAdmLiveSource.includes("currently_checking_status"), true, "verify:adm-live evidence should include metadata lock state.");
+assert.equal(verifyAdmLiveSource.includes("status_sync_started_at"), true, "verify:adm-live evidence should include metadata lock lease start.");
 
 const lockRecoverySource = automationSource.slice(
   automationSource.indexOf("export async function recoverStuckAutomationLocks"),
