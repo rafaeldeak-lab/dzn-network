@@ -74,27 +74,44 @@ jobs:
           }
           const safe = {
             ok: parsed.ok,
+            taskStatus: parsed.task_status ?? parsed.status ?? null,
+            error: parsed.error ?? parsed.message ?? null,
             processed: parsed.processed ?? parsed.processedCount ?? parsed.processed_count ?? 0,
             succeeded: parsed.succeeded ?? 0,
             skipped: parsed.skipped ?? parsed.skippedCount ?? parsed.skipped_count ?? 0,
             failed: parsed.failed ?? parsed.failedCount ?? parsed.failed_count ?? 0,
             updatedPlayerCounts: parsed.updated_player_counts ?? 0,
             budgetExhausted: parsed.budgetExhausted ?? false,
+            accepted: parsed.accepted === true,
+            noOpReason: parsed.no_op_reason ?? null,
             snapshots: Array.isArray(parsed.snapshots) ? parsed.snapshots.length : 0,
             finalized: Array.isArray(parsed.finalized) ? parsed.finalized.length : 0,
             expiredChallenges: parsed.transitions?.expiredChallenges ?? 0,
           };
           fs.appendFileSync(
             process.env.GITHUB_STEP_SUMMARY,
-            `- ${name}: HTTP ${code}; ok=${safe.ok}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}\n`,
+            `- ${name}: HTTP ${code}; ok=${safe.ok}; taskStatus=${safe.taskStatus}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}; error=${safe.error ?? ""}\n`,
           );
-          console.log(`${name}: HTTP ${code}; ok=${safe.ok}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}`);
+          console.log(`${name}: HTTP ${code}; ok=${safe.ok}; taskStatus=${safe.taskStatus}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}; error=${safe.error ?? ""}`);
           if (code === 401 || code === 403) {
             console.error(`${name}: cron auth failed.`);
             process.exit(1);
           }
           if (code < 200 || code >= 300) {
             console.error(`${name}: endpoint returned HTTP ${code}.`);
+            process.exit(1);
+          }
+          if (safe.accepted || safe.taskStatus === "accepted") {
+            console.error(`${name}: endpoint only accepted background work; completion was not proven.`);
+            process.exit(1);
+          }
+          if (safe.ok === false || ["failed", "timed_out"].includes(String(safe.taskStatus ?? ""))) {
+            console.error(`${name}: task failed or timed out. error=${safe.error ?? "missing_error"}`);
+            process.exit(1);
+          }
+          const meaningfulNoOp = ["no_op", "warning"].includes(String(safe.taskStatus ?? "")) || safe.noOpReason || safe.error;
+          if (safe.processed === 0 && safe.skipped === 0 && safe.failed === 0 && safe.snapshots === 0 && safe.finalized === 0 && safe.expiredChallenges === 0 && !meaningfulNoOp) {
+            console.error(`${name}: zero processed/skipped/failed without explicit no-op or warning.`);
             process.exit(1);
           }
           NODE

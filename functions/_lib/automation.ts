@@ -21,7 +21,7 @@ export const AUTOMATION_MIGRATION_WARNING =
 
 export type AutomationCronSource = typeof AUTOMATION_CRON_SOURCES[number];
 export type AutomationCronJobType = "metadata" | "adm" | "discord-posts" | "server-wars";
-export type AutomationCronStatus = "started" | "success" | "failed" | "partial";
+export type AutomationCronStatus = "started" | "success" | "failed" | "partial" | "warning" | "no_op" | "timed_out" | "accepted";
 
 type AutomationCronRunRow = {
   source: string | null;
@@ -173,15 +173,51 @@ export async function recordAutomationCronRun(env: Env, input: {
   skippedCount?: number | null;
   failedCount?: number | null;
 }) {
+  const normalized = normalizeAutomationCronRunInput(input);
   try {
-    await insertAutomationCronRun(env, input);
+    await insertAutomationCronRun(env, normalized);
     return;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error ?? "");
     if (!/no such table|no such column|has no column|syntax error/i.test(message)) throw error;
   }
   await ensureAutomationSchema(env);
-  await insertAutomationCronRun(env, input);
+  await insertAutomationCronRun(env, normalized);
+}
+
+function normalizeAutomationCronRunInput(input: {
+  source: AutomationCronSource;
+  jobType: AutomationCronJobType;
+  status: AutomationCronStatus;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  errorMessage?: string | null;
+  durationMs?: number | null;
+  processedCount?: number | null;
+  skippedCount?: number | null;
+  failedCount?: number | null;
+}) {
+  const failed = input.status === "failed" || input.status === "timed_out";
+  const message = sanitizeAutomationError(input.errorMessage);
+  return {
+    ...input,
+    failedCount: failed && !hasPositiveMetric(input.failedCount) ? 1 : input.failedCount,
+    errorMessage: failed && !message ? `${input.jobType}_${input.status}` : message,
+  };
+}
+
+function hasPositiveMetric(value: number | null | undefined) {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) && number > 0;
+}
+
+function sanitizeAutomationError(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/(token|access_token|signature|sig|secret|key)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 240);
 }
 
 async function insertAutomationCronRun(env: Env, input: {
@@ -408,12 +444,59 @@ export async function getAutomationContextForLinkedServer(env: Env, linkedServer
   };
 }
 
-export async function markStatusCheckStarted(env: Env, guildId: string) {
+export async function markStatusCheckStarted(env: Env, guildId: string, options: { leaseMs?: number } = {}) {
   const now = new Date().toISOString();
-  await requireDb(env)
-    .prepare("UPDATE server_sync_state SET currently_checking_status = 1, status_sync_started_at = ?, updated_at = ? WHERE guild_id = ?")
-    .bind(now, now, guildId)
+  const leaseMs = Math.max(60_000, Math.min(Math.trunc(Number(options.leaseMs ?? 5 * 60 * 1000)) || 5 * 60 * 1000, 15 * 60 * 1000));
+  const staleCutoff = new Date(Date.now() - leaseMs).toISOString();
+  const result = await requireDb(env)
+    .prepare(
+      `UPDATE server_sync_state SET
+        currently_checking_status = 1,
+        status_sync_started_at = ?,
+        last_status_error = CASE
+          WHEN COALESCE(currently_checking_status, 0) = 1 THEN ?
+          ELSE last_status_error
+        END,
+        updated_at = ?
+       WHERE guild_id = ?
+         AND (
+           COALESCE(currently_checking_status, 0) = 0
+           OR COALESCE(status_sync_started_at, updated_at, '1970-01-01T00:00:00.000Z') <= ?
+         )`,
+    )
+    .bind(now, `Reclaimed stale status sync lock after ${Math.round(leaseMs / 60000)} minutes.`, now, guildId, staleCutoff)
     .run();
+  const changes = Number(result.meta?.changes ?? 0);
+  return {
+    acquired: changes > 0,
+    startedAt: now,
+    reclaimed: changes > 0,
+    leaseMs,
+  };
+}
+
+export async function clearStatusCheckLock(env: Env, guildId: string, startedAt?: string | null, error?: string | null) {
+  const now = new Date().toISOString();
+  const sql = startedAt
+    ? `UPDATE server_sync_state SET
+        currently_checking_status = 0,
+        status_sync_started_at = NULL,
+        last_status_error = COALESCE(?, last_status_error),
+        updated_at = ?
+       WHERE guild_id = ?
+         AND status_sync_started_at = ?`
+    : `UPDATE server_sync_state SET
+        currently_checking_status = 0,
+        status_sync_started_at = NULL,
+        last_status_error = COALESCE(?, last_status_error),
+        updated_at = ?
+       WHERE guild_id = ?`;
+  const statement = requireDb(env).prepare(sql);
+  if (startedAt) {
+    await statement.bind(error ?? null, now, guildId, startedAt).run();
+  } else {
+    await statement.bind(error ?? null, now, guildId).run();
+  }
 }
 
 export async function recordStatusCheckResult(env: Env, values: {

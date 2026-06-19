@@ -61,11 +61,11 @@ const TASKS: SchedulerTask[] = [
     cadence: "every-five-minutes",
     timeoutMs: 10_000,
     body: {
-      async: true,
       source: "cloudflare-scheduled",
       cron: "dzn-auto-update-worker",
-      max_jobs: 2,
+      max_posts: 1,
       deadline_ms: 2_500,
+      mode: "single_bounded",
     },
   },
 ];
@@ -131,7 +131,7 @@ export async function runAutoUpdateTick(env: Env, options: { cron: string | null
     const startedAt = new Date().toISOString();
     const result = await runTask(env, task, baseUrl, secret, options);
     results.push(result);
-    await safeRecordTask(env, task.label, result.ok ? "success" : "failed", startedAt, result).catch((error) => {
+    await safeRecordTask(env, task.label, cronStatusFromTaskResult(result), startedAt, result).catch((error) => {
       console.warn("DZN AUTO UPDATE WORKER CRON RUN RECORD SKIPPED", {
         task: task.label,
         message: error instanceof Error ? sanitizeMessage(error.message) : "record failed",
@@ -195,14 +195,22 @@ async function runTask(
       signal: controller.signal,
     });
     const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const taskStatus = taskStatusFromBody(response, body);
+    const processed = numberMetric(body?.processed ?? body?.processedCount ?? body?.processed_count);
+    const skipped = numberMetric(body?.skipped ?? body?.skippedCount ?? body?.skipped_count);
+    const failed = numberMetric(body?.failed ?? body?.failedCount ?? body?.failed_count);
     return {
       label: task.label,
-      ok: response.ok && body?.ok !== false,
+      ok: response.ok && body?.ok !== false && !["failed", "timed_out", "accepted", "trigger_failed"].includes(taskStatus),
       status: response.status,
-      processed: numberMetric(body?.processed ?? body?.processedCount ?? body?.processed_count),
-      skipped: numberMetric(body?.skipped ?? body?.skippedCount ?? body?.skipped_count),
-      failed: numberMetric(body?.failed ?? body?.failedCount ?? body?.failed_count),
-      body: sanitizeTaskBody(body),
+      processed,
+      skipped,
+      failed,
+      body: sanitizeTaskBody({
+        ...(body ?? {}),
+        task_status: taskStatus,
+        error: taskErrorMessage(response, body, taskStatus),
+      }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "request failed";
@@ -268,17 +276,18 @@ async function safeRecordTask(
   result: { processed: number; skipped: number; failed: number; body: unknown },
 ) {
   const finishedAt = new Date().toISOString();
+  const failed = status === "failed" || status === "timed_out";
   await recordAutomationCronRun(env, {
     source: normalizeAutomationCronSource("cloudflare-scheduled", "dzn-auto-update-worker"),
     jobType,
     status,
     startedAt,
     finishedAt,
-    errorMessage: status === "failed" ? errorMessageFromBody(result.body) : null,
+    errorMessage: ["failed", "timed_out", "accepted"].includes(status) ? errorMessageFromBody(result.body) : null,
     durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
     processedCount: result.processed,
     skippedCount: result.skipped,
-    failedCount: result.failed,
+    failedCount: failed && result.failed === 0 ? 1 : result.failed,
   });
 }
 
@@ -311,6 +320,7 @@ function sanitizeTaskBody(value: Record<string, unknown> | null) {
   if (!value) return null;
   return {
     ok: value.ok,
+    task_status: sanitizeMessage(value.task_status),
     accepted: value.accepted,
     processed: value.processed ?? value.processedCount ?? value.processed_count,
     succeeded: value.succeeded,
@@ -325,6 +335,36 @@ function sanitizeTaskBody(value: Record<string, unknown> | null) {
     error: sanitizeMessage(value.error),
     message: sanitizeMessage(value.message),
   };
+}
+
+function taskStatusFromBody(response: Response, body: Record<string, unknown> | null) {
+  const explicit = String(body?.task_status ?? body?.status ?? "").trim().toLowerCase();
+  if (explicit) return explicit;
+  if (response.status === 202 || body?.accepted === true) return "accepted";
+  if (!response.ok) return "trigger_failed";
+  if (body?.ok === false) return "failed";
+  return "success";
+}
+
+function taskErrorMessage(response: Response, body: Record<string, unknown> | null, taskStatus: string) {
+  const bodyError = sanitizeMessage(body?.error ?? body?.message);
+  if (bodyError) return bodyError;
+  if (taskStatus === "trigger_failed") return `route_http_${response.status}`;
+  if (taskStatus === "accepted") return "task_accepted_without_completion";
+  if (taskStatus === "timed_out") return "task_timed_out";
+  if (taskStatus === "failed") return "task_failed_without_message";
+  return null;
+}
+
+function cronStatusFromTaskResult(result: { ok: boolean; body: unknown }): AutomationCronStatus {
+  const body = isRecord(result.body) ? result.body : {};
+  const status = String(body.task_status ?? "").trim().toLowerCase();
+  if (status === "no_op") return "no_op";
+  if (status === "partial") return "partial";
+  if (status === "warning") return "warning";
+  if (status === "timed_out") return "timed_out";
+  if (status === "accepted") return "accepted";
+  return result.ok ? "success" : "failed";
 }
 
 function errorMessageFromBody(value: unknown) {

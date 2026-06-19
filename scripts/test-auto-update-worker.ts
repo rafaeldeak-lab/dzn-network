@@ -71,8 +71,31 @@ async function main() {
     assert.equal((calls[0].body as { deadline_ms: number }).deadline_ms, 2500);
     assert.equal((calls[0].body as { max_servers: number }).max_servers, 1);
     assert.equal((calls[0].body as { player_count_stale_ms: number }).player_count_stale_ms, 60000);
-    assert.equal((calls[1].body as { async: boolean }).async, true);
-    assert.equal((calls[1].body as { max_jobs: number }).max_jobs, 2);
+    assert.equal("async" in (calls[1].body as Record<string, unknown>), false, "Discord dispatch should run as one bounded protected route call, not a Pages waitUntil acknowledgement.");
+    assert.equal((calls[1].body as { max_posts: number }).max_posts, 1);
+    assert.equal((calls[1].body as { mode: string }).mode, "single_bounded");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  calls.length = 0;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    ok: false,
+    task_status: "failed",
+    error: "route_task_failed_for_test",
+  }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  })) as typeof fetch;
+
+  try {
+    const result = await runAutoUpdateTick({
+      DZN_CRON_SECRET: "unit-test-secret",
+      DZN_APP_URL: "https://dzn.test",
+    } as Env, { cron: "* * * * *", scheduledTime: Date.UTC(2026, 0, 1, 12, 1, 0) });
+    assert.equal(result.results[0].ok, false, "HTTP 200 with task_status=failed must not be recorded as success.");
+    assert.equal("body" in result.results[0], true);
+    assert.equal((result.results[0] as { body: { error: string } }).body.error, "route_task_failed_for_test");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -100,8 +100,7 @@ async function run() {
     message: "Server info updated from Nitrado",
   });
 
-  let waitUntilPromise: Promise<unknown> | null = null;
-  let asyncRefreshCalled = false;
+  let asyncRequestRefreshCalled = false;
   const asyncResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
     method: "POST",
     headers: {
@@ -109,11 +108,9 @@ async function run() {
       "content-type": "application/json",
     },
     body: JSON.stringify({ cron: "github-actions", max_servers: 1, deadline_ms: 5000, async: true }),
-  }), env, (promise) => {
-    waitUntilPromise = promise;
-  }), {
+  }), env), {
     refreshMetadata: async (_env, options = {}) => {
-      asyncRefreshCalled = true;
+      asyncRequestRefreshCalled = true;
       assert.equal(options.maxServers, 1);
       assert.equal(options.deadlineMs, 5000);
       assert.equal(options.debugServiceId, null);
@@ -130,10 +127,12 @@ async function run() {
       };
     },
   });
-  assert.equal(asyncResponse.status, 202);
-  assert.ok(waitUntilPromise);
-  await waitUntilPromise;
-  assert.equal(asyncRefreshCalled, true);
+  assert.equal(asyncResponse.status, 200);
+  const asyncJson = await asyncResponse.json() as { ok: boolean; task_status: string; accepted?: boolean };
+  assert.equal(asyncJson.ok, true);
+  assert.equal(asyncJson.task_status, "success");
+  assert.equal(asyncJson.accepted, undefined);
+  assert.equal(asyncRequestRefreshCalled, true);
 
   const timeoutResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
     method: "POST",
@@ -144,13 +143,13 @@ async function run() {
     body: JSON.stringify({ cron: "github-actions", max_servers: 2, deadline_ms: 100 }),
   }), env), {
     refreshMetadata: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 350));
       return {
-        processed: 1,
-        succeeded: 1,
+        processed: 0,
+        succeeded: 0,
         failed: 0,
-        skipped: 0,
-        updated_player_counts: 1,
+        skipped: 1,
+        updated_player_counts: 0,
+        budget_exhausted: true,
         results: [],
       };
     },
@@ -158,14 +157,19 @@ async function run() {
   assert.equal(timeoutResponse.status, 200);
   const timeoutJson = await timeoutResponse.json() as {
     ok: boolean;
+    task_status: string;
     timed_out: boolean;
     budget_exhausted: boolean;
     processed: number;
+    failed: number;
+    error: string;
   };
-  assert.equal(timeoutJson.ok, true);
+  assert.equal(timeoutJson.ok, false);
+  assert.equal(timeoutJson.task_status, "timed_out");
   assert.equal(timeoutJson.timed_out, true);
   assert.equal(timeoutJson.budget_exhausted, true);
   assert.equal(timeoutJson.processed, 0);
+  assert.equal(timeoutJson.error, "metadata_budget_exhausted_before_work");
 
   const unauthorizedResponse = await handleMetadataSyncRun(makeContext(new Request("https://dzn.test/api/sync/metadata/run", {
     method: "POST",

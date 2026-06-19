@@ -1,6 +1,7 @@
 import { decryptToken, sha256 } from "./crypto";
 import {
   type AutomationSyncServer,
+  clearStatusCheckLock,
   getAutomationContextForLinkedServer,
   getDueStatusAutomationServers,
   markStatusCheckStarted,
@@ -30,6 +31,7 @@ export type ScheduledMetadataSyncServerResult = {
   player_count_last_checked_at: string | null;
   metadata_last_checked_at: string | null;
   message: string;
+  phase?: string;
 };
 
 export type ScheduledMetadataSyncResult = {
@@ -626,6 +628,17 @@ export async function refreshLivePlayerCountsForActiveServers(
   let budgetExhausted = false;
   let updatedPlayerCounts = 0;
   const results: ScheduledMetadataSyncServerResult[] = [];
+  if (rows.length === 0) {
+    return {
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      skipped: 1,
+      updated_player_counts: 0,
+      budget_exhausted: false,
+      results,
+    };
+  }
   for (const row of rows) {
     if (Date.now() >= deadlineAtMs - 750) {
       budgetExhausted = true;
@@ -642,10 +655,10 @@ export async function refreshLivePlayerCountsForActiveServers(
         player_count_last_checked_at: row.player_count_last_checked_at,
         metadata_last_checked_at: row.metadata_last_checked_at,
         message: "Metadata refresh budget exhausted before this server",
+        phase: "budget_guard",
       });
       break;
     }
-    processed += 1;
     const serverName = firstString(row.display_name, row.hostname, row.server_name, row.nitrado_service_name);
     const previousCheckedAt = row.player_count_last_checked_at ?? row.metadata_last_checked_at;
     if (skipFreshWithinMs !== null && !isMetadataStale(previousCheckedAt, skipFreshWithinMs)) {
@@ -662,12 +675,36 @@ export async function refreshLivePlayerCountsForActiveServers(
         player_count_last_checked_at: row.player_count_last_checked_at,
         metadata_last_checked_at: row.metadata_last_checked_at,
         message: "Live player count checked recently; skipped fallback refresh",
+        phase: "fresh_skip",
       });
       continue;
     }
 
+    const lock = await markStatusCheckStarted(env, row.guild_id, {
+      leaseMs: Math.max(3 * 60 * 1000, Math.min(livePlayerCountStaleMs, 5 * 60 * 1000)),
+    });
+    if (!lock.acquired) {
+      skipped += 1;
+      results.push({
+        linked_server_id: row.id,
+        service_id: row.nitrado_service_id,
+        server_name: serverName,
+        status: "skipped",
+        changed: false,
+        current_players: cleanNumber(row.current_players),
+        max_players: cleanNumber(row.max_players),
+        player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        player_count_last_checked_at: row.player_count_last_checked_at,
+        metadata_last_checked_at: row.metadata_last_checked_at,
+        message: "Active metadata lock is still within lease; skipped this server",
+        phase: "lock_active",
+      });
+      continue;
+    }
+
+    processed += 1;
+    let lockClearedByResult = false;
     try {
-      await markStatusCheckStarted(env, row.guild_id);
       const beforeCurrent = cleanNumber(row.current_players);
       const beforeMax = cleanNumber(row.max_players);
       const result = await refreshNitradoServerPlayerCountOnly(env, row, new Date().toISOString());
@@ -687,6 +724,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         serverStatus: result.metadata?.server_status ?? null,
         error: result.ok ? null : result.message,
       });
+      lockClearedByResult = true;
       await upsertServerPublicCache(env, {
         guildId: row.guild_id,
         planKey: row.plan_key,
@@ -712,6 +750,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         player_count_last_checked_at: result.player_count_last_checked_at ?? null,
         metadata_last_checked_at: result.metadata_last_checked_at ?? null,
         message: result.message,
+        phase: result.ok ? "nitrado_live_count_success" : "nitrado_live_count_unavailable",
       });
     } catch (error) {
       failed += 1;
@@ -720,6 +759,8 @@ export async function refreshLivePlayerCountsForActiveServers(
         planKey: row.plan_key,
         ok: false,
         error: error instanceof Error ? error.message : "Nitrado metadata refresh failed",
+      }).then(() => {
+        lockClearedByResult = true;
       }).catch(() => null);
       results.push({
         linked_server_id: row.id,
@@ -733,7 +774,12 @@ export async function refreshLivePlayerCountsForActiveServers(
         player_count_last_checked_at: row.player_count_last_checked_at,
         metadata_last_checked_at: row.metadata_last_checked_at,
         message: error instanceof Error ? error.message : "Nitrado metadata refresh failed",
+        phase: "nitrado_live_count_error",
       });
+    } finally {
+      if (!lockClearedByResult) {
+        await clearStatusCheckLock(env, row.guild_id, lock.startedAt, "metadata_lock_cleanup_after_incomplete_run").catch(() => null);
+      }
     }
   }
 
