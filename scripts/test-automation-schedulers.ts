@@ -105,6 +105,7 @@ assert.equal(automationSource.includes("UPDATE server_public_cache SET"), true, 
 assert.equal(automationSource.includes("last_status_update_at = CASE WHEN ? THEN ? ELSE last_status_update_at END"), true, "Failed status checks must not overwrite fresh public cache timestamps.");
 assert.equal(automationSource.includes('input.status === "failed" || input.status === "timed_out"'), true, "Failed/timed-out automation rows must be normalized.");
 assert.equal(automationSource.includes("failed && !hasPositiveMetric(input.failedCount) ? 1"), true, "Failed automation rows must not keep zero failed_count.");
+assert.equal(automationSource.includes('input.status === "warning" && hasPositiveMetric(input.failedCount)'), true, "Warning automation rows with failures must carry an error message.");
 assert.equal(automationSource.includes("${input.jobType}_${input.status}"), true, "Failed automation rows must get a fallback error message.");
 assert.equal(automationSource.includes("sanitizeAutomationError"), true, "Automation errors must be sanitized before recording.");
 assert.equal(automationSource.includes("clearStatusCheckLock"), true, "Metadata status locks must have explicit cleanup support.");
@@ -159,6 +160,7 @@ assert.equal(autoUpdateWorker.includes("AbortController"), true);
 assert.equal(autoUpdateWorker.includes("recordAutomationCronRun"), true);
 assert.equal(autoUpdateWorker.includes("taskStatusFromBody"), true);
 assert.equal(autoUpdateWorker.includes("task_accepted_without_completion"), true);
+assert.equal(autoUpdateWorker.includes('"failed", "timed_out", "accepted", "warning"'), true, "Auto-update Worker warning rows must pass through safe error context.");
 assert.equal(autoUpdateWorker.includes("max_posts: 1"), true);
 assert.equal(autoUpdateWorker.includes("/api/sync/adm/run"), false, "Auto-update Worker must never run ADM imports.");
 assert.equal(autoUpdateWorker.includes("TOKEN_ENCRYPTION_KEY"), false, "Auto-update Worker must not handle Nitrado token decryption.");
