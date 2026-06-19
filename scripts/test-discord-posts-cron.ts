@@ -21,7 +21,6 @@ async function run() {
     headers: { "x-dzn-cron-secret": "wrong" },
   }), env), false);
 
-  let waitUntilPromise: Promise<unknown> | null = null;
   let dispatchCalled = false;
   const asyncResponse = await handleDiscordPostRun(makeContext(new Request("https://dzn.test/api/sync/discord-posts/run", {
     method: "POST",
@@ -30,9 +29,7 @@ async function run() {
       "content-type": "application/json",
     },
     body: JSON.stringify({ source: "cloudflare-scheduled", max_jobs: 2, deadline_ms: 2500, async: true }),
-  }), env, (promise) => {
-    waitUntilPromise = promise;
-  }), {
+  }), env), {
     dispatch: async (_env, options = {}) => {
       dispatchCalled = true;
       assert.equal(options.maxJobs, 2);
@@ -51,23 +48,29 @@ async function run() {
     },
   });
 
-  assert.equal(asyncResponse.status, 202);
+  assert.equal(asyncResponse.status, 200);
   const acceptedJson = await asyncResponse.json() as {
     ok: boolean;
-    accepted: boolean;
+    task_status: string;
     max_jobs: number;
     deadline_ms: number;
   };
   assert.deepEqual(acceptedJson, {
     ok: true,
-    accepted: true,
+    task_status: "success",
+    no_op_reason: null,
+    processed: 1,
+    edited: 0,
+    sent: 1,
+    posted: 1,
+    skipped: 0,
+    failed: 0,
+    budgetExhausted: false,
+    results: [],
     source: "cloudflare",
     cron: null,
-    max_jobs: 2,
-    deadline_ms: 2500,
+    mode: "single_bounded",
   });
-  assert.ok(waitUntilPromise);
-  await waitUntilPromise;
   assert.equal(dispatchCalled, true);
 
   const syncResponse = await handleDiscordPostRun(makeContext(new Request("https://dzn.test/api/sync/discord-posts/run", {
@@ -91,8 +94,9 @@ async function run() {
     }),
   });
   assert.equal(syncResponse.status, 200);
-  const syncJson = await syncResponse.json() as { ok: boolean; processed: number; source: string };
+  const syncJson = await syncResponse.json() as { ok: boolean; task_status: string; processed: number; source: string };
   assert.equal(syncJson.ok, true);
+  assert.equal(syncJson.task_status, "success");
   assert.equal(syncJson.processed, 1);
   assert.equal(syncJson.source, "github-backup");
 

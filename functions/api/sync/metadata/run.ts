@@ -6,6 +6,7 @@ type MetadataSyncRunBody = {
   cron?: string;
   debug_service_id?: string;
   deadline_ms?: number;
+  mode?: string;
   player_count_stale_ms?: number;
   source?: string;
   max_servers?: number;
@@ -34,6 +35,7 @@ type MetadataRefreshResult = {
     player_count_last_checked_at: string | null;
     metadata_last_checked_at: string | null;
     message: string;
+    phase?: string;
   }>;
 };
 
@@ -67,7 +69,7 @@ export const onRequestGet: PagesFunction = () => json(
 );
 
 export async function handleMetadataSyncRun(
-  { request, env, waitUntil }: PagesContext,
+  { request, env }: PagesContext,
   handlers?: MetadataSyncRunHandlers,
 ) {
   const unauthorized = requireCronSecret(request, env);
@@ -86,29 +88,7 @@ export async function handleMetadataSyncRun(
     skipAutomationMaintenance: true,
     debugServiceId,
   };
-  const responseTimeoutMs = Math.max(250, Math.min(refreshOptions.deadlineMs, 5_000));
-
-  if (body.async === true) {
-    waitUntil(runMetadataRefresh(env, source, startedAt, refreshOptions, handlers).catch((error) => {
-      console.warn("DZN METADATA ASYNC CRON REFRESH FAILED", error instanceof Error ? error.message : "metadata refresh failed");
-    }));
-    return json({
-      ok: true,
-      accepted: true,
-      source,
-      cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
-      max_servers: refreshOptions.maxServers,
-      deadline_ms: refreshOptions.deadlineMs,
-      player_count_stale_ms: refreshOptions.livePlayerCountStaleMs,
-      debug_service_id: debugServiceId,
-    }, { status: 202 });
-  }
-
-  const refreshPromise = runMetadataRefresh(env, source, startedAt, refreshOptions, handlers ?? await defaultHandlers());
-  refreshPromise.catch((error) => {
-    console.warn("DZN METADATA CRON REFRESH FINISHED AFTER RESPONSE", error instanceof Error ? error.message : "metadata refresh failed");
-  });
-  const { result, timedOut } = await raceMetadataRefreshWithTimeout(refreshPromise, responseTimeoutMs);
+  const { result, taskStatus, taskError } = await runMetadataRefresh(env, source, startedAt, refreshOptions, handlers ?? await defaultHandlers());
   const [staleRemainingCount, diagnostics] = await Promise.all([
     countStaleMetadataRemaining(env, refreshOptions.livePlayerCountStaleMs).catch(() => null),
     readMetadataDiagnostics(env, refreshOptions.livePlayerCountStaleMs).catch(() => null),
@@ -129,46 +109,20 @@ export async function handleMetadataSyncRun(
   });
 
   return json({
-    ok: true,
+    ok: taskStatus !== "failed" && taskStatus !== "timed_out",
+    task_status: taskStatus,
+    error: taskError,
+    no_op_reason: taskStatus === "no_op" ? taskError : null,
     ...result,
-    timed_out: timedOut,
+    timed_out: taskStatus === "timed_out",
     stale_remaining_count: staleRemainingCount,
     next_recommended_run_seconds: staleRemainingCount && staleRemainingCount > 0 ? 60 : 300,
     diagnostics: buildSafeMetadataDiagnostics(result, diagnostics, debugServiceId),
-    warnings: buildMetadataWarnings(result, timedOut, staleRemainingCount),
+    warnings: buildMetadataWarnings(result, taskStatus === "timed_out", staleRemainingCount),
     source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
+    mode: typeof body.mode === "string" && body.mode.trim() ? body.mode.trim().slice(0, 80) : "single_bounded",
   });
-}
-
-async function raceMetadataRefreshWithTimeout(
-  promise: Promise<MetadataRefreshResult>,
-  timeoutMs: number,
-) {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      promise.then((result) => ({ result, timedOut: false })),
-      new Promise<{ result: MetadataRefreshResult; timedOut: true }>((resolve) => {
-        timeout = setTimeout(() => {
-          resolve({
-            timedOut: true,
-            result: {
-              processed: 0,
-              succeeded: 0,
-              failed: 0,
-              skipped: 0,
-              updated_player_counts: 0,
-              budget_exhausted: true,
-              results: [],
-            },
-          });
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
 }
 
 async function runMetadataRefresh(
@@ -181,16 +135,42 @@ async function runMetadataRefresh(
   try {
     const activeHandlers = handlers ?? await defaultHandlers();
     const result = await activeHandlers.refreshMetadata(env, options);
-    await safeRecordCronRun(env, source, result.failed > 0 && result.succeeded > 0 ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
+    const taskStatus = classifyMetadataResult(result);
+    const taskError = metadataResultMessage(result, taskStatus);
+    await safeRecordCronRun(env, source, taskStatus, startedAt, taskError, {
       processedCount: result.processed,
       skippedCount: result.skipped,
       failedCount: result.failed,
     });
-    return result;
+    return { result, taskStatus, taskError };
   } catch (error) {
     await safeRecordCronRun(env, source, "failed", startedAt, error);
     throw error;
   }
+}
+
+function classifyMetadataResult(result: MetadataRefreshResult) {
+  if (result.budget_exhausted && result.processed === 0) return "timed_out" as const;
+  if (result.processed === 0 && result.skipped > 0 && result.failed === 0) return "no_op" as const;
+  if (result.failed > 0 && result.succeeded > 0) return "partial" as const;
+  if (result.failed > 0 && result.processed > 0 && isUnavailableOnlyMetadataResult(result)) return "warning" as const;
+  if (result.failed > 0) return "failed" as const;
+  return "success" as const;
+}
+
+function isUnavailableOnlyMetadataResult(result: MetadataRefreshResult) {
+  return result.results.length > 0
+    && result.results.every((item) => item.status !== "succeeded")
+    && result.results.every((item) => /unavailable|endpoint|nitrado|token|metadata/i.test(item.message ?? ""));
+}
+
+function metadataResultMessage(result: MetadataRefreshResult, status: ReturnType<typeof classifyMetadataResult>) {
+  if (status === "success") return undefined;
+  if (status === "no_op") return "metadata_no_due_server";
+  if (status === "timed_out") return "metadata_budget_exhausted_before_work";
+  const failed = result.results.find((item) => item.status === "failed") ?? result.results[0];
+  const phase = failed?.phase ? `${failed.phase}: ` : "";
+  return `${phase}${failed?.message || `metadata_${status}`}`;
 }
 
 async function countStaleMetadataRemaining(env: Env, staleMs = 90_000) {
@@ -341,7 +321,7 @@ function ageSeconds(value: string | null | undefined) {
 async function safeRecordCronRun(
   env: Env,
   source: ReturnType<typeof normalizeAutomationCronSource>,
-  status: "success" | "failed" | "partial",
+  status: "success" | "failed" | "partial" | "warning" | "no_op" | "timed_out" | "accepted",
   startedAt: string,
   error?: unknown,
   metrics: { processedCount?: number; skippedCount?: number; failedCount?: number } = {},
@@ -355,7 +335,7 @@ async function safeRecordCronRun(
       status,
       startedAt,
       finishedAt,
-      errorMessage: error instanceof Error ? error.message : null,
+      errorMessage: error instanceof Error ? error.message : typeof error === "string" ? error : null,
       durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
       ...metrics,
     });

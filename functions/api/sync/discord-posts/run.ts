@@ -7,7 +7,9 @@ import type { Env, PagesContext, PagesFunction } from "../../../_lib/types";
 type DiscordPostRunBody = {
   async?: boolean;
   max_jobs?: number;
+  max_posts?: number;
   deadline_ms?: number;
+  mode?: string;
   cron?: string;
   source?: string;
 };
@@ -33,7 +35,7 @@ export const onRequestGet: PagesFunction = () => json(
 );
 
 export async function handleDiscordPostRun(
-  { request, env, waitUntil }: PagesContext,
+  { request, env }: PagesContext,
   handlers: DiscordPostRunHandlers = DEFAULT_HANDLERS,
 ) {
   const unauthorized = requireCronSecret(request, env);
@@ -42,29 +44,18 @@ export async function handleDiscordPostRun(
   const source = normalizeAutomationCronSource(body.source, body.cron);
   const startedAt = new Date().toISOString();
   const runOptions = {
-    maxJobs: sanitizePositiveInteger(body.max_jobs, 2, 10),
+    maxJobs: sanitizePositiveInteger(body.max_posts ?? body.max_jobs, 1, 10),
     deadlineMs: sanitizePositiveInteger(body.deadline_ms, 2500, 5000),
   };
-
-  if (body.async === true) {
-    waitUntil(runDiscordPostDispatch(env, source, startedAt, runOptions, handlers).catch((error) => {
-      console.warn("DZN DISCORD POST ASYNC CRON RUN FAILED", error instanceof Error ? error.message : "discord post sync failed");
-    }));
-    return json({
-      ok: true,
-      accepted: true,
-      source,
-      cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
-      max_jobs: runOptions.maxJobs,
-      deadline_ms: runOptions.deadlineMs,
-    }, { status: 202 });
-  }
 
   const result = await runDiscordPostDispatch(env, source, startedAt, runOptions, handlers);
   return json({
     ...result,
+    ok: result.task_status !== "failed" && result.task_status !== "timed_out",
+    no_op_reason: result.task_status === "no_op" ? result.error : null,
     source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
+    mode: typeof body.mode === "string" && body.mode.trim() ? body.mode.trim().slice(0, 80) : "single_bounded",
   });
 }
 
@@ -77,16 +68,38 @@ async function runDiscordPostDispatch(
 ) {
   try {
     const result = await handlers.dispatch(env, options);
-    await safeRecordCronRun(env, source, result.failed > 0 && (result.posted > 0 || result.skipped > 0) ? "partial" : result.failed > 0 ? "failed" : "success", startedAt, undefined, {
+    const taskStatus = classifyDiscordResult(result);
+    const taskError = discordResultMessage(result, taskStatus);
+    await safeRecordCronRun(env, source, taskStatus, startedAt, taskError, {
       processedCount: result.processed,
       skippedCount: result.skipped,
       failedCount: result.failed,
     });
-    return result;
+    return {
+      ...result,
+      task_status: taskStatus,
+      error: taskError,
+    };
   } catch (error) {
     await safeRecordCronRun(env, source, "failed", startedAt, error);
     throw error;
   }
+}
+
+function classifyDiscordResult(result: Awaited<ReturnType<DiscordPostRunHandlers["dispatch"]>>) {
+  if (result.budgetExhausted && result.processed === 0) return "timed_out" as const;
+  if (result.processed === 0 && result.skipped === 0 && result.failed === 0) return "no_op" as const;
+  if (result.failed > 0 && (result.posted > 0 || result.skipped > 0)) return "partial" as const;
+  if (result.failed > 0) return "failed" as const;
+  return "success" as const;
+}
+
+function discordResultMessage(result: Awaited<ReturnType<DiscordPostRunHandlers["dispatch"]>>, status: ReturnType<typeof classifyDiscordResult>) {
+  if (status === "success") return undefined;
+  if (status === "no_op") return "discord_no_due_post";
+  if (status === "timed_out") return "discord_budget_exhausted_before_work";
+  const failed = result.results?.find((item) => item.status === "failed") ?? result.results?.[0];
+  return failed?.reason || `discord_${status}`;
 }
 
 export function isDiscordPostCronAuthorized(request: Request, env: Env) {
@@ -101,7 +114,7 @@ function sanitizePositiveInteger(value: unknown, fallback: number, max = 100000)
 async function safeRecordCronRun(
   env: Env,
   source: ReturnType<typeof normalizeAutomationCronSource>,
-  status: "success" | "failed" | "partial",
+  status: "success" | "failed" | "partial" | "warning" | "no_op" | "timed_out" | "accepted",
   startedAt: string,
   error?: unknown,
   metrics: { processedCount?: number; skippedCount?: number; failedCount?: number } = {},
@@ -114,7 +127,7 @@ async function safeRecordCronRun(
       status,
       startedAt,
       finishedAt,
-      errorMessage: error instanceof Error ? error.message : null,
+      errorMessage: error instanceof Error ? error.message : typeof error === "string" ? error : null,
       durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
       ...metrics,
     });
