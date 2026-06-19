@@ -47,6 +47,25 @@ assert.equal(workflow.includes('"deadline_ms":2500'), true);
 assert.equal(workflow.includes("/api/sync/discord-posts/run"), true);
 assert.equal(workflow.includes('"max_jobs":2'), true);
 assert.equal(workflow.includes("--max-time 75"), true);
+assert.equal(workflow.includes("overall=0"), true, "Backup workflow must aggregate all task results before deciding overall status.");
+assert.equal(workflow.includes('|| overall=1'), true, "Backup workflow must continue invoking later tasks after one task fails validation.");
+assert.equal(
+  workflow.indexOf('call_dzn "Server Wars refresh backup"') < workflow.indexOf('call_dzn "Discord posts dispatch backup"'),
+  true,
+  "Discord backup must still be invoked after the Server Wars backup call.",
+);
+assert.equal(workflow.includes("parsed.taskStatus ?? parsed.task_status ?? parsed.status"), true);
+assert.equal(workflow.includes("parsed.noOpReason ?? parsed.no_op_reason"), true);
+assert.equal(workflow.includes("parsed.warningCode ?? parsed.warning_code"), true);
+assert.equal(workflow.includes("parsed.errorCode ?? parsed.error_code"), true);
+assert.equal(workflow.includes("invalid or missing taskStatus"), true);
+assert.equal(workflow.includes('acceptedStatuses = new Set(["success", "no_op", "warning"])'), true);
+assert.equal(workflow.includes("no_op status requires a noOpReason"), true);
+assert.equal(workflow.includes("zero processed/skipped/failed without explicit no-op or warning"), true);
+assert.equal(workflow.includes("warning status requires a meaningful warning or error code"), true);
+assert.equal(workflow.includes("noOpReason=${safe.noOpReason"), true);
+assert.equal(workflow.includes("warningCode=${safe.warningCode"), true);
+assert.equal(workflow.includes("errorCode=${safe.errorCode"), true);
 
 assert.equal(workflow.includes("/api/sync/adm/run"), false, "The scheduler workflow must not become the primary ADM sync runner.");
 assert.equal(workflow.includes("TOKEN_ENCRYPTION_KEY"), false);
@@ -115,6 +134,12 @@ assert.equal(serverWarsCron.includes("requireCronSecret"), true);
 assert.equal(serverWarsCron.includes("runServerWarAutomationTick"), true);
 assert.equal(serverWarsCron.includes("body.async === true"), true);
 assert.equal(serverWarsCron.includes("waitUntil(runAndRecordServerWarAutomation"), true);
+assert.equal(serverWarsCron.includes("toServerWarCronContract"), true, "Server Wars cron route must normalize every result to a machine-verifiable task contract.");
+assert.equal(serverWarsCron.includes('taskStatus === "no_op" ? "no_due_server_war_work"'), true);
+assert.equal(serverWarsCron.includes("task_status: taskStatus"), true);
+assert.equal(serverWarsCron.includes("warningCode"), true);
+assert.equal(serverWarsCron.includes("errorCode"), true);
+assert.equal(serverWarsCron.includes('taskStatus: "failed"'), true);
 assert.equal(discordRoute.includes("requireCronSecret"), true);
 assert.equal(discordRoute.indexOf("requireCronSecret") < discordRoute.indexOf("readJson"), true, "Discord route should reject unauthenticated callers before parsing body.");
 assert.equal(discordRoute.includes("body.async === true"), false, "Discord route must not return a waitUntil acknowledgement as success.");
@@ -160,6 +185,7 @@ assert.equal(autoUpdateWorker.includes("for (const task of dueTasks)"), true);
 assert.equal(autoUpdateWorker.includes("AbortController"), true);
 assert.equal(autoUpdateWorker.includes("recordAutomationCronRun"), true);
 assert.equal(autoUpdateWorker.includes("taskStatusFromBody"), true);
+assert.equal(autoUpdateWorker.includes("body?.taskStatus ?? body?.task_status"), true, "Auto-update Worker should accept camelCase and snake_case taskStatus fields.");
 assert.equal(autoUpdateWorker.includes("task_accepted_without_completion"), true);
 assert.equal(autoUpdateWorker.includes('"failed", "timed_out", "accepted", "warning", "no_op"'), true, "Auto-update Worker warning/no-op rows must pass through safe error context.");
 assert.equal(autoUpdateWorker.includes("max_posts: 1"), true);
@@ -169,5 +195,91 @@ assert.equal(serverMetadata.includes("UPDATE server_public_cache SET"), true, "F
 assert.equal(serverMetadata.includes("WHERE guild_id = ?"), true, "Public cache sync must target the existing guild row.");
 assert.equal(serverMetadata.includes("refreshNitradoServerPlayerCountOnly"), true, "Cron metadata refresh must use the lightweight live-count path.");
 assert.equal(serverMetadata.includes("fetchNitradoOnlinePlayerCount"), true, "Cron metadata refresh must use the dedicated Nitrado player-count endpoint.");
+
+type SchedulerBody = Record<string, unknown>;
+
+function countMetric(value: unknown) {
+  if (Array.isArray(value)) return value.length;
+  const count = Number(value ?? 0);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function validateSchedulerContract(code: number, parsed: SchedulerBody) {
+  const safe = {
+    ok: parsed.ok,
+    taskStatus: parsed.taskStatus ?? parsed.task_status ?? parsed.status ?? null,
+    processed: countMetric(parsed.processed ?? parsed.processedCount ?? parsed.processed_count),
+    skipped: countMetric(parsed.skipped ?? parsed.skippedCount ?? parsed.skipped_count),
+    failed: countMetric(parsed.failed ?? parsed.failedCount ?? parsed.failed_count),
+    snapshots: countMetric(parsed.snapshots),
+    finalized: countMetric(parsed.finalized),
+    expiredChallenges: countMetric(parsed.expiredChallenges ?? parsed.expired_challenges),
+    noOpReason: parsed.noOpReason ?? parsed.no_op_reason ?? null,
+    warningCode: parsed.warningCode ?? parsed.warning_code ?? null,
+    warning: parsed.warning ?? null,
+    errorCode: parsed.errorCode ?? parsed.error_code ?? null,
+    error: parsed.error ?? parsed.message ?? null,
+    accepted: parsed.accepted === true,
+  };
+  if (code === 401 || code === 403) return { ok: false, reason: "auth" };
+  if (code < 200 || code >= 300) return { ok: false, reason: "http" };
+  if (safe.accepted || safe.taskStatus === "accepted") return { ok: false, reason: "accepted" };
+  const taskStatus = String(safe.taskStatus ?? "");
+  if (!new Set(["success", "no_op", "warning"]).has(taskStatus)) return { ok: false, reason: "invalid_status" };
+  if (safe.ok === false || ["failed", "timed_out"].includes(taskStatus)) return { ok: false, reason: "failed" };
+  if (taskStatus === "warning" && !safe.warningCode && !safe.warning && !safe.errorCode && !safe.error) {
+    return { ok: false, reason: "anonymous_warning" };
+  }
+  if (taskStatus === "no_op" && !safe.noOpReason) return { ok: false, reason: "missing_no_op_reason" };
+  const zeroCounters = safe.processed === 0 && safe.skipped === 0 && safe.failed === 0 && safe.snapshots === 0 && safe.finalized === 0 && safe.expiredChallenges === 0;
+  if (zeroCounters && taskStatus !== "no_op" && taskStatus !== "warning") return { ok: false, reason: "zero_without_reason" };
+  if (zeroCounters && taskStatus === "no_op" && !safe.noOpReason) return { ok: false, reason: "zero_no_op_without_reason" };
+  if (zeroCounters && taskStatus === "warning" && !safe.warningCode && !safe.warning && !safe.errorCode && !safe.error) {
+    return { ok: false, reason: "zero_warning_without_reason" };
+  }
+  return { ok: true, reason: null };
+}
+
+assert.deepEqual(validateSchedulerContract(200, {
+  ok: true,
+  taskStatus: "no_op",
+  noOpReason: "no_due_server_war_work",
+  processed: 0,
+  skipped: 0,
+  failed: 0,
+  snapshots: 0,
+  finalized: 0,
+  expiredChallenges: 0,
+}), { ok: true, reason: null }, "Server Wars no-work contract should pass.");
+
+assert.deepEqual(validateSchedulerContract(200, {
+  ok: true,
+  taskStatus: "success",
+  processed: 1,
+  skipped: 0,
+  failed: 0,
+  snapshots: 1,
+  finalized: 0,
+  expiredChallenges: 0,
+}), { ok: true, reason: null }, "Server Wars completed work contract should pass.");
+
+assert.equal(validateSchedulerContract(200, { ok: true, taskStatus: null, processed: 0, skipped: 0, failed: 0 }).ok, false, "Null taskStatus must fail.");
+assert.equal(validateSchedulerContract(200, { ok: true, task_status: null, processed: 0, skipped: 0, failed: 0 }).ok, false, "HTTP 200 ok=true with taskStatus=null must fail.");
+assert.equal(validateSchedulerContract(200, { ok: true, taskStatus: "success", processed: 0, skipped: 0, failed: 0 }).ok, false, "Zero counters without noOpReason must fail.");
+assert.equal(validateSchedulerContract(200, { ok: true, taskStatus: "no_op", noOpReason: "discord_no_posts_due", processed: 0, skipped: 0, failed: 0 }).ok, true, "Explicit Discord no-op should pass.");
+assert.equal(validateSchedulerContract(200, { ok: true, taskStatus: "success", processed: 1, skipped: 1, failed: 0 }).ok, true, "Metadata success contract should remain passing.");
+
+const attemptedTasks: string[] = [];
+let aggregateFailure = false;
+for (const task of [
+  { name: "Metadata", body: { ok: true, taskStatus: "success", processed: 1, skipped: 1, failed: 0 } },
+  { name: "Server Wars", body: { ok: true, taskStatus: null, processed: 0, skipped: 0, failed: 0 } },
+  { name: "Discord", body: { ok: true, taskStatus: "no_op", noOpReason: "discord_no_posts_due", processed: 0, skipped: 0, failed: 0 } },
+]) {
+  attemptedTasks.push(task.name);
+  aggregateFailure = !validateSchedulerContract(200, task.body).ok || aggregateFailure;
+}
+assert.deepEqual(attemptedTasks, ["Metadata", "Server Wars", "Discord"], "Server Wars failure must not prevent Discord invocation/reporting.");
+assert.equal(aggregateFailure, true, "Invalid Server Wars contract should still fail the aggregate workflow.");
 
 console.log("Automation scheduler tests passed.");

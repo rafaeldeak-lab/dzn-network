@@ -30,6 +30,8 @@ type ServerWarCronOptions = {
   source: string;
 };
 
+type ServerWarCronTaskStatus = "success" | "no_op" | "warning" | "failed";
+
 export const onRequestPost: PagesFunction = async ({ request, env, waitUntil }) => {
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
@@ -52,6 +54,8 @@ export const onRequestPost: PagesFunction = async ({ request, env, waitUntil }) 
       return json({
         ok: true,
         accepted: true,
+        taskStatus: "accepted",
+        task_status: "accepted",
         source,
         max_events: options.maxEvents,
         max_finalizations: options.maxFinalizations,
@@ -70,6 +74,11 @@ export const onRequestPost: PagesFunction = async ({ request, env, waitUntil }) 
     });
     return json({
       ok: false,
+      taskStatus: "failed",
+      task_status: "failed",
+      processed: 0,
+      skipped: 0,
+      failed: 1,
       error: "SERVER_WARS_AUTOMATION_UNAVAILABLE",
       errorCode: "SERVER_WARS_AUTOMATION_UNAVAILABLE",
       message: "Server Wars automation is temporarily unavailable.",
@@ -98,20 +107,113 @@ async function runAndRecordServerWarAutomation(
   startedAt: string,
   options: ServerWarCronOptions,
 ) {
-  const result = await runServerWarAutomationTick(env, options);
-  await recordAutomationCronRun(env, {
-    source: normalizeAutomationCronSource(options.source, options.source),
-    jobType: "server-wars",
-    status: result.warnings.length && result.snapshots.length + result.finalized.length === 0 ? "partial" : "success",
-    startedAt,
-    finishedAt: new Date().toISOString(),
-    processedCount: result.snapshots.length + result.finalized.length + result.transitions.expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing,
-    skippedCount: result.budgetExhausted ? 1 : 0,
-    failedCount: [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length,
-  }).catch((error) => {
-    console.warn("DZN Server Wars cron run record skipped", {
-      message: error instanceof Error ? error.message : "record failed",
+  try {
+    const result = await runServerWarAutomationTick(env, options);
+    const contract = toServerWarCronContract(result);
+    await recordAutomationCronRun(env, {
+      source: normalizeAutomationCronSource(options.source, options.source),
+      jobType: "server-wars",
+      status: contract.taskStatus,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      errorMessage: contract.error ?? contract.warning ?? contract.noOpReason,
+      processedCount: contract.processed,
+      skippedCount: contract.skipped,
+      failedCount: contract.failed,
+    }).catch((error) => {
+      console.warn("DZN Server Wars cron run record skipped", {
+        message: error instanceof Error ? error.message : "record failed",
+      });
     });
-  });
-  return result;
+    return contract;
+  } catch (error) {
+    const message = sanitizeServerWarCronMessage(error);
+    await recordAutomationCronRun(env, {
+      source: normalizeAutomationCronSource(options.source, options.source),
+      jobType: "server-wars",
+      status: "failed",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      errorMessage: message,
+      processedCount: 0,
+      skippedCount: 0,
+      failedCount: 1,
+    }).catch((recordError) => {
+      console.warn("DZN Server Wars cron failure record skipped", {
+        message: recordError instanceof Error ? recordError.message : "record failed",
+      });
+    });
+    return {
+      ok: false,
+      taskStatus: "failed" as const,
+      task_status: "failed" as const,
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+      snapshots: 0,
+      finalized: 0,
+      expiredChallenges: 0,
+      budgetExhausted: false,
+      budget_exhausted: false,
+      noOpReason: null,
+      no_op_reason: null,
+      warningCode: null,
+      warning: null,
+      errorCode: "server_wars_automation_failed",
+      error: message,
+    };
+  }
+}
+
+function toServerWarCronContract(result: Awaited<ReturnType<typeof runServerWarAutomationTick>>) {
+  const snapshots = result.snapshots.length;
+  const finalized = result.finalized.length;
+  const expiredChallenges = result.transitions.expiredChallenges;
+  const processed = snapshots + finalized + expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing;
+  const failed = [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length;
+  const warning = result.warnings[0] ?? null;
+  const taskStatus: ServerWarCronTaskStatus = failed > 0
+    ? "failed"
+    : warning || result.budgetExhausted
+      ? "warning"
+      : processed === 0
+        ? "no_op"
+        : "success";
+  const noOpReason = taskStatus === "no_op" ? "no_due_server_war_work" : null;
+  const warningCode = taskStatus === "warning"
+    ? result.budgetExhausted ? "server_wars_budget_exhausted" : "server_wars_warning"
+    : null;
+  const errorCode = taskStatus === "failed" ? "server_wars_item_failed" : null;
+  const error = taskStatus === "failed"
+    ? [...result.snapshots, ...result.finalized].find((item) => !item.ok)?.error ?? "Server Wars automation item failed"
+    : null;
+  return {
+    ok: taskStatus !== "failed",
+    taskStatus,
+    task_status: taskStatus,
+    noOpReason,
+    no_op_reason: noOpReason,
+    processed,
+    skipped: result.budgetExhausted ? 1 : 0,
+    failed: taskStatus === "failed" ? Math.max(1, failed) : 0,
+    snapshots,
+    finalized,
+    expiredChallenges,
+    budgetExhausted: result.budgetExhausted,
+    budget_exhausted: result.budgetExhausted,
+    warningCode,
+    warning,
+    errorCode,
+    error,
+    transitions: result.transitions,
+    source: result.source,
+    now: result.now,
+  };
+}
+
+function sanitizeServerWarCronMessage(error: unknown) {
+  return String(error instanceof Error ? error.message : error ?? "Server Wars automation failed")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/(token|access_token|signature|sig|secret|key)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 240);
 }

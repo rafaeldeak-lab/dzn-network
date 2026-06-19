@@ -201,7 +201,7 @@ async function runTask(
     const failed = numberMetric(body?.failed ?? body?.failedCount ?? body?.failed_count);
     return {
       label: task.label,
-      ok: response.ok && body?.ok !== false && !["failed", "timed_out", "accepted", "trigger_failed"].includes(taskStatus),
+      ok: response.ok && body?.ok !== false && !["failed", "timed_out", "accepted", "trigger_failed", "invalid_contract"].includes(taskStatus),
       status: response.status,
       processed,
       skipped,
@@ -241,15 +241,15 @@ async function runServerWarsTask(env: Env, task: SchedulerTask) {
       maxChallengeExpirations: numberMetric(task.body.max_challenge_expirations) || 10,
       deadlineMs: numberMetric(task.body.deadline_ms) || 2500,
     });
-    const failed = [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length;
+    const contract = toServerWarsTaskContract(result);
     return {
       label: task.label,
-      ok: failed === 0,
+      ok: contract.ok,
       status: 200,
-      processed: result.snapshots.length + result.finalized.length + result.transitions.expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing,
-      skipped: result.budgetExhausted ? 1 : 0,
-      failed,
-      body: sanitizeTaskBody(result as unknown as Record<string, unknown>),
+      processed: contract.processed,
+      skipped: contract.skipped,
+      failed: contract.failed,
+      body: sanitizeTaskBody(contract as unknown as Record<string, unknown>),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "server wars automation failed";
@@ -266,6 +266,49 @@ async function runServerWarsTask(env: Env, task: SchedulerTask) {
       body: { ok: false, error: sanitizeMessage(message) },
     };
   }
+}
+
+function toServerWarsTaskContract(result: Awaited<ReturnType<typeof runServerWarAutomationTick>>) {
+  const snapshots = result.snapshots.length;
+  const finalized = result.finalized.length;
+  const expiredChallenges = result.transitions.expiredChallenges;
+  const processed = snapshots + finalized + expiredChallenges + result.transitions.scheduledToLive + result.transitions.liveToFinalizing;
+  const failed = [...result.snapshots, ...result.finalized].filter((item) => !item.ok).length;
+  const warning = result.warnings[0] ?? null;
+  const taskStatus = failed > 0
+    ? "failed"
+    : warning || result.budgetExhausted
+      ? "warning"
+      : processed === 0
+        ? "no_op"
+        : "success";
+  const noOpReason = taskStatus === "no_op" ? "no_due_server_war_work" : null;
+  const warningCode = taskStatus === "warning"
+    ? result.budgetExhausted ? "server_wars_budget_exhausted" : "server_wars_warning"
+    : null;
+  const errorCode = taskStatus === "failed" ? "server_wars_item_failed" : null;
+  const error = taskStatus === "failed"
+    ? [...result.snapshots, ...result.finalized].find((item) => !item.ok)?.error ?? "Server Wars automation item failed"
+    : null;
+  return {
+    ok: taskStatus !== "failed",
+    task_status: taskStatus,
+    taskStatus,
+    no_op_reason: noOpReason,
+    noOpReason,
+    processed,
+    skipped: result.budgetExhausted ? 1 : 0,
+    failed: taskStatus === "failed" ? Math.max(1, failed) : 0,
+    snapshots,
+    finalized,
+    expiredChallenges,
+    budgetExhausted: result.budgetExhausted,
+    budget_exhausted: result.budgetExhausted,
+    warningCode,
+    warning,
+    errorCode,
+    error,
+  };
 }
 
 async function safeRecordTask(
@@ -320,7 +363,7 @@ function sanitizeTaskBody(value: Record<string, unknown> | null) {
   if (!value) return null;
   return {
     ok: value.ok,
-    task_status: sanitizeMessage(value.task_status),
+    task_status: sanitizeMessage(value.task_status ?? value.taskStatus),
     accepted: value.accepted,
     processed: value.processed ?? value.processedCount ?? value.processed_count,
     succeeded: value.succeeded,
@@ -329,21 +372,25 @@ function sanitizeTaskBody(value: Record<string, unknown> | null) {
     updated_player_counts: value.updated_player_counts,
     timed_out: value.timed_out,
     budget_exhausted: value.budget_exhausted ?? value.budgetExhausted,
-    snapshots: Array.isArray(value.snapshots) ? value.snapshots.length : undefined,
-    finalized: Array.isArray(value.finalized) ? value.finalized.length : undefined,
-    expiredChallenges: isRecord(value.transitions) ? value.transitions.expiredChallenges : undefined,
+    no_op_reason: sanitizeMessage(value.no_op_reason ?? value.noOpReason),
+    warning_code: sanitizeMessage(value.warning_code ?? value.warningCode),
+    error_code: sanitizeMessage(value.error_code ?? value.errorCode),
+    snapshots: Array.isArray(value.snapshots) ? value.snapshots.length : value.snapshots,
+    finalized: Array.isArray(value.finalized) ? value.finalized.length : value.finalized,
+    expiredChallenges: value.expiredChallenges ?? value.expired_challenges ?? (isRecord(value.transitions) ? value.transitions.expiredChallenges : undefined),
     error: sanitizeMessage(value.error),
+    warning: sanitizeMessage(value.warning),
     message: sanitizeMessage(value.message),
   };
 }
 
 function taskStatusFromBody(response: Response, body: Record<string, unknown> | null) {
-  const explicit = String(body?.task_status ?? body?.status ?? "").trim().toLowerCase();
+  const explicit = String(body?.taskStatus ?? body?.task_status ?? body?.status ?? "").trim().toLowerCase();
   if (explicit) return explicit;
   if (response.status === 202 || body?.accepted === true) return "accepted";
   if (!response.ok) return "trigger_failed";
   if (body?.ok === false) return "failed";
-  return "success";
+  return "invalid_contract";
 }
 
 function taskErrorMessage(response: Response, body: Record<string, unknown> | null, taskStatus: string) {
@@ -351,6 +398,7 @@ function taskErrorMessage(response: Response, body: Record<string, unknown> | nu
   if (bodyError) return bodyError;
   if (taskStatus === "trigger_failed") return `route_http_${response.status}`;
   if (taskStatus === "accepted") return "task_accepted_without_completion";
+  if (taskStatus === "invalid_contract") return "task_missing_completion_status";
   if (taskStatus === "timed_out") return "task_timed_out";
   if (taskStatus === "failed") return "task_failed_without_message";
   return null;
@@ -358,7 +406,7 @@ function taskErrorMessage(response: Response, body: Record<string, unknown> | nu
 
 function cronStatusFromTaskResult(result: { ok: boolean; body: unknown }): AutomationCronStatus {
   const body = isRecord(result.body) ? result.body : {};
-  const status = String(body.task_status ?? "").trim().toLowerCase();
+  const status = String(body.task_status ?? body.taskStatus ?? "").trim().toLowerCase();
   if (status === "no_op") return "no_op";
   if (status === "partial") return "partial";
   if (status === "warning") return "warning";
@@ -369,7 +417,7 @@ function cronStatusFromTaskResult(result: { ok: boolean; body: unknown }): Autom
 
 function errorMessageFromBody(value: unknown) {
   if (!isRecord(value)) return null;
-  return sanitizeMessage(value.error ?? value.message);
+  return sanitizeMessage(value.error ?? value.message ?? value.warning ?? value.no_op_reason ?? value.noOpReason);
 }
 
 function sanitizeMessage(value: unknown) {

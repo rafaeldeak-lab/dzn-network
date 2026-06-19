@@ -21,6 +21,14 @@ assert.equal(workerSource.includes('cadence: "every-five-minutes"'), true, "Heav
 assert.equal(workerSource.includes("isFiveMinuteTick"), true, "Worker should gate Server Wars and Discord to five-minute ticks.");
 assert.equal(workerSource.includes("AbortController"), true, "Each task should enforce a timeout.");
 assert.equal(workerSource.includes("recordAutomationCronRun"), true, "Scheduler check-ins should be persisted.");
+assert.equal(workerSource.includes("toServerWarsTaskContract"), true, "Direct Server Wars work should expose the same completed task contract as the protected route.");
+assert.equal(workerSource.includes("no_due_server_war_work"), true, "Direct Server Wars no-op work must include an explicit reason.");
+assert.equal(workerSource.includes("body?.taskStatus ?? body?.task_status"), true, "HTTP task result parsing should accept camelCase and snake_case task status fields.");
+assert.equal(workerSource.includes("invalid_contract"), true, "HTTP 200 without a task completion status must not be treated as success.");
+assert.equal(workerSource.includes("task_missing_completion_status"), true, "Invalid route contracts should record a meaningful error.");
+assert.equal(workerSource.includes("no_op_reason"), true, "Sanitized worker task bodies should retain no-op reasons.");
+assert.equal(workerSource.includes("warning_code"), true, "Sanitized worker task bodies should retain warning codes.");
+assert.equal(workerSource.includes("error_code"), true, "Sanitized worker task bodies should retain error codes.");
 assert.equal(workerSource.includes("authorization: `Bearer ${secret}`"), true);
 assert.equal(workerSource.includes("x-dzn-cron-secret"), true);
 assert.equal(workerSource.includes("x-sync-cron-secret"), true);
@@ -45,7 +53,7 @@ async function main() {
       body: init?.body ? JSON.parse(String(init.body)) : null,
       headers,
     });
-    return new Response(JSON.stringify({ ok: true, processed: 1, skipped: 0, failed: 0 }), {
+    return new Response(JSON.stringify({ ok: true, task_status: "success", processed: 1, skipped: 0, failed: 0 }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -107,7 +115,7 @@ async function main() {
       body: init?.body ? JSON.parse(String(init.body)) : null,
       headers: new Headers(init?.headers),
     });
-    return new Response(JSON.stringify({ ok: true, processed: 1, skipped: 0, failed: 0 }), {
+    return new Response(JSON.stringify({ ok: true, task_status: "success", processed: 1, skipped: 0, failed: 0 }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });

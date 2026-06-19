@@ -42,6 +42,13 @@ assert.doesNotMatch(automationSource, /position_x|position_y|raw_line|TOKEN_ENCR
 
 assert.match(cronRouteSource, /requireCronSecret/, "Cron route must require the shared cron secret.");
 assert.match(cronRouteSource, /runServerWarAutomationTick/, "Cron route must call the automation helper.");
+assert.match(cronRouteSource, /toServerWarCronContract/, "Cron route must normalize automation output into an explicit task contract.");
+assert.match(cronRouteSource, /taskStatus/, "Cron route must return a taskStatus.");
+assert.match(cronRouteSource, /task_status/, "Cron route must return a snake_case task_status for workflow compatibility.");
+assert.match(cronRouteSource, /no_due_server_war_work/, "No-work Server Wars runs must include an explicit no-op reason.");
+assert.match(cronRouteSource, /warningCode/, "Warning runs must include a machine-readable warning code.");
+assert.match(cronRouteSource, /errorCode/, "Failed runs must include a machine-readable error code.");
+assert.match(cronRouteSource, /snapshots,[\s\S]*finalized,[\s\S]*expiredChallenges/, "Cron route must return Server Wars counters for scheduler verification.");
 assert.match(cronRouteSource, /onRequestPost/, "Cron route should only run on POST.");
 assert.match(cronRouteSource, /methodNotAllowed/, "Cron route should reject unsafe methods.");
 assert.match(cronRouteSource, /cache-control[\s\S]*no-store/, "Cron route must not be cached.");

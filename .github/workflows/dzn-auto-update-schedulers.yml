@@ -59,7 +59,7 @@ jobs:
             rm -f "$body_file"
             if [ "$curl_exit" -ne 0 ]; then
               echo "::error::${name} curl failed with exit ${curl_exit}."
-              exit "$curl_exit"
+              return "$curl_exit"
             fi
             node - "$name" "$http_code" "$body" <<'NODE'
           const fs = require("node:fs");
@@ -72,27 +72,35 @@ jobs:
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${name}: HTTP ${code}; invalid JSON response\n`);
             process.exit(2);
           }
+          const countValue = (value) => {
+            if (Array.isArray(value)) return value.length;
+            const count = Number(value ?? 0);
+            return Number.isFinite(count) ? count : 0;
+          };
           const safe = {
             ok: parsed.ok,
-            taskStatus: parsed.task_status ?? parsed.status ?? null,
+            taskStatus: parsed.taskStatus ?? parsed.task_status ?? parsed.status ?? null,
             error: parsed.error ?? parsed.message ?? null,
-            processed: parsed.processed ?? parsed.processedCount ?? parsed.processed_count ?? 0,
-            succeeded: parsed.succeeded ?? 0,
-            skipped: parsed.skipped ?? parsed.skippedCount ?? parsed.skipped_count ?? 0,
-            failed: parsed.failed ?? parsed.failedCount ?? parsed.failed_count ?? 0,
-            updatedPlayerCounts: parsed.updated_player_counts ?? 0,
-            budgetExhausted: parsed.budgetExhausted ?? false,
+            processed: countValue(parsed.processed ?? parsed.processedCount ?? parsed.processed_count),
+            succeeded: countValue(parsed.succeeded),
+            skipped: countValue(parsed.skipped ?? parsed.skippedCount ?? parsed.skipped_count),
+            failed: countValue(parsed.failed ?? parsed.failedCount ?? parsed.failed_count),
+            updatedPlayerCounts: countValue(parsed.updated_player_counts),
+            budgetExhausted: Boolean(parsed.budgetExhausted ?? parsed.budget_exhausted ?? false),
             accepted: parsed.accepted === true,
-            noOpReason: parsed.no_op_reason ?? null,
-            snapshots: Array.isArray(parsed.snapshots) ? parsed.snapshots.length : 0,
-            finalized: Array.isArray(parsed.finalized) ? parsed.finalized.length : 0,
-            expiredChallenges: parsed.transitions?.expiredChallenges ?? 0,
+            noOpReason: parsed.noOpReason ?? parsed.no_op_reason ?? null,
+            warningCode: parsed.warningCode ?? parsed.warning_code ?? null,
+            warning: parsed.warning ?? null,
+            errorCode: parsed.errorCode ?? parsed.error_code ?? null,
+            snapshots: countValue(parsed.snapshots),
+            finalized: countValue(parsed.finalized),
+            expiredChallenges: countValue(parsed.expiredChallenges ?? parsed.expired_challenges ?? parsed.transitions?.expiredChallenges),
           };
           fs.appendFileSync(
             process.env.GITHUB_STEP_SUMMARY,
-            `- ${name}: HTTP ${code}; ok=${safe.ok}; taskStatus=${safe.taskStatus}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}; error=${safe.error ?? ""}\n`,
+            `- ${name}: HTTP ${code}; ok=${safe.ok}; taskStatus=${safe.taskStatus}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; noOpReason=${safe.noOpReason ?? ""}; warningCode=${safe.warningCode ?? ""}; errorCode=${safe.errorCode ?? ""}; budgetExhausted=${safe.budgetExhausted}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; error=${safe.error ?? ""}\n`,
           );
-          console.log(`${name}: HTTP ${code}; ok=${safe.ok}; taskStatus=${safe.taskStatus}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; budgetExhausted=${safe.budgetExhausted}; error=${safe.error ?? ""}`);
+          console.log(`${name}: HTTP ${code}; ok=${safe.ok}; taskStatus=${safe.taskStatus}; processed=${safe.processed}; skipped=${safe.skipped}; failed=${safe.failed}; noOpReason=${safe.noOpReason ?? ""}; warningCode=${safe.warningCode ?? ""}; errorCode=${safe.errorCode ?? ""}; budgetExhausted=${safe.budgetExhausted}; snapshots=${safe.snapshots}; finalized=${safe.finalized}; expiredChallenges=${safe.expiredChallenges}; error=${safe.error ?? ""}`);
           if (code === 401 || code === 403) {
             console.error(`${name}: cron auth failed.`);
             process.exit(1);
@@ -105,21 +113,51 @@ jobs:
             console.error(`${name}: endpoint only accepted background work; completion was not proven.`);
             process.exit(1);
           }
-          if (safe.ok === false || ["failed", "timed_out"].includes(String(safe.taskStatus ?? ""))) {
+          const taskStatus = String(safe.taskStatus ?? "");
+          const acceptedStatuses = new Set(["success", "no_op", "warning"]);
+          if (!acceptedStatuses.has(taskStatus)) {
+            console.error(`${name}: invalid or missing taskStatus=${taskStatus || "null"}.`);
+            process.exit(1);
+          }
+          if (safe.ok === false || ["failed", "timed_out"].includes(taskStatus)) {
             console.error(`${name}: task failed or timed out. error=${safe.error ?? "missing_error"}`);
             process.exit(1);
           }
-          const meaningfulNoOp = ["no_op", "warning"].includes(String(safe.taskStatus ?? "")) || safe.noOpReason || safe.error;
+          if (taskStatus === "warning" && !safe.warningCode && !safe.warning && !safe.errorCode && !safe.error) {
+            console.error(`${name}: warning status requires a meaningful warning or error code.`);
+            process.exit(1);
+          }
+          if (taskStatus === "no_op" && !safe.noOpReason) {
+            console.error(`${name}: no_op status requires a noOpReason.`);
+            process.exit(1);
+          }
+          const meaningfulNoOp = taskStatus === "no_op" && safe.noOpReason;
+          const meaningfulWarning = taskStatus === "warning" && (safe.warningCode || safe.warning || safe.errorCode || safe.error);
           if (safe.processed === 0 && safe.skipped === 0 && safe.failed === 0 && safe.snapshots === 0 && safe.finalized === 0 && safe.expiredChallenges === 0 && !meaningfulNoOp) {
-            console.error(`${name}: zero processed/skipped/failed without explicit no-op or warning.`);
+            if (!meaningfulWarning) {
+              console.error(`${name}: zero processed/skipped/failed without explicit no-op or warning.`);
+              process.exit(1);
+            }
+          }
+          if (safe.failed > 0 && taskStatus !== "warning") {
+            console.error(`${name}: failed counter requires failed or warning status.`);
             process.exit(1);
           }
           NODE
           }
 
-          call_dzn "Metadata/player-count refresh backup" "/api/sync/metadata/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_servers":2,"deadline_ms":2500}'
-          call_dzn "Server Wars refresh backup" "/api/cron/server-wars/refresh" '{"source":"github-backup","max_events":1,"max_finalizations":1,"max_challenge_expirations":10,"deadline_ms":2500}'
-          call_dzn "Discord posts dispatch backup" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_jobs":2,"deadline_ms":2500}'
+          overall=0
+          call_dzn "Metadata/player-count refresh backup" "/api/sync/metadata/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_servers":2,"deadline_ms":2500}' || overall=1
+          call_dzn "Server Wars refresh backup" "/api/cron/server-wars/refresh" '{"source":"github-backup","max_events":1,"max_finalizations":1,"max_challenge_expirations":10,"deadline_ms":2500}' || overall=1
+          call_dzn "Discord posts dispatch backup" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_jobs":2,"deadline_ms":2500}' || overall=1
+
+          if [ "$overall" -ne 0 ]; then
+            {
+              echo ""
+              echo "Overall: failed"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
           {
             echo ""
