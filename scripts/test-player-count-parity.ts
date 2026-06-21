@@ -46,6 +46,31 @@ const freshCacheFallback = resolveFreshPublicPlayerCount({
 assert.equal(freshCacheFallback.currentPlayers, 2, "Fresh cache can be used only when linked metadata is not fresh.");
 assert.equal(freshCacheFallback.source, "server_public_cache");
 
+const recentUnavailableAttempt = resolveFreshPublicPlayerCount({
+  linkedCurrentPlayers: 0,
+  linkedMaxPlayers: 10,
+  linkedCheckedAt: fresh,
+  linkedStatus: "unavailable",
+  cacheCurrentPlayers: 4,
+  cacheMaxPlayers: 10,
+  cacheCheckedAt: fresh,
+}, now);
+assert.equal(recentUnavailableAttempt.currentPlayers, null, "Unavailable Nitrado attempts must not publish older cached player counts as fresh.");
+assert.equal(recentUnavailableAttempt.status, "unavailable");
+assert.equal(recentUnavailableAttempt.source, "none");
+
+const cacheOlderThanLatestAttempt = resolveFreshPublicPlayerCount({
+  linkedCurrentPlayers: null,
+  linkedMaxPlayers: 10,
+  linkedCheckedAt: "2026-06-06T11:58:00.000Z",
+  linkedStatus: "failed",
+  cacheCurrentPlayers: 4,
+  cacheMaxPlayers: 10,
+  cacheCheckedAt: "2026-06-06T11:55:00.000Z",
+}, now);
+assert.equal(cacheOlderThanLatestAttempt.currentPlayers, null, "A cache row older than the latest metadata attempt must not be treated as live.");
+assert.equal(cacheOlderThanLatestAttempt.status, "stale");
+
 const total = sumFreshPublicPlayers([
   {
     linkedCurrentPlayers: 0,
@@ -66,6 +91,13 @@ const total = sumFreshPublicPlayers([
     linkedCheckedAt: stale,
     linkedStatus: "unknown",
     cacheCurrentPlayers: 2,
+    cacheCheckedAt: fresh,
+  },
+  {
+    linkedCurrentPlayers: 0,
+    linkedCheckedAt: fresh,
+    linkedStatus: "unavailable",
+    cacheCurrentPlayers: 4,
     cacheCheckedAt: fresh,
   },
 ], now);
@@ -157,7 +189,12 @@ assert.equal(publicServersSource.includes("PUBLIC_PLAYER_COUNT_STATUS_SQL"), tru
 assert.equal(serverMetadataSource.includes("syncPublicCacheFromMetadataRefresh"), true, "Metadata refresh should keep public cache in sync.");
 assert.equal(serverMetadataSource.includes("patchHomeStatsPlayerCountsFromFreshMetadata"), true, "Metadata refresh should patch home-stats player snapshots.");
 assert.equal(serverMetadataSource.includes("metadata.player_count_status !== \"fresh\""), true, "Only confirmed fresh Nitrado counts should update public cache.");
+assert.equal(serverMetadataSource.includes("result.ok && result.player_count_status === \"fresh\""), true, "Worker metadata refresh must update public player cache only after a successful numeric Nitrado result.");
+assert.equal(serverMetadataSource.includes("serverOnline: result.ok ? metadataOnlineValue(result.metadata) : null"), true, "Failed metadata attempts must not refresh public-facing server status fields.");
 assert.equal(playerCountsSource.includes("getPublicPlayerCountSummary"), true, "Player counts should have a canonical public summary helper.");
 assert.equal(playerCountsSource.includes("writePublicApiCache(env, snapshot.key"), true, "Home-stats snapshot player counts should be refreshed after metadata updates.");
+assert.equal(playerCountsSource.includes("linkedStatus !== \"unavailable\""), true, "Recent unavailable attempts must block fresh public cache fallback.");
+assert.equal(playerCountsSource.includes("cacheNotOlderThanLatestAttempt"), true, "Public player cache fallback must not predate the latest metadata attempt.");
+assert.equal(playerCountsSource.includes("linked_servers.player_count_last_checked_at"), true, "Public player-count SQL must compare cache freshness with the latest linked server attempt.");
 
 console.log("Player count parity tests passed.");

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   handleMetadataSyncRun,
@@ -193,6 +194,11 @@ async function run() {
   }), env));
   assert.equal(optionsResponse.status, 204);
   assert.equal(optionsResponse.headers.get("allow"), "POST, OPTIONS");
+
+  const metadataSource = readFileSync("functions/_lib/server-metadata.ts", "utf8");
+  assert.equal(metadataSource.includes("deadlineAtMs - Date.now() - 700"), true, "Scheduled metadata attempts must leave response budget after the safe Nitrado player-count fetch.");
+  assert.equal(metadataSource.includes("Math.min(1500"), true, "Scheduled Nitrado player-count fetches must stay below the route deadline.");
+  assert.equal(metadataSource.includes("timeoutMs = 2500"), true, "Manual/default metadata refreshes keep the existing safe Nitrado timeout cap.");
 }
 
 function makeContext(request: Request, testEnv: Env, waitUntil: PagesContext["waitUntil"] = () => undefined): PagesContext {

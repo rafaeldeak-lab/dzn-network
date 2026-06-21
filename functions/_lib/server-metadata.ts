@@ -465,6 +465,7 @@ async function refreshNitradoServerPlayerCountOnly(
   env: Env,
   row: AutomationSyncServer,
   now: string,
+  options: { timeoutMs?: number } = {},
 ) {
   const db = requireDb(env);
   const linkedServer: LinkedServerMetadataRow = {
@@ -507,7 +508,7 @@ async function refreshNitradoServerPlayerCountOnly(
           source: "gameservers_games_players" as const,
           sampledAt: now,
         }
-      : await fetchNitradoOnlinePlayerCount(await getNitradoTokenForLinkedServer(env, linkedServer), row.nitrado_service_id ?? "", now);
+      : await fetchNitradoOnlinePlayerCount(await getNitradoTokenForLinkedServer(env, linkedServer), row.nitrado_service_id ?? "", now, options.timeoutMs);
     if (!livePlayerCount) {
       await updatePlayerCountFreshness(db, row.id, {
         checkedAt: now,
@@ -707,12 +708,15 @@ export async function refreshLivePlayerCountsForActiveServers(
     try {
       const beforeCurrent = cleanNumber(row.current_players);
       const beforeMax = cleanNumber(row.max_players);
-      const result = await refreshNitradoServerPlayerCountOnly(env, row, new Date().toISOString());
+      const attemptTimeoutMs = Math.max(500, Math.min(1500, deadlineAtMs - Date.now() - 700));
+      const result = await refreshNitradoServerPlayerCountOnly(env, row, new Date().toISOString(), { timeoutMs: attemptTimeoutMs });
       if (result.ok) succeeded += 1;
       else failed += 1;
-      const nextCurrent = cleanNumber(result.metadata?.current_players);
-      const nextMax = cleanNumber(result.metadata?.max_players);
-      const changed = nextCurrent !== beforeCurrent || nextMax !== beforeMax;
+      const resultCurrent = cleanNumber(result.metadata?.current_players);
+      const resultMax = cleanNumber(result.metadata?.max_players);
+      const nextCurrent = result.ok ? resultCurrent : null;
+      const nextMax = result.ok ? resultMax : null;
+      const changed = result.ok && (nextCurrent !== beforeCurrent || nextMax !== beforeMax);
       if (changed) updatedPlayerCounts += 1;
       await recordStatusCheckResult(env, {
         guildId: row.guild_id,
@@ -720,21 +724,26 @@ export async function refreshLivePlayerCountsForActiveServers(
         ok: result.ok,
         currentPlayers: nextCurrent,
         maxPlayers: nextMax,
-        serverOnline: metadataOnlineValue(result.metadata),
-        serverStatus: result.metadata?.server_status ?? null,
+        serverOnline: result.ok ? metadataOnlineValue(result.metadata) : null,
+        serverStatus: result.ok ? result.metadata?.server_status ?? null : null,
         error: result.ok ? null : result.message,
       });
       lockClearedByResult = true;
-      await upsertServerPublicCache(env, {
-        guildId: row.guild_id,
-        planKey: row.plan_key,
-        publicServerName: serverName,
-        currentPlayers: nextCurrent,
-        maxPlayers: nextMax,
-        serverOnline: metadataOnlineValue(result.metadata),
-        serverStatus: result.metadata?.server_status ?? null,
-        lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
-      });
+      if (result.ok && result.player_count_status === "fresh") {
+        await upsertServerPublicCache(env, {
+          guildId: row.guild_id,
+          planKey: row.plan_key,
+          publicServerName: serverName,
+          currentPlayers: nextCurrent,
+          maxPlayers: nextMax,
+          serverOnline: metadataOnlineValue(result.metadata),
+          serverStatus: result.metadata?.server_status ?? null,
+          lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
+        });
+        await patchHomeStatsPlayerCountsFromFreshMetadata(env).catch((error) => {
+          console.warn("DZN HOME STATS PLAYER COUNT SNAPSHOT PATCH SKIPPED", error instanceof Error ? error.message : "home-stats player count patch failed");
+        });
+      }
       if (result.ok && shouldQueueDiscordUpdates) {
         await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], changed ? "status-change" : "status-check");
       }
@@ -744,8 +753,8 @@ export async function refreshLivePlayerCountsForActiveServers(
         server_name: serverName,
         status: result.ok ? "succeeded" : "failed",
         changed,
-        current_players: nextCurrent,
-        max_players: nextMax,
+        current_players: resultCurrent,
+        max_players: resultMax,
         player_count_status: normalizePlayerCountStatus(result.player_count_status),
         player_count_last_checked_at: result.player_count_last_checked_at ?? null,
         metadata_last_checked_at: result.metadata_last_checked_at ?? null,
@@ -989,10 +998,11 @@ async function fetchNitradoOnlinePlayerCount(
   token: string,
   serviceId: string,
   now: string,
+  timeoutMs = 2500,
 ): Promise<NitradoLivePlayerCountProbe | null> {
   if (!serviceId) return null;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2500);
+  const timeout = setTimeout(() => controller.abort(), Math.max(500, Math.min(Math.trunc(timeoutMs) || 2500, 2500)));
   try {
     const response = await fetch(
       `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers/games/players`,

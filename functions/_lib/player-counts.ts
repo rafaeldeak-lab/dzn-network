@@ -25,6 +25,11 @@ export const PUBLIC_CACHE_PLAYER_COUNT_FRESH_SQL = `(
   server_public_cache.current_player_count IS NOT NULL
   AND server_public_cache.last_status_update_at IS NOT NULL
   AND server_public_cache.last_status_update_at >= ${PUBLIC_PLAYER_COUNT_FRESHNESS_CUTOFF_SQL}
+  AND lower(COALESCE(linked_servers.player_count_status, '')) != 'unavailable'
+  AND (
+    linked_servers.player_count_last_checked_at IS NULL
+    OR server_public_cache.last_status_update_at >= linked_servers.player_count_last_checked_at
+  )
 )`;
 
 export const PUBLIC_CURRENT_PLAYERS_SQL = `CASE
@@ -47,6 +52,7 @@ END`;
 
 export const PUBLIC_PLAYER_COUNT_STATUS_SQL = `CASE
   WHEN ${PUBLIC_LINKED_PLAYER_COUNT_FRESH_SQL} OR ${PUBLIC_CACHE_PLAYER_COUNT_FRESH_SQL} THEN 'fresh'
+  WHEN lower(COALESCE(linked_servers.player_count_status, '')) = 'unavailable' THEN 'unavailable'
   ELSE 'stale'
 END`;
 
@@ -81,7 +87,14 @@ export function resolveFreshPublicPlayerCount(row: PublicPlayerCountSourceRow, n
   }
 
   const cacheCurrent = finiteNumber(row.cacheCurrentPlayers);
-  const cacheFresh = cacheCurrent !== null && isFreshTimestamp(row.cacheCheckedAt, nowMs);
+  const linkedStatus = String(row.linkedStatus ?? "").toLowerCase();
+  const linkedCheckedAt = timestampMs(row.linkedCheckedAt);
+  const cacheCheckedAt = timestampMs(row.cacheCheckedAt);
+  const cacheNotOlderThanLatestAttempt = linkedCheckedAt === null || (cacheCheckedAt !== null && cacheCheckedAt >= linkedCheckedAt);
+  const cacheFresh = cacheCurrent !== null
+    && linkedStatus !== "unavailable"
+    && cacheNotOlderThanLatestAttempt
+    && isFreshTimestamp(row.cacheCheckedAt, nowMs);
   if (cacheFresh) {
     return {
       currentPlayers: cacheCurrent,
@@ -96,7 +109,7 @@ export function resolveFreshPublicPlayerCount(row: PublicPlayerCountSourceRow, n
     currentPlayers: null,
     maxPlayers: null,
     checkedAt: row.linkedCheckedAt ?? row.cacheCheckedAt ?? null,
-    status: "stale" as const,
+    status: linkedStatus === "unavailable" ? "unavailable" as const : "stale" as const,
     source: "none" as const,
   };
 }
@@ -136,7 +149,7 @@ type PublicPlayerCountDbRow = {
   current_players: number | null;
   max_players: number | null;
   checked_at: string | null;
-  player_count_status: "fresh" | "stale" | null;
+  player_count_status: "fresh" | "stale" | "unavailable" | null;
   linked_current_players: number | null;
   linked_max_players: number | null;
   linked_checked_at: string | null;
@@ -299,8 +312,13 @@ export function publicPlayerCountSummaryForApi(summary: PublicPlayerCountSummary
 }
 
 function isFreshTimestamp(value: string | null | undefined, nowMs: number) {
+  const time = timestampMs(value);
+  return time !== null && nowMs - time <= PUBLIC_PLAYER_COUNT_FRESHNESS_MS;
+}
+
+function timestampMs(value: string | null | undefined) {
   const time = Date.parse(String(value ?? ""));
-  return Number.isFinite(time) && nowMs - time <= PUBLIC_PLAYER_COUNT_FRESHNESS_MS;
+  return Number.isFinite(time) ? time : null;
 }
 
 function finiteNumber(value: unknown) {
