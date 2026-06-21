@@ -857,14 +857,20 @@ function ServerDashboard({
     : lastGoodDashboardStats;
   const preferLastKnownStats = Boolean(cachedDashboardStats && isWaitingForNitradoStatsStatus(effectiveSyncStatus));
   const pickDashboardStat = (syncValue: number | null | undefined, cachedValue: number | null | undefined) => {
+    if (cachedValue !== null && cachedValue !== undefined && effectiveDashboardHealth?.source !== "local_fallback") return cachedValue;
     if (preferLastKnownStats && cachedValue !== null && cachedValue !== undefined) return cachedValue;
     return syncValue ?? cachedValue ?? null;
   };
   const lastSyncDuration = syncStatus?.last_sync_duration_ms ?? lastSyncResult?.syncDurationMs ?? null;
   const activityCount = (effectiveSyncData?.total_joins ?? effectiveDashboardHealth?.stats.joins ?? 0) + (effectiveSyncData?.total_disconnects ?? effectiveDashboardHealth?.stats.disconnects ?? 0) + (effectiveSyncData?.total_deaths ?? effectiveDashboardHealth?.stats.deaths ?? 0);
   const noPvpKillsYet = statsSyncActive && (effectiveSyncData?.total_kills ?? effectiveDashboardHealth?.stats.kills ?? 0) === 0;
-  const globalRankLabel = formatGlobalRank(server.global_rank ?? server.rank ?? null);
-  const scoreLabel = server.score_label ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending");
+  const dashboardHealthRank = typeof cachedDashboardStats?.stats.rank === "number" ? cachedDashboardStats.stats.rank : null;
+  const globalRankLabel = formatGlobalRank(dashboardHealthRank ?? server.global_rank ?? server.rank ?? null);
+  const dashboardHealthScore = cachedDashboardStats?.stats.score;
+  const scoreLabel = cachedDashboardStats?.stats.score_label
+    ?? (dashboardHealthScore !== undefined ? String(dashboardHealthScore) : null)
+    ?? server.score_label
+    ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : "Pending");
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown ?? null);
   const syncBanner = getSyncBanner({
     active: statsSyncActive,
@@ -888,7 +894,7 @@ function ServerDashboard({
   const metadataChangedLabel = server.metadata_last_changed_at ? formatRelativeTime(server.metadata_last_changed_at) : null;
   const dashboardPlayerCount = pickFreshestDashboardPlayerCount(server, effectiveDashboardHealth?.server ?? null);
   const playerCountCheckedLabel = dashboardPlayerCount.checkedAt ? formatRelativeTime(dashboardPlayerCount.checkedAt) : "not checked yet";
-  const playerCountStatusLabel = formatPlayerCountStatus(dashboardPlayerCount.status);
+  const playerCountStatusLabel = formatPlayerCountStatus(dashboardPlayerCount.status, dashboardPlayerCount.checkedAt);
   const currentPlayers = dashboardPlayerCount.currentPlayers ?? cachedDashboardStats?.stats.players ?? null;
   const maxPlayers = dashboardPlayerCount.maxPlayers;
   const playerSlotsLabel = formatDashboardPlayerSlots(
@@ -918,10 +924,9 @@ function ServerDashboard({
     joins: pickDashboardStat(effectiveSyncData?.total_joins, cachedDashboardStats?.stats.joins),
     disconnects: pickDashboardStat(effectiveSyncData?.total_disconnects, cachedDashboardStats?.stats.disconnects),
     uniquePlayers: pickDashboardStat(effectiveSyncData?.unique_players, cachedDashboardStats?.stats.unique_players),
-    score: server.score_label
-      ?? (typeof server.score === "number" && server.score > 0 ? String(server.score) : cachedDashboardStats?.stats.score !== undefined ? String(cachedDashboardStats.stats.score) : "Pending"),
+    score: scoreLabel,
   };
-  const ownerReputationTier = inferDashboardReputationTier(server.score ?? cachedDashboardStats?.stats.score ?? 0);
+  const ownerReputationTier = inferDashboardReputationTier(cachedDashboardStats?.stats.score ?? server.score ?? 0);
   const ownerBadgeCollection = useMemo(() => buildServerBadgeCollection({
     serverId: server.id,
     planKey: effectiveBillingStatus?.plan_key ?? "starter",
@@ -932,14 +937,15 @@ function ServerDashboard({
     totalDisconnects: dashboardStatValues.disconnects,
     uniquePlayers: dashboardStatValues.uniquePlayers,
     longestKill: server.longest_kill ?? server.score_breakdown?.longest_kill_points ?? 0,
-    rank: server.global_rank ?? server.rank ?? null,
-    score: server.score ?? cachedDashboardStats?.stats.score ?? 0,
+    rank: dashboardHealthRank ?? server.global_rank ?? server.rank ?? null,
+    score: cachedDashboardStats?.stats.score ?? server.score ?? 0,
     category: normalizedServerCategory ?? effectiveServerMode,
     active: statsSyncActive,
     verified: statsSyncActive,
     featured: false,
   }), [
     cachedDashboardStats?.stats.score,
+    dashboardHealthRank,
     dashboardStatValues.deaths,
     dashboardStatValues.disconnects,
     dashboardStatValues.joins,
@@ -1268,25 +1274,28 @@ function ServerDashboard({
 
   useEffect(() => {
     let active = true;
-    const initialRefresh = window.setTimeout(() => {
-      if (active) {
-        void refreshSyncData({ warnOnError: true });
-        void onRefreshRef.current();
-      }
-    }, 0);
+    const refreshVisibleDashboard = () => {
+      if (!active || document.visibilityState === "hidden") return;
+      void refreshDashboardHealth();
+      void refreshSyncData({ warnOnError: true });
+      void onRefreshRef.current();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshVisibleDashboard();
+    };
+    const initialRefresh = window.setTimeout(refreshVisibleDashboard, 0);
     const interval = window.setInterval(() => {
-      if (active && document.visibilityState !== "hidden") {
-        void refreshSyncData({ warnOnError: true });
-        void onRefreshRef.current();
-      }
+      refreshVisibleDashboard();
     }, SYNC_POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       active = false;
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refreshSyncData]);
+  }, [refreshDashboardHealth, refreshSyncData]);
 
   useEffect(() => {
     const jobId = activeAdmImportJobPollId;
@@ -8285,6 +8294,7 @@ function formatPlayerCountFreshnessDetail(
   const fraction = formatPlayerSlots(current, max);
   const age = checkedAt ? formatRelativeTime(checkedAt) : "not checked yet";
   if (isLivePlayerCountFresh(checkedAt, status)) return `${fraction} confirmed from Nitrado ${age}`;
+  if (status === "unavailable") return `Live player count unavailable. Last known: ${fraction}. Last attempted ${age}.`;
   if (shouldShowLastKnownPlayerCountLabel(checkedAt)) {
     if (isLivePlayerCountWarning(checkedAt, status)) return `Live player count stale. Last known: ${fraction}. Last checked ${age}.`;
     return `Player count stale - Nitrado metadata not refreshed for ${age}. Last known: ${fraction}.`;
@@ -8329,10 +8339,11 @@ function formatNitradoServerStatus(status: string | null | undefined, online: bo
   return "Unknown";
 }
 
-function formatPlayerCountStatus(value: string | null | undefined) {
-  if (value === "fresh") return "Fresh";
+function formatPlayerCountStatus(value: string | null | undefined, checkedAt?: string | null | undefined) {
+  if (isLivePlayerCountFresh(checkedAt, value)) return "Fresh";
   if (value === "stale") return "Stale";
   if (value === "unavailable") return "Unavailable";
+  if (value === "fresh") return "Stale";
   return "Unknown";
 }
 

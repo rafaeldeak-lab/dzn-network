@@ -1391,6 +1391,8 @@ export type DashboardHealthResult = {
     disconnects: number;
     unique_players: number;
     score: number;
+    score_label?: string | null;
+    rank?: number | null;
   };
   autoSync?: {
     overallStatus: string;

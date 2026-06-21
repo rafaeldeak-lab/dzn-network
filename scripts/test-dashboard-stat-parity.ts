@@ -40,6 +40,7 @@ assert.equal(patchedHomeStats.playersOnline, 1, "ADM stat patch must not alter l
 
 const serverStatsSource = readFileSync("functions/_lib/server-stats.ts", "utf8");
 const dashboardHealthSource = readFileSync("functions/api/servers/[serverId]/dashboard/health.ts", "utf8");
+const dashboardComponentSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 const automationStatusSource = readFileSync("functions/api/servers/[serverId]/adm/automation-status.ts", "utf8");
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
 const homeStatsSource = readFileSync("functions/api/public/home-stats.ts", "utf8");
@@ -55,6 +56,13 @@ assert.equal(serverStatsSource.includes("build_events"), true, "Events Tracked m
 
 assert.equal(dashboardHealthSource.includes("getCanonicalServerStats"), true, "Dashboard health must use canonical server stats.");
 assert.equal(dashboardHealthSource.includes("statsFromCanonical"), true, "Dashboard health must map canonical stats into its overview payload.");
+assert.equal(dashboardHealthSource.includes("getRankedPublicServers"), true, "Dashboard health score/rank must come from the same public ranking helper as public leaderboards.");
+assert.equal(dashboardHealthSource.includes("score_label: rankedServer?.score_label"), true, "Dashboard health must expose the current canonical score label.");
+assert.equal(dashboardHealthSource.includes("rank: rankedServer?.rank"), true, "Dashboard health must expose the current canonical public rank.");
+assert.equal(dashboardComponentSource.includes("formatPlayerCountStatus(dashboardPlayerCount.status, dashboardPlayerCount.checkedAt)"), true, "Dashboard freshness label must use the same timestamp-aware freshness calculation as the detail text.");
+assert.equal(dashboardComponentSource.includes("refreshDashboardHealth();"), true, "Dashboard must poll the bounded dashboard health endpoint for canonical stat refreshes.");
+assert.equal(dashboardComponentSource.includes("document.addEventListener(\"visibilitychange\""), true, "Dashboard must refetch bounded health/status data when the tab becomes visible.");
+assert.equal(dashboardComponentSource.includes("document.visibilityState === \"hidden\""), true, "Dashboard polling must pause while the tab is hidden.");
 assert.equal(automationStatusSource.includes("getCanonicalServerStats"), true, "ADM automation status must use canonical server stats.");
 assert.equal(admSyncSource.includes("canonicalStats?.kills"), true, "Dashboard sync status must return canonical kills.");
 assert.equal(admSyncSource.includes("patchHomeStatsAdmStatsFromCanonicalEvents"), true, "Successful ADM imports must refresh home-stats ADM snapshots.");
