@@ -606,12 +606,19 @@ async function refreshNitradoServerPlayerCountOnly(
 
 export async function refreshLivePlayerCountsForActiveServers(
   env: Env,
-  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; livePlayerCountStaleMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean; debugServiceId?: string | null } = {},
+  options: { maxServers?: number; skipFreshWithinMs?: number; includeResults?: boolean; deadlineMs?: number; livePlayerCountStaleMs?: number; queueDiscordUpdates?: boolean; skipAutomationMaintenance?: boolean; debugServiceId?: string | null; patchHomeStats?: boolean } = {},
 ): Promise<ScheduledMetadataSyncResult> {
-  await ensureLinkedServerMetadataColumns(env);
+  const skipScheduledMaintenance = options.skipAutomationMaintenance === true;
+  if (!skipScheduledMaintenance) {
+    await ensureLinkedServerMetadataColumns(env);
+  }
   const maxServers = Math.max(1, Math.min(Math.trunc(Number(options.maxServers ?? 25)) || 25, 100));
+  const candidateLimit = skipScheduledMaintenance
+    ? Math.max(maxServers, Math.min(maxServers + 5, 10))
+    : maxServers;
   const deadlineAtMs = Date.now() + Math.max(500, Math.min(Math.trunc(Number(options.deadlineMs ?? 20_000)) || 20_000, 30_000));
   const shouldQueueDiscordUpdates = options.queueDiscordUpdates !== false;
+  const shouldPatchHomeStats = options.patchHomeStats !== false && !skipScheduledMaintenance;
   const skipFreshWithinMs = typeof options.skipFreshWithinMs === "number" && Number.isFinite(options.skipFreshWithinMs)
     ? Math.max(0, options.skipFreshWithinMs)
     : null;
@@ -619,7 +626,7 @@ export async function refreshLivePlayerCountsForActiveServers(
     ? Math.max(30_000, Math.min(Math.trunc(options.livePlayerCountStaleMs), 30 * 60 * 1000))
     : METADATA_STALE_MS;
   const rows = options.skipAutomationMaintenance === true
-    ? await getDueMetadataRefreshServersFast(env, maxServers, livePlayerCountStaleMs, options.debugServiceId)
+    ? await getDueMetadataRefreshServersFast(env, candidateLimit, livePlayerCountStaleMs, options.debugServiceId)
     : await getDueStatusAutomationServers(env, maxServers);
 
   let processed = 0;
@@ -641,6 +648,7 @@ export async function refreshLivePlayerCountsForActiveServers(
     };
   }
   for (const row of rows) {
+    if (processed >= maxServers) break;
     if (Date.now() >= deadlineAtMs - 750) {
       budgetExhausted = true;
       skipped += 1;
@@ -727,7 +735,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         serverOnline: result.ok ? metadataOnlineValue(result.metadata) : null,
         serverStatus: result.ok ? result.metadata?.server_status ?? null : null,
         error: result.ok ? null : result.message,
-      });
+      }, { skipSchemaEnsure: skipScheduledMaintenance });
       lockClearedByResult = true;
       if (result.ok && result.player_count_status === "fresh") {
         await upsertServerPublicCache(env, {
@@ -739,10 +747,12 @@ export async function refreshLivePlayerCountsForActiveServers(
           serverOnline: metadataOnlineValue(result.metadata),
           serverStatus: result.metadata?.server_status ?? null,
           lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
-        });
-        await patchHomeStatsPlayerCountsFromFreshMetadata(env).catch((error) => {
-          console.warn("DZN HOME STATS PLAYER COUNT SNAPSHOT PATCH SKIPPED", error instanceof Error ? error.message : "home-stats player count patch failed");
-        });
+        }, { skipSchemaEnsure: skipScheduledMaintenance });
+        if (shouldPatchHomeStats) {
+          await patchHomeStatsPlayerCountsFromFreshMetadata(env).catch((error) => {
+            console.warn("DZN HOME STATS PLAYER COUNT SNAPSHOT PATCH SKIPPED", error instanceof Error ? error.message : "home-stats player count patch failed");
+          });
+        }
       }
       if (result.ok && shouldQueueDiscordUpdates) {
         await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], changed ? "status-change" : "status-check");
@@ -768,7 +778,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         planKey: row.plan_key,
         ok: false,
         error: error instanceof Error ? error.message : "Nitrado metadata refresh failed",
-      }).then(() => {
+      }, { skipSchemaEnsure: skipScheduledMaintenance }).then(() => {
         lockClearedByResult = true;
       }).catch(() => null);
       results.push({
@@ -826,6 +836,7 @@ async function getDueMetadataRefreshServersFast(
   const now = new Date().toISOString();
   const staleStatusLockCutoff = new Date(Date.now() - Math.max(Math.min(livePlayerCountStaleMs, 90_000), 60_000)).toISOString();
   const livePlayerCountCutoff = new Date(Date.now() - livePlayerCountStaleMs).toISOString();
+  const unavailableRetryCutoff = new Date(Date.now() - Math.max(2 * 60 * 1000, Math.min(livePlayerCountStaleMs * 3, 5 * 60 * 1000))).toISOString();
   const db = requireDb(env);
   const selectDueServersSql =
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
@@ -845,31 +856,30 @@ async function getDueMetadataRefreshServersFast(
          AND linked_servers.nitrado_service_id != ''
          AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
          AND (
-           COALESCE(server_sync_state.currently_checking_status, 0) = 0
-           OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
-         )
-         AND (
            COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
            OR linked_servers.player_count_last_checked_at IS NULL
            OR linked_servers.player_count_last_checked_at <= ?
+           OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
+         )
+         AND (
+           lower(COALESCE(linked_servers.player_count_status, 'unknown')) != 'unavailable'
+           OR linked_servers.player_count_last_checked_at IS NULL
+           OR linked_servers.player_count_last_checked_at <= ?
+           OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
          )
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
-         CASE
-           WHEN linked_servers.player_count_last_checked_at IS NULL
-             OR linked_servers.player_count_last_checked_at <= ?
-           THEN 0 ELSE 1
-         END ASC,
          CASE lower(COALESCE(linked_servers.listing_visibility, 'public'))
            WHEN 'public' THEN 0
            WHEN 'listed' THEN 0
            ELSE 1
          END ASC,
+         CASE WHEN linked_servers.player_count_last_checked_at IS NULL THEN 0 ELSE 1 END ASC,
+         COALESCE(linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
          CASE lower(COALESCE(linked_servers.player_count_status, 'unknown'))
            WHEN 'unavailable' THEN 1
            ELSE 0
          END ASC,
-         COALESCE(linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at, '1970-01-01T00:00:00.000Z') ASC,
          CASE lower(COALESCE(server_subscriptions.plan_key, 'free'))
            WHEN 'premium' THEN 4
            WHEN 'network' THEN 4
@@ -883,7 +893,7 @@ async function getDueMetadataRefreshServersFast(
        LIMIT ?`;
   const rows = await db
     .prepare(selectDueServersSql)
-    .bind(staleStatusLockCutoff, now, livePlayerCountCutoff, livePlayerCountCutoff, maxServers)
+    .bind(now, livePlayerCountCutoff, staleStatusLockCutoff, unavailableRetryCutoff, staleStatusLockCutoff, maxServers)
     .all<AutomationSyncServer>();
   const dueRows = rows.results ?? [];
   const sanitizedDebugServiceId = cleanServiceId(debugServiceId);

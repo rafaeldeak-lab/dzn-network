@@ -39,6 +39,7 @@ async function run() {
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
       assert.equal(options.skipAutomationMaintenance, true);
+      assert.equal(options.patchHomeStats, false);
       return {
         processed: 3,
         succeeded: 3,
@@ -118,6 +119,7 @@ async function run() {
       assert.equal(options.includeResults, true);
       assert.equal(options.queueDiscordUpdates, false);
       assert.equal(options.skipAutomationMaintenance, true);
+      assert.equal(options.patchHomeStats, false);
       return {
         processed: 1,
         succeeded: 1,
@@ -199,6 +201,10 @@ async function run() {
   assert.equal(metadataSource.includes("deadlineAtMs - Date.now() - 700"), true, "Scheduled metadata attempts must leave response budget after the safe Nitrado player-count fetch.");
   assert.equal(metadataSource.includes("Math.min(1500"), true, "Scheduled Nitrado player-count fetches must stay below the route deadline.");
   assert.equal(metadataSource.includes("timeoutMs = 2500"), true, "Manual/default metadata refreshes keep the existing safe Nitrado timeout cap.");
+  const metadataRunSource = readFileSync("functions/api/sync/metadata/run.ts", "utf8");
+  assert.equal(metadataRunSource.includes("patchHomeStats: false"), true, "Scheduled metadata route should not rewrite broad home-stats snapshots.");
+  assert.equal(metadataRunSource.includes("stale_over_slo_count"), true, "Metadata route should expose five-minute attempt SLO failures.");
+  assert.equal(metadataRunSource.includes("stale_lock_count"), true, "Metadata route should expose stale lock failures.");
 }
 
 function makeContext(request: Request, testEnv: Env, waitUntil: PagesContext["waitUntil"] = () => undefined): PagesContext {

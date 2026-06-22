@@ -25,6 +25,7 @@
     "test:server-war-gating": "tsx scripts/test-server-war-gating.ts",
     "test:server-war-automation": "tsx scripts/test-server-war-automation.ts",
     "test:automation-schedulers": "tsx scripts/test-automation-schedulers.ts",
+    "test:metadata-fairness": "tsx scripts/test-metadata-fairness.ts",
     "test:public-servers-fallback": "tsx scripts/test-public-servers-fallback.ts",
     "test:auto-update-worker": "tsx scripts/test-auto-update-worker.ts",
     "seed:advanced-showcase-preview": "tsx scripts/seed-advanced-showcase-preview.ts",

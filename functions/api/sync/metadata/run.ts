@@ -46,6 +46,7 @@ type MetadataRefreshOptions = {
   includeResults: boolean;
   queueDiscordUpdates: boolean;
   skipAutomationMaintenance: boolean;
+  patchHomeStats: boolean;
   debugServiceId: string | null;
 };
 
@@ -86,6 +87,7 @@ export async function handleMetadataSyncRun(
     includeResults: true,
     queueDiscordUpdates: false,
     skipAutomationMaintenance: true,
+    patchHomeStats: false,
     debugServiceId,
   };
   const { result, taskStatus, taskError } = await runMetadataRefresh(env, source, startedAt, refreshOptions, handlers ?? await defaultHandlers());
@@ -118,7 +120,7 @@ export async function handleMetadataSyncRun(
     stale_remaining_count: staleRemainingCount,
     next_recommended_run_seconds: staleRemainingCount && staleRemainingCount > 0 ? 60 : 300,
     diagnostics: buildSafeMetadataDiagnostics(result, diagnostics, debugServiceId),
-    warnings: buildMetadataWarnings(result, taskStatus === "timed_out", staleRemainingCount),
+    warnings: buildMetadataWarnings(result, taskStatus === "timed_out", staleRemainingCount, diagnostics),
     source,
     cron: typeof body.cron === "string" && body.cron.trim() ? body.cron.trim().slice(0, 80) : null,
     mode: typeof body.mode === "string" && body.mode.trim() ? body.mode.trim().slice(0, 80) : "single_bounded",
@@ -200,16 +202,23 @@ async function countStaleMetadataRemaining(env: Env, staleMs = 90_000) {
 
 async function readMetadataDiagnostics(env: Env, staleMs = 90_000) {
   const cutoff = new Date(Date.now() - Math.max(30_000, Math.min(staleMs, 30 * 60 * 1000))).toISOString();
+  const attemptSloCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const lockLeaseCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const db = await requireDbLazy(env);
   const row = await db
     .prepare(
       `SELECT
          COUNT(*) AS stale_remaining_count,
+         SUM(CASE WHEN COALESCE(linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at, '1970-01-01T00:00:00.000Z') <= ? THEN 1 ELSE 0 END) AS stale_over_slo_count,
+         SUM(CASE WHEN COALESCE(server_sync_state.currently_checking_status, 0) = 1
+                   AND COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
+                  THEN 1 ELSE 0 END) AS stale_lock_count,
          MAX(CASE WHEN linked_servers.player_count_last_checked_at IS NOT NULL THEN
            (strftime('%s', 'now') - strftime('%s', linked_servers.player_count_last_checked_at))
          ELSE NULL END) AS oldest_public_metadata_age_seconds
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) IN ('public', 'listed')
          AND linked_servers.nitrado_service_id IS NOT NULL
@@ -223,8 +232,13 @@ async function readMetadataDiagnostics(env: Env, staleMs = 90_000) {
            OR linked_servers.player_count_last_checked_at <= ?
          )`,
     )
-    .bind(cutoff, cutoff)
-    .first<{ stale_remaining_count: number | null; oldest_public_metadata_age_seconds: number | null }>();
+    .bind(attemptSloCutoff, lockLeaseCutoff, cutoff, cutoff)
+    .first<{
+      stale_remaining_count: number | null;
+      stale_over_slo_count: number | null;
+      stale_lock_count: number | null;
+      oldest_public_metadata_age_seconds: number | null;
+    }>();
 
   const tracked = await db
     .prepare(
@@ -245,6 +259,9 @@ async function readMetadataDiagnostics(env: Env, staleMs = 90_000) {
 
   return {
     stale_remaining_count: Number(row?.stale_remaining_count ?? 0),
+    stale_over_slo_count: Number(row?.stale_over_slo_count ?? 0),
+    stale_lock_count: Number(row?.stale_lock_count ?? 0),
+    health_status: Number(row?.stale_over_slo_count ?? 0) > 0 || Number(row?.stale_lock_count ?? 0) > 0 ? "failed" : "ok",
     oldest_public_metadata_age_seconds: row?.oldest_public_metadata_age_seconds === null || row?.oldest_public_metadata_age_seconds === undefined
       ? null
       : Number(row.oldest_public_metadata_age_seconds),
@@ -282,6 +299,9 @@ function buildSafeMetadataDiagnostics(
       })),
     stale_remaining_count: diagnostics?.stale_remaining_count ?? null,
     oldest_public_metadata_age_seconds: diagnostics?.oldest_public_metadata_age_seconds ?? null,
+    stale_over_slo_count: diagnostics?.stale_over_slo_count ?? null,
+    stale_lock_count: diagnostics?.stale_lock_count ?? null,
+    health_status: diagnostics?.health_status ?? null,
     tracked_public_servers: diagnostics?.tracked_public_servers ?? [],
   };
 }
@@ -290,10 +310,13 @@ function buildMetadataWarnings(
   result: MetadataRefreshResult,
   timedOut: boolean,
   staleRemainingCount: number | null,
+  diagnostics: Awaited<ReturnType<typeof readMetadataDiagnostics>> | null,
 ) {
   const warnings: string[] = [];
   if (timedOut || result.budget_exhausted) warnings.push("Metadata refresh reached its response/runtime budget; remaining servers will continue next run.");
   if (staleRemainingCount !== null && staleRemainingCount > 0) warnings.push(`${staleRemainingCount} stale metadata server${staleRemainingCount === 1 ? "" : "s"} remain queued for the next scheduler tick.`);
+  if (diagnostics && diagnostics.stale_over_slo_count > 0) warnings.push(`${diagnostics.stale_over_slo_count} eligible metadata server${diagnostics.stale_over_slo_count === 1 ? "" : "s"} exceeded the five-minute attempt SLO.`);
+  if (diagnostics && diagnostics.stale_lock_count > 0) warnings.push(`${diagnostics.stale_lock_count} metadata status lock${diagnostics.stale_lock_count === 1 ? "" : "s"} exceeded the scheduler lease.`);
   const failed = result.results.filter((item) => item.status === "failed");
   if (failed.length > 0) warnings.push(`${failed.length} metadata refresh attempt${failed.length === 1 ? "" : "s"} failed; previous player counts remain protected by freshness rules.`);
   return warnings;

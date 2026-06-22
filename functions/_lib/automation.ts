@@ -509,8 +509,10 @@ export async function recordStatusCheckResult(env: Env, values: {
   serverOnline?: boolean | number | null;
   serverStatus?: string | null;
   error?: string | null;
-}) {
-  await ensureAutomationSchema(env);
+}, options: { skipSchemaEnsure?: boolean } = {}) {
+  if (options.skipSchemaEnsure !== true) {
+    await ensureAutomationSchema(env);
+  }
   const db = requireDb(env);
   const now = new Date().toISOString();
   const nextDue = addMinutesIso(now, getServerStatusInterval(values.planKey));
@@ -975,8 +977,10 @@ export async function upsertServerPublicCache(env: Env, input: {
   partnerFeatured?: boolean;
   lastStatusUpdateAt?: string | null;
   lastAdmUpdateAt?: string | null;
-}) {
-  await ensureAutomationSchema(env);
+}, options: { skipSchemaEnsure?: boolean } = {}) {
+  if (options.skipSchemaEnsure !== true) {
+    await ensureAutomationSchema(env);
+  }
   const now = new Date().toISOString();
   await requireDb(env)
     .prepare(
