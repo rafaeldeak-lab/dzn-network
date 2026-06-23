@@ -1,0 +1,515 @@
+name: DZN Player Count History Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - audit/player-count-history-20260623
+
+jobs:
+  player-count-history-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run SELECT-only D1 historical player-count audit
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or variable."
+            exit 1
+          fi
+
+          cat > audit-player-count-history.mjs <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { writeFileSync } from "node:fs";
+
+          const DB_NAME = "dzn_network_db";
+          const TARGET = {
+            serverId: "8741ac30-84ba-41e2-93e8-d584cdc81c89",
+            serviceId: "18765761",
+            serverName: "NukeTown",
+          };
+          const MAX_ROWS_PER_QUERY = 200;
+
+          function sqlString(value) {
+            return `'${String(value).replace(/'/g, "''")}'`;
+          }
+
+          function quoteIdent(value) {
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error(`Unsafe identifier: ${value}`);
+            return `"${value}"`;
+          }
+
+          function assertSelectOnly(sql) {
+            const compact = sql.replace(/\s+/g, " ").trim();
+            if (!/^(select|with)\b/i.test(compact)) throw new Error(`Refusing non-SELECT SQL: ${compact.slice(0, 80)}`);
+            if (/\b(insert|update|delete|drop|alter|create|replace|attach|detach|vacuum|reindex)\b/i.test(compact)) {
+              throw new Error(`Refusing mutating SQL: ${compact.slice(0, 80)}`);
+            }
+          }
+
+          function runD1(sql) {
+            assertSelectOnly(sql);
+            const output = execFileSync(
+              "npx",
+              ["wrangler", "d1", "execute", DB_NAME, "--remote", "--json", "--command", sql],
+              {
+                encoding: "utf8",
+                maxBuffer: 25 * 1024 * 1024,
+                env: process.env,
+              },
+            );
+            const parsed = JSON.parse(output);
+            return parsed.flatMap((entry) => entry.results ?? []);
+          }
+
+          function safeRun(sql, fallback = []) {
+            try {
+              return runD1(sql);
+            } catch (error) {
+              warnings.push({ category: "query_failed", detail: error instanceof Error ? error.message.slice(0, 180) : "query failed" });
+              return fallback;
+            }
+          }
+
+          function pick(row, names) {
+            for (const name of names) {
+              if (Object.prototype.hasOwnProperty.call(row, name) && row[name] !== null && row[name] !== undefined && row[name] !== "") return row[name];
+            }
+            return null;
+          }
+
+          function toNumber(value) {
+            if (value === null || value === undefined || value === "") return null;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : null;
+          }
+
+          function timestampFromRow(row) {
+            return pick(row, [
+              "created_at", "updated_at", "finished_at", "started_at", "checked_at", "observed_at", "sampled_at",
+              "metadata_last_checked_at", "player_count_last_checked_at", "last_status_update_at", "timestamp",
+              "time", "at",
+            ]);
+          }
+
+          function taskRunId(table, row) {
+            const id = pick(row, ["automation_cron_run_id", "cron_run_id", "sync_run_id", "workflow_run_id", "run_id", "job_id", "task_id", "id"]);
+            return id === null ? null : `${table}:${String(id).slice(0, 80)}`;
+          }
+
+          function classify(source) {
+            const value = String(source ?? "").toLowerCase();
+            if (/getstats|gameservers_stats|webinterface_get_stats|\/stats|stats/.test(value)) return "3. getStats/stats response";
+            if (/gameservers_games_players|games\/players|gameservers\/games\/players|players_endpoint/.test(value)) return "2. /gameservers/games/players response";
+            if (/server_public_cache|public_cache|cache/.test(value)) return "4. stale server_public_cache";
+            if (/broad_gameservers|\/gameservers\b|gameservers metadata|metadata|\bgameservers\b/.test(value)) return "1. broad /gameservers API response";
+            return "5. another proven source";
+          }
+
+          function sourceFromText(text) {
+            const value = String(text ?? "");
+            const patterns = [
+              "gameservers_games_players",
+              "gameservers/games/players",
+              "gameservers_stats",
+              "webinterface_get_stats",
+              "getStats",
+              "server_public_cache",
+              "public_cache",
+              "broad_gameservers",
+              "/gameservers",
+              "gameservers",
+              "metadata",
+              "cache",
+            ];
+            return patterns.find((pattern) => value.toLowerCase().includes(pattern.toLowerCase())) ?? null;
+          }
+
+          function extractJsonCandidates(value) {
+            const text = String(value ?? "");
+            const candidates = [];
+            for (const key of ["currentPlayers", "current_players", "current_player_count"]) {
+              const re = new RegExp(`["]?${key}["]?\\s*[:=]\\s*["]?(\\d+)`, "gi");
+              for (const match of text.matchAll(re)) {
+                const current = toNumber(match[1]);
+                if (current !== null && current > 0) candidates.push({ current, key });
+              }
+            }
+            return candidates;
+          }
+
+          function extractMaxFromText(value) {
+            const text = String(value ?? "");
+            for (const key of ["maxPlayers", "max_players", "max_player_count", "slots"]) {
+              const re = new RegExp(`["]?${key}["]?\\s*[:=]\\s*["]?(\\d+)`, "i");
+              const match = text.match(re);
+              if (match) return toNumber(match[1]);
+            }
+            return null;
+          }
+
+          function tryParseJson(value) {
+            if (typeof value !== "string") return null;
+            try { return JSON.parse(value); } catch { return null; }
+          }
+
+          function findJsonFacts(parsed) {
+            const facts = [];
+            function walk(node, path = []) {
+              if (!node || typeof node !== "object") return;
+              if (Array.isArray(node)) {
+                node.forEach((item, index) => walk(item, path.concat(String(index))));
+                return;
+              }
+              const source = sourceFromText(JSON.stringify({
+                source: node.source,
+                helper: node.helper,
+                endpoint: node.endpoint,
+                player_count_source: node.player_count_source,
+                phase: node.phase,
+              }));
+              for (const key of ["currentPlayers", "current_players", "current_player_count"]) {
+                const current = toNumber(node[key]);
+                if (current !== null && current > 0) {
+                  facts.push({
+                    current,
+                    max: toNumber(node.maxPlayers ?? node.max_players ?? node.max_player_count ?? node.slots),
+                    source,
+                    path: path.concat(key).join("."),
+                  });
+                }
+              }
+              if (node.field === "current_players") {
+                for (const key of ["next", "value", "current", "newValue"]) {
+                  const current = toNumber(node[key]);
+                  if (current !== null && current > 0) facts.push({ current, max: null, source, path: path.concat(`field:${key}`).join(".") });
+                }
+                const previous = toNumber(node.previous ?? node.oldValue);
+                if (previous !== null && previous > 0) facts.push({ current: previous, max: null, source, path: path.concat("field:previous").join("."), previousOnly: true });
+              }
+              for (const [key, child] of Object.entries(node)) walk(child, path.concat(key));
+            }
+            walk(parsed);
+            return facts;
+          }
+
+          function addEvidence(input) {
+            const current = toNumber(input.currentPlayers);
+            if (current === null || current <= 0) return;
+            const source = input.sourceHelper ?? "unknown";
+            evidence.push({
+              timestamp: input.timestamp ?? null,
+              currentPlayers: current,
+              maxPlayers: toNumber(input.maxPlayers),
+              sourceHelper: String(source).slice(0, 120),
+              taskRunId: input.taskRunId ?? null,
+              status: input.status ? String(input.status).slice(0, 80) : null,
+              productionCommit: input.productionCommit ? String(input.productionCommit).slice(0, 80) : null,
+              cacheTimestamp: input.cacheTimestamp ?? null,
+              errorWarningCategory: input.errorWarningCategory ?? null,
+              classification: classify(source),
+              evidenceTable: input.evidenceTable,
+              evidenceColumn: input.evidenceColumn ?? null,
+            });
+          }
+
+          const warnings = [];
+          const evidence = [];
+
+          const tables = safeRun("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name");
+          const schema = {};
+          for (const table of tables) {
+            schema[table.name] = safeRun(`SELECT name, type, pk FROM pragma_table_info(${sqlString(table.name)})`);
+          }
+
+          const schemaSummary = tables.map((table) => ({
+            table: table.name,
+            columns: (schema[table.name] ?? []).map((col) => col.name),
+            relevant: /metadata|status|cache|sync|cron|audit|diagnostic|history|snapshot|public|automation|linked_server|server_/i.test(table.name)
+              || (schema[table.name] ?? []).some((col) => /current|player|metadata|status|json|source|cache|cron|run|error|warning/i.test(col.name)),
+          }));
+
+          const relevantTables = schemaSummary.filter((entry) => entry.relevant).map((entry) => entry.table);
+
+          const linkedRows = schema.linked_servers ? safeRun(
+            `SELECT
+               linked_servers.id,
+               linked_servers.nitrado_service_id,
+               linked_servers.public_slug,
+               linked_servers.display_name,
+               linked_servers.server_name,
+               linked_servers.current_players,
+               linked_servers.max_players,
+               linked_servers.player_count_source,
+               linked_servers.player_count_status,
+               linked_servers.player_count_last_checked_at,
+               linked_servers.metadata_last_checked_at,
+               linked_servers.updated_at,
+               server_public_cache.current_player_count AS cache_current_players,
+               server_public_cache.max_player_count AS cache_max_players,
+               server_public_cache.last_status_update_at AS cache_last_status_update_at,
+               server_public_cache.updated_at AS cache_updated_at
+             FROM linked_servers
+             LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+             WHERE linked_servers.id = ${sqlString(TARGET.serverId)}
+                OR linked_servers.nitrado_service_id = ${sqlString(TARGET.serviceId)}
+             LIMIT 10`,
+          ) : [];
+
+          for (const row of linkedRows) {
+            addEvidence({
+              timestamp: row.player_count_last_checked_at ?? row.metadata_last_checked_at ?? row.updated_at,
+              currentPlayers: row.current_players,
+              maxPlayers: row.max_players,
+              sourceHelper: row.player_count_source ?? "linked_servers",
+              taskRunId: "linked_servers:current",
+              status: row.player_count_status,
+              cacheTimestamp: row.cache_last_status_update_at ?? row.cache_updated_at,
+              errorWarningCategory: null,
+              evidenceTable: "linked_servers",
+              evidenceColumn: "current_players",
+            });
+            addEvidence({
+              timestamp: row.cache_last_status_update_at ?? row.cache_updated_at,
+              currentPlayers: row.cache_current_players,
+              maxPlayers: row.cache_max_players,
+              sourceHelper: "server_public_cache",
+              taskRunId: "server_public_cache:current",
+              status: "cache_current_state",
+              cacheTimestamp: row.cache_last_status_update_at ?? row.cache_updated_at,
+              errorWarningCategory: null,
+              evidenceTable: "server_public_cache",
+              evidenceColumn: "current_player_count",
+            });
+          }
+
+          for (const tableName of relevantTables) {
+            const columns = schema[tableName] ?? [];
+            const colNames = columns.map((col) => col.name);
+            const table = quoteIdent(tableName);
+            const targetPredicates = [];
+            if (colNames.includes("linked_server_id")) targetPredicates.push(`${quoteIdent("linked_server_id")} = ${sqlString(TARGET.serverId)}`);
+            if (colNames.includes("server_id")) targetPredicates.push(`${quoteIdent("server_id")} = ${sqlString(TARGET.serverId)}`);
+            if (tableName === "linked_servers" && colNames.includes("id")) targetPredicates.push(`${quoteIdent("id")} = ${sqlString(TARGET.serverId)}`);
+            for (const col of ["nitrado_service_id", "service_id", "source_service_id"]) {
+              if (colNames.includes(col)) targetPredicates.push(`${quoteIdent(col)} = ${sqlString(TARGET.serviceId)}`);
+            }
+
+            const textCols = columns.filter((col) => /TEXT|JSON|VARCHAR|CHAR|CLOB/i.test(col.type ?? "") || /json|metadata|payload|body|response|result|diagnostic|snapshot|error|warning|message|source|name/i.test(col.name));
+            const searchableTextCols = textCols.slice(0, 12);
+            for (const col of searchableTextCols) {
+              const c = quoteIdent(col.name);
+              targetPredicates.push(`${c} LIKE ${sqlString(`%${TARGET.serverId}%`)}`);
+              targetPredicates.push(`${c} LIKE ${sqlString(`%${TARGET.serviceId}%`)}`);
+              targetPredicates.push(`${c} LIKE ${sqlString(`%${TARGET.serverName}%`)}`);
+            }
+
+            const targetWhere = targetPredicates.length ? `(${targetPredicates.join(" OR ")})` : null;
+            if (!targetWhere) continue;
+
+            const timeCols = colNames.filter((name) => /(^|_)(created|updated|started|finished|checked|observed|sampled|timestamp|time|at)($|_)/i.test(name)).slice(0, 5);
+            const idCols = colNames.filter((name) => /(^id$|run_id|job_id|task_id|cron_run_id|workflow_run_id|sync_run_id)/i.test(name)).slice(0, 5);
+            const statusCols = colNames.filter((name) => /status|state|phase/i.test(name)).slice(0, 4);
+            const sourceCols = colNames.filter((name) => /source|helper|endpoint|path|type/i.test(name)).slice(0, 4);
+            const maxCols = colNames.filter((name) => /max.*players|max_player_count|slots|capacity/i.test(name)).slice(0, 3);
+            const currentCols = colNames.filter((name) => /current.*players|current_player_count|players_online|online_players|currentplayers/i.test(name));
+            const errorCols = colNames.filter((name) => /error|warning|message|reason/i.test(name)).slice(0, 3);
+            const commitCols = colNames.filter((name) => /commit|sha|head_sha|git/i.test(name)).slice(0, 2);
+
+            const selectCols = Array.from(new Set([...idCols, ...timeCols, ...statusCols, ...sourceCols, ...maxCols, ...currentCols, ...errorCols, ...commitCols, ...searchableTextCols.map((col) => col.name)])).slice(0, 30);
+            if (selectCols.length === 0) continue;
+
+            for (const currentCol of currentCols) {
+              const rows = safeRun(
+                `SELECT ${selectCols.map((name) => `${quoteIdent(name)} AS ${quoteIdent(name)}`).join(", ")}
+                 FROM ${table}
+                 WHERE ${targetWhere}
+                   AND CAST(${quoteIdent(currentCol)} AS INTEGER) > 0
+                 ORDER BY ${timeCols.length ? timeCols.map(quoteIdent).join(" DESC, ") : "rowid DESC"}
+                 LIMIT ${MAX_ROWS_PER_QUERY}`,
+              );
+              for (const row of rows) {
+                const source = pick(row, sourceCols) ?? sourceFromText(JSON.stringify(row)) ?? `${tableName}.${currentCol}`;
+                addEvidence({
+                  timestamp: timestampFromRow(row),
+                  currentPlayers: row[currentCol],
+                  maxPlayers: pick(row, maxCols),
+                  sourceHelper: source,
+                  taskRunId: taskRunId(tableName, row),
+                  status: pick(row, statusCols),
+                  productionCommit: pick(row, commitCols),
+                  cacheTimestamp: row.last_status_update_at ?? row.cache_checked_at ?? null,
+                  errorWarningCategory: pick(row, errorCols),
+                  evidenceTable: tableName,
+                  evidenceColumn: currentCol,
+                });
+              }
+            }
+
+            for (const col of searchableTextCols) {
+              const c = quoteIdent(col.name);
+              const rows = safeRun(
+                `SELECT ${selectCols.map((name) => `${quoteIdent(name)} AS ${quoteIdent(name)}`).join(", ")}
+                 FROM ${table}
+                 WHERE ${targetWhere}
+                   AND (
+                     ${c} LIKE ${sqlString("%currentPlayers%")}
+                     OR ${c} LIKE ${sqlString("%current_players%")}
+                     OR ${c} LIKE ${sqlString("%current_player_count%")}
+                     OR ${c} LIKE ${sqlString("%gameservers%")}
+                     OR ${c} LIKE ${sqlString("%getStats%")}
+                     OR ${c} LIKE ${sqlString("%stats%")}
+                     OR ${c} LIKE ${sqlString("%metadata%")}
+                     OR ${c} LIKE ${sqlString("%cache%")}
+                   )
+                 ORDER BY ${timeCols.length ? timeCols.map(quoteIdent).join(" DESC, ") : "rowid DESC"}
+                 LIMIT ${MAX_ROWS_PER_QUERY}`,
+              );
+              for (const row of rows) {
+                const text = row[col.name];
+                const parsed = tryParseJson(text);
+                const facts = parsed ? findJsonFacts(parsed) : extractJsonCandidates(text).map((candidate) => ({
+                  current: candidate.current,
+                  max: extractMaxFromText(text),
+                  source: sourceFromText(text),
+                  path: candidate.key,
+                }));
+                for (const fact of facts) {
+                  addEvidence({
+                    timestamp: timestampFromRow(row),
+                    currentPlayers: fact.current,
+                    maxPlayers: fact.max,
+                    sourceHelper: fact.source ?? pick(row, sourceCols) ?? `${tableName}.${col.name}:${fact.path}`,
+                    taskRunId: taskRunId(tableName, row),
+                    status: fact.previousOnly ? "previous_nonzero_evidence" : pick(row, statusCols),
+                    productionCommit: pick(row, commitCols),
+                    cacheTimestamp: row.last_status_update_at ?? row.cache_checked_at ?? null,
+                    errorWarningCategory: pick(row, errorCols),
+                    evidenceTable: tableName,
+                    evidenceColumn: col.name,
+                  });
+                }
+              }
+            }
+          }
+
+          const dedupe = new Map();
+          for (const item of evidence) {
+            const key = JSON.stringify([item.timestamp, item.currentPlayers, item.maxPlayers, item.sourceHelper, item.taskRunId, item.evidenceTable, item.evidenceColumn]);
+            dedupe.set(key, item);
+          }
+          const sanitizedEvidence = [...dedupe.values()].sort((a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")));
+
+          const relevantSchema = schemaSummary
+            .filter((entry) => entry.relevant)
+            .map((entry) => ({ table: entry.table, columns: entry.columns.filter((name) => /current|player|metadata|status|json|source|cache|cron|run|error|warning|commit|sha|timestamp|checked|updated|created/i.test(name)) }));
+
+          const report = {
+            target: TARGET,
+            generatedAt: new Date().toISOString(),
+            githubSha: process.env.GITHUB_SHA ?? null,
+            inspectedRelevantTables: relevantSchema,
+            currentStateRows: linkedRows.map((row) => ({
+              linked_server_id: row.id,
+              service_id: row.nitrado_service_id,
+              current_players: row.current_players,
+              max_players: row.max_players,
+              player_count_source: row.player_count_source,
+              player_count_status: row.player_count_status,
+              player_count_last_checked_at: row.player_count_last_checked_at,
+              cache_current_players: row.cache_current_players,
+              cache_max_players: row.cache_max_players,
+              cache_last_status_update_at: row.cache_last_status_update_at,
+            })),
+            nonzeroEvidence: sanitizedEvidence.map((item) => ({
+              timestamp: item.timestamp,
+              current_players: item.currentPlayers,
+              max_players: item.maxPlayers,
+              source_helper: item.sourceHelper,
+              task_run_id: item.taskRunId,
+              status: item.status,
+              production_commit: item.productionCommit,
+              cache_timestamp: item.cacheTimestamp,
+              error_warning_category: item.errorWarningCategory,
+              classification: item.classification,
+              evidence_table: item.evidenceTable,
+              evidence_column: item.evidenceColumn,
+            })),
+            warnings,
+          };
+
+          function table(headers, rows) {
+            const lines = [];
+            lines.push(`| ${headers.join(" | ")} |`);
+            lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+            for (const row of rows) lines.push(`| ${headers.map((header) => String(row[header] ?? "").replace(/\|/g, "/").slice(0, 180)).join(" | ")} |`);
+            return lines.join("\n");
+          }
+
+          const evidenceRows = report.nonzeroEvidence.map((item) => ({
+            timestamp: item.timestamp,
+            current_players: item.current_players,
+            max_players: item.max_players,
+            source_helper: item.source_helper,
+            task_run_id: item.task_run_id,
+            status: item.status,
+            production_commit: item.production_commit,
+            cache_timestamp: item.cache_timestamp,
+            error_warning_category: item.error_warning_category,
+            classification: item.classification,
+          }));
+
+          const markdown = [
+            "## DZN Player Count History Audit",
+            "",
+            `Generated: ${report.generatedAt}`,
+            `Workflow commit: ${report.githubSha}`,
+            `Target server: ${TARGET.serverId}`,
+            `Target service: ${TARGET.serviceId}`,
+            "",
+            "### Current State",
+            table(["linked_server_id", "service_id", "current_players", "max_players", "player_count_source", "player_count_status", "player_count_last_checked_at", "cache_current_players", "cache_last_status_update_at"], report.currentStateRows),
+            "",
+            "### Historical Nonzero Evidence",
+            evidenceRows.length
+              ? table(["timestamp", "current_players", "max_players", "source_helper", "task_run_id", "status", "production_commit", "cache_timestamp", "error_warning_category", "classification"], evidenceRows)
+              : "No retained historical table/query inspected by this workflow contained a sanitized nonzero NukeTown player-count record.",
+            "",
+            "### Inspected Relevant Tables",
+            table(["table", "columns"], report.inspectedRelevantTables.map((entry) => ({ table: entry.table, columns: entry.columns.join(", ") }))),
+            "",
+            "### Warnings",
+            report.warnings.length ? table(["category", "detail"], report.warnings) : "None.",
+          ].join("\n");
+
+          writeFileSync("sanitized-player-count-audit.json", JSON.stringify(report, null, 2));
+          writeFileSync("sanitized-player-count-audit.md", markdown);
+          console.log(markdown);
+          NODE
+
+          node audit-player-count-history.mjs
+          cat sanitized-player-count-audit.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload sanitized audit artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sanitized-player-count-audit
+          path: |
+            sanitized-player-count-audit.json
+            sanitized-player-count-audit.md
