@@ -9,6 +9,7 @@ on:
 jobs:
   player-count-history-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -19,8 +20,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
       - name: Run SELECT-only D1 historical player-count audit
         run: |
           set -euo pipefail
@@ -35,16 +34,19 @@ jobs:
           fi
 
           cat > audit-player-count-history.mjs <<'NODE'
-          import { execFileSync } from "node:child_process";
           import { writeFileSync } from "node:fs";
 
           const DB_NAME = "dzn_network_db";
+          const CF_API_BASE = "https://api.cloudflare.com/client/v4";
+          const CF_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+          const CF_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
           const TARGET = {
             serverId: "8741ac30-84ba-41e2-93e8-d584cdc81c89",
             serviceId: "18765761",
             serverName: "NukeTown",
           };
           const MAX_ROWS_PER_QUERY = 200;
+          let d1DatabaseId = null;
 
           function sqlString(value) {
             return `'${String(value).replace(/'/g, "''")}'`;
@@ -63,33 +65,74 @@ jobs:
             }
           }
 
-          function runD1(sql) {
-            assertSelectOnly(sql);
-            const output = execFileSync(
-              "npx",
-              ["wrangler", "d1", "execute", DB_NAME, "--remote", "--json", "--command", sql],
-              {
-                encoding: "utf8",
-                maxBuffer: 25 * 1024 * 1024,
-                env: process.env,
-              },
-            );
-            const parsed = JSON.parse(output);
-            return parsed.flatMap((entry) => entry.results ?? []);
+          function sanitizeCloudflarePayload(payload) {
+            if (!payload || typeof payload !== "object") return "Cloudflare API request failed";
+            const errors = Array.isArray(payload.errors) ? payload.errors : [];
+            if (!errors.length) return "Cloudflare API request failed";
+            return errors
+              .map((error) => `${error.code ?? "unknown"}:${String(error.message ?? "request failed").replace(/Bearer\s+\S+/gi, "Bearer [redacted]")}`)
+              .join("; ")
+              .slice(0, 220);
           }
 
-          function safeRun(sql, fallback = []) {
+          async function cloudflareJson(path, init = {}) {
+            const response = await fetch(`${CF_API_BASE}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${CF_TOKEN}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let payload = null;
             try {
-              return runD1(sql);
+              payload = text ? JSON.parse(text) : null;
+            } catch {
+              throw new Error(`Cloudflare API returned non-JSON response (${response.status})`);
+            }
+            if (!response.ok || payload?.success === false) {
+              throw new Error(`Cloudflare API ${response.status}: ${sanitizeCloudflarePayload(payload)}`);
+            }
+            return payload;
+          }
+
+          async function resolveD1DatabaseId() {
+            if (d1DatabaseId) return d1DatabaseId;
+            const payload = await cloudflareJson(`/accounts/${encodeURIComponent(CF_ACCOUNT_ID)}/d1/database`);
+            const databases = Array.isArray(payload.result) ? payload.result : [];
+            const match = databases.find((database) => database.name === DB_NAME || database.uuid === DB_NAME || database.id === DB_NAME);
+            if (!match) throw new Error(`D1 database ${DB_NAME} is not visible to the provided read token`);
+            d1DatabaseId = match.uuid ?? match.id;
+            return d1DatabaseId;
+          }
+
+          async function runD1(sql) {
+            assertSelectOnly(sql);
+            const databaseId = await resolveD1DatabaseId();
+            const payload = await cloudflareJson(
+              `/accounts/${encodeURIComponent(CF_ACCOUNT_ID)}/d1/database/${encodeURIComponent(databaseId)}/query`,
+              {
+                method: "POST",
+                body: JSON.stringify({ sql }),
+              },
+            );
+            const result = Array.isArray(payload.result) ? payload.result : [payload.result];
+            return result.flatMap((entry) => entry?.results ?? []);
+          }
+
+          async function safeRun(sql, fallback = []) {
+            try {
+              return await runD1(sql);
             } catch (error) {
               warnings.push({ category: "query_failed", detail: error instanceof Error ? error.message.slice(0, 180) : "query failed" });
               return fallback;
             }
           }
 
-          function requireSchemaQuery(sql) {
+          async function requireSchemaQuery(sql) {
             try {
-              return runD1(sql);
+              return await runD1(sql);
             } catch (error) {
               const detail = error instanceof Error ? error.message.slice(0, 220) : "schema query failed";
               console.error(`::error::Unable to inspect D1 schema with SELECT-only credentials: ${detail}`);
@@ -242,10 +285,10 @@ jobs:
           const warnings = [];
           const evidence = [];
 
-          const tables = requireSchemaQuery("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name");
+          const tables = await requireSchemaQuery("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name");
           const schema = {};
           for (const table of tables) {
-            schema[table.name] = safeRun(`SELECT name, type, pk FROM pragma_table_info(${sqlString(table.name)})`);
+            schema[table.name] = await safeRun(`SELECT name, type, pk FROM pragma_table_info(${sqlString(table.name)})`);
           }
 
           const schemaSummary = tables.map((table) => ({
@@ -257,7 +300,7 @@ jobs:
 
           const relevantTables = schemaSummary.filter((entry) => entry.relevant).map((entry) => entry.table);
 
-          const linkedRows = schema.linked_servers ? safeRun(
+          const linkedRows = schema.linked_servers ? await safeRun(
             `SELECT
                linked_servers.id,
                linked_servers.nitrado_service_id,
@@ -346,7 +389,7 @@ jobs:
             if (selectCols.length === 0) continue;
 
             for (const currentCol of currentCols) {
-              const rows = safeRun(
+              const rows = await safeRun(
                 `SELECT ${selectCols.map((name) => `${quoteIdent(name)} AS ${quoteIdent(name)}`).join(", ")}
                  FROM ${table}
                  WHERE ${targetWhere}
@@ -374,7 +417,7 @@ jobs:
 
             for (const col of searchableTextCols) {
               const c = quoteIdent(col.name);
-              const rows = safeRun(
+              const rows = await safeRun(
                 `SELECT ${selectCols.map((name) => `${quoteIdent(name)} AS ${quoteIdent(name)}`).join(", ")}
                  FROM ${table}
                  WHERE ${targetWhere}
