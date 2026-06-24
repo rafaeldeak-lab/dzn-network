@@ -29,7 +29,7 @@ import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLead
 import { buildAchievementShowcase, buildServerReputationSummary, type AchievementShowcase, type ReputationSummary } from "../../_lib/reputation";
 import { resolvePublicServerVisualLoadout, type PublicServerVisualLoadout } from "../../_lib/server-visual-loadouts";
 import { explainServerVisibility, getFeaturedServerCandidates, getRecommendedServers, getServerDiscoveryScore, getServerVisibilityConfig, getSpotlightEligibleServers, type VisibilityExplanation, type VisibilityTier } from "../../_lib/server-visibility";
-import type { ServerScoreBreakdown } from "../../_lib/server-ranking";
+import { calculateServerScoreBreakdown, type ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
 import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
 import { buildServerBadgeCollection, type PublicLockedBadge, type ServerBadgeCollection } from "../../../lib/badges/rules";
@@ -95,6 +95,12 @@ type PublicServerRow = {
   plan_key: string | null;
   subscription_status: string | null;
   active_promotions_json: string | null;
+  network_rank?: number | null;
+  longest_kill?: number | null;
+};
+
+type PublicServerRankingSnapshot = Omit<PublicLeaderboardServer, "rank"> & {
+  rank: number | null;
 };
 
 type PublicRecentEvent = {
@@ -315,6 +321,10 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
     return getPublicServersPreviewPayload(env);
   }
 
+  if (slug) {
+    return getPublicServerProfileFastPayload(env, slug, viewerLoggedIn);
+  }
+
   await ensureLinkedServerMetadataColumns(env);
   await ensureServerLogConfigTable(env);
   await ensureAdmSyncSchema(env);
@@ -365,6 +375,194 @@ async function getPublicServersPreviewPayload(env: Env) {
     .map((server) => applyPublicServerAccess(server, false));
   sortPublicServersForDiscovery(servers);
   return { ok: true, servers, ...buildPublicServerVisibilityGroups(servers), stats: buildPublicStats(servers), access_level: "preview", is_locked: true };
+}
+
+async function getPublicServerProfileFastPayload(env: Env, slug: string, viewerLoggedIn: boolean) {
+  const directRow = await queryPublicServerBySlug(env, slug);
+  const aliasServerId = directRow ? null : await resolveSlugAliasLinkedServerId(env, slug).catch(() => null);
+  const row = directRow ?? (aliasServerId ? await queryPublicServerById(env, aliasServerId) : null);
+
+  if (!row) {
+    if (shouldShowMockServers(env)) {
+      const mockServers = mockPublicServers().map((server) => applyPublicServerAccess(server, viewerLoggedIn));
+      return { ok: true, server: findPublicServerBySlug(mockServers, slug) ?? null, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
+    }
+    return { ok: true, server: null, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
+  }
+
+  const reviewSummaries = await getPublicServerRatingSummaries(env, [row.id]).catch(() => new Map<string, PublicServerRatingSummary>());
+  const badgeAwardMap = await getPublicBadgeAwardMap(env, [row.id]).catch(() => new Map<string, { awards: ServerBadgeAwardRow[]; crownCodes: string[] }>());
+  const server = await toSafePublicServer(
+    env,
+    row,
+    lightweightRankingFromPublicRow(row),
+    reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary(),
+    badgeAwardMap.get(row.id) ?? null,
+  );
+
+  return getPublicServerProfileBySlug(
+    env,
+    row,
+    server ? applyPublicServerAccess(server, viewerLoggedIn) : null,
+    viewerLoggedIn,
+  );
+}
+
+async function queryPublicServerBySlug(env: Env, slug: string) {
+  return querySinglePublicServer(env, "lower(linked_servers.public_slug) = ?", slug);
+}
+
+async function queryPublicServerById(env: Env, linkedServerId: string) {
+  return querySinglePublicServer(env, "linked_servers.id = ?", linkedServerId);
+}
+
+async function querySinglePublicServer(env: Env, whereClause: string, value: string) {
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT
+        linked_servers.id,
+        linked_servers.public_slug,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
+        linked_servers.tags_json,
+        linked_servers.status,
+        linked_servers.nitrado_service_id,
+        linked_servers.nitrado_service_name,
+        COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, linked_servers.max_players, linked_servers.player_slots) AS player_slots,
+        COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, linked_servers.max_players) AS max_players,
+        ${PUBLIC_CURRENT_PLAYERS_SQL} AS current_players,
+        linked_servers.platform,
+        linked_servers.map_name,
+        linked_servers.mission,
+        linked_servers.server_mode,
+        COALESCE(server_public_cache.server_status, linked_servers.server_status) AS server_status,
+        COALESCE(server_public_cache.server_online, linked_servers.is_online) AS is_online,
+        COALESCE(linked_servers.metadata_last_checked_at, server_public_cache.last_status_update_at) AS metadata_last_checked_at,
+        ${PUBLIC_PLAYER_COUNT_CHECKED_AT_SQL} AS player_count_last_checked_at,
+        linked_servers.player_count_source,
+        ${PUBLIC_PLAYER_COUNT_STATUS_SQL} AS player_count_status,
+        linked_servers.created_at,
+        linked_servers.updated_at,
+        discord_guilds.name AS guild_name,
+        discord_guilds.icon_url AS guild_icon_url,
+        server_log_config.adm_path AS adm_path,
+        onboarding_checks.adm_logs_found AS adm_logs_found,
+        onboarding_checks.last_tested_at AS adm_last_checked_at,
+        adm_sync_state.latest_adm_file AS adm_sync_latest_file,
+        adm_sync_state.latest_adm_path AS adm_sync_latest_path,
+        adm_sync_state.last_sync_status AS adm_sync_status,
+        adm_sync_state.last_sync_message AS adm_sync_message,
+        adm_sync_state.last_sync_at AS adm_sync_at,
+        (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS total_kills,
+        (
+          (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL)
+          + (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats'))
+        ) AS total_deaths,
+        (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_connected') AS total_joins,
+        (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_disconnected') AS total_disconnects,
+        (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id) AS unique_players,
+        COALESCE((SELECT MAX(distance) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill,
+        server_stats.updated_at AS server_stats_updated_at,
+        server_public_cache.updated_at AS public_cache_updated_at,
+        CASE
+          WHEN COALESCE(server_stats.total_joins, 0) > 0
+            OR COALESCE(server_stats.total_disconnects, 0) > 0
+            OR COALESCE(server_stats.total_deaths, 0) > 0
+            OR COALESCE(server_stats.total_kills, 0) > 0
+            OR COALESCE(server_stats.unique_players, 0) > 0
+            OR COALESCE(server_public_cache.last_adm_update_at, '') <> ''
+            OR COALESCE(adm_sync_state.last_processed_file, '') <> ''
+          THEN 'completed' ELSE NULL
+        END AS latest_success_sync_status,
+        'scheduled_nitrado' AS latest_success_sync_trigger,
+        COALESCE(server_public_cache.last_adm_update_at, server_stats.updated_at, adm_sync_state.last_sync_at) AS latest_success_sync_at,
+        linked_servers.public_short_description,
+        linked_servers.public_description,
+        linked_servers.public_discord_invite,
+        linked_servers.public_website_url,
+        linked_servers.public_rules,
+        linked_servers.public_language,
+        linked_servers.public_region_label,
+        linked_servers.public_listing_updated_at,
+        server_advertising_state.last_bumped_at,
+        server_advertising_state.bump_count_current_period,
+        server_advertising_state.bump_period_start,
+        server_advertising_state.bump_period_end,
+        server_advertising_state.featured_until,
+        server_advertising_state.featured_label,
+        (
+          SELECT json_group_array(json_object(
+            'promotionType', server_promotions.promotion_type,
+            'status', server_promotions.status,
+            'endsAt', server_promotions.ends_at
+          ))
+          FROM server_promotions
+          WHERE server_promotions.server_id = linked_servers.id
+            AND server_promotions.status = 'active'
+            AND server_promotions.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ) AS active_promotions_json,
+        COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
+        server_subscriptions.status AS subscription_status,
+        server_public_cache.network_rank AS network_rank
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE ${whereClause}
+         AND lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       LIMIT 1`,
+    )
+    .bind(value)
+    .first<PublicServerRow>();
+  return row ? canonicalizePublicServerRows([row])[0] ?? null : null;
+}
+
+function lightweightRankingFromPublicRow(row: PublicServerRow): PublicServerRankingSnapshot {
+  const kills = numberOrZero(row.total_kills);
+  const deaths = numberOrZero(row.total_deaths);
+  const uniquePlayers = numberOrZero(row.unique_players);
+  const joins = numberOrZero(row.total_joins);
+  const longestKill = numberOrZero(row.longest_kill);
+  const statsSyncActive = isSuccessfulAdmSyncStatus(row.latest_success_sync_status) ||
+    isSuccessfulAdmSyncStatus(row.adm_sync_status) ||
+    kills > 0 ||
+    deaths > 0 ||
+    joins > 0 ||
+    uniquePlayers > 0;
+  const kd = calculatePublicServerKd(kills, deaths);
+  const scoreBreakdown = calculateServerScoreBreakdown({
+    kills,
+    deaths,
+    joins,
+    uniquePlayers,
+    longestKill,
+    statsSyncActive,
+  });
+  return {
+    rank: numberOrZero(row.network_rank) || null,
+    server_id: row.id,
+    server_name: row.server_name ?? "DZN Server",
+    slug: row.public_slug,
+    mode: row.server_type,
+    kills,
+    deaths,
+    kd: kd.value,
+    kd_label: kd.label,
+    longest_kill: longestKill,
+    unique_players: uniquePlayers,
+    joins,
+    stats_sync_active: statsSyncActive,
+    score: scoreBreakdown.final_score,
+    score_label: String(scoreBreakdown.final_score),
+    score_breakdown: scoreBreakdown,
+  };
 }
 
 async function queryPublicServersPreview(env: Env) {
@@ -484,7 +682,7 @@ async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | nul
   if (viewerLoggedIn) {
     // Public profile pages are server-scoped. Global leaderboards are only used by
     // global pages; child profile data must always query by this resolved server id.
-    const leaderboard = await getPublicServerLeaderboardById(env, row.id, 10);
+    const leaderboard = await getPublicServerLeaderboardById(env, row.id, 10).catch(() => [] as PublicLeaderboardPlayer[]);
     server.top_players = leaderboard.slice(0, 5);
     server.pvp_leaderboard = leaderboard;
   }
@@ -745,7 +943,7 @@ async function ensureServerLogConfigTable(env: Env) {
 async function toSafePublicServer(
   env: Env,
   row: PublicServerRow,
-  ranking: PublicLeaderboardServer | null,
+  ranking: PublicServerRankingSnapshot | null,
   reviewSummary: PublicServerRatingSummary,
   badgeAwardData: { awards: ServerBadgeAwardRow[]; crownCodes: string[] } | null,
 ): Promise<SafePublicServer | null> {
@@ -967,7 +1165,7 @@ async function toSafePublicServer(
       public_listing: "Active",
       last_sync_at: lastSyncAt,
     },
-    recent_events: await getPublicRecentEvents(env, row.id),
+    recent_events: await getPublicRecentEvents(env, row.id).catch(() => []),
   } satisfies SafePublicServer;
 }
 

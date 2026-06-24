@@ -21,10 +21,14 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   } catch (error) {
     console.warn("DZN SERVER ADVANCED LEADERBOARDS LOAD FAILED", safeError(error));
     return json({
-      ok: false,
-      error: "server_advanced_leaderboards_load_failed",
+      ok: true,
+      available: false,
+      stale: false,
+      generated_at: new Date().toISOString(),
+      boards: [],
+      reason: "server_advanced_leaderboards_temporarily_unavailable",
       message: "Server advanced leaderboard data could not be loaded right now.",
-    }, { headers: publicApiErrorHeaders(), status: 503 });
+    }, { headers: publicApiErrorHeaders() });
   }
 };
 

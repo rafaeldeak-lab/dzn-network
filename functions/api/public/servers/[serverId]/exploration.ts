@@ -35,10 +35,14 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   } catch (error) {
     console.warn("DZN SERVER EXPLORATION LOAD FAILED", safeError(error));
     return json({
-      ok: false,
-      error: "server_exploration_load_failed",
+      ok: true,
+      available: false,
+      stale: false,
+      generated_at: new Date().toISOString(),
+      exploration: null,
+      reason: "server_exploration_temporarily_unavailable",
       message: "Server exploration data could not be loaded right now.",
-    }, { headers: publicApiErrorHeaders(), status: 503 });
+    }, { headers: publicApiErrorHeaders() });
   }
 };
 
