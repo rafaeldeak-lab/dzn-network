@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 function source(path: string) {
-  return readFileSync(path, "utf8");
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 }
 
 const advancedStatsRoute = source("functions/api/servers/[serverId]/dashboard/advanced-stats.ts");

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/live-stats.ts", "utf8");
-const publicServersRoute = readFileSync("functions/api/public/servers.ts", "utf8");
-const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
-const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", "utf8");
+const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/live-stats.ts", "utf8").replace(/\r\n/g, "\n");
+const publicServersRoute = readFileSync("functions/api/public/servers.ts", "utf8").replace(/\r\n/g, "\n");
+const automationSource = readFileSync("functions/_lib/automation.ts", "utf8").replace(/\r\n/g, "\n");
+const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", "utf8").replace(/\r\n/g, "\n");
 
 function sliceBetween(source: string, startMarker: string, endMarker: string) {
   const start = source.indexOf(startMarker);

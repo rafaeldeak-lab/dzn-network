@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/live-stats.ts", "utf8");
-const serverStats = readFileSync("functions/_lib/server-stats.ts", "utf8");
+const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/live-stats.ts", "utf8").replace(/\r\n/g, "\n");
+const serverStats = readFileSync("functions/_lib/server-stats.ts", "utf8").replace(/\r\n/g, "\n");
 
 function sliceBetween(source: string, startMarker: string, endMarker: string) {
   const start = source.indexOf(startMarker);
