@@ -12,7 +12,7 @@ jobs:
     permissions:
       contents: read
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_READ_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+            echo "::error::Missing CLOUDFLARE_D1_READ_TOKEN GitHub secret."
             exit 1
           fi
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
@@ -84,6 +84,16 @@ jobs:
             } catch (error) {
               warnings.push({ category: "query_failed", detail: error instanceof Error ? error.message.slice(0, 180) : "query failed" });
               return fallback;
+            }
+          }
+
+          function requireSchemaQuery(sql) {
+            try {
+              return runD1(sql);
+            } catch (error) {
+              const detail = error instanceof Error ? error.message.slice(0, 220) : "schema query failed";
+              console.error(`::error::Unable to inspect D1 schema with SELECT-only credentials: ${detail}`);
+              throw error;
             }
           }
 
@@ -232,7 +242,7 @@ jobs:
           const warnings = [];
           const evidence = [];
 
-          const tables = safeRun("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name");
+          const tables = requireSchemaQuery("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name");
           const schema = {};
           for (const table of tables) {
             schema[table.name] = safeRun(`SELECT name, type, pk FROM pragma_table_info(${sqlString(table.name)})`);
