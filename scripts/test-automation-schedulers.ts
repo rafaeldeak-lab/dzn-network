@@ -107,6 +107,22 @@ assert.equal(metadataCron.includes("result.budget_exhausted && result.processed 
 assert.equal(metadataCron.includes("metadata_budget_exhausted_before_work"), true);
 assert.equal(metadataCron.includes("body.async === true"), false, "Metadata route must not return a waitUntil acknowledgement as success.");
 assert.equal(metadataCron.includes("waitUntil(runMetadataRefresh"), false);
+assert.equal(
+  metadataCron.includes("hasOnlyExpectedUnavailableFailures"),
+  true,
+  "Expected Nitrado-unavailable failures must be classified separately.",
+);
+assert.equal(
+  metadataCron.indexOf("hasOnlyExpectedUnavailableFailures(result)")
+    < metadataCron.indexOf("result.failed > 0 && result.succeeded > 0"),
+  true,
+  "Expected upstream-unavailable failures must become warnings before generic partial classification.",
+);
+assert.equal(
+  metadataCron.includes('"nitrado_live_count_unavailable"'),
+  true,
+  "Metadata warnings must expose a stable machine-readable warning code.",
+);
 assert.equal(serverMetadata.includes("staleStatusLockCutoff"), true);
 assert.equal(serverMetadata.includes("livePlayerCountStaleMs"), true);
 assert.equal(serverMetadata.includes("livePlayerCountCutoff"), true);
@@ -189,6 +205,24 @@ assert.equal(autoUpdateWorker.includes("recordAutomationCronRun"), true);
 assert.equal(autoUpdateWorker.includes("taskStatusFromBody"), true);
 assert.equal(autoUpdateWorker.includes("body?.taskStatus ?? body?.task_status"), true, "Auto-update Worker should accept camelCase and snake_case taskStatus fields.");
 assert.equal(autoUpdateWorker.includes("task_accepted_without_completion"), true);
+assert.equal(
+  autoUpdateWorker.includes("const COMPLETED_TASK_STATUSES = new Set(["),
+  true,
+  "Auto-update Worker must explicitly allow completed task statuses.",
+);
+assert.equal(
+  autoUpdateWorker.includes("results.every((result) => result.ok)"),
+  true,
+  "Overall Worker health must require every due task to complete acceptably.",
+);
+assert.equal(
+  autoUpdateWorker.includes("results.some((result) => result.ok)"),
+  false,
+  "One successful task must not hide another task failure.",
+);
+assert.equal(autoUpdateWorker.includes('"success"'), true);
+assert.equal(autoUpdateWorker.includes('"warning"'), true);
+assert.equal(autoUpdateWorker.includes('"no_op"'), true);
 assert.equal(autoUpdateWorker.includes('"failed", "timed_out", "accepted", "warning", "no_op"'), true, "Auto-update Worker warning/no-op rows must pass through safe error context.");
 assert.equal(autoUpdateWorker.includes("max_posts: 1"), true);
 assert.equal(autoUpdateWorker.includes("/api/sync/adm/run"), false, "Auto-update Worker must never run ADM imports.");

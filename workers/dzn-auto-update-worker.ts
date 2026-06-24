@@ -27,6 +27,11 @@ type SchedulerTask = {
 const WORKER_NAME = "dzn-auto-update-worker";
 const DEFAULT_APP_URL = "https://dzn-network.pages.dev";
 const CRON_SECRET_HEADERS = ["x-dzn-cron-secret", "x-sync-cron-secret", "x-cron-secret"] as const;
+const COMPLETED_TASK_STATUSES = new Set([
+  "success",
+  "warning",
+  "no_op",
+]);
 
 const TASKS: SchedulerTask[] = [
   {
@@ -139,13 +144,16 @@ export async function runAutoUpdateTick(env: Env, options: { cron: string | null
     });
   }
 
-  const ok = results.some((result) => result.ok);
+  const ok =
+    results.length > 0
+    && results.every((result) => result.ok);
   console.log("DZN AUTO UPDATE WORKER TICK COMPLETE", {
     ok,
     tasks: results.map((result) => ({
       label: result.label,
       ok: result.ok,
       status: result.status,
+      taskStatus: taskStatusForLog(result.body),
       processed: result.processed,
       failed: result.failed,
     })),
@@ -199,9 +207,13 @@ async function runTask(
     const processed = numberMetric(body?.processed ?? body?.processedCount ?? body?.processed_count);
     const skipped = numberMetric(body?.skipped ?? body?.skippedCount ?? body?.skipped_count);
     const failed = numberMetric(body?.failed ?? body?.failedCount ?? body?.failed_count);
+    const completed = COMPLETED_TASK_STATUSES.has(taskStatus);
     return {
       label: task.label,
-      ok: response.ok && body?.ok !== false && !["failed", "timed_out", "accepted", "trigger_failed", "invalid_contract"].includes(taskStatus),
+      ok:
+        response.ok
+        && body?.ok !== false
+        && completed,
       status: response.status,
       processed,
       skipped,
@@ -418,6 +430,11 @@ function cronStatusFromTaskResult(result: { ok: boolean; body: unknown }): Autom
 function errorMessageFromBody(value: unknown) {
   if (!isRecord(value)) return null;
   return sanitizeMessage(value.error ?? value.message ?? value.warning ?? value.no_op_reason ?? value.noOpReason);
+}
+
+function taskStatusForLog(value: unknown) {
+  if (!isRecord(value)) return null;
+  return sanitizeMessage(value.task_status ?? value.taskStatus);
 }
 
 function sanitizeMessage(value: unknown) {

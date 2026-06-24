@@ -90,7 +90,20 @@ export async function handleMetadataSyncRun(
     patchHomeStats: false,
     debugServiceId,
   };
-  const { result, taskStatus, taskError } = await runMetadataRefresh(env, source, startedAt, refreshOptions, handlers ?? await defaultHandlers());
+  const { result, taskStatus, taskError, warningCode } = await runMetadataRefresh(env, source, startedAt, refreshOptions, handlers ?? await defaultHandlers());
+
+  const taskCompleted = taskStatus === "success" || taskStatus === "warning" || taskStatus === "no_op";
+  const noOpReason = taskStatus === "no_op"
+    ? taskError ?? "metadata_no_due_server"
+    : null;
+  const warning = taskStatus === "warning"
+    ? taskError ?? "One or more Nitrado player-count sources were unavailable."
+    : null;
+  const error = taskCompleted
+    ? null
+    : taskError ?? `metadata_${taskStatus}`;
+  const errorCode = metadataErrorCode(taskStatus);
+
   const [staleRemainingCount, diagnostics] = await Promise.all([
     countStaleMetadataRemaining(env, refreshOptions.livePlayerCountStaleMs).catch(() => null),
     readMetadataDiagnostics(env, refreshOptions.livePlayerCountStaleMs).catch(() => null),
@@ -111,10 +124,17 @@ export async function handleMetadataSyncRun(
   });
 
   return json({
-    ok: taskStatus !== "failed" && taskStatus !== "timed_out",
+    ok: taskCompleted,
     task_status: taskStatus,
-    error: taskError,
-    no_op_reason: taskStatus === "no_op" ? taskError : null,
+    taskStatus,
+    error,
+    error_code: errorCode,
+    errorCode,
+    warning,
+    warning_code: warningCode,
+    warningCode,
+    no_op_reason: noOpReason,
+    noOpReason,
     ...result,
     timed_out: taskStatus === "timed_out",
     stale_remaining_count: staleRemainingCount,
@@ -139,12 +159,17 @@ async function runMetadataRefresh(
     const result = await activeHandlers.refreshMetadata(env, options);
     const taskStatus = classifyMetadataResult(result);
     const taskError = metadataResultMessage(result, taskStatus);
+    const warningCode = taskStatus === "warning"
+      ? metadataWarningCode(result)
+      : null;
+
     await safeRecordCronRun(env, source, taskStatus, startedAt, taskError, {
       processedCount: result.processed,
       skippedCount: result.skipped,
       failedCount: result.failed,
     });
-    return { result, taskStatus, taskError };
+
+    return { result, taskStatus, taskError, warningCode };
   } catch (error) {
     await safeRecordCronRun(env, source, "failed", startedAt, error);
     throw error;
@@ -154,16 +179,65 @@ async function runMetadataRefresh(
 function classifyMetadataResult(result: MetadataRefreshResult) {
   if (result.budget_exhausted && result.processed === 0) return "timed_out" as const;
   if (result.processed === 0 && result.skipped > 0 && result.failed === 0) return "no_op" as const;
+
+  /*
+   * Expected upstream Nitrado unavailability is a warning even when
+   * another server refreshed successfully. Unknown, D1, auth, timeout,
+   * parser, and internal failures remain partial/failed.
+   */
+  if (hasOnlyExpectedUnavailableFailures(result)) return "warning" as const;
+
   if (result.failed > 0 && result.succeeded > 0) return "partial" as const;
-  if (result.failed > 0 && result.processed > 0 && isUnavailableOnlyMetadataResult(result)) return "warning" as const;
   if (result.failed > 0) return "failed" as const;
   return "success" as const;
 }
 
-function isUnavailableOnlyMetadataResult(result: MetadataRefreshResult) {
-  return result.results.length > 0
-    && result.results.every((item) => item.status !== "succeeded")
-    && result.results.every((item) => /unavailable|endpoint|nitrado|token|metadata/i.test(item.message ?? ""));
+function hasOnlyExpectedUnavailableFailures(result: MetadataRefreshResult) {
+  if (result.failed <= 0) return false;
+
+  const failedResults = result.results.filter((item) => item.status === "failed");
+
+  /*
+   * Never downgrade unreported/unknown failures. Every failed counter
+   * must have a matching failed result.
+   */
+  if (failedResults.length !== result.failed) return false;
+
+  return failedResults.every((item) => isExpectedNitradoUnavailable(item.message));
+}
+
+function isExpectedNitradoUnavailable(message: string | null | undefined) {
+  const normalized = String(message ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+
+  return normalized.includes("nitrado live player count endpoint unavailable")
+    || normalized.includes("nitrado metadata unavailable")
+    || normalized.includes("nitrado player count unavailable")
+    || (
+      normalized.includes("nitrado")
+      && normalized.includes("endpoint")
+      && normalized.includes("unavailable")
+    );
+}
+
+function metadataWarningCode(result: MetadataRefreshResult) {
+  const failedResults = result.results.filter((item) => item.status === "failed");
+
+  if (
+    failedResults.length > 0
+    && failedResults.every((item) => isExpectedNitradoUnavailable(item.message))
+  ) {
+    return "nitrado_live_count_unavailable";
+  }
+
+  return "metadata_warning";
+}
+
+function metadataErrorCode(taskStatus: ReturnType<typeof classifyMetadataResult>) {
+  if (taskStatus === "timed_out") return "metadata_budget_exhausted_before_work";
+  if (taskStatus === "partial") return "metadata_partial_failure";
+  if (taskStatus === "failed") return "metadata_refresh_failed";
+  return null;
 }
 
 function metadataResultMessage(result: MetadataRefreshResult, status: ReturnType<typeof classifyMetadataResult>) {
@@ -171,8 +245,19 @@ function metadataResultMessage(result: MetadataRefreshResult, status: ReturnType
   if (status === "no_op") return "metadata_no_due_server";
   if (status === "timed_out") return "metadata_budget_exhausted_before_work";
   const failed = result.results.find((item) => item.status === "failed") ?? result.results[0];
-  const phase = failed?.phase ? `${failed.phase}: ` : "";
-  return `${phase}${failed?.message || `metadata_${status}`}`;
+  const phase = sanitizeMetadataMessage(failed?.phase);
+  const message = sanitizeMetadataMessage(failed?.message) ?? `metadata_${status}`;
+  return phase ? `${phase}: ${message}` : message;
+}
+
+function sanitizeMetadataMessage(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/(token|access_token|signature|sig|secret|key)=([^&\s]+)/gi, "$1=[redacted]")
+    .slice(0, 240);
 }
 
 async function countStaleMetadataRemaining(env: Env, staleMs = 90_000) {
