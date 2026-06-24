@@ -85,7 +85,7 @@ assert.equal(
   "Live-stats must use a dedicated bounded canonical helper.",
 );
 assert.equal(
-  liveStatsHelper.includes("WITH\n      kill_stats AS"),
+  liveStatsHelper.includes("kill_stats AS ("),
   true,
   "Live-stats helper must aggregate kill data once for the selected server.",
 );

@@ -9,6 +9,7 @@ import {
   normalizePlanKey,
   type PlanKey,
 } from "./plans";
+import { rankServers } from "./server-ranking";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 
@@ -982,6 +983,11 @@ export async function upsertServerPublicCache(env: Env, input: {
     await ensureAutomationSchema(env);
   }
   const now = new Date().toISOString();
+  const networkRank = input.networkRank !== undefined
+    ? input.networkRank
+    : input.lastAdmUpdateAt
+      ? await readNetworkRankSnapshot(env, input.guildId).catch(() => null)
+      : null;
   await requireDb(env)
     .prepare(
       `INSERT INTO server_public_cache (
@@ -1015,13 +1021,75 @@ export async function upsertServerPublicCache(env: Env, input: {
       input.serverStatus ?? null,
       input.leaderboardSnapshotJson ?? null,
       input.eventSnapshotJson ?? null,
-      input.networkRank ?? null,
+      networkRank,
       input.partnerFeatured ? 1 : 0,
       input.lastStatusUpdateAt ?? null,
       input.lastAdmUpdateAt ?? null,
       now,
     )
     .run();
+}
+
+async function readNetworkRankSnapshot(env: Env, guildId: string) {
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT
+        linked_servers.id,
+        linked_servers.guild_id,
+        COALESCE(server_stats.total_kills, 0) AS kills,
+        COALESCE(server_stats.total_deaths, 0) AS deaths,
+        COALESCE(server_stats.total_joins, 0) AS joins,
+        COALESCE(server_stats.unique_players, 0) AS unique_players,
+        COALESCE((
+          SELECT MAX(distance)
+          FROM kill_events
+          WHERE kill_events.linked_server_id = linked_servers.id
+        ), 0) AS longest_kill,
+        CASE
+          WHEN COALESCE(server_stats.total_kills, 0) > 0
+            OR COALESCE(server_stats.total_joins, 0) > 0
+            OR COALESCE(server_stats.unique_players, 0) > 0
+            OR COALESCE(server_stats.last_event_at, '') <> ''
+          THEN 1 ELSE 0
+        END AS stats_active,
+        COALESCE(server_stats.last_event_at, linked_servers.updated_at, linked_servers.created_at) AS last_activity_at
+       FROM linked_servers
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       WHERE lower(linked_servers.status) = 'live'
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+         AND (linked_servers.merged_into_server_id IS NULL OR TRIM(COALESCE(linked_servers.merged_into_server_id, '')) = '')
+       LIMIT 500`,
+    )
+    .all<{
+      id: string;
+      guild_id: string | null;
+      kills: number | null;
+      deaths: number | null;
+      joins: number | null;
+      unique_players: number | null;
+      longest_kill: number | null;
+      stats_active: number | null;
+      last_activity_at: string | null;
+    }>();
+
+  const ranked = rankServers((result.results ?? []).map((row) => ({
+    id: row.id,
+    guildId: row.guild_id,
+    kills: numberOrZero(row.kills),
+    deaths: numberOrZero(row.deaths),
+    joins: numberOrZero(row.joins),
+    uniquePlayers: numberOrZero(row.unique_players),
+    longestKill: numberOrZero(row.longest_kill),
+    statsSyncActive: Number(row.stats_active ?? 0) === 1,
+    lastActivityAt: row.last_activity_at,
+  })));
+
+  return ranked.find((row) => row.guildId === guildId)?.rank ?? null;
+}
+
+function numberOrZero(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string, planKey: PlanKey, postTypes: AutoPostType[], reason: string) {
