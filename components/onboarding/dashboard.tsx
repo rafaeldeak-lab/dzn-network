@@ -53,6 +53,8 @@ const PLAYER_COUNT_LAST_KNOWN_THRESHOLD_MS = 60 * 60 * 1000;
 const LIVE_STATS_TIMEOUT_MS = 8000;
 const DASHBOARD_HEALTH_TIMEOUT_MS = 12000;
 const SYNC_FEED_TIMEOUT_MS = 10000;
+const OPTIONAL_DASHBOARD_MAX_IN_FLIGHT = 2;
+const OPTIONAL_DASHBOARD_RETRY_LIMIT = 1;
 let hasLoggedMultiServerReady = false;
 
 type DiscordChannelCache = {
@@ -149,6 +151,24 @@ type RunDashboardActionInput<T> = {
   successSummary?: (result: T) => string;
   major?: boolean;
   autoHardRefreshOnComplete?: boolean;
+};
+
+type OptionalDashboardRequestKey =
+  | "advanced-stats"
+  | "server-wars"
+  | "billing"
+  | "discord-posts"
+  | "sync-health-diagnostics"
+  | "public-cache"
+  | "automation-health";
+
+type OptionalDashboardRequest = {
+  key: OptionalDashboardRequestKey;
+  serverId: string;
+  generation: number;
+  execute: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (error: unknown) => void;
 };
 
 type DashboardTotalsSnapshot = {
@@ -544,13 +564,22 @@ function ServerDashboard({
   const [badgeStatus, setBadgeStatus] = useState<ServerBadgeStatusResponse | null>(null);
   const [advancedStats, setAdvancedStats] = useState<DashboardAdvancedStatsResult | null>(null);
   const [advancedStatsError, setAdvancedStatsError] = useState("");
-  const [advancedStatsLoading, setAdvancedStatsLoading] = useState(true);
+  const [advancedStatsLoading, setAdvancedStatsLoading] = useState(false);
+  const [advancedStatsVisible, setAdvancedStatsVisible] = useState(false);
   const [serverWars, setServerWars] = useState<DashboardServerWarsResult | null>(null);
   const [serverWarsError, setServerWarsError] = useState("");
-  const [serverWarsLoading, setServerWarsLoading] = useState(true);
+  const [serverWarsLoading, setServerWarsLoading] = useState(false);
+  const [serverWarsVisible, setServerWarsVisible] = useState(false);
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const activeServerIdRef = useRef(serverProp.id);
+  const advancedStatsPanelRef = useRef<HTMLDivElement | null>(null);
+  const serverWarsPanelRef = useRef<HTMLDivElement | null>(null);
+  const advancedStatsRequestedRef = useRef(false);
+  const serverWarsRequestedRef = useRef(false);
+  const optionalRequestQueueRef = useRef<Array<OptionalDashboardRequest>>([]);
+  const optionalRequestActiveCountRef = useRef(0);
+  const optionalRequestGenerationRef = useRef(0);
   const liveStatsInFlightRef = useRef(false);
   const dashboardHealthInFlightRef = useRef(false);
   const liveStatsAbortRef = useRef<AbortController | null>(null);
@@ -603,6 +632,69 @@ function ServerDashboard({
     saveDashboardActionState(server.id, null);
   }
 
+  const pumpOptionalDashboardRequests = useCallback(() => {
+    while (
+      optionalRequestActiveCountRef.current < OPTIONAL_DASHBOARD_MAX_IN_FLIGHT &&
+      optionalRequestQueueRef.current.length > 0
+    ) {
+      const request = optionalRequestQueueRef.current.shift();
+      if (!request) return;
+      if (
+        request.generation !== optionalRequestGenerationRef.current ||
+        request.serverId !== activeServerIdRef.current
+      ) {
+        request.reject(new Error("optional_request_cancelled"));
+        continue;
+      }
+
+      optionalRequestActiveCountRef.current += 1;
+      dashboardRequestDebug(request.key, "optional_started", { serverId: request.serverId });
+      request.execute()
+        .then(request.resolve, request.reject)
+        .finally(() => {
+          optionalRequestActiveCountRef.current = Math.max(0, optionalRequestActiveCountRef.current - 1);
+          dashboardRequestDebug(request.key, "optional_finished", { serverId: request.serverId });
+          pumpOptionalDashboardRequests();
+        });
+    }
+  }, []);
+
+  const runOptionalDashboardRequest = useCallback(<T,>(
+    key: OptionalDashboardRequestKey,
+    requestServerId: string,
+    task: () => Promise<T>,
+  ) => new Promise<T>((resolve, reject) => {
+    const generation = optionalRequestGenerationRef.current;
+    const execute = async () => {
+      let attempt = 0;
+      for (;;) {
+        if (generation !== optionalRequestGenerationRef.current || activeServerIdRef.current !== requestServerId) {
+          throw new Error("optional_request_cancelled");
+        }
+        try {
+          return await task();
+        } catch (error) {
+          if (attempt >= OPTIONAL_DASHBOARD_RETRY_LIMIT || !isRetryableDashboardOptionalError(error)) {
+            throw error;
+          }
+          attempt += 1;
+          dashboardRequestDebug(key, "optional_retry_scheduled", { serverId: requestServerId, attempt });
+          await sleepDashboardOptionalRetry(randomDashboardOptionalRetryDelayMs());
+        }
+      }
+    };
+
+    optionalRequestQueueRef.current.push({
+      key,
+      serverId: requestServerId,
+      generation,
+      execute,
+      resolve: (value) => resolve(value as T),
+      reject,
+    });
+    pumpOptionalDashboardRequests();
+  }), [pumpOptionalDashboardRequests]);
+
   useEffect(() => {
     onRefreshRef.current = onRefresh;
   }, [onRefresh]);
@@ -638,6 +730,8 @@ function ServerDashboard({
   useEffect(() => {
     let cancelled = false;
     activeServerIdRef.current = serverProp.id;
+    optionalRequestGenerationRef.current += 1;
+    optionalRequestQueueRef.current = [];
     liveStatsAbortRef.current?.abort();
     dashboardHealthAbortRef.current?.abort();
     syncFeedAbortRef.current?.abort();
@@ -660,6 +754,16 @@ function ServerDashboard({
       setLastGoodDashboardStats(cachedStats);
       setLiveStatsError("");
       setLiveStatsLastSuccessfulAt(cachedLiveStats?.generated_at ?? null);
+      setAdvancedStats(null);
+      setAdvancedStatsError("");
+      setAdvancedStatsLoading(false);
+      setAdvancedStatsVisible(false);
+      advancedStatsRequestedRef.current = false;
+      setServerWars(null);
+      setServerWarsError("");
+      setServerWarsLoading(false);
+      setServerWarsVisible(false);
+      serverWarsRequestedRef.current = false;
     });
     lastAppliedLiveStatsGeneratedAtRef.current = null;
     lastAppliedDashboardHealthGeneratedAtRef.current = cachedHealth?.source === "local_fallback" ? null : cachedHealth?.generated_at ?? null;
@@ -675,53 +779,87 @@ function ServerDashboard({
     }
   }, [dashboardAction, server.id]);
 
-  useEffect(() => {
-    let active = true;
+  const refreshAdvancedStats = useCallback(async () => {
+    const requestServerId = server.id;
+    setAdvancedStatsLoading(true);
+    try {
+      const data = await runOptionalDashboardRequest(
+        "advanced-stats",
+        requestServerId,
+        () => getDashboardAdvancedStats(requestServerId),
+      );
+      if (activeServerIdRef.current !== requestServerId) return false;
+      setAdvancedStats(data);
+      setAdvancedStatsError(data.available === false
+        ? data.reason ?? "advanced_stats_snapshot_pending"
+        : "");
+      return true;
+    } catch (error) {
+      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return false;
+      setAdvancedStatsError(error instanceof Error ? error.message : "Advanced showcase data could not be loaded right now.");
+      return false;
+    } finally {
+      if (activeServerIdRef.current === requestServerId) setAdvancedStatsLoading(false);
+    }
+  }, [runOptionalDashboardRequest, server.id]);
 
-    async function loadAdvancedStats() {
-      setAdvancedStatsLoading(true);
-      try {
-        const data = await getDashboardAdvancedStats(server.id);
-        if (!active) return;
-        setAdvancedStats(data);
-        setAdvancedStatsError("");
-      } catch (error) {
-        if (!active) return;
-        setAdvancedStatsError(error instanceof Error ? error.message : "Advanced showcase data could not be loaded right now.");
-      } finally {
-        if (active) setAdvancedStatsLoading(false);
-      }
+  const refreshServerWars = useCallback(async () => {
+    const requestServerId = server.id;
+    setServerWarsLoading(true);
+    try {
+      const data = await runOptionalDashboardRequest(
+        "server-wars",
+        requestServerId,
+        () => getDashboardServerWars(requestServerId),
+      );
+      if (activeServerIdRef.current !== requestServerId) return false;
+      setServerWars(data);
+      setServerWarsError(data.available === false
+        ? data.reason ?? "server_wars_temporarily_unavailable"
+        : "");
+      return true;
+    } catch (error) {
+      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return false;
+      setServerWarsError(error instanceof Error ? error.message : "Server Wars data could not be loaded right now.");
+      return false;
+    } finally {
+      if (activeServerIdRef.current === requestServerId) setServerWarsLoading(false);
+    }
+  }, [runOptionalDashboardRequest, server.id]);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") {
+      const handle = window.setTimeout(() => {
+        setAdvancedStatsVisible(true);
+        setServerWarsVisible(true);
+      }, 0);
+      return () => window.clearTimeout(handle);
     }
 
-    loadAdvancedStats();
-    return () => {
-      active = false;
-    };
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        if (entry.target === advancedStatsPanelRef.current) setAdvancedStatsVisible(true);
+        if (entry.target === serverWarsPanelRef.current) setServerWarsVisible(true);
+      }
+    }, { rootMargin: "220px 0px" });
+
+    if (advancedStatsPanelRef.current) observer.observe(advancedStatsPanelRef.current);
+    if (serverWarsPanelRef.current) observer.observe(serverWarsPanelRef.current);
+    return () => observer.disconnect();
   }, [server.id]);
 
   useEffect(() => {
-    let active = true;
+    if (!advancedStatsVisible || advancedStatsRequestedRef.current) return;
+    advancedStatsRequestedRef.current = true;
+    void refreshAdvancedStats();
+  }, [advancedStatsVisible, refreshAdvancedStats]);
 
-    async function loadServerWars() {
-      setServerWarsLoading(true);
-      try {
-        const data = await getDashboardServerWars(server.id);
-        if (!active) return;
-        setServerWars(data);
-        setServerWarsError("");
-      } catch (error) {
-        if (!active) return;
-        setServerWarsError(error instanceof Error ? error.message : "Server Wars data could not be loaded right now.");
-      } finally {
-        if (active) setServerWarsLoading(false);
-      }
-    }
-
-    loadServerWars();
-    return () => {
-      active = false;
-    };
-  }, [server.id]);
+  useEffect(() => {
+    if (!serverWarsVisible || serverWarsRequestedRef.current) return;
+    serverWarsRequestedRef.current = true;
+    void refreshServerWars();
+  }, [refreshServerWars, serverWarsVisible]);
 
   const tags = useMemo(() => {
     try {
@@ -730,28 +868,42 @@ function ServerDashboard({
       return [];
     }
   }, [server.tags_json]);
+  const showInternalSyncSupportTools = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DZN_SUPPORT_MODE === "true";
 
-  const refreshDiscordChannels = useCallback(async () => {
+  const refreshDiscordChannels = useCallback(async (options: { live?: boolean } = {}) => {
+    const requestServerId = server.id;
     setDiscordChannelsLoading(true);
     try {
-      const channels = await getDiscordPostingChannels(server.id);
+      const channels = await runOptionalDashboardRequest(
+        "discord-posts",
+        requestServerId,
+        () => getDiscordPostingChannels(requestServerId, { refresh: options.live === true }),
+      );
+      if (activeServerIdRef.current !== requestServerId) return null;
       setDiscordChannelsResponse(channels);
       const errorCode = channels.error_code ?? channels.errorCode ?? null;
       if (channels.ok === false || errorCode) {
         const failure = buildChannelFetchFailure(channels);
         setDiscordChannelFetchFailure(failure);
         setDiscordChannelsWarning(friendlyChannelFetchWarning(channels, postingSetupsCountRef.current > 0));
+        if (channels.channels.length) {
+          setDiscordPostingChannels(channels.channels);
+          const nextCache = buildDiscordChannelCache(requestServerId, channels);
+          setDiscordChannelCache(nextCache);
+          saveDiscordChannelCache(requestServerId, nextCache);
+        }
         return channels;
       }
 
       setDiscordPostingChannels(channels.channels);
       setDiscordChannelsWarning(channels.warning ?? "");
       setDiscordChannelFetchFailure(null);
-      const nextCache = buildDiscordChannelCache(server.id, channels);
+      const nextCache = buildDiscordChannelCache(requestServerId, channels);
       setDiscordChannelCache(nextCache);
-      saveDiscordChannelCache(server.id, nextCache);
+      saveDiscordChannelCache(requestServerId, nextCache);
       return channels;
-    } catch {
+    } catch (error) {
+      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return null;
       const failure: DiscordChannelFetchFailure = {
         error_code: "channel_fetch_unavailable",
         message: "Discord channel refresh is temporarily unavailable. Existing saved setups remain active.",
@@ -765,52 +917,155 @@ function ServerDashboard({
         : failure.message);
       return null;
     } finally {
-      setDiscordChannelsLoading(false);
+      if (activeServerIdRef.current === requestServerId) setDiscordChannelsLoading(false);
     }
-  }, [server.id]);
+  }, [runOptionalDashboardRequest, server.id]);
 
   const refreshBilling = useCallback(async () => {
+    const requestServerId = server.id;
     try {
-      const [billing, advertising] = await Promise.all([
-        getBillingStatus(),
-        getServerAdvertisingStatus(server.id).catch(() => null),
-      ]);
+      const { billing, advertising, plans, readiness } = await runOptionalDashboardRequest(
+        "billing",
+        requestServerId,
+        async () => {
+          const [billingResult, advertisingResult, plansResult, readinessResult] = await Promise.all([
+            getBillingStatus(),
+            getServerAdvertisingStatus(requestServerId).catch(() => null),
+            getBillingPlans().catch(() => null),
+            getBillingReadiness().catch(() => null),
+          ]);
+          return {
+            billing: billingResult,
+            advertising: advertisingResult,
+            plans: plansResult,
+            readiness: readinessResult,
+          };
+        },
+      );
+      if (activeServerIdRef.current !== requestServerId) return false;
       setBillingStatus(billing);
       setLastGoodBilling(billing);
       setLastBillingRefreshAt(new Date().toISOString());
       if (advertising?.advertising) setAdvertisingStatus(advertising.advertising);
-      const plans = await getBillingPlans().catch(() => null);
       if (plans?.plans?.length) setBillingPlans(plans.plans);
-      const readiness = await getBillingReadiness().catch(() => null);
       setBillingReadiness(readiness);
-      const posting = await getPostingDestinations(server.id).catch(() => null);
+      setBillingMessage("");
+      return true;
+    } catch (error) {
+      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return false;
+      setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
+      return false;
+    }
+  }, [runOptionalDashboardRequest, server.id]);
+
+  const refreshDiscordPostingSetup = useCallback(async (options: { liveChannels?: boolean } = {}) => {
+    const requestServerId = server.id;
+    try {
+      const { posting, channels } = await runOptionalDashboardRequest(
+        "discord-posts",
+        requestServerId,
+        async () => {
+          const [postingResult, channelsResult] = await Promise.all([
+            getPostingDestinations(requestServerId).catch(() => null),
+            getDiscordPostingChannels(requestServerId, { refresh: options.liveChannels === true }).catch(() => null),
+          ]);
+          return { posting: postingResult, channels: channelsResult };
+        },
+      );
+      if (activeServerIdRef.current !== requestServerId) return false;
       if (posting?.setups) setPostingSetups(posting.setups);
       if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
-      await refreshDiscordChannels();
-      const logSettings = await getNitradoLogSettings(server.id).catch(() => null);
+      if (channels) {
+        setDiscordChannelsResponse(channels);
+        const errorCode = channels.error_code ?? channels.errorCode ?? null;
+        if (channels.ok === false || errorCode) {
+          const failure = buildChannelFetchFailure(channels);
+          setDiscordChannelFetchFailure(failure);
+          setDiscordChannelsWarning(friendlyChannelFetchWarning(channels, posting?.setups?.length ? true : postingSetupsCountRef.current > 0));
+        } else {
+          setDiscordChannelsWarning(channels.warning ?? "");
+          setDiscordChannelFetchFailure(null);
+        }
+        if (channels.channels.length) {
+          setDiscordPostingChannels(channels.channels);
+          const nextCache = buildDiscordChannelCache(requestServerId, channels);
+          setDiscordChannelCache(nextCache);
+          saveDiscordChannelCache(requestServerId, nextCache);
+        }
+      }
+      return true;
+    } catch (error) {
+      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return false;
+      setDiscordChannelsWarning(error instanceof Error ? error.message : "Discord posting setup is temporarily unavailable.");
+      return false;
+    } finally {
+      if (activeServerIdRef.current === requestServerId) setDiscordChannelsLoading(false);
+    }
+  }, [runOptionalDashboardRequest, server.id]);
+
+  const refreshSyncHealthDiagnostics = useCallback(async () => {
+    const requestServerId = server.id;
+    try {
+      const { logSettings, health, cacheDebug } = await runOptionalDashboardRequest(
+        "sync-health-diagnostics",
+        requestServerId,
+        async () => {
+          const [logSettingsResult, healthResult, cacheDebugResult] = await Promise.all([
+            getNitradoLogSettings(requestServerId).catch(() => null),
+            getAutomationHealth().catch(() => null),
+            getPublicCacheDebug(requestServerId).catch(() => null),
+          ]);
+          return {
+            logSettings: logSettingsResult,
+            health: healthResult,
+            cacheDebug: cacheDebugResult,
+          };
+        },
+      );
+      if (activeServerIdRef.current !== requestServerId) return false;
       if (logSettings?.saved_settings) {
         setNitradoLogSettings(logSettings.saved_settings);
         setNitradoLogSettingsCheck(logSettings);
       }
-      const health = await getAutomationHealth().catch(() => null);
       if (health) {
         setAutomationHealth(health);
         setLastGoodAutomationHealth(health);
       }
-      const cacheDebug = await getPublicCacheDebug(server.id).catch(() => null);
       if (cacheDebug) {
         setPublicCacheDebug(cacheDebug);
         setLastGoodPublicCache(cacheDebug);
       }
+      return true;
     } catch (error) {
-      setDiscordChannelsLoading(false);
-      setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
+      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return false;
+      setLastRefreshError(error instanceof Error ? error.message : "Sync Health diagnostics unavailable.");
+      return false;
     }
-  }, [refreshDiscordChannels, server.id]);
+  }, [runOptionalDashboardRequest, server.id]);
 
   useEffect(() => {
-    void Promise.resolve().then(refreshBilling);
-  }, [refreshBilling]);
+    if (activeTab !== "billing") return;
+    const handle = window.setTimeout(() => {
+      void refreshBilling();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [activeTab, refreshBilling]);
+
+  useEffect(() => {
+    if (activeTab !== "discord-posts") return;
+    const handle = window.setTimeout(() => {
+      void refreshDiscordPostingSetup();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [activeTab, refreshDiscordPostingSetup]);
+
+  useEffect(() => {
+    if (activeTab !== "sync-health" || !showInternalSyncSupportTools) return;
+    const handle = window.setTimeout(() => {
+      void refreshSyncHealthDiagnostics();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [activeTab, refreshSyncHealthDiagnostics, showInternalSyncSupportTools]);
 
   const refreshDashboardLiveStats = useCallback(async () => {
     const requestServerId = server.id;
@@ -1213,8 +1468,6 @@ function ServerDashboard({
   const activeDashboardAction = isActiveDashboardActionStatus(dashboardAction?.status) ? dashboardAction : null;
   const isDashboardActionActive = Boolean(activeDashboardAction);
   const dashboardActionKey = activeDashboardAction?.actionKey ?? null;
-  const showInternalSyncSupportTools = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DZN_SUPPORT_MODE === "true";
-
   const refreshSyncData = useCallback(async (options: { manual?: boolean; warnOnError?: boolean; queueIfBusy?: boolean } = {}) => {
     if (syncRefreshInFlightRef.current) {
       if (options.queueIfBusy && syncRefreshPromiseRef.current) {
@@ -1302,22 +1555,26 @@ function ServerDashboard({
     const tasks: Array<Promise<unknown>> = [];
 
     if (includeFull || scopes.has("live-stats") || scopes.has("dashboard-health")) tasks.push(refreshDashboardLiveStats());
-    if (includeFull || scopes.has("dashboard-health")) tasks.push(refreshDashboardHealth());
+    if ((includeFull && activeTab === "sync-health") || scopes.has("dashboard-health")) tasks.push(refreshDashboardHealth());
     if (includeFull || scopes.has("sync")) tasks.push(refreshSyncData({ warnOnError: false, queueIfBusy: true }));
     if (includeFull) tasks.push(onRefreshRef.current());
-    if (includeFull || scopes.has("billing")) tasks.push(refreshBilling());
-    if (includeFull || scopes.has("discord")) tasks.push(refreshDiscordChannels());
+    if ((includeFull && activeTab === "billing") || scopes.has("billing")) tasks.push(refreshBilling());
+    if ((includeFull && activeTab === "discord-posts") || scopes.has("discord")) tasks.push(refreshDiscordPostingSetup());
     if (includeFull || scopes.has("public-cache")) {
-      tasks.push(getPublicCacheDebug(server.id).then((cacheDebug) => {
-        setPublicCacheDebug(cacheDebug);
-        setLastGoodPublicCache(cacheDebug);
-      }));
+      if (scopes.has("public-cache") || activeTab === "sync-health") {
+        tasks.push(runOptionalDashboardRequest("public-cache", server.id, () => getPublicCacheDebug(server.id)).then((cacheDebug) => {
+          setPublicCacheDebug(cacheDebug);
+          setLastGoodPublicCache(cacheDebug);
+        }));
+      }
     }
-    if (includeFull || scopes.has("sync")) {
-      tasks.push(getAutomationHealth().then((health) => {
-        setAutomationHealth(health);
-        setLastGoodAutomationHealth(health);
-      }));
+    if ((includeFull && activeTab === "sync-health" && showInternalSyncSupportTools) || scopes.has("sync")) {
+      if (activeTab === "sync-health" && showInternalSyncSupportTools) {
+        tasks.push(runOptionalDashboardRequest("automation-health", server.id, () => getAutomationHealth()).then((health) => {
+          setAutomationHealth(health);
+          setLastGoodAutomationHealth(health);
+        }));
+      }
     }
 
     const results = await Promise.allSettled(tasks);
@@ -2675,14 +2932,19 @@ function ServerDashboard({
   async function refreshDashboardAfterManualAdmImport(beforeTotals?: DashboardTotalsSnapshot) {
     setManualAdmRefreshFailed(false);
     setRefreshingSyncData(true);
-    const [authRefresh, statusResult, eventsResult, publicCacheResult, automationResult, liveStatsResult, healthResult] = await Promise.allSettled([
+    const optionalDiagnostics = activeTab === "sync-health" && showInternalSyncSupportTools
+      ? [
+          runOptionalDashboardRequest("public-cache", server.id, () => getPublicCacheDebug(server.id)),
+          runOptionalDashboardRequest("automation-health", server.id, () => getAutomationHealth()),
+        ]
+      : [];
+    const [authRefresh, statusResult, eventsResult, liveStatsResult, healthResult, ...diagnosticResults] = await Promise.allSettled([
       getMe(),
       getSyncStatus(server.id),
       getRecentSyncEvents(server.id),
-      getPublicCacheDebug(server.id),
-      getAutomationHealth(),
       refreshDashboardLiveStats(),
       refreshDashboardHealth(),
+      ...optionalDiagnostics,
     ]);
 
     let refreshedServer: LinkedServer | null = null;
@@ -2696,8 +2958,10 @@ function ServerDashboard({
 
     if (statusResult.status === "fulfilled") setSyncStatus(statusResult.value.status);
     if (eventsResult.status === "fulfilled") setRecentEvents(eventsResult.value.events);
-    if (publicCacheResult.status === "fulfilled") setPublicCacheDebug(publicCacheResult.value);
-    if (automationResult.status === "fulfilled") setAutomationHealth(automationResult.value);
+    const publicCacheResult = diagnosticResults[0];
+    const automationResult = diagnosticResults[1];
+    if (publicCacheResult?.status === "fulfilled") setPublicCacheDebug(publicCacheResult.value as PublicCacheDebug);
+    if (automationResult?.status === "fulfilled") setAutomationHealth(automationResult.value as AutomationHealth);
 
     if (beforeTotals) {
       const afterStatus = statusResult.status === "fulfilled" ? statusResult.value.status : syncStatus;
@@ -2707,7 +2971,7 @@ function ServerDashboard({
       }
     }
 
-    const ok = [authRefresh, statusResult, eventsResult, publicCacheResult, liveStatsResult, healthResult].every((result) => result.status === "fulfilled");
+    const ok = [authRefresh, statusResult, eventsResult, liveStatsResult, healthResult].every((result) => result.status === "fulfilled");
     if (ok) {
       setLastRefreshedAt(new Date().toISOString());
       setLiveRefreshWarning("");
@@ -3105,16 +3369,20 @@ function ServerDashboard({
           {liveRefreshWarning}
         </p>
       ) : null}
-      <DashboardAdvancedShowcasePanel
-        stats={advancedStats}
-        loading={advancedStatsLoading}
-        error={advancedStatsError}
-      />
-      <DashboardServerWarsPanel
-        wars={serverWars}
-        loading={serverWarsLoading}
-        error={serverWarsError}
-      />
+      <div ref={advancedStatsPanelRef}>
+        <DashboardAdvancedShowcasePanel
+          stats={advancedStats}
+          loading={advancedStatsVisible && advancedStatsLoading}
+          error={advancedStatsError}
+        />
+      </div>
+      <div ref={serverWarsPanelRef}>
+        <DashboardServerWarsPanel
+          wars={serverWars}
+          loading={serverWarsVisible && serverWarsLoading}
+          error={serverWarsError}
+        />
+      </div>
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)_minmax(320px,0.72fr)]">
         <DashboardPanel className="p-4">
           <div className="flex items-center justify-between gap-3">
@@ -3602,7 +3870,7 @@ function ServerDashboard({
             channelsWarning={discordChannelsWarning}
             connectedServerName={server.guild_name ?? serverDisplayName}
             planName={effectivePlanLabel}
-            onChannelsRefresh={refreshDiscordChannels}
+            onChannelsRefresh={() => refreshDiscordChannels({ live: true })}
             runDashboardAction={runDashboardAction}
             onSaved={(result) => {
               setPostingSetups(result.setups ?? []);
@@ -8227,6 +8495,25 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function isOptionalRequestCancelled(error: unknown) {
+  return error instanceof Error && error.message === "optional_request_cancelled";
+}
+
+function isRetryableDashboardOptionalError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /request failed:\s*503|error\s*1102|exceeded resource limits|temporarily unavailable/i.test(message);
+}
+
+function randomDashboardOptionalRetryDelayMs() {
+  return 650 + Math.floor(Math.random() * 850);
+}
+
+function sleepDashboardOptionalRetry(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
+
 function isSyncFeedEndpoint(endpoint: string | null) {
   return endpoint === "sync-status" ||
     endpoint === "recent-events" ||
@@ -8235,8 +8522,8 @@ function isSyncFeedEndpoint(endpoint: string | null) {
 }
 
 function dashboardRequestDebug(
-  stream: "live-stats" | "dashboard-health" | "sync-feed",
-  event: "started" | "completed" | "failed" | "skipped_in_flight",
+  stream: "live-stats" | "dashboard-health" | "sync-feed" | OptionalDashboardRequestKey,
+  event: "started" | "completed" | "failed" | "skipped_in_flight" | "optional_started" | "optional_finished" | "optional_retry_scheduled",
   details: Record<string, unknown> = {},
 ) {
   if (process.env.NODE_ENV !== "development") return;

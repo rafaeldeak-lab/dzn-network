@@ -446,8 +446,9 @@ export async function runAutoPostDispatcherNow(linkedServerId: string) {
   });
 }
 
-export async function getDiscordPostingChannels(linkedServerId: string) {
-  const response = await fetch(`/api/servers/${encodeURIComponent(linkedServerId)}/discord-channels`, {
+export async function getDiscordPostingChannels(linkedServerId: string, options: { refresh?: boolean } = {}) {
+  const query = options.refresh ? "?refresh=1" : "";
+  const response = await fetch(`/api/servers/${encodeURIComponent(linkedServerId)}/discord-channels${query}`, {
     cache: "no-store",
     credentials: "include",
     headers: {

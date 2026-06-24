@@ -32,7 +32,11 @@ export type BillingReadinessResponse = {
 
 export type DashboardAdvancedStatsResult = {
   ok?: boolean;
+  available?: boolean;
+  stale?: boolean;
+  reason?: string | null;
   generated_at?: string;
+  data?: DashboardAdvancedStatsResult | null;
   access?: {
     effectivePlan?: string;
     dashboardAnalytics?: boolean;
@@ -91,6 +95,8 @@ export type DashboardAdvancedStatsResult = {
 
 export type DashboardServerWarsResult = {
   ok: boolean;
+  available?: boolean;
+  reason?: string | null;
   generated_at?: string;
   server?: {
     id: string;
