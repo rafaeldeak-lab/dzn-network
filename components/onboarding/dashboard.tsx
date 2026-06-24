@@ -45,11 +45,14 @@ import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
 import type { AdmAutomationStatusResult, AdmBackfillPlanResult, AdmFileDiscoveryDebug, AdmImportJobProgressResult, AdmRecentSyncEvent, AdmSyncRunResult, AdmSyncStatus, AdvertisingBumpStatus, AutomationCronRunSummary, AutomationHealth, AutoPostDispatchNowResult, AuthResponse, BillingPlanSummary, BillingReadinessResponse, BillingStatus, BulkAdmFileResult, BulkAdmImportResult, DashboardAdvancedStatsResult, DashboardHealthResult, DashboardLiveStatsResult, DashboardServerWarsResult, DiscordChannelsResponse, DiscordPostingChannel, LinkedServer, ManualAdmImportErrorResult, ManualAdmImportResult, ManualAdmParsePreviewResult, NitradoLogAccessDiagnostics, NitradoLogSettingsCheckResponse, NitradoLogSettingsConfirmation, PostingChannelSetup, PostingDestinationsResponse, PostingOptionSummary, PublicCacheDebug, PublicCacheRebuildResult, SyncLockRecoveryResult } from "./types";
 
-const LIVE_STATS_POLL_INTERVAL_MS = 15000;
-const DASHBOARD_HEALTH_POLL_INTERVAL_MS = 60000;
+const LIVE_STATS_POLL_INTERVAL_MS = 30000;
+const DASHBOARD_HEALTH_POLL_INTERVAL_MS = 120000;
 const SYNC_POLL_INTERVAL_MS = 30000;
 const ADM_IMPORT_JOB_POLL_INTERVAL_MS = 3000;
 const PLAYER_COUNT_LAST_KNOWN_THRESHOLD_MS = 60 * 60 * 1000;
+const LIVE_STATS_TIMEOUT_MS = 8000;
+const DASHBOARD_HEALTH_TIMEOUT_MS = 12000;
+const SYNC_FEED_TIMEOUT_MS = 10000;
 let hasLoggedMultiServerReady = false;
 
 type DiscordChannelCache = {
@@ -548,12 +551,23 @@ function ServerDashboard({
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const activeServerIdRef = useRef(serverProp.id);
+  const liveStatsInFlightRef = useRef(false);
+  const dashboardHealthInFlightRef = useRef(false);
+  const liveStatsAbortRef = useRef<AbortController | null>(null);
+  const dashboardHealthAbortRef = useRef<AbortController | null>(null);
+  const syncFeedAbortRef = useRef<AbortController | null>(null);
   const liveStatsRequestIdRef = useRef(0);
   const lastAppliedLiveStatsGeneratedAtRef = useRef<string | null>(null);
   const dashboardHealthRequestIdRef = useRef(0);
   const lastAppliedDashboardHealthGeneratedAtRef = useRef<string | null>(null);
   const lastGoodDashboardHealthRef = useRef(lastGoodDashboardHealth);
   const lastGoodDashboardLiveStatsRef = useRef(lastGoodDashboardLiveStats);
+  const lastRefreshedAtRef = useRef<string | null>(lastRefreshedAt);
+  const failedEndpointRef = useRef<string | null>(failedEndpoint);
+  const recentEventsRef = useRef(recentEvents);
+  const lastGoodAdmJobRef = useRef(lastGoodAdmJob);
+  const postingSetupsCountRef = useRef(postingSetups.length);
+  const lastLiveStatsFailureMessageRef = useRef<string | null>(null);
   const onRefreshRef = useRef(onRefresh);
   const dashboardActionRef = useRef<DashboardActionProgress | null>(dashboardAction);
   const admChunkRunnerControlRef = useRef({ paused: false, cancelled: false, runId: 0 });
@@ -594,6 +608,26 @@ function ServerDashboard({
   }, [onRefresh]);
 
   useEffect(() => {
+    lastRefreshedAtRef.current = lastRefreshedAt;
+  }, [lastRefreshedAt]);
+
+  useEffect(() => {
+    failedEndpointRef.current = failedEndpoint;
+  }, [failedEndpoint]);
+
+  useEffect(() => {
+    recentEventsRef.current = recentEvents;
+  }, [recentEvents]);
+
+  useEffect(() => {
+    lastGoodAdmJobRef.current = lastGoodAdmJob;
+  }, [lastGoodAdmJob]);
+
+  useEffect(() => {
+    postingSetupsCountRef.current = postingSetups.length;
+  }, [postingSetups.length]);
+
+  useEffect(() => {
     lastGoodDashboardHealthRef.current = lastGoodDashboardHealth;
   }, [lastGoodDashboardHealth]);
 
@@ -604,6 +638,13 @@ function ServerDashboard({
   useEffect(() => {
     let cancelled = false;
     activeServerIdRef.current = serverProp.id;
+    liveStatsAbortRef.current?.abort();
+    dashboardHealthAbortRef.current?.abort();
+    syncFeedAbortRef.current?.abort();
+    liveStatsInFlightRef.current = false;
+    dashboardHealthInFlightRef.current = false;
+    syncRefreshInFlightRef.current = false;
+    syncRefreshPromiseRef.current = null;
     liveStatsRequestIdRef.current += 1;
     dashboardHealthRequestIdRef.current += 1;
     const cachedHealth = loadDashboardHealthCache(serverProp.id);
@@ -699,7 +740,7 @@ function ServerDashboard({
       if (channels.ok === false || errorCode) {
         const failure = buildChannelFetchFailure(channels);
         setDiscordChannelFetchFailure(failure);
-        setDiscordChannelsWarning(friendlyChannelFetchWarning(channels, postingSetups.length > 0));
+        setDiscordChannelsWarning(friendlyChannelFetchWarning(channels, postingSetupsCountRef.current > 0));
         return channels;
       }
 
@@ -719,14 +760,14 @@ function ServerDashboard({
         attempted_at: new Date().toISOString(),
       };
       setDiscordChannelFetchFailure(failure);
-      setDiscordChannelsWarning(postingSetups.length > 0
+      setDiscordChannelsWarning(postingSetupsCountRef.current > 0
         ? `${failure.message} Saved auto-post setups continue running even if channel refresh temporarily fails.`
         : failure.message);
       return null;
     } finally {
       setDiscordChannelsLoading(false);
     }
-  }, [postingSetups.length, server.id]);
+  }, [server.id]);
 
   const refreshBilling = useCallback(async () => {
     try {
@@ -773,11 +814,20 @@ function ServerDashboard({
 
   const refreshDashboardLiveStats = useCallback(async () => {
     const requestServerId = server.id;
+    if (liveStatsInFlightRef.current) {
+      dashboardRequestDebug("live-stats", "skipped_in_flight", { serverId: requestServerId });
+      return false;
+    }
+
     const requestId = liveStatsRequestIdRef.current + 1;
     liveStatsRequestIdRef.current = requestId;
+    liveStatsInFlightRef.current = true;
+    const request = createDashboardRequestController(LIVE_STATS_TIMEOUT_MS);
+    liveStatsAbortRef.current = request.controller;
+    dashboardRequestDebug("live-stats", "started", { serverId: requestServerId, requestId });
 
     try {
-      const response = await getDashboardLiveStats(requestServerId);
+      const response = await getDashboardLiveStats(requestServerId, { signal: request.controller.signal });
       if (
         !response.ok ||
         response.server_id !== requestServerId ||
@@ -794,39 +844,59 @@ function ServerDashboard({
       setLastGoodDashboardStats(dashboardStatsCacheFromLiveStats(response));
       saveDashboardLiveStatsCache(requestServerId, response);
       setLiveStatsError("");
+      lastLiveStatsFailureMessageRef.current = null;
       setLiveStatsLastSuccessfulAt(response.generated_at);
-      if (failedEndpoint === "dashboard-live-stats") {
+      if (failedEndpointRef.current === "dashboard-live-stats") {
         setFailedEndpoint(null);
         setLastRefreshError(null);
       }
       setLiveRefreshStatus("ok");
       setLiveRefreshWarning("");
       setLastRefreshedAt(response.generated_at);
+      dashboardRequestDebug("live-stats", "completed", { serverId: requestServerId, requestId });
       return true;
     } catch (error) {
       if (activeServerIdRef.current !== requestServerId || liveStatsRequestIdRef.current !== requestId) {
         return false;
       }
-      const message = error instanceof Error ? error.message : "Live stat refresh failed.";
+      const message = isAbortError(error) ? "Live stat refresh timed out." : error instanceof Error ? error.message : "Live stat refresh failed.";
       setLiveStatsError(message);
       setFailedEndpoint("dashboard-live-stats");
       setLastRefreshError(message);
-      setFailedRefreshCount((count) => count + 1);
+      if (lastLiveStatsFailureMessageRef.current !== message) {
+        lastLiveStatsFailureMessageRef.current = message;
+        setFailedRefreshCount((count) => count + 1);
+      }
       setLiveRefreshStatus("stale");
       const lastGood = lastGoodDashboardLiveStatsRef.current;
       if (lastGood) {
         setLiveRefreshWarning(`Live stat refresh failed. Showing last successful canonical data from ${formatClockTime(lastGood.generated_at)}.`);
       }
+      dashboardRequestDebug("live-stats", "failed", { serverId: requestServerId, requestId, aborted: isAbortError(error) });
       return false;
+    } finally {
+      request.cancelTimeout();
+      if (liveStatsAbortRef.current === request.controller) liveStatsAbortRef.current = null;
+      if (liveStatsRequestIdRef.current === requestId) liveStatsInFlightRef.current = false;
     }
-  }, [failedEndpoint, server.id]);
+  }, [server.id]);
 
   const refreshDashboardHealth = useCallback(async () => {
     const requestServerId = server.id;
+    if (dashboardHealthInFlightRef.current) {
+      dashboardRequestDebug("dashboard-health", "skipped_in_flight", { serverId: requestServerId });
+      return false;
+    }
+
     const requestId = dashboardHealthRequestIdRef.current + 1;
     dashboardHealthRequestIdRef.current = requestId;
+    dashboardHealthInFlightRef.current = true;
+    const request = createDashboardRequestController(DASHBOARD_HEALTH_TIMEOUT_MS);
+    dashboardHealthAbortRef.current = request.controller;
+    dashboardRequestDebug("dashboard-health", "started", { serverId: requestServerId, requestId });
+
     try {
-      const response = await getDashboardHealth(requestServerId);
+      const response = await getDashboardHealth(requestServerId, { signal: request.controller.signal });
       if (
         !response.ok ||
         response.server_id !== requestServerId ||
@@ -841,38 +911,36 @@ function ServerDashboard({
       setLastGoodDashboardHealth(response);
       setLastGoodDashboardStats(dashboardStatsCacheFromHealth(response));
       saveDashboardHealthCache(requestServerId, response);
-      if (response.latest_events.length && !recentEvents.length) {
+      if (response.latest_events.length && !recentEventsRef.current.length) {
         setRecentEvents(response.latest_events);
         setLastGoodRecentEvents(response.latest_events);
       }
-      if (response.sync.active_job && !lastGoodAdmJob) {
+      if (response.sync.active_job && !lastGoodAdmJobRef.current) {
         setLastGoodAdmJob(dashboardHealthJobToAdmJob(response.sync.active_job));
       }
       setLastRefreshedAt(response.generated_at);
+      dashboardRequestDebug("dashboard-health", "completed", { serverId: requestServerId, requestId });
       return true;
     } catch (error) {
       if (activeServerIdRef.current !== requestServerId || dashboardHealthRequestIdRef.current !== requestId) {
         return false;
       }
       setFailedEndpoint("dashboard-health");
-      setLastRefreshError(error instanceof Error ? error.message : "Dashboard health snapshot failed.");
+      setLastRefreshError(isAbortError(error) ? "Dashboard health refresh timed out." : error instanceof Error ? error.message : "Dashboard health snapshot failed.");
       setFailedRefreshCount((count) => count + 1);
       const cached = lastGoodDashboardHealthRef.current;
       if (cached) {
         setLiveRefreshStatus("stale");
         setLiveRefreshWarning(`Live refresh failed. Showing last successful data from ${formatClockTime(cached.generated_at)}. Retrying...`);
       }
+      dashboardRequestDebug("dashboard-health", "failed", { serverId: requestServerId, requestId, aborted: isAbortError(error) });
       return false;
+    } finally {
+      request.cancelTimeout();
+      if (dashboardHealthAbortRef.current === request.controller) dashboardHealthAbortRef.current = null;
+      if (dashboardHealthRequestIdRef.current === requestId) dashboardHealthInFlightRef.current = false;
     }
-  }, [lastGoodAdmJob, recentEvents.length, server.id]);
-
-  useEffect(() => {
-    void Promise.resolve().then(refreshDashboardLiveStats);
-  }, [refreshDashboardLiveStats]);
-
-  useEffect(() => {
-    void Promise.resolve().then(refreshDashboardHealth);
-  }, [refreshDashboardHealth]);
+  }, [server.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1161,12 +1229,14 @@ function ServerDashboard({
     syncRefreshInFlightRef.current = true;
     if (options.manual) setManualRefreshing(true);
     setRefreshingSyncData(true);
+    const request = createDashboardRequestController(SYNC_FEED_TIMEOUT_MS);
+    syncFeedAbortRef.current = request.controller;
+    dashboardRequestDebug("sync-feed", "started", { serverId: server.id });
 
     const refreshPromise = Promise.allSettled([
-      getSyncStatus(server.id),
-      getRecentSyncEvents(server.id),
-      getNitradoLogSettings(server.id),
-    ]).then(([statusResult, eventsResult, logSettingsResult]) => {
+      getSyncStatus(server.id, { signal: request.controller.signal }),
+      getRecentSyncEvents(server.id, { signal: request.controller.signal }),
+    ]).then(([statusResult, eventsResult]) => {
       const now = new Date().toISOString();
       const failed: string[] = [];
 
@@ -1187,29 +1257,25 @@ function ServerDashboard({
         failed.push("recent-events");
       }
 
-      if (logSettingsResult.status === "fulfilled" && logSettingsResult.value?.saved_settings) {
-        setNitradoLogSettings(logSettingsResult.value.saved_settings);
-        setNitradoLogSettingsCheck(logSettingsResult.value);
-      } else if (logSettingsResult.status === "rejected") {
-        failed.push("nitrado-log-settings");
-      }
-
       if (failed.length) {
         setFailedEndpoint(failed.join(", "));
-        setLastRefreshError(firstRejectedMessage(statusResult, eventsResult, logSettingsResult));
-        setFailedRefreshCount((count) => count + 1);
+        setLastRefreshError(firstRejectedMessage(statusResult, eventsResult));
+        if (failedEndpointRef.current !== failed.join(", ")) setFailedRefreshCount((count) => count + 1);
         setLiveRefreshStatus(statusResult.status === "fulfilled" || eventsResult.status === "fulfilled" ? "stale" : "retrying");
         if (options.warnOnError !== false) {
-          setLiveRefreshWarning(`Live refresh failed. Showing last successful data from ${lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "the previous refresh"}. Retrying...`);
+          setLiveRefreshWarning(`Dashboard activity refresh failed. Showing last successful data from ${lastRefreshedAtRef.current ? formatClockTime(lastRefreshedAtRef.current) : "the previous refresh"}. Retrying...`);
         }
         return statusResult.status === "fulfilled" || eventsResult.status === "fulfilled";
       }
 
       setLastRefreshedAt(now);
-      setLiveRefreshWarning("");
-      setLiveRefreshStatus("ok");
-      setLastRefreshError(null);
-      setFailedEndpoint(null);
+      if (isSyncFeedEndpoint(failedEndpointRef.current)) {
+        setLiveRefreshWarning("");
+        setLiveRefreshStatus("ok");
+        setLastRefreshError(null);
+        setFailedEndpoint(null);
+      }
+      dashboardRequestDebug("sync-feed", "completed", { serverId: server.id });
       return true;
     });
 
@@ -1220,10 +1286,12 @@ function ServerDashboard({
     } finally {
       syncRefreshInFlightRef.current = false;
       syncRefreshPromiseRef.current = null;
+      request.cancelTimeout();
+      if (syncFeedAbortRef.current === request.controller) syncFeedAbortRef.current = null;
       setRefreshingSyncData(false);
       if (options.manual) setManualRefreshing(false);
     }
-  }, [lastRefreshedAt, server.id]);
+  }, [server.id]);
 
   async function refreshDashboardDataAfterAction(scope: RunDashboardActionInput<unknown>["refreshAfterSuccess"] = "full") {
     if (scope === false || scope === "none") return true;
@@ -1259,7 +1327,7 @@ function ServerDashboard({
       setLastRefreshError(firstRejectedMessage(...results));
       setFailedRefreshCount((count) => count + 1);
       setLiveRefreshStatus("stale");
-      setLiveRefreshWarning(`Action completed, but dashboard refresh failed. Showing last successful data from ${lastRefreshedAt ? formatClockTime(lastRefreshedAt) : "the previous refresh"}.`);
+      setLiveRefreshWarning(`Action completed, but dashboard refresh failed. Showing last successful data from ${lastRefreshedAtRef.current ? formatClockTime(lastRefreshedAtRef.current) : "the previous refresh"}.`);
     }
     return ok;
   }
@@ -1442,6 +1510,8 @@ function ServerDashboard({
   }, [refreshDashboardLiveStats]);
 
   useEffect(() => {
+    if (activeTab !== "sync-health") return;
+
     let active = true;
     const refreshVisibleHealth = () => {
       if (!active || document.visibilityState === "hidden") return;
@@ -1450,7 +1520,7 @@ function ServerDashboard({
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") refreshVisibleHealth();
     };
-    const initialRefresh = window.setTimeout(refreshVisibleHealth, activeTab === "sync-health" ? 0 : 1000);
+    const initialRefresh = window.setTimeout(refreshVisibleHealth, 0);
     const interval = window.setInterval(refreshVisibleHealth, DASHBOARD_HEALTH_POLL_INTERVAL_MS);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
@@ -8142,6 +8212,35 @@ function isOlderGeneratedAt(next: string | null | undefined, current: string | n
   const currentTime = Date.parse(current);
   if (!Number.isFinite(nextTime) || !Number.isFinite(currentTime)) return false;
   return nextTime < currentTime;
+}
+
+function createDashboardRequestController(timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    controller,
+    cancelTimeout: () => window.clearTimeout(timeout),
+  };
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function isSyncFeedEndpoint(endpoint: string | null) {
+  return endpoint === "sync-status" ||
+    endpoint === "recent-events" ||
+    endpoint === "sync-status, recent-events" ||
+    endpoint === "recent-events, sync-status";
+}
+
+function dashboardRequestDebug(
+  stream: "live-stats" | "dashboard-health" | "sync-feed",
+  event: "started" | "completed" | "failed" | "skipped_in_flight",
+  details: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV !== "development") return;
+  console.debug("DZN DASHBOARD REQUEST", { stream, event, ...details });
 }
 
 function dashboardHealthJobToAdmJob(job: DashboardHealthResult["sync"]["active_job"]): AdmImportJobProgressResult | null {

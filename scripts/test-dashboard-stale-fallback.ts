@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 
 const dashboard = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 
+const manualImportRefreshBlock = dashboard.slice(
+  dashboard.indexOf("async function refreshDashboardAfterManualAdmImport"),
+  dashboard.indexOf("let refreshedServer", dashboard.indexOf("async function refreshDashboardAfterManualAdmImport")),
+);
+
 assert.equal(
   dashboard.includes("const canonicalStats = dashboardLiveStats?.stats"),
   true,
@@ -65,9 +70,12 @@ assert.equal(
   "Overview and Sync Health must use the same canonical snapshot metadata.",
 );
 assert.equal(
-  dashboard.includes("getMe(),\n      getSyncStatus(server.id)"),
+  manualImportRefreshBlock.includes("getMe()")
+    && manualImportRefreshBlock.includes("getSyncStatus(server.id)")
+    && manualImportRefreshBlock.includes("refreshDashboardLiveStats()")
+    && manualImportRefreshBlock.includes("refreshDashboardHealth()"),
   true,
-  "Manual import refresh may refresh auth/server metadata once after a write.",
+  "Manual import refresh may refresh auth/server metadata and canonical dashboard snapshots once after a write.",
 );
 
 console.log("Dashboard stale-fallback tests passed.");

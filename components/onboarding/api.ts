@@ -181,24 +181,25 @@ export async function testAdmPath(path: string) {
   });
 }
 
-export async function getSyncStatus(linkedServerId?: string) {
+export async function getSyncStatus(linkedServerId?: string, init: RequestInit = {}) {
   const query = linkedServerId ? `?linked_server_id=${encodeURIComponent(linkedServerId)}` : "";
-  return request<{ status: AdmSyncStatus }>(`/api/sync/status${query}`);
+  return request<{ status: AdmSyncStatus }>(`/api/sync/status${query}`, init);
 }
 
-export async function getRecentSyncEvents(linkedServerId?: string) {
+export async function getRecentSyncEvents(linkedServerId?: string, init: RequestInit = {}) {
   const query = linkedServerId ? `?linked_server_id=${encodeURIComponent(linkedServerId)}` : "";
-  return request<{ events: AdmRecentSyncEvent[] }>(`/api/sync/recent-events${query}`);
+  return request<{ events: AdmRecentSyncEvent[] }>(`/api/sync/recent-events${query}`, init);
 }
 
 export async function runLogAccessDiagnostics() {
   return request<{ diagnostics: NitradoLogAccessDiagnostics }>("/api/nitrado/log-access-diagnostics");
 }
 
-export async function getNitradoLogSettings(linkedServerId: string, options: { check?: boolean } = {}) {
+export async function getNitradoLogSettings(linkedServerId: string, options: { check?: boolean; signal?: AbortSignal } = {}) {
   const query = options.check ? "?check=1" : "";
   return request<NitradoLogSettingsCheckResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/nitrado-log-settings${query}`, {
     cache: "no-store",
+    signal: options.signal,
   });
 }
 
@@ -364,16 +365,18 @@ export async function getAdmAutomationStatus(linkedServerId: string) {
   });
 }
 
-export async function getDashboardHealth(linkedServerId: string) {
+export async function getDashboardHealth(linkedServerId: string, init: RequestInit = {}) {
   return request<DashboardHealthApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/health`, {
     cache: "no-store",
+    ...init,
   });
 }
 
-export async function getDashboardLiveStats(linkedServerId: string) {
+export async function getDashboardLiveStats(linkedServerId: string, init: RequestInit = {}) {
   return request<DashboardLiveStatsApiResult>(`/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/live-stats`, {
     cache: "no-store",
     credentials: "include",
+    ...init,
   });
 }
 

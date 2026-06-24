@@ -524,10 +524,14 @@ includesAll(dashboard, [
   "Showing last successful canonical data",
   "const shouldShowLiveRefreshWarning = Boolean(liveRefreshWarning);",
   "Last known canonical stats",
-  "Promise.resolve().then(refreshDashboardHealth)",
-  "Promise.resolve().then(refreshDashboardLiveStats)",
+  "const LIVE_STATS_POLL_INTERVAL_MS = 30000",
+  "const DASHBOARD_HEALTH_POLL_INTERVAL_MS = 120000",
+  "liveStatsInFlightRef",
+  "dashboardHealthInFlightRef",
   "dashboardHealthJobToAdmJob",
 ]);
+assert.equal(dashboard.includes("Promise.resolve().then(refreshDashboardHealth)"), false, "Dashboard health must not duplicate initial polling requests.");
+assert.equal(dashboard.includes("Promise.resolve().then(refreshDashboardLiveStats)"), false, "Live stats must not duplicate initial polling requests.");
 assert.equal(dashboard.includes('planLabel("free")'), false, "Dashboard must not downgrade the current plan to Free from a missing billing response.");
 
 const migration = source("migrations/0028_public_stats_snapshots.sql");
