@@ -1,4 +1,3 @@
-import { getServerAdvancedShowcasePayload } from "../../../../_lib/advanced-leaderboards";
 import { getSessionUser } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
@@ -28,18 +27,18 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   }
 
   try {
-    const payload = await getServerAdvancedShowcasePayload(env, linkedServerId, { ownerScoped: true, overlayLimit: 420 });
+    const payload = await readDurableAdvancedStatsSnapshot(linkedServerId);
     if (!payload) {
-      return json({ ok: false, error: "server_not_found" }, { status: 404 });
+      return json(advancedStatsPending(), { headers: PRIVATE_HEADERS });
     }
     return json(payload, { headers: PRIVATE_HEADERS });
   } catch (error) {
     console.warn("DZN DASHBOARD ADVANCED STATS LOAD FAILED", safeError(error));
     return json({
-      ok: false,
-      error: "dashboard_advanced_stats_load_failed",
-      message: "Advanced showcase data could not be loaded right now.",
-    }, { status: 503 });
+      ...advancedStatsPending(),
+      reason: "advanced_stats_snapshot_unavailable",
+      warning: "Advanced showcase data is temporarily unavailable. Core dashboard stats remain live.",
+    }, { headers: PRIVATE_HEADERS });
   }
 };
 
@@ -51,6 +50,27 @@ function sanitizeParam(value: unknown) {
   const raw = Array.isArray(value) ? value[0] : value;
   if (typeof raw !== "string") return "";
   return raw.trim().slice(0, 96);
+}
+
+async function readDurableAdvancedStatsSnapshot(_linkedServerId: string) {
+  // Durable advanced analytics snapshots are produced outside the dashboard GET
+  // path. Until one exists, the route intentionally degrades instead of
+  // rebuilding travel/exploration analytics from raw ADM event tables.
+  return null;
+}
+
+function advancedStatsPending() {
+  return {
+    ok: true,
+    available: false,
+    stale: false,
+    reason: "advanced_stats_snapshot_pending",
+    generated_at: new Date().toISOString(),
+    data: null,
+    notes: [
+      "Advanced Showcase is temporarily unavailable. Core canonical stats remain live.",
+    ],
+  };
 }
 
 function safeError(error: unknown) {

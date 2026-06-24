@@ -249,8 +249,10 @@ export async function getPublicServerWarRecordPayload(env: Env, serverIdOrSlug: 
   };
 }
 
-export async function getOwnerServerWarsPayload(env: Env, user: SessionUser, serverId: string) {
-  await ensureServerWarsSchema(env);
+export async function getOwnerServerWarsPayload(env: Env, user: SessionUser, serverId: string, options: { skipSchemaEnsure?: boolean } = {}) {
+  if (!options.skipSchemaEnsure) {
+    await ensureServerWarsSchema(env);
+  }
   const access = await requireServerOwnerOrDznAdmin(env, user, serverId);
   if (!access.allowed) {
     return {
@@ -266,7 +268,9 @@ export async function getOwnerServerWarsPayload(env: Env, user: SessionUser, ser
   const warAccess = getServerWarsAccess(server.plan_key, server.subscription_status);
   const category = normalizeWarServerCategory(server);
   const [events, pendingChallenges, trophies, titles] = await Promise.all([
-    getServerWarEventsForServer(env, server.id, ["pending_acceptance", "scheduled", "live", "finalizing", "completed"], false),
+    getServerWarEventsForServer(env, server.id, ["pending_acceptance", "scheduled", "live", "finalizing", "completed"], false, {
+      skipSchemaEnsure: options.skipSchemaEnsure,
+    }),
     getPendingChallengesForServer(env, server.id),
     getServerTrophies(env, server.id, false),
     getServerChampionTitles(env, server.id, false),
@@ -729,7 +733,7 @@ async function getEventTrophies(env: Env, eventId: string, options: { publicOnly
     .map(serializeTrophy);
 }
 
-async function getServerWarEventsForServer(env: Env, serverId: string, statuses: string[], publicOnly: boolean) {
+async function getServerWarEventsForServer(env: Env, serverId: string, statuses: string[], publicOnly: boolean, options: { skipSchemaEnsure?: boolean } = {}) {
   if (!statuses.length) return [];
   const placeholders = statuses.map(() => "?").join(", ");
   const rows = await requireDb(env)
@@ -747,7 +751,11 @@ async function getServerWarEventsForServer(env: Env, serverId: string, statuses:
   const events: PublicServerWarEvent[] = [];
   for (const row of rows.results ?? []) {
     if (publicOnly && row.visibility !== "public") continue;
-    events.push(await eventRowToPublicEvent(env, row, { publicOnly, standingsLimit: 8 }));
+    events.push(await eventRowToPublicEvent(env, row, {
+      publicOnly,
+      standingsLimit: 8,
+      skipSchemaEnsure: options.skipSchemaEnsure,
+    }));
   }
   return events;
 }

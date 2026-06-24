@@ -2,7 +2,6 @@ import { getSessionUser, requireDb } from "../../../_lib/db";
 import {
   classifyDiscordPostingError,
   checkDiscordPostingPermissions,
-  fetchDiscordPostingChannels,
   getPostingDeliveryMode,
   recordDiscordPostingDeliveryState,
   sendDiscordTestPost,
@@ -35,13 +34,16 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (!linkedServerId) return json({ error: "Invalid server id" }, { status: 400 });
   const access = await requireOwnedServer(env, user.id, linkedServerId);
   if (!access) return json({ error: "Server not found" }, { status: 404 });
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
-  if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
 
   if (request.method === "GET") {
+    const context = await getPostingContextForRead(env, linkedServerId);
+    if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
     return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
   }
   if (request.method !== "POST") return methodNotAllowed();
+
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
 
   const body = await readJson<SavePostingDestinationBody>(request);
   if (!isActiveSubscriptionStatus(context.subscriptionStatus)) {
@@ -333,7 +335,6 @@ async function runPostingTest(
 }
 
 async function getPostingDestinationPayload(env: Env, guildId: string, planKey: string) {
-  await ensureAutomationSchema(env);
   const rows = await requireDb(env)
     .prepare(
       `SELECT post_type, discord_channel_id, discord_webhook_url, enabled, required_feature, min_plan_key, updated_at
@@ -377,7 +378,8 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
        FROM automation_jobs
        WHERE guild_id = ?
          AND job_type = 'discord-post-update'
-       ORDER BY updated_at DESC`,
+       ORDER BY updated_at DESC
+       LIMIT 40`,
     )
     .bind(guildId)
     .all<{
@@ -394,9 +396,8 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
     list.push(row);
     jobsByType.set(row.post_type, list);
   }
-  const channelRows = await fetchDiscordPostingChannels(env, guildId).catch(() => []);
-  const channelNames = new Map(channelRows.map((channel) => [channel.channel_id, channel]));
-  const postTypeSummaries = await Promise.all(AUTO_POST_TYPES.map(async (postType) => {
+  const channelNames = new Map((rows.results ?? []).map((row) => [row.discord_channel_id, savedPostingChannel(row.discord_channel_id)]));
+  const postTypeSummaries = AUTO_POST_TYPES.map((postType) => {
       const row = configured.get(postType);
       const state = row?.discord_channel_id ? states.get(`${postType}:${row.discord_channel_id}`) : undefined;
       const jobs = jobsByType.get(postType) ?? [];
@@ -405,19 +406,12 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
         discord_webhook_url: row?.discord_webhook_url ?? null,
       });
       let permissionMissing: string[] = [];
-      let setupWarning = state?.last_error ?? null;
+      const setupWarning = state?.last_error ?? null;
       if (row?.discord_channel_id) {
-        const permissionCheck = await checkDiscordPostingPermissions(env, {
-          discord_channel_id: row.discord_channel_id,
-          discord_webhook_url: row.discord_webhook_url ?? null,
-        });
-        if (permissionCheck.mode === "bot" || permissionCheck.mode === "webhook" || permissionCheck.mode === "not_configured") {
-          deliveryMode = permissionCheck.mode;
-        } else {
+        permissionMissing = parseMissingPermissions(state?.last_error ?? null);
+        if (permissionMissing.length > 0 && !row.discord_webhook_url) {
           deliveryMode = "not_configured";
         }
-        permissionMissing = permissionCheck.missing_permissions;
-        setupWarning = permissionCheck.ok ? null : state?.last_error ?? permissionCheck.warning;
       }
       const setup = resolvePostingSetup(deliveryMode, row?.discord_channel_id ?? null, Boolean(row?.discord_webhook_url), setupWarning, permissionMissing);
       return {
@@ -447,7 +441,7 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
         queued_job_count: jobs.filter((job) => job.status === "queued").length,
         latest_automation_job_id: jobs[0]?.id ?? null,
       };
-    }));
+    });
   const summariesByType = new Map(postTypeSummaries.map((summary) => [summary.post_type, summary]));
   const groupedRows = new Map<string, typeof postTypeSummaries>();
   for (const row of rows.results ?? []) {
@@ -514,6 +508,35 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
         })),
       };
     }),
+  };
+}
+
+async function getPostingContextForRead(env: Env, linkedServerId: string) {
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT linked_servers.guild_id,
+              COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
+              server_subscriptions.status
+       FROM linked_servers
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE linked_servers.id = ?
+       LIMIT 1`,
+    )
+    .bind(linkedServerId)
+    .first<{ guild_id: string | null; plan_key: string | null; status: string | null }>();
+  if (!row?.guild_id) return null;
+  return {
+    guildId: row.guild_id,
+    planKey: row.plan_key ?? "free",
+    subscriptionStatus: row.status ?? "inactive",
+  };
+}
+
+function savedPostingChannel(channelId: string) {
+  return {
+    channel_id: channelId,
+    channel_name: `saved-${channelId.slice(-4)}`,
+    category_name: null,
   };
 }
 

@@ -2,7 +2,7 @@ import { defaultBumpPeriod, evaluateBumpEligibility, periodExpired } from "../..
 import { ensureMockUser, getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { isMockAuth } from "../../../../_lib/mock";
-import { ensureBillingSchema, getOwnerEntitlements } from "../../../../_lib/plans";
+import { ensureBillingSchema, getOwnerEntitlements, getPlanConfig, type PlanEntitlements } from "../../../../_lib/plans";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -14,7 +14,9 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const linkedServerId = sanitizeLinkedServerId(params.serverId);
   if (!linkedServerId) return json({ error: "Invalid server id" }, { status: 400 });
 
-  await ensureBillingSchema(env);
+  if (request.method === "POST") {
+    await ensureBillingSchema(env);
+  }
   const db = requireDb(env);
   const server = await db
     .prepare(
@@ -30,7 +32,9 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (!server) return json({ error: "Linked server not found" }, { status: 404 });
   if (server.user_id !== user.id) return json({ error: "No access to this linked server." }, { status: 403 });
 
-  const entitlements = await getOwnerEntitlements(env, user.discord_id);
+  const entitlements = request.method === "GET"
+    ? await getOwnerEntitlementsReadOnly(env, user.discord_id)
+    : await getOwnerEntitlements(env, user.discord_id);
   const now = new Date();
   const billing = await db
     .prepare("SELECT current_period_start, current_period_end FROM owner_billing_accounts WHERE discord_user_id = ? LIMIT 1")
@@ -110,6 +114,37 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     },
   });
 };
+
+async function getOwnerEntitlementsReadOnly(env: Env, discordUserId: string): Promise<PlanEntitlements> {
+  try {
+    const row = await requireDb(env)
+      .prepare("SELECT * FROM owner_plan_entitlements WHERE discord_user_id = ? LIMIT 1")
+      .bind(discordUserId)
+      .first<Record<string, unknown>>();
+    return row ? entitlementsFromReadonlyRow(row) : getPlanConfig("free");
+  } catch {
+    return getPlanConfig("free");
+  }
+}
+
+function entitlementsFromReadonlyRow(row: Record<string, unknown>): PlanEntitlements {
+  const base = getPlanConfig(row.plan_key);
+  return {
+    ...base,
+    max_linked_servers: Number(row.max_linked_servers ?? base.max_linked_servers),
+    can_use_reviews: Number(row.can_use_reviews ?? (base.can_use_reviews ? 1 : 0)) === 1,
+    can_use_public_listing: Number(row.can_use_public_listing ?? (base.can_use_public_listing ? 1 : 0)) === 1,
+    can_use_advanced_analytics: Number(row.can_use_advanced_analytics ?? (base.can_use_advanced_analytics ? 1 : 0)) === 1,
+    can_join_events: Number(row.can_join_events ?? (base.can_join_events ? 1 : 0)) === 1,
+    can_use_ad_bumps: Number(row.can_use_ad_bumps ?? (base.can_use_ad_bumps ? 1 : 0)) === 1,
+    included_bumps_per_month: Number(row.included_bumps_per_month ?? base.included_bumps_per_month),
+    bump_cooldown_hours: Number(row.bump_cooldown_hours ?? base.bump_cooldown_hours),
+    can_use_featured_slots: Number(row.can_use_featured_slots ?? (base.can_use_featured_slots ? 1 : 0)) === 1,
+    stat_history_days: Number(row.stat_history_days ?? base.stat_history_days),
+    public_publish_interval_minutes: Number(row.public_publish_interval_minutes ?? base.public_publish_interval_minutes),
+    visibility_weight: Number(row.visibility_weight ?? base.visibility_weight),
+  };
+}
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
   const user = await getSessionUser(env, request);

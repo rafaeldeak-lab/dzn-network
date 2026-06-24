@@ -1,4 +1,3 @@
-import { getAutomationContextForLinkedServer } from "../../../_lib/automation";
 import { getSessionUser, requireDb } from "../../../_lib/db";
 import {
   DiscordChannelFetchError,
@@ -41,6 +40,8 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const user = await resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized", error_code: "not_authorized" }, { status: 401 });
 
+  const url = new URL(request.url);
+  const liveRefresh = url.searchParams.get("refresh") === "1" || url.searchParams.get("live") === "1";
   const linkedServerId = sanitizeLinkedServerId(params.serverId);
   if (!linkedServerId) return json({ error: "Invalid server id" }, { status: 400 });
 
@@ -83,24 +84,6 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     });
   }
 
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
-  if (!context) {
-    return json({
-      error: "Automation is not ready for this server yet.",
-      ...emptyResponse({
-        selectedServerId: server.id,
-        selectedGuildId,
-        guildName,
-        botTokenConfigured,
-        botConnected: null,
-        fetchedAt,
-        errorCode: "missing_guild_id",
-        errorMessage: "Automation context could not be created for the selected guild.",
-        botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
-      }),
-    });
-  }
-
   if (isMockAuth(env.MOCK_AUTH)) {
     const channels = [
       mockChannel("123456789012345678", "auto-leaderboards", "Automation"),
@@ -123,6 +106,33 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       errorStatus: null,
       retryable: false,
       botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
+      usingCachedChannelState: false,
+      lastFetchSuccessAt: fetchedAt,
+    }));
+  }
+
+  if (!liveRefresh) {
+    const cachedChannels = await readCachedDiscordPostingChannels(env, selectedGuildId);
+    return json(channelResponse({
+      ok: true,
+      channels: cachedChannels,
+      selectedServerId: server.id,
+      selectedGuildId,
+      guildName,
+      botTokenConfigured,
+      botConnected: null,
+      fetchedAt,
+      manualFallback: true,
+      warning: cachedChannels.length
+        ? "Using saved Discord posting destinations. Open Discord Posts and refresh channels to verify live channel permissions."
+        : null,
+      errorCode: null,
+      errorMessage: null,
+      errorStatus: null,
+      retryable: false,
+      botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
+      usingCachedChannelState: true,
+      lastFetchSuccessAt: null,
     }));
   }
 
@@ -144,12 +154,17 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       errorStatus: null,
       retryable: false,
       botInviteUrl: buildBotInviteUrl(env, selectedGuildId),
+      usingCachedChannelState: false,
+      lastFetchSuccessAt: fetchedAt,
     }));
   } catch (error) {
     const classified = classifyChannelFetchError(error);
+    const cachedChannels = await readCachedDiscordPostingChannels(env, selectedGuildId).catch(() => []);
     return json({
       error: classified.message,
-      ...emptyResponse({
+      ...channelResponse({
+        ok: false,
+        channels: cachedChannels,
         selectedServerId: server.id,
         selectedGuildId,
         guildName,
@@ -161,10 +176,14 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         errorStatus: classified.status,
         retryable: classified.retryable,
         botInviteUrl: classified.code === "bot_not_in_guild" ? buildBotInviteUrl(env, selectedGuildId) : null,
+        manualFallback: true,
+        warning: classified.message,
+        usingCachedChannelState: true,
+        lastFetchSuccessAt: null,
       }),
       warning: classified.message,
       bot_invite_url: classified.code === "bot_not_in_guild" ? buildBotInviteUrl(env, selectedGuildId) : null,
-    }, { status: classified.status });
+    });
   }
 };
 
@@ -210,6 +229,8 @@ function channelResponse(input: {
   errorStatus: number | null;
   retryable: boolean;
   botInviteUrl: string | null;
+  usingCachedChannelState?: boolean;
+  lastFetchSuccessAt?: string | null;
 }) {
   return {
     ok: input.ok,
@@ -239,8 +260,8 @@ function channelResponse(input: {
       errorCode: input.errorCode,
       errorMessage: input.errorMessage,
       errorStatus: input.errorStatus,
-      lastFetchSuccessAt: input.errorCode ? null : input.fetchedAt,
-      usingCachedChannelState: false,
+      lastFetchSuccessAt: input.lastFetchSuccessAt ?? (input.errorCode ? null : input.fetchedAt),
+      usingCachedChannelState: Boolean(input.usingCachedChannelState),
     }),
   };
 }
@@ -388,6 +409,63 @@ function buildBotInviteUrl(env: Env, guildId: string | null) {
   url.searchParams.set("guild_id", guildId);
   url.searchParams.set("disable_guild_select", "true");
   return url.toString();
+}
+
+async function readCachedDiscordPostingChannels(env: Env, guildId: string): Promise<DiscordPostingChannel[]> {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT destinations.discord_channel_id,
+              MAX(destinations.updated_at) AS updated_at,
+              MAX(state.last_error) AS last_error
+       FROM server_posting_destinations destinations
+       LEFT JOIN server_posting_state state
+         ON state.guild_id = destinations.guild_id
+        AND state.discord_channel_id = destinations.discord_channel_id
+       WHERE destinations.guild_id = ?
+       GROUP BY destinations.discord_channel_id
+       ORDER BY MAX(destinations.updated_at) DESC
+       LIMIT 50`,
+    )
+    .bind(guildId)
+    .all<{ discord_channel_id: string; updated_at: string | null; last_error: string | null }>();
+
+  return (rows.results ?? []).map((row, index) => {
+    const missing = parseMissingPermissions(row.last_error);
+    return {
+      channel_id: row.discord_channel_id,
+      channel_name: `saved-${row.discord_channel_id.slice(-4)}`,
+      channel_type: "text",
+      category_name: "Saved destinations",
+      position: index,
+      category_position: 0,
+      can_view: !missing.includes("View Channel"),
+      can_send: !missing.includes("Send Messages"),
+      can_embed: !missing.includes("Embed Links"),
+      can_read_history: !missing.includes("Read Message History"),
+      can_manage_messages: !missing.includes("Manage Messages"),
+      can_post: missing.length === 0,
+      missing_permissions: missing,
+      permission_source: "unknown",
+      permission_diagnostics: {
+        selected_channel_id: row.discord_channel_id,
+        selected_channel_name: `saved-${row.discord_channel_id.slice(-4)}`,
+        bot_user_id: null,
+        bot_role_ids: [],
+        bot_role_names: [],
+        bot_has_administrator: false,
+        base_guild_permissions: null,
+        effective_channel_permissions: null,
+        permission_source: "unknown",
+        missing_permissions: missing,
+      },
+    };
+  });
+}
+
+function parseMissingPermissions(value: string | null) {
+  const match = value?.match(/Missing:\s*([^.]*)\./i);
+  if (!match?.[1]) return [];
+  return match[1].split(",").map((permission) => permission.trim()).filter(Boolean);
 }
 
 function hasDiscordBotToken(env: Env) {
