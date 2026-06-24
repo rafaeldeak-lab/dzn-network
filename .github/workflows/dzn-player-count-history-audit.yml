@@ -46,6 +46,7 @@ jobs:
             serverName: "NukeTown",
           };
           const MAX_ROWS_PER_QUERY = 200;
+          const QUERY_TIMEOUT_MS = 15000;
           let d1DatabaseId = null;
 
           function sqlString(value) {
@@ -76,14 +77,17 @@ jobs:
           }
 
           async function cloudflareJson(path, init = {}) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
             const response = await fetch(`${CF_API_BASE}${path}`, {
               ...init,
+              signal: controller.signal,
               headers: {
                 Authorization: `Bearer ${CF_TOKEN}`,
                 "Content-Type": "application/json",
                 ...(init.headers ?? {}),
               },
-            });
+            }).finally(() => clearTimeout(timeout));
             const text = await response.text();
             let payload = null;
             try {
@@ -298,11 +302,31 @@ jobs:
               || (schema[table.name] ?? []).some((col) => /current|player|metadata|status|json|source|cache|cron|run|error|warning/i.test(col.name)),
           }));
 
-          const relevantTables = schemaSummary.filter((entry) => entry.relevant).map((entry) => entry.table);
+          const evidenceCandidateTables = new Set([
+            "linked_servers",
+            "server_metadata_versions",
+            "server_sync_state",
+            "server_public_cache",
+            "sync_runs",
+            "automation_cron_runs",
+            "adm_sync_state",
+            "adm_sync_file_state",
+            "adm_import_jobs",
+            "nitrado_file_read_attempts",
+            "public_stats_snapshots",
+            "public_api_snapshots",
+            "adm_worker_heartbeat",
+            "adm_worker_selection_state",
+          ]);
+          const relevantTables = schemaSummary
+            .filter((entry) => entry.relevant && evidenceCandidateTables.has(entry.table))
+            .map((entry) => entry.table);
+          console.log(`Schema tables inspected: ${tables.length}; evidence tables selected: ${relevantTables.join(", ") || "none"}`);
 
           const linkedRows = schema.linked_servers ? await safeRun(
             `SELECT
                linked_servers.id,
+               linked_servers.guild_id,
                linked_servers.nitrado_service_id,
                linked_servers.public_slug,
                linked_servers.display_name,
@@ -348,9 +372,11 @@ jobs:
               cacheTimestamp: row.cache_last_status_update_at ?? row.cache_updated_at,
               errorWarningCategory: null,
               evidenceTable: "server_public_cache",
-              evidenceColumn: "current_player_count",
+             evidenceColumn: "current_player_count",
             });
           }
+
+          const targetGuildIds = new Set(linkedRows.map((row) => row.guild_id).filter(Boolean).map(String));
 
           for (const tableName of relevantTables) {
             const columns = schema[tableName] ?? [];
@@ -360,6 +386,9 @@ jobs:
             if (colNames.includes("linked_server_id")) targetPredicates.push(`${quoteIdent("linked_server_id")} = ${sqlString(TARGET.serverId)}`);
             if (colNames.includes("server_id")) targetPredicates.push(`${quoteIdent("server_id")} = ${sqlString(TARGET.serverId)}`);
             if (tableName === "linked_servers" && colNames.includes("id")) targetPredicates.push(`${quoteIdent("id")} = ${sqlString(TARGET.serverId)}`);
+            if (colNames.includes("guild_id") && targetGuildIds.size > 0) {
+              targetPredicates.push(`${quoteIdent("guild_id")} IN (${[...targetGuildIds].map(sqlString).join(", ")})`);
+            }
             for (const col of ["nitrado_service_id", "service_id", "source_service_id"]) {
               if (colNames.includes(col)) targetPredicates.push(`${quoteIdent(col)} = ${sqlString(TARGET.serviceId)}`);
             }
@@ -387,6 +416,7 @@ jobs:
 
             const selectCols = Array.from(new Set([...idCols, ...timeCols, ...statusCols, ...sourceCols, ...maxCols, ...currentCols, ...errorCols, ...commitCols, ...searchableTextCols.map((col) => col.name)])).slice(0, 30);
             if (selectCols.length === 0) continue;
+            console.log(`Scanning evidence table: ${tableName}`);
 
             for (const currentCol of currentCols) {
               const rows = await safeRun(
