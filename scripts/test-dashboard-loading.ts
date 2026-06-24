@@ -503,20 +503,29 @@ const dashboardApi = source("components/onboarding/api.ts");
 includesAll(dashboardApi, [
   "getDashboardHealth",
   "/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/health",
+  "getDashboardLiveStats",
+  "/api/servers/${encodeURIComponent(linkedServerId)}/dashboard/live-stats",
 ]);
 
 const dashboard = source("components/onboarding/dashboard.tsx");
 includesAll(dashboard, [
   "dzn:lastGoodDashboard:",
+  "dzn:lastGoodDashboardLiveStats:",
   "dzn:lastGoodSyncHealth:",
+  "refreshDashboardLiveStats",
   "refreshDashboardHealth",
+  "dashboardLiveStats?.stats",
   "effectiveDashboardHealth",
   "dashboardStatValues",
   "formatNullableDashboardNumber",
   "effectivePlanLabel",
   "DashboardDataHealthPanel",
   "Showing last successful data",
+  "Showing last successful canonical data",
+  "const shouldShowLiveRefreshWarning = Boolean(liveRefreshWarning);",
+  "Last known canonical stats",
   "Promise.resolve().then(refreshDashboardHealth)",
+  "Promise.resolve().then(refreshDashboardLiveStats)",
   "dashboardHealthJobToAdmJob",
 ]);
 assert.equal(dashboard.includes('planLabel("free")'), false, "Dashboard must not downgrade the current plan to Free from a missing billing response.");
