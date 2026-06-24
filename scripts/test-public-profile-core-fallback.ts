@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const publicServers = readFileSync("functions/api/public/servers.ts", "utf8");
-const publicProfileLeaderboards = readFileSync("functions/api/public/servers/[serverId]/leaderboards.ts", "utf8");
-const publicProfileExploration = readFileSync("functions/api/public/servers/[serverId]/exploration.ts", "utf8");
-const publicProfileWars = readFileSync("functions/api/public/servers/[serverId]/wars/index.ts", "utf8");
+const publicServers = readFileSync("functions/api/public/servers.ts", "utf8").replace(/\r\n/g, "\n");
+const publicProfileLeaderboards = readFileSync("functions/api/public/servers/[serverId]/leaderboards.ts", "utf8").replace(/\r\n/g, "\n");
+const publicProfileExploration = readFileSync("functions/api/public/servers/[serverId]/exploration.ts", "utf8").replace(/\r\n/g, "\n");
+const publicProfileWars = readFileSync("functions/api/public/servers/[serverId]/wars/index.ts", "utf8").replace(/\r\n/g, "\n");
 
 const slugFastPathIndex = publicServers.indexOf("if (slug) {\n    return getPublicServerProfileFastPayload");
 const broadEnsureIndex = publicServers.indexOf("await ensureLinkedServerMetadataColumns(env)");
