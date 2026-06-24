@@ -1,0 +1,194 @@
+name: DZN ADM Worker Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: dzn-adm-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-adm-worker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+      SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Validate deployment credentials
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET GitHub secret."
+            exit 1
+          fi
+          echo "::add-mask::$CRON_SECRET"
+
+          if [ -n "${DZN_CRON_SECRET:-}" ]; then
+            echo "cron_secret_name=DZN_CRON_SECRET" >> "$GITHUB_ENV"
+          else
+            echo "cron_secret_name=SYNC_CRON_SECRET" >> "$GITHUB_ENV"
+          fi
+      - name: Run ADM deployment tests
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          npm run test:queued-adm-job-progress
+          npm run test:adm-fixtures
+          npm run test:adm-sync-runner
+          npm run test:automation-health
+          npm run worker:adm-sync:dry-run
+          git diff --check
+      - name: Verify existing ADM Worker runtime secrets before deployment
+        run: |
+          set -euo pipefail
+
+          npx wrangler secret list --config wrangler.adm-sync.toml > adm-worker-secrets-before.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const secrets = JSON.parse(fs.readFileSync("adm-worker-secrets-before.json", "utf8"));
+          const names = Array.isArray(secrets)
+            ? secrets.map((secret) => secret?.name).filter(Boolean)
+            : [];
+
+          if (!names.includes("TOKEN_ENCRYPTION_KEY")) {
+            console.error("dzn-adm-sync-worker is missing existing Cloudflare runtime secret TOKEN_ENCRYPTION_KEY");
+            process.exit(1);
+          }
+
+          console.log("Verified required dzn-adm-sync-worker runtime secret names before deployment.");
+          NODE
+      - name: Deploy ADM Worker
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config wrangler.adm-sync.toml | tee adm-worker-deploy.txt
+      - name: Provision cron secret into ADM Worker
+        run: |
+          set -euo pipefail
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          echo "::add-mask::$CRON_SECRET"
+          printf "%s" "$CRON_SECRET" |
+            npx wrangler secret put DZN_CRON_SECRET \
+              --config wrangler.adm-sync.toml
+      - name: Verify runtime secret names after deployment
+        run: |
+          set -euo pipefail
+
+          npx wrangler secret list --config wrangler.adm-sync.toml > adm-worker-secrets-after.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const secrets = JSON.parse(fs.readFileSync("adm-worker-secrets-after.json", "utf8"));
+          const names = Array.isArray(secrets)
+            ? secrets.map((secret) => secret?.name).filter(Boolean)
+            : [];
+
+          for (const required of ["TOKEN_ENCRYPTION_KEY", "DZN_CRON_SECRET"]) {
+            if (!names.includes(required)) {
+              console.error(`dzn-adm-sync-worker is missing required Cloudflare runtime secret ${required}`);
+              process.exit(1);
+            }
+          }
+
+          console.log("Verified required dzn-adm-sync-worker runtime secret names after deployment.");
+          NODE
+      - name: Verify ADM Worker schedule
+        run: |
+          set -euo pipefail
+
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/dzn-adm-sync-worker/schedules" \
+            > adm-worker-schedules.json
+
+          set +e
+          node <<'NODE'
+          const fs = require("node:fs");
+          const response = JSON.parse(fs.readFileSync("adm-worker-schedules.json", "utf8"));
+          if (!response.success) {
+            console.error("Cloudflare schedules API did not return success.");
+            process.exit(1);
+          }
+
+          let schedules;
+          if (Array.isArray(response.result)) {
+            schedules = response.result;
+          } else if (Array.isArray(response.result?.schedules)) {
+            schedules = response.result.schedules;
+          } else if (Array.isArray(response.result?.triggers)) {
+            schedules = response.result.triggers;
+          } else {
+            console.error("Cloudflare schedules API response shape was not recognized.");
+            process.exit(2);
+          }
+
+          const hasSchedule = schedules.some((schedule) =>
+            schedule?.cron === "* * * * *"
+              || schedule?.cron_trigger?.cron === "* * * * *"
+              || schedule?.schedule === "* * * * *",
+          );
+          if (!hasSchedule) {
+            console.error("dzn-adm-sync-worker scheduled trigger * * * * * was not found.");
+            process.exit(1);
+          }
+          console.log("Verified dzn-adm-sync-worker scheduled trigger * * * * *.");
+          NODE
+          schedule_status=$?
+          set -e
+
+          if [ "$schedule_status" -ne 0 ]; then
+            if [ "$schedule_status" -ne 2 ]; then
+              exit "$schedule_status"
+            fi
+            if ! grep -F 'schedule: * * * * *' adm-worker-deploy.txt >/dev/null \
+              || ! grep -F 'crons = ["* * * * *"]' wrangler.adm-sync.toml >/dev/null; then
+              echo "::error::dzn-adm-sync-worker deployment/config did not report the expected * * * * * schedule."
+              exit 1
+            fi
+            echo "::warning::Cloudflare schedules API response shape was not recognized, but Wrangler deploy output and config confirmed the configured * * * * * trigger."
+          fi
+      - name: Deployment summary
+        run: |
+          set -euo pipefail
+
+          worker_version_id="$(grep -Eo 'Current Version ID: [a-f0-9-]+' adm-worker-deploy.txt | awk '{print $4}' | tail -n 1 || true)"
+          if [ -z "$worker_version_id" ]; then
+            worker_version_id="unavailable"
+          fi
+
+          {
+            echo "## DZN ADM Worker Deploy"
+            echo ""
+            echo "- Worker: dzn-adm-sync-worker"
+            echo "- Config: wrangler.adm-sync.toml"
+            echo "- Schedule: * * * * *"
+            echo "- D1 binding: DB"
+            echo "- Database name: dzn_network_db"
+            echo "- TOKEN_ENCRYPTION_KEY present: yes"
+            echo "- DZN_CRON_SECRET present: yes"
+            echo "- Source commit SHA: ${GITHUB_SHA}"
+            echo "- Deploy result: success"
+            echo "- Worker version ID: ${worker_version_id}"
+            echo "- Cron secret provisioned as: DZN_CRON_SECRET"
+            echo "- Source secret used: ${cron_secret_name}"
+          } >> "$GITHUB_STEP_SUMMARY"

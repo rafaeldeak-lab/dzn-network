@@ -22,10 +22,10 @@ Current allowed GitHub Actions secrets:
   Only if the ADM Codex Safe Fix workflow is explicitly enabled.
 
 - `CLOUDFLARE_API_TOKEN`
-  Only for the manual `DZN Auto Update Worker Deploy` workflow. Scope it narrowly to deploy `dzn-auto-update-worker`, manage that Worker secret, and read Worker schedules.
+  Only for the manual `DZN Auto Update Worker Deploy` and `DZN ADM Worker Deploy` workflows. Scope it narrowly to deploy the intended Worker, manage that Worker's `DZN_CRON_SECRET`, list Worker secret names, and read Worker schedules.
 
 - `CLOUDFLARE_ACCOUNT_ID`
-  Only for the manual `DZN Auto Update Worker Deploy` workflow. This may be a repository variable instead of a secret.
+  Only for the manual `DZN Auto Update Worker Deploy` and `DZN ADM Worker Deploy` workflows. This may be a repository variable instead of a secret.
 
 Do not copy all Cloudflare runtime secrets into GitHub.
 
@@ -64,12 +64,15 @@ The Cloudflare ADM Worker owns Worker runtime secrets.
 Required:
 
 - `TOKEN_ENCRYPTION_KEY`
+- `DZN_CRON_SECRET`
 
 Optional:
 
 - `SYNC_WORKER_HEALTH_TOKEN`
 
 The ADM Worker also requires the D1 DB binding.
+
+The manual `DZN ADM Worker Deploy` GitHub workflow deploys `dzn-adm-sync-worker` from `wrangler.adm-sync.toml`. It verifies that the existing Cloudflare Worker runtime secret name `TOKEN_ENCRYPTION_KEY` is present, but GitHub never receives `TOKEN_ENCRYPTION_KEY` and the workflow never prints its value. The workflow provisions `DZN_CRON_SECRET` safely from the existing GitHub cron secret through standard input.
 
 ## Cloudflare auto-update Worker secrets
 
