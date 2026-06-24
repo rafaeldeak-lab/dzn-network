@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const dashboard = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+const dashboard = readFileSync("components/onboarding/dashboard.tsx", "utf8").replace(/\r\n/g, "\n");
 
 function sliceBetween(startMarker: string, endMarker: string) {
   const start = dashboard.indexOf(startMarker);
