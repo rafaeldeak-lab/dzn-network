@@ -114,7 +114,10 @@ assert.equal(
   "Discord channel response must expose cached-channel evidence.",
 );
 assert.equal(
-  discordChannelsRoute.includes("return json({\n      error: classified.message"),
+  discordChannelsRoute.includes("error: classified.message") &&
+    discordChannelsRoute.includes("manualFallback: true") &&
+    discordChannelsRoute.includes("usingCachedChannelState: true") &&
+    discordChannelsRoute.includes("warning: classified.message"),
   true,
   "Explicit Discord refresh failures must degrade inside the module payload.",
 );
