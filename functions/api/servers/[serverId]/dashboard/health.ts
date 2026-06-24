@@ -3,9 +3,8 @@ import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../../../../_lib/plans";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
-import { getRankedPublicServers } from "../../../../_lib/public-leaderboards";
 import { calculateServerScore } from "../../../../_lib/server-ranking";
-import { getCanonicalServerStats } from "../../../../_lib/server-stats";
+import { getCanonicalServerRank, getCanonicalServerStats } from "../../../../_lib/server-stats";
 import type { PagesFunction } from "../../../../_lib/types";
 
 type ServerRow = {
@@ -305,7 +304,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     ]);
 
     if (!server) return dashboardHealthError(404, "server_not_found", "Server not found.");
-    const [latestDiagnostic, latestCompletedImport, preferredSourceState, canonicalStats, rankedServers] = await Promise.all([
+    const [latestDiagnostic, latestCompletedImport, preferredSourceState, canonicalStats] = await Promise.all([
       db.prepare(
         `SELECT file_name, file_path, method, endpoint_kind, status, http_status, error_code, error_message, created_at
          FROM nitrado_file_read_attempts
@@ -329,15 +328,14 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
          LIMIT 1`,
       ).bind(server.nitrado_service_id ?? "").first<SourceStateRow>().catch(() => null),
       getCanonicalServerStats(db, linkedServerId).catch(() => null),
-      getRankedPublicServers(env, 500).catch(() => []),
     ]);
+    const canonicalRank = canonicalStats ? await getCanonicalServerRank(db, linkedServerId, canonicalStats).catch(() => null) : null;
     const latestReadTruth = normalizeLatestReadTruth(latestReadIssue, latestDiagnostic);
 
     const planKey = normalizePlanKey(server.plan_key);
     const currentPlan = effectiveEntitlementPlan(planKey, server.subscription_status);
     const statsSnapshot = canonicalStats ? statsFromCanonical(canonicalStats, server) : statsFromRow(stats, server);
-    const rankedServer = rankedServers.find((row) => row.server_id === linkedServerId) ?? null;
-    const score = rankedServer?.score ?? calculateServerScore({
+    const score = canonicalRank?.score ?? calculateServerScore({
       kills: statsSnapshot.kills,
       deaths: statsSnapshot.deaths,
       uniquePlayers: statsSnapshot.unique_players,
@@ -411,9 +409,10 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         disconnects: statsSnapshot.disconnects,
         unique_players: statsSnapshot.unique_players,
         score,
-        score_label: rankedServer?.score_label ?? (score > 0 || statsSnapshot.kills > 0 || statsSnapshot.deaths > 0 || statsSnapshot.joins > 0 || statsSnapshot.unique_players > 0 ? String(score) : "Pending"),
-        rank: rankedServer?.rank ?? null,
+        score_label: canonicalRank?.scoreLabel ?? String(score),
+        rank: canonicalRank?.rank ?? null,
       },
+      stats_source: canonicalStats ? "canonical-adm-events" : "server_stats_fallback",
       autoSync: {
         overallStatus: ownerAutoSyncStatus(activeJobSnapshot, canonicalError, server, statsSnapshot),
         headline: ownerAutoSyncHeadline(activeJobSnapshot, canonicalError, server, statsSnapshot),
@@ -434,7 +433,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         currentLiveAdm,
       },
       recent_events_count: events.length,
-      latest_event_at: latestEventAt(events),
+      latest_event_at: canonicalStats?.lastEventAt ?? latestEventAt(events),
       latest_events: events,
       sync: {
         status: server.last_sync_status ?? admStatus,

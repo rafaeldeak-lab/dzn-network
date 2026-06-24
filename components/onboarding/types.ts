@@ -1482,6 +1482,28 @@ export type DashboardHealthResult = {
 
 export type DashboardHealthApiResult = DashboardHealthResult | ManualAdmImportErrorResult;
 
+export type DashboardLiveStatsResult = {
+  ok: true;
+  server_id: string;
+  generated_at: string;
+  latest_event_at: string | null;
+  source: "canonical-adm-events";
+  stats: {
+    kills: number;
+    deaths: number;
+    joins: number;
+    disconnects: number;
+    unique_players: number;
+    longest_kill: number;
+    total_events_tracked: number;
+    score: number;
+    score_label: string;
+    rank: number | null;
+  };
+};
+
+export type DashboardLiveStatsApiResult = DashboardLiveStatsResult | ManualAdmImportErrorResult;
+
 export type AdmFileDiscoveryCandidateDebug = {
   name: string;
   path: string;

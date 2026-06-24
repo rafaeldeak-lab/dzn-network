@@ -3,6 +3,7 @@ import {
   readPublicApiCache,
   writePublicApiCache,
 } from "./public-api-cache";
+import { calculateServerScoreBreakdown, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
 
 const PUBLIC_HOME_STATS_ADM_SNAPSHOT_KEYS = [
@@ -48,6 +49,14 @@ export type CanonicalServerStats = {
   longestKill: number;
   totalEventsTracked: number;
   lastEventAt: string | null;
+};
+
+export type CanonicalServerRank = {
+  score: number;
+  scoreLabel: string;
+  scoreBreakdown: ServerScoreBreakdown;
+  rank: number | null;
+  statsSyncActive: boolean;
 };
 
 export type PublicAdmStatsSummary = {
@@ -202,6 +211,159 @@ export async function getCanonicalServerStats(
     totalEventsTracked: kills + playerEvents + buildEvents,
     lastEventAt: latestEventAt,
   };
+}
+
+export async function getCanonicalServerRank(
+  db: D1Database,
+  linkedServerId: string,
+  stats: CanonicalServerStats,
+): Promise<CanonicalServerRank> {
+  const statsSyncActive = await hasCanonicalServerActivity(db, linkedServerId).catch(() =>
+    stats.kills > 0 || stats.joins > 0 || stats.uniquePlayers > 0 || Boolean(stats.lastEventAt),
+  );
+  const scoreBreakdown = calculateServerScoreBreakdown({
+    kills: stats.kills,
+    deaths: stats.deaths,
+    joins: stats.joins,
+    uniquePlayers: stats.uniquePlayers,
+    longestKill: stats.longestKill,
+    statsSyncActive,
+  });
+  const rank = await getCanonicalServerRankNumber(db, linkedServerId).catch(() => null);
+
+  return {
+    score: scoreBreakdown.final_score,
+    scoreLabel: String(scoreBreakdown.final_score),
+    scoreBreakdown,
+    rank,
+    statsSyncActive,
+  };
+}
+
+async function hasCanonicalServerActivity(db: D1Database, linkedServerId: string) {
+  const row = await db
+    .prepare(
+      `
+      SELECT
+        CASE
+          WHEN EXISTS (SELECT 1 FROM kill_events WHERE linked_server_id = ? LIMIT 1)
+            OR EXISTS (SELECT 1 FROM player_events WHERE linked_server_id = ? LIMIT 1)
+            OR EXISTS (SELECT 1 FROM player_profiles WHERE linked_server_id = ? LIMIT 1)
+            OR EXISTS (
+              SELECT 1
+              FROM adm_sync_state
+              WHERE linked_server_id = ?
+                AND lower(COALESCE(last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+              LIMIT 1
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM sync_runs
+              WHERE linked_server_id = ?
+                AND lower(COALESCE(status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+              LIMIT 1
+            )
+          THEN 1 ELSE 0
+        END AS active
+      `,
+    )
+    .bind(linkedServerId, linkedServerId, linkedServerId, linkedServerId, linkedServerId)
+    .first<{ active: number | null }>();
+
+  return Number(row?.active ?? 0) === 1;
+}
+
+async function getCanonicalServerRankNumber(db: D1Database, linkedServerId: string) {
+  const row = await db
+    .prepare(
+      `
+      WITH server_scope AS (
+        SELECT
+          linked_servers.id,
+          (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS kills,
+          (
+            (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL)
+            + (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats'))
+          ) AS deaths,
+          (SELECT COUNT(*) FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id) AS unique_players,
+          (SELECT COUNT(*) FROM player_events WHERE player_events.linked_server_id = linked_servers.id AND player_events.event_type = 'player_connected') AS joins,
+          COALESCE((SELECT MAX(COALESCE(distance, 0)) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id), 0) AS longest_kill,
+          CASE
+            WHEN EXISTS (SELECT 1 FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id LIMIT 1)
+              OR EXISTS (SELECT 1 FROM player_events WHERE player_events.linked_server_id = linked_servers.id LIMIT 1)
+              OR EXISTS (SELECT 1 FROM player_profiles WHERE player_profiles.linked_server_id = linked_servers.id LIMIT 1)
+              OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+              OR EXISTS (
+                SELECT 1
+                FROM sync_runs
+                WHERE sync_runs.linked_server_id = linked_servers.id
+                  AND lower(COALESCE(sync_runs.status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+                LIMIT 1
+              )
+            THEN 1 ELSE 0
+          END AS stats_active,
+          COALESCE(
+            server_stats.last_event_at,
+            (
+              SELECT MAX(COALESCE(kill_events.occurred_at, kill_events.created_at))
+              FROM kill_events
+              WHERE kill_events.linked_server_id = linked_servers.id
+            ),
+            linked_servers.updated_at,
+            linked_servers.created_at
+          ) AS last_activity_at
+        FROM linked_servers
+        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+        WHERE lower(linked_servers.status) = 'live'
+          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+      ),
+      scored AS (
+        SELECT
+          *,
+          MAX(0, (kills * 10) + (unique_players * 5) + (joins * 2) + ROUND(longest_kill) + CASE WHEN stats_active = 1 THEN 25 ELSE 0 END - (deaths * 2)) AS score,
+          CASE
+            WHEN kills > 0 OR deaths > 0 OR unique_players > 0 OR joins > 0 OR longest_kill > 0 OR stats_active = 1
+            THEN 1 ELSE 0
+          END AS has_score_data,
+          CASE
+            WHEN kills = 0 AND deaths = 0 THEN -1
+            WHEN kills > 0 AND deaths = 0 THEN kills
+            WHEN deaths > 0 THEN CAST(kills AS REAL) / deaths
+            ELSE 0
+          END AS kd_rank,
+          COALESCE(julianday(last_activity_at), 0) AS activity_rank
+        FROM server_scope
+      ),
+      target AS (
+        SELECT *
+        FROM scored
+        WHERE id = ?
+        LIMIT 1
+      )
+      SELECT
+        1 + (
+          SELECT COUNT(*)
+          FROM scored other
+          JOIN target ON 1 = 1
+          WHERE other.id != target.id
+            AND (
+              other.has_score_data > target.has_score_data
+              OR (other.has_score_data = target.has_score_data AND other.score > target.score)
+              OR (other.has_score_data = target.has_score_data AND other.score = target.score AND other.kills > target.kills)
+              OR (other.has_score_data = target.has_score_data AND other.score = target.score AND other.kills = target.kills AND other.kd_rank > target.kd_rank)
+              OR (other.has_score_data = target.has_score_data AND other.score = target.score AND other.kills = target.kills AND other.kd_rank = target.kd_rank AND other.longest_kill > target.longest_kill)
+              OR (other.has_score_data = target.has_score_data AND other.score = target.score AND other.kills = target.kills AND other.kd_rank = target.kd_rank AND other.longest_kill = target.longest_kill AND other.unique_players > target.unique_players)
+              OR (other.has_score_data = target.has_score_data AND other.score = target.score AND other.kills = target.kills AND other.kd_rank = target.kd_rank AND other.longest_kill = target.longest_kill AND other.unique_players = target.unique_players AND other.activity_rank > target.activity_rank)
+            )
+        ) AS rank
+      FROM target
+      `,
+    )
+    .bind(linkedServerId)
+    .first<{ rank: number | null }>();
+
+  return row?.rank ?? null;
 }
 
 export async function getPublicAdmStatsSummary(db: D1Database): Promise<PublicAdmStatsSummary> {
