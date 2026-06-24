@@ -1,7 +1,8 @@
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
-import { getCanonicalServerRank, getCanonicalServerStats } from "../../../../_lib/server-stats";
+import { calculateServerScoreBreakdown } from "../../../../_lib/server-ranking";
+import { getCanonicalServerLiveStats } from "../../../../_lib/server-stats";
 import type { PagesFunction } from "../../../../_lib/types";
 
 const NO_STORE_HEADERS = {
@@ -24,10 +25,22 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         access.reason === "not_found" ? "Server not found." : "Forbidden.",
       );
     }
+    const server = access.server;
+    if (!server) {
+      return liveStatsError(403, "forbidden", "Forbidden.");
+    }
 
     const db = requireDb(env);
-    const stats = await getCanonicalServerStats(db, linkedServerId);
-    const rank = await getCanonicalServerRank(db, linkedServerId, stats);
+    const stats = await getCanonicalServerLiveStats(db, linkedServerId);
+    const scoreBreakdown = calculateServerScoreBreakdown({
+      kills: stats.kills,
+      deaths: stats.deaths,
+      joins: stats.joins,
+      uniquePlayers: stats.uniquePlayers,
+      longestKill: stats.longestKill,
+      statsSyncActive: stats.statsSyncActive,
+    });
+    const rank = await readLightweightRank(db, server.guild_id);
     const generatedAt = new Date().toISOString();
 
     return json({
@@ -44,10 +57,13 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         unique_players: stats.uniquePlayers,
         longest_kill: stats.longestKill,
         total_events_tracked: stats.totalEventsTracked,
-        score: rank.score,
-        score_label: rank.scoreLabel,
+        score: scoreBreakdown.final_score,
+        score_label: String(scoreBreakdown.final_score),
         rank: rank.rank,
       },
+      rank_source: rank.source,
+      rank_generated_at: rank.generatedAt,
+      rank_stale: rank.stale,
     }, { headers: NO_STORE_HEADERS });
   } catch (error) {
     return liveStatsError(500, "dashboard_live_stats_failed", "Unable to load live canonical dashboard stats.", sanitize(error));
@@ -79,4 +95,41 @@ function sanitize(value: unknown) {
   if (value instanceof Error) return value.message;
   if (typeof value === "string") return value.slice(0, 240);
   return null;
+}
+
+async function readLightweightRank(db: D1Database, guildId: string | null) {
+  if (!guildId) return unavailableRank();
+
+  try {
+    const row = await db
+      .prepare(
+        `SELECT network_rank, last_adm_update_at, updated_at
+         FROM server_public_cache
+         WHERE guild_id = ?
+         LIMIT 1`,
+      )
+      .bind(guildId)
+      .first<{ network_rank: number | null; last_adm_update_at: string | null; updated_at: string | null }>();
+
+    const rank = Number(row?.network_rank ?? 0);
+    if (!Number.isFinite(rank) || rank <= 0) return unavailableRank();
+
+    return {
+      rank,
+      source: "leaderboard_snapshot" as const,
+      generatedAt: row?.last_adm_update_at ?? row?.updated_at ?? null,
+      stale: false,
+    };
+  } catch {
+    return unavailableRank();
+  }
+}
+
+function unavailableRank() {
+  return {
+    rank: null,
+    source: "unavailable" as const,
+    generatedAt: null,
+    stale: true,
+  };
 }

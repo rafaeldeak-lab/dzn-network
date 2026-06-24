@@ -62,9 +62,11 @@ assert.equal(dashboardHealthSource.includes("getRankedPublicServers"), false, "D
 assert.equal(dashboardHealthSource.includes("score_label: canonicalRank?.scoreLabel"), true, "Dashboard health must expose the current canonical score label.");
 assert.equal(dashboardHealthSource.includes("rank: canonicalRank?.rank"), true, "Dashboard health must expose the current canonical public rank.");
 assert.equal(dashboardHealthSource.includes("stats_source: canonicalStats ? \"canonical-adm-events\" : \"server_stats_fallback\""), true, "Dashboard health must label canonical stat source.");
-assert.equal(dashboardLiveStatsSource.includes("getCanonicalServerStats"), true, "Dashboard live stats must use canonical server stats.");
-assert.equal(dashboardLiveStatsSource.includes("getCanonicalServerRank"), true, "Dashboard live stats must use canonical score/rank.");
-assert.equal(dashboardLiveStatsSource.includes("server_public_cache"), false, "Dashboard live stats must not depend on public cache.");
+assert.equal(dashboardLiveStatsSource.includes("getCanonicalServerLiveStats"), true, "Dashboard live stats must use the bounded canonical live-stats helper.");
+assert.equal(dashboardLiveStatsSource.includes("getCanonicalServerRank"), false, "Dashboard live stats must not run broad rank calculation on every poll.");
+assert.equal(dashboardLiveStatsSource.includes("calculateServerScoreBreakdown"), true, "Dashboard live stats must calculate score directly from current canonical counts.");
+assert.equal(dashboardLiveStatsSource.includes("rank_source"), true, "Dashboard live stats must report lightweight rank evidence.");
+assert.equal(dashboardLiveStatsSource.includes("getCanonicalServerLiveStats"), true, "Dashboard live stat counts must not depend on public cache.");
 assert.equal(dashboardLiveStatsSource.includes("ensureAdmSyncSchema"), false, "Dashboard live stats must not run schema setup on every poll.");
 assert.equal(dashboardLiveStatsSource.includes("Nitrado"), false, "Dashboard live stats must not call Nitrado.");
 assert.equal(dashboardComponentSource.includes("formatPlayerCountStatus(dashboardPlayerCount.status, dashboardPlayerCount.checkedAt)"), true, "Dashboard freshness label must use the same timestamp-aware freshness calculation as the detail text.");

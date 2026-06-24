@@ -22,7 +22,7 @@ const fixtures: Record<string, ServerFixture> = {
     kills: 1657,
     deaths: 2449,
     joins: 2797,
-    disconnects: 534,
+    disconnects: 585,
     uniquePlayers: 443,
     longestKill: 84.6898,
     latestKillAt: "2026-06-24T06:47:00.000Z",
@@ -55,7 +55,10 @@ const fixtures: Record<string, ServerFixture> = {
 };
 
 class MemoryD1 {
-  constructor(private readonly userId = "owner-user") {}
+  constructor(
+    private readonly userId = "owner-user",
+    private readonly failRank = false,
+  ) {}
 
   prepare(sql: string) {
     return new MemoryD1Statement(this, sql);
@@ -72,6 +75,33 @@ class MemoryD1 {
 
     if (normalized.includes("FROM linked_servers") && normalized.includes("user_id")) {
       return server ? { id: server.id, user_id: server.userId, guild_id: `${server.id}-guild` } : null;
+    }
+
+    if (normalized.includes("AS player_events") && normalized.includes("AS stats_active")) {
+      return {
+        kills: server?.kills ?? 0,
+        deaths: server?.deaths ?? 0,
+        joins: server?.joins ?? 0,
+        disconnects: server?.disconnects ?? 0,
+        player_events: (server?.joins ?? 0) + (server?.disconnects ?? 0),
+        unique_players: server?.uniquePlayers ?? 0,
+        longest_kill: server?.longestKill ?? 0,
+        latest_kill_at: server?.latestKillAt ?? null,
+        latest_player_event_at: server?.latestPlayerAt ?? null,
+        build_events: 0,
+        latest_build_at: null,
+        stats_active: server && (server.kills || server.joins || server.uniquePlayers || server.latestKillAt || server.latestPlayerAt) ? 1 : 0,
+      };
+    }
+
+    if (normalized.includes("FROM server_public_cache")) {
+      if (this.failRank) throw new Error("rank snapshot unavailable");
+      const rank = rankFixtures().find((row) => `${row.id}-guild` === String(bindings[0]))?.rank ?? null;
+      return {
+        network_rank: rank,
+        last_adm_update_at: "2026-06-24T06:50:00.000Z",
+        updated_at: "2026-06-24T06:51:00.000Z",
+      };
     }
 
     if (normalized.includes("COUNT(*) AS kills") && normalized.includes("FROM kill_events")) {
@@ -186,6 +216,9 @@ async function readJson(response: Response) {
     source?: string;
     generated_at?: string;
     latest_event_at?: string | null;
+    rank_source?: string;
+    rank_generated_at?: string | null;
+    rank_stale?: boolean;
     stats?: {
       kills: number;
       deaths: number;
@@ -219,6 +252,9 @@ async function main() {
     assert.equal(body.ok, true);
     assert.equal(body.server_id, serverId);
     assert.equal(body.source, "canonical-adm-events");
+    assert.equal(body.rank_source, "leaderboard_snapshot");
+    assert.equal(body.rank_generated_at, "2026-06-24T06:50:00.000Z");
+    assert.equal(body.rank_stale, false);
     assert.equal(typeof body.generated_at, "string");
     assert.equal(body.latest_event_at, [expected.latestKillAt, expected.latestPlayerAt].filter(Boolean).sort().at(-1) ?? null);
     assert.equal(body.stats?.kills, expected.kills);
@@ -232,6 +268,16 @@ async function main() {
     assert.equal(body.stats?.score_label, String(score(expected)));
     assert.equal(body.stats?.rank, rankFixtures().find((row) => row.id === serverId)?.rank ?? null);
   }
+
+  const rankFailureResponse = await onRequestGet(makeContext("nuketown", new MemoryD1("owner-user", true)));
+  assert.equal(rankFailureResponse.status, 200, "Rank lookup failure must not fail canonical live stats.");
+  const rankFailureBody = await readJson(rankFailureResponse);
+  assert.equal(rankFailureBody.ok, true);
+  assert.equal(rankFailureBody.stats?.kills, fixtures.nuketown.kills);
+  assert.equal(rankFailureBody.stats?.rank, null);
+  assert.equal(rankFailureBody.rank_source, "unavailable");
+  assert.equal(rankFailureBody.rank_generated_at, null);
+  assert.equal(rankFailureBody.rank_stale, true);
 
   console.log("Dashboard live-stats endpoint tests passed.");
 }

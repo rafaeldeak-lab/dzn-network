@@ -59,6 +59,10 @@ export type CanonicalServerRank = {
   statsSyncActive: boolean;
 };
 
+export type CanonicalServerLiveStats = CanonicalServerStats & {
+  statsSyncActive: boolean;
+};
+
 export type PublicAdmStatsSummary = {
   killsTracked: number;
   deathsTracked: number;
@@ -210,6 +214,146 @@ export async function getCanonicalServerStats(
     longestKill: toNumber(killStats?.longest_kill),
     totalEventsTracked: kills + playerEvents + buildEvents,
     lastEventAt: latestEventAt,
+  };
+}
+
+export async function getCanonicalServerLiveStats(
+  db: D1Database,
+  linkedServerId: string,
+): Promise<CanonicalServerLiveStats> {
+  const row = await queryCanonicalServerLiveStats(db, linkedServerId, true).catch(() =>
+    queryCanonicalServerLiveStats(db, linkedServerId, false),
+  );
+
+  return canonicalLiveStatsFromRow(row);
+}
+
+async function queryCanonicalServerLiveStats(db: D1Database, linkedServerId: string, includeBuildEvents: boolean) {
+  const buildStatsCte = includeBuildEvents
+    ? `build_stats AS (
+        SELECT
+          COUNT(*) AS build_events,
+          MAX(COALESCE(occurred_at, created_at)) AS latest_build_at
+        FROM build_events
+        WHERE linked_server_id = ?
+      )`
+    : `build_stats AS (
+        SELECT
+          0 AS build_events,
+          NULL AS latest_build_at
+      )`;
+
+  return db
+    .prepare(
+      `
+      WITH
+      kill_stats AS (
+        SELECT
+          COUNT(*) AS kills,
+          SUM(CASE WHEN victim_name IS NOT NULL THEN 1 ELSE 0 END) AS kill_deaths,
+          MAX(COALESCE(distance, 0)) AS longest_kill,
+          MAX(COALESCE(occurred_at, created_at)) AS latest_kill_at
+        FROM kill_events
+        WHERE linked_server_id = ?
+      ),
+      player_event_stats AS (
+        SELECT
+          SUM(CASE WHEN event_type = 'player_connected' THEN 1 ELSE 0 END) AS joins,
+          SUM(CASE WHEN event_type = 'player_disconnected' THEN 1 ELSE 0 END) AS disconnects,
+          SUM(CASE WHEN event_type IN (${DEATH_EVENT_TYPES.map(() => "?").join(", ")}) THEN 1 ELSE 0 END) AS player_deaths,
+          COUNT(*) AS player_events,
+          MAX(COALESCE(occurred_at, created_at)) AS latest_player_event_at
+        FROM player_events
+        WHERE linked_server_id = ?
+      ),
+      profile_stats AS (
+        SELECT COUNT(*) AS unique_players
+        FROM player_profiles
+        WHERE linked_server_id = ?
+      ),
+      ${buildStatsCte}
+      SELECT
+        COALESCE(kill_stats.kills, 0) AS kills,
+        COALESCE(kill_stats.kill_deaths, 0) + COALESCE(player_event_stats.player_deaths, 0) AS deaths,
+        COALESCE(player_event_stats.joins, 0) AS joins,
+        COALESCE(player_event_stats.disconnects, 0) AS disconnects,
+        COALESCE(player_event_stats.player_events, 0) AS player_events,
+        COALESCE(profile_stats.unique_players, 0) AS unique_players,
+        COALESCE(kill_stats.longest_kill, 0) AS longest_kill,
+        kill_stats.latest_kill_at AS latest_kill_at,
+        player_event_stats.latest_player_event_at AS latest_player_event_at,
+        COALESCE(build_stats.build_events, 0) AS build_events,
+        build_stats.latest_build_at AS latest_build_at,
+        CASE
+          WHEN COALESCE(kill_stats.kills, 0) > 0
+            OR COALESCE(player_event_stats.player_events, 0) > 0
+            OR COALESCE(profile_stats.unique_players, 0) > 0
+            OR EXISTS (
+              SELECT 1
+              FROM adm_sync_state
+              WHERE adm_sync_state.linked_server_id = ?
+                AND lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+              LIMIT 1
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM sync_runs
+              WHERE sync_runs.linked_server_id = ?
+                AND lower(COALESCE(sync_runs.status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+              LIMIT 1
+            )
+          THEN 1 ELSE 0
+        END AS stats_active
+      FROM kill_stats
+      CROSS JOIN player_event_stats
+      CROSS JOIN profile_stats
+      CROSS JOIN build_stats
+      `,
+    )
+    .bind(
+      linkedServerId,
+      ...DEATH_EVENT_TYPES,
+      linkedServerId,
+      linkedServerId,
+      ...(includeBuildEvents ? [linkedServerId] : []),
+      linkedServerId,
+      linkedServerId,
+    )
+    .first<{
+      kills: number | null;
+      deaths: number | null;
+      joins: number | null;
+      disconnects: number | null;
+      player_events: number | null;
+      unique_players: number | null;
+      longest_kill: number | null;
+      latest_kill_at: string | null;
+      latest_player_event_at: string | null;
+      build_events: number | null;
+      latest_build_at: string | null;
+      stats_active: number | null;
+    }>();
+}
+
+function canonicalLiveStatsFromRow(row: Awaited<ReturnType<typeof queryCanonicalServerLiveStats>>): CanonicalServerLiveStats {
+  const kills = toNumber(row?.kills);
+  const playerEvents = toNumber(row?.player_events);
+  const buildEvents = toNumber(row?.build_events);
+  const latestEventAt = [row?.latest_kill_at, row?.latest_player_event_at, row?.latest_build_at]
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+
+  return {
+    kills,
+    deaths: toNumber(row?.deaths),
+    joins: toNumber(row?.joins),
+    disconnects: toNumber(row?.disconnects),
+    uniquePlayers: toNumber(row?.unique_players),
+    longestKill: toNumber(row?.longest_kill),
+    totalEventsTracked: kills + playerEvents + buildEvents,
+    lastEventAt: latestEventAt,
+    statsSyncActive: Number(row?.stats_active ?? 0) === 1,
   };
 }
 

@@ -1488,6 +1488,9 @@ export type DashboardLiveStatsResult = {
   generated_at: string;
   latest_event_at: string | null;
   source: "canonical-adm-events";
+  rank_source: "leaderboard_snapshot" | "unavailable";
+  rank_generated_at: string | null;
+  rank_stale: boolean;
   stats: {
     kills: number;
     deaths: number;
