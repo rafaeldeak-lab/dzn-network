@@ -1,4 +1,5 @@
 import { ensureMockUser, getSessionUser } from "../../../../../_lib/db";
+import { createEventEntryNotification } from "../../../../../_lib/dzn-pulse";
 import { json, methodNotAllowed } from "../../../../../_lib/http";
 import { isMockAuth } from "../../../../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../../../../_lib/types";
@@ -12,6 +13,16 @@ export const onRequestPost: PagesFunction = async ({ request, env, params }) => 
   try {
     const { enterOwnerEvent } = await import("../../../../../_lib/event-hub");
     const result = await enterOwnerEvent(env, user, serverId, eventId);
+    if (result.payload.ok && typeof result.payload.eventId === "string" && typeof result.payload.serverId === "string") {
+      await createEventEntryNotification(env, {
+        userId: user.id,
+        serverId: result.payload.serverId,
+        eventId: result.payload.eventId,
+        eventSlug: typeof result.payload.eventSlug === "string" ? result.payload.eventSlug : null,
+        eventName: typeof result.payload.eventName === "string" ? result.payload.eventName : null,
+        serverName: typeof result.payload.serverName === "string" ? result.payload.serverName : null,
+      }).catch(() => null);
+    }
     return json(result.payload, { status: result.status });
   } catch (error) {
     const requestId = crypto.randomUUID();
