@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
 
 const DZN_DISCORD_INVITE_URL =
@@ -59,7 +60,8 @@ export function SiteHeader({
   const resolvedAuthenticated = authenticated ?? fetchedAuthenticated;
 
   return (
-    <header className="dzn-header-shell">
+    <DznPulseProvider>
+      <header className="dzn-header-shell">
       <nav className="dzn-header-nav" aria-label="Main navigation">
         <Link href="/" className="dzn-header-logo" aria-label="DZN Network home">
           <span className="dzn-header-logo-frame">
@@ -90,6 +92,7 @@ export function SiteHeader({
         </div>
 
         <div className="dzn-header-actions">
+          {resolvedAuthenticated ? <DznPulseBell className="dzn-header-pulse-bell" /> : null}
           <a href={DZN_DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer" className="dzn-header-action dzn-header-action--discord">
             Discord
           </a>
@@ -114,6 +117,7 @@ export function SiteHeader({
           )}
         </div>
       </nav>
-    </header>
+      </header>
+    </DznPulseProvider>
   );
 }
