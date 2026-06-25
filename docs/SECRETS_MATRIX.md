@@ -66,6 +66,16 @@ Cloudflare Pages owns runtime app secrets such as:
 - `TOKEN_ENCRYPTION_KEY` if Pages Functions need to decrypt stored Nitrado tokens
 - `NEXT_PUBLIC_*` variables required by the frontend
 
+Feature flags owned by Cloudflare Pages environment variables:
+
+- `DZN_PULSE_ENABLED`
+  Enables the authenticated DZN Pulse bell, drawer, event popup manager, `/dzn-pulse` page data, and Pulse notification APIs. Defaults to off when unset or set to `false`.
+
+- `DZN_DISCORD_NOTIFICATIONS_ENABLED`
+  Enables optional Discord delivery for Pulse notifications only when a supported dispatcher and user preference also allow it. Defaults to off when unset or set to `false`.
+
+These are booleans, not secrets. Do not expose Cloudflare runtime secrets through these flags, and do not add Nitrado browser/session tokens for Pulse.
+
 ## Cloudflare ADM Worker secrets
 
 The Cloudflare ADM Worker owns Worker runtime secrets.

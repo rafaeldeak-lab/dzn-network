@@ -82,6 +82,8 @@ web_modules/
 out
 .wrangler/
 .autodev/reports/
+tmp/dzn-pulse-*.patch
+tmp/dzn-pulse-demo-seed.sql
 tests/fixtures/adm/recovery-june-2026/raw/
 tests/fixtures/adm/recovery-june-2026/*.zip
 
