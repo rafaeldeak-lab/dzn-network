@@ -123,9 +123,11 @@ jobs:
 
           fs.appendFileSync(process.env.GITHUB_ENV, `PRODUCTION_D1_DATABASE_NAME=${name}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `PRODUCTION_D1_DATABASE_ID=${id}\n`);
+          fs.writeFileSync("production-d1.env", `PRODUCTION_D1_DATABASE_NAME=${name}\nPRODUCTION_D1_DATABASE_ID=${id}\n`);
           console.log(`Detected production D1 database name: ${name}`);
           console.log(`Detected production D1 database id: ${id}`);
           NODE
+          source production-d1.env
 
           if [ "${PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
             echo "::error::preview_db_name must not equal the production D1 database name."
