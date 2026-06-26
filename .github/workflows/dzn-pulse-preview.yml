@@ -46,6 +46,8 @@ jobs:
       CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}
+      DZN_PULSE_PREVIEW_SESSION_SECRET: ${{ secrets.DZN_PULSE_PREVIEW_SESSION_SECRET }}
       INPUT_BRANCH: ${{ inputs.branch }}
       MODE: ${{ inputs.mode }}
       CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
@@ -156,6 +158,16 @@ jobs:
                 echo "::error::Feature-on preview must not target the production Pages project."
                 exit 1
               fi
+              if [ -z "${DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET:-}" ]; then
+                echo "::error::Missing DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET GitHub secret for feature-on preview auth."
+                exit 1
+              fi
+              if [ -z "${DZN_PULSE_PREVIEW_SESSION_SECRET:-}" ]; then
+                echo "::error::Missing DZN_PULSE_PREVIEW_SESSION_SECRET GitHub secret for feature-on preview auth."
+                exit 1
+              fi
+              echo "::add-mask::$DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET"
+              echo "::add-mask::$DZN_PULSE_PREVIEW_SESSION_SECRET"
               ;;
           esac
 
@@ -559,6 +571,16 @@ jobs:
             echo "::error::Refusing feature-on deploy because preview D1 id equals production D1 id."
             exit 1
           fi
+          if [ -z "${DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET:-}" ]; then
+            echo "::error::Missing DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET GitHub secret for feature-on preview auth."
+            exit 1
+          fi
+          if [ -z "${DZN_PULSE_PREVIEW_SESSION_SECRET:-}" ]; then
+            echo "::error::Missing DZN_PULSE_PREVIEW_SESSION_SECRET GitHub secret for feature-on preview auth."
+            exit 1
+          fi
+          echo "::add-mask::$DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET"
+          echo "::add-mask::$DZN_PULSE_PREVIEW_SESSION_SECRET"
 
           node <<'NODE'
           const fs = require("node:fs");
@@ -823,6 +845,16 @@ jobs:
           });
           NODE
 
+          printf "%s" "$DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET" |
+            npx wrangler pages secret put DISCORD_CLIENT_SECRET \
+              --project-name "${PREVIEW_PROJECT_NAME}"
+          printf "%s" "$DZN_PULSE_PREVIEW_SESSION_SECRET" |
+            npx wrangler pages secret put SESSION_SECRET \
+              --project-name "${PREVIEW_PROJECT_NAME}"
+          npx wrangler pages secret list --project-name "${PREVIEW_PROJECT_NAME}" | tee pulse-pages-secrets.txt
+          grep -q "DISCORD_CLIENT_SECRET" pulse-pages-secrets.txt
+          grep -q "SESSION_SECRET" pulse-pages-secrets.txt
+
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
           npx wrangler pages deploy out \
             --project-name "${PREVIEW_PROJECT_NAME}" \
@@ -979,6 +1011,40 @@ jobs:
             throw new Error(`Discord auth start did not redirect to Discord. status=${authStart.status} locationOrigin=${authLocationOrigin}`);
           }
           console.log("Discord auth start redirects to Discord.");
+
+          const setCookies = typeof authStart.headers.getSetCookie === "function"
+            ? authStart.headers.getSetCookie()
+            : authStart.headers.get("set-cookie")
+              ? [authStart.headers.get("set-cookie")]
+              : [];
+          const cookieHeader = setCookies.map((line) => String(line).split(";")[0]).join("; ");
+          const authState = new URL(authLocation).searchParams.get("state");
+          if (!cookieHeader || !authState) {
+            throw new Error("Discord auth start did not provide a state cookie and authorize state.");
+          }
+          const syntheticCallback = await fetch(`${base}/api/auth/discord/callback?code=synthetic-preview-diagnostic-code&state=${encodeURIComponent(authState)}`, {
+            redirect: "manual",
+            headers: { cookie: cookieHeader },
+          });
+          const syntheticLocation = syntheticCallback.headers.get("location") ?? "";
+          const syntheticUrl = new URL(syntheticLocation, base);
+          const syntheticStage = syntheticUrl.searchParams.get("stage");
+          const syntheticReason = syntheticUrl.searchParams.get("reason");
+          const syntheticClientSecret = syntheticUrl.searchParams.get("client_secret");
+          const syntheticSessionSecret = syntheticUrl.searchParams.get("session_secret");
+          if (syntheticCallback.status !== 302 || syntheticStage !== "token_exchange") {
+            throw new Error(`Synthetic Discord callback did not reach token exchange diagnostics. status=${syntheticCallback.status} stage=${syntheticStage ?? "missing"}`);
+          }
+          if (syntheticClientSecret !== "1" || syntheticSessionSecret !== "1") {
+            throw new Error(`Preview auth secrets are not runtime-readable. clientSecret=${syntheticClientSecret ?? "missing"} sessionSecret=${syntheticSessionSecret ?? "missing"}`);
+          }
+          if (syntheticReason === "invalid_client") {
+            throw new Error("Preview DISCORD_CLIENT_SECRET is runtime-readable but Discord rejected it as invalid_client.");
+          }
+          if (syntheticReason === "missing_client_secret" || syntheticReason === "missing_client_id" || syntheticReason === "missing_redirect_uri") {
+            throw new Error(`Preview auth configuration is incomplete: ${syntheticReason}`);
+          }
+          console.log(`Synthetic callback reached Discord token exchange with runtime secrets present. sanitizedReason=${syntheticReason ?? "missing"}`);
 
           const privateGetRoutes = [
             "/api/dzn-pulse/summary",

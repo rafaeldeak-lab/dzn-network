@@ -123,6 +123,12 @@ assert.equal(dznPulsePreviewWorkflow.includes("notification_preferences"), true)
 assert.equal(dznPulsePreviewWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"'), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_PREVIEW_SESSION_SECRET: ${{ secrets.DZN_PULSE_PREVIEW_SESSION_SECRET }}"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler pages secret put DISCORD_CLIENT_SECRET"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler pages secret put SESSION_SECRET"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("Preview auth secrets are not runtime-readable"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("invalid_client"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("Refusing to set DZN_PULSE_ENABLED on production Pages project"), true);
 assert.equal(dznPulsePreviewWorkflow.includes('PRODUCTION_PAGES_PROJECT_NAME: dzn-network'), true);
