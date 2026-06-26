@@ -1,0 +1,483 @@
+name: DZN Pulse Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_rollout:
+        description: Must equal DZN_PULSE_PRODUCTION_ROLLOUT
+        required: true
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/dzn-pulse-production-rollout.yml
+
+concurrency:
+  group: dzn-pulse-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollout:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[run-dzn-pulse-production-rollout]')
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+      EXPECTED_PULSE_MERGE_SHA: 79df5885634c3c5facec6c7c649fb41ddf8f4986
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate rollout guard
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.confirm_production_rollout }}" != "DZN_PULSE_PRODUCTION_ROLLOUT" ]; then
+              echo "::error::Manual dispatch must confirm DZN_PULSE_PRODUCTION_ROLLOUT."
+              exit 1
+            fi
+          else
+            if ! echo "${{ github.event.head_commit.message }}" | grep -q "\[run-dzn-pulse-production-rollout\]"; then
+              echo "::error::Push-triggered rollout requires the explicit rollout marker."
+              exit 1
+            fi
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Production rollout may only run on main."
+            exit 1
+          fi
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+          echo "::add-mask::${CLOUDFLARE_API_TOKEN}"
+
+          git merge-base --is-ancestor "${EXPECTED_PULSE_MERGE_SHA}" HEAD
+
+          if [ ! -f migrations/0052_dzn_pulse.sql ]; then
+            echo "::error::Missing migrations/0052_dzn_pulse.sql."
+            exit 1
+          fi
+          if grep -Eiq "\b(DROP|TRUNCATE|DELETE\s+FROM|ALTER\s+TABLE)\b" migrations/0052_dzn_pulse.sql; then
+            echo "::error::Migration 0052 contains destructive SQL."
+            exit 1
+          fi
+          if grep -Eiq "player_stats|kill_events|player_events|server_stats|public_.*cache" migrations/0052_dzn_pulse.sql; then
+            echo "::error::Migration 0052 references protected non-Pulse tables."
+            exit 1
+          fi
+
+          {
+            echo "## DZN Pulse Production Rollout"
+            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Expected Pulse merge SHA ancestor: ${EXPECTED_PULSE_MERGE_SHA}"
+            echo "- Production Pages project: ${PRODUCTION_PAGES_PROJECT_NAME}"
+            echo "- Production D1 database: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify feature-off production deployment
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const base = "https://dzn-network.pages.dev";
+          const forbidden = ["Request failed: 503", "SERVER UNAVAILABLE", "Error 1102", "exceeded resource limits"];
+
+          async function request(path) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 20000);
+            try {
+              const response = await fetch(`${base}${path}`, {
+                redirect: "follow",
+                signal: controller.signal,
+                headers: { "User-Agent": "dzn-pulse-production-rollout" },
+              });
+              const text = await response.text();
+              return { status: response.status, text };
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+
+          async function waitForFeatureOff() {
+            let last = "";
+            for (let attempt = 1; attempt <= 18; attempt += 1) {
+              const result = await request("/api/dzn-pulse/config");
+              last = `status=${result.status} body=${result.text.slice(0, 160)}`;
+              if (result.status === 200) {
+                const parsed = JSON.parse(result.text);
+                if (parsed.dznPulseEnabled === false && parsed.discordNotificationsEnabled === false) {
+                  console.log("Feature-off production config verified.");
+                  return;
+                }
+              }
+              await new Promise((resolve) => setTimeout(resolve, 10000));
+            }
+            throw new Error(`Feature-off production config did not become active: ${last}`);
+          }
+
+          async function check(path, count, statuses = [200]) {
+            let ok = 0;
+            for (let index = 0; index < count; index += 1) {
+              const result = await request(path);
+              if (!statuses.includes(result.status)) {
+                throw new Error(`${path} returned HTTP ${result.status}`);
+              }
+              for (const marker of forbidden) {
+                if (result.text.includes(marker)) {
+                  throw new Error(`${path} contained ${marker}`);
+                }
+              }
+              ok += 1;
+            }
+            console.log(`${path}: ${ok}/${count}`);
+          }
+
+          await waitForFeatureOff();
+          await check("/api/dzn-pulse/summary", 2, [401, 403, 404]);
+          await check("/api/dzn-pulse/notifications/unread-count", 2, [401, 403, 404]);
+          await check("/api/dzn-pulse/event-popups", 2, [401, 403, 404]);
+          await check("/api/public/servers", 20);
+          await check("/api/public/home-stats", 10);
+          await check("/api/public/leaderboards", 10);
+          await check("/api/public/leaderboards/advanced", 10);
+          await check("/api/public/server-wars", 20);
+          await check("/leaderboards", 20);
+          await check("/servers/profile?slug=nuketown-deathmatch", 20);
+          await check("/servers/profile?slug=pandora-dayz", 20);
+          await check("/dashboard", 3);
+          NODE
+
+      - name: Record production D1 bookmark and schema
+        run: |
+          set -euo pipefail
+
+          bookmark_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "D1 bookmark timestamp: ${bookmark_time}"
+          npx wrangler d1 time-travel info "${PRODUCTION_D1_DATABASE_NAME}" \
+            --json \
+            --timestamp "${bookmark_time}" \
+            | tee d1-time-travel-before.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
+            --remote \
+            --json \
+            --command "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','index') ORDER BY type, name;" \
+            > d1-schema-before.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const raw = fs.readFileSync("d1-time-travel-before.json", "utf8");
+          let parsed = {};
+          try { parsed = JSON.parse(raw); } catch {}
+          const text = JSON.stringify(parsed);
+          const bookmark = text.match(/[a-f0-9]{16,}/i)?.[0] ?? "recorded";
+          fs.writeFileSync("d1-bookmark-summary.txt", `${bookmark}\n`);
+          console.log(`Production D1 time-travel bookmark recorded: ${bookmark}`);
+          NODE
+
+      - name: Apply only migration 0052 to production D1
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 migrations list "${PRODUCTION_D1_DATABASE_NAME}" --remote | tee migrations-before.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const text = fs.readFileSync("migrations-before.txt", "utf8");
+          const files = [...new Set(text.match(/\d{4}_[A-Za-z0-9_-]+\.sql/g) ?? [])];
+          if (files.length !== 1 || files[0] !== "0052_dzn_pulse.sql") {
+            throw new Error(`Expected only 0052_dzn_pulse.sql pending, found: ${files.join(", ") || "none"}`);
+          }
+          console.log("Confirmed only 0052_dzn_pulse.sql is pending.");
+          NODE
+
+          npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" --remote | tee migrations-apply.txt
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
+            --remote \
+            --json \
+            --command "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','index') ORDER BY type, name;" \
+            > d1-schema-after.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
+            --remote \
+            --json \
+            --command "SELECT 'notification_campaigns' AS table_name, COUNT(*) AS count FROM notification_campaigns UNION ALL SELECT 'user_notifications', COUNT(*) FROM user_notifications UNION ALL SELECT 'event_popup_dismissals', COUNT(*) FROM event_popup_dismissals UNION ALL SELECT 'notification_preferences', COUNT(*) FROM notification_preferences;" \
+            > d1-pulse-counts.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          function parseWranglerJson(path) {
+            const text = fs.readFileSync(path, "utf8");
+            const start = text.indexOf("[");
+            const end = text.lastIndexOf("]");
+            if (start < 0 || end < start) throw new Error(`${path} did not contain JSON array output.`);
+            const parsed = JSON.parse(text.slice(start, end + 1));
+            if (!Array.isArray(parsed) || parsed.some((entry) => entry.success === false)) {
+              throw new Error(`${path} reported unsuccessful D1 output.`);
+            }
+            return parsed.flatMap((entry) => entry.results ?? []);
+          }
+
+          const before = parseWranglerJson("d1-schema-before.json");
+          const after = parseWranglerJson("d1-schema-after.json");
+          const counts = parseWranglerJson("d1-pulse-counts.json");
+          const requiredTables = [
+            "notification_campaigns",
+            "user_notifications",
+            "event_popup_dismissals",
+            "notification_preferences",
+          ];
+          const requiredIndexes = [
+            "idx_notification_campaigns_active_priority",
+            "idx_notification_campaigns_event_id",
+            "idx_user_notifications_user_dedupe",
+            "idx_user_notifications_user_read_created",
+            "idx_user_notifications_expires_at",
+            "idx_user_notifications_server_id",
+            "idx_user_notifications_event_id",
+            "idx_user_notifications_campaign_id",
+            "idx_event_popup_dismissals_user_campaign_scope",
+            "idx_event_popup_dismissals_campaign",
+            "idx_event_popup_dismissals_server",
+          ];
+          const afterNames = new Set(after.map((row) => row.name));
+          for (const name of [...requiredTables, ...requiredIndexes]) {
+            if (!afterNames.has(name)) throw new Error(`Missing Pulse schema object: ${name}`);
+          }
+          const newNames = new Set([...requiredTables, ...requiredIndexes]);
+          const beforeMap = new Map(before.map((row) => [row.name, row.sql ?? ""]));
+          const afterMap = new Map(after.map((row) => [row.name, row.sql ?? ""]));
+          for (const [name, sql] of beforeMap) {
+            if (!afterMap.has(name)) throw new Error(`Existing schema object disappeared: ${name}`);
+            if (!newNames.has(name) && afterMap.get(name) !== sql) {
+              throw new Error(`Existing schema object changed unexpectedly: ${name}`);
+            }
+          }
+          for (const row of counts) {
+            if (Number(row.count) !== 0) {
+              throw new Error(`Expected no demo data in ${row.table_name}, found ${row.count}`);
+            }
+          }
+          console.log("Production D1 Pulse migration verified with zero seeded rows.");
+          NODE
+
+      - name: Enable Pulse and deploy production Pages
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.PRODUCTION_PAGES_PROJECT_NAME;
+          const d1Id = process.env.PRODUCTION_D1_DATABASE_ID;
+
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { success: false, errors: [{ message: "non_json" }] }; }
+            if (!response.ok || parsed.success === false) {
+              throw new Error(parsed.errors?.map((error) => error.message).join("; ") || `Cloudflare API HTTP ${response.status}`);
+            }
+            return parsed.result ?? null;
+          }
+
+          function deploymentConfig(project, environment) {
+            return project?.deployment_configs?.[environment] ?? {};
+          }
+          function envVars(config) {
+            return config?.env_vars && typeof config.env_vars === "object" ? config.env_vars : {};
+          }
+          function d1Databases(config) {
+            return config?.d1_databases && typeof config.d1_databases === "object" ? config.d1_databases : {};
+          }
+
+          void (async () => {
+            const project = await api(`/pages/projects/${projectName}`);
+            const productionConfig = deploymentConfig(project, "production");
+            const previewConfig = deploymentConfig(project, "preview");
+            const currentD1 = d1Databases(productionConfig).DB?.id ?? d1Databases(productionConfig).DB?.database_id ?? "";
+            if (currentD1 && currentD1 !== d1Id) {
+              throw new Error("Production Pages DB binding does not match expected production D1 id.");
+            }
+
+            const nextProductionConfig = {
+              ...productionConfig,
+              env_vars: {
+                ...envVars(productionConfig),
+                DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
+                DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+              },
+              d1_databases: {
+                ...d1Databases(productionConfig),
+                DB: { id: d1Id },
+              },
+            };
+
+            await api(`/pages/projects/${projectName}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                deployment_configs: {
+                  production: nextProductionConfig,
+                  preview: previewConfig,
+                },
+              }),
+            });
+            console.log("Configured production Pages DZN_PULSE_ENABLED=true.");
+            console.log("Configured production Pages DZN_DISCORD_NOTIFICATIONS_ENABLED=false.");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npx wrangler pages deploy out \
+            --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
+            --branch main \
+            --commit-hash "${GITHUB_SHA}" \
+            --commit-message "Enable DZN Pulse after migration" \
+            --commit-dirty=true \
+            | tee production-pages-deploy.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployText = fs.readFileSync("production-pages-deploy.txt", "utf8");
+          const immutableUrl = deployText.match(/https:\/\/[^\s]+\.pages\.dev/)?.[0] ?? "";
+          const stableUrl = "https://dzn-network.pages.dev";
+          fs.writeFileSync("production-pages-url.txt", `${stableUrl}\n`);
+          if (immutableUrl) fs.writeFileSync("production-pages-immutable-url.txt", `${immutableUrl}\n`);
+          console.log(`Production Pages URL: ${stableUrl}`);
+          if (immutableUrl) console.log(`Production immutable URL: ${immutableUrl}`);
+          NODE
+
+      - name: Verify feature-on production
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const base = "https://dzn-network.pages.dev";
+          const forbidden = ["Request failed: 503", "SERVER UNAVAILABLE", "Error 1102", "exceeded resource limits"];
+
+          async function request(path) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 20000);
+            try {
+              const response = await fetch(`${base}${path}`, {
+                redirect: "follow",
+                signal: controller.signal,
+                headers: { "User-Agent": "dzn-pulse-production-rollout" },
+              });
+              const text = await response.text();
+              return { status: response.status, text };
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+
+          async function waitForFeatureOn() {
+            let last = "";
+            for (let attempt = 1; attempt <= 24; attempt += 1) {
+              const result = await request("/api/dzn-pulse/config");
+              last = `status=${result.status} body=${result.text.slice(0, 160)}`;
+              if (result.status === 200) {
+                const parsed = JSON.parse(result.text);
+                if (parsed.dznPulseEnabled === true && parsed.discordNotificationsEnabled === false) {
+                  console.log("Feature-on production config verified.");
+                  return;
+                }
+              }
+              await new Promise((resolve) => setTimeout(resolve, 10000));
+            }
+            throw new Error(`Feature-on production config did not become active: ${last}`);
+          }
+
+          async function check(path, count, statuses = [200]) {
+            let ok = 0;
+            for (let index = 0; index < count; index += 1) {
+              const result = await request(path);
+              if (!statuses.includes(result.status)) {
+                throw new Error(`${path} returned HTTP ${result.status}`);
+              }
+              for (const marker of forbidden) {
+                if (result.text.includes(marker)) {
+                  throw new Error(`${path} contained ${marker}`);
+                }
+              }
+              ok += 1;
+            }
+            console.log(`${path}: ${ok}/${count}`);
+          }
+
+          await waitForFeatureOn();
+          await check("/api/dzn-pulse/summary", 3, [401, 403]);
+          await check("/api/dzn-pulse/notifications/unread-count", 3, [401, 403]);
+          await check("/api/dzn-pulse/notifications", 3, [401, 403]);
+          await check("/api/dzn-pulse/event-popups", 3, [401, 403]);
+          await check("/dzn-pulse", 5);
+          await check("/api/public/servers", 20);
+          await check("/api/public/home-stats", 10);
+          await check("/api/public/leaderboards", 10);
+          await check("/api/public/leaderboards/advanced", 10);
+          await check("/api/public/server-wars", 20);
+          await check("/leaderboards", 20);
+          await check("/servers/profile?slug=nuketown-deathmatch", 20);
+          await check("/servers/profile?slug=pandora-dayz", 20);
+          await check("/dashboard", 3);
+          NODE
+
+      - name: Write rollout summary
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "## Rollout Artifacts"
+            echo "- Production Pages URL: https://dzn-network.pages.dev"
+            if [ -f production-pages-immutable-url.txt ]; then
+              echo "- Production immutable URL: $(cat production-pages-immutable-url.txt)"
+            fi
+            if [ -f d1-bookmark-summary.txt ]; then
+              echo "- D1 bookmark: $(cat d1-bookmark-summary.txt)"
+            fi
+            echo "- Migration: 0052_dzn_pulse.sql"
+            echo "- DZN_PULSE_ENABLED: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
