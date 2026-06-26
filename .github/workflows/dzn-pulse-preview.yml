@@ -213,6 +213,7 @@ jobs:
           const productionName = process.env.PRODUCTION_D1_DATABASE_NAME;
           const productionId = process.env.PRODUCTION_D1_DATABASE_ID;
 
+          void (async () => {
           async function api(path, init = {}) {
             const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
               ...init,
@@ -267,6 +268,10 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_D1_DATABASE_ID=${previewId}\n`);
           console.log(`Preview D1 database name: ${previewName}`);
           console.log(`Preview D1 database id: ${previewId}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
           NODE
 
       - name: Apply and verify preview D1 migrations
@@ -356,6 +361,7 @@ jobs:
             "exceededCpu",
           ];
 
+          void (async () => {
           async function request(path) {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 15000);
@@ -403,6 +409,10 @@ jobs:
           await check("/servers/profile?slug=pandora-dayz", 20);
 
           console.log(`Feature-off preview verified: ${base}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
           NODE
 
       - name: Deploy feature-on Pages preview
@@ -427,6 +437,7 @@ jobs:
           const branch = process.env.INPUT_BRANCH;
           const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
 
+          void (async () => {
           async function api(path, init = {}) {
             const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
               ...init,
@@ -500,6 +511,10 @@ jobs:
           console.log(`Configured preview Pages project: ${projectName}`);
           console.log(`Configured preview branch: ${branch}`);
           console.log(`Configured preview D1 binding DB id: ${d1Id}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
           NODE
 
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
@@ -599,6 +614,7 @@ jobs:
             "CLOUDFLARE_API_TOKEN",
           ];
 
+          void (async () => {
           async function request(method, path, body) {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 15000);
@@ -686,6 +702,10 @@ jobs:
           }
 
           console.log(`Feature-on hosted route verification passed: ${base}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
           NODE
 
       - name: Preview summary
