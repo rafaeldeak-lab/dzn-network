@@ -254,9 +254,7 @@ function PulseSidebar() {
   ];
   return (
     <aside className="hidden border-r border-white/8 bg-black/28 p-4 backdrop-blur-xl lg:block">
-      <Link href="/" className="block">
-        <DznLogo />
-      </Link>
+      <DznLogo />
       <nav className="mt-6 space-y-1" aria-label="DZN Pulse navigation">
         {nav.map((item) => {
           const Icon = item.icon;

@@ -147,6 +147,7 @@ assert.equal(pulsePage.includes("The heartbeat of the DZN Network"), true, "DZN 
 assert.equal(pulsePage.includes("No live events right now."), true, "DZN Pulse page must include honest live-event empty state.");
 assert.equal(pulsePage.includes("Same-Category Matching"), true, "DZN Pulse page must explain same-category matching.");
 assert.equal(pulsePage.includes("/api/dzn-pulse/summary"), true, "DZN Pulse page must use the summary API.");
+assert.equal(/<Link[^>]+href=["']\/["'][\s\S]{0,120}<DznLogo/.test(pulsePage), false, "DZN Pulse page must not wrap DznLogo in Link because DznLogo already renders an anchor.");
 
 assert.equal(eventsPage.includes("DznPulseProvider enablePopups"), true, "Events shell must mount the Pulse provider with popups.");
 assert.equal(eventsPage.includes("PulseEventsSidebarItem"), true, "Events sidebar must include a feature-gated Pulse item.");
