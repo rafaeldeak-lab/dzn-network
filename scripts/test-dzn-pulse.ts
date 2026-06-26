@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
-import { sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
+import { getPulseSummary, sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
 
 function read(path: string) {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
@@ -159,4 +159,33 @@ assert.equal(packageJson.includes("\"test:dzn-pulse\""), true, "Package scripts 
 assert.equal(gitignore.includes("tmp/dzn-pulse-demo-seed.sql"), true, "Generated Pulse demo seed SQL must be ignored.");
 assert.equal(gitignore.includes("tmp/dzn-pulse-*.patch"), true, "Pulse preflight patches must be ignored.");
 
-console.log("DZN Pulse tests passed.");
+const summaryQueries: string[] = [];
+const emptyStatement = {
+  bind: () => emptyStatement,
+  all: async () => ({ results: [] }),
+  first: async () => null,
+  run: async () => ({ success: true }),
+};
+const emptyPreviewDb = {
+  prepare: (query: string) => {
+    summaryQueries.push(query);
+    return emptyStatement;
+  },
+};
+getPulseSummary(
+  { DZN_PULSE_ENABLED: "true", DB: emptyPreviewDb } as never,
+  { id: "preview-user", email: "preview@example.test", name: "Preview User", role: "owner" } as never,
+)
+  .then((emptyPreviewSummary) => {
+    assert.equal(emptyPreviewSummary.ok, true, "Authenticated Pulse summary must return a controlled empty-state payload.");
+    assert.equal(emptyPreviewSummary.metrics.live_events, 0, "Empty preview summary must not fabricate live events.");
+    assert.equal(emptyPreviewSummary.top_server, null, "Empty preview summary must not fabricate a top server.");
+    assert.deepEqual(emptyPreviewSummary.monthly_rankings, [], "Empty preview summary must not fabricate rankings.");
+    assert.equal(summaryQueries.some((query) => query.includes("LIMIT 8")), true, "Pulse summary event query must stay bounded.");
+    assert.equal(summaryQueries.some((query) => query.includes("LIMIT 25")), true, "Pulse summary ranking query must stay bounded.");
+    console.log("DZN Pulse tests passed.");
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
