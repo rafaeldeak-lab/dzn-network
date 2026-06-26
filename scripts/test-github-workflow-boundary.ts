@@ -10,6 +10,7 @@ const diagnosticsWorkflow = read(".github/workflows/dzn-nitrado-diagnostics.yml"
 const autoUpdateWorkflow = read(".github/workflows/dzn-auto-update-schedulers.yml");
 const autoUpdateWorkerDeployWorkflow = read(".github/workflows/dzn-auto-update-worker-deploy.yml");
 const admWorkerDeployWorkflow = read(".github/workflows/dzn-adm-worker-deploy.yml");
+const dznPulsePreviewWorkflow = read(".github/workflows/dzn-pulse-preview.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
 const admWorkerConfig = read("wrangler.adm-sync.toml");
 const workflows = [
@@ -81,6 +82,52 @@ assert.equal(admWorkerDeployWorkflow.includes("wrangler d1"), false);
 assert.equal(admWorkerDeployWorkflow.includes("npm run migrate"), false);
 assert.equal(admWorkerConfig.includes('name = "dzn-adm-sync-worker"'), true);
 assert.equal(admWorkerConfig.includes('crons = ["* * * * *"]'), true);
+
+assert.equal(dznPulsePreviewWorkflow.includes("name: DZN Pulse Preview"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("\n  push:"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("\n  schedule:"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("confirm_preview_only:"), true);
+assert.equal(dznPulsePreviewWorkflow.includes('confirm_preview_only must equal PREVIEW_ONLY'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN Pulse preview may only run against feature/dzn-pulse / PR #11"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN Pulse preview must never run against main"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("pulse_preview"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("dzn_pulse_preview"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("preview_db_name must not equal the production D1 database name"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("Preview D1 database id equals production D1 database id"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("Refusing D1 command for non-preview database name"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("Refusing migration for non-preview database name"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("Refusing seed for non-preview database name"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("test -f migrations/0052_dzn_pulse.sql"), true);
+assert.equal(dznPulsePreviewWorkflow.includes('npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote --yes'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("notification_campaigns"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("user_notifications"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("event_popup_dismissals"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("notification_preferences"), true);
+assert.equal(dznPulsePreviewWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("Refusing to set DZN_PULSE_ENABLED on production Pages project"), true);
+assert.equal(dznPulsePreviewWorkflow.includes('PRODUCTION_PAGES_PROJECT_NAME: dzn-network'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
+assert.equal(dznPulsePreviewWorkflow.includes("--project-name dzn-network"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("wrangler pages deploy out"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("wrangler.auto-update.toml"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("wrangler.adm-sync.toml"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("dzn-auto-update-worker"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("dzn-adm-sync-worker"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("db:migrate:remote"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("dzn_network_db --remote"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("echo \"$CLOUDFLARE_API_TOKEN\""), false);
+assert.equal(dznPulsePreviewWorkflow.includes("echo \"${CLOUDFLARE_API_TOKEN}\""), false);
+assert.equal(dznPulsePreviewWorkflow.includes("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_SEED_LOCAL=1 npm run seed:dzn-pulse-demo"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("git check-ignore --quiet tmp/dzn-pulse-demo-seed.sql"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler d1 execute \"${PREVIEW_DB_NAME}\" --remote --file tmp/dzn-pulse-demo-seed.sql"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("/api/dzn-pulse/config"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("/api/public/servers"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("Worker exceeded resource limits"), true);
 
 const runtimeOnlySecretPatterns = [
   /secrets\.DISCORD_BOT_TOKEN/,

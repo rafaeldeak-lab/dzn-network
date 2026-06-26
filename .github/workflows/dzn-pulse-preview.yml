@@ -1,0 +1,712 @@
+name: DZN Pulse Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to preview
+        default: feature/dzn-pulse
+        required: true
+      mode:
+        description: Action to run
+        required: true
+        type: choice
+        options:
+          - validate
+          - provision-preview-db
+          - deploy-feature-off
+          - deploy-feature-on
+          - seed-preview
+          - verify-feature-on
+          - full-preview
+      confirm_preview_only:
+        description: Must equal PREVIEW_ONLY
+        required: true
+      preview_db_name:
+        description: Preview D1 database name
+        required: true
+        default: dzn_network_db_dzn_pulse_preview
+      preview_project_name:
+        description: Dedicated preview Pages project, if branch env vars cannot be isolated
+        required: false
+        default: dzn-network-pulse-preview
+
+concurrency:
+  group: dzn-pulse-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dzn-pulse-preview:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      INPUT_BRANCH: ${{ inputs.branch }}
+      MODE: ${{ inputs.mode }}
+      CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
+      PREVIEW_DB_NAME: ${{ inputs.preview_db_name }}
+      PREVIEW_PROJECT_NAME: ${{ inputs.preview_project_name }}
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+    steps:
+      - name: Checkout requested branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate preview-only inputs
+        run: |
+          set -euo pipefail
+
+          if [ "${CONFIRM_PREVIEW_ONLY}" != "PREVIEW_ONLY" ]; then
+            echo "::error::confirm_preview_only must equal PREVIEW_ONLY."
+            exit 1
+          fi
+
+          if [ "${INPUT_BRANCH}" != "feature/dzn-pulse" ]; then
+            echo "::error::DZN Pulse preview may only run against feature/dzn-pulse / PR #11."
+            exit 1
+          fi
+
+          if [ "${INPUT_BRANCH}" = "main" ] || [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "::error::DZN Pulse preview must never run against main."
+            exit 1
+          fi
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+            exit 1
+          fi
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false for Pulse preview."
+            exit 1
+          fi
+
+          guardPreviewDatabaseName() {
+            case "$1" in
+              *pulse_preview*|*dzn_pulse_preview*) return 0 ;;
+              *)
+                echo "::error::Preview D1 database name must contain pulse_preview or dzn_pulse_preview."
+                return 1
+                ;;
+            esac
+          }
+
+          guardPreviewDatabaseName "${PREVIEW_DB_NAME}"
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const source = fs.readFileSync("wrangler.toml", "utf8");
+          const name = source.match(/database_name\s*=\s*"([^"]+)"/)?.[1] ?? "";
+          const id = source.match(/database_id\s*=\s*"([^"]+)"/)?.[1] ?? "";
+
+          if (!name || !id) {
+            console.error("Could not detect production D1 database name/id from wrangler.toml.");
+            process.exit(1);
+          }
+
+          fs.appendFileSync(process.env.GITHUB_ENV, `PRODUCTION_D1_DATABASE_NAME=${name}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `PRODUCTION_D1_DATABASE_ID=${id}\n`);
+          console.log(`Detected production D1 database name: ${name}`);
+          console.log(`Detected production D1 database id: ${id}`);
+          NODE
+
+          if [ "${PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
+            echo "::error::preview_db_name must not equal the production D1 database name."
+            exit 1
+          fi
+
+          case "${MODE}" in
+            deploy-feature-on|seed-preview|verify-feature-on|full-preview)
+              if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+                echo "::error::Feature-on preview must not target the production Pages project."
+                exit 1
+              fi
+              ;;
+          esac
+
+          {
+            echo "## DZN Pulse Preview Guard"
+            echo ""
+            echo "- Mode: ${MODE}"
+            echo "- Branch: ${INPUT_BRANCH}"
+            echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
+            echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
+            echo "- Production D1 database name: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- Production D1 database id: ${PRODUCTION_D1_DATABASE_ID}"
+            echo "- Discord Pulse delivery: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate DZN Pulse branch
+        if: ${{ inputs.mode == 'validate' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          npm run test
+          npm run test:dzn-pulse
+          npm run test:events
+          npm run test:ctf-tournament-dashboard
+          npm run test:dashboard-core-first-load
+          npm run test:dashboard-optional-fallback
+          npm run test:public-profile-core-fallback
+          npm run test:dashboard-optional-concurrency
+          npm run test:durable-rank-snapshot
+          npm run test:dashboard-live-stats-cpu
+          npm run test:dashboard-stat-parity
+          npm run test:dashboard-loading
+          npm run test:player-count-parity
+          npm run test:public-access-gating
+          npm run test:automation-schedulers
+          npm run test:auto-update-worker
+          npm run test:metadata-sync-runner
+          npm run test:server-metadata
+          npm run test:queued-adm-job-progress
+          npm run test:adm-fixtures
+          npm run test:server-wars
+          npm run test:server-war-automation
+          npm run test:github-workflows
+          npm run worker:auto-update:dry-run
+          npm run worker:adm-sync:dry-run
+          npm run autodev:production-smoke
+          git diff --check
+
+      - name: Resolve or create preview D1 database
+        if: ${{ inputs.mode == 'provision-preview-db' || inputs.mode == 'deploy-feature-on' || inputs.mode == 'seed-preview' || inputs.mode == 'verify-feature-on' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *pulse_preview*|*dzn_pulse_preview*) ;;
+            *)
+              echo "::error::Refusing D1 command for non-preview database name."
+              exit 1
+              ;;
+          esac
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const previewName = process.env.PREVIEW_DB_NAME;
+          const productionName = process.env.PRODUCTION_D1_DATABASE_NAME;
+          const productionId = process.env.PRODUCTION_D1_DATABASE_ID;
+
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ message: "Cloudflare API returned non-JSON response." }] };
+            }
+            if (!response.ok || parsed.success === false) {
+              const message = parsed.errors?.map((error) => error.message).join("; ") || `HTTP ${response.status}`;
+              throw new Error(message);
+            }
+            return parsed;
+          }
+
+          if (previewName === productionName) {
+            throw new Error("preview_db_name equals production database name.");
+          }
+
+          const list = await api("/d1/database?per_page=100");
+          const databases = Array.isArray(list.result) ? list.result : list.result?.databases ?? [];
+          let database = databases.find((item) => item?.name === previewName);
+
+          if (!database) {
+            const created = await api("/d1/database", {
+              method: "POST",
+              body: JSON.stringify({ name: previewName }),
+            });
+            database = created.result;
+          }
+
+          const previewId = database?.uuid ?? database?.id;
+          if (!previewId) {
+            throw new Error("Could not resolve preview D1 database id.");
+          }
+          if (previewId === productionId) {
+            throw new Error("Preview D1 database id equals production D1 database id.");
+          }
+
+          fs.writeFileSync("preview-d1.json", JSON.stringify({
+            name: previewName,
+            id: previewId,
+          }, null, 2));
+          fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_D1_DATABASE_ID=${previewId}\n`);
+          console.log(`Preview D1 database name: ${previewName}`);
+          console.log(`Preview D1 database id: ${previewId}`);
+          NODE
+
+      - name: Apply and verify preview D1 migrations
+        if: ${{ inputs.mode == 'provision-preview-db' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *pulse_preview*|*dzn_pulse_preview*) ;;
+            *)
+              echo "::error::Refusing migration for non-preview database name."
+              exit 1
+              ;;
+          esac
+
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing migration because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          test -f migrations/0052_dzn_pulse.sql
+          npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote --yes | tee preview-d1-migrations.txt
+          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name;" > preview-d1-schema.json
+          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "PRAGMA foreign_key_check;" > preview-d1-foreign-key-check.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const schemaText = fs.readFileSync("preview-d1-schema.json", "utf8");
+          const fkText = fs.readFileSync("preview-d1-foreign-key-check.json", "utf8");
+
+          function rowsFromWranglerJson(text) {
+            const parsed = JSON.parse(text);
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+
+          const names = new Set(rowsFromWranglerJson(schemaText).map((row) => row.name).filter(Boolean));
+          const requiredTables = [
+            "notification_campaigns",
+            "user_notifications",
+            "event_popup_dismissals",
+            "notification_preferences",
+          ];
+          const requiredIndexes = [
+            "idx_notification_campaigns_active_priority",
+            "idx_notification_campaigns_event_id",
+            "idx_user_notifications_user_dedupe",
+            "idx_user_notifications_user_read_created",
+            "idx_user_notifications_expires_at",
+            "idx_user_notifications_server_id",
+            "idx_user_notifications_event_id",
+            "idx_user_notifications_campaign_id",
+            "idx_event_popup_dismissals_user_campaign_scope",
+            "idx_event_popup_dismissals_campaign",
+            "idx_event_popup_dismissals_server",
+          ];
+
+          for (const name of [...requiredTables, ...requiredIndexes]) {
+            if (!names.has(name)) {
+              console.error(`Preview D1 schema is missing ${name}.`);
+              process.exit(1);
+            }
+          }
+
+          const fkRows = rowsFromWranglerJson(fkText);
+          if (fkRows.length > 0) {
+            console.error("Preview D1 foreign_key_check returned rows.");
+            process.exit(1);
+          }
+
+          console.log("Preview D1 Pulse schema and indexes verified.");
+          NODE
+
+      - name: Verify feature-off Pages preview
+        if: ${{ inputs.mode == 'deploy-feature-off' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const branch = process.env.INPUT_BRANCH.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+          const base = `https://${branch}.dzn-network.pages.dev`;
+          const forbidden = [
+            "Request failed: 503",
+            "SERVER UNAVAILABLE",
+            "Error 1102",
+            "Worker exceeded resource limits",
+            "exceededCpu",
+          ];
+
+          async function request(path) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 15000);
+            try {
+              const response = await fetch(`${base}${path}`, { signal: controller.signal });
+              const text = await response.text();
+              return { status: response.status, text };
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+
+          async function check(path, count, statuses = [200]) {
+            for (let index = 0; index < count; index += 1) {
+              const result = await request(path);
+              if (!statuses.includes(result.status)) {
+                throw new Error(`${path} returned HTTP ${result.status}`);
+              }
+              for (const marker of forbidden) {
+                if (result.text.includes(marker)) {
+                  throw new Error(`${path} contained ${marker}`);
+                }
+              }
+            }
+            console.log(`${path}: ${count}/${count}`);
+          }
+
+          const config = await request("/api/dzn-pulse/config");
+          if (config.status !== 200) throw new Error(`config returned HTTP ${config.status}`);
+          const parsed = JSON.parse(config.text);
+          if (parsed.dznPulseEnabled !== false || parsed.discordNotificationsEnabled !== false) {
+            throw new Error("Feature-off preview config did not report disabled Pulse flags.");
+          }
+
+          await check("/dzn-pulse", 3, [200]);
+          await check("/api/dzn-pulse/notifications/unread-count", 3, [401, 403, 404]);
+          await check("/api/dzn-pulse/summary", 3, [401, 403, 404]);
+          await check("/api/public/servers", 20);
+          await check("/api/public/home-stats", 10);
+          await check("/api/public/leaderboards", 10);
+          await check("/api/public/leaderboards/advanced", 10);
+          await check("/api/public/server-wars", 20);
+          await check("/leaderboards", 20);
+          await check("/servers/profile?slug=nuketown-deathmatch", 20);
+          await check("/servers/profile?slug=pandora-dayz", 20);
+
+          console.log(`Feature-off preview verified: ${base}`);
+          NODE
+
+      - name: Deploy feature-on Pages preview
+        if: ${{ inputs.mode == 'deploy-feature-on' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Refusing to set DZN_PULSE_ENABLED on production Pages project."
+            exit 1
+          fi
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing feature-on deploy because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.PREVIEW_PROJECT_NAME;
+          const branch = process.env.INPUT_BRANCH;
+          const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
+
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ message: "Cloudflare API returned non-JSON response." }] };
+            }
+            return { ok: response.ok, status: response.status, parsed };
+          }
+
+          const get = await api(`/pages/projects/${projectName}`);
+          if (get.status === 404) {
+            const created = await api("/pages/projects", {
+              method: "POST",
+              body: JSON.stringify({
+                name: projectName,
+                production_branch: branch,
+              }),
+            });
+            if (!created.ok || created.parsed.success === false) {
+              throw new Error(created.parsed.errors?.map((error) => error.message).join("; ") || "Failed to create preview Pages project.");
+            }
+          } else if (!get.ok || get.parsed.success === false) {
+            throw new Error(get.parsed.errors?.map((error) => error.message).join("; ") || "Failed to read preview Pages project.");
+          }
+
+          const envVars = {
+            DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
+            DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+          };
+          const d1Databases = {
+            DB: { id: d1Id },
+          };
+          const patched = await api(`/pages/projects/${projectName}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              production_branch: branch,
+              deployment_configs: {
+                production: {
+                  env_vars: envVars,
+                  d1_databases: d1Databases,
+                },
+                preview: {
+                  env_vars: envVars,
+                  d1_databases: d1Databases,
+                },
+              },
+            }),
+          });
+          if (!patched.ok || patched.parsed.success === false) {
+            throw new Error(patched.parsed.errors?.map((error) => error.message).join("; ") || "Failed to configure preview Pages project.");
+          }
+
+          fs.writeFileSync("pulse-preview-project.json", JSON.stringify({
+            projectName,
+            branch,
+            d1Binding: "DB",
+            d1Id,
+            dznPulseEnabled: true,
+            discordNotificationsEnabled: false,
+          }, null, 2));
+          console.log(`Configured preview Pages project: ${projectName}`);
+          console.log(`Configured preview branch: ${branch}`);
+          console.log(`Configured preview D1 binding DB id: ${d1Id}`);
+          NODE
+
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npx wrangler pages deploy out \
+            --project-name "${PREVIEW_PROJECT_NAME}" \
+            --branch "${INPUT_BRANCH}" \
+            --commit-dirty=true \
+            | tee pulse-feature-on-pages-deploy.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployText = fs.readFileSync("pulse-feature-on-pages-deploy.txt", "utf8");
+          const url = deployText.match(/https:\/\/[^\s]+\.pages\.dev/)?.[0]
+            ?? `https://${process.env.INPUT_BRANCH.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}.${process.env.PREVIEW_PROJECT_NAME}.pages.dev`;
+          fs.writeFileSync("pulse-feature-on-url.txt", `${url}\n`);
+          console.log(`Feature-on preview URL: ${url}`);
+          NODE
+
+      - name: Seed preview-only Pulse data
+        if: ${{ inputs.mode == 'seed-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *pulse_preview*|*dzn_pulse_preview*) ;;
+            *)
+              echo "::error::Refusing seed for non-preview database name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing seed because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          DZN_PULSE_SEED_LOCAL=1 npm run seed:dzn-pulse-demo
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const sqlPath = "tmp/dzn-pulse-demo-seed.sql";
+          const sql = fs.readFileSync(sqlPath, "utf8");
+          const upper = sql.toUpperCase();
+          const allowedTables = new Set([
+            "NOTIFICATION_CAMPAIGNS",
+            "USER_NOTIFICATIONS",
+            "EVENT_POPUP_DISMISSALS",
+            "NOTIFICATION_PREFERENCES",
+          ]);
+          if (upper.includes("DROP ") || upper.includes("ALTER ") || upper.includes("TRUNCATE ") || upper.includes("CREATE ")) {
+            throw new Error("Generated seed SQL contains destructive or schema statements.");
+          }
+          for (const match of upper.matchAll(/\b(?:INSERT|UPDATE|DELETE)\s+(?:OR\s+IGNORE\s+)?(?:INTO\s+)?([A-Z0-9_]+)/g)) {
+            if (!allowedTables.has(match[1])) {
+              throw new Error(`Generated seed SQL targets non-Pulse table ${match[1]}.`);
+            }
+          }
+          if (/SECRET|TOKEN|COOKIE|AUTHORIZATION|BEARER|PRIVATE KEY/.test(upper)) {
+            throw new Error("Generated seed SQL appears to contain secret-like content.");
+          }
+          console.log("Generated preview seed SQL inspected.");
+          NODE
+
+          git check-ignore --quiet tmp/dzn-pulse-demo-seed.sql
+          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --file tmp/dzn-pulse-demo-seed.sql
+          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "SELECT 'notification_campaigns' AS table_name, COUNT(*) AS count FROM notification_campaigns UNION ALL SELECT 'user_notifications', COUNT(*) FROM user_notifications UNION ALL SELECT 'event_popup_dismissals', COUNT(*) FROM event_popup_dismissals UNION ALL SELECT 'notification_preferences', COUNT(*) FROM notification_preferences;" > pulse-preview-counts.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const parsed = JSON.parse(fs.readFileSync("pulse-preview-counts.json", "utf8"));
+          const rows = (Array.isArray(parsed) ? parsed : [parsed])
+            .flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          console.log("Preview Pulse seed counts:");
+          for (const row of rows) {
+            console.log(`${row.table_name}: ${row.count}`);
+          }
+          NODE
+
+      - name: Verify feature-on preview
+        if: ${{ inputs.mode == 'verify-feature-on' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const urlPath = "pulse-feature-on-url.txt";
+          const branchUrl = `https://${process.env.INPUT_BRANCH.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}.${process.env.PREVIEW_PROJECT_NAME}.pages.dev`;
+          const base = fs.existsSync(urlPath) ? fs.readFileSync(urlPath, "utf8").trim() : branchUrl;
+          const forbidden = [
+            "Request failed: 503",
+            "SERVER UNAVAILABLE",
+            "Error 1102",
+            "Worker exceeded resource limits",
+            "exceededCpu",
+            "BEGIN PRIVATE KEY",
+            "DISCORD_BOT_TOKEN",
+            "STRIPE_SECRET",
+            "CLOUDFLARE_API_TOKEN",
+          ];
+
+          async function request(method, path, body) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 15000);
+            try {
+              const response = await fetch(`${base}${path}`, {
+                method,
+                headers: body ? { "content-type": "application/json" } : undefined,
+                body: body ? JSON.stringify(body) : undefined,
+                signal: controller.signal,
+              });
+              const text = await response.text();
+              for (const marker of forbidden) {
+                if (text.includes(marker)) throw new Error(`${path} contained ${marker}`);
+              }
+              return { status: response.status, text };
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+
+          async function check(path, count, statuses = [200]) {
+            for (let index = 0; index < count; index += 1) {
+              const result = await request("GET", path);
+              if (!statuses.includes(result.status)) {
+                throw new Error(`${path} returned HTTP ${result.status}`);
+              }
+            }
+            console.log(`${path}: ${count}/${count}`);
+          }
+
+          const config = await request("GET", "/api/dzn-pulse/config");
+          if (config.status !== 200) throw new Error(`config returned HTTP ${config.status}`);
+          const parsed = JSON.parse(config.text);
+          if (parsed.dznPulseEnabled !== true || parsed.discordNotificationsEnabled !== false) {
+            throw new Error("Feature-on preview config did not report enabled Pulse and disabled Discord delivery.");
+          }
+
+          const privateGetRoutes = [
+            "/api/dzn-pulse/summary",
+            "/api/dzn-pulse/notifications",
+            "/api/dzn-pulse/notifications/unread-count",
+            "/api/dzn-pulse/event-popups",
+          ];
+          for (const route of privateGetRoutes) {
+            const result = await request("GET", route);
+            if (![401, 403].includes(result.status)) {
+              throw new Error(`${route} unauthenticated request returned HTTP ${result.status}, expected 401/403.`);
+            }
+          }
+
+          const privatePostRoutes = [
+            ["/api/dzn-pulse/notifications/demo/read", {}],
+            ["/api/dzn-pulse/notifications/read-all", {}],
+            ["/api/dzn-pulse/notifications/clear-read", {}],
+            ["/api/dzn-pulse/event-popups/demo-weekend-kill-race/dismiss", { mode: "snooze" }],
+          ];
+          for (const [route, body] of privatePostRoutes) {
+            const result = await request("POST", route, body);
+            if (![401, 403].includes(result.status)) {
+              throw new Error(`${route} unauthenticated mutation returned HTTP ${result.status}, expected 401/403.`);
+            }
+          }
+
+          await check("/dzn-pulse", 3, [200]);
+          await check("/events", 3, [200]);
+          await check("/events/challenges", 3, [200]);
+          await check("/events/tournaments", 3, [200]);
+          await check("/api/public/servers", 20);
+          await check("/api/public/home-stats", 10);
+          await check("/api/public/leaderboards", 10);
+          await check("/api/public/leaderboards/advanced", 10);
+          await check("/api/public/server-wars", 20);
+          await check("/leaderboards", 20);
+          await check("/servers/profile?slug=nuketown-deathmatch", 20);
+          await check("/servers/profile?slug=pandora-dayz", 20);
+
+          const stop = Date.now() + 5 * 60 * 1000;
+          while (Date.now() < stop) {
+            await Promise.all([
+              check("/api/dzn-pulse/config", 1, [200]),
+              check("/api/public/servers", 1, [200]),
+              check("/events", 1, [200]),
+            ]);
+            await new Promise((resolve) => setTimeout(resolve, 15000));
+          }
+
+          console.log(`Feature-on hosted route verification passed: ${base}`);
+          NODE
+
+      - name: Preview summary
+        if: always()
+        run: |
+          set -euo pipefail
+
+          feature_on_url="not deployed"
+          if [ -f pulse-feature-on-url.txt ]; then
+            feature_on_url="$(cat pulse-feature-on-url.txt)"
+          fi
+          preview_d1_id="${PREVIEW_D1_DATABASE_ID:-not resolved}"
+
+          {
+            echo "## DZN Pulse Preview"
+            echo ""
+            echo "- Mode: ${MODE}"
+            echo "- Branch: ${INPUT_BRANCH}"
+            echo "- Source commit SHA: ${GITHUB_SHA}"
+            echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
+            echo "- Preview D1 database id: ${preview_d1_id}"
+            echo "- Preview Pages project: ${PREVIEW_PROJECT_NAME}"
+            echo "- DZN_PULSE_ENABLED feature-on state: true only on dedicated preview project"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Feature-on preview URL: ${feature_on_url}"
+          } >> "$GITHUB_STEP_SUMMARY"
