@@ -292,6 +292,11 @@ export async function enterOwnerEvent(env: Env, user: SessionUser | null, server
       ok: true,
       entryId,
       status: "entered",
+      eventId: event.id,
+      eventSlug: event.slug,
+      eventName: event.name,
+      serverId: server.id,
+      serverName: serverDisplayName(server),
       message: "Server entered successfully. Scoring will be handled automatically from ADM sync.",
     },
   };

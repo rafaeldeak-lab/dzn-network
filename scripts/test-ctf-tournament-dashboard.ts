@@ -60,6 +60,6 @@ for (const forbidden of ["adm-sync", "adm-parser", "adm_import_jobs"]) {
 
 const packageSource = readFileSync("package.json", "utf8");
 assert.equal(packageSource.includes("\"test:ctf-tournament-dashboard\": \"tsx scripts/test-ctf-tournament-dashboard.ts\""), true);
-assert.equal(packageSource.includes("test:ctf-tournament-dashboard && npm run test:events && npm run test:billing-plans"), true);
+assert.equal(packageSource.includes("test:ctf-tournament-dashboard && npm run test:events && npm run test:dzn-pulse && npm run test:billing-plans"), true);
 
 console.log("CTF tournament dashboard tests passed.");

@@ -9,9 +9,13 @@ Set these on the DZN Network Pages project:
 ```text
 DZN_CRON_SECRET=use-one-long-random-secret
 DZN_APP_URL=https://dzn-network.pages.dev
+DZN_PULSE_ENABLED=false
+DZN_DISCORD_NOTIFICATIONS_ENABLED=false
 ```
 
 `DZN_CRON_SECRET` must match the Worker secret exactly. `DZN_APP_URL` should point to production, not a preview deploy.
+
+`DZN_PULSE_ENABLED` and `DZN_DISCORD_NOTIFICATIONS_ENABLED` are feature flags, not secrets. Both default off when unset or `false`. Enable Pulse only after the additive Pulse migration has been applied to the target environment.
 
 ## 2. Cloudflare Worker environment variables
 

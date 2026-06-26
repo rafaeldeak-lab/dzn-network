@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
+  Activity,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -30,7 +31,9 @@ import {
   fallbackMatches,
   fallbackServerEvents,
   fallbackServers,
+  type CompetitiveEvent,
   type EventDetailPayload,
+  type EventMatch,
   type EventsPayload,
   type ServerEventsPayload,
 } from "./event-data";
@@ -50,6 +53,11 @@ import { ServerEventProfile } from "./ServerEventProfile";
 import { TournamentCard } from "./TournamentCard";
 import { TournamentTable } from "./TournamentTable";
 import { ServerWarsTeaser } from "@/components/server-wars/server-wars-platform";
+import {
+  DznPulseBell,
+  DznPulseProvider,
+  usePulseContextOptional,
+} from "@/components/dzn-pulse/dzn-pulse-provider";
 
 type LoadState = "loading" | "loaded" | "stale";
 type TournamentStatusFilter = "all" | "upcoming" | "active" | "completed" | string;
@@ -345,6 +353,7 @@ export function EventsHubPage() {
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
+          <PulseEventSpotlight event={(active[0] ?? upcoming[0] ?? data.events[0]) ?? null} />
           <ServerWarsTeaser />
           <SectionHeader title="Active Tournaments" href="/events/tournaments?status=active" />
           <div className="grid gap-4 lg:grid-cols-3">
@@ -513,6 +522,7 @@ export function EventsChallengesPage() {
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
+          <PulseFeaturedMatchup match={fallbackMatches[0] ?? null} />
           <div className="grid gap-4 lg:grid-cols-2">
             {fallbackMatches.slice(0, 4).map((match) => <ChallengeBattleCard key={match.id} match={match} locked={data.teaserMode} />)}
           </div>
@@ -589,40 +599,73 @@ function EventsShell({ children }: { children: ReactNode }) {
     { href: "/events", label: "Events", icon: Flag },
     { href: "/events/tournaments", label: "CTF Tournaments", icon: Trophy },
     { href: "/events/challenges", label: "Challenges", icon: Swords },
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   ];
   return (
-    <main className="min-h-screen bg-[#02030a] text-zinc-100">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_24%_0%,rgba(124,58,237,0.18),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(14,165,233,0.12),transparent_30%),linear-gradient(180deg,#02030a,#050816_48%,#02030a)]" />
-      <div className="relative grid min-h-screen lg:grid-cols-[220px_1fr]">
-        <aside className="hidden border-r border-white/8 bg-black/28 p-4 backdrop-blur-xl lg:block">
-          <Link href="/" className="block">
-            <DznLogo />
-          </Link>
-          <nav className="mt-6 space-y-1">
-            {nav.map((item) => {
-              const active = isSidebarItemActive(pathname, item.href);
-              const Icon = item.icon;
-              return (
-                <Link key={item.href} href={item.href} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase transition", active ? "bg-violet-500/24 text-white shadow-[0_0_18px_rgba(124,58,237,0.2)]" : "text-zinc-500 hover:bg-white/[0.04] hover:text-white")}>
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </aside>
-        <div className="min-w-0">
-          <header className="sticky top-0 z-20 border-b border-white/8 bg-[#02030a]/86 px-4 py-3 backdrop-blur-xl lg:hidden">
-            <div className="flex items-center justify-between gap-3">
+    <DznPulseProvider enablePopups>
+      <main className="min-h-screen bg-[#02030a] text-zinc-100">
+        <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_24%_0%,rgba(124,58,237,0.18),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(14,165,233,0.12),transparent_30%),linear-gradient(180deg,#02030a,#050816_48%,#02030a)]" />
+        <div className="relative grid min-h-screen lg:grid-cols-[220px_1fr]">
+          <aside className="hidden border-r border-white/8 bg-black/28 p-4 backdrop-blur-xl lg:block">
+            <Link href="/" className="block">
               <DznLogo />
-              <Link href="/events" className="rounded-lg border border-violet-300/30 bg-violet-500/16 px-3 py-2 text-xs font-black uppercase text-white">Events</Link>
-            </div>
-          </header>
-          <div className="flex w-full max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
+            </Link>
+            <nav className="mt-6 space-y-1">
+              {nav.map((item) => {
+                const active = isSidebarItemActive(pathname, item.href);
+                const Icon = item.icon;
+                return (
+                  <Link key={item.href} href={item.href} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase transition", active ? "bg-violet-500/24 text-white shadow-[0_0_18px_rgba(124,58,237,0.2)]" : "text-zinc-500 hover:bg-white/[0.04] hover:text-white")}>
+                    <Icon className="h-4 w-4" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+              <PulseEventsSidebarItem pathname={pathname} />
+              <Link href="/dashboard" className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase transition", isSidebarItemActive(pathname, "/dashboard") ? "bg-violet-500/24 text-white shadow-[0_0_18px_rgba(124,58,237,0.2)]" : "text-zinc-500 hover:bg-white/[0.04] hover:text-white")}>
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
+              </Link>
+            </nav>
+          </aside>
+          <div className="min-w-0">
+            <header className="sticky top-0 z-20 border-b border-white/8 bg-[#02030a]/86 px-4 py-3 backdrop-blur-xl lg:hidden">
+              <div className="flex items-center justify-between gap-3">
+                <DznLogo />
+                <div className="flex items-center gap-2">
+                  <DznPulseBell />
+                  <Link href="/events" className="rounded-lg border border-violet-300/30 bg-violet-500/16 px-3 py-2 text-xs font-black uppercase text-white">Events</Link>
+                </div>
+              </div>
+            </header>
+            <PulseEventsDesktopBell />
+            <div className="flex w-full max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </DznPulseProvider>
+  );
+}
+
+function PulseEventsSidebarItem({ pathname }: { pathname: string }) {
+  const pulse = usePulseContextOptional();
+  if (!pulse?.enabled) return null;
+  const active = isSidebarItemActive(pathname, "/dzn-pulse");
+  return (
+    <Link href="/dzn-pulse" className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase transition", active ? "bg-violet-500/24 text-white shadow-[0_0_18px_rgba(124,58,237,0.2)]" : "text-zinc-500 hover:bg-white/[0.04] hover:text-white")}>
+      <Activity className="h-4 w-4" />
+      <span className="min-w-0 flex-1">DZN Pulse</span>
+      <span className="rounded bg-blue-500/22 px-1.5 py-0.5 text-[9px] text-blue-100">NEW</span>
+    </Link>
+  );
+}
+
+function PulseEventsDesktopBell() {
+  const pulse = usePulseContextOptional();
+  if (!pulse?.enabled) return null;
+  return (
+    <div className="hidden justify-end px-4 pt-4 sm:px-6 lg:flex lg:px-8">
+      <DznPulseBell />
+    </div>
   );
 }
 
@@ -718,6 +761,106 @@ function HeaderLine({ title, subtitle, action }: { title: string; subtitle: stri
       {action}
     </section>
   );
+}
+
+function PulseEventSpotlight({ event }: { event: CompetitiveEvent | null }) {
+  const pulse = usePulseContextOptional();
+  if (!pulse?.enabled || !event) return null;
+  const artwork = event.banner_url;
+  return (
+    <article className="relative overflow-hidden rounded-xl border border-violet-300/24 bg-[#050812] shadow-[0_28px_110px_rgba(0,0,0,0.34)]">
+      {artwork ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={artwork} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover opacity-38" />
+      ) : null}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.24),transparent_34%),radial-gradient(circle_at_88%_20%,rgba(249,115,22,0.22),transparent_34%),linear-gradient(90deg,rgba(5,8,18,0.96),rgba(5,8,18,0.72),rgba(5,8,18,0.96))]" />
+      <div className="relative z-10 grid gap-5 p-5 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div>
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-md border border-amber-300/32 bg-amber-400/12 px-2.5 py-1 text-[10px] font-black uppercase text-amber-100">Featured Event</span>
+            <span className="rounded-md border border-violet-300/30 bg-violet-500/12 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">{event.category_label}</span>
+          </div>
+          <p className="mt-5 text-xs font-black uppercase tracking-[0.26em] text-cyan-100">Server VS Server</p>
+          <h2 className="mt-2 max-w-xl text-4xl font-black uppercase leading-none text-white sm:text-5xl">{event.name}</h2>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">{event.description}</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[390px]">
+          <PulseSpotlightStat label="Servers" value={formatNumber(event.registered_servers)} />
+          <PulseSpotlightStat label="Players" value={formatNumber(event.total_participants)} />
+          <PulseSpotlightStat label="Starts In" value={event.starts_at ? shortClientTimeUntil(event.starts_at) : "TBD"} />
+        </div>
+        <div className="lg:col-span-2 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div className="h-2 overflow-hidden rounded-full border border-white/10 bg-white/[0.06]">
+            <span className="block h-full rounded-full bg-[linear-gradient(90deg,#22d3ee,#8b5cf6,#f97316)]" style={{ width: `${Math.max(0, Math.min(100, event.progress_percent))}%` }} />
+          </div>
+          <Link href={`/events/${event.slug}`} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-violet-300/32 bg-violet-500/18 px-5 text-xs font-black uppercase text-white transition hover:bg-violet-500/28">
+            View Details
+          </Link>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function PulseFeaturedMatchup({ match }: { match: EventMatch | null }) {
+  const pulse = usePulseContextOptional();
+  if (!pulse?.enabled || !match) return null;
+  return (
+    <article className="overflow-hidden rounded-xl border border-violet-300/24 bg-[#050812] shadow-[0_28px_110px_rgba(0,0,0,0.34)]">
+      <div className="relative grid min-h-[260px] lg:grid-cols-[1fr_auto_1fr]">
+        <PulseMatchSide tone="blue" label="Blue Side" name={match.left_server.server_name} score={match.left_score} />
+        <div className="relative z-10 flex flex-col items-center justify-center border-y border-white/10 bg-black/34 px-5 py-4 lg:border-x lg:border-y-0">
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-black uppercase text-white">VS</span>
+          <p className="mt-4 text-[10px] font-black uppercase text-zinc-500">Ends In</p>
+          <p className="mt-1 font-mono text-lg font-black text-white">{match.ends_at ? shortClientTimeUntil(match.ends_at) : "TBD"}</p>
+        </div>
+        <PulseMatchSide tone="orange" label="Orange Side" name={match.right_server.server_name} score={match.right_score} alignRight />
+      </div>
+      <div className="grid gap-3 border-t border-white/10 p-4 text-xs sm:grid-cols-4">
+        <PulseSpotlightStat label="Roster" value="Verified" />
+        <PulseSpotlightStat label="Metric" value="Tally Live" />
+        <PulseSpotlightStat label="Mode" value={match.category_label} />
+        <Link href="/events/dzn-season-1/bracket" className="inline-flex min-h-10 items-center justify-center rounded-lg border border-violet-300/32 bg-violet-500/18 px-4 text-[10px] font-black uppercase text-white">
+          View Match Details
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function PulseMatchSide({ tone, label, name, score, alignRight = false }: { tone: "blue" | "orange"; label: string; name: string; score: number; alignRight?: boolean }) {
+  const blue = tone === "blue";
+  return (
+    <div className={`relative min-h-[180px] overflow-hidden ${blue ? "bg-cyan-500/10" : "bg-orange-500/10"}`}>
+      <div className={`absolute inset-0 ${blue ? "bg-[radial-gradient(circle_at_20%_28%,rgba(34,211,238,0.32),transparent_42%),linear-gradient(90deg,rgba(5,8,18,0.24),rgba(5,8,18,0.84))]" : "bg-[radial-gradient(circle_at_80%_28%,rgba(249,115,22,0.32),transparent_42%),linear-gradient(270deg,rgba(5,8,18,0.24),rgba(5,8,18,0.84))]"}`} />
+      <div className={`relative z-10 flex h-full min-h-[180px] flex-col justify-center p-5 ${alignRight ? "items-end text-right" : ""}`}>
+        <p className={`text-[10px] font-black uppercase ${blue ? "text-cyan-200" : "text-orange-200"}`}>{label}</p>
+        <h3 className="mt-2 text-2xl font-black uppercase text-white">{name}</h3>
+        <p className={`mt-3 font-mono text-5xl font-black ${blue ? "text-cyan-100" : "text-orange-100"}`}>{formatNumber(score)}</p>
+      </div>
+    </div>
+  );
+}
+
+function PulseSpotlightStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+      <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
+      <p className="mt-1 text-sm font-black uppercase text-white">{value}</p>
+    </div>
+  );
+}
+
+function shortClientTimeUntil(value: string) {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return "TBD";
+  const diff = Math.max(0, time - Date.now());
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function EventActionLink({ href, children }: { href: string; children: ReactNode }) {
