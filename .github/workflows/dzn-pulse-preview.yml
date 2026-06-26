@@ -402,7 +402,7 @@ jobs:
           fi
 
           test -f migrations/0052_dzn_pulse.sql
-          npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote --yes | tee preview-d1-migrations.txt
+          npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote | tee preview-d1-migrations.txt
           npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name;" > preview-d1-schema.json
           npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "PRAGMA foreign_key_check;" > preview-d1-foreign-key-check.json
 

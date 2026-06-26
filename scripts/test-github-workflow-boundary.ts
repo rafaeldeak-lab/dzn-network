@@ -112,7 +112,7 @@ assert.equal(dznPulsePreviewWorkflow.includes("Refusing D1 command for non-previ
 assert.equal(dznPulsePreviewWorkflow.includes("Refusing migration for non-preview database name"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("Refusing seed for non-preview database name"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("test -f migrations/0052_dzn_pulse.sql"), true);
-assert.equal(dznPulsePreviewWorkflow.includes('npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote --yes'), true);
+assert.equal(dznPulsePreviewWorkflow.includes('npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote'), true);
 assert.equal(dznPulsePreviewWorkflow.includes("notification_campaigns"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("user_notifications"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("event_popup_dismissals"), true);
