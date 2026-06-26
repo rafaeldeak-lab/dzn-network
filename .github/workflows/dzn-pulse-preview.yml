@@ -78,8 +78,8 @@ jobs:
             exit 1
           fi
 
-          if [ "${INPUT_BRANCH}" = "main" ] || [ "${GITHUB_REF_NAME}" = "main" ]; then
-            echo "::error::DZN Pulse preview must never run against main."
+          if [ "${INPUT_BRANCH}" = "main" ]; then
+            echo "::error::DZN Pulse preview input branch must never be main."
             exit 1
           fi
 

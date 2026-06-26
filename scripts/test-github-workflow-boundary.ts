@@ -90,7 +90,7 @@ assert.equal(dznPulsePreviewWorkflow.includes("\n  schedule:"), false);
 assert.equal(dznPulsePreviewWorkflow.includes("confirm_preview_only:"), true);
 assert.equal(dznPulsePreviewWorkflow.includes('confirm_preview_only must equal PREVIEW_ONLY'), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN Pulse preview may only run against feature/dzn-pulse / PR #11"), true);
-assert.equal(dznPulsePreviewWorkflow.includes("DZN Pulse preview must never run against main"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN Pulse preview input branch must never be main"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("pulse_preview"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("dzn_pulse_preview"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("preview_db_name must not equal the production D1 database name"), true);
