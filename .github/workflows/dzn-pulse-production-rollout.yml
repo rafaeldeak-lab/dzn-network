@@ -26,6 +26,8 @@ jobs:
       contains(github.event.head_commit.message, '[run-dzn-pulse-production-rollout]')
     runs-on: ubuntu-latest
     env:
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
@@ -69,15 +71,28 @@ jobs:
             exit 1
           fi
 
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+          ROLLOUT_CF_TOKEN="${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}}"
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_PULSE_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PREVIEW_TOKEN, or CLOUDFLARE_API_TOKEN."
             exit 1
           fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          if [ -n "${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_PULSE_PRODUCTION_TOKEN"
+            echo "ROLLOUT_CF_TOKEN_SOURCE=CLOUDFLARE_PULSE_PRODUCTION_TOKEN" >> "$GITHUB_ENV"
+          elif [ -n "${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_PULSE_PREVIEW_TOKEN"
+            echo "ROLLOUT_CF_TOKEN_SOURCE=CLOUDFLARE_PULSE_PREVIEW_TOKEN" >> "$GITHUB_ENV"
+          else
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_API_TOKEN"
+            echo "ROLLOUT_CF_TOKEN_SOURCE=CLOUDFLARE_API_TOKEN" >> "$GITHUB_ENV"
+          fi
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}" >> "$GITHUB_ENV"
+
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
             echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
             exit 1
           fi
-          echo "::add-mask::${CLOUDFLARE_API_TOKEN}"
 
           git merge-base --is-ancestor "${EXPECTED_PULSE_MERGE_SHA}" HEAD
 
@@ -100,6 +115,7 @@ jobs:
             echo "- Expected Pulse merge SHA ancestor: ${EXPECTED_PULSE_MERGE_SHA}"
             echo "- Production Pages project: ${PRODUCTION_PAGES_PROJECT_NAME}"
             echo "- Production D1 database: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- Cloudflare token source: ${ROLLOUT_CF_TOKEN_SOURCE:-selected}"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
           } >> "$GITHUB_STEP_SUMMARY"
 
