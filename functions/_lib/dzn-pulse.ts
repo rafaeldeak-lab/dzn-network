@@ -1,7 +1,6 @@
 import { ensureMockUser, getLinkedServersForUserSummary, requireDb } from "./db";
-import { getEventsListPayload } from "./events";
 import { isDiscordNotificationsEnabled, isDznPulseEnabled } from "./feature-flags";
-import { getPublicLeaderboardsPayload, type PublicLeaderboardServer } from "./public-leaderboards";
+import { rankServers, type RankedServer } from "./server-ranking";
 import { getServerCategoryLabel, normalizeServerCategory } from "./server-categories";
 import type { Env, SessionUser } from "./types";
 
@@ -222,6 +221,38 @@ type PulseSummaryRankRow = {
   category_label: string | null;
   points: number;
   win_loss: string | null;
+};
+
+type PulseSummaryEventRow = {
+  id: string;
+  slug: string;
+  name: string;
+  category: string | null;
+  event_type: string | null;
+  status: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  banner_url: string | null;
+  server_limit: number | null;
+  team_limit: number | null;
+  registered_servers: number | null;
+  match_count: number | null;
+};
+
+type PulseSummaryServerRow = {
+  id: string;
+  slug: string | null;
+  server_name: string | null;
+  category: string | null;
+  current_players: number | null;
+  max_players: number | null;
+  kills: number | null;
+  deaths: number | null;
+  uniquePlayers: number | null;
+  joins: number | null;
+  longestKill: number | null;
+  statsSyncActive: boolean | null;
+  lastActivityAt: string | null;
 };
 
 export function pulseFeatureDisabledPayload() {
@@ -522,18 +553,16 @@ export async function dismissEventPopup(env: Env, user: SessionUser, campaignId:
 
 export async function getPulseSummary(env: Env, user: SessionUser): Promise<PulseSummary> {
   if (!isDznPulseEnabled(env)) return emptyPulseSummary();
-  const [events, leaderboards, servers, announcements, achievements, recentActivity] = await Promise.all([
-    getEventsListPayload(env, user, { full: true, limit: 12 }).catch(() => null),
-    getPublicLeaderboardsPayload(env, true, { full: true, pageSize: 10 }).catch(() => null),
+  const [eventRows, rankedServers, servers, announcements, achievements, recentActivity] = await Promise.all([
+    readPulseSummaryEvents(env).catch(() => []),
+    readPulseSummaryRankings(env).catch(() => []),
     getLinkedServersForUserSummary(env, user.id).catch(() => []),
     readAnnouncements(env, user).catch(() => []),
     readAchievements(env, user).catch(() => []),
     readRecentActivity(env).catch(() => []),
   ]);
-  const eventRows = events?.events ?? [];
   const liveEvent = eventRows.find((event) => event.status === "live") ?? null;
   const upcoming = eventRows.filter((event) => ["upcoming", "registration_open", "standby"].includes(event.status)).slice(0, 5);
-  const topServers = leaderboards?.top_servers ?? [];
 
   return {
     ok: true,
@@ -548,9 +577,9 @@ export async function getPulseSummary(env: Env, user: SessionUser): Promise<Puls
       connected_communities: servers.length,
     },
     live_event: liveEvent ? toPulseEventSummary(liveEvent as Record<string, unknown>) : null,
-    top_server: topServers[0] ? toPulseTopServer(topServers[0]) : null,
+    top_server: rankedServers[0] ? toPulseTopServer(rankedServers[0]) : null,
     announcements,
-    monthly_rankings: topServers.slice(0, 5).map(toPulseRankRow),
+    monthly_rankings: rankedServers.slice(0, 5).map(toPulseRankRow),
     upcoming_events: upcoming.map((event) => toPulseEventSummary(event as Record<string, unknown>)),
     achievements,
     recent_activity: recentActivity,
@@ -562,6 +591,111 @@ export async function generateDuePulseNotifications(env: Env) {
     return { ok: true, skipped: true, reason: "dzn_pulse_disabled", created: 0 };
   }
   return { ok: true, skipped: true, reason: "no_scheduler_hook_configured", created: 0 };
+}
+
+async function readPulseSummaryEvents(env: Env) {
+  const db = requireDb(env);
+  const rows = await db
+    .prepare(
+      `SELECT competitive_events.id,
+              competitive_events.slug,
+              competitive_events.name,
+              competitive_events.category,
+              competitive_events.event_type,
+              competitive_events.status,
+              competitive_events.starts_at,
+              competitive_events.ends_at,
+              competitive_events.banner_url,
+              competitive_events.server_limit,
+              competitive_events.team_limit,
+              (SELECT COUNT(*)
+               FROM competitive_event_servers
+               WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
+              (SELECT COUNT(*)
+               FROM competitive_event_matches
+               WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
+       FROM competitive_events
+       WHERE COALESCE(competitive_events.visibility, 'public') != 'private'
+         AND competitive_events.status IN ('live', 'registration_open', 'upcoming', 'standby')
+       ORDER BY CASE competitive_events.status
+         WHEN 'live' THEN 0
+         WHEN 'registration_open' THEN 1
+         WHEN 'upcoming' THEN 2
+         WHEN 'standby' THEN 3
+         ELSE 4
+       END, datetime(COALESCE(competitive_events.starts_at, competitive_events.created_at)) ASC
+       LIMIT 8`,
+    )
+    .all<PulseSummaryEventRow>()
+    .catch(() => ({ results: [] as PulseSummaryEventRow[] }));
+
+  return (rows.results ?? []).map((row) => {
+    const registered = numberOrZero(row.registered_servers);
+    const serverLimit = numberOrZero(row.server_limit ?? row.team_limit);
+    const category = normalizeServerCategory(row.category);
+    const eventType = normalizeEventTypeText(row.event_type);
+    return {
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      category: category ?? row.category ?? "same-category",
+      category_label: category ? getServerCategoryLabel(category) : "Same Category",
+      event_type: eventType,
+      event_type_label: pulseEventTypeLabel(eventType),
+      status: String(row.status ?? "upcoming"),
+      starts_at: row.starts_at,
+      ends_at: row.ends_at,
+      registered_servers: registered,
+      total_participants: registered,
+      match_count: numberOrZero(row.match_count),
+      progress_percent: serverLimit > 0 ? Math.min(100, Math.round((registered / serverLimit) * 100)) : Math.min(100, registered * 12),
+      banner_url: row.banner_url,
+    };
+  });
+}
+
+async function readPulseSummaryRankings(env: Env) {
+  const db = requireDb(env);
+  const rows = await db
+    .prepare(
+      `SELECT linked_servers.id,
+              linked_servers.public_slug AS slug,
+              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+              COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type, linked_servers.server_category) AS category,
+              linked_servers.current_players,
+              COALESCE(linked_servers.max_players, linked_servers.player_slots) AS max_players,
+              COALESCE(server_stats.total_kills, 0) AS kills,
+              COALESCE(server_stats.total_deaths, 0) AS deaths,
+              COALESCE(server_stats.unique_players, 0) AS uniquePlayers,
+              COALESCE(server_stats.total_joins, 0) AS joins,
+              0 AS longestKill,
+              CASE
+                WHEN COALESCE(server_stats.total_kills, 0) > 0
+                  OR COALESCE(server_stats.total_deaths, 0) > 0
+                  OR COALESCE(server_stats.unique_players, 0) > 0
+                  OR COALESCE(server_stats.total_joins, 0) > 0
+                  OR lower(COALESCE(adm_sync_state.last_sync_status, '')) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+                THEN 1 ELSE 0
+              END AS statsSyncActive,
+              COALESCE(server_stats.last_event_at, linked_servers.updated_at, linked_servers.created_at) AS lastActivityAt
+       FROM linked_servers
+       LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+       WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       ORDER BY COALESCE(server_stats.total_kills, 0) DESC,
+                COALESCE(server_stats.unique_players, 0) DESC,
+                datetime(COALESCE(server_stats.last_event_at, linked_servers.updated_at, linked_servers.created_at)) DESC
+       LIMIT 25`,
+    )
+    .all<PulseSummaryServerRow>()
+    .catch(() => ({ results: [] as PulseSummaryServerRow[] }));
+
+  return rankServers((rows.results ?? []).map((row) => ({
+    ...row,
+    server_name: row.server_name ?? "Unnamed DZN Server",
+    statsSyncActive: Number(row.statsSyncActive ?? 0) === 1,
+  })), 5);
 }
 
 export function sanitizePulseActionUrl(value: string | null | undefined) {
@@ -861,12 +995,14 @@ async function readRecentActivity(env: Env) {
 }
 
 function toPulseEventSummary(event: Record<string, unknown>): PulseSummaryEvent {
+  const category = normalizeServerCategory(event.category);
+  const eventType = normalizeEventTypeText(event.event_type);
   return {
     id: String(event.id ?? ""),
     slug: String(event.slug ?? "events"),
     name: String(event.name ?? "DZN Event"),
-    event_type_label: String(event.event_type_label ?? event.event_type ?? "Event"),
-    category_label: String(event.category_label ?? event.category ?? "Same Category"),
+    event_type_label: String(event.event_type_label ?? pulseEventTypeLabel(eventType)),
+    category_label: String(event.category_label ?? (category ? getServerCategoryLabel(category) : "Same Category")),
     status: String(event.status ?? "upcoming"),
     starts_at: stringValue(event.starts_at),
     ends_at: stringValue(event.ends_at),
@@ -878,29 +1014,31 @@ function toPulseEventSummary(event: Record<string, unknown>): PulseSummaryEvent 
   };
 }
 
-function toPulseTopServer(row: PublicLeaderboardServer): PulseSummaryServer {
+function toPulseTopServer(row: RankedServer<PulseSummaryServerRow>): PulseSummaryServer {
+  const category = normalizeServerCategory(row.category);
   return {
-    id: row.server_id,
+    id: row.id,
     slug: row.slug,
-    name: row.server_name,
-    category: row.mode,
-    category_label: row.mode,
+    name: row.server_name ?? "Unnamed DZN Server",
+    category,
+    category_label: category ? getServerCategoryLabel(category) : null,
     score: numberOrZero(row.score),
     score_label: row.score_label || String(numberOrZero(row.score)),
     rank: nullableNumber(row.rank),
-    players_online: null,
-    max_players: null,
+    players_online: nullableNumber(row.current_players),
+    max_players: nullableNumber(row.max_players),
     win_loss: null,
-    kd_ratio: nullableNumber(row.kd),
+    kd_ratio: calculateKd(row.kills, row.deaths),
   };
 }
 
-function toPulseRankRow(row: PublicLeaderboardServer): PulseSummaryRankRow {
+function toPulseRankRow(row: RankedServer<PulseSummaryServerRow>): PulseSummaryRankRow {
+  const category = normalizeServerCategory(row.category);
   return {
     rank: nullableNumber(row.rank),
-    server_name: row.server_name,
+    server_name: row.server_name ?? "Unnamed DZN Server",
     server_slug: row.slug,
-    category_label: row.mode,
+    category_label: category ? getServerCategoryLabel(category) : null,
     points: numberOrZero(row.score),
     win_loss: null,
   };
@@ -1063,6 +1201,37 @@ function isSameUtcDay(value: string | null | undefined) {
   return date.getUTCFullYear() === now.getUTCFullYear() &&
     date.getUTCMonth() === now.getUTCMonth() &&
     date.getUTCDate() === now.getUTCDate();
+}
+
+function normalizeEventTypeText(value: unknown) {
+  const text = String(value ?? "event").trim().toLowerCase();
+  return /^[a-z0-9_-]{2,80}$/.test(text) ? text : "event";
+}
+
+function pulseEventTypeLabel(value: string) {
+  const labels: Record<string, string> = {
+    capture_the_flag: "Capture The Flag",
+    community_cup: "Community Cup",
+    bot_tournament: "Bot Tournament",
+    faction_wars: "Faction Wars",
+    seasonal_wars: "Seasonal Wars",
+    kill_race: "Kill Race",
+    survival_challenge: "Survival Challenge",
+    event: "Event",
+  };
+  return labels[value] ?? value
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function calculateKd(killsValue: unknown, deathsValue: unknown) {
+  const kills = numberOrZero(killsValue);
+  const deaths = numberOrZero(deathsValue);
+  if (kills === 0 && deaths === 0) return null;
+  if (deaths === 0) return kills;
+  return Math.round((kills / deaths) * 100) / 100;
 }
 
 function formatBadgeName(value: string) {

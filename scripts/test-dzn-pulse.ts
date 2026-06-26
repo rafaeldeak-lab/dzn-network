@@ -76,6 +76,11 @@ assert.equal(service.includes("campaign_not_found"), true, "Popup dismissals mus
 assert.equal(service.includes("\"private, no-store, no-cache, must-revalidate\""), true, "Private Pulse APIs must use no-store caching.");
 assert.equal(service.includes("sanitizePulseActionUrl(campaign.action_url)"), true, "Campaign action URLs must be sanitized.");
 assert.equal(service.includes("if (!isDznPulseEnabled(env))"), true, "Pulse generation/service methods must no-op or reject when disabled.");
+assert.equal(service.includes("getPublicLeaderboardsPayload"), false, "Pulse summary must not call the broad public leaderboard payload.");
+assert.equal(service.includes("getEventsListPayload"), false, "Pulse summary must not call the broad events payload.");
+assert.equal(service.includes("readPulseSummaryEvents"), true, "Pulse summary must use a bounded events query.");
+assert.equal(service.includes("readPulseSummaryRankings"), true, "Pulse summary must use a bounded ranking query.");
+assert.equal(service.includes("LIMIT 25"), true, "Pulse summary rankings must stay bounded.");
 assert.equal(discordHelpers.includes("class DiscordRequestError"), true, "Discord OAuth failures must have sanitized stages.");
 assert.equal(discordHelpers.includes("SAFE_TOKEN_ERROR_CODES"), true, "Discord token errors must be allowlisted.");
 assert.equal(discordHelpers.includes("invalid_client"), true, "Token diagnostics must preserve invalid_client.");
