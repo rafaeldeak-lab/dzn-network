@@ -128,6 +128,9 @@ assert.equal(provider.includes("dzn:pulse:pending-dismissals:v1"), true, "Pendin
 assert.equal(provider.includes("data-dzn-pulse-bell"), true, "Bell focus restoration needs a stable selector.");
 assert.equal(provider.includes("DznPulseDrawer"), true, "Provider must render the drawer.");
 assert.equal(provider.includes("EventPopupManager"), true, "Provider must support popup manager mounting.");
+assert.equal(provider.includes("const [mounted, setMounted] = useState(false)"), true, "Pulse provider must defer dynamic Pulse UI until after client hydration.");
+assert.equal(provider.includes("enabled: mounted && enabled"), true, "Pulse context must not expose enabled state before hydration completes.");
+assert.equal(provider.includes("mounted && enabled ? <DznPulseDrawer />"), true, "Pulse drawer must be client-mounted to avoid hydration drift.");
 assert.equal(provider.includes("trapFocus"), true, "Drawer/popup must trap focus.");
 assert.equal(provider.includes("markAllRead"), true, "Drawer must support mark-all-read.");
 assert.equal(provider.includes("clearRead"), true, "Drawer must support clearing read notifications.");

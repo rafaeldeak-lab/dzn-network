@@ -147,6 +147,7 @@ export function DznPulseProvider({
   children: ReactNode;
   enablePopups?: boolean;
 }) {
+  const [mounted, setMounted] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -168,6 +169,11 @@ export function DznPulseProvider({
   }, [filter]);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     let cancelled = false;
     loadPulseConfig()
       .then((config) => {
@@ -179,10 +185,10 @@ export function DznPulseProvider({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mounted]);
 
   const refreshUnread = useCallback(async () => {
-    if (!enabled || unreadInFlightRef.current || document.visibilityState === "hidden") return;
+    if (!mounted || !enabled || unreadInFlightRef.current || document.visibilityState === "hidden") return;
     unreadInFlightRef.current = true;
     try {
       const response = await fetchJsonWithRetry<{ ok: boolean; unreadCount: number }>("/api/dzn-pulse/notifications/unread-count", {
@@ -198,10 +204,10 @@ export function DznPulseProvider({
     } finally {
       unreadInFlightRef.current = false;
     }
-  }, [enabled]);
+  }, [enabled, mounted]);
 
   const refreshNotifications = useCallback(async () => {
-    if (!enabled) return;
+    if (!mounted || !enabled) return;
     if (listInFlightRef.current) {
       pendingListRefreshRef.current = true;
       return;
@@ -237,14 +243,14 @@ export function DznPulseProvider({
         }, 0);
       }
     }
-  }, [enabled]);
+  }, [enabled, mounted]);
 
   useEffect(() => {
     refreshNotificationsRef.current = refreshNotifications;
   }, [refreshNotifications]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!mounted || !enabled) return;
     const firstRefresh = window.setTimeout(() => {
       void refreshUnread();
     }, 0);
@@ -265,15 +271,15 @@ export function DznPulseProvider({
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
     };
-  }, [enabled, refreshUnread]);
+  }, [enabled, mounted, refreshUnread]);
 
   useEffect(() => {
-    if (!drawerOpen || !enabled) return;
+    if (!mounted || !drawerOpen || !enabled) return;
     const timer = window.setTimeout(() => {
       void refreshNotifications();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [drawerOpen, enabled, filter, refreshNotifications]);
+  }, [drawerOpen, enabled, filter, mounted, refreshNotifications]);
 
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => {
@@ -343,7 +349,7 @@ export function DznPulseProvider({
   }, [notifications]);
 
   const value = useMemo<PulseContextValue>(() => ({
-    enabled,
+    enabled: mounted && enabled,
     drawerOpen,
     unreadCount,
     filter,
@@ -373,14 +379,15 @@ export function DznPulseProvider({
     openDrawer,
     refreshNotifications,
     unreadCount,
+    mounted,
   ]);
 
   return (
     <PulseContext.Provider value={value}>
       {children}
-      {enabled ? <DznPulseDrawer /> : null}
-      {enabled && enablePopups ? <EventPopupManager /> : null}
-      {enabled ? <PulseBellFocusBridge buttonRef={bellButtonRef} /> : null}
+      {mounted && enabled ? <DznPulseDrawer /> : null}
+      {mounted && enabled && enablePopups ? <EventPopupManager /> : null}
+      {mounted && enabled ? <PulseBellFocusBridge buttonRef={bellButtonRef} /> : null}
     </PulseContext.Provider>
   );
 }
