@@ -40,6 +40,7 @@ import {
 import { cn, formatNumber } from "./event-format";
 import { BracketView } from "./BracketView";
 import { ChallengeBattleCard } from "./ChallengeBattleCard";
+import { ClientTimeUntil } from "./ClientTimeUntil";
 import { EventFilterPanel } from "./EventFilterPanel";
 import { EventHero } from "./EventHero";
 import { EventTabs } from "./EventTabs";
@@ -606,9 +607,7 @@ function EventsShell({ children }: { children: ReactNode }) {
         <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_24%_0%,rgba(124,58,237,0.18),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(14,165,233,0.12),transparent_30%),linear-gradient(180deg,#02030a,#050816_48%,#02030a)]" />
         <div className="relative grid min-h-screen lg:grid-cols-[220px_1fr]">
           <aside className="hidden border-r border-white/8 bg-black/28 p-4 backdrop-blur-xl lg:block">
-            <Link href="/" className="block">
-              <DznLogo />
-            </Link>
+            <DznLogo />
             <nav className="mt-6 space-y-1">
               {nav.map((item) => {
                 const active = isSidebarItemActive(pathname, item.href);
@@ -787,7 +786,7 @@ function PulseEventSpotlight({ event }: { event: CompetitiveEvent | null }) {
         <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[390px]">
           <PulseSpotlightStat label="Servers" value={formatNumber(event.registered_servers)} />
           <PulseSpotlightStat label="Players" value={formatNumber(event.total_participants)} />
-          <PulseSpotlightStat label="Starts In" value={event.starts_at ? shortClientTimeUntil(event.starts_at) : "TBD"} />
+          <PulseSpotlightStat label="Starts In" value={<ClientTimeUntil value={event.starts_at} />} />
         </div>
         <div className="lg:col-span-2 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
           <div className="h-2 overflow-hidden rounded-full border border-white/10 bg-white/[0.06]">
@@ -812,7 +811,7 @@ function PulseFeaturedMatchup({ match }: { match: EventMatch | null }) {
         <div className="relative z-10 flex flex-col items-center justify-center border-y border-white/10 bg-black/34 px-5 py-4 lg:border-x lg:border-y-0">
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-black uppercase text-white">VS</span>
           <p className="mt-4 text-[10px] font-black uppercase text-zinc-500">Ends In</p>
-          <p className="mt-1 font-mono text-lg font-black text-white">{match.ends_at ? shortClientTimeUntil(match.ends_at) : "TBD"}</p>
+          <p className="mt-1 font-mono text-lg font-black text-white"><ClientTimeUntil value={match.ends_at} /></p>
         </div>
         <PulseMatchSide tone="orange" label="Orange Side" name={match.right_server.server_name} score={match.right_score} alignRight />
       </div>
@@ -842,25 +841,13 @@ function PulseMatchSide({ tone, label, name, score, alignRight = false }: { tone
   );
 }
 
-function PulseSpotlightStat({ label, value }: { label: string; value: string }) {
+function PulseSpotlightStat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/30 p-3">
       <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
       <p className="mt-1 text-sm font-black uppercase text-white">{value}</p>
     </div>
   );
-}
-
-function shortClientTimeUntil(value: string) {
-  const time = Date.parse(value);
-  if (!Number.isFinite(time)) return "TBD";
-  const diff = Math.max(0, time - Date.now());
-  const days = Math.floor(diff / 86400000);
-  const hours = Math.floor((diff % 86400000) / 3600000);
-  const minutes = Math.floor((diff % 3600000) / 60000);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
 }
 
 function EventActionLink({ href, children }: { href: string; children: ReactNode }) {

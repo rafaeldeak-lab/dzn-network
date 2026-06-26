@@ -1,7 +1,7 @@
 import { Activity, ChevronRight } from "lucide-react";
 
 import type { EventActivity } from "./event-data";
-import { shortTimeUntil } from "./event-format";
+import { ClientTimeUntil } from "./ClientTimeUntil";
 
 export function LiveActivityFeed({ activity }: { activity: EventActivity[] }) {
   return (
@@ -19,7 +19,7 @@ export function LiveActivityFeed({ activity }: { activity: EventActivity[] }) {
             <span className="mt-1 h-2 w-2 rounded-full bg-rose-400 shadow-[0_0_14px_rgba(251,113,133,0.8)]" />
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold text-zinc-100">{item.message}</p>
-              <p className="mt-1 text-[10px] uppercase text-zinc-500">{item.event_name ?? "DZN Event"} · {shortTimeUntil(item.created_at)}</p>
+              <p className="mt-1 text-[10px] uppercase text-zinc-500">{item.event_name ?? "DZN Event"} - <ClientTimeUntil value={item.created_at} /></p>
             </div>
             <ChevronRight className="h-4 w-4 text-zinc-600 transition group-hover:text-violet-200" />
           </div>

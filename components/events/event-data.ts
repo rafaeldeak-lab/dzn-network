@@ -133,7 +133,8 @@ export type ServerEventsPayload = {
   compatible_upcoming_events: CompetitiveEvent[];
 };
 
-const now = Date.now();
+const FALLBACK_NOW_MS = Date.UTC(2026, 5, 26, 12, 0, 0);
+const FALLBACK_GENERATED_AT = new Date(FALLBACK_NOW_MS).toISOString();
 
 export const fallbackEvents: CompetitiveEvent[] = [
   event("dzn-season-1", "DZN Season 1", "Capture the flag across verified console communities.", "deathmatch", "capture_the_flag", "live", 32, 512, 88, "/media/dzn-cinematic-survivor.png", 2),
@@ -178,7 +179,7 @@ export const fallbackActivity: EventActivity[] = [
 export function fallbackEventsPayload(): EventsPayload {
   return {
     ok: true,
-    generated_at: new Date().toISOString(),
+    generated_at: FALLBACK_GENERATED_AT,
     source: "display_fallback",
     teaserMode: true,
     full: false,
@@ -227,7 +228,7 @@ export function fallbackServerEvents(slug: string): ServerEventsPayload {
       event_wins: 7,
       event_losses: 2,
       event_draws: 1,
-      last_event_at: new Date(now - 7200000).toISOString(),
+      last_event_at: new Date(FALLBACK_NOW_MS - 7200000).toISOString(),
     },
     current_events: fallbackEvents.filter((item) => item.category === serverRow.category && item.status === "live"),
     upcoming_events: fallbackEvents.filter((item) => item.category === serverRow.category && item.status !== "ended"),
@@ -262,8 +263,8 @@ function event(slug: string, name: string, description: string, category: Server
     total_score: progress * 100,
     match_count: Math.max(2, Math.round(servers / 2)),
     server_limit: 32,
-    starts_at: new Date(now + dayOffset * 86400000).toISOString(),
-    ends_at: new Date(now + (dayOffset + 3) * 86400000).toISOString(),
+    starts_at: new Date(FALLBACK_NOW_MS + dayOffset * 86400000).toISOString(),
+    ends_at: new Date(FALLBACK_NOW_MS + (dayOffset + 3) * 86400000).toISOString(),
     banner_url: banner,
     rules: "Only same-category servers can compete. Roster verification and DZN dedupe remain enforced.",
     rewards: "Champion badge, featured placement, premium leaderboard spotlight.",
@@ -285,7 +286,7 @@ function server(name: string, category: ServerCategory, score: number, wins: num
     losses,
     draws: wins % 2,
     seed: wins + losses,
-    registered_at: new Date(now - wins * 3600000).toISOString(),
+    registered_at: new Date(FALLBACK_NOW_MS - wins * 3600000).toISOString(),
     current_players: players,
     max_players: 50,
     event_mmr: 1000 + score / 10,
@@ -305,8 +306,8 @@ function match(round: number, left: EventServer, right: EventServer, leftScore: 
     round_number: round,
     left_score: leftScore,
     right_score: rightScore,
-    starts_at: new Date(now + round * 3600000).toISOString(),
-    ends_at: status === "completed" ? new Date(now - round * 3600000).toISOString() : null,
+    starts_at: new Date(FALLBACK_NOW_MS + round * 3600000).toISOString(),
+    ends_at: status === "completed" ? new Date(FALLBACK_NOW_MS - round * 3600000).toISOString() : null,
     left_server: left,
     right_server: right,
   };
@@ -323,6 +324,6 @@ function activity(type: string, message: string, server: string, minutesAgo: num
     public_slug: null,
     activity_type: type,
     message,
-    created_at: new Date(now - minutesAgo * 60000).toISOString(),
+    created_at: new Date(FALLBACK_NOW_MS - minutesAgo * 60000).toISOString(),
   };
 }
