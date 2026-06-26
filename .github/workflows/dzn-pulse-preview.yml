@@ -634,6 +634,28 @@ jobs:
             }
           }
 
+          async function deriveDiscordClientIdFromProductionAuthorize() {
+            const response = await fetch("https://dzn-network.pages.dev/api/auth/discord/start?returnTo=%2Fdzn-pulse", {
+              redirect: "manual",
+            });
+            const location = response.headers.get("location") ?? "";
+            let authorizeUrl;
+            try {
+              authorizeUrl = new URL(location, "https://dzn-network.pages.dev");
+            } catch {
+              throw new Error("Production Discord authorize route returned an invalid redirect.");
+            }
+            if (response.status !== 302 || authorizeUrl.origin !== "https://discord.com" || authorizeUrl.pathname !== "/oauth2/authorize") {
+              throw new Error("Production Discord authorize route did not return the expected Discord OAuth redirect.");
+            }
+            const clientId = authorizeUrl.searchParams.get("client_id")?.trim();
+            if (!clientId) {
+              throw new Error("Production Discord authorize redirect did not include a client_id.");
+            }
+            maskIfSensitive("DISCORD_CLIENT_ID", clientId);
+            return clientId;
+          }
+
           const get = await api(`/pages/projects/${projectName}`);
           let previewProject = null;
           if (get.status === 404) {
@@ -658,12 +680,14 @@ jobs:
           const currentProductionConfig = deploymentConfig(previewProject, "production");
           const currentPreviewConfig = deploymentConfig(previewProject, "preview");
           const sourceProductionConfig = deploymentConfig(productionProject, "production");
+          const derivedDiscordClientId = await deriveDiscordClientIdFromProductionAuthorize();
 
           const requiredEnvVars = {
             DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
             DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
             DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
             DISCORD_REDIRECT_URI: { type: "plain_text", value: previewRedirectUri },
+            DISCORD_CLIENT_ID: { type: "plain_text", value: derivedDiscordClientId },
           };
 
           const authNames = ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "SESSION_SECRET"];
@@ -704,10 +728,13 @@ jobs:
 
           const diagnostics = {
             discordClientIdPresent: present(resolvedConfig, "DISCORD_CLIENT_ID"),
+            discordClientIdRuntimeProvided: Boolean(readableValue(resolvedConfig, "DISCORD_CLIENT_ID")),
             discordClientSecretPresent: present(resolvedConfig, "DISCORD_CLIENT_SECRET"),
+            discordClientSecretRuntimeReadable: Boolean(readableValue(resolvedConfig, "DISCORD_CLIENT_SECRET")),
             discordRedirectUriPresent: present(resolvedConfig, "DISCORD_REDIRECT_URI"),
             dznAppUrlPresent: present(resolvedConfig, "DZN_APP_URL"),
             sessionSecretPresent: present(resolvedConfig, "SESSION_SECRET"),
+            sessionSecretRuntimeReadable: Boolean(readableValue(resolvedConfig, "SESSION_SECRET")),
             redirectUriHost: hostFromUrl(previewRedirectUri),
             appUrlHost: hostFromUrl(previewBaseUrl),
           };
@@ -768,10 +795,13 @@ jobs:
           console.log(`Configured preview branch: ${branch}`);
           console.log(`Configured preview D1 binding DB id: ${d1Id}`);
           console.log(`Preview auth diagnostic discordClientIdPresent=${diagnostics.discordClientIdPresent}`);
+          console.log(`Preview auth diagnostic discordClientIdRuntimeProvided=${diagnostics.discordClientIdRuntimeProvided}`);
           console.log(`Preview auth diagnostic discordClientSecretPresent=${diagnostics.discordClientSecretPresent}`);
+          console.log(`Preview auth diagnostic discordClientSecretRuntimeReadable=${diagnostics.discordClientSecretRuntimeReadable}`);
           console.log(`Preview auth diagnostic discordRedirectUriPresent=${diagnostics.discordRedirectUriPresent}`);
           console.log(`Preview auth diagnostic dznAppUrlPresent=${diagnostics.dznAppUrlPresent}`);
           console.log(`Preview auth diagnostic sessionSecretPresent=${diagnostics.sessionSecretPresent}`);
+          console.log(`Preview auth diagnostic sessionSecretRuntimeReadable=${diagnostics.sessionSecretRuntimeReadable}`);
           console.log(`Preview auth diagnostic redirectUriHost=${diagnostics.redirectUriHost}`);
           console.log(`Preview auth diagnostic appUrlHost=${diagnostics.appUrlHost}`);
           })().catch((error) => {

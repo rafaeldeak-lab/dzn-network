@@ -129,12 +129,17 @@ assert.equal(dznPulsePreviewWorkflow.includes('fs.writeFileSync("wrangler.toml",
 assert.equal(dznPulsePreviewWorkflow.includes("previewRedirectUri = `${previewBaseUrl}/api/auth/discord/callback`"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DISCORD_REDIRECT_URI: { type: \"plain_text\", value: previewRedirectUri }"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_APP_URL: { type: \"plain_text\", value: previewBaseUrl }"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("deriveDiscordClientIdFromProductionAuthorize"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DISCORD_CLIENT_ID: { type: \"plain_text\", value: derivedDiscordClientId }"), true);
 assert.equal(dznPulsePreviewWorkflow.includes('[vars]'), true);
 assert.equal(dznPulsePreviewWorkflow.includes("discordClientIdPresent"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("discordClientIdRuntimeProvided"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("discordClientSecretPresent"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("discordClientSecretRuntimeReadable"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("discordRedirectUriPresent"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("dznAppUrlPresent"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("sessionSecretPresent"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("sessionSecretRuntimeReadable"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("redirectUriHost"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("appUrlHost"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("Discord auth start redirects to Discord."), true);
