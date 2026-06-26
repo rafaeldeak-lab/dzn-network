@@ -24,10 +24,19 @@ Current allowed GitHub Actions secrets:
 - `CLOUDFLARE_API_TOKEN`
   Only for the manual `DZN Auto Update Worker Deploy` and `DZN ADM Worker Deploy` workflows. Scope it narrowly to deploy the intended Worker, manage that Worker's `DZN_CRON_SECRET`, list Worker secret names, and read Worker schedules.
 
+- `CLOUDFLARE_PULSE_PREVIEW_TOKEN`
+  Optional least-privilege token for the manual `DZN Pulse Preview` workflow. If present, that workflow uses it instead of `CLOUDFLARE_API_TOKEN`; otherwise it falls back to `CLOUDFLARE_API_TOKEN`. Full preview requires Account -> D1 -> Edit and Account -> Cloudflare Pages -> Edit on the DZN Cloudflare account only. Add Account -> Workers Scripts -> Edit only if Cloudflare Pages preview deployment requires worker-style deployment. Do not grant Zone permissions unless a workflow step explicitly uses a Zone API.
+
 - `CLOUDFLARE_ACCOUNT_ID`
-  Only for the manual `DZN Auto Update Worker Deploy` and `DZN ADM Worker Deploy` workflows. This may be a repository variable instead of a secret.
+  Only for the manual `DZN Auto Update Worker Deploy`, `DZN ADM Worker Deploy`, and `DZN Pulse Preview` workflows. This may be a repository variable instead of a secret.
 
 Do not copy all Cloudflare runtime secrets into GitHub.
+
+## DZN Pulse preview workflow
+
+The manual `DZN Pulse Preview` GitHub workflow is preview-only. It may create or reuse a D1 database whose name contains `pulse_preview` or `dzn_pulse_preview`, apply migrations to that preview database, seed synthetic preview data, and deploy a dedicated preview Pages project. It refuses the production D1 name/id and refuses the production Pages project for feature-on preview.
+
+Use `CLOUDFLARE_PULSE_PREVIEW_TOKEN` for least privilege where possible. The token must verify through Cloudflare `/user/tokens/verify` and must be able to list/create/edit D1 databases in the DZN Cloudflare account. If token verification fails, replace the token. If token verification passes but D1 list/create fails, add Account -> D1 -> Edit for the DZN Cloudflare account. If Pages deploy/configuration fails after D1 succeeds, add Account -> Cloudflare Pages -> Edit for the DZN Cloudflare account.
 
 Do not add these to GitHub unless a workflow explicitly requires them:
 

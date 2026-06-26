@@ -56,6 +56,8 @@ CLOUDFLARE_ACCOUNT_ID=cloudflare-account-id
 
 The DZN ADM GitHub workflow is manual-only. The DZN Auto Update Schedulers workflow is backup/monitoring only. Do not add Cloudflare runtime secrets such as Discord, Stripe, session, token encryption, or Nitrado tokens to GitHub unless a specific workflow explicitly requires them.
 
+For the manual `DZN Pulse Preview` workflow, prefer a separate `CLOUDFLARE_PULSE_PREVIEW_TOKEN` secret. It needs Account -> D1 -> Edit and Account -> Cloudflare Pages -> Edit for the DZN Cloudflare account only. The workflow falls back to `CLOUDFLARE_API_TOKEN` if the preview token is not present, verifies the token before D1 work, and refuses production D1 and production Pages targets.
+
 ## 4. Stripe environment variables
 
 Set these in Cloudflare Pages:

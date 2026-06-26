@@ -43,6 +43,7 @@ jobs:
   dzn-pulse-preview:
     runs-on: ubuntu-latest
     env:
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       INPUT_BRANCH: ${{ inputs.branch }}
@@ -83,15 +84,30 @@ jobs:
             exit 1
           fi
 
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error::Missing CLOUDFLARE_API_TOKEN GitHub secret."
+          PULSE_CF_TOKEN="${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+          if [ -z "${PULSE_CF_TOKEN:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_PULSE_PREVIEW_TOKEN or CLOUDFLARE_API_TOKEN GitHub secret."
             exit 1
           fi
+          echo "::add-mask::$PULSE_CF_TOKEN"
+          if [ "${#PULSE_CF_TOKEN}" -le 20 ]; then
+            echo "::error::Cloudflare preview token is present but too short to be valid."
+            exit 1
+          fi
+          {
+            printf "PULSE_CF_TOKEN=%s\n" "$PULSE_CF_TOKEN"
+            printf "CLOUDFLARE_API_TOKEN=%s\n" "$PULSE_CF_TOKEN"
+          } >> "$GITHUB_ENV"
 
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
             echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
             exit 1
           fi
+          if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID is present but does not look like a 32-character Cloudflare account id."
+            exit 1
+          fi
+          account_id_masked="${CLOUDFLARE_ACCOUNT_ID:0:6}...${CLOUDFLARE_ACCOUNT_ID: -4}"
 
           if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
             echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false for Pulse preview."
@@ -152,11 +168,104 @@ jobs:
             echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
             echo "- Production D1 database name: ${PRODUCTION_D1_DATABASE_NAME}"
             echo "- Production D1 database id: ${PRODUCTION_D1_DATABASE_ID}"
+            echo "- Cloudflare account id: ${account_id_masked}"
+            if [ -n "${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-}" ]; then
+              echo "- Cloudflare token source: CLOUDFLARE_PULSE_PREVIEW_TOKEN"
+            else
+              echo "- Cloudflare token source: CLOUDFLARE_API_TOKEN fallback"
+            fi
             echo "- Discord Pulse delivery: false"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install
         run: npm ci
+
+      - name: Diagnose Cloudflare preview auth
+        if: ${{ inputs.mode == 'provision-preview-db' || inputs.mode == 'deploy-feature-on' || inputs.mode == 'seed-preview' || inputs.mode == 'verify-feature-on' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          echo "Wrangler version: $(npx wrangler --version)"
+          account_id_masked="${CLOUDFLARE_ACCOUNT_ID:0:6}...${CLOUDFLARE_ACCOUNT_ID: -4}"
+          echo "GitHub ref: ${GITHUB_REF_NAME}"
+          echo "Selected branch: ${INPUT_BRANCH}"
+          echo "Preview D1 database name: ${PREVIEW_DB_NAME}"
+          echo "Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
+          echo "Cloudflare account id: ${account_id_masked}"
+          echo "Cloudflare preview token present: yes"
+          echo "Cloudflare preview token length valid: yes"
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.PULSE_CF_TOKEN;
+
+          function maskId(id) {
+            if (typeof id !== "string" || id.length < 10) return "unavailable";
+            return `${id.slice(0, 8)}...${id.slice(-4)}`;
+          }
+
+          function errorCategory(errors) {
+            const first = Array.isArray(errors) ? errors[0] : null;
+            return {
+              code: first?.code ?? "unknown",
+              message: first?.message
+                ? String(first.message).replace(/[A-Za-z0-9_-]{20,}/g, "[redacted]")
+                : "unknown",
+            };
+          }
+
+          async function cloudflare(path) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = {
+                success: false,
+                errors: [{ code: `http_${response.status}`, message: "non_json_response" }],
+              };
+            }
+            return { response, parsed };
+          }
+
+          void (async () => {
+            const tokenResult = await cloudflare("/user/tokens/verify");
+            if (!tokenResult.response.ok || tokenResult.parsed.success !== true) {
+              const category = errorCategory(tokenResult.parsed.errors);
+              console.log(`Cloudflare token verify success=false code=${category.code} category=${category.message}`);
+              console.error("Cloudflare token invalid or expired.");
+              process.exit(1);
+            }
+            console.log("Cloudflare token verify success=true");
+
+            const d1Result = await cloudflare(`/accounts/${accountId}/d1/database?per_page=100`);
+            if (!d1Result.response.ok || d1Result.parsed.success !== true) {
+              const category = errorCategory(d1Result.parsed.errors);
+              console.log(`Cloudflare D1 list success=false code=${category.code} category=${category.message}`);
+              console.error("Cloudflare token lacks D1/account permission.");
+              process.exit(1);
+            }
+
+            const databases = Array.isArray(d1Result.parsed.result)
+              ? d1Result.parsed.result
+              : d1Result.parsed.result?.databases ?? [];
+            console.log("Cloudflare D1 list success=true");
+            for (const database of databases) {
+              const name = database?.name ?? "unnamed";
+              const id = database?.uuid ?? database?.id ?? "";
+              console.log(`D1 database: ${name} id=${maskId(id)}`);
+            }
+          })().catch((error) => {
+            console.error(error?.message ?? "Cloudflare preview auth diagnostic failed.");
+            process.exit(1);
+          });
+          NODE
 
       - name: Validate DZN Pulse branch
         if: ${{ inputs.mode == 'validate' || inputs.mode == 'full-preview' }}
@@ -208,7 +317,7 @@ jobs:
           node <<'NODE'
           const fs = require("node:fs");
           const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const token = process.env.PULSE_CF_TOKEN;
           const previewName = process.env.PREVIEW_DB_NAME;
           const productionName = process.env.PRODUCTION_D1_DATABASE_NAME;
           const productionId = process.env.PRODUCTION_D1_DATABASE_ID;
@@ -432,7 +541,7 @@ jobs:
           node <<'NODE'
           const fs = require("node:fs");
           const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const token = process.env.PULSE_CF_TOKEN;
           const projectName = process.env.PREVIEW_PROJECT_NAME;
           const branch = process.env.INPUT_BRANCH;
           const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
