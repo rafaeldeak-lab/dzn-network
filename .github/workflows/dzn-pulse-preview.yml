@@ -554,8 +554,12 @@ jobs:
           const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
           const token = process.env.PULSE_CF_TOKEN;
           const projectName = process.env.PREVIEW_PROJECT_NAME;
+          const productionProjectName = process.env.PRODUCTION_PAGES_PROJECT_NAME;
           const branch = process.env.INPUT_BRANCH;
           const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
+          const previewDbName = process.env.PREVIEW_DB_NAME;
+          const previewBaseUrl = `https://${projectName}.pages.dev`;
+          const previewRedirectUri = `${previewBaseUrl}/api/auth/discord/callback`;
 
           void (async () => {
           async function api(path, init = {}) {
@@ -577,7 +581,61 @@ jobs:
             return { ok: response.ok, status: response.status, parsed };
           }
 
+          async function getProject(name) {
+            const result = await api(`/pages/projects/${name}`);
+            if (!result.ok || result.parsed.success === false) return null;
+            return result.parsed.result ?? null;
+          }
+
+          function deploymentConfig(project, environment) {
+            return project?.deployment_configs?.[environment] ?? {};
+          }
+
+          function envVars(config) {
+            return config?.env_vars && typeof config.env_vars === "object" ? config.env_vars : {};
+          }
+
+          function d1Databases(config) {
+            return config?.d1_databases && typeof config.d1_databases === "object" ? config.d1_databases : {};
+          }
+
+          function varEntry(config, name) {
+            return envVars(config)[name] ?? null;
+          }
+
+          function readableValue(config, name) {
+            const entry = varEntry(config, name);
+            const value = typeof entry?.value === "string" ? entry.value : "";
+            if (!value || /^\*+$/.test(value) || value === "<redacted>") return null;
+            return { type: entry?.type === "secret_text" ? "secret_text" : "plain_text", value };
+          }
+
+          function present(config, name) {
+            const entry = varEntry(config, name);
+            return Boolean(entry && (entry.type || entry.value || entry.name));
+          }
+
+          function maskIfSensitive(name, value) {
+            if (!value) return;
+            if (/SECRET|TOKEN|KEY/i.test(name)) {
+              console.log(`::add-mask::${value}`);
+            }
+          }
+
+          function tomlString(value) {
+            return JSON.stringify(String(value));
+          }
+
+          function hostFromUrl(value) {
+            try {
+              return new URL(value).host;
+            } catch {
+              return "invalid";
+            }
+          }
+
           const get = await api(`/pages/projects/${projectName}`);
+          let previewProject = null;
           if (get.status === 404) {
             const created = await api("/pages/projects", {
               method: "POST",
@@ -589,30 +647,78 @@ jobs:
             if (!created.ok || created.parsed.success === false) {
               throw new Error(created.parsed.errors?.map((error) => error.message).join("; ") || "Failed to create preview Pages project.");
             }
+            previewProject = created.parsed.result ?? null;
           } else if (!get.ok || get.parsed.success === false) {
             throw new Error(get.parsed.errors?.map((error) => error.message).join("; ") || "Failed to read preview Pages project.");
+          } else {
+            previewProject = get.parsed.result ?? null;
           }
 
-          const envVars = {
+          const productionProject = productionProjectName ? await getProject(productionProjectName) : null;
+          const currentProductionConfig = deploymentConfig(previewProject, "production");
+          const currentPreviewConfig = deploymentConfig(previewProject, "preview");
+          const sourceProductionConfig = deploymentConfig(productionProject, "production");
+
+          const requiredEnvVars = {
             DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
             DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+            DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
+            DISCORD_REDIRECT_URI: { type: "plain_text", value: previewRedirectUri },
           };
-          const d1Databases = {
-            DB: { id: d1Id },
+
+          const authNames = ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "SESSION_SECRET"];
+          const copiedEnvVars = {};
+          const currentConfigs = [currentProductionConfig, currentPreviewConfig];
+          for (const name of authNames) {
+            const alreadyPresent = currentConfigs.some((config) => present(config, name));
+            if (alreadyPresent) continue;
+            const source = readableValue(sourceProductionConfig, name);
+            if (!source) continue;
+            maskIfSensitive(name, source.value);
+            copiedEnvVars[name] = { type: source.type, value: source.value };
+          }
+
+          const resolvedConfig = {
+            env_vars: {
+              ...envVars(currentProductionConfig),
+              ...envVars(currentPreviewConfig),
+              ...copiedEnvVars,
+              ...requiredEnvVars,
+            },
           };
+
+          function mergeDeploymentConfig(config) {
+            return {
+              ...config,
+              env_vars: {
+                ...envVars(config),
+                ...copiedEnvVars,
+                ...requiredEnvVars,
+              },
+              d1_databases: {
+                ...d1Databases(config),
+                DB: { id: d1Id },
+              },
+            };
+          }
+
+          const diagnostics = {
+            discordClientIdPresent: present(resolvedConfig, "DISCORD_CLIENT_ID"),
+            discordClientSecretPresent: present(resolvedConfig, "DISCORD_CLIENT_SECRET"),
+            discordRedirectUriPresent: present(resolvedConfig, "DISCORD_REDIRECT_URI"),
+            dznAppUrlPresent: present(resolvedConfig, "DZN_APP_URL"),
+            sessionSecretPresent: present(resolvedConfig, "SESSION_SECRET"),
+            redirectUriHost: hostFromUrl(previewRedirectUri),
+            appUrlHost: hostFromUrl(previewBaseUrl),
+          };
+
           const patched = await api(`/pages/projects/${projectName}`, {
             method: "PATCH",
             body: JSON.stringify({
               production_branch: branch,
               deployment_configs: {
-                production: {
-                  env_vars: envVars,
-                  d1_databases: d1Databases,
-                },
-                preview: {
-                  env_vars: envVars,
-                  d1_databases: d1Databases,
-                },
+                production: mergeDeploymentConfig(currentProductionConfig),
+                preview: mergeDeploymentConfig(currentPreviewConfig),
               },
             }),
           });
@@ -627,30 +733,52 @@ jobs:
             d1Id,
             dznPulseEnabled: true,
             discordNotificationsEnabled: false,
+            authDiagnostics: diagnostics,
           }, null, 2));
+          const wranglerVars = {
+            DZN_PULSE_ENABLED: "true",
+            DZN_DISCORD_NOTIFICATIONS_ENABLED: "false",
+            DZN_APP_URL: previewBaseUrl,
+            DISCORD_REDIRECT_URI: previewRedirectUri,
+          };
+          for (const name of authNames) {
+            const source = readableValue(resolvedConfig, name);
+            if (!source) continue;
+            maskIfSensitive(name, source.value);
+            wranglerVars[name] = source.value;
+          }
+
+          const wranglerToml = [
+            `name = ${tomlString(projectName)}`,
+            'compatibility_date = "2026-05-13"',
+            'pages_build_output_dir = "./out"',
+            "",
+            "[vars]",
+            ...Object.entries(wranglerVars).map(([name, value]) => `${name} = ${tomlString(value)}`),
+            "",
+            "[[d1_databases]]",
+            'binding = "DB"',
+            `database_name = ${tomlString(previewDbName)}`,
+            `database_id = ${tomlString(d1Id)}`,
+            "",
+          ].join("\n");
+          fs.writeFileSync("wrangler.toml", wranglerToml);
+          fs.writeFileSync("pulse-preview-auth-diagnostics.json", JSON.stringify(diagnostics, null, 2));
           console.log(`Configured preview Pages project: ${projectName}`);
           console.log(`Configured preview branch: ${branch}`);
           console.log(`Configured preview D1 binding DB id: ${d1Id}`);
+          console.log(`Preview auth diagnostic discordClientIdPresent=${diagnostics.discordClientIdPresent}`);
+          console.log(`Preview auth diagnostic discordClientSecretPresent=${diagnostics.discordClientSecretPresent}`);
+          console.log(`Preview auth diagnostic discordRedirectUriPresent=${diagnostics.discordRedirectUriPresent}`);
+          console.log(`Preview auth diagnostic dznAppUrlPresent=${diagnostics.dznAppUrlPresent}`);
+          console.log(`Preview auth diagnostic sessionSecretPresent=${diagnostics.sessionSecretPresent}`);
+          console.log(`Preview auth diagnostic redirectUriHost=${diagnostics.redirectUriHost}`);
+          console.log(`Preview auth diagnostic appUrlHost=${diagnostics.appUrlHost}`);
           })().catch((error) => {
             console.error(error);
             process.exit(1);
           });
           NODE
-
-          cat > wrangler.toml <<EOF
-          name = "${PREVIEW_PROJECT_NAME}"
-          compatibility_date = "2026-05-13"
-          pages_build_output_dir = "./out"
-
-          [vars]
-          DZN_PULSE_ENABLED = "true"
-          DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"
-
-          [[d1_databases]]
-          binding = "DB"
-          database_name = "${PREVIEW_DB_NAME}"
-          database_id = "${PREVIEW_D1_DATABASE_ID}"
-          EOF
 
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
           npx wrangler pages deploy out \
@@ -787,6 +915,21 @@ jobs:
           if (parsed.dznPulseEnabled !== true || parsed.discordNotificationsEnabled !== false) {
             throw new Error("Feature-on preview config did not report enabled Pulse and disabled Discord delivery.");
           }
+
+          const authStart = await fetch(`${base}/api/auth/discord/start?returnTo=%2Fdzn-pulse`, {
+            redirect: "manual",
+          });
+          const authLocation = authStart.headers.get("location") ?? "";
+          let authLocationOrigin = "";
+          try {
+            authLocationOrigin = new URL(authLocation, base).origin;
+          } catch {
+            authLocationOrigin = "invalid";
+          }
+          if (authStart.status !== 302 || authLocationOrigin !== "https://discord.com") {
+            throw new Error(`Discord auth start did not redirect to Discord. status=${authStart.status} locationOrigin=${authLocationOrigin}`);
+          }
+          console.log("Discord auth start redirects to Discord.");
 
           const privateGetRoutes = [
             "/api/dzn-pulse/summary",
