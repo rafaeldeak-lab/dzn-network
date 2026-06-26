@@ -125,6 +125,13 @@ assert.equal(dznPulsePreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("Refusing to set DZN_PULSE_ENABLED on production Pages project"), true);
 assert.equal(dznPulsePreviewWorkflow.includes('PRODUCTION_PAGES_PROJECT_NAME: dzn-network'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("cat > wrangler.toml <<EOF"), true);
+assert.equal(dznPulsePreviewWorkflow.includes('name = "${PREVIEW_PROJECT_NAME}"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes('[vars]'), true);
+assert.equal(dznPulsePreviewWorkflow.includes('DZN_PULSE_ENABLED = "true"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes('database_name = "${PREVIEW_DB_NAME}"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes('database_id = "${PREVIEW_D1_DATABASE_ID}"'), true);
 assert.equal(dznPulsePreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
 assert.equal(dznPulsePreviewWorkflow.includes("--project-name dzn-network"), false);
 assert.equal(dznPulsePreviewWorkflow.includes("wrangler pages deploy out"), true);

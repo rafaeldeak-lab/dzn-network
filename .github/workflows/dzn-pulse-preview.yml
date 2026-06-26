@@ -637,6 +637,21 @@ jobs:
           });
           NODE
 
+          cat > wrangler.toml <<EOF
+          name = "${PREVIEW_PROJECT_NAME}"
+          compatibility_date = "2026-05-13"
+          pages_build_output_dir = "./out"
+
+          [vars]
+          DZN_PULSE_ENABLED = "true"
+          DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "${PREVIEW_DB_NAME}"
+          database_id = "${PREVIEW_D1_DATABASE_ID}"
+          EOF
+
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
           npx wrangler pages deploy out \
             --project-name "${PREVIEW_PROJECT_NAME}" \
