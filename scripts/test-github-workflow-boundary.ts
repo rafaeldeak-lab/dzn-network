@@ -123,6 +123,7 @@ assert.equal(dznPulsePreviewWorkflow.includes("notification_preferences"), true)
 assert.equal(dznPulsePreviewWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"'), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_PREVIEW_DISCORD_CLIENT_ID: ${{ vars.DZN_PULSE_PREVIEW_DISCORD_CLIENT_ID }}"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_PREVIEW_SESSION_SECRET: ${{ secrets.DZN_PULSE_PREVIEW_SESSION_SECRET }}"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler pages secret put DISCORD_CLIENT_SECRET"), true);
@@ -136,8 +137,11 @@ assert.equal(dznPulsePreviewWorkflow.includes('fs.writeFileSync("wrangler.toml",
 assert.equal(dznPulsePreviewWorkflow.includes("previewRedirectUri = `${previewBaseUrl}/api/auth/discord/callback`"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DISCORD_REDIRECT_URI: { type: \"plain_text\", value: previewRedirectUri }"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_APP_URL: { type: \"plain_text\", value: previewBaseUrl }"), true);
-assert.equal(dznPulsePreviewWorkflow.includes("deriveDiscordClientIdFromProductionAuthorize"), true);
-assert.equal(dznPulsePreviewWorkflow.includes("DISCORD_CLIENT_ID: { type: \"plain_text\", value: derivedDiscordClientId }"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("deriveDiscordClientIdFromProductionAuthorize"), false);
+assert.equal(dznPulsePreviewWorkflow.includes("https://dzn-network.pages.dev/api/auth/discord/start"), false);
+assert.equal(dznPulsePreviewWorkflow.includes('process.env.DZN_PULSE_PREVIEW_DISCORD_CLIENT_ID || "1504270029795885178"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DISCORD_CLIENT_ID: { type: \"plain_text\", value: previewDiscordClientId }"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("DISCORD_CLIENT_ID: previewDiscordClientId"), true);
 assert.equal(dznPulsePreviewWorkflow.includes('[vars]'), true);
 assert.equal(dznPulsePreviewWorkflow.includes("discordClientIdPresent"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("discordClientIdRuntimeProvided"), true);
