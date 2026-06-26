@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
 import type { CompetitiveEvent } from "./event-data";
-import { formatDate, shortTimeUntil } from "./event-format";
+import { ClientTimeUntil } from "./ClientTimeUntil";
+import { formatDate } from "./event-format";
 import { EventStatusBadge } from "./EventStatusBadge";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 
@@ -35,7 +36,7 @@ export function TournamentTable({ events }: { events: CompetitiveEvent[] }) {
               <td className="hidden px-4 py-4 text-zinc-400 md:table-cell">{formatDate(event.starts_at)}</td>
               <td className="px-4 py-4 text-right">
                 <Link href={`/events/${event.slug}`} className="inline-flex items-center gap-2 rounded-md border border-violet-300/28 bg-violet-500/12 px-3 py-2 text-[10px] font-black uppercase text-violet-100 transition hover:bg-violet-500/22">
-                  {shortTimeUntil(event.status === "live" ? event.ends_at : event.starts_at)}
+                  <ClientTimeUntil value={event.status === "live" ? event.ends_at : event.starts_at} />
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </Link>
               </td>

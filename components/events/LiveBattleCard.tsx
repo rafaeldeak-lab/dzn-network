@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Swords, Users } from "lucide-react";
 
 import type { EventMatch } from "./event-data";
-import { formatNumber, shortTimeUntil } from "./event-format";
+import { ClientTimeUntil } from "./ClientTimeUntil";
+import { formatNumber } from "./event-format";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 
 export function LiveBattleCard({ match, eventSlug = "dzn-season-1" }: { match: EventMatch; eventSlug?: string }) {
@@ -31,7 +32,7 @@ export function LiveBattleCard({ match, eventSlug = "dzn-season-1" }: { match: E
       </div>
       <div className="mt-4 flex items-center justify-between text-[10px] uppercase text-zinc-500">
         <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />Same category only</span>
-        <span>{match.starts_at ? shortTimeUntil(match.starts_at) : "Standby"}</span>
+        <span>{match.starts_at ? <ClientTimeUntil value={match.starts_at} /> : "Standby"}</span>
       </div>
       <Link href={`/events/${eventSlug}/bracket`} className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-4 py-2.5 text-xs font-black uppercase text-cyan-50 transition hover:bg-cyan-400/18">
         Open Bracket

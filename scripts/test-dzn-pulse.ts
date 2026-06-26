@@ -13,6 +13,10 @@ const flags = read("functions/_lib/feature-flags.ts");
 const provider = read("components/dzn-pulse/dzn-pulse-provider.tsx");
 const pulsePage = read("components/dzn-pulse/dzn-pulse-page.tsx");
 const eventsPage = read("components/events/events-platform.tsx");
+const eventCountdown = read("components/events/CountdownTimer.tsx");
+const eventData = read("components/events/event-data.ts");
+const eventFormat = read("components/events/event-format.ts");
+const clientTimeUntil = read("components/events/ClientTimeUntil.tsx");
 const dashboard = read("components/onboarding/dashboard.tsx");
 const siteHeader = read("components/site-header.tsx");
 const discordCallback = read("functions/api/auth/discord/callback.ts");
@@ -153,6 +157,17 @@ assert.equal(eventsPage.includes("DznPulseProvider enablePopups"), true, "Events
 assert.equal(eventsPage.includes("PulseEventsSidebarItem"), true, "Events sidebar must include a feature-gated Pulse item.");
 assert.equal(eventsPage.includes("PulseEventSpotlight"), true, "Events page must include a feature-gated visual enhancement.");
 assert.equal(eventsPage.includes("PulseFeaturedMatchup"), true, "Challenges page must include a feature-gated matchup card.");
+assert.equal(/<Link[^>]+href=["']\/["'][\s\S]{0,120}<DznLogo/.test(eventsPage), false, "Events pages must not wrap DznLogo in Link because DznLogo already renders an anchor.");
+assert.equal(eventsPage.includes("shortClientTimeUntil"), false, "Events pages must not render Date.now-based relative labels during hydration.");
+assert.equal(eventCountdown.includes("useState(() => Date.now())"), false, "Event detail countdown must not compute Date.now during the first render.");
+assert.equal(eventCountdown.includes("emptyCountdownParts"), true, "Event detail countdown must use stable SSR/client placeholder parts.");
+assert.equal(clientTimeUntil.includes("window.setTimeout(update, 0)"), true, "Event relative time labels must schedule the first dynamic update after hydration.");
+assert.equal(clientTimeUntil.includes("setMounted(true)"), false, "Event relative time labels must not call setState synchronously inside effects.");
+assert.equal(eventCountdown.includes("window.setTimeout(update, 0)"), true, "Event countdowns must schedule the first dynamic update after hydration.");
+assert.equal(eventCountdown.includes("setMounted(true)"), false, "Event countdowns must not call setState synchronously inside effects.");
+assert.equal(eventData.includes("Date.now()"), false, "Event fallback data must not use Date.now during module render.");
+assert.equal(eventData.includes("FALLBACK_NOW_MS"), true, "Event fallback data must use a deterministic timestamp.");
+assert.equal(eventFormat.includes("shortTimeUntil"), false, "Event format helpers must not expose Date.now-based render helpers.");
 
 assert.equal(dashboard.includes("DznPulseProvider enablePopups"), true, "Dashboard shell must mount the Pulse provider.");
 assert.equal(dashboard.includes("DznPulseBell"), true, "Dashboard must use the shared Pulse bell.");

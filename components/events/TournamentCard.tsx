@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ArrowUpRight, Flag, Users } from "lucide-react";
 
 import type { CompetitiveEvent } from "./event-data";
-import { eventImageStyle, formatNumber, shortTimeUntil } from "./event-format";
+import { ClientTimeUntil } from "./ClientTimeUntil";
+import { eventImageStyle, formatNumber } from "./event-format";
 import { EventStatusBadge } from "./EventStatusBadge";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 
@@ -34,7 +35,7 @@ export function TournamentCard({ event, compact = false }: { event: CompetitiveE
         <div className="mt-4 grid grid-cols-3 gap-2 text-[10px] uppercase text-zinc-500">
           <span className="rounded-md border border-white/8 bg-white/[0.03] p-2"><Users className="mb-1 h-3.5 w-3.5 text-cyan-200" />{formatNumber(event.registered_servers)} servers</span>
           <span className="rounded-md border border-white/8 bg-white/[0.03] p-2"><Flag className="mb-1 h-3.5 w-3.5 text-violet-200" />{formatNumber(event.match_count)} rounds</span>
-          <span className="rounded-md border border-white/8 bg-white/[0.03] p-2">{live ? "Ends" : "Starts"}<br />{shortTimeUntil(live ? event.ends_at : event.starts_at)}</span>
+          <span className="rounded-md border border-white/8 bg-white/[0.03] p-2">{live ? "Ends" : "Starts"}<br /><ClientTimeUntil value={live ? event.ends_at : event.starts_at} /></span>
         </div>
         <Link href={`/events/${event.slug}`} className="mt-auto inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/16 px-4 py-2.5 text-xs font-black uppercase text-violet-50 transition hover:bg-violet-500/26">
           View Event

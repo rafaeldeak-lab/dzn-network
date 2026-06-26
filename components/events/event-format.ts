@@ -13,11 +13,11 @@ export function formatDate(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
-export function shortTimeUntil(value: string | null | undefined) {
+export function relativeTimeLabel(value: string | null | undefined, nowMs: number) {
   if (!value) return "TBD";
   const target = new Date(value).getTime();
   if (!Number.isFinite(target)) return "TBD";
-  const diff = target - Date.now();
+  const diff = target - nowMs;
   const absolute = Math.abs(diff);
   const days = Math.floor(absolute / 86400000);
   const hours = Math.floor((absolute % 86400000) / 3600000);

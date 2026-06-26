@@ -4,14 +4,19 @@ import { Clock3 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export function CountdownTimer({ target, mode = "ends" }: { target: string | null | undefined; mode?: "starts" | "ends" }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
+    const update = () => setNow(Date.now());
+    const firstUpdate = window.setTimeout(update, 0);
+    const interval = window.setInterval(update, 1000);
+    return () => {
+      window.clearTimeout(firstUpdate);
+      window.clearInterval(interval);
+    };
   }, []);
 
-  const parts = countdownParts(target, now);
+  const parts = now !== null ? countdownParts(target, now) : emptyCountdownParts();
   return (
     <div className="rounded-lg border border-white/10 bg-black/28 p-4">
       <div className="flex items-center gap-2 text-[10px] font-black uppercase text-zinc-400">
@@ -42,5 +47,14 @@ function countdownParts(target: string | null | undefined, now: number) {
     { label: "Hrs", value: String(hours).padStart(2, "0") },
     { label: "Min", value: String(minutes).padStart(2, "0") },
     { label: "Sec", value: String(seconds).padStart(2, "0") },
+  ];
+}
+
+function emptyCountdownParts() {
+  return [
+    { label: "Days", value: "--" },
+    { label: "Hrs", value: "--" },
+    { label: "Min", value: "--" },
+    { label: "Sec", value: "--" },
   ];
 }
