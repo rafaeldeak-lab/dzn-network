@@ -230,13 +230,22 @@ jobs:
           const fs = require("node:fs");
           const text = fs.readFileSync("migrations-before.txt", "utf8");
           const files = [...new Set(text.match(/\d{4}_[A-Za-z0-9_-]+\.sql/g) ?? [])];
-          if (files.length !== 1 || files[0] !== "0052_dzn_pulse.sql") {
+          if (files.length === 0) {
+            fs.writeFileSync("d1-migration-0052-already-applied.txt", "yes\n");
+            console.log("Migration 0052 is already applied; continuing with schema verification.");
+          } else if (files.length === 1 && files[0] === "0052_dzn_pulse.sql") {
+            fs.writeFileSync("d1-migration-0052-apply.txt", "yes\n");
+            console.log("Confirmed only 0052_dzn_pulse.sql is pending.");
+          } else {
             throw new Error(`Expected only 0052_dzn_pulse.sql pending, found: ${files.join(", ") || "none"}`);
           }
-          console.log("Confirmed only 0052_dzn_pulse.sql is pending.");
           NODE
 
-          npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" --remote | tee migrations-apply.txt
+          if [ -f d1-migration-0052-apply.txt ]; then
+            npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" --remote | tee migrations-apply.txt
+          else
+            echo "Skipping migration apply because 0052 is already applied." | tee migrations-apply.txt
+          fi
 
           npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
             --remote \
@@ -383,6 +392,27 @@ jobs:
             console.error(error);
             process.exit(1);
           });
+          NODE
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const lines = [
+            'name = "dzn-network"',
+            'compatibility_date = "2026-05-13"',
+            'pages_build_output_dir = "./out"',
+            '',
+            '[vars]',
+            'DZN_PULSE_ENABLED = "true"',
+            'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+            '',
+            '[[d1_databases]]',
+            'binding = "DB"',
+            'database_name = "dzn_network_db"',
+            'database_id = "37515c66-2787-49e4-8568-a461517e975e"',
+            '',
+          ];
+          fs.writeFileSync("wrangler.toml", lines.join("\n"));
+          console.log("Prepared production Pages runtime config for DZN Pulse.");
           NODE
 
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
