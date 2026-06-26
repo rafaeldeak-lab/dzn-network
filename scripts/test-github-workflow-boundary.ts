@@ -112,7 +112,10 @@ assert.equal(dznPulsePreviewWorkflow.includes("Refusing D1 command for non-previ
 assert.equal(dznPulsePreviewWorkflow.includes("Refusing migration for non-preview database name"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("Refusing seed for non-preview database name"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("test -f migrations/0052_dzn_pulse.sql"), true);
-assert.equal(dznPulsePreviewWorkflow.includes('npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("wrangler.dzn-pulse-preview.toml"), true);
+assert.equal(dznPulsePreviewWorkflow.includes('database_name = "${previewName}"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes('database_id = "${previewId}"'), true);
+assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler d1 migrations apply DB --config wrangler.dzn-pulse-preview.toml --remote"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("notification_campaigns"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("user_notifications"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("event_popup_dismissals"), true);
@@ -137,7 +140,7 @@ assert.equal(dznPulsePreviewWorkflow.includes("CLOUDFLARE_API_TOKEN: ${{ secrets
 assert.equal(dznPulsePreviewWorkflow.includes("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("DZN_PULSE_SEED_LOCAL=1 npm run seed:dzn-pulse-demo"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("git check-ignore --quiet tmp/dzn-pulse-demo-seed.sql"), true);
-assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler d1 execute \"${PREVIEW_DB_NAME}\" --remote --file tmp/dzn-pulse-demo-seed.sql"), true);
+assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler d1 execute DB --config wrangler.dzn-pulse-preview.toml --remote --file tmp/dzn-pulse-demo-seed.sql"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("/api/dzn-pulse/config"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("/api/public/servers"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("Worker exceeded resource limits"), true);

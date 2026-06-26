@@ -374,6 +374,16 @@ jobs:
             name: previewName,
             id: previewId,
           }, null, 2));
+          fs.writeFileSync("wrangler.dzn-pulse-preview.toml", [
+            'name = "dzn-pulse-preview-d1"',
+            'compatibility_date = "2024-11-01"',
+            "",
+            "[[d1_databases]]",
+            'binding = "DB"',
+            `database_name = "${previewName}"`,
+            `database_id = "${previewId}"`,
+            "",
+          ].join("\n"));
           fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_D1_DATABASE_ID=${previewId}\n`);
           console.log(`Preview D1 database name: ${previewName}`);
           console.log(`Preview D1 database id: ${previewId}`);
@@ -402,9 +412,10 @@ jobs:
           fi
 
           test -f migrations/0052_dzn_pulse.sql
-          npx wrangler d1 migrations apply "${PREVIEW_DB_NAME}" --remote | tee preview-d1-migrations.txt
-          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name;" > preview-d1-schema.json
-          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "PRAGMA foreign_key_check;" > preview-d1-foreign-key-check.json
+          test -f wrangler.dzn-pulse-preview.toml
+          npx wrangler d1 migrations apply DB --config wrangler.dzn-pulse-preview.toml --remote | tee preview-d1-migrations.txt
+          npx wrangler d1 execute DB --config wrangler.dzn-pulse-preview.toml --remote --json --command "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name;" > preview-d1-schema.json
+          npx wrangler d1 execute DB --config wrangler.dzn-pulse-preview.toml --remote --json --command "PRAGMA foreign_key_check;" > preview-d1-foreign-key-check.json
 
           node <<'NODE'
           const fs = require("node:fs");
@@ -687,8 +698,9 @@ jobs:
           NODE
 
           git check-ignore --quiet tmp/dzn-pulse-demo-seed.sql
-          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --file tmp/dzn-pulse-demo-seed.sql
-          npx wrangler d1 execute "${PREVIEW_DB_NAME}" --remote --json --command "SELECT 'notification_campaigns' AS table_name, COUNT(*) AS count FROM notification_campaigns UNION ALL SELECT 'user_notifications', COUNT(*) FROM user_notifications UNION ALL SELECT 'event_popup_dismissals', COUNT(*) FROM event_popup_dismissals UNION ALL SELECT 'notification_preferences', COUNT(*) FROM notification_preferences;" > pulse-preview-counts.json
+          test -f wrangler.dzn-pulse-preview.toml
+          npx wrangler d1 execute DB --config wrangler.dzn-pulse-preview.toml --remote --file tmp/dzn-pulse-demo-seed.sql
+          npx wrangler d1 execute DB --config wrangler.dzn-pulse-preview.toml --remote --json --command "SELECT 'notification_campaigns' AS table_name, COUNT(*) AS count FROM notification_campaigns UNION ALL SELECT 'user_notifications', COUNT(*) FROM user_notifications UNION ALL SELECT 'event_popup_dismissals', COUNT(*) FROM event_popup_dismissals UNION ALL SELECT 'notification_preferences', COUNT(*) FROM notification_preferences;" > pulse-preview-counts.json
 
           node <<'NODE'
           const fs = require("node:fs");
