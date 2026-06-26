@@ -696,6 +696,7 @@ jobs:
           const requiredEnvVars = {
             DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
             DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+            DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS: { type: "plain_text", value: "true" },
             DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
             DISCORD_REDIRECT_URI: { type: "plain_text", value: previewRedirectUri },
             DISCORD_CLIENT_ID: { type: "plain_text", value: derivedDiscordClientId },
@@ -776,6 +777,7 @@ jobs:
           const wranglerVars = {
             DZN_PULSE_ENABLED: "true",
             DZN_DISCORD_NOTIFICATIONS_ENABLED: "false",
+            DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS: "true",
             DZN_APP_URL: previewBaseUrl,
             DISCORD_REDIRECT_URI: previewRedirectUri,
           };

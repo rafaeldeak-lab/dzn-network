@@ -33,6 +33,7 @@ interface CloudflareEnv {
   SYNC_CRON_SECRET?: string;
   DZN_PULSE_ENABLED?: string;
   DZN_DISCORD_NOTIFICATIONS_ENABLED?: string;
+  DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS?: string;
   DZN_APP_URL?: string;
   SYNC_WORKER_HEALTH_TOKEN?: string;
   DZN_ADMIN_DISCORD_IDS?: string;

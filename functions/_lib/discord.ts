@@ -3,6 +3,26 @@ import type { DiscordGuild, DiscordUser, Env } from "./types";
 const DISCORD_API = "https://discord.com/api/v10";
 const DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize";
 const ADMINISTRATOR = BigInt(8);
+const SAFE_TOKEN_ERROR_CODES = new Set([
+  "invalid_client",
+  "invalid_grant",
+  "redirect_uri_mismatch",
+  "unsupported_grant_type",
+]);
+
+export class DiscordRequestError extends Error {
+  stage: "token_exchange" | "user_fetch" | "guilds_fetch";
+  status: number | null;
+  code: string;
+
+  constructor(stage: DiscordRequestError["stage"], status: number | null, code: string) {
+    super(`${stage}:${code}`);
+    this.name = "DiscordRequestError";
+    this.stage = stage;
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export function buildDiscordAuthorizeUrl(env: Env, state: string) {
   const url = new URL(DISCORD_AUTHORIZE_URL);
@@ -29,12 +49,32 @@ export type DiscordTokenResponse = {
 };
 
 export async function exchangeDiscordCode(env: Env, code: string) {
+  const clientId = env.DISCORD_CLIENT_ID;
+  if (!clientId) {
+    throw new DiscordRequestError("token_exchange", null, "missing_client_id");
+  }
+  const clientSecret = env.DISCORD_CLIENT_SECRET;
+  if (!clientSecret) {
+    throw new DiscordRequestError("token_exchange", null, "missing_client_secret");
+  }
+  const rawRedirectUri = env.DISCORD_REDIRECT_URI;
+  if (!rawRedirectUri) {
+    throw new DiscordRequestError("token_exchange", null, "missing_redirect_uri");
+  }
+
+  let redirectUri: string;
+  try {
+    redirectUri = validateDiscordRedirectUri(rawRedirectUri);
+  } catch {
+    throw new DiscordRequestError("token_exchange", null, "invalid_redirect_uri");
+  }
+
   const body = new URLSearchParams({
-    client_id: required(env.DISCORD_CLIENT_ID, "DISCORD_CLIENT_ID"),
-    client_secret: required(env.DISCORD_CLIENT_SECRET, "DISCORD_CLIENT_SECRET"),
+    client_id: clientId,
+    client_secret: clientSecret,
     grant_type: "authorization_code",
     code,
-    redirect_uri: validateDiscordRedirectUri(required(env.DISCORD_REDIRECT_URI, "DISCORD_REDIRECT_URI")),
+    redirect_uri: redirectUri,
   });
 
   const response = await fetch(`${DISCORD_API}/oauth2/token`, {
@@ -43,7 +83,9 @@ export async function exchangeDiscordCode(env: Env, code: string) {
     body,
   });
 
-  if (!response.ok) throw new Error("Discord token exchange failed");
+  if (!response.ok) {
+    throw new DiscordRequestError("token_exchange", response.status, await sanitizeDiscordErrorCode(response));
+  }
   return response.json() as Promise<DiscordTokenResponse>;
 }
 
@@ -69,7 +111,7 @@ export async function fetchDiscordUser(accessToken: string): Promise<DiscordUser
   const response = await fetch(`${DISCORD_API}/users/@me`, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
-  if (!response.ok) throw new Error("Discord user fetch failed");
+  if (!response.ok) throw new DiscordRequestError("user_fetch", response.status, "http_error");
   return response.json() as Promise<DiscordUser>;
 }
 
@@ -77,7 +119,7 @@ export async function fetchDiscordGuilds(accessToken: string): Promise<DiscordGu
   const response = await fetch(`${DISCORD_API}/users/@me/guilds`, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
-  if (!response.ok) throw new Error("Discord guild fetch failed");
+  if (!response.ok) throw new DiscordRequestError("guilds_fetch", response.status, "http_error");
   return response.json() as Promise<DiscordGuild[]>;
 }
 
@@ -118,4 +160,19 @@ function validateDiscordRedirectUri(value: string) {
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+async function sanitizeDiscordErrorCode(response: Response) {
+  let rawCode = "";
+  try {
+    const body = await response.json() as { error?: unknown; code?: unknown };
+    rawCode = typeof body.error === "string"
+      ? body.error
+      : typeof body.code === "string"
+        ? body.code
+        : "";
+  } catch {
+    rawCode = "";
+  }
+  return SAFE_TOKEN_ERROR_CODES.has(rawCode) ? rawCode : "other";
 }

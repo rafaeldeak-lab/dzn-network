@@ -1,5 +1,6 @@
 import { createSession, SESSION_COOKIE, storeDiscordOAuthToken, storeGuilds, upsertUser } from "../../../_lib/db";
 import {
+  DiscordRequestError,
   exchangeDiscordCode,
   fetchDiscordGuilds,
   fetchDiscordUser,
@@ -7,7 +8,7 @@ import {
 } from "../../../_lib/discord";
 import { methodNotAllowed, readCookie, redirect, secureHeaders, setCookie } from "../../../_lib/http";
 import { isValidOAuthState, OAUTH_RETURN_COOKIE, OAUTH_STATE_COOKIE, safeReturnTo } from "../../../_lib/oauth";
-import type { PagesFunction } from "../../../_lib/types";
+import type { Env, PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") {
@@ -30,15 +31,16 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       maxAge: 0,
       path: "/api/auth/discord/callback",
     }));
-    return redirect("/login?error=discord_state", headers);
+    return redirect(callbackFailurePath(request, env, {
+      stage: "state_validation",
+      reason: stateFailureReason(code, state, expectedState),
+    }, "discord_state"), headers);
   }
 
   try {
     const token = await exchangeDiscordCode(env, code);
-    const [user, guilds] = await Promise.all([
-      fetchDiscordUser(token.access_token),
-      fetchDiscordGuilds(token.access_token),
-    ]);
+    const user = await fetchDiscordUser(token.access_token);
+    const guilds = await fetchDiscordGuilds(token.access_token);
     const userId = await upsertUser(env, user);
     await storeDiscordOAuthToken(env, userId, token);
     await storeGuilds(env, userId, filterAdminGuilds(guilds));
@@ -55,7 +57,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       path: "/api/auth/discord/callback",
     }));
     return new Response(null, { status: 302, headers });
-  } catch {
+  } catch (error) {
     const headers = new Headers();
     headers.append("set-cookie", setCookie(OAUTH_STATE_COOKIE, "", {
       maxAge: 0,
@@ -65,6 +67,112 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       maxAge: 0,
       path: "/api/auth/discord/callback",
     }));
-    return redirect("/login?error=discord_callback", headers);
+    return redirect(callbackFailurePath(request, env, classifyCallbackFailure(error), "discord_callback"), headers);
   }
 };
+
+type CallbackFailure = {
+  stage: string;
+  reason: string;
+  status?: number | null;
+};
+
+function classifyCallbackFailure(error: unknown): CallbackFailure {
+  if (error instanceof DiscordRequestError) {
+    return {
+      stage: error.stage,
+      reason: error.code,
+      status: error.status,
+    };
+  }
+  return {
+    stage: "d1_or_session",
+    reason: "write_or_session_error",
+  };
+}
+
+function stateFailureReason(code: string | null, state: string | null, expectedState: string | null) {
+  if (!code) return "missing_code";
+  if (!state || !isValidOAuthState(state)) return "invalid_state";
+  if (!expectedState || !isValidOAuthState(expectedState)) return "missing_expected_state";
+  return "state_mismatch";
+}
+
+function callbackFailurePath(request: Request, env: Env, failure: CallbackFailure, errorCode: string) {
+  if (!isPreviewAuthDiagnosticEnabled(request, env)) {
+    return `/login?error=${errorCode}`;
+  }
+
+  const output = new URL("/login", "https://dzn.local");
+  output.searchParams.set("error", errorCode);
+  output.searchParams.set("stage", safeDiagnosticValue(failure.stage));
+  output.searchParams.set("reason", safeDiagnosticValue(failure.reason));
+  if (typeof failure.status === "number") {
+    output.searchParams.set("status", String(failure.status));
+  }
+
+  const diagnostics = runtimeDiagnostics(env);
+  for (const [key, value] of Object.entries(diagnostics)) {
+    output.searchParams.set(key, value);
+  }
+
+  return `${output.pathname}${output.search}`;
+}
+
+function isPreviewAuthDiagnosticEnabled(request: Request, env: Env) {
+  const host = new URL(request.url).hostname;
+  const isPulsePreviewHost = host === "dzn-network-pulse-preview.pages.dev" || host.endsWith(".dzn-network-pulse-preview.pages.dev");
+  if (!isPulsePreviewHost) return false;
+  return env.DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS === "true"
+    || (env.DZN_PULSE_ENABLED === "true" && env.DZN_DISCORD_NOTIFICATIONS_ENABLED !== "true");
+}
+
+function runtimeDiagnostics(env: Env) {
+  const redirectUri = stringEnv(env.DISCORD_REDIRECT_URI);
+  const appUrl = stringEnv(env.DZN_APP_URL);
+  const clientSecret = stringEnv(env.DISCORD_CLIENT_SECRET);
+  const sessionSecret = stringEnv(env.SESSION_SECRET);
+
+  return {
+    client_id: boolParam(Boolean(stringEnv(env.DISCORD_CLIENT_ID))),
+    client_secret: boolParam(Boolean(clientSecret)),
+    client_secret_trimmed: trimParam(clientSecret),
+    redirect_uri: boolParam(Boolean(redirectUri)),
+    redirect_uri_host: urlPart(redirectUri, "host"),
+    redirect_uri_path: urlPart(redirectUri, "pathname"),
+    redirect_uri_expected: boolParam(redirectUri === "https://dzn-network-pulse-preview.pages.dev/api/auth/discord/callback"),
+    app_url: boolParam(Boolean(appUrl)),
+    app_url_host: urlPart(appUrl, "host"),
+    session_secret: boolParam(Boolean(sessionSecret)),
+    session_secret_trimmed: trimParam(sessionSecret),
+    pulse_enabled: boolParam(env.DZN_PULSE_ENABLED === "true"),
+    discord_pulse_enabled: boolParam(env.DZN_DISCORD_NOTIFICATIONS_ENABLED === "true"),
+  };
+}
+
+function stringEnv(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function boolParam(value: boolean) {
+  return value ? "1" : "0";
+}
+
+function trimParam(value: string | null) {
+  if (!value) return "missing";
+  return value === value.trim() ? "1" : "0";
+}
+
+function urlPart(value: string | null, part: "host" | "pathname") {
+  if (!value) return "missing";
+  try {
+    return safeDiagnosticValue(new URL(value)[part]);
+  } catch {
+    return "invalid";
+  }
+}
+
+function safeDiagnosticValue(value: string) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9_.-]/g, "_");
+  return normalized.slice(0, 80) || "unknown";
+}

@@ -15,6 +15,8 @@ const pulsePage = read("components/dzn-pulse/dzn-pulse-page.tsx");
 const eventsPage = read("components/events/events-platform.tsx");
 const dashboard = read("components/onboarding/dashboard.tsx");
 const siteHeader = read("components/site-header.tsx");
+const discordCallback = read("functions/api/auth/discord/callback.ts");
+const discordHelpers = read("functions/_lib/discord.ts");
 const envExample = read(".env.example");
 const cloudflareEnv = read("cloudflare-env.d.ts");
 const packageJson = read("package.json");
@@ -44,6 +46,7 @@ assert.equal(envExample.includes("DZN_PULSE_ENABLED=false"), true, "DZN Pulse mu
 assert.equal(envExample.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED=false"), true, "Discord notification delivery must default off in .env.example.");
 assert.equal(cloudflareEnv.includes("DZN_PULSE_ENABLED?: string"), true, "Cloudflare Env type must include DZN_PULSE_ENABLED.");
 assert.equal(cloudflareEnv.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED?: string"), true, "Cloudflare Env type must include DZN_DISCORD_NOTIFICATIONS_ENABLED.");
+assert.equal(cloudflareEnv.includes("DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS?: string"), true, "Cloudflare Env type must include preview auth diagnostics flag.");
 assert.equal(flags.includes("parseBooleanFlag"), true, "Feature flags must use a typed parser.");
 
 for (const serviceContract of [
@@ -73,6 +76,24 @@ assert.equal(service.includes("campaign_not_found"), true, "Popup dismissals mus
 assert.equal(service.includes("\"private, no-store, no-cache, must-revalidate\""), true, "Private Pulse APIs must use no-store caching.");
 assert.equal(service.includes("sanitizePulseActionUrl(campaign.action_url)"), true, "Campaign action URLs must be sanitized.");
 assert.equal(service.includes("if (!isDznPulseEnabled(env))"), true, "Pulse generation/service methods must no-op or reject when disabled.");
+assert.equal(discordHelpers.includes("class DiscordRequestError"), true, "Discord OAuth failures must have sanitized stages.");
+assert.equal(discordHelpers.includes("SAFE_TOKEN_ERROR_CODES"), true, "Discord token errors must be allowlisted.");
+assert.equal(discordHelpers.includes("invalid_client"), true, "Token diagnostics must preserve invalid_client.");
+assert.equal(discordHelpers.includes("invalid_grant"), true, "Token diagnostics must preserve invalid_grant.");
+assert.equal(discordHelpers.includes("redirect_uri_mismatch"), true, "Token diagnostics must preserve redirect URI mismatch.");
+assert.equal(discordHelpers.includes("missing_client_secret"), true, "Token diagnostics must report missing client secret without exposing the value.");
+assert.equal(discordCallback.includes("DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS"), true, "Preview callback diagnostics must be feature-flagged.");
+assert.equal(discordCallback.includes("DZN_PULSE_ENABLED"), true, "Preview callback diagnostics must work under feature-on preview runtime flags.");
+assert.equal(discordCallback.includes("dzn-network-pulse-preview.pages.dev"), true, "Preview callback diagnostics must be host-gated.");
+assert.equal(discordCallback.includes("stage: \"token_exchange\"") || discordCallback.includes("stage: error.stage"), true, "Callback must report token exchange stage safely.");
+assert.equal(discordCallback.includes("state_validation"), true, "Callback must report state validation stage safely.");
+assert.equal(discordCallback.includes("d1_or_session"), true, "Callback must report D1/session stage safely.");
+assert.equal(discordCallback.includes("client_secret_trimmed"), true, "Callback diagnostics must include secret trim boolean only.");
+assert.equal(discordCallback.includes("session_secret_trimmed"), true, "Callback diagnostics must include session secret trim boolean only.");
+assert.equal(/searchParams\.set\(\s*["'](?:oauth_)?code["']/i.test(discordCallback), false, "Callback diagnostics must not include OAuth code values.");
+assert.equal(/searchParams\.set\(\s*["'](?:access_|refresh_)?token["']/i.test(discordCallback), false, "Callback diagnostics must not include token values.");
+assert.equal(/searchParams\.set\(\s*["']cookie["']/i.test(discordCallback), false, "Callback diagnostics must not include cookie values.");
+assert.equal(/searchParams\.set\(\s*["'](?:client_|session_)?secret["']/i.test(discordCallback), false, "Callback diagnostics must not include secret values.");
 assert.equal(sanitizePulseActionUrl("/events/weekend-kill-race"), "/events/weekend-kill-race");
 assert.equal(sanitizePulseActionUrl("/dashboard/events"), "/dashboard/events");
 assert.equal(sanitizePulseActionUrl("/events-evil"), null, "Sibling paths must not pass an internal route prefix check.");
