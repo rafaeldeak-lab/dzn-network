@@ -18,8 +18,10 @@ assert.match(advancedSource, /canShowMapOverlay \? exploration : \{ \.\.\.explor
 assert.doesNotMatch(publicExplorationApi, /position_x|position_y|pos_x|pos_y/);
 assert.doesNotMatch(publicServerAdvancedApi, /position_x|position_y|pos_x|pos_y/);
 assert.match(publicAdvancedApi, /publicAccessCacheHeaders/);
+assert.match(publicAdvancedApi, /withRouteBudget/);
 assert.match(publicAdvancedApi, /Advanced Showcase is temporarily unavailable/);
 assert.match(publicAdvancedApi, /fallback_reason: "advanced_live_query_failed_no_snapshot"/);
+assert.doesNotMatch(publicAdvancedApi, /publicApiErrorHeaders/);
 assert.doesNotMatch(publicAdvancedApi, /status:\s*503/);
 assert.match(publicServerAdvancedApi, /publicAccessCacheHeaders/);
 assert.match(ownerAdvancedApi, /requireServerOwnerOrDznAdmin/);
