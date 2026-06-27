@@ -244,6 +244,9 @@ assert.equal(productionDiscordAuthRepairWorkflow.includes("confirm_discord_auth_
 assert.equal(productionDiscordAuthRepairWorkflow.includes("run-dzn-production-discord-auth-repair"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("Production Discord auth repair may only run on main."), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_PRODUCTION_DISCORD_CLIENT_ID: ${{ vars.DZN_PRODUCTION_DISCORD_CLIENT_ID }}"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("PROTECTED_CALLBACK_DIAGNOSTIC_SECRET_SOURCE"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes('DZN_PRODUCTION_DISCORD_CLIENT_ID:-1504270029795885178'), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("https://dzn-network.pages.dev/api/auth/discord/callback"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DISCORD_CLIENT_ID"), true);
@@ -259,6 +262,13 @@ assert.equal(productionDiscordAuthRepairWorkflow.includes("for name in DISCORD_C
 assert.equal(productionDiscordAuthRepairWorkflow.includes("$name listed before repair: true"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/auth/discord/start?returnTo=%2Fdashboard"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("Discord auth start redirects to Discord with the production callback."), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("synthetic-production-diagnostic-code"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("diagnostic=1"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes('"x-dzn-cron-secret": process.env.PROTECTED_CALLBACK_DIAGNOSTIC_SECRET'), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("client_secret_trimmed"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("invalid_client"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("invalid_grant"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("Production Discord client secret is missing, invalid, or no longer current."), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/dzn-pulse/config"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/dzn-pulse/summary"), true);

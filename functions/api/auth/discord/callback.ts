@@ -6,6 +6,7 @@ import {
   fetchDiscordUser,
   filterAdminGuilds,
 } from "../../../_lib/discord";
+import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
 import { methodNotAllowed, readCookie, redirect, secureHeaders, setCookie } from "../../../_lib/http";
 import { isValidOAuthState, OAUTH_RETURN_COOKIE, OAUTH_STATE_COOKIE, safeReturnTo } from "../../../_lib/oauth";
 import type { Env, PagesFunction } from "../../../_lib/types";
@@ -99,7 +100,8 @@ function stateFailureReason(code: string | null, state: string | null, expectedS
 }
 
 function callbackFailurePath(request: Request, env: Env, failure: CallbackFailure, errorCode: string) {
-  if (!isPreviewAuthDiagnosticEnabled(request, env)) {
+  const protectedDiagnostic = isProtectedAuthDiagnosticEnabled(request, env);
+  if (!protectedDiagnostic && !isPreviewAuthDiagnosticEnabled(request, env)) {
     return `/login?error=${errorCode}`;
   }
 
@@ -111,12 +113,17 @@ function callbackFailurePath(request: Request, env: Env, failure: CallbackFailur
     output.searchParams.set("status", String(failure.status));
   }
 
-  const diagnostics = runtimeDiagnostics(env);
+  const diagnostics = runtimeDiagnostics(request, env, protectedDiagnostic);
   for (const [key, value] of Object.entries(diagnostics)) {
     output.searchParams.set(key, value);
   }
 
   return `${output.pathname}${output.search}`;
+}
+
+function isProtectedAuthDiagnosticEnabled(request: Request, env: Env) {
+  const url = new URL(request.url);
+  return url.searchParams.get("diagnostic") === "1" && isCronSecretAuthorized(request, env);
 }
 
 function isPreviewAuthDiagnosticEnabled(request: Request, env: Env) {
@@ -127,20 +134,23 @@ function isPreviewAuthDiagnosticEnabled(request: Request, env: Env) {
     || (env.DZN_PULSE_ENABLED === "true" && env.DZN_DISCORD_NOTIFICATIONS_ENABLED !== "true");
 }
 
-function runtimeDiagnostics(env: Env) {
+function runtimeDiagnostics(request: Request, env: Env, protectedDiagnostic: boolean) {
+  const host = new URL(request.url).hostname;
   const redirectUri = stringEnv(env.DISCORD_REDIRECT_URI);
   const appUrl = stringEnv(env.DZN_APP_URL);
   const clientSecret = stringEnv(env.DISCORD_CLIENT_SECRET);
   const sessionSecret = stringEnv(env.SESSION_SECRET);
+  const expectedRedirectUri = expectedRedirectUriForHost(host);
 
   return {
+    diagnostic: protectedDiagnostic ? "protected" : "preview",
     client_id: boolParam(Boolean(stringEnv(env.DISCORD_CLIENT_ID))),
     client_secret: boolParam(Boolean(clientSecret)),
     client_secret_trimmed: trimParam(clientSecret),
     redirect_uri: boolParam(Boolean(redirectUri)),
     redirect_uri_host: urlPart(redirectUri, "host"),
     redirect_uri_path: urlPart(redirectUri, "pathname"),
-    redirect_uri_expected: boolParam(redirectUri === "https://dzn-network-pulse-preview.pages.dev/api/auth/discord/callback"),
+    redirect_uri_expected: boolParam(Boolean(expectedRedirectUri) && redirectUri === expectedRedirectUri),
     app_url: boolParam(Boolean(appUrl)),
     app_url_host: urlPart(appUrl, "host"),
     session_secret: boolParam(Boolean(sessionSecret)),
@@ -148,6 +158,14 @@ function runtimeDiagnostics(env: Env) {
     pulse_enabled: boolParam(env.DZN_PULSE_ENABLED === "true"),
     discord_pulse_enabled: boolParam(env.DZN_DISCORD_NOTIFICATIONS_ENABLED === "true"),
   };
+}
+
+function expectedRedirectUriForHost(host: string) {
+  if (host === "dzn-network.pages.dev") return "https://dzn-network.pages.dev/api/auth/discord/callback";
+  if (host === "dzn-network-pulse-preview.pages.dev" || host.endsWith(".dzn-network-pulse-preview.pages.dev")) {
+    return "https://dzn-network-pulse-preview.pages.dev/api/auth/discord/callback";
+  }
+  return null;
 }
 
 function stringEnv(value: unknown) {

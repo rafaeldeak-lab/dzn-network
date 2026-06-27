@@ -28,6 +28,8 @@ jobs:
       CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+      SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
       DZN_PRODUCTION_DISCORD_CLIENT_ID: ${{ vars.DZN_PRODUCTION_DISCORD_CLIENT_ID }}
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
       PRODUCTION_D1_DATABASE_NAME: dzn_network_db
@@ -76,6 +78,19 @@ jobs:
           echo "::add-mask::${REPAIR_CF_TOKEN}"
           printf "CLOUDFLARE_API_TOKEN=%s\n" "${REPAIR_CF_TOKEN}" >> "$GITHUB_ENV"
 
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET GitHub secret for protected callback diagnostics."
+            exit 1
+          fi
+          echo "::add-mask::${CRON_SECRET}"
+          printf "PROTECTED_CALLBACK_DIAGNOSTIC_SECRET=%s\n" "${CRON_SECRET}" >> "$GITHUB_ENV"
+          if [ -n "${DZN_CRON_SECRET:-}" ]; then
+            echo "PROTECTED_CALLBACK_DIAGNOSTIC_SECRET_SOURCE=DZN_CRON_SECRET" >> "$GITHUB_ENV"
+          else
+            echo "PROTECTED_CALLBACK_DIAGNOSTIC_SECRET_SOURCE=SYNC_CRON_SECRET" >> "$GITHUB_ENV"
+          fi
+
           if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
             echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
             exit 1
@@ -110,6 +125,7 @@ jobs:
             echo "- DZN_APP_URL: ${PRODUCTION_APP_URL}"
             echo "- DZN_PULSE_ENABLED: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Protected callback diagnostic secret source: $([ -n "${DZN_CRON_SECRET:-}" ] && echo DZN_CRON_SECRET || echo SYNC_CRON_SECRET)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify existing production auth secret names
@@ -261,6 +277,66 @@ jobs:
             throw new Error(`Production Discord auth start did not recover: ${last}`);
           }
 
+          async function verifySyntheticCallbackDiagnostic() {
+            const start = await request("/api/auth/discord/start?returnTo=%2Fdashboard", { redirect: "manual" });
+            const location = start.headers.get("location") ?? "";
+            if (start.status !== 302) {
+              throw new Error(`Discord auth start returned HTTP ${start.status} before callback diagnostic.`);
+            }
+            const redirect = new URL(location, base);
+            const state = redirect.searchParams.get("state");
+            if (redirect.origin !== "https://discord.com" || !state) {
+              throw new Error("Discord auth start did not return a Discord state for callback diagnostic.");
+            }
+            const setCookie = start.headers.get("set-cookie") ?? "";
+            const stateCookie = setCookie.match(/dzn_oauth_state=[^;,]+/)?.[0] ?? "";
+            const returnCookie = setCookie.match(/dzn_oauth_return=[^;,]+/)?.[0] ?? "";
+            if (!stateCookie) {
+              throw new Error("Discord auth start did not set the OAuth state cookie.");
+            }
+
+            const callback = await request(`/api/auth/discord/callback?code=synthetic-production-diagnostic-code&state=${encodeURIComponent(state)}&diagnostic=1`, {
+              redirect: "manual",
+              headers: {
+                cookie: [stateCookie, returnCookie].filter(Boolean).join("; "),
+                "x-dzn-cron-secret": process.env.PROTECTED_CALLBACK_DIAGNOSTIC_SECRET,
+              },
+            });
+            const callbackLocation = callback.headers.get("location") ?? "";
+            const diagnostic = new URL(callbackLocation, base);
+            const params = diagnostic.searchParams;
+            const stage = params.get("stage");
+            const reason = params.get("reason");
+            const status = params.get("status");
+            const clientId = params.get("client_id");
+            const clientSecret = params.get("client_secret");
+            const clientSecretTrimmed = params.get("client_secret_trimmed");
+            const redirectExpected = params.get("redirect_uri_expected");
+            const sessionSecret = params.get("session_secret");
+
+            console.log(`Callback diagnostic: stage=${stage} reason=${reason} status=${status ?? "none"} client_id=${clientId} client_secret=${clientSecret} client_secret_trimmed=${clientSecretTrimmed} redirect_uri_expected=${redirectExpected} session_secret=${sessionSecret}`);
+
+            if (stage === "state_validation") {
+              throw new Error(`OAuth callback state validation failed in protected diagnostic: reason=${reason ?? "unknown"}`);
+            }
+            if (stage !== "token_exchange") {
+              throw new Error(`Synthetic callback diagnostic reached unexpected stage=${stage ?? "missing"}.`);
+            }
+            if (clientId !== "1" || clientSecret !== "1" || sessionSecret !== "1" || redirectExpected !== "1") {
+              throw new Error("Production callback runtime auth configuration is not fully readable.");
+            }
+            if (clientSecretTrimmed !== "1") {
+              throw new Error("Production DISCORD_CLIENT_SECRET contains leading/trailing whitespace or newline.");
+            }
+            if (reason === "invalid_client" || reason === "missing_client_secret") {
+              throw new Error("Production Discord client secret is missing, invalid, or no longer current.");
+            }
+            if (reason !== "invalid_grant") {
+              throw new Error(`Production Discord token exchange returned unexpected sanitized reason=${reason ?? "missing"}.`);
+            }
+            console.log("Production Discord token exchange accepted the client credentials; synthetic code was rejected as invalid_grant as expected.");
+          }
+
           function safeOrigin(location) {
             try {
               return new URL(location, base).origin;
@@ -285,6 +361,7 @@ jobs:
           }
 
           await waitForDiscordStart();
+          await verifySyntheticCallbackDiagnostic();
 
           const config = await request("/api/dzn-pulse/config");
           if (config.status !== 200) throw new Error(`/api/dzn-pulse/config returned ${config.status}`);

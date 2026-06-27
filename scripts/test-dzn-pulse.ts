@@ -94,6 +94,9 @@ assert.equal(discordHelpers.includes("missing_client_secret"), true, "Token diag
 assert.equal(discordCallback.includes("DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS"), true, "Preview callback diagnostics must be feature-flagged.");
 assert.equal(discordCallback.includes("DZN_PULSE_ENABLED"), true, "Preview callback diagnostics must work under feature-on preview runtime flags.");
 assert.equal(discordCallback.includes("dzn-network-pulse-preview.pages.dev"), true, "Preview callback diagnostics must be host-gated.");
+assert.equal(discordCallback.includes("isCronSecretAuthorized"), true, "Production callback diagnostics must require protected cron authorization.");
+assert.equal(discordCallback.includes("diagnostic\") === \"1\""), true, "Production callback diagnostics must require an explicit diagnostic query.");
+assert.equal(discordCallback.includes("dzn-network.pages.dev/api/auth/discord/callback"), true, "Production callback diagnostics must validate the exact callback URI.");
 assert.equal(discordCallback.includes("stage: \"token_exchange\"") || discordCallback.includes("stage: error.stage"), true, "Callback must report token exchange stage safely.");
 assert.equal(discordCallback.includes("state_validation"), true, "Callback must report state validation stage safely.");
 assert.equal(discordCallback.includes("d1_or_session"), true, "Callback must report D1/session stage safely.");
