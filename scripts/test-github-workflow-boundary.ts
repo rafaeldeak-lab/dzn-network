@@ -13,6 +13,7 @@ const admWorkerDeployWorkflow = read(".github/workflows/dzn-adm-worker-deploy.ym
 const dznPulsePreviewWorkflow = read(".github/workflows/dzn-pulse-preview.yml");
 const dznPulseProductionRolloutWorkflow = read(".github/workflows/dzn-pulse-production-rollout.yml");
 const protectedRouteAuthRepairWorkflow = read(".github/workflows/dzn-protected-route-auth-repair.yml");
+const productionDiscordAuthRepairWorkflow = read(".github/workflows/dzn-production-discord-auth-repair.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
 const admWorkerConfig = read("wrangler.adm-sync.toml");
 const workflows = [
@@ -236,6 +237,39 @@ assert.equal(protectedRouteAuthRepairWorkflow.includes("wrangler.adm-sync.toml")
 assert.equal(protectedRouteAuthRepairWorkflow.includes("wrangler.auto-update.toml"), false);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("dzn-adm-sync-worker"), false);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("dzn-auto-update-worker"), false);
+
+assert.equal(productionDiscordAuthRepairWorkflow.includes("name: DZN Production Discord Auth Repair"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("confirm_discord_auth_repair"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("run-dzn-production-discord-auth-repair"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("Production Discord auth repair may only run on main."), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_PRODUCTION_DISCORD_CLIENT_ID: ${{ vars.DZN_PRODUCTION_DISCORD_CLIENT_ID }}"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes('DZN_PRODUCTION_DISCORD_CLIENT_ID:-1504270029795885178'), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("https://dzn-network.pages.dev/api/auth/discord/callback"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DISCORD_CLIENT_ID"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DISCORD_REDIRECT_URI"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_APP_URL"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_PULSE_ENABLED"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("for name in DISCORD_CLIENT_SECRET SESSION_SECRET"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("$name listed before repair: true"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/auth/discord/start?returnTo=%2Fdashboard"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("Discord auth start redirects to Discord with the production callback."), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/dzn-pulse/config"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/dzn-pulse/summary"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/public/servers"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/public/leaderboards/advanced"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/sync/metadata/run"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/cron/server-wars/refresh"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/sync/discord-posts/run"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/sync/adm/run"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("wrangler d1 migrations apply"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("wrangler.adm-sync.toml"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("wrangler.auto-update.toml"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("dzn-adm-sync-worker"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("dzn-auto-update-worker"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"true\""), false);
 
 const runtimeOnlySecretPatterns = [
   /secrets\.DISCORD_BOT_TOKEN/,

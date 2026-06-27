@@ -1,0 +1,275 @@
+name: DZN Production Discord Auth Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_discord_auth_repair:
+        description: "Must equal DZN_PRODUCTION_DISCORD_AUTH_REPAIR"
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/dzn-production-discord-auth-repair.yml"
+
+concurrency:
+  group: dzn-production-discord-auth-repair
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_PRODUCTION_DISCORD_CLIENT_ID: ${{ vars.DZN_PRODUCTION_DISCORD_CLIENT_ID }}
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+      PRODUCTION_APP_URL: https://dzn-network.pages.dev
+      PRODUCTION_DISCORD_REDIRECT_URI: https://dzn-network.pages.dev/api/auth/discord/callback
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate production Discord auth repair guard
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.confirm_discord_auth_repair }}" != "DZN_PRODUCTION_DISCORD_AUTH_REPAIR" ]; then
+              echo "::error::Manual dispatch must confirm DZN_PRODUCTION_DISCORD_AUTH_REPAIR."
+              exit 1
+            fi
+          else
+            if ! echo "${{ github.event.head_commit.message }}" | grep -q "\[run-dzn-production-discord-auth-repair\]"; then
+              echo "::error::Push-triggered repair requires the explicit Discord auth repair marker."
+              exit 1
+            fi
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Production Discord auth repair may only run on main."
+            exit 1
+          fi
+
+          REPAIR_CF_TOKEN="${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}}"
+          if [ -z "${REPAIR_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_PULSE_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PREVIEW_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${REPAIR_CF_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${REPAIR_CF_TOKEN}" >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+          DISCORD_CLIENT_ID="${DZN_PRODUCTION_DISCORD_CLIENT_ID:-1504270029795885178}"
+          if ! echo "${DISCORD_CLIENT_ID}" | grep -Eq '^[0-9]{10,30}$'; then
+            echo "::error::DZN_PRODUCTION_DISCORD_CLIENT_ID must be a numeric Discord application ID."
+            exit 1
+          fi
+          printf "PRODUCTION_DISCORD_CLIENT_ID=%s\n" "${DISCORD_CLIENT_ID}" >> "$GITHUB_ENV"
+
+          node <<'NODE'
+          const redirectUri = process.env.PRODUCTION_DISCORD_REDIRECT_URI;
+          const appUrl = process.env.PRODUCTION_APP_URL;
+          const redirect = new URL(redirectUri);
+          const app = new URL(appUrl);
+          if (redirect.origin !== "https://dzn-network.pages.dev" || redirect.pathname !== "/api/auth/discord/callback") {
+            throw new Error("Production Discord redirect URI must be the dzn-network callback.");
+          }
+          if (app.href !== "https://dzn-network.pages.dev/") {
+            throw new Error("Production app URL must remain https://dzn-network.pages.dev.");
+          }
+          NODE
+
+          {
+            echo "## DZN Production Discord Auth Repair"
+            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Production Pages project: ${PRODUCTION_PAGES_PROJECT_NAME}"
+            echo "- DISCORD_CLIENT_ID present: true"
+            echo "- DISCORD_REDIRECT_URI: ${PRODUCTION_DISCORD_REDIRECT_URI}"
+            echo "- DZN_APP_URL: ${PRODUCTION_APP_URL}"
+            echo "- DZN_PULSE_ENABLED: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify existing production auth secret names
+        run: |
+          set -euo pipefail
+          npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-before.txt
+
+          for name in DISCORD_CLIENT_SECRET SESSION_SECRET; do
+            if grep -q "$name" pages-secrets-before.txt; then
+              echo "$name listed before repair: true"
+            else
+              echo "::error::Production Pages runtime secret $name is missing. Add it in Cloudflare Pages; this workflow will not copy runtime secrets into GitHub."
+              exit 1
+            fi
+          done
+
+      - name: Provision production Discord authorize bindings
+        run: |
+          set -euo pipefail
+
+          printf "%s" "${PRODUCTION_DISCORD_CLIENT_ID}" |
+            npx wrangler pages secret put DISCORD_CLIENT_ID \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          printf "%s" "${PRODUCTION_DISCORD_REDIRECT_URI}" |
+            npx wrangler pages secret put DISCORD_REDIRECT_URI \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          printf "%s" "${PRODUCTION_APP_URL}" |
+            npx wrangler pages secret put DZN_APP_URL \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          printf "true" |
+            npx wrangler pages secret put DZN_PULSE_ENABLED \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          printf "false" |
+            npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+
+          npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-after.txt
+          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET DISCORD_REDIRECT_URI DZN_APP_URL SESSION_SECRET DZN_PULSE_ENABLED DZN_DISCORD_NOTIFICATIONS_ENABLED; do
+            grep -q "$name" pages-secrets-after.txt
+            echo "$name listed after repair: true"
+          done
+
+      - name: Redeploy production Pages with Discord auth bindings
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const lines = [
+            'name = "dzn-network"',
+            'compatibility_date = "2026-05-13"',
+            'pages_build_output_dir = "./out"',
+            '',
+            '[[d1_databases]]',
+            'binding = "DB"',
+            'database_name = "dzn_network_db"',
+            'database_id = "37515c66-2787-49e4-8568-a461517e975e"',
+            '',
+          ];
+          fs.writeFileSync("wrangler.toml", lines.join("\n"));
+          NODE
+
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npx wrangler pages deploy out \
+            --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
+            --branch main \
+            --commit-hash "${GITHUB_SHA}" \
+            --commit-message "Repair production Discord auth bindings" \
+            --commit-dirty=true \
+            | tee production-discord-auth-pages-deploy.txt
+
+      - name: Verify production Discord authorize route
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const base = "https://dzn-network.pages.dev";
+          const expectedRedirectUri = "https://dzn-network.pages.dev/api/auth/discord/callback";
+          const forbidden = ["Request failed: 503", "SERVER UNAVAILABLE", "Error 1102", "exceeded resource limits"];
+
+          async function request(path, options = {}) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 25000);
+            try {
+              const response = await fetch(`${base}${path}`, {
+                redirect: options.redirect ?? "follow",
+                signal: controller.signal,
+                headers: {
+                  "User-Agent": "dzn-production-discord-auth-repair",
+                  ...(options.headers ?? {}),
+                },
+                ...options,
+              });
+              const text = await response.text();
+              return { status: response.status, text, headers: response.headers };
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+
+          async function waitForDiscordStart() {
+            let last = "";
+            for (let attempt = 1; attempt <= 24; attempt += 1) {
+              const result = await request("/api/auth/discord/start?returnTo=%2Fdashboard", { redirect: "manual" });
+              const location = result.headers.get("location") ?? "";
+              last = `status=${result.status} locationOrigin=${safeOrigin(location)}`;
+              if (result.status === 302) {
+                const redirect = new URL(location);
+                const redirectUri = redirect.searchParams.get("redirect_uri");
+                if (redirect.origin === "https://discord.com" && redirect.pathname === "/oauth2/authorize" && redirectUri === expectedRedirectUri) {
+                  console.log("Discord auth start redirects to Discord with the production callback.");
+                  return;
+                }
+                if (location.includes("error=discord_authorize")) {
+                  last = "discord_authorize";
+                }
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+            throw new Error(`Production Discord auth start did not recover: ${last}`);
+          }
+
+          function safeOrigin(location) {
+            try {
+              return new URL(location, base).origin;
+            } catch {
+              return "invalid";
+            }
+          }
+
+          async function check(path, count, statuses = [200]) {
+            for (let index = 0; index < count; index += 1) {
+              const result = await request(path);
+              if (!statuses.includes(result.status)) {
+                throw new Error(`${path} returned HTTP ${result.status}`);
+              }
+              for (const marker of forbidden) {
+                if (result.text.includes(marker)) {
+                  throw new Error(`${path} contained ${marker}`);
+                }
+              }
+            }
+            console.log(`${path}: ${count}/${count}`);
+          }
+
+          await waitForDiscordStart();
+
+          const config = await request("/api/dzn-pulse/config");
+          if (config.status !== 200) throw new Error(`/api/dzn-pulse/config returned ${config.status}`);
+          const parsedConfig = JSON.parse(config.text);
+          if (parsedConfig.dznPulseEnabled !== true || parsedConfig.discordNotificationsEnabled !== false) {
+            throw new Error("Pulse config changed unexpectedly.");
+          }
+          console.log("Pulse config remains enabled with Discord Pulse delivery disabled.");
+
+          await check("/api/dzn-pulse/summary", 2, [401, 403]);
+          await check("/api/public/servers", 10);
+          await check("/api/public/leaderboards/advanced", 10);
+          await check("/leaderboards", 5);
+          await check("/dzn-pulse", 3);
+          await check("/dashboard", 3);
+          console.log("Production Discord auth repair verification passed.");
+          NODE
