@@ -11,6 +11,7 @@ const autoUpdateWorkflow = read(".github/workflows/dzn-auto-update-schedulers.ym
 const autoUpdateWorkerDeployWorkflow = read(".github/workflows/dzn-auto-update-worker-deploy.yml");
 const admWorkerDeployWorkflow = read(".github/workflows/dzn-adm-worker-deploy.yml");
 const dznPulsePreviewWorkflow = read(".github/workflows/dzn-pulse-preview.yml");
+const dznPulseProductionRolloutWorkflow = read(".github/workflows/dzn-pulse-production-rollout.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
 const admWorkerConfig = read("wrangler.adm-sync.toml");
 const workflows = [
@@ -179,6 +180,29 @@ assert.equal(dznPulsePreviewWorkflow.includes("npx wrangler d1 execute DB --conf
 assert.equal(dznPulsePreviewWorkflow.includes("/api/dzn-pulse/config"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("/api/public/servers"), true);
 assert.equal(dznPulsePreviewWorkflow.includes("Worker exceeded resource limits"), true);
+
+assert.equal(dznPulseProductionRolloutWorkflow.includes("name: DZN Pulse Production Rollout"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("confirm_production_rollout"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED: { type: \"plain_text\", value: \"true\" }"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: \"plain_text\", value: \"false\" }"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler d1 migrations list \"${PRODUCTION_D1_DATABASE_NAME}\" --remote"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler d1 migrations apply \"${PRODUCTION_D1_DATABASE_NAME}\" --remote"), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("Migration 0052_dzn_pulse.sql is pending; stopping before enabling DZN Pulse."), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("Production D1 Pulse schema already exists; no migration was run."), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("notification_campaigns"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("user_notifications"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("event_popup_dismissals"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("notification_preferences"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("idx_notification_campaigns_active_priority"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("idx_user_notifications_user_read_created"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("idx_event_popup_dismissals_user_campaign_scope"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("wrangler.adm-sync.toml"), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("wrangler.auto-update.toml"), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("dzn-adm-sync-worker"), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("dzn-auto-update-worker"), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"true\""), false);
 
 const runtimeOnlySecretPatterns = [
   /secrets\.DISCORD_BOT_TOKEN/,

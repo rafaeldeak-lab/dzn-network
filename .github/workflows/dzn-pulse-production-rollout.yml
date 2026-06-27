@@ -192,66 +192,23 @@ jobs:
           await check("/dashboard", 3);
           NODE
 
-      - name: Record production D1 bookmark and schema
-        run: |
-          set -euo pipefail
-
-          bookmark_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          echo "D1 bookmark timestamp: ${bookmark_time}"
-          npx wrangler d1 time-travel info "${PRODUCTION_D1_DATABASE_NAME}" \
-            --json \
-            --timestamp "${bookmark_time}" \
-            | tee d1-time-travel-before.json
-
-          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
-            --remote \
-            --json \
-            --command "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','index') ORDER BY type, name;" \
-            > d1-schema-before.json
-
-          node <<'NODE'
-          const fs = require("node:fs");
-          const raw = fs.readFileSync("d1-time-travel-before.json", "utf8");
-          let parsed = {};
-          try { parsed = JSON.parse(raw); } catch {}
-          const text = JSON.stringify(parsed);
-          const bookmark = text.match(/[a-f0-9]{16,}/i)?.[0] ?? "recorded";
-          fs.writeFileSync("d1-bookmark-summary.txt", `${bookmark}\n`);
-          console.log(`Production D1 time-travel bookmark recorded: ${bookmark}`);
-          NODE
-
-      - name: Apply only migration 0052 to production D1
+      - name: Verify production Pulse schema already exists
         run: |
           set -euo pipefail
 
           npx wrangler d1 migrations list "${PRODUCTION_D1_DATABASE_NAME}" --remote | tee migrations-before.txt
 
-          node <<'NODE'
-          const fs = require("node:fs");
-          const text = fs.readFileSync("migrations-before.txt", "utf8");
-          const files = [...new Set(text.match(/\d{4}_[A-Za-z0-9_-]+\.sql/g) ?? [])];
-          if (files.length === 0) {
-            fs.writeFileSync("d1-migration-0052-already-applied.txt", "yes\n");
-            console.log("Migration 0052 is already applied; continuing with schema verification.");
-          } else if (files.length === 1 && files[0] === "0052_dzn_pulse.sql") {
-            fs.writeFileSync("d1-migration-0052-apply.txt", "yes\n");
-            console.log("Confirmed only 0052_dzn_pulse.sql is pending.");
-          } else {
-            throw new Error(`Expected only 0052_dzn_pulse.sql pending, found: ${files.join(", ") || "none"}`);
-          }
-          NODE
-
-          if [ -f d1-migration-0052-apply.txt ]; then
-            npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" --remote | tee migrations-apply.txt
-          else
-            echo "Skipping migration apply because 0052 is already applied." | tee migrations-apply.txt
-          fi
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
+            --remote \
+            --json \
+            --command "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','index') ORDER BY type, name;" \
+            > d1-schema-current.json
 
           npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
             --remote \
             --json \
             --command "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','index') ORDER BY type, name;" \
-            > d1-schema-after.json
+            > d1-schema-confirm.json
 
           npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" \
             --remote \
@@ -274,8 +231,17 @@ jobs:
             return parsed.flatMap((entry) => entry.results ?? []);
           }
 
-          const before = parseWranglerJson("d1-schema-before.json");
-          const after = parseWranglerJson("d1-schema-after.json");
+          const migrationText = fs.readFileSync("migrations-before.txt", "utf8");
+          const pendingMigrations = [...new Set(migrationText.match(/\d{4}_[A-Za-z0-9_-]+\.sql/g) ?? [])];
+          if (pendingMigrations.includes("0052_dzn_pulse.sql")) {
+            throw new Error("Migration 0052_dzn_pulse.sql is pending; stopping before enabling DZN Pulse.");
+          }
+          if (pendingMigrations.length > 0) {
+            throw new Error(`Unexpected pending production D1 migrations: ${pendingMigrations.join(", ")}`);
+          }
+
+          const current = parseWranglerJson("d1-schema-current.json");
+          const confirm = parseWranglerJson("d1-schema-confirm.json");
           const counts = parseWranglerJson("d1-pulse-counts.json");
           const requiredTables = [
             "notification_campaigns",
@@ -296,25 +262,20 @@ jobs:
             "idx_event_popup_dismissals_campaign",
             "idx_event_popup_dismissals_server",
           ];
-          const afterNames = new Set(after.map((row) => row.name));
+          const currentNames = new Set(current.map((row) => row.name));
           for (const name of [...requiredTables, ...requiredIndexes]) {
-            if (!afterNames.has(name)) throw new Error(`Missing Pulse schema object: ${name}`);
+            if (!currentNames.has(name)) throw new Error(`Missing Pulse schema object: ${name}`);
           }
-          const newNames = new Set([...requiredTables, ...requiredIndexes]);
-          const beforeMap = new Map(before.map((row) => [row.name, row.sql ?? ""]));
-          const afterMap = new Map(after.map((row) => [row.name, row.sql ?? ""]));
-          for (const [name, sql] of beforeMap) {
-            if (!afterMap.has(name)) throw new Error(`Existing schema object disappeared: ${name}`);
-            if (!newNames.has(name) && afterMap.get(name) !== sql) {
-              throw new Error(`Existing schema object changed unexpectedly: ${name}`);
-            }
+          const currentMap = new Map(current.map((row) => [row.name, row.sql ?? ""]));
+          const confirmMap = new Map(confirm.map((row) => [row.name, row.sql ?? ""]));
+          for (const [name, sql] of currentMap) {
+            if (!confirmMap.has(name)) throw new Error(`Schema object disappeared during read-only verification: ${name}`);
+            if (confirmMap.get(name) !== sql) throw new Error(`Schema object changed during read-only verification: ${name}`);
           }
           for (const row of counts) {
-            if (Number(row.count) !== 0) {
-              throw new Error(`Expected no demo data in ${row.table_name}, found ${row.count}`);
-            }
+            console.log(`${row.table_name}: ${Number(row.count ?? 0)} rows`);
           }
-          console.log("Production D1 Pulse migration verified with zero seeded rows.");
+          console.log("Production D1 Pulse schema already exists; no migration was run.");
           NODE
 
       - name: Enable Pulse and deploy production Pages
@@ -420,7 +381,7 @@ jobs:
             --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
             --branch main \
             --commit-hash "${GITHUB_SHA}" \
-            --commit-message "Enable DZN Pulse after migration" \
+            --commit-message "Enable DZN Pulse after schema verification" \
             --commit-dirty=true \
             | tee production-pages-deploy.txt
 
@@ -520,10 +481,7 @@ jobs:
             if [ -f production-pages-immutable-url.txt ]; then
               echo "- Production immutable URL: $(cat production-pages-immutable-url.txt)"
             fi
-            if [ -f d1-bookmark-summary.txt ]; then
-              echo "- D1 bookmark: $(cat d1-bookmark-summary.txt)"
-            fi
-            echo "- Migration: 0052_dzn_pulse.sql"
+            echo "- Migration: 0052_dzn_pulse.sql already applied; no migration run"
             echo "- DZN_PULSE_ENABLED: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
           } >> "$GITHUB_STEP_SUMMARY"
