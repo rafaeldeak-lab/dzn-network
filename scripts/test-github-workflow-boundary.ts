@@ -186,8 +186,8 @@ assert.equal(dznPulsePreviewWorkflow.includes("Worker exceeded resource limits")
 assert.equal(dznPulseProductionRolloutWorkflow.includes("name: DZN Pulse Production Rollout"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("confirm_production_rollout"), true);
-assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED = \"true\""), true);
-assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED = \"true\""), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), false);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler pages secret put DZN_PULSE_ENABLED"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
@@ -223,7 +223,8 @@ assert.equal(protectedRouteAuthRepairWorkflow.includes("npx wrangler pages secre
 assert.equal(protectedRouteAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_PULSE_ENABLED"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("--project-name \"${PRODUCTION_PAGES_PROJECT_NAME}\""), true);
-assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_PULSE_ENABLED = \"true\""), false);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), false);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"true\""), false);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("/api/sync/metadata/run"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("/api/cron/server-wars/refresh"), true);
