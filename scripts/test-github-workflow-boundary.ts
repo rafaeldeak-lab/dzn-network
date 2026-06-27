@@ -188,6 +188,8 @@ assert.equal(dznPulseProductionRolloutWorkflow.includes("workflow_dispatch:"), t
 assert.equal(dznPulseProductionRolloutWorkflow.includes("confirm_production_rollout"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED = \"true\""), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler pages secret put DZN_PULSE_ENABLED"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler d1 migrations list \"${PRODUCTION_D1_DATABASE_NAME}\" --remote"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler d1 migrations apply \"${PRODUCTION_D1_DATABASE_NAME}\" --remote"), false);
@@ -218,6 +220,8 @@ assert.equal(protectedRouteAuthRepairWorkflow.includes("SYNC_CRON_SECRET present
 assert.equal(protectedRouteAuthRepairWorkflow.includes("Selected secret source:"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("Headers sent: x-dzn-cron-secret, x-sync-cron-secret, x-cron-secret, Authorization"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_CRON_SECRET"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_PULSE_ENABLED"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("--project-name \"${PRODUCTION_PAGES_PROJECT_NAME}\""), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"true\""), false);

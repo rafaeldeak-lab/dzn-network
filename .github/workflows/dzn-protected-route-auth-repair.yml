@@ -116,9 +116,19 @@ jobs:
           printf "%s" "$PROTECTED_CRON_SECRET" |
             npx wrangler pages secret put DZN_CRON_SECRET \
               --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          printf "true" |
+            npx wrangler pages secret put DZN_PULSE_ENABLED \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          printf "false" |
+            npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
           npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-after.txt
           grep -q "DZN_CRON_SECRET" pages-secrets-after.txt
+          grep -q "DZN_PULSE_ENABLED" pages-secrets-after.txt
+          grep -q "DZN_DISCORD_NOTIFICATIONS_ENABLED" pages-secrets-after.txt
           echo "DZN_CRON_SECRET listed after repair: true"
+          echo "DZN_PULSE_ENABLED listed after repair: true"
+          echo "DZN_DISCORD_NOTIFICATIONS_ENABLED listed after repair: true"
 
       - name: Redeploy production Pages with existing flags
         run: |

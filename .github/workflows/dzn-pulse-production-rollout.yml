@@ -303,6 +303,13 @@ jobs:
           console.log("Prepared production Pages runtime config for DZN Pulse.");
           NODE
 
+          printf "true" |
+            npx wrangler pages secret put DZN_PULSE_ENABLED \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          printf "false" |
+            npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
           npx wrangler pages deploy out \
             --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
