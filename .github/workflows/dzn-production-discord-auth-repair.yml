@@ -152,6 +152,35 @@ jobs:
             echo "$name listed after repair: true"
           done
 
+      - name: Ensure Pages production branch is main
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.PRODUCTION_PAGES_PROJECT_NAME;
+          const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/${projectName}`;
+
+          const response = await fetch(url, {
+            method: "PATCH",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ production_branch: "main" }),
+          });
+          const body = await response.json().catch(() => null);
+          if (!response.ok || body?.success === false) {
+            const firstError = Array.isArray(body?.errors) ? body.errors[0] : null;
+            throw new Error(`Failed to set Pages production branch. status=${response.status} code=${firstError?.code ?? "unknown"}`);
+          }
+          if (body?.result?.production_branch !== "main") {
+            throw new Error("Pages production branch did not resolve to main.");
+          }
+          console.log("Pages production branch verified: main");
+          NODE
+
       - name: Redeploy production Pages with Discord auth bindings
         run: |
           set -euo pipefail

@@ -251,6 +251,10 @@ assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages se
 assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_APP_URL"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_PULSE_ENABLED"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("Ensure Pages production branch is main"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes('JSON.stringify({ production_branch: "main" })'), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("deployment_configs"), false);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("env_vars"), false);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("for name in DISCORD_CLIENT_SECRET SESSION_SECRET"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("$name listed before repair: true"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("/api/auth/discord/start?returnTo=%2Fdashboard"), true);
