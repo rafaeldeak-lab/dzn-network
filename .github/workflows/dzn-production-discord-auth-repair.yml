@@ -246,7 +246,7 @@ jobs:
               const location = result.headers.get("location") ?? "";
               last = `status=${result.status} locationOrigin=${safeOrigin(location)}`;
               if (result.status === 302) {
-                const redirect = new URL(location);
+                const redirect = new URL(location, base);
                 const redirectUri = redirect.searchParams.get("redirect_uri");
                 if (redirect.origin === "https://discord.com" && redirect.pathname === "/oauth2/authorize" && redirectUri === expectedRedirectUri) {
                   console.log("Discord auth start redirects to Discord with the production callback.");
