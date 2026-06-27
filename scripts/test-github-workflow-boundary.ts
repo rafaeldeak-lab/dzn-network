@@ -12,6 +12,7 @@ const autoUpdateWorkerDeployWorkflow = read(".github/workflows/dzn-auto-update-w
 const admWorkerDeployWorkflow = read(".github/workflows/dzn-adm-worker-deploy.yml");
 const dznPulsePreviewWorkflow = read(".github/workflows/dzn-pulse-preview.yml");
 const dznPulseProductionRolloutWorkflow = read(".github/workflows/dzn-pulse-production-rollout.yml");
+const protectedRouteAuthRepairWorkflow = read(".github/workflows/dzn-protected-route-auth-repair.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
 const admWorkerConfig = read("wrangler.adm-sync.toml");
 const workflows = [
@@ -20,6 +21,7 @@ const workflows = [
   [".github/workflows/dzn-auto-update-schedulers.yml", autoUpdateWorkflow],
   [".github/workflows/dzn-auto-update-worker-deploy.yml", autoUpdateWorkerDeployWorkflow],
   [".github/workflows/dzn-adm-worker-deploy.yml", admWorkerDeployWorkflow],
+  [".github/workflows/dzn-protected-route-auth-repair.yml", protectedRouteAuthRepairWorkflow],
 ] as const;
 
 assert.equal(admWorkflow.includes("name: DZN ADM Worker Manual Trigger"), true);
@@ -184,11 +186,13 @@ assert.equal(dznPulsePreviewWorkflow.includes("Worker exceeded resource limits")
 assert.equal(dznPulseProductionRolloutWorkflow.includes("name: DZN Pulse Production Rollout"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("confirm_production_rollout"), true);
-assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED: { type: \"plain_text\", value: \"true\" }"), true);
-assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: \"plain_text\", value: \"false\" }"), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED = \"true\""), true);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler d1 migrations list \"${PRODUCTION_D1_DATABASE_NAME}\" --remote"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("npx wrangler d1 migrations apply \"${PRODUCTION_D1_DATABASE_NAME}\" --remote"), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("PATCH"), false);
+assert.equal(dznPulseProductionRolloutWorkflow.includes("/pages/projects/${projectName}"), false);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("Migration 0052_dzn_pulse.sql is pending; stopping before enabling DZN Pulse."), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("Production D1 Pulse schema already exists; no migration was run."), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("notification_campaigns"), true);
@@ -203,6 +207,30 @@ assert.equal(dznPulseProductionRolloutWorkflow.includes("wrangler.auto-update.to
 assert.equal(dznPulseProductionRolloutWorkflow.includes("dzn-adm-sync-worker"), false);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("dzn-auto-update-worker"), false);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"true\""), false);
+
+assert.equal(protectedRouteAuthRepairWorkflow.includes("name: DZN Protected Route Auth Repair"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("confirm_protected_auth_repair"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("run-dzn-protected-auth-repair"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("CRON_SECRET=\"${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}\""), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_CRON_SECRET present:"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("SYNC_CRON_SECRET present:"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("Selected secret source:"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("Headers sent: x-dzn-cron-secret, x-sync-cron-secret, x-cron-secret, Authorization"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("npx wrangler pages secret put DZN_CRON_SECRET"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("--project-name \"${PRODUCTION_PAGES_PROJECT_NAME}\""), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"false\""), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED = \"true\""), false);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("/api/sync/metadata/run"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("/api/cron/server-wars/refresh"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("/api/sync/discord-posts/run"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("/api/autodev/adm-health"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("/api/sync/adm/run"), false);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("wrangler d1 migrations apply"), false);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("wrangler.adm-sync.toml"), false);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("wrangler.auto-update.toml"), false);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("dzn-adm-sync-worker"), false);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("dzn-auto-update-worker"), false);
 
 const runtimeOnlySecretPatterns = [
   /secrets\.DISCORD_BOT_TOKEN/,

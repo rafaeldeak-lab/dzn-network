@@ -1,0 +1,255 @@
+name: DZN Protected Route Auth Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_protected_auth_repair:
+        description: "Must equal DZN_PROTECTED_AUTH_REPAIR"
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/dzn-protected-route-auth-repair.yml"
+
+concurrency:
+  group: dzn-protected-route-auth-repair
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+      SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+      DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate protected auth repair guard
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.confirm_protected_auth_repair }}" != "DZN_PROTECTED_AUTH_REPAIR" ]; then
+              echo "::error::Manual dispatch must confirm DZN_PROTECTED_AUTH_REPAIR."
+              exit 1
+            fi
+          else
+            if ! echo "${{ github.event.head_commit.message }}" | grep -q "\[run-dzn-protected-auth-repair\]"; then
+              echo "::error::Push-triggered repair requires the explicit repair marker."
+              exit 1
+            fi
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Protected auth repair may only run on main."
+            exit 1
+          fi
+
+          REPAIR_CF_TOKEN="${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}}"
+          if [ -z "${REPAIR_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_PULSE_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PREVIEW_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${REPAIR_CF_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${REPAIR_CF_TOKEN}" >> "$GITHUB_ENV"
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET GitHub secret."
+            exit 1
+          fi
+          echo "::add-mask::${CRON_SECRET}"
+          if [ -n "${DZN_CRON_SECRET:-}" ]; then
+            echo "PROTECTED_CRON_SECRET_SOURCE=DZN_CRON_SECRET" >> "$GITHUB_ENV"
+          else
+            echo "PROTECTED_CRON_SECRET_SOURCE=SYNC_CRON_SECRET" >> "$GITHUB_ENV"
+          fi
+          printf "PROTECTED_CRON_SECRET=%s\n" "${CRON_SECRET}" >> "$GITHUB_ENV"
+
+          {
+            echo "## DZN Protected Route Auth Repair"
+            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Production Pages project: ${PRODUCTION_PAGES_PROJECT_NAME}"
+            echo "- DZN_CRON_SECRET present: $([ -n "${DZN_CRON_SECRET:-}" ] && echo true || echo false)"
+            echo "- SYNC_CRON_SECRET present: $([ -n "${SYNC_CRON_SECRET:-}" ] && echo true || echo false)"
+            echo "- Selected secret source: $([ -n "${DZN_CRON_SECRET:-}" ] && echo DZN_CRON_SECRET || echo SYNC_CRON_SECRET)"
+            echo "- Headers sent: x-dzn-cron-secret, x-sync-cron-secret, x-cron-secret, Authorization"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Inspect current Pages secret names
+        run: |
+          set -euo pipefail
+          npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-before.txt
+          if grep -q "DZN_CRON_SECRET" pages-secrets-before.txt; then
+            echo "DZN_CRON_SECRET listed before repair: true"
+          else
+            echo "DZN_CRON_SECRET listed before repair: false"
+          fi
+
+      - name: Provision production Pages cron secret
+        run: |
+          set -euo pipefail
+          printf "%s" "$PROTECTED_CRON_SECRET" |
+            npx wrangler pages secret put DZN_CRON_SECRET \
+              --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
+          npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-after.txt
+          grep -q "DZN_CRON_SECRET" pages-secrets-after.txt
+          echo "DZN_CRON_SECRET listed after repair: true"
+
+      - name: Redeploy production Pages with existing flags
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const lines = [
+            'name = "dzn-network"',
+            'compatibility_date = "2026-05-13"',
+            'pages_build_output_dir = "./out"',
+            '',
+            '[vars]',
+            'DZN_PULSE_ENABLED = "true"',
+            'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+            '',
+            '[[d1_databases]]',
+            'binding = "DB"',
+            'database_name = "dzn_network_db"',
+            'database_id = "37515c66-2787-49e4-8568-a461517e975e"',
+            '',
+          ];
+          fs.writeFileSync("wrangler.toml", lines.join("\n"));
+          NODE
+
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npx wrangler pages deploy out \
+            --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
+            --branch main \
+            --commit-hash "${GITHUB_SHA}" \
+            --commit-message "Repair protected route cron auth" \
+            --commit-dirty=true \
+            | tee protected-auth-pages-deploy.txt
+
+      - name: Verify protected route auth
+        run: |
+          set -euo pipefail
+
+          APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
+
+          node <<'NODE'
+          const base = process.env.DZN_APP_URL || "https://dzn-network.pages.dev";
+          const secret = process.env.PROTECTED_CRON_SECRET;
+          const forbidden = ["Request failed: 503", "SERVER UNAVAILABLE", "Error 1102", "exceeded resource limits"];
+
+          async function request(path, options = {}) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 25000);
+            try {
+              const response = await fetch(`${base}${path}`, {
+                redirect: "follow",
+                signal: controller.signal,
+                headers: {
+                  "User-Agent": "dzn-protected-auth-repair",
+                  ...(options.headers ?? {}),
+                },
+                ...options,
+              });
+              const text = await response.text();
+              return { status: response.status, text };
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+
+          async function assertPublic(path, count) {
+            for (let index = 0; index < count; index += 1) {
+              const result = await request(path);
+              if (result.status !== 200) throw new Error(`${path} returned HTTP ${result.status}`);
+              for (const marker of forbidden) {
+                if (result.text.includes(marker)) throw new Error(`${path} contained ${marker}`);
+              }
+            }
+            console.log(`${path}: ${count}/${count}`);
+          }
+
+          async function assertUnauthorized(path) {
+            const result = await request(path, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            });
+            if (![401, 403].includes(result.status)) {
+              throw new Error(`${path} without cron secret returned HTTP ${result.status}`);
+            }
+            console.log(`${path}: unauthenticated ${result.status}`);
+          }
+
+          async function assertAuthorized(path, body) {
+            const result = await request(path, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-dzn-cron-secret": secret,
+                "x-sync-cron-secret": secret,
+                "x-cron-secret": secret,
+                "authorization": `Bearer ${secret}`,
+              },
+              body,
+            });
+            console.log(`${path}: authorized HTTP ${result.status}`);
+            if (result.status === 401 || result.status === 403) {
+              throw new Error(`${path} still failed cron authorization.`);
+            }
+            if (result.status < 200 || result.status >= 300) {
+              throw new Error(`${path} returned HTTP ${result.status}: ${result.text.slice(0, 160)}`);
+            }
+            for (const marker of forbidden) {
+              if (result.text.includes(marker)) throw new Error(`${path} contained ${marker}`);
+            }
+          }
+
+          const config = await request("/api/dzn-pulse/config");
+          if (config.status !== 200) throw new Error(`/api/dzn-pulse/config returned ${config.status}`);
+          const parsedConfig = JSON.parse(config.text);
+          if (parsedConfig.dznPulseEnabled !== true || parsedConfig.discordNotificationsEnabled !== false) {
+            throw new Error("Pulse config changed unexpectedly.");
+          }
+
+          await assertUnauthorized("/api/sync/metadata/run");
+          await assertUnauthorized("/api/cron/server-wars/refresh");
+          await assertUnauthorized("/api/sync/discord-posts/run");
+          await assertUnauthorized("/api/autodev/adm-health");
+
+          await assertAuthorized("/api/autodev/adm-health", "{}");
+          await assertAuthorized("/api/sync/metadata/run", JSON.stringify({ source: "github-auth-repair", cron: "protected-auth-repair", max_servers: 1, deadline_ms: 2500 }));
+          await assertAuthorized("/api/cron/server-wars/refresh", JSON.stringify({ source: "github-auth-repair", max_events: 1, max_finalizations: 1, max_challenge_expirations: 10, deadline_ms: 2500 }));
+          await assertAuthorized("/api/sync/discord-posts/run", JSON.stringify({ source: "github-auth-repair", cron: "protected-auth-repair", max_jobs: 1, deadline_ms: 2500 }));
+
+          await assertPublic("/api/public/servers", 5);
+          await assertPublic("/api/public/leaderboards/advanced", 5);
+          await assertPublic("/dzn-pulse", 3);
+          console.log("Protected route auth repair verification passed.");
+          NODE
