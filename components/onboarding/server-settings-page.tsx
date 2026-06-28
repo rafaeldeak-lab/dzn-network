@@ -47,6 +47,12 @@ type SettingsResponse = {
     currentCategory: CategoryValue | null;
     currentCategoryLabel: string;
     description: string;
+    advertBannerUrl?: string | null;
+    advertBannerAlt?: string | null;
+    ownerAnnouncement?: string | null;
+    freshWipePromo?: string | null;
+    discordEmbedBannerUrl?: string | null;
+    discordEmbedAccentColor?: string | null;
     visibility: ListingVisibility;
     listingUpdatedAt: string | null;
     lastUpdatedAt: string | null;
@@ -68,6 +74,28 @@ type SettingsResponse = {
     plan_key: string;
     subscription_status: string;
     policy_group: "trial_free" | "pro_premium";
+    listing_plan_key?: "free" | "pro";
+    listing_label?: string;
+  };
+  listing?: {
+    listingPlanKey: "free" | "pro";
+    publicLabel: string;
+    descriptionLimit: number;
+    bumpCooldownDays: number;
+    galleryLimit: number;
+    galleryMaxFileSizeBytes: number;
+    galleryRecommendedWidth: number;
+    galleryRecommendedHeight: number;
+    galleryAspectRatio: string;
+    discordChannelLimit: number | null;
+    enhancedDiscordEmbeds: boolean;
+    customAdvertBanner: boolean;
+    ownerAnnouncement: boolean;
+    listingAnalytics: "limited" | "pro";
+    canUseCustomBanner: boolean;
+    canUseGallery: boolean;
+    canUseOwnerAnnouncement: boolean;
+    canUseProDiscordEmbeds: boolean;
   };
   categoryPolicy: {
     cooldownDays: number;
@@ -359,6 +387,12 @@ export function ServerSettingsPage() {
   const [confirmingCategory, setConfirmingCategory] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [description, setDescription] = useState("");
+  const [advertBannerUrl, setAdvertBannerUrl] = useState("");
+  const [advertBannerAlt, setAdvertBannerAlt] = useState("");
+  const [ownerAnnouncement, setOwnerAnnouncement] = useState("");
+  const [freshWipePromo, setFreshWipePromo] = useState("");
+  const [discordEmbedBannerUrl, setDiscordEmbedBannerUrl] = useState("");
+  const [discordEmbedAccentColor, setDiscordEmbedAccentColor] = useState("");
   const [visibility, setVisibility] = useState<ListingVisibility>("public");
   const [discordChannels, setDiscordChannels] = useState<DiscordEventChannelsResponse | null>(null);
   const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
@@ -386,6 +420,7 @@ export function ServerSettingsPage() {
   const categoryProgress = useSaveProgress();
   const tagsProgress = useSaveProgress();
   const descriptionProgress = useSaveProgress();
+  const proAdvertProgress = useSaveProgress();
   const visibilityProgress = useSaveProgress();
   const discordSaveProgress = useSaveProgress();
   const discordTestProgress = useSaveProgress();
@@ -432,6 +467,12 @@ export function ServerSettingsPage() {
         setSelectedCategory(data.server.currentCategory ?? "");
         setSelectedTags(data.currentTags);
         setDescription(data.server.description ?? "");
+        setAdvertBannerUrl(data.server.advertBannerUrl ?? "");
+        setAdvertBannerAlt(data.server.advertBannerAlt ?? "");
+        setOwnerAnnouncement(data.server.ownerAnnouncement ?? "");
+        setFreshWipePromo(data.server.freshWipePromo ?? "");
+        setDiscordEmbedBannerUrl(data.server.discordEmbedBannerUrl ?? "");
+        setDiscordEmbedAccentColor(data.server.discordEmbedAccentColor ?? "");
         setVisibility(data.server.visibility);
         setEventChannelIds(channelIdsFromSettings(data));
         setSaveState({ area: null, message: null, error: null });
@@ -510,11 +551,22 @@ export function ServerSettingsPage() {
 
   const selectedServer = useMemo(() => servers.find((server) => server.id === selectedServerId) ?? null, [servers, selectedServerId]);
   const selectedCategoryOption = settings?.availableCategories.find((category) => category.value === selectedCategory) ?? null;
+  const listingLimits = settings?.listing;
+  const descriptionLimit = listingLimits?.descriptionLimit ?? 500;
+  const listingLabel = listingLimits?.publicLabel ?? "Free Listing";
   const categoryChanged = Boolean(settings && selectedCategory && selectedCategory !== settings.server.currentCategory);
   const descriptionChanged = Boolean(settings && description !== (settings.server.description ?? ""));
   const visibilityChanged = Boolean(settings && visibility !== settings.server.visibility);
   const tagsChanged = Boolean(settings && JSON.stringify(selectedTags) !== JSON.stringify(settings.currentTags));
   const discordChanged = Boolean(settings && JSON.stringify(eventChannelIds) !== JSON.stringify(channelIdsFromSettings(settings)));
+  const proAdvertChanged = Boolean(settings && (
+    advertBannerUrl !== (settings.server.advertBannerUrl ?? "") ||
+    advertBannerAlt !== (settings.server.advertBannerAlt ?? "") ||
+    ownerAnnouncement !== (settings.server.ownerAnnouncement ?? "") ||
+    freshWipePromo !== (settings.server.freshWipePromo ?? "") ||
+    discordEmbedBannerUrl !== (settings.server.discordEmbedBannerUrl ?? "") ||
+    discordEmbedAccentColor !== (settings.server.discordEmbedAccentColor ?? "")
+  ));
 
   async function saveCategory() {
     if (!settings || !selectedCategory) return;
@@ -553,21 +605,32 @@ export function ServerSettingsPage() {
     }
   }
 
-  async function saveListing(kind: "description" | "visibility") {
+  async function saveListing(kind: "description" | "visibility" | "proAdvert") {
     if (!settings) return;
-    const progress = kind === "description" ? descriptionProgress : visibilityProgress;
-    progress.start(kind === "description" ? "Validating description..." : "Validating visibility...", 15);
+    const progress = kind === "description" ? descriptionProgress : kind === "visibility" ? visibilityProgress : proAdvertProgress;
+    progress.start(kind === "description" ? "Validating description..." : kind === "visibility" ? "Validating visibility..." : "Validating Pro advert settings...", 15);
     setSaveState({ area: null, message: null, error: null });
     try {
-      progress.setStage("saving", kind === "description" ? "Saving public description..." : "Saving listing visibility...", 35);
-      const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/listing`, { description, visibility });
+      progress.setStage("saving", kind === "description" ? "Saving public description..." : kind === "visibility" ? "Saving listing visibility..." : "Saving Pro advert settings...", 35);
+      const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/listing`, {
+        description,
+        visibility,
+        advertBannerUrl,
+        advertBannerAlt,
+        ownerAnnouncement,
+        freshWipePromo,
+        discordEmbedBannerUrl,
+        discordEmbedAccentColor,
+      });
       progress.setStage("refreshing", "Refreshing public listing status...", 70);
       await reloadSettings(settings.server.id);
       const fallback = kind === "visibility"
         ? visibility === "hidden"
           ? "Server hidden from public listings."
           : "Public listing updated."
-        : "Public description updated.";
+        : kind === "proAdvert"
+          ? "Pro advert settings updated."
+          : "Public description updated.";
       setSaveState({ area: null, message: result.message ?? fallback, error: null });
       progress.complete("Saved");
     } catch (error) {
@@ -589,6 +652,12 @@ export function ServerSettingsPage() {
     setSelectedCategory(next.server.currentCategory ?? "");
     setSelectedTags(next.currentTags);
     setDescription(next.server.description ?? "");
+    setAdvertBannerUrl(next.server.advertBannerUrl ?? "");
+    setAdvertBannerAlt(next.server.advertBannerAlt ?? "");
+    setOwnerAnnouncement(next.server.ownerAnnouncement ?? "");
+    setFreshWipePromo(next.server.freshWipePromo ?? "");
+    setDiscordEmbedBannerUrl(next.server.discordEmbedBannerUrl ?? "");
+    setDiscordEmbedAccentColor(next.server.discordEmbedAccentColor ?? "");
     setVisibility(next.server.visibility);
     setEventChannelIds(channelIdsFromSettings(next));
     void refreshDiscordEventChannels(serverId, false);
@@ -1110,15 +1179,15 @@ export function ServerSettingsPage() {
               <textarea
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                maxLength={500}
+                maxLength={descriptionLimit}
                 rows={7}
                 placeholder="Describe your community, server rules, and what makes it worth joining."
                 className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-black/32 px-3 py-3 text-sm font-bold leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45"
               />
             </label>
             <div className="mt-2 flex items-center justify-between gap-3 text-xs font-bold text-zinc-500">
-              <span>40 to 500 characters. HTML is sanitized.</span>
-              <span>{description.length}/500</span>
+              <span>40 to {descriptionLimit} characters on {listingLabel}. HTML is sanitized.</span>
+              <span>{description.length}/{descriptionLimit}</span>
             </div>
             <SaveProgressButton
               idleLabel="Save Description"
@@ -1138,6 +1207,25 @@ export function ServerSettingsPage() {
       </div>
 
       <VisualLoadoutSection key={settings.server.id} serverId={settings.server.id} serverName={settings.server.name} planKey={settings.plan.plan_key} />
+      <AdvertisingPackagePanel settings={settings} />
+      <ProAdvertSettingsPanel
+        settings={settings}
+        advertBannerUrl={advertBannerUrl}
+        setAdvertBannerUrl={setAdvertBannerUrl}
+        advertBannerAlt={advertBannerAlt}
+        setAdvertBannerAlt={setAdvertBannerAlt}
+        ownerAnnouncement={ownerAnnouncement}
+        setOwnerAnnouncement={setOwnerAnnouncement}
+        freshWipePromo={freshWipePromo}
+        setFreshWipePromo={setFreshWipePromo}
+        discordEmbedBannerUrl={discordEmbedBannerUrl}
+        setDiscordEmbedBannerUrl={setDiscordEmbedBannerUrl}
+        discordEmbedAccentColor={discordEmbedAccentColor}
+        setDiscordEmbedAccentColor={setDiscordEmbedAccentColor}
+        changed={proAdvertChanged}
+        progress={proAdvertProgress}
+        onSave={() => saveListing("proAdvert")}
+      />
 
       <section id="discord-event-channels" className="glass-surface animated-border mt-5 rounded-lg p-5">
         <div className="relative z-10">
@@ -1572,6 +1660,229 @@ function JoinedSeasonGroup({ seasons }: { seasons: OwnerJoinedSeason[] }) {
         <p className="mt-3 text-sm leading-6 text-zinc-400">This server has not joined a DZN season yet.</p>
       )}
     </div>
+  );
+}
+
+function AdvertisingPackagePanel({ settings }: { settings: SettingsResponse }) {
+  const listing = settings.listing;
+  const isPro = listing?.listingPlanKey === "pro";
+  const features = [
+    {
+      title: "Gallery images",
+      text: "Add up to 4 gallery images to make your server listing more eye-catching.",
+      icon: Eye,
+      unlocked: Boolean(listing?.canUseGallery),
+    },
+    {
+      title: "Custom banner",
+      text: "Add a custom server advert banner for public cards, profiles, and Discord embeds.",
+      icon: ShieldCheck,
+      unlocked: Boolean(listing?.canUseCustomBanner),
+    },
+    {
+      title: "Weekly bump",
+      text: "Bump your server every 7 days instead of every 30 days.",
+      icon: RefreshCw,
+      unlocked: isPro,
+    },
+    {
+      title: "Discord Pro embeds",
+      text: "Auto-post enhanced server adverts, events, leaderboards and weekly recaps into your Discord.",
+      icon: Bell,
+      unlocked: Boolean(listing?.canUseProDiscordEmbeds),
+    },
+    {
+      title: "Analytics",
+      text: "See listing views, join clicks, Discord clicks and bump performance where tracking is available.",
+      icon: BarChart3,
+      unlocked: listing?.listingAnalytics === "pro",
+    },
+  ];
+
+  return (
+    <section className="glass-surface animated-border mt-5 rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <SectionTitle icon={<ShieldCheck className="h-5 w-5" />} title="Advertising Package" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+              Current package: <span className="font-black text-white">{listing?.publicLabel ?? settings.plan.listing_label ?? "Free Listing"}</span>. Pro improves presentation, Discord promotion and analytics only. It never changes reviews, kill stats, K/D, longest kill, leaderboard rank, or gameplay results.
+            </p>
+          </div>
+          {!isPro ? (
+            <Link href="/dashboard?tab=billing" className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/30 bg-violet-500/15 px-4 py-3 text-xs font-black uppercase text-violet-50 transition hover:border-violet-200/60">
+              Upgrade to Pro
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          ) : null}
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {features.map((feature) => {
+            const Icon = feature.icon;
+            return (
+              <article key={feature.title} className={`rounded-lg border p-4 ${feature.unlocked ? "border-cyan-300/25 bg-cyan-400/10" : "border-violet-300/18 bg-violet-400/[0.075]"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <Icon className={`h-5 w-5 ${feature.unlocked ? "text-cyan-100" : "text-violet-100"}`} />
+                  <span className="rounded-md border border-white/10 bg-black/24 px-2 py-1 text-[10px] font-black uppercase text-zinc-200">
+                    {feature.unlocked ? "Active" : "PRO FEATURE"}
+                  </span>
+                </div>
+                <h3 className="mt-4 text-sm font-black uppercase text-white">{feature.title}</h3>
+                <p className="mt-2 text-xs leading-5 text-zinc-300">{feature.text}</p>
+                {!feature.unlocked ? (
+                  <div className="mt-3 inline-flex items-center gap-1.5 text-[10px] font-black uppercase text-violet-100">
+                    <LockKeyhole className="h-3.5 w-3.5" />
+                    Locked preview
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProAdvertSettingsPanel({
+  settings,
+  advertBannerUrl,
+  setAdvertBannerUrl,
+  advertBannerAlt,
+  setAdvertBannerAlt,
+  ownerAnnouncement,
+  setOwnerAnnouncement,
+  freshWipePromo,
+  setFreshWipePromo,
+  discordEmbedBannerUrl,
+  setDiscordEmbedBannerUrl,
+  discordEmbedAccentColor,
+  setDiscordEmbedAccentColor,
+  changed,
+  progress,
+  onSave,
+}: {
+  settings: SettingsResponse;
+  advertBannerUrl: string;
+  setAdvertBannerUrl: (value: string) => void;
+  advertBannerAlt: string;
+  setAdvertBannerAlt: (value: string) => void;
+  ownerAnnouncement: string;
+  setOwnerAnnouncement: (value: string) => void;
+  freshWipePromo: string;
+  setFreshWipePromo: (value: string) => void;
+  discordEmbedBannerUrl: string;
+  setDiscordEmbedBannerUrl: (value: string) => void;
+  discordEmbedAccentColor: string;
+  setDiscordEmbedAccentColor: (value: string) => void;
+  changed: boolean;
+  progress: ReturnType<typeof useSaveProgress>;
+  onSave: () => void;
+}) {
+  const listing = settings.listing;
+  const canUseBanner = Boolean(listing?.canUseCustomBanner);
+  const canUseAnnouncement = Boolean(listing?.canUseOwnerAnnouncement);
+  const canUseDiscordEmbeds = Boolean(listing?.canUseProDiscordEmbeds);
+  const locked = !(canUseBanner || canUseAnnouncement || canUseDiscordEmbeds);
+
+  return (
+    <section className="glass-surface animated-border mt-5 rounded-lg p-5">
+      <div className="relative z-10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <SectionTitle icon={<Eye className="h-5 w-5" />} title="Pro Advert Visuals" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+              Publish Pro-only presentation fields for your public profile and enhanced Discord embeds. Images must be hosted through the existing approved storage/CDN flow before you paste the HTTPS URL here.
+            </p>
+            {locked ? (
+              <p className="mt-2 text-xs font-bold text-violet-100">Free listings can preview these tools, but the backend will reject publishing until the server has Pro access.</p>
+            ) : null}
+          </div>
+          <SaveProgressButton
+            idleLabel="Save Pro Advert"
+            savingLabel="Saving Pro Advert..."
+            refreshingLabel="Refreshing..."
+            successLabel="Saved"
+            errorLabel="Retry Save"
+            state={progress.state}
+            disabled={!changed || locked}
+            onClick={onSave}
+            icon={<Save className="h-4 w-4" />}
+            buttonClassName="inline-flex items-center gap-2 rounded-lg border border-violet-300/25 bg-violet-400/10 px-4 py-3 text-xs font-black uppercase text-violet-50 transition hover:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+          />
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <label className="block">
+            <span className="text-[10px] font-black uppercase text-zinc-400">Custom advert banner HTTPS URL</span>
+            <input
+              value={advertBannerUrl}
+              onChange={(event) => setAdvertBannerUrl(event.target.value)}
+              disabled={!canUseBanner}
+              placeholder="https://cdn.example.com/server-banner.jpg"
+              className="mt-2 w-full rounded-lg border border-white/10 bg-black/32 px-3 py-3 text-sm font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] font-black uppercase text-zinc-400">Banner alt text</span>
+            <input
+              value={advertBannerAlt}
+              onChange={(event) => setAdvertBannerAlt(event.target.value.slice(0, 120))}
+              disabled={!canUseBanner}
+              maxLength={120}
+              placeholder="Short accessible banner description"
+              className="mt-2 w-full rounded-lg border border-white/10 bg-black/32 px-3 py-3 text-sm font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+          </label>
+          <label className="block lg:col-span-2">
+            <span className="text-[10px] font-black uppercase text-zinc-400">Owner announcement</span>
+            <textarea
+              value={ownerAnnouncement}
+              onChange={(event) => setOwnerAnnouncement(event.target.value.slice(0, 500))}
+              disabled={!canUseAnnouncement}
+              maxLength={500}
+              rows={3}
+              placeholder="Share a Pro-only announcement for your server profile."
+              className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-black/32 px-3 py-3 text-sm font-bold leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+            <span className="mt-1 block text-xs font-bold text-zinc-500">{ownerAnnouncement.length}/500</span>
+          </label>
+          <label className="block lg:col-span-2">
+            <span className="text-[10px] font-black uppercase text-zinc-400">Fresh wipe or event promo</span>
+            <textarea
+              value={freshWipePromo}
+              onChange={(event) => setFreshWipePromo(event.target.value.slice(0, 240))}
+              disabled={!canUseAnnouncement}
+              maxLength={240}
+              rows={2}
+              placeholder="Example: Fresh wipe this Friday, faction war signups open."
+              className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-black/32 px-3 py-3 text-sm font-bold leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+            <span className="mt-1 block text-xs font-bold text-zinc-500">{freshWipePromo.length}/240</span>
+          </label>
+          <label className="block">
+            <span className="text-[10px] font-black uppercase text-zinc-400">Discord embed banner HTTPS URL</span>
+            <input
+              value={discordEmbedBannerUrl}
+              onChange={(event) => setDiscordEmbedBannerUrl(event.target.value)}
+              disabled={!canUseDiscordEmbeds}
+              placeholder="https://cdn.example.com/discord-embed-banner.jpg"
+              className="mt-2 w-full rounded-lg border border-white/10 bg-black/32 px-3 py-3 text-sm font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] font-black uppercase text-zinc-400">Discord embed accent colour</span>
+            <input
+              value={discordEmbedAccentColor}
+              onChange={(event) => setDiscordEmbedAccentColor(event.target.value)}
+              disabled={!canUseDiscordEmbeds}
+              placeholder="#7c3aed"
+              className="mt-2 w-full rounded-lg border border-white/10 bg-black/32 px-3 py-3 text-sm font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-300/45 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+          </label>
+        </div>
+      </div>
+    </section>
   );
 }
 

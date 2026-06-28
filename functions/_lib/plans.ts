@@ -4,9 +4,14 @@ import {
   AUTO_POST_TYPES,
   AUTO_POST_OPTIONS,
   BILLING_PLAN_CONFIG,
+  FREE_BUMP_COOLDOWN_DAYS,
   PAID_PLAN_KEYS,
+  PRO_BUMP_COOLDOWN_DAYS,
+  canUseProFeature as centralCanUseProFeature,
   getAdmDiscoveryIntervalMinutes as centralAdmDiscoveryInterval,
   getAdmPullInterval as centralAdmPullInterval,
+  getBumpCooldownDays as centralGetBumpCooldownDays,
+  getListingLimits as centralGetListingLimits,
   getManualRefreshCooldown as centralManualRefreshCooldown,
   getPlanByStripePriceId,
   getPlanPriority as centralPlanPriority,
@@ -14,9 +19,15 @@ import {
   getPublicPublishIntervalMinutes as centralPublicPublishInterval,
   getServerStatusInterval as centralServerStatusInterval,
   hasAutoPost as centralHasAutoPost,
+  hasListingAutoPost as centralHasListingAutoPost,
   hasPlanFeature as centralHasPlanFeature,
+  isProListing as centralIsProListing,
+  normalizeListingPlanKey as centralNormalizeListingPlanKey,
   normalizePlanKey as centralNormalizePlanKey,
   type AutoPostType,
+  type ListingFeatureKey,
+  type ListingLimits,
+  type ListingPlanKey,
   type NormalizedPlanKey,
   type PlanFeature,
 } from "../../lib/billing/plans";
@@ -97,13 +108,13 @@ export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
     plan_key: "free",
     ...automationPlan("free"),
     max_linked_servers: 1,
-    can_use_reviews: false,
+    can_use_reviews: true,
     can_use_public_listing: true,
     can_use_advanced_analytics: false,
     can_join_events: false,
-    can_use_ad_bumps: false,
-    included_bumps_per_month: 0,
-    bump_cooldown_hours: 999,
+    can_use_ad_bumps: true,
+    included_bumps_per_month: 1,
+    bump_cooldown_hours: FREE_BUMP_COOLDOWN_DAYS * 24,
     can_use_featured_slots: false,
     stat_history_days: 7,
   },
@@ -130,8 +141,8 @@ export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
     can_use_advanced_analytics: true,
     can_join_events: true,
     can_use_ad_bumps: true,
-    included_bumps_per_month: 2,
-    bump_cooldown_hours: 24,
+    included_bumps_per_month: 1,
+    bump_cooldown_hours: PRO_BUMP_COOLDOWN_DAYS * 24,
     can_use_featured_slots: false,
     stat_history_days: 90,
   },
@@ -144,8 +155,8 @@ export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
     can_use_advanced_analytics: true,
     can_join_events: true,
     can_use_ad_bumps: true,
-    included_bumps_per_month: 8,
-    bump_cooldown_hours: 6,
+    included_bumps_per_month: 1,
+    bump_cooldown_hours: PRO_BUMP_COOLDOWN_DAYS * 24,
     can_use_featured_slots: true,
     stat_history_days: 365,
   },
@@ -303,6 +314,30 @@ export function hasAutoPost(planKey: unknown, postType: AutoPostType) {
   return centralHasAutoPost(planKey, postType);
 }
 
+export function normalizeListingPlanKey(planOrSubscription: unknown, subscriptionStatus?: unknown): ListingPlanKey {
+  return centralNormalizeListingPlanKey(planOrSubscription, subscriptionStatus);
+}
+
+export function isProListing(planOrSubscription: unknown, subscriptionStatus?: unknown) {
+  return centralIsProListing(planOrSubscription, subscriptionStatus);
+}
+
+export function getListingLimits(planOrSubscription: unknown, subscriptionStatus?: unknown): ListingLimits {
+  return centralGetListingLimits(planOrSubscription, subscriptionStatus);
+}
+
+export function getBumpCooldownDays(planOrSubscription: unknown, subscriptionStatus?: unknown) {
+  return centralGetBumpCooldownDays(planOrSubscription, subscriptionStatus);
+}
+
+export function canUseProFeature(planOrSubscription: unknown, featureKey: ListingFeatureKey) {
+  return centralCanUseProFeature(planOrSubscription, featureKey);
+}
+
+export function hasListingAutoPost(planOrSubscription: unknown, postType: AutoPostType, subscriptionStatus?: unknown) {
+  return centralHasListingAutoPost(planOrSubscription, postType, subscriptionStatus);
+}
+
 export function getServerStatusInterval(planKey: unknown) {
   return centralServerStatusInterval(planKey);
 }
@@ -405,6 +440,9 @@ export async function ensureBillingSchema(env: Env) {
     .run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_advertising_state_owner_discord_id ON server_advertising_state(owner_discord_id)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_advertising_state_featured_until ON server_advertising_state(featured_until)").run();
+  await ensureColumn(env, "server_advertising_state", "next_bump_at", "TEXT");
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_advertising_state_next_bump_at ON server_advertising_state(next_bump_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_advertising_state_last_bumped_at ON server_advertising_state(last_bumped_at)").run();
 
   await db
     .prepare(

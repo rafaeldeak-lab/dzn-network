@@ -5212,13 +5212,11 @@ function AdvertisingBoostPanel({
 }) {
   const [bumping, setBumping] = useState(false);
   const [error, setError] = useState("");
-  const entitlements = billing?.entitlements;
-  const canBump = Boolean(entitlements?.can_use_ad_bumps);
+  const isProListing = billing?.plan_status === "active" || billing?.plan_status === "trialing";
+  const canBump = true;
   const proCheckoutConfigured = Boolean(billing?.checkout_configured?.pro);
-  const used = advertising?.bump_count_current_period ?? 0;
-  const included = advertising?.included_bumps_per_month ?? entitlements?.included_bumps_per_month ?? 0;
+  const cooldownDays = advertising?.bump_cooldown_days ?? (isProListing ? 7 : 30);
   const nextAvailable = nextBumpLabel(advertising);
-  const limitReached = included > 0 && used >= included;
   const cooldownActive = nextAvailable !== "Now" && canBump;
   const nextBumpCopy = nextAvailable === "Now" ? "now" : nextAvailable.toLowerCase();
 
@@ -5250,22 +5248,22 @@ function AdvertisingBoostPanel({
             </div>
           ) : null}
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <MiniInfo label="Bumps Used" value={`${used} / ${included}`} />
+            <MiniInfo label="Listing Plan" value={isProListing ? "Pro Listing" : "Free Listing"} />
             <MiniInfo label="Next Bump" value={nextAvailable} />
             <MiniInfo label="Last Bumped" value={advertising?.last_bumped_at ? formatRelativeTime(advertising.last_bumped_at) : "Never"} />
-            <MiniInfo label="Cooldown" value={`${advertising?.bump_cooldown_hours ?? entitlements?.bump_cooldown_hours ?? 24}h`} />
+            <MiniInfo label="Cooldown" value={`${cooldownDays} days`} />
           </div>
           <button
             type="button"
-            disabled={bumping || limitReached || cooldownActive}
+            disabled={bumping || cooldownActive}
             onClick={bump}
             className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-55"
           >
             <Zap className="h-4 w-4" />
-            {bumping ? "Bumping..." : limitReached ? "Limit reached" : cooldownActive ? "Cooldown active" : "Bump Server"}
+            {bumping ? "Bumping..." : cooldownActive ? "Cooldown active" : "Bump Server"}
           </button>
           <p className="mt-3 text-xs leading-5 text-zinc-400">
-            Bumps are paid visibility only. They do not change organic rank or score.
+            Your free listing can be bumped once every 30 days. Upgrade to Pro to bump once every 7 days. Bumps are visibility only and do not change organic rank or score.
           </p>
         </>
       ) : (
@@ -8853,12 +8851,20 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
 }
 
 function nextBumpLabel(advertising: AdvertisingBumpStatus | null) {
+  const explicitNext = advertising?.next_bump_at ? Date.parse(advertising.next_bump_at) : 0;
+  if (explicitNext > Date.now()) return humanCooldown(explicitNext - Date.now());
   if (!advertising?.last_bumped_at) return "Now";
   const last = new Date(advertising.last_bumped_at);
   if (Number.isNaN(last.getTime())) return "Now";
-  const next = last.getTime() + advertising.bump_cooldown_hours * 60 * 60 * 1000;
+  const cooldownDays = advertising.bump_cooldown_days ?? Math.ceil((advertising.bump_cooldown_hours ?? 24) / 24);
+  const next = last.getTime() + cooldownDays * 24 * 60 * 60 * 1000;
   if (next <= Date.now()) return "Now";
-  const hours = Math.ceil((next - Date.now()) / (60 * 60 * 1000));
+  return humanCooldown(next - Date.now());
+}
+
+function humanCooldown(ms: number) {
+  const hours = Math.ceil(ms / (60 * 60 * 1000));
+  if (hours >= 48) return `In ${Math.ceil(hours / 24)} days`;
   return `In ${hours}h`;
 }
 
