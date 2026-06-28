@@ -734,8 +734,8 @@ jobs:
 
             await expectStatus("/", 200);
             await expectStatus("/servers", 200);
-            await expectStatus("/servers/dzn-free-preview", 200);
-            await expectStatus("/servers/dzn-pro-preview", 200);
+            await expectStatus("/servers/profile?slug=dzn-free-preview", 200);
+            await expectStatus("/servers/profile?slug=dzn-pro-preview", 200);
             await expectStatus("/api/public/servers", 200);
             await expectStatus("/api/public/home-stats", 200);
             await expectStatus("/api/public/leaderboards", 200);
