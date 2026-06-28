@@ -155,7 +155,7 @@ jobs:
             process.exit(1);
           }
           console.log(`Production D1 verified: ${db.name} (${db.uuid})`);
-NODE
+          NODE
 
       - name: Create production D1 Time Travel bookmark
         run: |
@@ -177,7 +177,7 @@ NODE
           }
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Production D1 backup/bookmark: ${bookmark}\n`);
           console.log(`Production D1 Time Travel bookmark created: ${bookmark}`);
-NODE
+          NODE
 
       - name: Inspect production schema before migration
         run: |
@@ -214,7 +214,7 @@ NODE
           }
           fs.writeFileSync('d1-pending-0053.txt', pending.includes(allowed[0]) ? 'yes' : 'no');
           console.log(`Pending migration 0053: ${pending.includes(allowed[0]) ? 'yes' : 'no'}`);
-NODE
+          NODE
 
           if [ "$(cat d1-pending-0053.txt)" = "yes" ]; then
             npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" --remote
@@ -310,7 +310,7 @@ NODE
           }
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '- PRAGMA foreign_key_check: passed\n');
           console.log('Production D1 schema verification passed.');
-NODE
+          NODE
 
   deploy:
     if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'deploy') || (github.event_name == 'push' && contains(join(github.event.commits.*.message, '\n'), '[run-dzn-server-advertising-production-deploy]')) }}
@@ -417,7 +417,7 @@ NODE
             process.exit(1);
           }
           console.log('Migration 0053 schema present before production deploy.');
-NODE
+          NODE
 
       - name: Validate feature branch before deploy
         run: |
@@ -522,7 +522,7 @@ NODE
             process.exit(1);
           }
           console.log('Pulse config verified: enabled=true, discordNotificationsEnabled=false');
-NODE
+          NODE
 
           for path in \
             "/api/dzn-pulse/summary" \
