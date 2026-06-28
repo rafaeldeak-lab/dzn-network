@@ -50,6 +50,14 @@ type NitradoLivePlayerCountProbe = {
   sampledAt: string;
 };
 
+type NitradoCurrentPlayerResolution = {
+  currentPlayers: number | null;
+  source: "gameservers_games_players" | "gameservers_metadata" | "none";
+  conflict: boolean;
+  liveCurrentPlayers: number | null;
+  metadataCurrentPlayers: number | null;
+};
+
 export type LinkedServerMetadata = {
   hostname: string | null;
   description: string | null;
@@ -502,13 +510,16 @@ async function refreshNitradoServerPlayerCountOnly(
     geo_last_checked_at: null,
   };
   try {
+    const nitradoToken = isMockNitrado(env.MOCK_NITRADO)
+      ? null
+      : await getNitradoTokenForLinkedServer(env, linkedServer);
     const livePlayerCount = isMockNitrado(env.MOCK_NITRADO)
       ? {
           currentPlayers: cleanNumber(row.current_players) ?? 0,
           source: "gameservers_games_players" as const,
           sampledAt: now,
         }
-      : await fetchNitradoOnlinePlayerCount(await getNitradoTokenForLinkedServer(env, linkedServer), row.nitrado_service_id ?? "", now, options.timeoutMs);
+      : await fetchNitradoOnlinePlayerCount(nitradoToken ?? "", row.nitrado_service_id ?? "", now, options.timeoutMs);
     if (!livePlayerCount) {
       await updatePlayerCountFreshness(db, row.id, {
         checkedAt: now,
@@ -537,8 +548,36 @@ async function refreshNitradoServerPlayerCountOnly(
         },
       };
     }
-    const currentPlayers = cleanNumber(livePlayerCount.currentPlayers);
-    const maxPlayers = cleanNumber(row.max_players);
+
+    const metadataFallback = !isMockNitrado(env.MOCK_NITRADO) && cleanNumber(livePlayerCount.currentPlayers) === 0
+      ? await fetchNitradoMetadataSnapshot(nitradoToken ?? "", linkedServer, now, options.timeoutMs).catch((error) => {
+          console.warn("DZN PLAYER COUNT METADATA CROSS CHECK SKIPPED", {
+            linkedServerId: row.id,
+            serviceId: row.nitrado_service_id,
+            message: error instanceof Error ? error.message : "metadata cross-check unavailable",
+          });
+          return null;
+        })
+      : null;
+    const resolvedPlayerCount = resolveNitradoCurrentPlayerCount({
+      livePlayerCount,
+      gameserverCurrentPlayers: metadataFallback?.current_players ?? null,
+    });
+    if (resolvedPlayerCount.conflict) {
+      console.warn("DZN PLAYER COUNT SOURCE CONFLICT RESOLVED", {
+        linkedServerId: row.id,
+        serviceId: row.nitrado_service_id,
+        gamePort: metadataFallback?.game_port ?? null,
+        queryPort: metadataFallback?.query_port ?? null,
+        selectedSource: resolvedPlayerCount.source,
+        liveCurrentPlayers: resolvedPlayerCount.liveCurrentPlayers,
+        metadataCurrentPlayers: resolvedPlayerCount.metadataCurrentPlayers,
+        previousStoredCurrentPlayers: cleanNumber(row.current_players),
+        previousStoredMaxPlayers: cleanNumber(row.max_players),
+      });
+    }
+    const currentPlayers = resolvedPlayerCount.currentPlayers;
+    const maxPlayers = cleanNumber(metadataFallback?.max_players) ?? cleanNumber(row.max_players);
     await db
       .prepare(
         `UPDATE linked_servers SET
@@ -1036,6 +1075,34 @@ async function fetchNitradoOnlinePlayerCount(
   }
 }
 
+async function fetchNitradoMetadataSnapshot(
+  token: string,
+  linkedServer: LinkedServerMetadataRow,
+  now: string,
+  timeoutMs = 2500,
+): Promise<LinkedServerMetadata | null> {
+  const serviceId = linkedServer.nitrado_service_id ?? "";
+  if (!serviceId) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(500, Math.min(Math.trunc(timeoutMs) || 2500, 2500)));
+  try {
+    const response = await fetch(
+      `${NITRADO_API}/services/${encodeURIComponent(serviceId)}/gameservers`,
+      {
+        headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+        signal: controller.signal,
+      },
+    );
+    if (response.status === 401 || response.status === 403) return null;
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => null);
+    const metadata = await normalizeNitradoMetadata(payload, linkedServer, now, null);
+    return metadata.player_count_status === "fresh" ? metadata : null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function mockMetadata(linkedServer: LinkedServerMetadataRow, now: string) {
   const name = linkedServer.nitrado_service_id === "18765761"
     ? "NukeTown DEATHMATCH"
@@ -1156,10 +1223,24 @@ function normalizeNitradoMetadata(
     statusQuery.players,
     playerCountPair?.current,
   );
-  const currentPlayers = livePlayerCount?.currentPlayers ?? gameserverCurrentPlayers;
   const ipAddress = normalizeIpAddress(firstString(gameserver.ip, gameserver.address, query.ip, query.address, details.address));
   const gamePort = firstNumber(gameserver.port, config.port, query.port, details.port, portList.game, portList.port);
   const queryPort = firstNumber(gameserver.query_port, config.query_port, query.query_port, details.query_port, portList.query);
+  const resolvedPlayerCount = resolveNitradoCurrentPlayerCount({ livePlayerCount, gameserverCurrentPlayers });
+  if (resolvedPlayerCount.conflict) {
+    console.warn("DZN PLAYER COUNT SOURCE CONFLICT RESOLVED", {
+      linkedServerId: linkedServer.id,
+      serviceId: linkedServer.nitrado_service_id,
+      gamePort,
+      queryPort,
+      selectedSource: resolvedPlayerCount.source,
+      liveCurrentPlayers: resolvedPlayerCount.liveCurrentPlayers,
+      metadataCurrentPlayers: resolvedPlayerCount.metadataCurrentPlayers,
+      previousStoredCurrentPlayers: cleanNumber(linkedServer.current_players),
+      previousStoredMaxPlayers: cleanNumber(linkedServer.max_players),
+    });
+  }
+  const currentPlayers = resolvedPlayerCount.currentPlayers;
   const mapName = firstString(config.map, config.map_name, gameSpecific.map, gameSpecific.map_name, gameserver.map, query.map);
   const mission = firstString(config.mission, gameSpecific.mission, gameSpecific.mission_name, gameserver.mission);
   const serverStatus = firstString(gameserver.status, query.status, details.status, gameserver.server_status);
@@ -1188,7 +1269,10 @@ function normalizeNitradoMetadata(
       description,
       maxPlayers,
       currentPlayers,
-      playerCountSource: livePlayerCount?.source ?? "gameservers",
+      playerCountSource: resolvedPlayerCount.source === "none" ? "gameservers" : resolvedPlayerCount.source,
+      livePlayerCountCurrentPlayers: resolvedPlayerCount.liveCurrentPlayers,
+      metadataCurrentPlayers: resolvedPlayerCount.metadataCurrentPlayers,
+      playerCountSourceConflict: resolvedPlayerCount.conflict,
       livePlayerCountObservedAt: livePlayerCount?.sampledAt ?? null,
       ipAddress,
       gamePort,
@@ -1413,6 +1497,62 @@ export function extractNitradoOnlinePlayerCount(payload: unknown): number | null
   const directNumber = firstNumberFromPlayerCountKeys(payload);
   if (directNumber !== null) return directNumber;
   return countPlayerList(payload);
+}
+
+export function resolveNitradoCurrentPlayerCount(values: {
+  livePlayerCount?: { currentPlayers?: number | null; source?: string | null } | null;
+  gameserverCurrentPlayers?: number | null | undefined;
+}): NitradoCurrentPlayerResolution {
+  const liveCurrentPlayers = cleanNumber(values.livePlayerCount?.currentPlayers);
+  const metadataCurrentPlayers = cleanNumber(values.gameserverCurrentPlayers);
+
+  if (liveCurrentPlayers !== null && metadataCurrentPlayers !== null) {
+    if (liveCurrentPlayers === 0 && metadataCurrentPlayers > 0) {
+      return {
+        currentPlayers: metadataCurrentPlayers,
+        source: "gameservers_metadata",
+        conflict: true,
+        liveCurrentPlayers,
+        metadataCurrentPlayers,
+      };
+    }
+
+    return {
+      currentPlayers: liveCurrentPlayers,
+      source: "gameservers_games_players",
+      conflict: false,
+      liveCurrentPlayers,
+      metadataCurrentPlayers,
+    };
+  }
+
+  if (liveCurrentPlayers !== null) {
+    return {
+      currentPlayers: liveCurrentPlayers,
+      source: "gameservers_games_players",
+      conflict: false,
+      liveCurrentPlayers,
+      metadataCurrentPlayers,
+    };
+  }
+
+  if (metadataCurrentPlayers !== null) {
+    return {
+      currentPlayers: metadataCurrentPlayers,
+      source: "gameservers_metadata",
+      conflict: false,
+      liveCurrentPlayers,
+      metadataCurrentPlayers,
+    };
+  }
+
+  return {
+    currentPlayers: null,
+    source: "none",
+    conflict: false,
+    liveCurrentPlayers,
+    metadataCurrentPlayers,
+  };
 }
 
 export function resolveLivePlayerCounts(values: {

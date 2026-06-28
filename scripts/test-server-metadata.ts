@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveLivePlayerCounts } from "../functions/_lib/server-metadata";
+import { detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveLivePlayerCounts, resolveNitradoCurrentPlayerCount } from "../functions/_lib/server-metadata";
 
 assert.equal(detectServerModeFromText(["NukeTown DEATHMATCH"]), "DEATHMATCH");
 assert.equal(detectServerModeFromText(["Weekend raids KOS faction wars"]), "PVP");
@@ -31,6 +31,36 @@ assert.equal(
 );
 assert.equal(extractNitradoOnlinePlayerCount({ data: { current_players: 3 } }), 3);
 assert.equal(extractNitradoOnlinePlayerCount({ data: { player_count: "4 / 10" } }), 4);
+assert.deepEqual(resolveNitradoCurrentPlayerCount({
+  livePlayerCount: { currentPlayers: 0, source: "gameservers_games_players" },
+  gameserverCurrentPlayers: 1,
+}), {
+  currentPlayers: 1,
+  source: "gameservers_metadata",
+  conflict: true,
+  liveCurrentPlayers: 0,
+  metadataCurrentPlayers: 1,
+}, "Official metadata/query count must override an empty online-player endpoint when the two Nitrado sources conflict.");
+assert.deepEqual(resolveNitradoCurrentPlayerCount({
+  livePlayerCount: { currentPlayers: 0, source: "gameservers_games_players" },
+  gameserverCurrentPlayers: 0,
+}), {
+  currentPlayers: 0,
+  source: "gameservers_games_players",
+  conflict: false,
+  liveCurrentPlayers: 0,
+  metadataCurrentPlayers: 0,
+}, "A zero remains valid when the metadata endpoint agrees.");
+assert.deepEqual(resolveNitradoCurrentPlayerCount({
+  livePlayerCount: null,
+  gameserverCurrentPlayers: 2,
+}), {
+  currentPlayers: 2,
+  source: "gameservers_metadata",
+  conflict: false,
+  liveCurrentPlayers: null,
+  metadataCurrentPlayers: 2,
+}, "Metadata/query counts remain a trusted fallback when the player-list endpoint is unavailable.");
 assert.deepEqual(resolveLivePlayerCounts({
   currentPlayers: 2,
   maxPlayers: 10,
@@ -84,6 +114,8 @@ assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT METADATA MISSING"),
 assert.equal(serverMetadataSource.includes("player_count_status: PlayerCountStatus"), true);
 assert.equal(serverMetadataSource.includes("/gameservers/games/players"), true, "Live player count should use Nitrado's online player endpoint when available.");
 assert.equal(serverMetadataSource.includes("gameservers_games_players"), true, "Live player count source should be recorded without storing player lists.");
+assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT SOURCE CONFLICT RESOLVED"), true);
+assert.equal(serverMetadataSource.includes("fetchNitradoMetadataSnapshot"), true);
 assert.equal(serverMetadataSource.includes("extractNitradoOnlinePlayerCount"), true, "Online player endpoint payloads should be reduced to a count only.");
 assert.equal(serverMetadataSource.includes("currentMissing = rawCurrent === null"), true);
 assert.equal(serverMetadataSource.includes("skipFreshWithinMs"), true);
