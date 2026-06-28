@@ -1,0 +1,556 @@
+name: DZN Server Advertising Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Rollout stage to run
+        required: true
+        type: choice
+        options:
+          - migrate
+          - deploy
+      confirm_production_rollout:
+        description: Must equal DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT
+        required: true
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: dzn-server-advertising-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+  PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+  PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+  FEATURE_BRANCH: feature/server-advertising-system
+  EXPECTED_SERVER_ADVERTISING_SHA: 547e4626fb12fcf88b9d49f1d9d6e026b787f26e
+  FEATURE_MIGRATION_PATH: migrations/0053_server_advertising_packages.sql
+  DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+  PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+
+jobs:
+  migrate:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'migrate') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-dzn-server-advertising-production-migration]'))
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Select Cloudflare token
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.confirm_production_rollout }}" != "DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT" ]; then
+              echo "::error::Manual dispatch must confirm DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT."
+              exit 1
+            fi
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Production rollout may only run on main."
+            exit 1
+          fi
+
+          ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}}}"
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PREVIEW_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}" >> "$GITHUB_ENV"
+
+          if [ -n "${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-}" ]; then
+            echo "ROLLOUT_CF_TOKEN_SOURCE=CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN" >> "$GITHUB_ENV"
+          elif [ -n "${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-}" ]; then
+            echo "ROLLOUT_CF_TOKEN_SOURCE=CLOUDFLARE_PULSE_PRODUCTION_TOKEN" >> "$GITHUB_ENV"
+          elif [ -n "${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-}" ]; then
+            echo "ROLLOUT_CF_TOKEN_SOURCE=CLOUDFLARE_PULSE_PREVIEW_TOKEN" >> "$GITHUB_ENV"
+          else
+            echo "ROLLOUT_CF_TOKEN_SOURCE=CLOUDFLARE_API_TOKEN" >> "$GITHUB_ENV"
+          fi
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+      - name: Fetch and validate approved feature migration
+        run: |
+          set -euo pipefail
+
+          git fetch origin "${FEATURE_BRANCH}:${FEATURE_BRANCH}"
+          git merge-base --is-ancestor "${EXPECTED_SERVER_ADVERTISING_SHA}" "${FEATURE_BRANCH}"
+
+          mkdir -p migrations
+          git show "${FEATURE_BRANCH}:${FEATURE_MIGRATION_PATH}" > "${FEATURE_MIGRATION_PATH}"
+
+          if grep -Eiq "\b(DROP|TRUNCATE|DELETE\s+FROM)\b" "${FEATURE_MIGRATION_PATH}"; then
+            echo "::error::Migration 0053 contains destructive SQL."
+            exit 1
+          fi
+
+          if grep -Eiq "player_stats|kill_events|player_events|build_events|server_public_cache|server_wars|leaderboard|adm_import" "${FEATURE_MIGRATION_PATH}"; then
+            echo "::error::Migration 0053 references protected stat/cache/ADM tables."
+            exit 1
+          fi
+
+          if grep -Eiq "\bALTER\s+TABLE\b" "${FEATURE_MIGRATION_PATH}" &&
+             grep -Eiv "^\s*(--.*)?$|^\s*ALTER\s+TABLE\s+[^;]+\s+ADD\s+COLUMN\s+[^;]+;?\s*$" "${FEATURE_MIGRATION_PATH}" |
+             grep -Eiq "ALTER\s+TABLE"; then
+            echo "::error::Migration 0053 contains ALTER TABLE outside additive ADD COLUMN usage."
+            exit 1
+          fi
+
+          {
+            echo "## DZN Server Advertising Migration"
+            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Approved feature branch: ${FEATURE_BRANCH}"
+            echo "- Approved feature commit ancestor: ${EXPECTED_SERVER_ADVERTISING_SHA}"
+            echo "- Production D1 database: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- Cloudflare token source: ${ROLLOUT_CF_TOKEN_SOURCE}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm production D1 identity
+        run: |
+          set -euo pipefail
+
+          D1_LIST="$(npx wrangler d1 list --json)"
+          D1_LIST="${D1_LIST}" node <<'NODE'
+          const list = JSON.parse(process.env.D1_LIST || '[]');
+          const expectedName = process.env.PRODUCTION_D1_DATABASE_NAME;
+          const expectedId = process.env.PRODUCTION_D1_DATABASE_ID;
+          const db = list.find((entry) => entry.name === expectedName);
+          if (!db) {
+            console.error(`::error::Production D1 database ${expectedName} was not found.`);
+            process.exit(1);
+          }
+          if (db.uuid !== expectedId) {
+            console.error(`::error::Production D1 id mismatch for ${expectedName}.`);
+            process.exit(1);
+          }
+          console.log(`Production D1 verified: ${db.name} (${db.uuid})`);
+NODE
+
+      - name: Create production D1 Time Travel bookmark
+        run: |
+          set -euo pipefail
+
+          BOOKMARK_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          npx wrangler d1 time-travel info "${PRODUCTION_D1_DATABASE_NAME}" \
+            --timestamp "${BOOKMARK_TIMESTAMP}" \
+            --json > d1-time-travel-before-0053.json
+
+          node <<'NODE'
+          const fs = require('fs');
+          const payload = JSON.parse(fs.readFileSync('d1-time-travel-before-0053.json', 'utf8'));
+          const info = Array.isArray(payload) ? payload[0] : payload;
+          const bookmark = info?.bookmark || info?.result?.bookmark || info?.bookmarks?.[0]?.bookmark || null;
+          if (!bookmark) {
+            console.error('::error::Cloudflare did not return a D1 Time Travel bookmark.');
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Production D1 backup/bookmark: ${bookmark}\n`);
+          console.log(`Production D1 Time Travel bookmark created: ${bookmark}`);
+NODE
+
+      - name: Inspect production schema before migration
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT 'linked_servers' AS table_name, COUNT(*) AS row_count FROM linked_servers UNION ALL SELECT 'server_advertising_state', COUNT(*) FROM server_advertising_state;" \
+            > d1-counts-before.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT name, type FROM sqlite_master WHERE name IN ('server_gallery_images','server_listing_events','idx_server_advertising_state_next_bump_at','idx_server_advertising_state_last_bumped_at','idx_server_gallery_images_server_sort','idx_server_listing_events_server_type_created','idx_server_listing_events_user_type_created') ORDER BY name;" \
+            > d1-schema-before.json
+
+      - name: Apply only migration 0053 if needed
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT name FROM d1_migrations ORDER BY id;" > d1-applied-migrations.json
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const payload = JSON.parse(fs.readFileSync('d1-applied-migrations.json', 'utf8'));
+          const rows = Array.isArray(payload) ? payload.flatMap((entry) => entry.results || []) : [];
+          const applied = new Set(rows.map((row) => row.name));
+          const local = fs.readdirSync('migrations').filter((name) => name.endsWith('.sql')).sort();
+          const pending = local.filter((name) => !applied.has(name));
+          const allowed = ['0053_server_advertising_packages.sql'];
+          const unexpected = pending.filter((name) => !allowed.includes(name));
+          if (unexpected.length) {
+            console.error(`::error::Unexpected pending production D1 migrations: ${unexpected.join(', ')}`);
+            process.exit(1);
+          }
+          fs.writeFileSync('d1-pending-0053.txt', pending.includes(allowed[0]) ? 'yes' : 'no');
+          console.log(`Pending migration 0053: ${pending.includes(allowed[0]) ? 'yes' : 'no'}`);
+NODE
+
+          if [ "$(cat d1-pending-0053.txt)" = "yes" ]; then
+            npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" --remote
+            echo "- Migration 0053: applied" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Migration 0053: already applied" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Verify production schema after migration
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT 'linked_servers' AS table_name, COUNT(*) AS row_count FROM linked_servers UNION ALL SELECT 'server_advertising_state', COUNT(*) FROM server_advertising_state;" \
+            > d1-counts-after.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT name, type FROM sqlite_master WHERE name IN ('server_gallery_images','server_listing_events','idx_server_advertising_state_next_bump_at','idx_server_advertising_state_last_bumped_at','idx_server_gallery_images_server_sort','idx_server_listing_events_server_type_created','idx_server_listing_events_user_type_created') ORDER BY name;" \
+            > d1-schema-after.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA table_info(linked_servers);" > d1-linked-servers-columns.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA table_info(server_advertising_state);" > d1-ad-state-columns.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA foreign_key_check;" > d1-foreign-key-check.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT 'server_gallery_images' AS table_name, COUNT(*) AS row_count FROM server_gallery_images UNION ALL SELECT 'server_listing_events', COUNT(*) FROM server_listing_events;" \
+            > d1-new-table-counts.json
+
+          node <<'NODE'
+          const fs = require('fs');
+          const readRows = (file) => {
+            const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+            return Array.isArray(payload) ? payload.flatMap((entry) => entry.results || []) : [];
+          };
+
+          const beforeCounts = readRows('d1-counts-before.json');
+          const afterCounts = readRows('d1-counts-after.json');
+          const countFor = (rows, table) => rows.find((row) => row.table_name === table)?.row_count;
+          for (const table of ['linked_servers', 'server_advertising_state']) {
+            if (countFor(beforeCounts, table) !== countFor(afterCounts, table)) {
+              console.error(`::error::Unexpected row count change for ${table}.`);
+              process.exit(1);
+            }
+          }
+
+          const schemaNames = new Set(readRows('d1-schema-after.json').map((row) => row.name));
+          const requiredSchema = [
+            'server_gallery_images',
+            'server_listing_events',
+            'idx_server_advertising_state_next_bump_at',
+            'idx_server_advertising_state_last_bumped_at',
+            'idx_server_gallery_images_server_sort',
+            'idx_server_listing_events_server_type_created',
+            'idx_server_listing_events_user_type_created',
+          ];
+          for (const name of requiredSchema) {
+            if (!schemaNames.has(name)) {
+              console.error(`::error::Missing expected 0053 schema object: ${name}`);
+              process.exit(1);
+            }
+          }
+
+          const linkedColumns = new Set(readRows('d1-linked-servers-columns.json').map((row) => row.name));
+          for (const column of ['advert_banner_url', 'advert_banner_alt', 'owner_announcement', 'fresh_wipe_promo', 'discord_embed_banner_url', 'discord_embed_accent_color']) {
+            if (!linkedColumns.has(column)) {
+              console.error(`::error::Missing linked_servers advertising column: ${column}`);
+              process.exit(1);
+            }
+          }
+
+          const adStateColumns = new Set(readRows('d1-ad-state-columns.json').map((row) => row.name));
+          if (!adStateColumns.has('next_bump_at')) {
+            console.error('::error::Missing server_advertising_state.next_bump_at.');
+            process.exit(1);
+          }
+
+          const fkRows = readRows('d1-foreign-key-check.json');
+          if (fkRows.length) {
+            console.error('::error::PRAGMA foreign_key_check returned violations.');
+            process.exit(1);
+          }
+
+          const newCounts = readRows('d1-new-table-counts.json');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- linked_servers rows preserved: ${countFor(afterCounts, 'linked_servers')}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- server_advertising_state rows preserved: ${countFor(afterCounts, 'server_advertising_state')}\n`);
+          for (const row of newCounts) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${row.table_name} rows after migration: ${row.row_count}\n`);
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '- PRAGMA foreign_key_check: passed\n');
+          console.log('Production D1 schema verification passed.');
+NODE
+
+  deploy:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-dzn-server-advertising-production-deploy]'))
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate deploy guard
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.confirm_production_rollout }}" != "DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT" ]; then
+              echo "::error::Manual dispatch must confirm DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT."
+              exit 1
+            fi
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Production deploy may only run on main."
+            exit 1
+          fi
+
+          git merge-base --is-ancestor "${EXPECTED_SERVER_ADVERTISING_SHA}" HEAD
+
+          ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}}}"
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PREVIEW_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}" >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+      - name: Verify migration 0053 is already present
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT name, type FROM sqlite_master WHERE name IN ('server_gallery_images','server_listing_events','idx_server_advertising_state_next_bump_at','idx_server_advertising_state_last_bumped_at','idx_server_gallery_images_server_sort','idx_server_listing_events_server_type_created','idx_server_listing_events_user_type_created') ORDER BY name;" \
+            > d1-schema-before-deploy.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA table_info(linked_servers);" > d1-linked-columns-before-deploy.json
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA table_info(server_advertising_state);" > d1-ad-state-columns-before-deploy.json
+
+          node <<'NODE'
+          const fs = require('fs');
+          const readRows = (file) => {
+            const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+            return Array.isArray(payload) ? payload.flatMap((entry) => entry.results || []) : [];
+          };
+          const schemaNames = new Set(readRows('d1-schema-before-deploy.json').map((row) => row.name));
+          const requiredSchema = [
+            'server_gallery_images',
+            'server_listing_events',
+            'idx_server_advertising_state_next_bump_at',
+            'idx_server_advertising_state_last_bumped_at',
+            'idx_server_gallery_images_server_sort',
+            'idx_server_listing_events_server_type_created',
+            'idx_server_listing_events_user_type_created',
+          ];
+          for (const name of requiredSchema) {
+            if (!schemaNames.has(name)) {
+              console.error(`::error::Missing schema object before deploy: ${name}`);
+              process.exit(1);
+            }
+          }
+          const linkedColumns = new Set(readRows('d1-linked-columns-before-deploy.json').map((row) => row.name));
+          for (const column of ['advert_banner_url', 'advert_banner_alt', 'owner_announcement', 'fresh_wipe_promo', 'discord_embed_banner_url', 'discord_embed_accent_color']) {
+            if (!linkedColumns.has(column)) {
+              console.error(`::error::Missing linked_servers column before deploy: ${column}`);
+              process.exit(1);
+            }
+          }
+          const adStateColumns = new Set(readRows('d1-ad-state-columns-before-deploy.json').map((row) => row.name));
+          if (!adStateColumns.has('next_bump_at')) {
+            console.error('::error::Missing server_advertising_state.next_bump_at before deploy.');
+            process.exit(1);
+          }
+          console.log('Migration 0053 schema present before production deploy.');
+NODE
+
+      - name: Validate feature branch before deploy
+        run: |
+          set -euo pipefail
+          npm run lint
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npm run test:server-advertising-packages
+          npm run test:billing-plans
+          npm run test:public-access-gating
+          npm run test:github-workflows
+          git diff --check
+
+      - name: Deploy production Pages
+        run: |
+          set -euo pipefail
+
+          npx wrangler pages deploy out \
+            --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
+            --branch main \
+            --commit-hash "${GITHUB_SHA}" \
+            --commit-message "Deploy Free and Pro server advertising system" \
+            | tee production-pages-deploy.txt
+
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' production-pages-deploy.txt | head -n 1 || true)"
+          if [ -z "${DEPLOY_URL:-}" ]; then
+            DEPLOY_URL="${PRODUCTION_BASE_URL}"
+          fi
+          echo "PRODUCTION_DEPLOY_URL=${DEPLOY_URL}" >> "$GITHUB_ENV"
+          {
+            echo "## DZN Server Advertising Production Deploy"
+            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Production stable URL: ${PRODUCTION_BASE_URL}"
+            echo "- Production deployment URL: ${DEPLOY_URL}"
+            echo "- DZN_PULSE_ENABLED: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify production routes
+        run: |
+          set -euo pipefail
+
+          sleep 20
+
+          check_url() {
+            local path="$1"
+            local expected="$2"
+            local tries="${3:-3}"
+            local url="${PRODUCTION_BASE_URL}${path}"
+            local ok=0
+            local status=""
+            for attempt in $(seq 1 "${tries}"); do
+              body_file="$(mktemp)"
+              status="$(curl -L -sS -o "${body_file}" -w "%{http_code}" "${url}" || true)"
+              if [ "${status}" = "${expected}" ]; then
+                ok=$((ok + 1))
+              else
+                echo "::error::${path} returned HTTP ${status}, expected ${expected}."
+                cat "${body_file}" | head -c 500
+                rm -f "${body_file}"
+                exit 1
+              fi
+              if grep -Eqi "Error 1102|Request failed: 503|Minified React error #418" "${body_file}"; then
+                echo "::error::${path} response contained a blocked runtime error marker."
+                rm -f "${body_file}"
+                exit 1
+              fi
+              rm -f "${body_file}"
+            done
+            echo "${path} ${ok}/${tries} ${expected}" >> production-route-results.txt
+          }
+
+          : > production-route-results.txt
+          check_url "/" "200" 3
+          check_url "/servers" "200" 3
+          check_url "/dzn-pulse" "200" 3
+          check_url "/dashboard" "200" 3
+          check_url "/api/public/server-rail" "200" 5
+          check_url "/api/public/servers" "200" 10
+          check_url "/api/public/home-stats" "200" 10
+          check_url "/api/public/leaderboards" "200" 10
+          check_url "/api/public/leaderboards/advanced" "200" 10
+          check_url "/api/public/server-wars" "200" 10
+
+          for slug in nuketown-deathmatch pandora-dayz; do
+            status="$(curl -L -sS -o /tmp/profile-body.txt -w "%{http_code}" "${PRODUCTION_BASE_URL}/servers/profile?slug=${slug}" || true)"
+            if [ "${status}" != "200" ] && [ "${status}" != "404" ]; then
+              echo "::error::Profile slug ${slug} returned HTTP ${status}."
+              exit 1
+            fi
+            echo "/servers/profile?slug=${slug} ${status}" >> production-route-results.txt
+          done
+
+          CONFIG_JSON="$(curl -sS "${PRODUCTION_BASE_URL}/api/dzn-pulse/config")"
+          CONFIG_JSON="${CONFIG_JSON}" node <<'NODE'
+          const config = JSON.parse(process.env.CONFIG_JSON || '{}');
+          if (config.dznPulseEnabled !== true) {
+            console.error('::error::DZN Pulse config is not enabled after production deploy.');
+            process.exit(1);
+          }
+          if (config.discordNotificationsEnabled !== false) {
+            console.error('::error::DZN Discord Pulse delivery is not false after production deploy.');
+            process.exit(1);
+          }
+          console.log('Pulse config verified: enabled=true, discordNotificationsEnabled=false');
+NODE
+
+          for path in \
+            "/api/dzn-pulse/summary" \
+            "/api/dzn-pulse/notifications/unread-count" \
+            "/api/dzn-pulse/notifications" \
+            "/api/dzn-pulse/event-popups" \
+            "/api/servers/invalid-server-id/bump" \
+            "/api/servers/invalid-server-id/gallery" \
+            "/api/servers/invalid-server-id/posting-destinations"; do
+            method="GET"
+            data_args=()
+            if echo "${path}" | grep -Eq "/bump|/gallery|/posting-destinations"; then
+              method="POST"
+              data_args=(-H "Content-Type: application/json" --data "{}")
+            fi
+            status="$(curl -L -sS -o /tmp/protected-body.txt -w "%{http_code}" -X "${method}" "${data_args[@]}" "${PRODUCTION_BASE_URL}${path}" || true)"
+            if [ "${status}" != "401" ] && [ "${status}" != "403" ] && [ "${status}" != "404" ]; then
+              echo "::error::Logged-out protected route ${path} returned HTTP ${status}; expected 401/403/404."
+              exit 1
+            fi
+            echo "${path} logged-out ${status}" >> production-route-results.txt
+          done
+
+          {
+            echo "### Production Route Results"
+            sed 's/^/- /' production-route-results.txt
+          } >> "$GITHUB_STEP_SUMMARY"
