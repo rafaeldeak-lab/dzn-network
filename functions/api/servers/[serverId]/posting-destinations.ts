@@ -7,7 +7,7 @@ import {
   sendDiscordTestPost,
   verifyDiscordPostingChannel,
 } from "../../../_lib/discord-posting";
-import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
+import { ensureAutomationSchema } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, getListingLimits, hasListingAutoPost, normalizeListingPlanKey } from "../../../_lib/plans";
@@ -42,7 +42,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   }
   if (request.method !== "POST") return methodNotAllowed();
 
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  const context = await getPostingContextForRead(env, linkedServerId);
   if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
 
   const body = await readJson<SavePostingDestinationBody>(request);
