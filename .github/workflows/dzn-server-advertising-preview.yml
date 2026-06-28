@@ -1,0 +1,923 @@
+name: DZN Server Advertising Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to preview
+        default: feature/server-advertising-system
+        required: true
+      mode:
+        description: Action to run
+        required: true
+        type: choice
+        options:
+          - validate
+          - provision-preview-db
+          - deploy-preview
+          - verify-preview
+          - full-preview
+      confirm_preview_only:
+        description: Must equal PREVIEW_ONLY
+        required: true
+      preview_db_name:
+        description: Preview D1 database name
+        required: true
+        default: dzn_network_db_server_advertising_preview
+      preview_project_name:
+        description: Dedicated preview Pages project
+        required: true
+        default: dzn-network-server-advertising-preview
+
+concurrency:
+  group: dzn-server-advertising-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  server-advertising-preview:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+      SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+      INPUT_BRANCH: ${{ inputs.branch }}
+      MODE: ${{ inputs.mode }}
+      CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
+      PREVIEW_DB_NAME: ${{ inputs.preview_db_name }}
+      PREVIEW_PROJECT_NAME: ${{ inputs.preview_project_name }}
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+      PREVIEW_BASE_URL: https://${{ inputs.preview_project_name }}.pages.dev
+
+    steps:
+      - name: Checkout requested branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate preview-only inputs
+        run: |
+          set -euo pipefail
+
+          if [ "${CONFIRM_PREVIEW_ONLY}" != "PREVIEW_ONLY" ]; then
+            echo "::error::confirm_preview_only must equal PREVIEW_ONLY."
+            exit 1
+          fi
+
+          if [ "${INPUT_BRANCH}" != "feature/server-advertising-system" ]; then
+            echo "::error::Server advertising preview may only run against feature/server-advertising-system."
+            exit 1
+          fi
+
+          if [ "${INPUT_BRANCH}" = "main" ]; then
+            echo "::error::Preview branch must never be main."
+            exit 1
+          fi
+
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Preview Pages project must not equal the production Pages project."
+            exit 1
+          fi
+
+          case "${PREVIEW_DB_NAME}" in
+            *advertising_preview*|*server_advertising_preview*) ;;
+            *)
+              echo "::error::Preview D1 database name must contain advertising_preview or server_advertising_preview."
+              exit 1
+              ;;
+          esac
+
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+
+          if [ "${MODE}" != "validate" ]; then
+            CF_TOKEN="${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+            if [ -z "${CF_TOKEN:-}" ]; then
+              echo "::error::Missing CLOUDFLARE_PULSE_PREVIEW_TOKEN or CLOUDFLARE_API_TOKEN GitHub secret."
+              exit 1
+            fi
+            echo "::add-mask::$CF_TOKEN"
+            if [ "${#CF_TOKEN}" -le 20 ]; then
+              echo "::error::Cloudflare preview token is present but too short to be valid."
+              exit 1
+            fi
+            {
+              printf "SERVER_ADVERTISING_CF_TOKEN=%s\n" "$CF_TOKEN"
+              printf "CLOUDFLARE_API_TOKEN=%s\n" "$CF_TOKEN"
+            } >> "$GITHUB_ENV"
+
+            if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+              echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+              exit 1
+            fi
+            if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+              echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like a 32-character Cloudflare account id."
+              exit 1
+            fi
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const source = fs.readFileSync("wrangler.toml", "utf8");
+          const name = source.match(/database_name\s*=\s*"([^"]+)"/)?.[1] ?? "";
+          const id = source.match(/database_id\s*=\s*"([^"]+)"/)?.[1] ?? "";
+          if (!name || !id) {
+            console.error("Could not detect production D1 database name/id from wrangler.toml.");
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `PRODUCTION_D1_DATABASE_NAME=${name}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `PRODUCTION_D1_DATABASE_ID=${id}\n`);
+          console.log(`Detected production D1 database name: ${name}`);
+          console.log(`Detected production D1 database id: ${id}`);
+          NODE
+
+          {
+            echo "## DZN Server Advertising Preview Guard"
+            echo ""
+            echo "- Mode: ${MODE}"
+            echo "- Branch: ${INPUT_BRANCH}"
+            echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
+            echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
+            echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            if [ "${MODE}" != "validate" ]; then
+              if [ -n "${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-}" ]; then
+                echo "- Cloudflare token source: CLOUDFLARE_PULSE_PREVIEW_TOKEN"
+              else
+                echo "- Cloudflare token source: CLOUDFLARE_API_TOKEN fallback"
+              fi
+            fi
+            echo "- DZN_CRON_SECRET present: $([ -n "${DZN_CRON_SECRET:-}" ] && echo true || echo false)"
+            echo "- SYNC_CRON_SECRET present: $([ -n "${SYNC_CRON_SECRET:-}" ] && echo true || echo false)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate branch
+        if: ${{ inputs.mode == 'validate' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          npm run test
+          npm run test:server-advertising-packages
+          npm run test:billing-plans
+          npm run test:public-access-gating
+          git diff --check
+
+      - name: Diagnose Cloudflare preview auth
+        if: ${{ inputs.mode == 'provision-preview-db' || inputs.mode == 'deploy-preview' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+          echo "Wrangler version: $(npx wrangler --version)"
+          echo "GitHub ref: ${GITHUB_REF_NAME}"
+          echo "Selected branch: ${INPUT_BRANCH}"
+          echo "Preview D1 database name: ${PREVIEW_DB_NAME}"
+          echo "Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
+          echo "Cloudflare preview token present: yes"
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.SERVER_ADVERTISING_CF_TOKEN;
+
+          function maskId(id) {
+            return typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : "unavailable";
+          }
+
+          function category(errors) {
+            const first = Array.isArray(errors) ? errors[0] : null;
+            return {
+              code: first?.code ?? "unknown",
+              message: first?.message ? String(first.message).replace(/[A-Za-z0-9_-]{20,}/g, "[redacted]") : "unknown",
+            };
+          }
+
+          async function cloudflare(path) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ code: `http_${response.status}`, message: "non_json_response" }] };
+            }
+            return { response, parsed };
+          }
+
+          void (async () => {
+            const verify = await cloudflare("/user/tokens/verify");
+            if (!verify.response.ok || verify.parsed.success !== true) {
+              const error = category(verify.parsed.errors);
+              console.log(`Cloudflare token verify success=false code=${error.code} category=${error.message}`);
+              console.error("Cloudflare token invalid or expired.");
+              process.exit(1);
+            }
+            console.log("Cloudflare token verify success=true");
+
+            const d1 = await cloudflare(`/accounts/${accountId}/d1/database?per_page=100`);
+            if (!d1.response.ok || d1.parsed.success !== true) {
+              const error = category(d1.parsed.errors);
+              console.log(`Cloudflare D1 list success=false code=${error.code} category=${error.message}`);
+              console.error("Cloudflare token lacks D1/account permission.");
+              process.exit(1);
+            }
+            const databases = Array.isArray(d1.parsed.result) ? d1.parsed.result : d1.parsed.result?.databases ?? [];
+            console.log("Cloudflare D1 list success=true");
+            for (const database of databases) {
+              console.log(`D1 database: ${database?.name ?? "unnamed"} id=${maskId(database?.uuid ?? database?.id ?? "")}`);
+            }
+          })().catch((error) => {
+            console.error(error?.message ?? "Cloudflare auth diagnostic failed.");
+            process.exit(1);
+          });
+          NODE
+
+      - name: Resolve or create preview D1 database
+        if: ${{ inputs.mode == 'provision-preview-db' || inputs.mode == 'deploy-preview' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *advertising_preview*|*server_advertising_preview*) ;;
+            *)
+              echo "::error::Refusing D1 command for non-preview advertising database name."
+              exit 1
+              ;;
+          esac
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.SERVER_ADVERTISING_CF_TOKEN;
+          const previewName = process.env.PREVIEW_DB_NAME;
+          const productionName = process.env.PRODUCTION_D1_DATABASE_NAME;
+          const productionId = process.env.PRODUCTION_D1_DATABASE_ID;
+
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ message: "Cloudflare API returned non-JSON response." }] };
+            }
+            if (!response.ok || parsed.success === false) {
+              const message = parsed.errors?.map((error) => error.message).join("; ") || `HTTP ${response.status}`;
+              throw new Error(message);
+            }
+            return parsed;
+          }
+
+          void (async () => {
+            if (previewName === productionName) throw new Error("preview_db_name equals production database name.");
+            const list = await api("/d1/database?per_page=100");
+            const databases = Array.isArray(list.result) ? list.result : list.result?.databases ?? [];
+            let database = databases.find((item) => item?.name === previewName);
+            if (!database) {
+              database = (await api("/d1/database", {
+                method: "POST",
+                body: JSON.stringify({ name: previewName }),
+              })).result;
+            }
+            const previewId = database?.uuid ?? database?.id;
+            if (!previewId) throw new Error("Could not resolve preview D1 database id.");
+            if (previewId === productionId) throw new Error("Preview D1 database id equals production D1 database id.");
+            fs.writeFileSync("server-advertising-preview-d1.json", JSON.stringify({ name: previewName, id: previewId }, null, 2));
+            fs.writeFileSync("wrangler.server-advertising-preview.toml", [
+              'name = "dzn-server-advertising-preview-d1"',
+              'compatibility_date = "2026-05-13"',
+              "",
+              "[[d1_databases]]",
+              'binding = "DB"',
+              `database_name = "${previewName}"`,
+              `database_id = "${previewId}"`,
+              "",
+            ].join("\n"));
+            fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_D1_DATABASE_ID=${previewId}\n`);
+            console.log(`Preview D1 database name: ${previewName}`);
+            console.log(`Preview D1 database id: ${previewId}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Apply and verify preview D1 migrations through 0053
+        if: ${{ inputs.mode == 'provision-preview-db' || inputs.mode == 'deploy-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *advertising_preview*|*server_advertising_preview*) ;;
+            *)
+              echo "::error::Refusing migration for non-preview advertising database name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing migration because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          test -f migrations/0053_server_advertising_packages.sql
+          npx wrangler d1 migrations apply DB --config wrangler.server-advertising-preview.toml --remote | tee server-advertising-preview-migrations.txt
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --json --command "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name;" > server-advertising-preview-schema.json
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --json --command "PRAGMA table_info(linked_servers);" > linked-servers-columns.json
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --json --command "PRAGMA table_info(server_advertising_state);" > server-advertising-state-columns.json
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --json --command "PRAGMA foreign_key_check;" > server-advertising-preview-foreign-key-check.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rowsFromWranglerJson(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          const names = new Set(rowsFromWranglerJson("server-advertising-preview-schema.json").map((row) => row.name).filter(Boolean));
+          for (const name of [
+            "server_gallery_images",
+            "server_listing_events",
+            "idx_server_gallery_images_server_sort",
+            "idx_server_listing_events_server_type_created",
+            "idx_server_listing_events_user_type_created",
+            "idx_server_advertising_state_next_bump_at",
+            "idx_server_advertising_state_last_bumped_at",
+          ]) {
+            if (!names.has(name)) {
+              console.error(`Preview D1 schema is missing ${name}.`);
+              process.exit(1);
+            }
+          }
+          const linkedColumns = new Set(rowsFromWranglerJson("linked-servers-columns.json").map((row) => row.name));
+          for (const name of [
+            "advert_banner_url",
+            "advert_banner_alt",
+            "owner_announcement",
+            "fresh_wipe_promo",
+            "discord_embed_banner_url",
+            "discord_embed_accent_color",
+          ]) {
+            if (!linkedColumns.has(name)) {
+              console.error(`linked_servers is missing ${name}.`);
+              process.exit(1);
+            }
+          }
+          const advertisingColumns = new Set(rowsFromWranglerJson("server-advertising-state-columns.json").map((row) => row.name));
+          if (!advertisingColumns.has("next_bump_at")) {
+            console.error("server_advertising_state is missing next_bump_at.");
+            process.exit(1);
+          }
+          const fkRows = rowsFromWranglerJson("server-advertising-preview-foreign-key-check.json");
+          if (fkRows.length > 0) {
+            console.error("Preview D1 foreign_key_check returned rows.");
+            process.exit(1);
+          }
+          console.log("Preview D1 server advertising schema verified through 0053.");
+          NODE
+
+      - name: Seed preview-only advertising data
+        if: ${{ inputs.mode == 'deploy-preview' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *advertising_preview*|*server_advertising_preview*) ;;
+            *)
+              echo "::error::Refusing preview seed for non-preview advertising database name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing preview seed because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          cat > server-advertising-preview-data.sql <<'SQL'
+          INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at)
+          VALUES ('mock-user', 'mock-discord-user', 'AdvertisingPreviewOwner', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET username = excluded.username, updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at)
+          VALUES
+            ('preview-free-guild-row', '288000000000000001', 'mock-user', 'DZN Free Preview Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('preview-pro-guild-row', '288000000000000002', 'mock-user', 'DZN Pro Preview Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(guild_id) DO UPDATE SET owner_user_id = excluded.owner_user_id, name = excluded.name, updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO linked_servers (
+            id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
+            server_name, server_type, server_category, tags_json, region, status, public_slug,
+            display_name, hostname, description, max_players, current_players, is_online,
+            public_short_description, public_description, public_discord_invite, public_website_url,
+            public_language, public_region_label, public_listing_updated_at, listing_visibility,
+            created_at, updated_at
+          )
+          VALUES
+            (
+              'preview-free-server', 'mock-user', '288000000000000001', 'preview-free-guild-row',
+              'preview-free-service', 'DZN Free Preview Service', 'DZN Free Preview',
+              'Deathmatch', 'deathmatch', '["pvp","beta"]', 'EU', 'active',
+              'dzn-free-preview', 'DZN Free Preview', 'free-preview.dzn.test',
+              'Synthetic preview Free Listing server.', 60, 12, 1,
+              'Free Listing preview server.', 'Free Listing preview server with ratings and fair bump cooldowns.',
+              'https://discord.gg/dznpreview', 'https://example.com/free-preview', 'English',
+              'Europe', CURRENT_TIMESTAMP, 'public', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            ),
+            (
+              'preview-pro-server', 'mock-user', '288000000000000002', 'preview-pro-guild-row',
+              'preview-pro-service', 'DZN Pro Preview Service', 'DZN Pro Preview',
+              'PvP/PvE', 'pvp_pve', '["pro","events"]', 'US', 'active',
+              'dzn-pro-preview', 'DZN Pro Preview', 'pro-preview.dzn.test',
+              'Synthetic preview Pro Listing server.', 80, 34, 1,
+              'Pro Listing preview server.', 'Pro Listing preview server with gallery, banner and Discord advert gates.',
+              'https://discord.gg/dznpreview', 'https://example.com/pro-preview', 'English',
+              'North America', CURRENT_TIMESTAMP, 'public', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+          ON CONFLICT(id) DO UPDATE SET
+            server_name = excluded.server_name,
+            public_slug = excluded.public_slug,
+            listing_visibility = excluded.listing_visibility,
+            updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO server_subscriptions (
+            id, guild_id, owner_discord_id, plan_key, status, current_period_start, current_period_end, cancel_at_period_end, created_at, updated_at
+          )
+          VALUES (
+            'preview-pro-subscription', '288000000000000002', 'mock-discord-user', 'pro', 'active',
+            CURRENT_TIMESTAMP, datetime('now', '+30 days'), 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )
+          ON CONFLICT(guild_id) DO UPDATE SET plan_key = excluded.plan_key, status = excluded.status, updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO owner_plan_entitlements (
+            discord_user_id, plan_key, max_linked_servers, can_use_reviews, can_use_public_listing,
+            can_use_advanced_analytics, can_join_events, can_use_ad_bumps, included_bumps_per_month,
+            bump_cooldown_hours, can_use_featured_slots, stat_history_days, updated_at
+          )
+          VALUES ('mock-discord-user', 'free', 1, 1, 1, 0, 0, 1, 1, 720, 0, 7, CURRENT_TIMESTAMP)
+          ON CONFLICT(discord_user_id) DO UPDATE SET plan_key = excluded.plan_key, bump_cooldown_hours = excluded.bump_cooldown_hours, updated_at = CURRENT_TIMESTAMP;
+
+          DELETE FROM server_gallery_images WHERE server_id IN ('preview-free-server', 'preview-pro-server');
+          DELETE FROM server_listing_events WHERE server_id IN ('preview-free-server', 'preview-pro-server');
+          DELETE FROM server_advertising_state WHERE linked_server_id IN ('preview-free-server', 'preview-pro-server');
+          SQL
+
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --file server-advertising-preview-data.sql
+          git ls-files --error-unmatch server-advertising-preview-data.sql >/dev/null 2>&1 && {
+            echo "::error::Preview SQL seed file must not be tracked."
+            exit 1
+          } || true
+
+      - name: Configure and deploy preview Pages project
+        if: ${{ inputs.mode == 'deploy-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Refusing to deploy to production Pages project."
+            exit 1
+          fi
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing deploy because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.SERVER_ADVERTISING_CF_TOKEN;
+          const projectName = process.env.PREVIEW_PROJECT_NAME;
+          const branch = process.env.INPUT_BRANCH;
+          const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
+          const previewDbName = process.env.PREVIEW_DB_NAME;
+          const previewBaseUrl = `https://${projectName}.pages.dev`;
+
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ message: "Cloudflare API returned non-JSON response." }] };
+            }
+            return { ok: response.ok, status: response.status, parsed };
+          }
+
+          function envVars(config) {
+            return config?.env_vars && typeof config.env_vars === "object" ? config.env_vars : {};
+          }
+          function d1Databases(config) {
+            return config?.d1_databases && typeof config.d1_databases === "object" ? config.d1_databases : {};
+          }
+          function mergeConfig(config) {
+            return {
+              ...config,
+              env_vars: {
+                ...envVars(config),
+                DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
+                DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+                DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                MOCK_AUTH: { type: "plain_text", value: "true" },
+              },
+              d1_databases: {
+                ...d1Databases(config),
+                DB: { id: d1Id },
+              },
+            };
+          }
+
+          void (async () => {
+            const get = await api(`/pages/projects/${projectName}`);
+            let project = null;
+            if (get.status === 404) {
+              const created = await api("/pages/projects", {
+                method: "POST",
+                body: JSON.stringify({ name: projectName, production_branch: branch }),
+              });
+              if (!created.ok || created.parsed.success === false) {
+                throw new Error(created.parsed.errors?.map((error) => error.message).join("; ") || "Failed to create preview Pages project.");
+              }
+              project = created.parsed.result;
+            } else if (!get.ok || get.parsed.success === false) {
+              throw new Error(get.parsed.errors?.map((error) => error.message).join("; ") || "Failed to read preview Pages project.");
+            } else {
+              project = get.parsed.result;
+            }
+
+            const productionConfig = project?.deployment_configs?.production ?? {};
+            const previewConfig = project?.deployment_configs?.preview ?? {};
+            const patched = await api(`/pages/projects/${projectName}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                production_branch: branch,
+                deployment_configs: {
+                  production: mergeConfig(productionConfig),
+                  preview: mergeConfig(previewConfig),
+                },
+              }),
+            });
+            if (!patched.ok || patched.parsed.success === false) {
+              throw new Error(patched.parsed.errors?.map((error) => error.message).join("; ") || "Failed to configure preview Pages project.");
+            }
+
+            const wranglerToml = [
+              `name = ${JSON.stringify(projectName)}`,
+              'compatibility_date = "2026-05-13"',
+              'pages_build_output_dir = "./out"',
+              "",
+              "[vars]",
+              'DZN_PULSE_ENABLED = "true"',
+              'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+              `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              'MOCK_AUTH = "true"',
+              "",
+              "[[d1_databases]]",
+              'binding = "DB"',
+              `database_name = ${JSON.stringify(previewDbName)}`,
+              `database_id = ${JSON.stringify(d1Id)}`,
+              "",
+            ].join("\n");
+            fs.writeFileSync("wrangler.toml", wranglerToml);
+            fs.writeFileSync("server-advertising-preview-project.json", JSON.stringify({
+              projectName,
+              branch,
+              previewBaseUrl,
+              d1Binding: "DB",
+              d1Id,
+              mockAuth: true,
+              dznPulseEnabled: true,
+              discordNotificationsEnabled: false,
+            }, null, 2));
+            console.log(`Configured preview Pages project: ${projectName}`);
+            console.log(`Configured preview branch: ${branch}`);
+            console.log(`Configured preview D1 binding DB id: ${d1Id}`);
+            console.log("Configured DZN_DISCORD_NOTIFICATIONS_ENABLED=false");
+            console.log("Configured MOCK_AUTH=true for preview only");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          DZN_PULSE_ENABLED=true \
+          DZN_DISCORD_NOTIFICATIONS_ENABLED=false \
+          MOCK_AUTH=true \
+          npm run build
+          npx wrangler pages deploy out \
+            --project-name "${PREVIEW_PROJECT_NAME}" \
+            --branch "${INPUT_BRANCH}" \
+            --commit-dirty=true \
+            | tee server-advertising-pages-deploy.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployText = fs.readFileSync("server-advertising-pages-deploy.txt", "utf8");
+          const immutableUrl = deployText.match(/https:\/\/[^\s]+\.pages\.dev/)?.[0] ?? "";
+          const stableUrl = `https://${process.env.PREVIEW_PROJECT_NAME}.pages.dev`;
+          fs.writeFileSync("server-advertising-preview-url.txt", `${stableUrl}\n`);
+          if (immutableUrl) fs.writeFileSync("server-advertising-preview-immutable-url.txt", `${immutableUrl}\n`);
+          console.log(`Preview URL: ${stableUrl}`);
+          if (immutableUrl) console.log(`Immutable preview URL: ${immutableUrl}`);
+          NODE
+
+      - name: Verify preview deployment
+        if: ${{ inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const base = process.env.PREVIEW_BASE_URL;
+          const forbiddenText = [
+            "Request failed: 503",
+            "SERVER UNAVAILABLE",
+            "Error 1102",
+            "Worker exceeded resource limits",
+            "Minified React error #",
+          ];
+
+          function assert(condition, message) {
+            if (!condition) {
+              console.error(message);
+              process.exit(1);
+            }
+          }
+          async function fetchWithTimeout(url, init = {}) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 45000);
+            try {
+              return await fetch(url, { ...init, signal: controller.signal });
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+          async function expectStatus(path, expected, options = {}) {
+            const response = await fetchWithTimeout(`${base}${path}`, { redirect: "manual", ...options });
+            const body = await response.text();
+            assert(response.status === expected, `${path} returned HTTP ${response.status}, expected ${expected}.`);
+            for (const snippet of forbiddenText) {
+              assert(!body.includes(snippet), `${path} contains forbidden runtime text: ${snippet}`);
+            }
+            return { response, body };
+          }
+          function cookieFrom(response) {
+            const setCookie = response.headers.get("set-cookie") ?? "";
+            return setCookie.split(";")[0];
+          }
+          function jsonHeaders(cookie) {
+            return {
+              "content-type": "application/json",
+              ...(cookie ? { cookie } : {}),
+            };
+          }
+          async function jsonRequest(path, init = {}) {
+            const response = await fetchWithTimeout(`${base}${path}`, init);
+            const text = await response.text();
+            let parsed = null;
+            try {
+              parsed = text ? JSON.parse(text) : null;
+            } catch {
+              parsed = null;
+            }
+            return { response, text, parsed };
+          }
+
+          void (async () => {
+            const sourceChecks = [
+              ["components/site/beta-ticker.tsx", ["localStorage", "aria-label=\"Hide beta notice\"", "dzn-beta-ticker"]],
+              ["components/servers/live-server-rail.tsx", ["/api/public/server-rail", "aria-label=\"Live DZN server rail\"", "dzn-live-server-rail"]],
+              ["app/globals.css", ["prefers-reduced-motion", "dzn-beta-ticker__track", "dzn-live-server-rail__track"]],
+              ["lib/billing/plans.ts", ["FREE_BUMP_COOLDOWN_DAYS = 30", "PRO_BUMP_COOLDOWN_DAYS = 7", "FREE_DESCRIPTION_LIMIT = 500", "PRO_DESCRIPTION_LIMIT = 2500"]],
+            ];
+            for (const [file, snippets] of sourceChecks) {
+              const source = fs.readFileSync(file, "utf8");
+              for (const snippet of snippets) {
+                assert(source.includes(snippet), `${file} is missing ${snippet}`);
+              }
+            }
+
+            await expectStatus("/", 200);
+            await expectStatus("/servers", 200);
+            await expectStatus("/servers/dzn-free-preview", 200);
+            await expectStatus("/servers/dzn-pro-preview", 200);
+            await expectStatus("/api/public/servers", 200);
+            await expectStatus("/api/public/home-stats", 200);
+            await expectStatus("/api/public/leaderboards", 200);
+            await expectStatus("/api/public/leaderboards/advanced", 200);
+            await expectStatus("/api/public/server-wars", 200);
+
+            const rail = await jsonRequest("/api/public/server-rail");
+            assert(rail.response.status === 200, `/api/public/server-rail returned ${rail.response.status}.`);
+            assert((rail.response.headers.get("cache-control") ?? "").includes("s-maxage=60"), "server-rail cache header is missing s-maxage=60.");
+
+            const loggedOutBump = await jsonRequest("/api/servers/preview-free-server/advertising/bump", { method: "POST" });
+            assert(loggedOutBump.response.status === 401, "Logged-out bump route should return 401.");
+            const loggedOutGallery = await jsonRequest("/api/servers/preview-pro-server/gallery");
+            assert(loggedOutGallery.response.status === 401, "Logged-out gallery route should return 401.");
+            const loggedOutPosting = await jsonRequest("/api/servers/preview-pro-server/posting-destinations");
+            assert(loggedOutPosting.response.status === 401, "Logged-out Discord posting route should return 401.");
+
+            const login = await fetchWithTimeout(`${base}/api/auth/mock/start?returnTo=%2Fdashboard`, { redirect: "manual" });
+            assert(login.status === 302, `Mock auth login returned ${login.status}.`);
+            const cookie = cookieFrom(login);
+            assert(cookie.startsWith("dzn_session="), "Mock auth did not set dzn_session cookie.");
+            await expectStatus("/dashboard", 200, { headers: { cookie } });
+            await expectStatus("/dashboard/server-settings", 200, { headers: { cookie } });
+
+            const freeBumpBefore = await jsonRequest("/api/servers/preview-free-server/advertising/bump", { headers: { cookie } });
+            assert(freeBumpBefore.response.status === 200, `Free bump status returned ${freeBumpBefore.response.status}.`);
+            assert(freeBumpBefore.parsed?.advertising?.bump_cooldown_days === 30, "Free bump cooldown should be 30 days.");
+            const freeBump = await jsonRequest("/api/servers/preview-free-server/advertising/bump", { method: "POST", headers: { cookie } });
+            assert(freeBump.response.status === 200, `Free bump returned ${freeBump.response.status}.`);
+            assert(freeBump.parsed?.advertising?.bump_cooldown_days === 30, "Free bump success payload should use 30 days.");
+            const freeBumpRepeat = await jsonRequest("/api/servers/preview-free-server/advertising/bump", { method: "POST", headers: { cookie } });
+            assert(freeBumpRepeat.response.status === 429, "Repeated Free bump should be cooldown-blocked.");
+
+            const proEntitlementSql = `
+              UPDATE owner_plan_entitlements
+                 SET plan_key = 'pro',
+                     can_use_advanced_analytics = 1,
+                     can_join_events = 1,
+                     can_use_ad_bumps = 1,
+                     bump_cooldown_hours = 168,
+                     can_use_featured_slots = 1,
+                     updated_at = CURRENT_TIMESTAMP
+               WHERE discord_user_id = 'mock-discord-user';
+              DELETE FROM server_advertising_state WHERE linked_server_id = 'preview-pro-server';
+              DELETE FROM server_listing_events WHERE server_id = 'preview-pro-server';
+            `;
+            fs.writeFileSync("server-advertising-preview-promote-pro.sql", proEntitlementSql);
+            console.log("Free package preview checks passed. Pro entitlement promotion SQL generated for next step.");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --file server-advertising-preview-promote-pro.sql
+
+          node <<'NODE'
+          const base = process.env.PREVIEW_BASE_URL;
+          function assert(condition, message) {
+            if (!condition) {
+              console.error(message);
+              process.exit(1);
+            }
+          }
+          async function fetchWithTimeout(url, init = {}) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 45000);
+            try {
+              return await fetch(url, { ...init, signal: controller.signal });
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+          async function jsonRequest(path, init = {}) {
+            const response = await fetchWithTimeout(`${base}${path}`, init);
+            const text = await response.text();
+            let parsed = null;
+            try {
+              parsed = text ? JSON.parse(text) : null;
+            } catch {
+              parsed = null;
+            }
+            return { response, parsed, text };
+          }
+          function cookieFrom(response) {
+            const setCookie = response.headers.get("set-cookie") ?? "";
+            return setCookie.split(";")[0];
+          }
+          void (async () => {
+            const login = await fetchWithTimeout(`${base}/api/auth/mock/start?returnTo=%2Fdashboard`, { redirect: "manual" });
+            const cookie = cookieFrom(login);
+            assert(cookie.startsWith("dzn_session="), "Mock auth did not set session cookie for Pro checks.");
+            const headers = { cookie, "content-type": "application/json" };
+
+            const proBumpBefore = await jsonRequest("/api/servers/preview-pro-server/advertising/bump", { headers });
+            assert(proBumpBefore.response.status === 200, `Pro bump status returned ${proBumpBefore.response.status}.`);
+            assert(proBumpBefore.parsed?.advertising?.bump_cooldown_days === 7, "Pro bump cooldown should be 7 days.");
+            const proBump = await jsonRequest("/api/servers/preview-pro-server/advertising/bump", { method: "POST", headers });
+            assert(proBump.response.status === 200, `Pro bump returned ${proBump.response.status}.`);
+            assert(proBump.parsed?.advertising?.bump_cooldown_days === 7, "Pro bump success payload should use 7 days.");
+            for (let i = 0; i < 5; i += 1) {
+              await jsonRequest("/api/servers/preview-pro-server/advertising/bump", { method: "POST", headers });
+            }
+            const throttled = await jsonRequest("/api/servers/preview-pro-server/advertising/bump", { method: "POST", headers });
+            assert(throttled.response.status === 429, "Repeated bump attempts should return 429.");
+
+            const freeGallery = await jsonRequest("/api/servers/preview-free-server/gallery", { headers });
+            assert(freeGallery.response.status === 200, `Free gallery GET returned ${freeGallery.response.status}.`);
+            assert(freeGallery.parsed?.canPublishGallery === false, "Free gallery should not be publishable.");
+            const freeGalleryPut = await jsonRequest("/api/servers/preview-free-server/gallery", {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({ images: [{ url: "https://example.com/free.jpg", width: 1280, height: 720, sizeBytes: 1000, mimeType: "image/jpeg" }] }),
+            });
+            assert(freeGalleryPut.response.status === 403, "Free gallery PUT should be Pro-gated.");
+
+            const proGalleryPut = await jsonRequest("/api/servers/preview-pro-server/gallery", {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({ images: [{ url: "https://example.com/pro.jpg", width: 1280, height: 720, sizeBytes: 1000, mimeType: "image/jpeg" }] }),
+            });
+            assert(proGalleryPut.response.status === 200, `Pro gallery PUT returned ${proGalleryPut.response.status}.`);
+            const pngRejected = await jsonRequest("/api/servers/preview-pro-server/gallery", {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({ images: [{ url: "https://example.com/pro.png", width: 1280, height: 720, sizeBytes: 1000, mimeType: "image/png" }] }),
+            });
+            assert(pngRejected.response.status === 400, "Pro gallery should reject non-JPEG metadata.");
+            const fifthRejected = await jsonRequest("/api/servers/preview-pro-server/gallery", {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({ images: Array.from({ length: 5 }, (_, index) => ({ url: `https://example.com/pro-${index}.jpg`, width: 1280, height: 720, sizeBytes: 1000, mimeType: "image/jpeg" })) }),
+            });
+            assert(fifthRejected.response.status === 400, "Pro gallery should reject fifth image.");
+
+            const freePost = await jsonRequest("/api/servers/preview-free-server/posting-destinations", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ action: "save", channel_id: "288000000000000101", post_types: ["server_advert"], discord_webhook_url: "https://discord.com/api/webhooks/preview/free" }),
+            });
+            assert(freePost.response.status === 200, `Free Discord basic post returned ${freePost.response.status}.`);
+            const freeLockedPost = await jsonRequest("/api/servers/preview-free-server/posting-destinations", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ action: "save", channel_id: "288000000000000102", post_types: ["weekly_recap"], discord_webhook_url: "https://discord.com/api/webhooks/preview/free2" }),
+            });
+            assert(freeLockedPost.response.status === 403, "Free Discord weekly recap should be locked.");
+            const proPost = await jsonRequest("/api/servers/preview-pro-server/posting-destinations", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ action: "save", channel_id: "288000000000000201", post_types: ["server_advert", "weekly_recap"], discord_webhook_url: "https://discord.com/api/webhooks/preview/pro" }),
+            });
+            assert(proPost.response.status === 200, `Pro Discord post gates returned ${proPost.response.status}.`);
+
+            const publicServers = await jsonRequest("/api/public/servers");
+            assert(publicServers.response.status === 200, "Public servers should return 200 after package checks.");
+            const publicText = JSON.stringify(publicServers.parsed ?? {});
+            assert(publicText.includes("preview-free-server") || publicText.includes("dzn-free-preview"), "Public servers should include preview free listing.");
+            assert(publicText.includes("preview-pro-server") || publicText.includes("dzn-pro-preview"), "Public servers should include preview pro listing.");
+            assert(!/scoreAdvantage|ratingBoost|rankBoost|guaranteedTopRank/i.test(publicText), "Public payload must not expose Pro score/rank/review advantage fields.");
+
+            console.log("Preview Free/Pro package, bump, gallery, Discord gate, public route, and no-advantage checks passed.");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          {
+            echo "## DZN Server Advertising Preview Result"
+            echo ""
+            echo "- Preview URL: ${PREVIEW_BASE_URL}"
+            echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
+            echo "- Preview D1 database id: ${PREVIEW_D1_DATABASE_ID}"
+            echo "- Server rail: passed"
+            echo "- Beta ticker source/reduced-motion/persistence contract: passed"
+            echo "- Free listing limits: passed"
+            echo "- Pro listing limits: passed"
+            echo "- Bump owner/cooldown/throttle: passed"
+            echo "- Gallery Pro gate/JPEG metadata: passed"
+            echo "- Discord advertising package gates: passed"
+            echo "- Logged-out protected routes: passed"
+            echo "- Public routes: passed"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
