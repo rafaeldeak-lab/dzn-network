@@ -89,6 +89,7 @@ for (const snippet of [
   assert.equal(bumpRoute.includes(snippet), true, `Bump route should include ${snippet}.`);
 }
 assert.equal(/featured_until\s*=|visibility_weight\s*=|rank\s*=|score\s*=|kill_events|player_events/i.test(bumpRoute), false, "Bump route must not modify rankings, scores, or gameplay event data.");
+assert.equal(/ensureMockUser|isMockAuth/.test(bumpRoute), false, "Bump route must require a real session cookie even when preview MOCK_AUTH is enabled.");
 
 const galleryRoute = readFileSync("functions/api/servers/[serverId]/gallery.ts", "utf8");
 for (const snippet of [
