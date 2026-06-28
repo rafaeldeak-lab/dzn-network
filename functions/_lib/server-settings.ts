@@ -1,6 +1,6 @@
 import { isDznAdminDiscordId } from "./admin";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
-import { normalizePlanKey } from "./plans";
+import { canUseProFeature, getListingLimits, normalizeListingPlanKey, normalizePlanKey } from "./plans";
 import { getServerCategoryLabel, normalizeServerCategory } from "./server-categories";
 import type { Env, SessionUser } from "./types";
 
@@ -76,6 +76,12 @@ type SettingsServerRow = {
   listing_visibility: string | null;
   tags_changed_at: string | null;
   tags_cooldown_until: string | null;
+  advert_banner_url: string | null;
+  advert_banner_alt: string | null;
+  owner_announcement: string | null;
+  fresh_wipe_promo: string | null;
+  discord_embed_banner_url: string | null;
+  discord_embed_accent_color: string | null;
   plan_key: string | null;
   subscription_status: string | null;
 };
@@ -110,6 +116,12 @@ export type EventLockStatus = {
 type ListingUpdateInput = {
   description?: unknown;
   visibility?: unknown;
+  advertBannerUrl?: unknown;
+  advertBannerAlt?: unknown;
+  ownerAnnouncement?: unknown;
+  freshWipePromo?: unknown;
+  discordEmbedBannerUrl?: unknown;
+  discordEmbedAccentColor?: unknown;
 };
 
 const CATEGORY_VALUES = new Set<string>(OWNER_SERVER_CATEGORIES.map((category) => category.value));
@@ -131,6 +143,12 @@ export async function ensureServerListingSettingsSchema(env: Env) {
     ["listing_visibility", "TEXT DEFAULT 'public'"],
     ["tags_changed_at", "TEXT"],
     ["tags_cooldown_until", "TEXT"],
+    ["advert_banner_url", "TEXT"],
+    ["advert_banner_alt", "TEXT"],
+    ["owner_announcement", "TEXT"],
+    ["fresh_wipe_promo", "TEXT"],
+    ["discord_embed_banner_url", "TEXT"],
+    ["discord_embed_accent_color", "TEXT"],
   ];
   const missingColumns = settingColumns.filter(([name]) => !existing.has(name));
 
@@ -187,6 +205,8 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
   const monthlyChangesUsed = await countCategoryChangesInLast30Days(env, resolvedLinkedServerId);
   const eventLock = await getCategoryEventLockStatus(env, resolvedLinkedServerId, now, server);
   const policy = categoryPolicyForPlan(server.plan_key, server.subscription_status);
+  const listingPlanKey = normalizeListingPlanKey(server.plan_key, server.subscription_status);
+  const listingLimits = getListingLimits(server.plan_key, server.subscription_status);
   const cooldownUntil = futureIso(server.category_cooldown_until, now);
   const graceAvailable = isGraceAvailable(server, now);
   const tagsEditCount = await countListingChanges(env, resolvedLinkedServerId, "tags", "-7 days");
@@ -211,6 +231,15 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
         plan_key: normalizePlanKey(server.plan_key),
         subscription_status: server.subscription_status ?? "inactive",
         policy_group: policy.planGroup,
+        listing_plan_key: listingPlanKey,
+        listing_label: listingLimits.publicLabel,
+      },
+      listing: {
+        ...listingLimits,
+        canUseCustomBanner: canUseProFeature(server, "custom_banner"),
+        canUseGallery: canUseProFeature(server, "gallery_images"),
+        canUseOwnerAnnouncement: canUseProFeature(server, "owner_announcement"),
+        canUseProDiscordEmbeds: canUseProFeature(server, "discord_pro_embeds"),
       },
       categoryPolicy: {
         cooldownDays: policy.cooldownDays,
@@ -380,9 +409,10 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
   if (!canManageServer(env, user, server)) return { status: 403, payload: { ok: false, error: "NOT_AUTHORIZED", message: "You do not have access to this server." } };
   const resolvedLinkedServerId = server.id;
 
+  const listingLimits = getListingLimits(server.plan_key, server.subscription_status);
   const description = input.description === undefined ? server.public_description : sanitizePublicDescription(input.description);
-  if (description && (description.length < 40 || description.length > 500)) {
-    return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: "Description must be 40 to 500 characters." } };
+  if (description && (description.length < 40 || description.length > listingLimits.descriptionLimit)) {
+    return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: `Description must be 40 to ${listingLimits.descriptionLimit} characters for ${listingLimits.publicLabel}.` } };
   }
   if (description === false) {
     return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: "Description contains unsafe content." } };
@@ -403,14 +433,48 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
     if (visibilityEdits >= 5) return { status: 429, payload: { ok: false, error: "VISIBILITY_RATE_LIMITED", message: "Visibility can be changed up to 5 times per day." } };
   }
 
+  const advertBannerUrl = input.advertBannerUrl === undefined ? server.advert_banner_url : sanitizeOptionalHttpsUrl(input.advertBannerUrl);
+  const discordEmbedBannerUrl = input.discordEmbedBannerUrl === undefined ? server.discord_embed_banner_url : sanitizeOptionalHttpsUrl(input.discordEmbedBannerUrl);
+  const advertBannerAlt = input.advertBannerAlt === undefined ? server.advert_banner_alt : sanitizeShortText(input.advertBannerAlt, 120);
+  const ownerAnnouncement = input.ownerAnnouncement === undefined ? server.owner_announcement : sanitizeShortText(input.ownerAnnouncement, 240);
+  const freshWipePromo = input.freshWipePromo === undefined ? server.fresh_wipe_promo : sanitizeShortText(input.freshWipePromo, 180);
+  const discordEmbedAccentColor = input.discordEmbedAccentColor === undefined ? server.discord_embed_accent_color : sanitizeHexColour(input.discordEmbedAccentColor);
+
+  if ((input.advertBannerUrl !== undefined || input.discordEmbedBannerUrl !== undefined) && !canUseProFeature(server, "custom_banner")) {
+    return { status: 403, payload: { ok: false, error: "PRO_REQUIRED", message: "Custom advert and Discord banners require Pro Listing." } };
+  }
+  if ((input.ownerAnnouncement !== undefined || input.freshWipePromo !== undefined || input.discordEmbedAccentColor !== undefined) && !canUseProFeature(server, "owner_announcement")) {
+    return { status: 403, payload: { ok: false, error: "PRO_REQUIRED", message: "Owner announcements, fresh wipe promos, and custom Discord embed styling require Pro Listing." } };
+  }
+  if (advertBannerUrl === false || discordEmbedBannerUrl === false || advertBannerAlt === false || ownerAnnouncement === false || freshWipePromo === false || discordEmbedAccentColor === false) {
+    return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: "Listing media fields contain an invalid or unsafe value." } };
+  }
+
   await requireDb(env).prepare(
     `UPDATE linked_servers SET
       public_description = ?,
       listing_visibility = ?,
+      advert_banner_url = ?,
+      advert_banner_alt = ?,
+      owner_announcement = ?,
+      fresh_wipe_promo = ?,
+      discord_embed_banner_url = ?,
+      discord_embed_accent_color = ?,
       public_listing_updated_at = ?,
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-  ).bind(description || null, visibility, now, resolvedLinkedServerId).run();
+  ).bind(
+    description || null,
+    visibility,
+    advertBannerUrl || null,
+    advertBannerAlt || null,
+    ownerAnnouncement || null,
+    freshWipePromo || null,
+    discordEmbedBannerUrl || null,
+    discordEmbedAccentColor || null,
+    now,
+    resolvedLinkedServerId,
+  ).run();
   await insertListingChangeEvent(env, resolvedLinkedServerId, user.id, "listing", { description: server.public_description, visibility: server.listing_visibility }, { description, visibility }, now);
   if (visibilityChanged) {
     await insertListingChangeEvent(env, resolvedLinkedServerId, user.id, "visibility", server.listing_visibility, visibility, now);
@@ -460,7 +524,34 @@ export function sanitizePublicDescription(value: unknown): string | null | false
   if (/javascript:|data:text\/html|<|>/i.test(normalized)) return false;
   const urlCount = (normalized.match(/https?:\/\//gi) ?? []).length;
   if (urlCount > 2) return false;
-  return normalized.slice(0, 500);
+  return normalized;
+}
+
+function sanitizeOptionalHttpsUrl(value: unknown): string | null | false {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return false;
+    if (/javascript:|data:/i.test(raw)) return false;
+    return url.toString().slice(0, 500);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeShortText(value: unknown, maxLength: number): string | null | false {
+  const text = String(value ?? "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, " ");
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  if (/javascript:|data:text\/html|<|>/i.test(normalized)) return false;
+  return normalized.slice(0, maxLength);
+}
+
+function sanitizeHexColour(value: unknown): string | null | false {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : false;
 }
 
 export function categoryPolicyForPlan(planKey: unknown, subscriptionStatus?: unknown): CategoryPolicy {
@@ -615,6 +706,12 @@ function serializeSettingsServer(server: SettingsServerRow) {
     currentCategory: normalizeOwnerServerCategory(server.server_category),
     currentCategoryLabel: getServerCategoryLabel(server.server_category),
     description: server.public_description ?? "",
+    advertBannerUrl: server.advert_banner_url,
+    advertBannerAlt: server.advert_banner_alt,
+    ownerAnnouncement: server.owner_announcement,
+    freshWipePromo: server.fresh_wipe_promo,
+    discordEmbedBannerUrl: server.discord_embed_banner_url,
+    discordEmbedAccentColor: server.discord_embed_accent_color,
     visibility: normalizeListingVisibility(server.listing_visibility) ?? "public",
     listingUpdatedAt: server.public_listing_updated_at,
     lastUpdatedAt: server.public_listing_updated_at ?? server.category_changed_at,

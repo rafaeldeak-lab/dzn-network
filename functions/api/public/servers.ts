@@ -33,6 +33,7 @@ import { calculateServerScoreBreakdown, type ServerScoreBreakdown } from "../../
 import type { Env, PagesFunction } from "../../_lib/types";
 import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
 import { buildServerBadgeCollection, type PublicLockedBadge, type ServerBadgeCollection } from "../../../lib/badges/rules";
+import { normalizeListingPlanKey } from "../../../lib/billing/plans";
 
 type PublicServerRow = {
   id: string;
@@ -86,7 +87,12 @@ type PublicServerRow = {
   public_language: string | null;
   public_region_label: string | null;
   public_listing_updated_at: string | null;
+  advert_banner_url: string | null;
+  advert_banner_alt: string | null;
+  owner_announcement: string | null;
+  fresh_wipe_promo: string | null;
   last_bumped_at: string | null;
+  next_bump_at: string | null;
   bump_count_current_period: number | null;
   bump_period_start: string | null;
   bump_period_end: string | null;
@@ -120,6 +126,15 @@ type PublicPromotion = {
   promotionType: string;
   status: string;
   endsAt: string | null;
+};
+
+type PublicGalleryImage = {
+  id: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+  size_bytes: number | null;
+  sort_order: number;
 };
 
 export type RatingBreakdown = Record<1 | 2 | 3 | 4 | 5, number>;
@@ -169,6 +184,11 @@ type SafePublicServer = {
   public_language: string | null;
   public_region_label: string | null;
   public_listing_updated_at: string | null;
+  advert_banner_url: string | null;
+  advert_banner_alt: string | null;
+  owner_announcement: string | null;
+  fresh_wipe_promo: string | null;
+  gallery_images: PublicGalleryImage[];
   created_at: string | null;
   total_kills: number;
   total_deaths: number;
@@ -187,7 +207,7 @@ type SafePublicServer = {
   review_count: number;
   rating_breakdown: RatingBreakdown;
   advertising: PublicAdvertising;
-  plan_key: string;
+  plan_key: "free" | "pro";
   premium_status: "standard" | "premium";
   visibility_weight: number;
   visibilityWeight: number;
@@ -484,7 +504,12 @@ async function querySinglePublicServer(env: Env, whereClause: string, value: str
         linked_servers.public_language,
         linked_servers.public_region_label,
         linked_servers.public_listing_updated_at,
+        linked_servers.advert_banner_url,
+        linked_servers.advert_banner_alt,
+        linked_servers.owner_announcement,
+        linked_servers.fresh_wipe_promo,
         server_advertising_state.last_bumped_at,
+        server_advertising_state.next_bump_at,
         server_advertising_state.bump_count_current_period,
         server_advertising_state.bump_period_start,
         server_advertising_state.bump_period_end,
@@ -501,7 +526,7 @@ async function querySinglePublicServer(env: Env, whereClause: string, value: str
             AND server_promotions.status = 'active'
             AND server_promotions.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         ) AS active_promotions_json,
-        COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
+        COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
         server_subscriptions.status AS subscription_status,
         server_public_cache.network_rank AS network_rank
        FROM linked_servers
@@ -632,7 +657,12 @@ async function queryPublicServersPreview(env: Env) {
         linked_servers.public_language,
         linked_servers.public_region_label,
         linked_servers.public_listing_updated_at,
+        linked_servers.advert_banner_url,
+        linked_servers.advert_banner_alt,
+        linked_servers.owner_announcement,
+        linked_servers.fresh_wipe_promo,
         server_advertising_state.last_bumped_at,
+        server_advertising_state.next_bump_at,
         server_advertising_state.bump_count_current_period,
         server_advertising_state.bump_period_start,
         server_advertising_state.bump_period_end,
@@ -649,7 +679,7 @@ async function queryPublicServersPreview(env: Env) {
             AND server_promotions.status = 'active'
             AND server_promotions.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         ) AS active_promotions_json,
-        COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
+        COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
         server_subscriptions.status AS subscription_status
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
@@ -685,6 +715,9 @@ async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | nul
     const leaderboard = await getPublicServerLeaderboardById(env, row.id, 10).catch(() => [] as PublicLeaderboardPlayer[]);
     server.top_players = leaderboard.slice(0, 5);
     server.pvp_leaderboard = leaderboard;
+  }
+  if (server.plan_key === "pro") {
+    server.gallery_images = await getPublicServerGalleryImages(env, row.id).catch(() => [] as PublicGalleryImage[]);
   }
 
   return {
@@ -777,7 +810,12 @@ async function queryPublicServers(env: Env) {
       linked_servers.public_language,
       linked_servers.public_region_label,
       linked_servers.public_listing_updated_at,
+      linked_servers.advert_banner_url,
+      linked_servers.advert_banner_alt,
+      linked_servers.owner_announcement,
+      linked_servers.fresh_wipe_promo,
       server_advertising_state.last_bumped_at,
+      server_advertising_state.next_bump_at,
       server_advertising_state.bump_count_current_period,
       server_advertising_state.bump_period_start,
       server_advertising_state.bump_period_end,
@@ -794,7 +832,7 @@ async function queryPublicServers(env: Env) {
           AND server_promotions.status = 'active'
           AND server_promotions.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       ) AS active_promotions_json,
-      COALESCE(server_subscriptions.plan_key, 'starter') AS plan_key,
+      COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
       server_subscriptions.status AS subscription_status
     FROM linked_servers
     LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
@@ -987,7 +1025,7 @@ async function toSafePublicServer(
     score: ranking?.score ?? 0,
     score_label: ranking?.score_label ?? "Pending",
   };
-  const planKey = publicPlanKey(row.plan_key);
+  const planKey = publicPlanKey(row.plan_key, row.subscription_status);
   const reputation = buildServerReputationSummary({
     planKey,
     createdAt: row.created_at,
@@ -1016,6 +1054,7 @@ async function toSafePublicServer(
   });
   const advertising = publicAdvertisingFromState({
     last_bumped_at: row.last_bumped_at,
+    next_bump_at: row.next_bump_at,
     bump_count_current_period: numberOrZero(row.bump_count_current_period),
     bump_period_start: row.bump_period_start,
     bump_period_end: row.bump_period_end,
@@ -1118,6 +1157,11 @@ async function toSafePublicServer(
     public_language: row.public_language,
     public_region_label: row.public_region_label,
     public_listing_updated_at: row.public_listing_updated_at,
+    advert_banner_url: planKey === "pro" ? row.advert_banner_url : null,
+    advert_banner_alt: planKey === "pro" ? row.advert_banner_alt : null,
+    owner_announcement: planKey === "pro" ? row.owner_announcement : null,
+    fresh_wipe_promo: planKey === "pro" ? row.fresh_wipe_promo : null,
+    gallery_images: [],
     created_at: row.created_at,
     ...stats,
     score_breakdown: ranking?.score_breakdown ?? null,
@@ -1213,7 +1257,7 @@ async function toSafePublicServerPreview(
     score: 0,
     score_label: readable ? "ADM synced" : "Pending",
   };
-  const planKey = publicPlanKey(row.plan_key);
+  const planKey = publicPlanKey(row.plan_key, row.subscription_status);
   const reputation = buildServerReputationSummary({
     planKey,
     createdAt: row.created_at,
@@ -1249,6 +1293,7 @@ async function toSafePublicServerPreview(
   });
   const advertising = publicAdvertisingFromState({
     last_bumped_at: row.last_bumped_at,
+    next_bump_at: row.next_bump_at,
     bump_count_current_period: numberOrZero(row.bump_count_current_period),
     bump_period_start: row.bump_period_start,
     bump_period_end: row.bump_period_end,
@@ -1344,6 +1389,11 @@ async function toSafePublicServerPreview(
     public_language: row.public_language,
     public_region_label: row.public_region_label,
     public_listing_updated_at: row.public_listing_updated_at,
+    advert_banner_url: planKey === "pro" ? row.advert_banner_url : null,
+    advert_banner_alt: planKey === "pro" ? row.advert_banner_alt : null,
+    owner_announcement: planKey === "pro" ? row.owner_announcement : null,
+    fresh_wipe_promo: planKey === "pro" ? row.fresh_wipe_promo : null,
+    gallery_images: [],
     created_at: row.created_at,
     ...stats,
     score_breakdown: null,
@@ -1509,6 +1559,36 @@ export function emptyPublicServerRatingSummary(): PublicServerRatingSummary {
   };
 }
 
+async function getPublicServerGalleryImages(env: Env, linkedServerId: string): Promise<PublicGalleryImage[]> {
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT id, url, width, height, size_bytes, sort_order
+       FROM server_gallery_images
+       WHERE server_id = ?
+       ORDER BY sort_order ASC, created_at ASC
+       LIMIT 4`,
+    )
+    .bind(linkedServerId)
+    .all<{
+      id: string;
+      url: string | null;
+      width: number | null;
+      height: number | null;
+      size_bytes: number | null;
+      sort_order: number | null;
+    }>();
+  return (result.results ?? [])
+    .filter((row) => typeof row.url === "string" && row.url.startsWith("https://"))
+    .map((row, index) => ({
+      id: row.id,
+      url: row.url as string,
+      width: row.width === null ? null : numberOrZero(row.width),
+      height: row.height === null ? null : numberOrZero(row.height),
+      size_bytes: row.size_bytes === null ? null : numberOrZero(row.size_bytes),
+      sort_order: Number.isFinite(Number(row.sort_order)) ? Number(row.sort_order) : index,
+    }));
+}
+
 function publicRatingOrNull(value: unknown): 1 | 2 | 3 | 4 | 5 | null {
   const rating = Number(value);
   if (!Number.isFinite(rating)) return null;
@@ -1565,11 +1645,8 @@ export function sortPublicServersForDiscovery<T extends {
   return servers;
 }
 
-function publicPlanKey(value: unknown) {
-  const plan = String(value ?? "").trim().toLowerCase();
-  if (plan === "premium" || plan === "network" || plan === "partner") return "premium";
-  if (plan === "pro") return "pro";
-  return "starter";
+function publicPlanKey(value: unknown, subscriptionStatus?: unknown): "free" | "pro" {
+  return normalizeListingPlanKey(value, subscriptionStatus);
 }
 
 export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn: boolean): SafePublicServer {
@@ -1673,7 +1750,7 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync_active: false,
       ...emptyPublicServerRatingSummary(),
       advertising: publicAdvertisingFromState(null),
-      ...mockReputationFields("starter", { created_at: new Date().toISOString(), server_type: "PVP / PVE", total_kills: 0, total_deaths: 0, total_joins: 0, total_disconnects: 0, unique_players: 0, rank: null, score: 0, active: false }),
+      ...mockReputationFields("free", { created_at: new Date().toISOString(), server_type: "PVP / PVE", total_kills: 0, total_deaths: 0, total_joins: 0, total_disconnects: 0, unique_players: 0, rank: null, score: 0, active: false }),
       ...mockListingFields("Hybrid PvP/PvE community with factions, events, traders, and weekend raids."),
       recent_events: [],
     },
@@ -1718,7 +1795,7 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync_active: true,
       ...emptyPublicServerRatingSummary(),
       advertising: publicAdvertisingFromState(null),
-      ...mockReputationFields("premium", { created_at: new Date().toISOString(), server_type: "PVP", total_kills: 12, total_deaths: 18, total_joins: 42, total_disconnects: 36, unique_players: 14, rank: 1, score: 0, active: true }),
+      ...mockReputationFields("pro", { created_at: new Date().toISOString(), server_type: "PVP", total_kills: 12, total_deaths: 18, total_joins: 42, total_disconnects: 36, unique_players: 14, rank: 1, score: 0, active: true }),
       ...mockListingFields("Raid-focused PvP server with active factions and competitive stat tracking."),
       recent_events: [],
     },
@@ -1763,14 +1840,14 @@ function mockPublicServers(): SafePublicServer[] {
       stats_sync_active: false,
       ...emptyPublicServerRatingSummary(),
       advertising: publicAdvertisingFromState(null),
-      ...mockReputationFields("starter", { created_at: new Date().toISOString(), server_type: "DEATHMATCH", total_kills: 0, total_deaths: 0, total_joins: 0, total_disconnects: 0, unique_players: 0, rank: null, score: 0, active: false }),
+      ...mockReputationFields("free", { created_at: new Date().toISOString(), server_type: "DEATHMATCH", total_kills: 0, total_deaths: 0, total_joins: 0, total_disconnects: 0, unique_players: 0, rank: null, score: 0, active: false }),
       ...mockListingFields("Fast respawn deathmatch arena for clean fights and leaderboard runs."),
       recent_events: [],
     },
   ];
 }
 
-function mockReputationFields(planKey: string, input: {
+function mockReputationFields(planKey: "free" | "pro", input: {
   created_at: string;
   server_type: string;
   total_kills: number;
@@ -1833,7 +1910,7 @@ function mockReputationFields(planKey: string, input: {
   };
   const visibilityConfig = getServerVisibilityConfig(visibilityInput);
   return {
-    plan_key: publicPlanKey(planKey),
+    plan_key: (planKey === "pro" ? "pro" : "free") as "free" | "pro",
     premium_status: reputation.premiumStatus,
     visibility_weight: visibilityConfig.visibilityWeight,
     visibilityWeight: visibilityConfig.visibilityWeight,
@@ -1858,6 +1935,11 @@ function mockListingFields(shortDescription: string) {
     public_language: "English",
     public_region_label: "Community region",
     public_listing_updated_at: new Date().toISOString(),
+    advert_banner_url: null,
+    advert_banner_alt: null,
+    owner_announcement: null,
+    fresh_wipe_promo: null,
+    gallery_images: [],
   };
 }
 

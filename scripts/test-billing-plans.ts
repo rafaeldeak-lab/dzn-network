@@ -8,6 +8,7 @@ import { onRequest as checkoutHandler } from "../functions/api/billing/create-ch
 import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
+import { canUseProFeature, getBumpCooldownDays, getListingLimits, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const starter = getPlanConfig("starter");
@@ -16,10 +17,10 @@ const premium = getPlanConfig("premium");
 
 assert.equal(starter.can_use_ad_bumps, false);
 assert.equal(pro.can_use_ad_bumps, true);
-assert.equal(pro.included_bumps_per_month, 2);
+assert.equal(pro.included_bumps_per_month, 1);
 assert.equal(pro.max_linked_servers, 3);
 assert.equal(premium.max_linked_servers, 10);
-assert.equal(premium.included_bumps_per_month, 8);
+assert.equal(premium.included_bumps_per_month, 1);
 assert.equal(premium.monthly_price, 19.99);
 assert.equal(Math.round(premium.monthly_price * 100), 1999);
 assert.equal(premium.visibility_weight, 4);
@@ -53,8 +54,29 @@ assert.deepEqual(
     },
     now,
   }).code,
-  "limit_reached",
+  "cooldown",
 );
+
+assert.equal(normalizeListingPlanKey(null), "free");
+assert.equal(normalizeListingPlanKey("starter", "active"), "free");
+assert.equal(normalizeListingPlanKey("pro", "active"), "pro");
+assert.equal(normalizeListingPlanKey("premium", "trialing"), "pro");
+assert.equal(normalizeListingPlanKey("partner", "active"), "pro");
+assert.equal(normalizeListingPlanKey("network", "active"), "pro");
+assert.equal(normalizeListingPlanKey("pro", "past_due"), "free");
+assert.equal(isProListing({ plan_key: "premium", subscription_status: "active" }), true);
+assert.equal(isProListing({ plan_key: "pro", subscription_status: "canceled" }), false);
+assert.equal(getListingLimits({ plan_key: "free" }).descriptionLimit, 500);
+assert.equal(getListingLimits({ plan_key: "premium", subscription_status: "active" }).descriptionLimit, 2500);
+assert.equal(getListingLimits({ plan_key: "premium", subscription_status: "active" }).galleryLimit, 4);
+assert.equal(getListingLimits({ plan_key: "free" }).galleryLimit, 0);
+assert.equal(getBumpCooldownDays({ plan_key: "free" }), 30);
+assert.equal(getBumpCooldownDays({ plan_key: "network", subscription_status: "active" }), 7);
+assert.equal(canUseProFeature({ plan_key: "free" }, "custom_banner"), false);
+assert.equal(canUseProFeature({ plan_key: "pro", subscription_status: "active" }, "custom_banner"), true);
+assert.equal(hasListingAutoPost({ plan_key: "free" }, "server_advert"), true);
+assert.equal(hasListingAutoPost({ plan_key: "free" }, "weekly_recap"), false);
+assert.equal(hasListingAutoPost({ plan_key: "premium", subscription_status: "active" }, "weekly_recap"), true);
 
 const featured = publicAdvertisingFromState({ featured_until: "2026-05-18T12:00:00.000Z", featured_label: "featured" }, now);
 const boosted = publicAdvertisingFromState({ last_bumped_at: "2026-05-17T10:00:00.000Z" }, now);
@@ -153,10 +175,8 @@ assert.equal(JSON.stringify(completeReadiness).includes("whsec_secret_value_must
 assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false);
 
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
-const pricingSection = [
-  landingSource.slice(landingSource.indexOf("const pricingPlans"), landingSource.indexOf("function useHomeStats")),
-  landingSource.slice(landingSource.indexOf("function PricingUpgradeSection"), landingSource.indexOf("function GameModeGrid")),
-].join("\n");
+const pricingSection = landingSource.slice(landingSource.indexOf("const publicPricingPlans"), landingSource.indexOf("function GameModeGrid"));
+/*
 for (const snippet of [
   "Starter",
   "Pro",
@@ -186,9 +206,36 @@ for (const snippet of [
 }
 assert.equal(/Network|Partner/.test(pricingSection), false, "Public pricing section must not show Network/Partner plans.");
 assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Premium pricing copy must not claim paid leaderboard rank.");
+*/
+for (const snippet of [
+  "Free Listing",
+  "Pro Listing",
+  "Monthly paid package",
+  "Description limit",
+  "Gallery images",
+  "Custom banner",
+  "Bump cooldown",
+  "Discord channels",
+  "Discord auto posts",
+  "Embed design",
+  "Owner announcement",
+  "Event promotion",
+  "Featured rotation eligibility",
+  "Leaderboard/stat advantage",
+  "Pro helps your server look better, advertise better and understand performance better.",
+  "Does Pro affect leaderboard rank?",
+  "What does Pro improve?",
+  "Do Free servers still compete?",
+  "Can badges be bought?",
+]) {
+  assert.equal(pricingSection.includes(snippet), true, `Public pricing section should include ${snippet}.`);
+}
+assert.equal(/Starter|Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingSection), false, "Public pricing section must only show Free/Pro plans.");
+assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Pro pricing copy must not claim paid leaderboard rank.");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-assert.equal(dashboardSource.includes("Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits"), true, "Owner billing cards should explain Premium value.");
+assert.equal(dashboardSource.includes("Custom advert visuals, weekly bumping, enhanced Discord posts, featured rotation eligibility, and listing analytics"), true, "Owner billing cards should explain Pro Listing value.");
+assert.equal(dashboardSource.includes("Upgrade to Premium"), false, "Owner billing and Discord fallback cards should not present Premium as an advertising upgrade.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
 assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
 assert.equal(dashboardSource.includes("included_bumps_per_month: 3"), false, "Dashboard fallback plans must not keep stale Pro 3 promotion credits.");

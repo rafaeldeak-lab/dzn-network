@@ -35,6 +35,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { SiteHeader } from "@/components/site-header";
+import { LiveServerRail } from "@/components/servers/live-server-rail";
 import type { AuthResponse } from "@/components/onboarding/types";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import { DznLogo } from "./dzn-logo";
@@ -432,65 +433,61 @@ const featureCards = [
 
 const pricingPlans = [
   {
-    key: "starter",
-    name: "Starter",
-    price: "£4.99/month",
-    bestFor: "Best for new and small servers",
-    summary: "Standard discovery, basic leaderboard participation, earned badges, and 24 hour public updates.",
-    features: ["Standard listing", "Basic leaderboard participation", "Public updates every 24h", "Earned badges visible", "3 showcase badges", "No monthly promotion credits"],
+    key: "free",
+    name: "Free Listing",
+    price: "Free",
+    bestFor: "Best for getting listed",
+    summary: "List your DayZ server on DZN Network for free with a public profile, join link, ratings, reviews and basic network stats.",
+    features: ["Public server profile", "Basic discovery", "Ratings and reviews", "One Discord auto-post channel", "Basic server advert posts", "One bump every 30 days", "Standard listing visuals", "No leaderboard/stat advantage"],
   },
   {
     key: "pro",
-    name: "Pro",
-    price: "£9.99/month",
-    bestFor: "Best for growing communities",
-    summary: "Enhanced discovery, featured rotation eligibility, 2 monthly promotion credits, and stronger public presentation.",
-    features: ["Public updates every 4h", "Enhanced discovery", "Featured rotation eligible", "2 monthly promotion credits", "5 showcase badges", "Standard themes and reputation frames"],
-  },
-  {
-    key: "premium",
-    name: "Premium",
-    price: "£19.99/month",
-    bestFor: "Best for serious servers wanting maximum exposure",
-    summary: "Premium discovery priority, Premium Spotlight eligibility, animated visuals, and 8 monthly promotion credits.",
-    features: ["Fastest/current publishing", "Premium discovery priority", "Premium Spotlight eligible", "8 monthly promotion credits", "Premium animated frames and themes", "8 showcase badges"],
+    name: "Pro Listing",
+    price: "Monthly paid package",
+    bestFor: "Best for active advertising",
+    summary: "Upgrade your server advert with a longer description, custom banner, 4 gallery images, weekly bumping, enhanced Discord embeds, event promotion, profile styling and listing analytics.",
+    features: ["Enhanced public profile", "Custom advert banner", "Up to 4 JPEG gallery images", "Owner announcement", "Fresh wipe and event promo", "More Discord advert post types", "One bump every 7 days", "Featured rotation eligibility", "No leaderboard/stat advantage"],
   },
 ] as const;
 
-const pricingComparisonRows = [
-  { label: "Public publishing interval", starter: "Every 24h", pro: "Every 4h", premium: "Fastest/current" },
-  { label: "Visibility tier", starter: "Standard listing", pro: "Enhanced discovery", premium: "Premium discovery priority" },
-  { label: "Promotion credits", starter: "0 monthly credits", pro: "2 monthly credits", premium: "8 monthly credits" },
-  { label: "Featured eligibility", starter: "Standard listing only", pro: "Featured rotation eligible", premium: "Priority featured eligible" },
-  { label: "Spotlight eligibility", starter: "Not eligible", pro: "Not eligible", premium: "Premium Spotlight eligible" },
-  { label: "Showcase badge limit", starter: "3 badges", pro: "5 badges", premium: "8 badges" },
-  { label: "Frames/themes", starter: "Default frame and theme", pro: "Standard themes and reputation frames", premium: "Premium animated frames and themes" },
-  { label: "Animated visuals", starter: "Static visuals", pro: "Static visuals", premium: "Animated premium visuals" },
-  { label: "Seasons access", starter: "Same-category seasons", pro: "Same-category seasons", premium: "Same-category seasons" },
-  { label: "Badge/reputation showcase", starter: "Earned badges visible", pro: "5 badge showcase", premium: "Premium badge/status and 8 badge showcase" },
-  { label: "Best for", starter: "New and small servers", pro: "Growing communities", premium: "Maximum exposure and presentation" },
+const publicPricingPlans = pricingPlans;
+
+const listingComparisonRows = [
+  { label: "Price", free: "Free", pro: "Monthly paid package" },
+  { label: "Public listing", free: "Yes", pro: "Yes" },
+  { label: "Description limit", free: "500 characters", pro: "2,500 characters" },
+  { label: "Gallery images", free: "0", pro: "Up to 4 JPEG images" },
+  { label: "Custom banner", free: "No", pro: "Yes" },
+  { label: "Bump cooldown", free: "30 days", pro: "7 days" },
+  { label: "Ratings/reviews", free: "Yes", pro: "Yes" },
+  { label: "Discord channels", free: "1 channel", pro: "Multiple post-type channels" },
+  { label: "Discord auto posts", free: "Basic advert, bump, review", pro: "Events, leaderboard, longest kill, recaps, milestones" },
+  { label: "Embed design", free: "Standard DZN style", pro: "Enhanced Pro style" },
+  { label: "Analytics", free: "Limited", pro: "Views, clicks, bumps, Discord activity where available" },
+  { label: "Owner announcement", free: "No", pro: "Yes" },
+  { label: "Event promotion", free: "Limited/locked", pro: "Yes" },
+  { label: "Featured rotation eligibility", free: "Standard listing", pro: "Eligible, not guaranteed" },
+  { label: "Leaderboard/stat advantage", free: "No", pro: "No" },
+  { label: "Review score advantage", free: "No", pro: "No" },
+  { label: "Season/crown advantage", free: "No", pro: "No" },
 ] as const;
 
-const pricingFaqs = [
+const listingPricingFaqs = [
   {
-    question: "Does Premium affect leaderboard rank?",
-    answer: "No. Premium improves discovery, visibility, promotion and presentation only. Competitive leaderboard rank remains based on gameplay and stored stats.",
+    question: "Does Pro affect leaderboard rank?",
+    answer: "No. Pro improves presentation, advertising tools, Discord embeds, and analytics only. Competitive leaderboard rank remains based on gameplay and stored stats.",
   },
   {
-    question: "What does Premium improve?",
-    answer: "Premium improves public discovery priority, faster public updates, Premium Spotlight eligibility, monthly promotion credits, and visual presentation.",
+    question: "What does Pro improve?",
+    answer: "Pro improves public adverts, weekly bumping, gallery images, custom banners, Discord promotion, owner announcements, and analytics.",
   },
   {
-    question: "Do Starter servers still compete?",
-    answer: "Yes. Starter servers can appear in standard discovery, participate in basic leaderboards, show earned badges, and join normal same-category seasons.",
+    question: "Do Free servers still compete?",
+    answer: "Yes. Free listings get public profiles, ratings, reviews, join links, and fair competition. Paid presentation never changes gameplay results.",
   },
   {
     question: "Can badges be bought?",
     answer: "No. Earned badges, crowns, reputation awards, event badges, and seasonal badges must be earned before they can be showcased.",
-  },
-  {
-    question: "Can seasons be won by paying?",
-    answer: "No. Season scores, ranks, wins, and seasonal awards come from season snapshots and competition results, not billing plan.",
   },
 ] as const;
 
@@ -778,6 +775,7 @@ export function DznLandingPage() {
             loggedInContext={loggedInContext}
             dataPending={homeStatsPending}
           />
+          <LiveServerRail />
           {isAuthLoading ? <AuthCheckingPanel /> : null}
           {isPreviewMode ? (
             <HomepagePreviewUnlock />
@@ -1341,7 +1339,7 @@ function PricingUpgradeSection() {
           <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
           <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
           <p className="mt-3 text-sm leading-6 text-zinc-300/86">
-            Starter, Pro, and Premium keep competition fair while giving server owners clearer options for public updates, discovery placement, promotion credits, and visual presentation.
+            Free Listing and Pro Listing keep competition fair while giving server owners clear options for public profiles, weekly advertising tools, Discord promotion, and analytics.
           </p>
         </div>
         <a
@@ -1352,14 +1350,12 @@ function PricingUpgradeSection() {
         </a>
       </div>
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-3">
-        {pricingPlans.map((plan) => (
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        {publicPricingPlans.map((plan) => (
           <article
             key={plan.key}
             className={`rounded-lg border p-4 ${
-              plan.key === "premium"
-                ? "border-amber-300/25 bg-amber-300/[0.075] shadow-[0_0_34px_rgba(251,191,36,0.1)]"
-                : plan.key === "pro"
+              plan.key === "pro"
                   ? "border-cyan-300/20 bg-cyan-300/[0.055]"
                   : "border-white/10 bg-black/24"
             }`}
@@ -1387,32 +1383,30 @@ function PricingUpgradeSection() {
       </div>
 
       <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.065] p-4">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Premium exposure</p>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Fair Pro advertising</p>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-amber-50">
-          Premium is built for server owners who want maximum exposure, faster public updates, premium visuals, spotlight eligibility and monthly promotion credits.
+          Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, crowns, season wins, or gameplay results.
         </p>
         <p className="mt-2 text-xs font-bold text-amber-100/82">
-          Premium improves discovery, visibility, promotion and presentation. It does not buy leaderboard rank, K/D rank, crown wins, or season wins.
+          Featured and spotlight rotation are controlled visibility tools, not guaranteed permanent top rank.
         </p>
       </div>
 
       <div className="mt-5 overflow-x-auto rounded-lg border border-white/10 bg-black/24">
-        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[620px] border-collapse text-left text-sm">
           <thead className="bg-white/[0.04] text-[10px] font-black uppercase tracking-[0.14em] text-zinc-400">
             <tr>
               <th className="px-4 py-3">Feature</th>
-              <th className="px-4 py-3">Starter</th>
-              <th className="px-4 py-3">Pro</th>
-              <th className="px-4 py-3">Premium</th>
+              <th className="px-4 py-3">Free Listing</th>
+              <th className="px-4 py-3">Pro Listing</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/8 text-zinc-300">
-            {pricingComparisonRows.map((row) => (
+            {listingComparisonRows.map((row) => (
               <tr key={row.label}>
                 <th className="px-4 py-3 text-xs font-black uppercase text-zinc-200">{row.label}</th>
-                <td className="px-4 py-3">{row.starter}</td>
+                <td className="px-4 py-3">{row.free}</td>
                 <td className="px-4 py-3">{row.pro}</td>
-                <td className="px-4 py-3 text-amber-50">{row.premium}</td>
               </tr>
             ))}
           </tbody>
@@ -1420,7 +1414,7 @@ function PricingUpgradeSection() {
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        {pricingFaqs.map((item) => (
+        {listingPricingFaqs.map((item) => (
           <article key={item.question} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
             <h3 className="text-sm font-black text-white">{item.question}</h3>
             <p className="mt-2 text-xs leading-5 text-zinc-400">{item.answer}</p>

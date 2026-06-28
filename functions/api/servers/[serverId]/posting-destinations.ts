@@ -7,10 +7,10 @@ import {
   sendDiscordTestPost,
   verifyDiscordPostingChannel,
 } from "../../../_lib/discord-posting";
-import { ensureAutomationSchema, getAutomationContextForLinkedServer, isActiveSubscriptionStatus } from "../../../_lib/automation";
+import { ensureAutomationSchema } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
-import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, hasAutoPost } from "../../../_lib/plans";
+import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, getListingLimits, hasListingAutoPost, normalizeListingPlanKey } from "../../../_lib/plans";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 import type { AutoPostType } from "../../../../lib/billing/plans";
 
@@ -38,24 +38,21 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (request.method === "GET") {
     const context = await getPostingContextForRead(env, linkedServerId);
     if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
-    return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+    return json(await getPostingDestinationPayload(env, context));
   }
   if (request.method !== "POST") return methodNotAllowed();
 
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  const context = await getPostingContextForRead(env, linkedServerId);
   if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
 
   const body = await readJson<SavePostingDestinationBody>(request);
-  if (!isActiveSubscriptionStatus(context.subscriptionStatus)) {
-    return json({ error: "An active DZN subscription is required to configure Discord auto-posts." }, { status: 403 });
-  }
   if (body.channel_id || Array.isArray(body.post_types) || body.action) {
     return handleGroupedPostingAction(env, context, user, body);
   }
 
   const postType = normalizePostType(body.post_type);
   if (!postType) return json({ error: "Invalid post type" }, { status: 400 });
-  if (!hasAutoPost(context.planKey, postType)) {
+  if (!hasListingAutoPost(context, postType)) {
     return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
   }
   const channelId = sanitizeDiscordId(body.discord_channel_id);
@@ -95,7 +92,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       webhookUrl,
       body.enabled === false ? 0 : 1,
       requiredFeatureForPostType(postType),
-      context.planKey,
+      normalizeListingPlanKey(context) === "pro" ? "pro" : "starter",
       user.discord_id,
       now,
       now,
@@ -154,7 +151,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     }
   }
   return json({
-    ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+    ...await getPostingDestinationPayload(env, context),
     permission_check: permissionCheck,
     test_post: testResult,
   });
@@ -167,6 +164,7 @@ async function handleGroupedPostingAction(
   body: SavePostingDestinationBody,
 ) {
   await ensureAutomationSchema(env);
+  const limits = getListingLimits(context);
   const action = body.action ?? "save";
   const channelId = sanitizeDiscordId(body.channel_id ?? body.discord_channel_id);
   if (!channelId) return json({ error: "Discord channel is required." }, { status: 400 });
@@ -176,7 +174,7 @@ async function handleGroupedPostingAction(
       .prepare("DELETE FROM server_posting_destinations WHERE guild_id = ? AND discord_channel_id = ?")
       .bind(context.guildId, channelId)
       .run();
-    return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+    return json(await getPostingDestinationPayload(env, context));
   }
 
   if (action === "disable") {
@@ -184,7 +182,7 @@ async function handleGroupedPostingAction(
       .prepare("UPDATE server_posting_destinations SET enabled = 0, updated_at = ? WHERE guild_id = ? AND discord_channel_id = ?")
       .bind(new Date().toISOString(), context.guildId, channelId)
       .run();
-    return json(await getPostingDestinationPayload(env, context.guildId, context.planKey));
+    return json(await getPostingDestinationPayload(env, context));
   }
 
   const existingForChannel = await requireDb(env)
@@ -204,24 +202,24 @@ async function handleGroupedPostingAction(
     return json({
       error: "Choose another channel or add a webhook fallback.",
       permission_check: permissionCheck,
-      ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+      ...await getPostingDestinationPayload(env, context),
     }, { status: 400 });
   }
   if (permissionCheck.mode === "missing_permissions" && !webhookUrl) {
     return json({
       error: permissionCheck.warning ?? "DZN cannot auto-post in this channel yet.",
       permission_check: permissionCheck,
-      ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+      ...await getPostingDestinationPayload(env, context),
     }, { status: 400 });
   }
 
   if (action === "test") {
     const postType = normalizePostType(body.test_post_type ?? body.post_type ?? body.post_types?.[0]);
     if (!postType) return json({ error: "Select a post type to test." }, { status: 400 });
-    if (!hasAutoPost(context.planKey, postType)) return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
+    if (!hasListingAutoPost(context, postType)) return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
     const testResult = await runPostingTest(env, context.guildId, channelId, postType, webhookUrl, permissionCheck);
     return json({
-      ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+      ...await getPostingDestinationPayload(env, context),
       permission_check: permissionCheck,
       test_post: testResult,
     });
@@ -229,8 +227,11 @@ async function handleGroupedPostingAction(
 
   const postTypes = normalizePostTypes(body.post_types);
   if (!postTypes.length) return json({ error: "Select at least one auto-post type." }, { status: 400 });
-  const locked = postTypes.filter((postType) => !hasAutoPost(context.planKey, postType));
+  const locked = postTypes.filter((postType) => !hasListingAutoPost(context, postType));
   if (locked.length > 0) return json({ error: "One or more selected auto-post types are locked by your DZN plan." }, { status: 403 });
+  if (limits.discordChannelLimit !== null && await wouldExceedDiscordChannelLimit(env, context.guildId, channelId, limits.discordChannelLimit)) {
+    return json({ error: "Free Listing supports one connected Discord auto-post channel. Upgrade to Pro for multiple post-type channels.", code: "CHANNEL_LIMIT" }, { status: 403 });
+  }
 
   const now = new Date().toISOString();
   const db = requireDb(env);
@@ -257,7 +258,7 @@ async function handleGroupedPostingAction(
         webhookUrl,
         body.enabled === false ? 0 : 1,
         requiredFeatureForPostType(postType),
-        context.planKey,
+        normalizeListingPlanKey(context) === "pro" ? "pro" : "starter",
         user.discord_id,
         now,
         now,
@@ -278,7 +279,7 @@ async function handleGroupedPostingAction(
     .run();
 
   return json({
-    ...await getPostingDestinationPayload(env, context.guildId, context.planKey),
+    ...await getPostingDestinationPayload(env, context),
     permission_check: permissionCheck,
   });
 }
@@ -334,7 +335,9 @@ async function runPostingTest(
   }
 }
 
-async function getPostingDestinationPayload(env: Env, guildId: string, planKey: string) {
+async function getPostingDestinationPayload(env: Env, context: { guildId: string; planKey: string; subscriptionStatus: string }) {
+  const { guildId } = context;
+  const listingPlanKey = normalizeListingPlanKey(context);
   const rows = await requireDb(env)
     .prepare(
       `SELECT post_type, discord_channel_id, discord_webhook_url, enabled, required_feature, min_plan_key, updated_at
@@ -416,8 +419,8 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
       const setup = resolvePostingSetup(deliveryMode, row?.discord_channel_id ?? null, Boolean(row?.discord_webhook_url), setupWarning, permissionMissing);
       return {
         post_type: postType,
-        allowed: hasAutoPost(planKey, postType),
-        locked_message: hasAutoPost(planKey, postType) ? null : lockedMessage(postType),
+        allowed: hasListingAutoPost(context, postType),
+        locked_message: hasListingAutoPost(context, postType) ? null : lockedMessage(postType),
         discord_channel_id: row?.discord_channel_id ?? null,
         has_webhook_url: Boolean(row?.discord_webhook_url),
         enabled: row ? Number(row.enabled ?? 0) === 1 : false,
@@ -455,7 +458,8 @@ async function getPostingDestinationPayload(env: Env, guildId: string, planKey: 
   return {
     post_type_options: AUTO_POST_OPTIONS.map((option) => ({
       ...option,
-      allowed_by_plan: hasAutoPost(planKey, option.key),
+      allowed_by_plan: hasListingAutoPost(context, option.key),
+      listing_plan_key: listingPlanKey,
     })),
     post_types: postTypeSummaries,
     setups: [...groupedRows.entries()].map(([channelId, postTypes]) => {
@@ -540,6 +544,22 @@ function savedPostingChannel(channelId: string) {
   };
 }
 
+async function wouldExceedDiscordChannelLimit(env: Env, guildId: string, nextChannelId: string, limit: number) {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT DISTINCT discord_channel_id
+         FROM server_posting_destinations
+        WHERE guild_id = ?
+          AND COALESCE(enabled, 1) = 1
+          AND discord_channel_id IS NOT NULL`,
+    )
+    .bind(guildId)
+    .all<{ discord_channel_id: string | null }>();
+  const channelIds = new Set((rows.results ?? []).map((row) => row.discord_channel_id).filter((value): value is string => Boolean(value)));
+  channelIds.add(nextChannelId);
+  return channelIds.size > limit;
+}
+
 async function requireOwnedServer(env: Env, userId: string, linkedServerId: string) {
   return requireDb(env)
     .prepare("SELECT id FROM linked_servers WHERE id = ? AND user_id = ? LIMIT 1")
@@ -583,7 +603,7 @@ function requiredFeatureForPostType(postType: AutoPostType) {
 
 function lockedMessage(postType: AutoPostType) {
   if (postType === "server_vs_server_embed") return "Upgrade to Pro to auto-post server-vs-server competition updates.";
-  if (postType === "partner_featured_embed" || postType === "priority_status_embed") return "Upgrade to Premium to unlock priority Discord posting.";
+  if (postType === "partner_featured_embed" || postType === "priority_status_embed") return "Upgrade to Pro to unlock priority Discord posting.";
   return "Upgrade your DZN plan to unlock this Discord auto-post.";
 }
 

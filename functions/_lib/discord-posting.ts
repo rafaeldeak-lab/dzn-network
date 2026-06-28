@@ -1,6 +1,6 @@
-import { ensureAutomationSchema, isActiveSubscriptionStatus } from "./automation";
+import { ensureAutomationSchema } from "./automation";
 import { requireDb } from "./db";
-import { getAdmPullInterval, getServerStatusInterval, hasAutoPost, normalizePlanKey } from "./plans";
+import { getAdmPullInterval, getServerStatusInterval, hasListingAutoPost, normalizeListingPlanKey, normalizePlanKey } from "./plans";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 
@@ -250,14 +250,15 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
     .bind(job.guild_id)
     .first<{ plan_key: string | null; status: string | null }>();
   const planKey = normalizePlanKey(subscription?.plan_key);
-  if (!isActiveSubscriptionStatus(subscription?.status) || !hasAutoPost(planKey, job.post_type)) {
+  const listingContext = { plan_key: planKey, subscription_status: subscription?.status ?? "inactive" };
+  if (!hasListingAutoPost(listingContext, job.post_type)) {
     return {
       guild_id: job.guild_id,
       post_type: job.post_type,
       channel_id: null,
       status: "skipped_plan_locked",
       message_id: null,
-      reason: "Subscription inactive or plan does not allow this auto-post type.",
+      reason: "Listing package does not allow this auto-post type.",
     };
   }
 
@@ -276,13 +277,13 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
     };
   }
 
-  return processConfiguredPostingDestination(env, destination, planKey, { force: true });
+  return processConfiguredPostingDestination(env, destination, listingContext, { force: true });
 }
 
 async function processConfiguredPostingDestination(
   env: Env,
   destination: PostingDestination,
-  planKey: string,
+  listingContext: { plan_key?: unknown; planKey?: unknown; subscription_status?: unknown; subscriptionStatus?: unknown },
   options: { force?: boolean } = {},
 ): Promise<DiscordPostDispatchDetail> {
   if (Number(destination.enabled ?? 0) !== 1) {
@@ -297,7 +298,7 @@ async function processConfiguredPostingDestination(
     };
   }
 
-  if (!hasAutoPost(planKey, destination.post_type)) {
+  if (!hasListingAutoPost(listingContext, destination.post_type)) {
     await recordPostingDispatchStatus(env, destination, "skipped_plan_locked", "Current plan does not allow this auto-post type.");
     return {
       guild_id: destination.guild_id,
@@ -314,7 +315,8 @@ async function processConfiguredPostingDestination(
     .prepare("SELECT * FROM server_public_cache WHERE guild_id = ? LIMIT 1")
     .bind(destination.guild_id)
     .first<PublicCache>();
-  const payload = renderDiscordPostPayload(destination.post_type, cache, planKey);
+  const listingPlanKey = normalizeListingPlanKey(listingContext);
+  const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
   const payloadHash = await hashPayload(payload);
   const state = await db
     .prepare("SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
@@ -414,10 +416,11 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
     }
     if (processed >= options.maxJobs) break;
     const planKey = normalizePlanKey(row.plan_key);
-    if (!options.force && !isAutoPostDue(row.post_type, planKey, row.last_edited_at)) continue;
+    const listingContext = { plan_key: planKey, subscription_status: row.subscription_status ?? "inactive" };
+    if (!options.force && !isAutoPostDue(row.post_type, normalizeListingPlanKey(listingContext), row.last_edited_at)) continue;
     processed += 1;
     try {
-      const result = await processConfiguredPostingDestination(env, row, planKey, { force: options.force });
+      const result = await processConfiguredPostingDestination(env, row, listingContext, { force: options.force });
       results.push(result);
       if (result.status === "edited") edited += 1;
       else if (result.status === "sent" || result.status === "success") sent += 1;
@@ -1228,7 +1231,34 @@ function renderDiscordPostPayload(postType: AutoPostType, cache: PublicCache | n
     : `DZN ${planKey.toUpperCase()} automation. Nitrado controls fresh log availability.`;
   let description: string;
 
-  if (statusPost) {
+  if (postType === "server_advert" || postType === "bump_announcement" || postType === "rating_review") {
+    embedTitle = postType === "bump_announcement"
+      ? `DZN Server Bump - ${serverName}`
+      : postType === "rating_review"
+        ? `DZN Server Reviews - ${serverName}`
+        : `DZN Network Server Listing - ${serverName}`;
+    footerText = planKey === "pro" ? "DZN Network - Pro server advert" : "DZN Network - Free server listing";
+    description = [
+      `Server: ${serverName}`,
+      `Status: ${status}`,
+      `Players: ${current} / ${max}`,
+      `Network rank: ${cache?.network_rank ?? "pending"}`,
+      postType === "bump_announcement" ? "This server listing was bumped on DZN Network." : "View this server listing on DZN Network.",
+      "Ratings and reviews are earned by players. Paid plans do not boost review scores or competitive stats.",
+      `Updated at: ${now}`,
+    ].join("\n");
+  } else if (postType === "fresh_wipe" || postType === "event_announcement" || postType === "leaderboard_update" || postType === "longest_kill" || postType === "weekly_recap" || postType === "milestone") {
+    embedTitle = `DZN Pro ${title} - ${serverName}`;
+    footerText = "DZN Network - Pro automation";
+    description = [
+      `Server: ${serverName}`,
+      `Players: ${current} / ${max}`,
+      `Latest ADM update: ${cache?.last_adm_update_at ?? "waiting for ADM check"}`,
+      `Network rank: ${cache?.network_rank ?? "pending"}`,
+      "Pro Discord promotion is presentation only and does not affect leaderboard calculations.",
+      `Updated at: ${now}`,
+    ].join("\n");
+  } else if (statusPost) {
     description = [
       `Server: ${serverName}`,
       `Status: ${status}`,

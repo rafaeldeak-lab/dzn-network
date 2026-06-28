@@ -1,8 +1,7 @@
-import { defaultBumpPeriod, evaluateBumpEligibility, periodExpired } from "../../../../_lib/advertising";
-import { ensureMockUser, getSessionUser, requireDb } from "../../../../_lib/db";
+import { defaultBumpPeriod, evaluateListingBumpEligibility, periodExpired } from "../../../../_lib/advertising";
+import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
-import { isMockAuth } from "../../../../_lib/mock";
-import { ensureBillingSchema, getOwnerEntitlements, getPlanConfig, type PlanEntitlements } from "../../../../_lib/plans";
+import { ensureBillingSchema, getListingLimits, getOwnerEntitlements, getPlanConfig, type PlanEntitlements } from "../../../../_lib/plans";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -14,9 +13,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const linkedServerId = sanitizeLinkedServerId(params.serverId);
   if (!linkedServerId) return json({ error: "Invalid server id" }, { status: 400 });
 
-  if (request.method === "POST") {
-    await ensureBillingSchema(env);
-  }
+  await ensureBillingSchema(env);
   const db = requireDb(env);
   const server = await db
     .prepare(
@@ -36,6 +33,8 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     ? await getOwnerEntitlementsReadOnly(env, user.discord_id)
     : await getOwnerEntitlements(env, user.discord_id);
   const now = new Date();
+  const listingPlanInput = { plan_key: entitlements.plan_key, subscription_status: entitlements.plan_key === "free" ? "free" : "active" };
+  const listingLimits = getListingLimits(listingPlanInput);
   const billing = await db
     .prepare("SELECT current_period_start, current_period_end FROM owner_billing_accounts WHERE discord_user_id = ? LIMIT 1")
     .bind(user.discord_id)
@@ -65,53 +64,96 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         bump_count_current_period: Number(state?.bump_count_current_period ?? 0),
         bump_period_start: typeof state?.bump_period_start === "string" ? state.bump_period_start : periodStart,
         bump_period_end: typeof state?.bump_period_end === "string" ? state.bump_period_end : periodEnd,
-        included_bumps_per_month: entitlements.included_bumps_per_month,
-        bump_cooldown_hours: entitlements.bump_cooldown_hours,
+        next_bump_at: typeof state?.next_bump_at === "string" ? state.next_bump_at : null,
+        bump_cooldown_days: listingLimits.bumpCooldownDays,
       },
+      listing: listingLimits,
       entitlements,
     });
   }
 
-  const eligibility = evaluateBumpEligibility({ entitlements, state, now });
+  await ensureListingEventsSchema(env);
+  const rateLimited = await isBumpAttemptRateLimited(env, user.id, now);
+  if (rateLimited) {
+    return json({ error: "Please try again shortly.", code: "rate_limited", retry_after_seconds: 60 }, { status: 429 });
+  }
+  await recordListingEvent(env, linkedServerId, "bump_attempt", user.id, { plan: listingLimits.listingPlanKey }, now.toISOString());
+
+  const eligibility = evaluateListingBumpEligibility({ limits: listingLimits, state, now });
   if (!eligibility.ok) {
-    const status = eligibility.code === "upgrade_required" ? 402 : 429;
-    return json({ error: eligibility.reason, code: eligibility.code, retry_after_hours: "retry_after_hours" in eligibility ? eligibility.retry_after_hours : null }, { status });
+    return json({
+      error: eligibility.reason,
+      code: eligibility.code,
+      next_bump_at: eligibility.next_bump_at,
+      retry_after_seconds: eligibility.retry_after_seconds,
+      retry_after_days: eligibility.retry_after_days,
+    }, { status: 429 });
   }
 
   const nowIso = now.toISOString();
-  const nextCount = Number(state?.bump_count_current_period ?? 0) + 1;
+  const nextBumpAt = addDaysIso(nowIso, listingLimits.bumpCooldownDays);
   await db
     .prepare(
       `INSERT INTO server_advertising_state (
-        linked_server_id, owner_discord_id, last_bumped_at, bump_count_current_period,
-        bump_period_start, bump_period_end, featured_until, featured_label, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+        linked_server_id, owner_discord_id, last_bumped_at, next_bump_at,
+        bump_count_current_period, bump_period_start, bump_period_end,
+        featured_until, featured_label, updated_at
+      ) VALUES (?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, ?)
       ON CONFLICT(linked_server_id) DO UPDATE SET
         owner_discord_id = excluded.owner_discord_id,
-        last_bumped_at = excluded.last_bumped_at,
-        bump_count_current_period = excluded.bump_count_current_period,
-        bump_period_start = excluded.bump_period_start,
-        bump_period_end = excluded.bump_period_end,
+        bump_period_start = COALESCE(server_advertising_state.bump_period_start, excluded.bump_period_start),
+        bump_period_end = COALESCE(server_advertising_state.bump_period_end, excluded.bump_period_end),
         updated_at = excluded.updated_at`,
     )
-    .bind(linkedServerId, user.discord_id, nowIso, nextCount, periodStart, periodEnd, nowIso)
+    .bind(linkedServerId, user.discord_id, periodStart, periodEnd, nowIso)
     .run();
+
+  const nextCount = Number(state?.bump_count_current_period ?? 0) + 1;
+  const updated = await db
+    .prepare(
+      `UPDATE server_advertising_state
+          SET owner_discord_id = ?,
+              last_bumped_at = ?,
+              next_bump_at = ?,
+              bump_count_current_period = COALESCE(bump_count_current_period, 0) + 1,
+              bump_period_start = ?,
+              bump_period_end = ?,
+              updated_at = ?
+        WHERE linked_server_id = ?
+          AND owner_discord_id = ?
+          AND (next_bump_at IS NULL OR datetime(next_bump_at) <= datetime(?))
+        RETURNING last_bumped_at, next_bump_at, bump_count_current_period, bump_period_start, bump_period_end`,
+    )
+    .bind(user.discord_id, nowIso, nextBumpAt, periodStart, periodEnd, nowIso, linkedServerId, user.discord_id, nowIso)
+    .first<Record<string, unknown>>();
+  if (!updated) {
+    const latestState = await db.prepare("SELECT * FROM server_advertising_state WHERE linked_server_id = ? LIMIT 1").bind(linkedServerId).first<Record<string, unknown>>();
+    const latestEligibility = evaluateListingBumpEligibility({ limits: listingLimits, state: latestState, now });
+    return json({
+      error: latestEligibility.ok ? "Bump already processed. Refresh the page to see the latest status." : latestEligibility.reason,
+      code: latestEligibility.ok ? "already_processed" : latestEligibility.code,
+      next_bump_at: latestEligibility.ok ? nextBumpAt : latestEligibility.next_bump_at,
+      retry_after_seconds: latestEligibility.ok ? listingLimits.bumpCooldownDays * 24 * 60 * 60 : latestEligibility.retry_after_seconds,
+    }, { status: 429 });
+  }
   await db
     .prepare("INSERT INTO server_ad_bump_events (id, linked_server_id, owner_discord_id, bump_type, created_at) VALUES (?, ?, ?, 'included', ?)")
     .bind(crypto.randomUUID(), linkedServerId, user.discord_id, nowIso)
     .run();
+  await recordListingEvent(env, linkedServerId, "bump_success", user.id, { plan: listingLimits.listingPlanKey, next_bump_at: nextBumpAt }, nowIso);
 
   console.log("DZN SERVER BUMPED", { linkedServerId });
   return json({
     ok: true,
     advertising: {
-      last_bumped_at: nowIso,
-      bump_count_current_period: nextCount,
-      bump_period_start: periodStart,
-      bump_period_end: periodEnd,
-      included_bumps_per_month: entitlements.included_bumps_per_month,
-      bump_cooldown_hours: entitlements.bump_cooldown_hours,
+      last_bumped_at: typeof updated.last_bumped_at === "string" ? updated.last_bumped_at : nowIso,
+      next_bump_at: typeof updated.next_bump_at === "string" ? updated.next_bump_at : nextBumpAt,
+      bump_count_current_period: Number(updated.bump_count_current_period ?? nextCount),
+      bump_period_start: typeof updated.bump_period_start === "string" ? updated.bump_period_start : periodStart,
+      bump_period_end: typeof updated.bump_period_end === "string" ? updated.bump_period_end : periodEnd,
+      bump_cooldown_days: listingLimits.bumpCooldownDays,
     },
+    listing: listingLimits,
   });
 };
 
@@ -147,17 +189,55 @@ function entitlementsFromReadonlyRow(row: Record<string, unknown>): PlanEntitlem
 }
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
-  const user = await getSessionUser(env, request);
-  if (user || !isMockAuth(env.MOCK_AUTH)) return user;
-  const mock = await ensureMockUser(env);
-  return {
-    id: mock.userId,
-    discord_id: mock.user.id,
-    username: mock.user.username,
-    avatar: mock.user.avatar,
-  };
+  return getSessionUser(env, request);
 }
 
 function sanitizeLinkedServerId(value: unknown) {
   return typeof value === "string" && /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
+}
+
+async function ensureListingEventsSchema(env: Env) {
+  const db = requireDb(env);
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS server_listing_events (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'web',
+      user_id TEXT,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL
+    )`,
+  ).run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_listing_events_server_type_created ON server_listing_events(server_id, event_type, created_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_listing_events_user_type_created ON server_listing_events(user_id, event_type, created_at)").run();
+}
+
+async function isBumpAttemptRateLimited(env: Env, userId: string, now: Date) {
+  const windowStart = new Date(now.getTime() - 60 * 1000).toISOString();
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT COUNT(*) AS count
+         FROM server_listing_events
+        WHERE user_id = ?
+          AND event_type = 'bump_attempt'
+          AND datetime(created_at) >= datetime(?)`,
+    )
+    .bind(userId, windowStart)
+    .first<{ count: number | null }>();
+  return Number(row?.count ?? 0) >= 5;
+}
+
+async function recordListingEvent(env: Env, serverId: string, eventType: string, userId: string | null, metadata: Record<string, unknown>, createdAt: string) {
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_listing_events (id, server_id, event_type, source, user_id, metadata_json, created_at)
+       VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), serverId, eventType, userId, JSON.stringify(metadata), createdAt)
+    .run();
+}
+
+function addDaysIso(value: string, days: number) {
+  return new Date(Date.parse(value) + days * 24 * 60 * 60 * 1000).toISOString();
 }

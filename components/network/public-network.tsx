@@ -41,6 +41,7 @@ import Link from "next/link";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
+import { LiveServerRail } from "@/components/servers/live-server-rail";
 import { SiteHeader } from "@/components/site-header";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import type { PlanVisualTreatment, ProfileFrameVisual, ServerThemeBannerVisual, VisualBadge } from "@/lib/badges/visuals";
@@ -79,6 +80,18 @@ type PublicServer = {
   public_language: string | null;
   public_region_label: string | null;
   public_listing_updated_at: string | null;
+  advert_banner_url?: string | null;
+  advert_banner_alt?: string | null;
+  owner_announcement?: string | null;
+  fresh_wipe_promo?: string | null;
+  gallery_images?: Array<{
+    id: string;
+    url: string;
+    width: number | null;
+    height: number | null;
+    size_bytes: number | null;
+    sort_order: number;
+  }>;
   created_at: string | null;
   total_kills: number;
   total_deaths: number;
@@ -618,6 +631,8 @@ function ServerBrowser({
         />
       ) : null}
 
+      <LiveServerRail className="mt-7" />
+
       <section className="mt-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-2">
@@ -652,7 +667,7 @@ function ServerBrowser({
               icon={RadioTower}
               eyebrow="Standard Servers"
               title="All Public Servers"
-              copy="Starter, Pro and Premium servers remain visible here. Spotlight and featured placement do not change competitive rank."
+              copy="Free and Pro listings remain visible here. Featured placements do not change competitive rank, score, K/D, or reviews."
               meta={`${servers.length} visible listings`}
             />
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -679,12 +694,12 @@ function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups })
   return (
     <div className="mt-7 grid gap-7">
       {spotlightServers.length ? (
-        <section aria-label="Premium Spotlight Servers">
+        <section aria-label="Featured Pro Listings">
           <VisibilitySectionHeader
             icon={Crown}
-            eyebrow="Premium Spotlight"
-            title="Premium Spotlight Servers"
-            copy="Premium servers with eligible public profiles and enhanced discovery treatment."
+            eyebrow="Pro Spotlight"
+            title="Featured Pro Listings"
+            copy="Pro listings eligible for featured rotation with enhanced presentation treatment. Placement never changes ratings, competitive stats, or leaderboard rank."
             meta="1-3 spotlight listings"
             tone="premium"
           />
@@ -702,7 +717,7 @@ function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups })
             icon={Sparkles}
             eyebrow="Featured"
             title="Featured Servers"
-            copy="Pro and Premium servers eligible for enhanced discovery rotation."
+            copy="Pro listings eligible for enhanced discovery rotation."
             meta={`${featuredServers.length} featured`}
           />
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -801,6 +816,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
               <p className="truncate text-[10px] font-black uppercase tracking-[0.14em] text-violet-100/70">{server.guild_name ?? "DZN Network"}</p>
               <h3 className={`${isSpotlight ? "text-2xl" : "text-xl"} mt-1 truncate font-black uppercase text-white`}>{server.server_name}</h3>
               <p className="mt-1 truncate text-xs font-bold text-zinc-400">{server.server_type}</p>
+              <ServerRatingChip server={server} />
             </div>
           </div>
           <VisibilityLabels server={server} />
@@ -825,7 +841,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
         ) : null}
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
-          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{server.visibilityExplanation?.summary ?? "Discovery placement"}</p>
+          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
           <Link
             href={publicServerProfileHref(server.public_slug)}
             onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
@@ -842,7 +858,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
 
 function VisibilityLabels({ server }: { server: PublicServer }) {
   const tier = server.visibilityTier ?? (server.premium_status === "premium" ? "premium" : server.isFeaturedEligible ? "enhanced" : "standard");
-  const label = tier === "premium" ? "Premium" : tier === "enhanced" ? "Enhanced" : "Standard";
+  const label = tier === "premium" ? "Pro" : tier === "enhanced" ? "Enhanced" : "Standard";
   const className = tier === "premium"
     ? "border-amber-300/30 bg-amber-300/12 text-amber-100"
     : tier === "enhanced"
@@ -859,6 +875,11 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       ) : null}
     </div>
   );
+}
+
+function formatPublicVisibilitySummary(value: string | null | undefined) {
+  if (!value) return null;
+  return value.replace(/\bPremium\b/g, "Pro");
 }
 
 function StatsRow({ stats }: { stats: PublicStats }) {
@@ -986,7 +1007,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           <StatusPill label={server.server_type} tone="violet" />
           <StatusPill label={server.rank ? `Rank #${server.rank}` : "Rank Pending"} tone={server.rank ? "emerald" : "zinc"} />
           {server.reputation ? <StatusPill label={`${server.reputation.tier} Reputation`} tone="cyan" /> : null}
-          {server.premium_status === "premium" ? <StatusPill label="Premium Server" tone="violet" /> : null}
+          {server.plan_key === "pro" ? <StatusPill label="Pro Listing" tone="violet" /> : null}
           <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
             Score {server.score_label}
           </span>
@@ -1076,7 +1097,7 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
     ...(server.earnedBadges ?? []).filter((badge) => badge.category === "founder").slice(0, compact ? 1 : 1),
   ];
 
-  if (!reputation && visualBadges.length === 0 && server.premium_status !== "premium") return null;
+  if (!reputation && visualBadges.length === 0 && server.plan_key !== "pro") return null;
 
   return (
     <div className={`mt-3 flex flex-wrap gap-2 ${compact ? "max-w-[320px]" : ""}`}>
@@ -1086,10 +1107,10 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
           {reputation.tier}
         </span>
       ) : null}
-      {server.premium_status === "premium" ? (
+      {server.plan_key === "pro" ? (
         <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-violet-100">
           <Sparkles className="h-3.5 w-3.5" />
-          Premium
+          Pro Listing
         </span>
       ) : null}
       {visualBadges.map((badge) => (
@@ -1111,7 +1132,7 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
     { title: "Reputation", icon: ShieldCheck, rows: earnedBadges.filter((badge) => badge.category === "reputation") },
     { title: "Combat", icon: Crosshair, rows: earnedBadges.filter((badge) => badge.category === "combat") },
     { title: "Seasonal", icon: Trophy, rows: earnedBadges.filter((badge) => badge.category === "seasonal") },
-    { title: "Premium/Status", icon: Sparkles, rows: earnedBadges.filter((badge) => badge.category === "premium") },
+    { title: "Pro/Status", icon: Sparkles, rows: earnedBadges.filter((badge) => badge.category === "premium") },
     { title: "Community", icon: Users, rows: earnedBadges.filter((badge) => badge.category === "community") },
     { title: "Founder/Legacy", icon: Medal, rows: earnedBadges.filter((badge) => badge.category === "founder") },
   ];
@@ -1121,7 +1142,7 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
     { title: "Seasonal", icon: Trophy, rows: showcase?.seasonalTrophies ?? [] },
     { title: "Founder", icon: ShieldCheck, rows: showcase?.founderBadges ?? [] },
   ];
-  const hasRows = earnedBadges.length > 0 || groups.some((group) => group.rows.length > 0) || server.premium_status === "premium";
+  const hasRows = earnedBadges.length > 0 || groups.some((group) => group.rows.length > 0) || server.plan_key === "pro";
 
   return (
     <GlassPanel title="Achievements" icon={Crown}>
@@ -1173,7 +1194,7 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
 
         {hasRows ? (
           <div className="grid gap-3">
-            {earnedBadges.length === 0 && server.premium_status === "premium" ? <AchievementRow icon={Sparkles} name="Premium Server" description="Premium discovery and reputation framework member." /> : null}
+            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name="Pro Listing" description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
             {groups.map((group) =>
               earnedBadges.length === 0 ? group.rows.slice(0, 4).map((badge) => (
                 <AchievementRow key={badge.key} icon={group.icon} name={badge.name} description={badge.description} />
@@ -1422,6 +1443,8 @@ function ServerProfile({ server }: { server: PublicServer }) {
         />
       ) : null}
 
+      <ProProfileAdvertPanel server={server} />
+
       <section className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-5">
           <ServerTagsPanel tags={tags} />
@@ -1466,6 +1489,63 @@ function ServerProfile({ server }: { server: PublicServer }) {
         </aside>
       </section>
     </div>
+  );
+}
+
+function ProProfileAdvertPanel({ server }: { server: PublicServer }) {
+  const gallery = (server.gallery_images ?? []).filter((image) => image.url).slice(0, 4);
+  const hasProVisuals = server.plan_key === "pro" && Boolean(server.advert_banner_url || server.owner_announcement || server.fresh_wipe_promo || gallery.length);
+  if (!hasProVisuals) return null;
+
+  return (
+    <section className="mt-5 overflow-hidden rounded-xl border border-violet-300/24 bg-[#070b16]/88 shadow-[0_22px_80px_rgba(76,29,149,0.22)]">
+      {server.advert_banner_url ? (
+        <div className="relative aspect-[16/5] min-h-[170px] overflow-hidden border-b border-violet-300/18 bg-[radial-gradient(circle_at_20%_20%,rgba(168,85,247,0.25),transparent_34%),linear-gradient(135deg,rgba(6,10,22,0.98),rgba(17,24,39,0.88))]">
+          <img
+            src={server.advert_banner_url}
+            alt={server.advert_banner_alt || `${server.server_name} custom advert banner`}
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#050812] via-[#050812]/35 to-transparent" aria-hidden="true" />
+          <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">Pro Server Listing</p>
+              <h2 className="mt-1 text-2xl font-black uppercase text-white">{server.server_name}</h2>
+            </div>
+            <span className="rounded-lg border border-violet-200/35 bg-violet-500/22 px-3 py-2 text-[10px] font-black uppercase text-violet-50">Enhanced profile</span>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-3">
+          {server.owner_announcement ? (
+            <div className="rounded-lg border border-cyan-300/18 bg-cyan-400/[0.07] p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100/80">Owner Announcement</p>
+              <p className="mt-2 whitespace-pre-line text-sm font-semibold leading-6 text-cyan-50">{server.owner_announcement}</p>
+            </div>
+          ) : null}
+          {server.fresh_wipe_promo ? (
+            <div className="rounded-lg border border-amber-300/22 bg-amber-400/[0.08] p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-100/80">Fresh Wipe / Event Promo</p>
+              <p className="mt-2 whitespace-pre-line text-sm font-semibold leading-6 text-amber-50">{server.fresh_wipe_promo}</p>
+            </div>
+          ) : null}
+        </div>
+
+        {gallery.length ? (
+          <div className="grid grid-cols-2 gap-2">
+            {gallery.map((image) => (
+              <a key={image.id} href={image.url} target="_blank" rel="noreferrer" className="group relative aspect-video overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-200">
+                <img src={image.url} alt={`${server.server_name} gallery image`} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.03]" loading="lazy" />
+                <span className="sr-only">Open gallery image</span>
+              </a>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

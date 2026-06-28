@@ -823,11 +823,13 @@ export type PublicCacheRebuildResult = {
 
 export type AdvertisingBumpStatus = {
   last_bumped_at: string | null;
+  next_bump_at?: string | null;
   bump_count_current_period: number;
   bump_period_start: string | null;
   bump_period_end: string | null;
-  included_bumps_per_month: number;
-  bump_cooldown_hours: number;
+  included_bumps_per_month?: number;
+  bump_cooldown_hours?: number;
+  bump_cooldown_days?: number;
 };
 
 export type NitradoLogSettingsConfirmation = {

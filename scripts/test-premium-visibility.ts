@@ -127,13 +127,13 @@ for (const group of ["featuredServers", "spotlightServers", "recommendedServers"
   assert.equal(publicNetwork.includes(group), true, `Public network UI should consume ${group}.`);
 }
 assert.equal(publicServers.includes("rankA") && publicServers.includes("scoreDiff"), true, "Discovery sorting should retain competitive rank/score as fallback only.");
-assert.equal(publicNetwork.includes("Premium Spotlight Servers"), true, "Spotlight section should render when spotlightServers exist.");
+assert.equal(publicNetwork.includes("Featured Pro Listings"), true, "Spotlight section should render when spotlightServers exist.");
 assert.equal(publicNetwork.includes("!spotlightServers.length") && publicNetwork.includes("return null"), true, "Spotlight/recommendation sections should hide safely when empty.");
 assert.equal(publicNetwork.includes("Featured Servers"), true, "Featured section should render featuredServers.");
 assert.equal(publicNetwork.includes("Recommended Servers"), true, "Recommended section should render recommendedServers.");
 assert.equal(publicNetwork.includes("Recommended by activity, reputation, profile quality and visibility settings."), true, "Recommended copy should explain discovery placement.");
 assert.equal(publicNetwork.includes("All Public Servers"), true, "Standard server directory should still render.");
-assert.equal(publicNetwork.includes('tier === "premium" ? "Premium"'), true, "Premium label should only be used for premium visibility tier.");
+assert.equal(publicNetwork.includes('tier === "premium" ? "Pro"'), true, "Premium visibility tier should render as Pro in public advertising UI.");
 assert.equal(publicNetwork.includes("Spotlight Eligible"), true, "Spotlight eligible label should be available for eligible servers.");
 assert.equal(publicNetwork.includes("do not change competitive rank"), true, "Public UI copy should preserve competitive ranking fairness.");
 for (const snippet of [
@@ -166,10 +166,10 @@ for (const snippet of [
   "Badge showcase completeness",
   "Recommended actions",
   "Upgrade benefits",
-  "Premium visibility active",
+  "Pro listing tools active",
   "No upgrade needed",
   "Discovery and promotion only. Competitive leaderboard rankings are unchanged.",
-  "Premium discovery, spotlight eligibility, and premium presentation are active. No upgrade needed.",
+  "Pro presentation, spotlight eligibility, and featured rotation tools are active. No upgrade needed.",
 ]) {
   assert.equal(serverSettingsUi.includes(snippet), true, `Server Settings promotion panel should include ${snippet}.`);
 }
