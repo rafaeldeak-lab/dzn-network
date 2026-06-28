@@ -791,6 +791,7 @@ jobs:
           NODE
 
           npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --file server-advertising-preview-promote-pro.sql
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --command "SELECT guild_id, plan_key, status FROM server_subscriptions WHERE guild_id = '288000000000000002';"
 
           node <<'NODE'
           const base = process.env.PREVIEW_BASE_URL;
@@ -883,6 +884,16 @@ jobs:
               body: JSON.stringify({ action: "save", channel_id: "288000000000000102", post_types: ["weekly_recap"], discord_webhook_url: "https://discord.com/api/webhooks/preview/free2" }),
             });
             assert(freeLockedPost.response.status === 403, "Free Discord weekly recap should be locked.");
+            const proPostingBefore = await jsonRequest("/api/servers/preview-pro-server/posting-destinations", { headers });
+            const proWeekly = Array.isArray(proPostingBefore.parsed?.post_types)
+              ? proPostingBefore.parsed.post_types.find((postType) => postType?.key === "weekly_recap")
+              : null;
+            console.log("Pro posting gate diagnostic", {
+              status: proPostingBefore.response.status,
+              listing_plan_key: proPostingBefore.parsed?.listing_plan_key,
+              subscription_status: proPostingBefore.parsed?.subscription_status,
+              weekly_recap_allowed: proWeekly?.allowed_by_plan ?? null,
+            });
             const proPost = await jsonRequest("/api/servers/preview-pro-server/posting-destinations", {
               method: "POST",
               headers,
