@@ -36,9 +36,7 @@ env:
 
 jobs:
   migrate:
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'migrate') ||
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-dzn-server-advertising-production-migration]'))
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'migrate') || (github.event_name == 'push' && contains(join(github.event.commits.*.message, '\n'), '[run-dzn-server-advertising-production-migration]')) }}
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
@@ -67,7 +65,7 @@ jobs:
           set -euo pipefail
 
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.confirm_production_rollout }}" != "DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT" ]; then
+            if [ "${{ github.event.inputs.confirm_production_rollout || '' }}" != "DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT" ]; then
               echo "::error::Manual dispatch must confirm DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT."
               exit 1
             fi
@@ -315,9 +313,7 @@ NODE
 NODE
 
   deploy:
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy') ||
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-dzn-server-advertising-production-deploy]'))
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'deploy') || (github.event_name == 'push' && contains(join(github.event.commits.*.message, '\n'), '[run-dzn-server-advertising-production-deploy]')) }}
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
@@ -346,7 +342,7 @@ NODE
           set -euo pipefail
 
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.confirm_production_rollout }}" != "DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT" ]; then
+            if [ "${{ github.event.inputs.confirm_production_rollout || '' }}" != "DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT" ]; then
               echo "::error::Manual dispatch must confirm DZN_SERVER_ADVERTISING_PRODUCTION_ROLLOUT."
               exit 1
             fi
