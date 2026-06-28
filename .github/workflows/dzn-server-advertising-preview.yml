@@ -443,7 +443,7 @@ jobs:
             (
               'preview-free-server', 'mock-user', '288000000000000001', 'preview-free-guild-row',
               'preview-free-service', 'DZN Free Preview Service', 'DZN Free Preview',
-              'Deathmatch', 'deathmatch', '["pvp","beta"]', 'EU', 'active',
+                  'Deathmatch', 'deathmatch', '["pvp","beta"]', 'EU', 'live',
               'dzn-free-preview', 'DZN Free Preview', 'free-preview.dzn.test',
               'Synthetic preview Free Listing server.', 60, 12, 1,
               'Free Listing preview server.', 'Free Listing preview server with ratings and fair bump cooldowns.',
@@ -453,7 +453,7 @@ jobs:
             (
               'preview-pro-server', 'mock-user', '288000000000000002', 'preview-pro-guild-row',
               'preview-pro-service', 'DZN Pro Preview Service', 'DZN Pro Preview',
-              'PvP/PvE', 'pvp_pve', '["pro","events"]', 'US', 'active',
+                  'PvP/PvE', 'pvp_pve', '["pro","events"]', 'US', 'live',
               'dzn-pro-preview', 'DZN Pro Preview', 'pro-preview.dzn.test',
               'Synthetic preview Pro Listing server.', 80, 34, 1,
               'Pro Listing preview server.', 'Pro Listing preview server with gallery, banner and Discord advert gates.',
@@ -462,9 +462,33 @@ jobs:
             )
           ON CONFLICT(id) DO UPDATE SET
             server_name = excluded.server_name,
+            status = excluded.status,
             public_slug = excluded.public_slug,
             listing_visibility = excluded.listing_visibility,
             updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO server_public_cache (
+            id, guild_id, plan_key, public_server_name, current_player_count, max_player_count,
+            server_online, server_status, last_status_update_at, updated_at
+          )
+          VALUES
+            (
+              'preview-free-public-cache', '288000000000000001', 'free', 'DZN Free Preview',
+              12, 60, 1, 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            ),
+            (
+              'preview-pro-public-cache', '288000000000000002', 'pro', 'DZN Pro Preview',
+              34, 80, 1, 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+          ON CONFLICT(guild_id) DO UPDATE SET
+            plan_key = excluded.plan_key,
+            public_server_name = excluded.public_server_name,
+            current_player_count = excluded.current_player_count,
+            max_player_count = excluded.max_player_count,
+            server_online = excluded.server_online,
+            server_status = excluded.server_status,
+            last_status_update_at = excluded.last_status_update_at,
+            updated_at = excluded.updated_at;
 
           INSERT INTO server_subscriptions (
             id, guild_id, owner_discord_id, plan_key, status, current_period_start, current_period_end, cancel_at_period_end, created_at, updated_at
@@ -792,6 +816,7 @@ jobs:
 
           npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --file server-advertising-preview-promote-pro.sql
           npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --command "SELECT guild_id, plan_key, status FROM server_subscriptions WHERE guild_id = '288000000000000002';"
+          npx wrangler d1 execute DB --config wrangler.server-advertising-preview.toml --remote --command "SELECT linked_servers.id, linked_servers.public_slug, linked_servers.status, linked_servers.listing_visibility, linked_servers.guild_id, CASE WHEN server_public_cache.guild_id IS NULL THEN 0 ELSE 1 END AS public_cache_exists FROM linked_servers LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id WHERE linked_servers.id IN ('preview-free-server', 'preview-pro-server') ORDER BY linked_servers.id;"
 
           node <<'NODE'
           const base = process.env.PREVIEW_BASE_URL;
