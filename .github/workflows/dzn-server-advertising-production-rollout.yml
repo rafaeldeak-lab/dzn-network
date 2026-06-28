@@ -529,12 +529,12 @@ jobs:
             "/api/dzn-pulse/notifications/unread-count" \
             "/api/dzn-pulse/notifications" \
             "/api/dzn-pulse/event-popups" \
-            "/api/servers/invalid-server-id/bump" \
+            "/api/servers/invalid-server-id/advertising/bump" \
             "/api/servers/invalid-server-id/gallery" \
             "/api/servers/invalid-server-id/posting-destinations"; do
             method="GET"
             data_args=()
-            if echo "${path}" | grep -Eq "/bump|/gallery|/posting-destinations"; then
+            if echo "${path}" | grep -Eq "/advertising/bump|/posting-destinations"; then
               method="POST"
               data_args=(-H "Content-Type: application/json" --data "{}")
             fi
