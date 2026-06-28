@@ -1548,7 +1548,7 @@ function OwnerSeasonsPanel({
             <div className="mt-4 rounded-lg border border-violet-300/18 bg-violet-400/10 p-3">
               <p className="text-xs font-black uppercase text-violet-100">Plan note</p>
               <p className="mt-2 text-xs leading-5 text-zinc-300">
-                Starter can join normal seasons. Pro and Premium improve public presentation and discovery around your server, but paid plans do not improve season scores or rank.
+                Free listings can join normal seasons. Pro improves public presentation, discovery, and advertising tools around your server, but paid plans do not improve season scores or rank.
               </p>
             </div>
           </div>
@@ -1980,7 +1980,7 @@ function VisibilityPromotionPanel({
               </div>
 
               <div className={`rounded-lg border p-4 ${upgradeBenefits.length ? "border-violet-300/20 bg-violet-400/10" : "border-emerald-300/20 bg-emerald-400/10"}`}>
-                <p className="text-xs font-black uppercase text-zinc-200">{upgradeBenefits.length ? "Upgrade benefits" : "Premium visibility active"}</p>
+                <p className="text-xs font-black uppercase text-zinc-200">{upgradeBenefits.length ? "Upgrade benefits" : "Pro listing tools active"}</p>
                 {upgradeBenefits.length ? (
                   <ul className="mt-3 grid gap-2 text-sm leading-6 text-violet-50">
                     {upgradeBenefits.map((benefit) => (
@@ -1992,7 +1992,7 @@ function VisibilityPromotionPanel({
                   </ul>
                 ) : (
                   <p className="mt-3 text-sm leading-6 text-emerald-50">
-                    Premium discovery, spotlight eligibility, and premium presentation are active. No upgrade needed.
+                    Pro presentation, spotlight eligibility, and featured rotation tools are active. No upgrade needed.
                   </p>
                 )}
               </div>
@@ -2045,7 +2045,7 @@ function PromotionCreditsPanel({
           <div>
             <SectionTitle icon={<ArrowRight className="h-5 w-5" />} title="Server Promotion Credits" />
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-              Use monthly credits to refresh discovery placement, featured rotation, and Premium spotlight promotion.
+              Use monthly credits to refresh discovery placement, featured rotation, and Pro spotlight promotion.
             </p>
             <p className="mt-2 text-xs font-bold text-zinc-500">
               Promotions affect discovery and visibility only. They do not change competitive leaderboard rankings.
@@ -2169,7 +2169,7 @@ function PromotionCreditsPanel({
             </div>
 
             <p className="text-xs leading-5 text-zinc-500">
-              Starter has 0 monthly credits. Pro includes 2 monthly credits for directory and featured promotion. Premium includes 8 monthly credits, premium discovery priority, and spotlight boost eligibility.
+              Free listings use standard discovery without monthly promotion credits. Pro Listing unlocks promotion tools for directory, featured, and spotlight surfaces. Promotions never change competitive rankings.
             </p>
           </div>
         ) : null}
@@ -2410,7 +2410,7 @@ function formatSeasonStatus(value: string) {
 }
 
 function formatVisibilityTier(value: string) {
-  if (value === "premium") return "Premium discovery";
+  if (value === "premium") return "Pro discovery";
   if (value === "enhanced") return "Enhanced discovery";
   return "Standard discovery";
 }

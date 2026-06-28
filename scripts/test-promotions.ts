@@ -173,10 +173,9 @@ for (const snippet of [
   "No Credits",
   "Locked",
   "Spotlight boost",
-  "Starter has 0 monthly credits",
-  "Pro includes 2 monthly credits",
-  "Premium includes 8 monthly credits",
-  "premium discovery priority",
+  "Free listings use standard discovery without monthly promotion credits",
+  "Pro Listing unlocks promotion tools for directory, featured, and spotlight surfaces",
+  "Promotions never change competitive rankings",
 ]) {
   assert.equal(serverSettingsUi.includes(snippet), true, `Promotion credits UI should include ${snippet}.`);
 }

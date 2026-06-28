@@ -435,30 +435,22 @@ const pricingPlans = [
   {
     key: "free",
     name: "Free Listing",
-    price: "£4.99/month",
-    bestFor: "Best for joining beta",
+    price: "Free",
+    bestFor: "Best for getting listed",
     summary: "List your DayZ server on DZN Network for free with a public profile, join link, ratings, reviews and basic network stats.",
-    features: ["Public server listing", "Basic profile page", "500 character description", "Ratings and reviews", "One Discord channel", "30 day bump cooldown"],
+    features: ["Public server profile", "Basic discovery", "Ratings and reviews", "One Discord auto-post channel", "Basic server advert posts", "One bump every 30 days", "Standard listing visuals", "No leaderboard/stat advantage"],
   },
   {
     key: "pro",
     name: "Pro Listing",
-    price: "£9.99/month",
-    bestFor: "Best for advertising",
+    price: "Monthly paid package",
+    bestFor: "Best for active advertising",
     summary: "Upgrade your server advert with a longer description, custom banner, 4 gallery images, weekly bumping, enhanced Discord embeds, event promotion, profile styling and listing analytics.",
-    features: ["2,500 character description", "Custom advert banner", "4 JPEG gallery images", "7 day bump cooldown", "Enhanced Discord embeds", "Listing analytics"],
-  },
-  {
-    key: "premium",
-    name: "Premium",
-    price: "£19.99/month",
-    bestFor: "Best for serious servers wanting maximum exposure",
-    summary: "Premium discovery priority, Premium Spotlight eligibility, animated visuals, and 8 monthly promotion credits.",
-    features: ["Fastest/current publishing", "Premium discovery priority", "Premium Spotlight eligible", "8 monthly promotion credits", "Premium animated frames and themes", "8 showcase badges"],
+    features: ["Enhanced public profile", "Custom advert banner", "Up to 4 JPEG gallery images", "Owner announcement", "Fresh wipe and event promo", "More Discord advert post types", "One bump every 7 days", "Featured rotation eligibility", "No leaderboard/stat advantage"],
   },
 ] as const;
 
-const publicPricingPlans = pricingPlans.filter((plan) => plan.key === "free" || plan.key === "pro");
+const publicPricingPlans = pricingPlans;
 
 const listingComparisonRows = [
   { label: "Price", free: "Free", pro: "Monthly paid package" },
@@ -476,6 +468,8 @@ const listingComparisonRows = [
   { label: "Event promotion", free: "Limited/locked", pro: "Yes" },
   { label: "Featured rotation eligibility", free: "Standard listing", pro: "Eligible, not guaranteed" },
   { label: "Leaderboard/stat advantage", free: "No", pro: "No" },
+  { label: "Review score advantage", free: "No", pro: "No" },
+  { label: "Season/crown advantage", free: "No", pro: "No" },
 ] as const;
 
 const listingPricingFaqs = [
@@ -1369,7 +1363,7 @@ function PricingUpgradeSection() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-black uppercase text-white">{plan.name}</h3>
-                <p className="mt-1 text-2xl font-black text-white">{plan.key === "free" ? "Free" : "Pro monthly"}</p>
+                <p className="mt-1 text-2xl font-black text-white">{plan.price}</p>
               </div>
               <span className="rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] font-black uppercase text-zinc-200">
                 {plan.bestFor.replace(/^Best for /i, "")}
@@ -1391,7 +1385,7 @@ function PricingUpgradeSection() {
       <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.065] p-4">
         <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Fair Pro advertising</p>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-amber-50">
-          Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, or gameplay results.
+          Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, crowns, season wins, or gameplay results.
         </p>
         <p className="mt-2 text-xs font-bold text-amber-100/82">
           Featured and spotlight rotation are controlled visibility tools, not guaranteed permanent top rank.
@@ -1404,7 +1398,7 @@ function PricingUpgradeSection() {
             <tr>
               <th className="px-4 py-3">Feature</th>
               <th className="px-4 py-3">Free Listing</th>
-              <th className="px-4 py-3">Pro</th>
+              <th className="px-4 py-3">Pro Listing</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/8 text-zinc-300">

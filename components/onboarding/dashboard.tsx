@@ -5067,9 +5067,9 @@ type DashboardReviewSummary = {
 };
 
 const billingPlans = [
-  { key: "starter", label: "Starter", price: "£4.99/month", detail: "Standard listing, basic leaderboard participation, 24 hour public updates" },
-  { key: "pro", label: "Pro", price: "£9.99/month", detail: "Enhanced discovery, featured rotation eligibility, 2 monthly promotion credits" },
-  { key: "premium", label: "Premium", price: "£19.99/month", detail: "Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits" },
+  { key: "starter", label: "Free Listing", price: "Free", detail: "Public profile, ratings and reviews, basic Discord advert posts, and one bump every 30 days" },
+  { key: "pro", label: "Pro Listing", price: "Monthly paid package", detail: "Custom advert visuals, weekly bumping, enhanced Discord posts, featured rotation eligibility, and listing analytics" },
+  { key: "premium", label: "Pro Listing", price: "Legacy paid access", detail: "Existing paid legacy access is treated as Pro Listing for advertising features" },
 ] as const;
 
 function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; readiness: BillingReadinessResponse | null; message: string; onRefresh: () => Promise<void> }) {
@@ -5077,6 +5077,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
   const [portalBusy, setPortalBusy] = useState(false);
   const planKey = billing?.plan_key ?? "free";
   const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
+  const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === planKey);
 
   async function upgrade(planKey: "starter" | "pro" | "premium") {
     setBusyPlan(planKey);
@@ -5126,22 +5127,21 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
       <BillingReadinessWarning readiness={readiness} />
 
       <div className="mt-4 grid gap-2">
-        {displayPlans.map((plan) => (
+        {visiblePlans.map((plan) => (
           <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-black uppercase text-white">{plan.name} <span className="text-violet-200">{plan.price_label}</span></p>
+                <p className="text-sm font-black uppercase text-white">{billingPlanDisplayName(plan)} <span className="text-violet-200">{billingPlanDisplayPrice(plan)}</span></p>
                 <p className="mt-1 text-xs leading-5 text-zinc-400">
-                  {plan.max_linked_servers} server{plan.max_linked_servers === 1 ? "" : "s"} · {plan.stat_history_days} day stats · visibility weight {plan.visibility_weight}
+                  {billingPlanListingSummary(plan)}
                 </p>
                 <div className="mt-2 grid gap-1 text-[11px] leading-5 text-zinc-500">
-                  {plan.features.slice(0, 3).map((feature) => (
+                  {billingPlanDisplayFeatures(plan).map((feature) => (
                     <p key={feature}><span className="font-black uppercase text-zinc-400">Value:</span> {feature}</p>
                   ))}
                   <p><span className="font-black uppercase text-zinc-400">Tracking:</span> ADM ingestion and statistics collection continue normally on every plan.</p>
-                  <p><span className="font-black uppercase text-zinc-400">Public Publishing:</span> public profile, leaderboard, and discovery refresh every {formatPublishingInterval(plan.public_publish_interval_minutes)}.</p>
-                  <p><span className="font-black uppercase text-zinc-400">Discovery:</span> visibility weight {plan.visibility_weight}; competitive rankings are not altered.</p>
-                  <p><span className="font-black uppercase text-zinc-400">Promotion Credits:</span> {planPromotionCreditLimit(plan.plan_key)} per month for discovery and featured promotion surfaces.</p>
+                  <p><span className="font-black uppercase text-zinc-400">Fairness:</span> Pro never changes leaderboard rank, K/D, score, reviews, crowns, season wins, or gameplay results.</p>
+                  <p><span className="font-black uppercase text-zinc-400">Bumps:</span> {isBillingPlanPro(plan.plan_key) ? "one bump every 7 days" : "one bump every 30 days"}.</p>
                 </div>
                 <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                   {plan.configured ? "Checkout configured" : "Checkout not configured"}
@@ -5174,6 +5174,42 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
       </p>
     </DashboardPanel>
   );
+}
+
+function isBillingPlanPro(planKey: string) {
+  const normalized = planKey.toLowerCase();
+  return normalized === "pro" || normalized === "premium" || normalized === "network" || normalized === "partner";
+}
+
+function billingPlanDisplayName(plan: BillingPlanSummary) {
+  return isBillingPlanPro(plan.plan_key) ? "Pro Listing" : "Free Listing";
+}
+
+function billingPlanDisplayPrice(plan: BillingPlanSummary) {
+  if (!isBillingPlanPro(plan.plan_key)) return "Free";
+  return plan.plan_key === "premium" ? "Legacy paid access" : "Monthly paid package";
+}
+
+function billingPlanDisplayFeatures(plan: BillingPlanSummary) {
+  if (!isBillingPlanPro(plan.plan_key)) {
+    return [
+      "Public server profile with ratings and reviews",
+      "Basic Discord advert posts through one channel",
+      "One server bump every 30 days",
+    ];
+  }
+
+  return [
+    "Enhanced profile presentation with banner and gallery tools",
+    "Weekly server bumping and featured rotation eligibility",
+    "Enhanced Discord advert post types and listing analytics",
+  ];
+}
+
+function billingPlanListingSummary(plan: BillingPlanSummary) {
+  return isBillingPlanPro(plan.plan_key)
+    ? "Enhanced advertising tools, Pro visuals, weekly bumping, and Discord promotion"
+    : "Public listing, basic discovery, reviews, and standard listing visuals";
 }
 
 function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
@@ -7300,21 +7336,21 @@ function groupPostingOptions(options: PostingOptionSummary[]) {
 
 function fallbackPostingOptions(): PostingOptionSummary[] {
   return [
-    ["basic_status_embed", "Basic Server Status", "Basic", "starter", "Upgrade to Starter"],
+    ["basic_status_embed", "Basic Server Status", "Basic", "free", "Included with Free Listing"],
     ["leaderboard_embed", "Leaderboards", "Stats", "pro", "Upgrade to Pro"],
     ["daily_summary_embed", "Daily Summary", "Stats", "pro", "Upgrade to Pro"],
     ["event_leaderboard_embed", "Event Leaderboard", "Events", "pro", "Upgrade to Pro"],
     ["server_vs_server_embed", "Server-vs-Server Progress", "Events", "pro", "Upgrade to Pro"],
     ["network_ranking_embed", "Network Ranking", "Events", "pro", "Upgrade to Pro"],
-    ["killfeed_embed", "Killfeed", "Feeds", "premium", "Upgrade to Premium"],
-    ["pve_feed_embed", "PvE Feed", "Feeds", "premium", "Upgrade to Premium"],
-    ["hit_feed_embed", "Hit Feed", "Feeds", "premium", "Upgrade to Premium"],
-    ["connection_feed_embed", "Connection Feed", "Feeds", "premium", "Upgrade to Premium"],
-    ["build_feed_embed", "Build Feed", "Feeds", "premium", "Upgrade to Premium"],
-    ["admin_alerts_embed", "Admin Alerts", "Admin", "premium", "Upgrade to Premium"],
-    ["admin_logs_embed", "Admin Logs", "Admin", "premium", "Upgrade to Premium"],
-    ["partner_featured_embed", "Premium Featured Post", "Premium", "premium", "Upgrade to Premium"],
-    ["priority_status_embed", "Priority Status Post", "Premium", "premium", "Upgrade to Premium"],
+    ["killfeed_embed", "Killfeed", "Feeds", "pro", "Upgrade to Pro"],
+    ["pve_feed_embed", "PvE Feed", "Feeds", "pro", "Upgrade to Pro"],
+    ["hit_feed_embed", "Hit Feed", "Feeds", "pro", "Upgrade to Pro"],
+    ["connection_feed_embed", "Connection Feed", "Feeds", "pro", "Upgrade to Pro"],
+    ["build_feed_embed", "Build Feed", "Feeds", "pro", "Upgrade to Pro"],
+    ["admin_alerts_embed", "Admin Alerts", "Admin", "pro", "Upgrade to Pro"],
+    ["admin_logs_embed", "Admin Logs", "Admin", "pro", "Upgrade to Pro"],
+    ["partner_featured_embed", "Featured Pro Post", "Pro", "pro", "Upgrade to Pro"],
+    ["priority_status_embed", "Priority Status Post", "Pro", "pro", "Upgrade to Pro"],
   ].map(([key, label, group, minPlan, upgrade]) => ({
     key,
     label,
@@ -8627,10 +8663,8 @@ function formatRelativeTime(value: string) {
 }
 
 function planLabel(value: string) {
-  if (value === "starter") return "Starter";
-  if (value === "pro") return "Pro";
-  if (value === "premium" || value === "network" || value === "partner") return "Premium";
-  return "Free";
+  if (value === "pro" || value === "premium" || value === "network" || value === "partner") return "Pro Listing";
+  return "Free Listing";
 }
 
 function inferDashboardReputationTier(score: number | null | undefined) {
@@ -8642,21 +8676,6 @@ function inferDashboardReputationTier(score: number | null | undefined) {
   if (value >= 350) return "Gold";
   if (value >= 150) return "Silver";
   return "Bronze";
-}
-
-function formatPublishingInterval(minutes: number | null | undefined) {
-  if (minutes === 0) return "near real time";
-  const value = Number(minutes ?? 0);
-  if (!Number.isFinite(value) || value <= 0) return "near real time";
-  if (value >= 1440 && value % 1440 === 0) {
-    const days = value / 1440;
-    return `${days} day${days === 1 ? "" : "s"}`;
-  }
-  if (value >= 60 && value % 60 === 0) {
-    const hours = value / 60;
-    return `${hours} hour${hours === 1 ? "" : "s"}`;
-  }
-  return `${value} minute${value === 1 ? "" : "s"}`;
 }
 
 function getNitradoLogSettingsSourceLabel(settings: NitradoLogSettingsConfirmation | null) {

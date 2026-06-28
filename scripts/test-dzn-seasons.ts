@@ -280,7 +280,7 @@ includesAll(serverSettingsPage, [
   "Badge earned:",
   "Last refreshed",
   "Waiting for first score snapshot",
-  "Starter can join normal seasons.",
+  "Free listings can join normal seasons.",
   "paid plans do not improve season scores or rank",
 ]);
 

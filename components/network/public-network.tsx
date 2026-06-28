@@ -694,12 +694,12 @@ function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups })
   return (
     <div className="mt-7 grid gap-7">
       {spotlightServers.length ? (
-        <section aria-label="Premium Spotlight Servers">
+        <section aria-label="Featured Pro Listings">
           <VisibilitySectionHeader
             icon={Crown}
-            eyebrow="Premium Spotlight"
-            title="Premium Spotlight Servers"
-            copy="Pro and Premium listings with eligible public profiles and enhanced presentation treatment."
+            eyebrow="Pro Spotlight"
+            title="Featured Pro Listings"
+            copy="Pro listings eligible for featured rotation with enhanced presentation treatment. Placement never changes ratings, competitive stats, or leaderboard rank."
             meta="1-3 spotlight listings"
             tone="premium"
           />
@@ -841,7 +841,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
         ) : null}
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
-          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{server.visibilityExplanation?.summary ?? "Discovery placement"}</p>
+          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
           <Link
             href={publicServerProfileHref(server.public_slug)}
             onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
@@ -858,7 +858,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
 
 function VisibilityLabels({ server }: { server: PublicServer }) {
   const tier = server.visibilityTier ?? (server.premium_status === "premium" ? "premium" : server.isFeaturedEligible ? "enhanced" : "standard");
-  const label = tier === "premium" ? "Premium" : tier === "enhanced" ? "Enhanced" : "Standard";
+  const label = tier === "premium" ? "Pro" : tier === "enhanced" ? "Enhanced" : "Standard";
   const className = tier === "premium"
     ? "border-amber-300/30 bg-amber-300/12 text-amber-100"
     : tier === "enhanced"
@@ -875,6 +875,11 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       ) : null}
     </div>
   );
+}
+
+function formatPublicVisibilitySummary(value: string | null | undefined) {
+  if (!value) return null;
+  return value.replace(/\bPremium\b/g, "Pro");
 }
 
 function StatsRow({ stats }: { stats: PublicStats }) {

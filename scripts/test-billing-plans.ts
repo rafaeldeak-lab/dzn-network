@@ -210,7 +210,7 @@ assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard 
 for (const snippet of [
   "Free Listing",
   "Pro Listing",
-  "Pro monthly",
+  "Monthly paid package",
   "Description limit",
   "Gallery images",
   "Custom banner",
@@ -234,7 +234,8 @@ assert.equal(/Starter|Premium|Network Listing|Partner Listing|Network plan|Partn
 assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Pro pricing copy must not claim paid leaderboard rank.");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-assert.equal(dashboardSource.includes("Premium discovery priority, Spotlight eligibility, 8 monthly promotion credits"), true, "Owner billing cards should explain Premium value.");
+assert.equal(dashboardSource.includes("Custom advert visuals, weekly bumping, enhanced Discord posts, featured rotation eligibility, and listing analytics"), true, "Owner billing cards should explain Pro Listing value.");
+assert.equal(dashboardSource.includes("Upgrade to Premium"), false, "Owner billing and Discord fallback cards should not present Premium as an advertising upgrade.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
 assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
 assert.equal(dashboardSource.includes("included_bumps_per_month: 3"), false, "Dashboard fallback plans must not keep stale Pro 3 promotion credits.");
