@@ -162,7 +162,7 @@ function classifyBotStatusError(error: unknown) {
     if (error.code === "missing_bot_token") {
       return {
         code: "missing_bot_token" as const,
-        message: "DISCORD_BOT_TOKEN is missing in Cloudflare Pages, so DZN cannot verify bot installation.",
+        message: "DISCORD_BOT_TOKEN is missing from Cloudflare Pages production. Add/rotate it, redeploy Pages, then click Verify Bot Connection. If the bot is already installed, DZN cannot verify/control it until DISCORD_BOT_TOKEN is configured.",
       };
     }
     if (error.code === "bot_not_in_guild") {

@@ -11,6 +11,7 @@ const recentEventsRoute = source("functions/api/sync/recent-events.ts");
 const postingDestinationsRoute = source("functions/api/servers/[serverId]/posting-destinations.ts");
 const discordChannelsRoute = source("functions/api/servers/[serverId]/discord-channels.ts");
 const advertisingBumpRoute = source("functions/api/servers/[serverId]/advertising/bump.ts");
+const dashboardSource = source("components/onboarding/dashboard.tsx");
 
 assert.equal(
   advancedStatsRoute.includes("getServerAdvancedShowcasePayload"),
@@ -31,6 +32,21 @@ assert.equal(
   advancedStatsRoute.includes("status: 503"),
   false,
   "Advanced Stats optional snapshot reads must not fail the dashboard with HTTP 503.",
+);
+assert.equal(
+  dashboardSource.includes("friendlyAdvancedStatsReason"),
+  true,
+  "Dashboard must map internal advanced stats reason keys to user-facing copy.",
+);
+assert.equal(
+  dashboardSource.includes("Advanced stats snapshot pending. DZN found ADM logs. Stats will appear after the next readable activity import."),
+  true,
+  "Dashboard must show friendly copy for pending advanced stats snapshots.",
+);
+assert.equal(
+  dashboardSource.includes('data.reason ?? "advanced_stats_snapshot_pending"'),
+  false,
+  "Dashboard must not render raw advanced_stats_snapshot_pending fallback text.",
 );
 
 assert.equal(

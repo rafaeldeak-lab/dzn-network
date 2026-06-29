@@ -86,6 +86,41 @@ type PublicListingForm = {
   public_region_label: string;
 };
 
+type VerificationStage = {
+  label: string;
+  checkLabel: string;
+};
+
+type VerificationProgress = {
+  running: boolean;
+  activeIndex: number;
+  completedCount: number;
+  startedAt: string | null;
+  lastCheckedAt: string | null;
+};
+
+const VERIFICATION_STAGES: VerificationStage[] = [
+  { label: "Discord server selected", checkLabel: "Discord server selected" },
+  { label: "Bot token readable", checkLabel: "Bot token readable" },
+  { label: "Bot installed in guild", checkLabel: "DZN bot installed" },
+  { label: "Channel discovery", checkLabel: "Channels discovered" },
+  { label: "Nitrado token decrypt", checkLabel: "Nitrado token valid" },
+  { label: "Nitrado service fetch", checkLabel: "Nitrado service connected" },
+  { label: "DayZ server detected", checkLabel: "DayZ server detected" },
+  { label: "ADM log discovery", checkLabel: "ADM logs discovered" },
+  { label: "Metadata sync", checkLabel: "Server metadata synced" },
+  { label: "Stats sync / readable activity check", checkLabel: "Stats sync" },
+  { label: "Ready to publish calculation", checkLabel: "Ready to publish" },
+];
+
+const INITIAL_VERIFICATION_PROGRESS: VerificationProgress = {
+  running: false,
+  activeIndex: -1,
+  completedCount: 0,
+  startedAt: null,
+  lastCheckedAt: null,
+};
+
 export function SetupWizard() {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -115,6 +150,7 @@ export function SetupWizard() {
   const [botStatus, setBotStatus] = useState<DiscordBotStatusResponse | null>(null);
   const [botChecking, setBotChecking] = useState(false);
   const [botStatusMessage, setBotStatusMessage] = useState("");
+  const [verificationProgress, setVerificationProgress] = useState<VerificationProgress>(INITIAL_VERIFICATION_PROGRESS);
 
   const loadDiscordGuilds = useCallback(async (fresh: boolean) => {
     try {
@@ -221,6 +257,11 @@ export function SetupWizard() {
     try {
       const result = await getDiscordBotStatus(selectedGuild);
       setBotStatus(result);
+      setChecks((current) => mergeChecksWithBotStatus(current, result, selectedGuild));
+      setVerificationProgress((current) => ({
+        ...current,
+        lastCheckedAt: result.checked_at ?? new Date().toISOString(),
+      }));
       setBotStatusMessage(result.ok
         ? "DZN Bot is installed and channels were discovered."
         : result.error_message ?? "DZN Bot connection could not be verified yet.");
@@ -228,6 +269,10 @@ export function SetupWizard() {
     } catch (error) {
       setBotStatus(null);
       setBotStatusMessage(error instanceof Error ? error.message : "DZN Bot connection check failed.");
+      setVerificationProgress((current) => ({
+        ...current,
+        lastCheckedAt: new Date().toISOString(),
+      }));
       return null;
     } finally {
       setBotChecking(false);
@@ -258,6 +303,11 @@ export function SetupWizard() {
       });
       setTokenInput("");
       setTokenValid(true);
+      setChecks(null);
+      setVerificationProgress((current) => ({
+        ...current,
+        lastCheckedAt: new Date().toISOString(),
+      }));
       if (result.service) {
         setValidatedService(result.service);
         setServices([result.service]);
@@ -285,6 +335,11 @@ export function SetupWizard() {
       });
       setTokenInput("");
       setTokenValid(true);
+      setChecks(null);
+      setVerificationProgress((current) => ({
+        ...current,
+        lastCheckedAt: new Date().toISOString(),
+      }));
       setDirectServiceValidated(false);
       setValidatedService(null);
       const serviceResult = await getNitradoServices();
@@ -309,6 +364,8 @@ export function SetupWizard() {
         ...publicListing,
         nitradoServiceId: selectedService,
       });
+      setChecks(null);
+      setVerificationProgress(INITIAL_VERIFICATION_PROGRESS);
       setStep(5);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save onboarding");
@@ -320,11 +377,47 @@ export function SetupWizard() {
   async function runTest() {
     setBusy(true);
     setMessage("");
+    const startedAt = new Date().toISOString();
+    setVerificationProgress({
+      running: true,
+      activeIndex: 0,
+      completedCount: 0,
+      startedAt,
+      lastCheckedAt: null,
+    });
     try {
+      let latestBotStatus: DiscordBotStatusResponse | null = botStatus;
+      if (selectedGuild) {
+        setVerificationProgress((current) => ({
+          ...current,
+          activeIndex: 1,
+          completedCount: Math.max(current.completedCount, 1),
+        }));
+        latestBotStatus = await checkDiscordBot();
+      }
+      setVerificationProgress((current) => ({
+        ...current,
+        activeIndex: 4,
+        completedCount: Math.max(current.completedCount, 4),
+      }));
       const result = await testOnboarding();
-      setChecks(result.checks);
+      const mergedChecks = mergeChecksWithBotStatus(result.checks, latestBotStatus, selectedGuild);
+      setChecks(mergedChecks);
+      setVerificationProgress({
+        running: false,
+        activeIndex: -1,
+        completedCount: VERIFICATION_STAGES.length,
+        startedAt,
+        lastCheckedAt: latestBotStatus?.checked_at ?? new Date().toISOString(),
+      });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Verification test failed");
+      setVerificationProgress((current) => ({
+        ...current,
+        running: false,
+        activeIndex: -1,
+        lastCheckedAt: new Date().toISOString(),
+      }));
     } finally {
       setBusy(false);
     }
@@ -336,6 +429,10 @@ export function SetupWizard() {
     try {
       const result = await testAdmPath(path);
       setChecks(result.checks);
+      setVerificationProgress((current) => ({
+        ...current,
+        lastCheckedAt: new Date().toISOString(),
+      }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "ADM path test failed");
     } finally {
@@ -450,6 +547,8 @@ export function SetupWizard() {
                       setSelectedGuild(value);
                       setBotStatus(null);
                       setBotStatusMessage("");
+                      setChecks(null);
+                      setVerificationProgress(INITIAL_VERIFICATION_PROGRESS);
                     }}
                     onNext={() => setStep(1)}
                     onRefresh={refreshDiscordGuilds}
@@ -486,7 +585,20 @@ export function SetupWizard() {
                   )
                 ) : null}
                 {step === 5 ? (
-                  <ReviewStep guild={selectedGuildData} service={selectedServiceData} serverType={serverType} serverCategory={serverCategory} tags={selectedTags} checks={checks} busy={busy} onTest={runTest} onTestAdmPath={runManualAdmPathTest} onGoLive={publish} />
+                  <ReviewStep
+                    guild={selectedGuildData}
+                    service={selectedServiceData}
+                    serverType={serverType}
+                    serverCategory={serverCategory}
+                    tags={selectedTags}
+                    checks={checks}
+                    botStatus={botStatus}
+                    verificationProgress={verificationProgress}
+                    busy={busy}
+                    onTest={runTest}
+                    onTestAdmPath={runManualAdmPathTest}
+                    onGoLive={publish}
+                  />
                 ) : null}
                 {step === 6 ? (
                   <LiveStep
@@ -959,6 +1071,7 @@ function TokenStep({
   const [showToken, setShowToken] = useState(false);
   const [showServiceGuide, setShowServiceGuide] = useState(false);
   const [showPermissionGuide, setShowPermissionGuide] = useState(false);
+  const directMethodReady = Boolean(tokenInput.trim() && serviceIdInput.trim());
 
   return (
     <Step
@@ -1021,12 +1134,24 @@ function TokenStep({
               </div>
             </div>
             <p className="mt-3 text-sm text-zinc-400">
-              DZN only needs the service permission to verify your DayZ server and read server information/logs. Do not enable extra permissions.
+              DZN only needs the service permission to verify your DayZ server and read server information/logs. rootserver, ssh_keys, user_edit, service_order and user_info are not required unless DZN explicitly adds a later feature that needs them.
+            </p>
+            <p className="mt-2 text-sm text-zinc-400">
+              The same Nitrado long-life token can be reused for multiple services under the same Nitrado account, but each server needs its own Service ID saved and validated.
             </p>
           </GuideSection>
 
-          <GuideSection title="3. Paste Token + Service ID">
+          <GuideSection title="3. Choose One Setup Method">
+            <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-sm font-bold leading-6 text-cyan-50">
+              Use either Method A or Method B. You do not need both. If you already know your Service ID, Method A is the fastest path.
+            </div>
             <div className="grid gap-4">
+              <div className="rounded-lg border border-emerald-300/20 bg-emerald-400/8 p-4">
+                <p className="text-xs font-black uppercase text-emerald-100">Method A - Paste token + Service ID</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                  Preferred when you already know the Service ID. DZN validates that token against this specific server and re-saves it encrypted with the current TOKEN_ENCRYPTION_KEY.
+                </p>
+              </div>
               <div>
                 <label className="text-xs font-black uppercase text-zinc-500" htmlFor="nitrado-token">Nitrado API Token</label>
                 <div className="mt-2 flex h-12 items-center rounded-lg border border-white/10 bg-black/30 focus-within:border-violet-300/60">
@@ -1069,7 +1194,11 @@ function TokenStep({
                 </p>
               </div>
 
-              <div>
+              <div className={`rounded-lg border p-4 transition ${directMethodReady ? "border-white/10 bg-white/[0.02] opacity-60" : "border-violet-300/15 bg-violet-400/8"}`}>
+                <p className="text-xs font-black uppercase text-violet-100">Method B - Paste Web Interface URL / Find My Services</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                  Use this only if you do not know the Service ID. Pasting the Nitrado Web Interface URL extracts the Service ID, or DZN can list services available to the token.
+                </p>
                 <label className="text-xs font-black uppercase text-zinc-500" htmlFor="nitrado-web-url">Paste Nitrado Web Interface URL</label>
                 <input
                   id="nitrado-web-url"
@@ -1080,6 +1209,11 @@ function TokenStep({
                 />
                 {detectedServiceId ? (
                   <p className="mt-2 text-sm font-black text-emerald-100">Detected Service ID: {detectedServiceId}</p>
+                ) : null}
+                {directMethodReady ? (
+                  <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
+                    Token + Service ID is filled. You can skip this method.
+                  </p>
                 ) : null}
               </div>
             </div>
@@ -1300,9 +1434,35 @@ function ServiceStep({ services, selectedService, setSelectedService, onNext, bu
   );
 }
 
-function ReviewStep({ guild, service, serverType, serverCategory, tags, checks, busy, onTest, onTestAdmPath, onGoLive }: { guild?: DiscordGuild; service?: NitradoService; serverType: string; serverCategory: string; tags: string[]; checks: OnboardingChecks | null; busy: boolean; onTest: () => void; onTestAdmPath: (path: string) => Promise<void>; onGoLive: () => void }) {
+function ReviewStep({
+  guild,
+  service,
+  serverType,
+  serverCategory,
+  tags,
+  checks,
+  botStatus,
+  verificationProgress,
+  busy,
+  onTest,
+  onTestAdmPath,
+  onGoLive,
+}: {
+  guild?: DiscordGuild;
+  service?: NitradoService;
+  serverType: string;
+  serverCategory: string;
+  tags: string[];
+  checks: OnboardingChecks | null;
+  botStatus: DiscordBotStatusResponse | null;
+  verificationProgress: VerificationProgress;
+  busy: boolean;
+  onTest: () => void;
+  onTestAdmPath: (path: string) => Promise<void>;
+  onGoLive: () => void;
+}) {
   const [manualAdmPath, setManualAdmPath] = useState("");
-  const setupReview = getSetupReviewState({ guild, service, checks });
+  const setupReview = getSetupReviewState({ guild, service, checks, botStatus, verificationProgress });
   const canGoLive = setupReview.requiredPassed;
   const categoryLabel = getServerCategoryOption(serverCategory)?.label ?? "Not set";
   return (
@@ -1314,7 +1474,7 @@ function ReviewStep({ guild, service, serverType, serverCategory, tags, checks, 
         <Summary label="Server category" value={categoryLabel} />
         <Summary label="Tags" value={tags.length ? tags.join(", ") : "No optional tags"} />
       </div>
-      <SetupResultBanner review={setupReview} busy={busy} />
+      <SetupResultBanner review={setupReview} busy={busy} progress={verificationProgress} />
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {setupReview.checks.map((check) => (
           <SetupCheckCard key={check.label} check={check} />
@@ -1344,7 +1504,7 @@ function ReviewStep({ guild, service, serverType, serverCategory, tags, checks, 
         </p>
       </div>
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <WizardButton disabled={busy} onClick={onTest}>{busy ? "Testing" : "Run test"}</WizardButton>
+        <WizardButton disabled={busy || verificationProgress.running} onClick={onTest}>{busy || verificationProgress.running ? "Testing" : "Run test"}</WizardButton>
         <WizardButton disabled={!canGoLive || busy} onClick={onGoLive}>Go live</WizardButton>
       </div>
       {!canGoLive ? (
@@ -1366,7 +1526,7 @@ function ReviewStep({ guild, service, serverType, serverCategory, tags, checks, 
 type FriendlyCheck = {
   label: string;
   message: string;
-  status: "passed" | "warning" | "failed" | "pending";
+  status: "passed" | "warning" | "failed" | "pending" | "running";
   required?: boolean;
 };
 
@@ -1379,12 +1539,38 @@ type SetupReviewState = {
   attention: FriendlyCheck[];
 };
 
-function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild; service?: NitradoService; checks: OnboardingChecks | null }): SetupReviewState {
+function getSetupReviewState({
+  guild,
+  service,
+  checks,
+  botStatus,
+  verificationProgress = INITIAL_VERIFICATION_PROGRESS,
+}: {
+  guild?: DiscordGuild;
+  service?: NitradoService;
+  checks: OnboardingChecks | null;
+  botStatus?: DiscordBotStatusResponse | null;
+  verificationProgress?: VerificationProgress;
+}): SetupReviewState {
   const admDiscovered = Boolean(checks?.admLogsFound || checks?.admLog?.admFileExists);
   const admReadable = Boolean(checks?.admLogsFound && checks?.admLog?.sampleReadSucceeded);
-  const metadataSynced = Boolean(checks?.metadataSynced || service?.name);
-  const discordBotConnected = Boolean(checks?.discordBotConnected);
-  const discordChannelsAvailable = Boolean(checks?.discordChannelsAvailable);
+  const metadataSynced = checks ? Boolean(checks.metadataSynced) : Boolean(service?.name);
+  const selectedGuildId = guild?.guild_id ?? null;
+  const freshBotStatus = botStatus?.guild_id && selectedGuildId && botStatus.guild_id === selectedGuildId ? botStatus : null;
+  const checksGuildMatches = !checks?.discordBotGuildId || (selectedGuildId !== null && checks.discordBotGuildId === selectedGuildId);
+  const hasBotEvidence = Boolean(freshBotStatus || (checks && checksGuildMatches));
+  const discordBotConnected = freshBotStatus ? Boolean(freshBotStatus.bot_connected) : checksGuildMatches ? Boolean(checks?.discordBotConnected) : false;
+  const discordChannelsAvailable = freshBotStatus ? Boolean(freshBotStatus.channels_available) : checksGuildMatches ? Boolean(checks?.discordChannelsAvailable) : false;
+  const discordPostableChannelCount = freshBotStatus?.postable_channels_count ?? (checksGuildMatches ? checks?.discordPostableChannelCount : 0) ?? 0;
+  const discordErrorMessage = freshBotStatus?.error_message ?? (checksGuildMatches ? checks?.discordBotErrorMessage : "The selected Discord server changed. Run the bot check again for this guild.") ?? null;
+  const discordErrorCode = freshBotStatus?.error_code ?? (checksGuildMatches ? checks?.discordBotErrorCode : "guild_mismatch") ?? null;
+  const botTokenReadable = freshBotStatus
+    ? Boolean(freshBotStatus.bot_token_configured)
+    : checks && checksGuildMatches
+      ? discordErrorCode === "missing_bot_token"
+        ? false
+        : discordBotConnected || discordChannelsAvailable
+      : false;
   const checkRows: FriendlyCheck[] = [
     {
       label: "Discord server selected",
@@ -1393,29 +1579,39 @@ function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild;
       required: true,
     },
     {
+      label: "Bot token readable",
+      status: hasBotEvidence ? botTokenReadable ? "passed" : "failed" : "pending",
+      message: hasBotEvidence
+        ? botTokenReadable
+          ? "DISCORD_BOT_TOKEN is configured and DZN can verify the bot."
+          : discordErrorMessage ?? "DISCORD_BOT_TOKEN is missing from Cloudflare Pages production. Add/rotate it, redeploy Pages, then click Verify Bot Connection."
+        : "Run the test to confirm DZN can read DISCORD_BOT_TOKEN at runtime.",
+      required: true,
+    },
+    {
       label: "DZN bot installed",
-      status: !checks ? "pending" : discordBotConnected ? "passed" : "failed",
-      message: !checks
+      status: hasBotEvidence ? discordBotConnected ? "passed" : "failed" : "pending",
+      message: !hasBotEvidence
         ? "Run the test to confirm the DZN bot is installed in the selected Discord server."
         : discordBotConnected
           ? "DZN bot is installed in the selected Discord server."
-          : "DZN Bot is not installed in this Discord server yet. Add the bot to enable auto-posts, channel discovery, slash commands, and Discord automation.",
+          : discordErrorMessage ?? "DZN Bot is not installed in this Discord server yet. Add the bot to enable auto-posts, channel discovery, slash commands, and Discord automation.",
       required: true,
     },
     {
       label: "Channels discovered",
-      status: !checks ? "pending" : discordChannelsAvailable ? "passed" : "failed",
-      message: !checks
+      status: hasBotEvidence ? discordChannelsAvailable ? "passed" : "failed" : "pending",
+      message: !hasBotEvidence
         ? "Run the test to confirm DZN can fetch Discord channels with the bot."
         : discordChannelsAvailable
-          ? `${checks.discordPostableChannelCount ?? 0} channels can currently be used for DZN posting.`
-          : "DZN could not fetch channels from the selected Discord server. Reconnect the bot and run the test again.",
+          ? `${discordPostableChannelCount} channels can currently be used for DZN posting.`
+          : discordErrorMessage ?? "DZN could not fetch channels from the selected Discord server. Reconnect the bot and run the test again.",
       required: true,
     },
     {
       label: "Nitrado token valid",
       status: !checks ? "pending" : checks.tokenValid ? "passed" : "failed",
-      message: !checks ? "Run the test to confirm Nitrado access." : checks.tokenValid ? "Nitrado access confirmed." : "Your Nitrado token was rejected. Check the token and try again.",
+      message: !checks ? "Run the test to confirm Nitrado access." : checks.tokenValid ? "Nitrado access confirmed." : checks.tokenErrorMessage ?? "Your Nitrado token was rejected. Check the token and try again.",
       required: true,
     },
     {
@@ -1447,7 +1643,7 @@ function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild;
         : admReadable
           ? "Readable ADM activity is available for sync."
           : admDiscovered
-            ? "ADM logs found. Stats will begin syncing automatically once readable activity is available."
+            ? "ADM logs found. Stats will appear after the next readable activity import."
             : "PvP stats will begin syncing once ADM logs are discovered and readable.",
     },
     {
@@ -1463,27 +1659,42 @@ function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild;
     },
   ];
 
-  const requiredPassed = checkRows.every((check) => !check.required || check.status === "passed");
-  const hasFailedRequired = checkRows.some((check) => check.required && check.status === "failed");
-  const hasWarnings = checkRows.some((check) => check.status === "warning");
-  const status = !checks ? "pending" : hasFailedRequired ? "failed" : hasWarnings ? "warning" : "success";
-  const readyIndex = checkRows.findIndex((check) => check.label === "Ready to publish");
+  const activeStage = verificationProgress.running ? VERIFICATION_STAGES[verificationProgress.activeIndex] : null;
+  const rowsWithProgress = checkRows.map((check) => (
+    activeStage?.checkLabel === check.label && check.status !== "passed" && check.status !== "failed"
+      ? {
+          ...check,
+          status: "running" as const,
+          message: `Checking now: ${activeStage.label}.`,
+        }
+      : check
+  ));
+
+  const requiredPassed = rowsWithProgress.every((check) => !check.required || check.status === "passed");
+  const hasFailedRequired = rowsWithProgress.some((check) => check.required && check.status === "failed");
+  const hasWarnings = rowsWithProgress.some((check) => check.status === "warning");
+  const status = verificationProgress.running || !checks ? "pending" : hasFailedRequired ? "failed" : hasWarnings ? "warning" : "success";
+  const readyIndex = rowsWithProgress.findIndex((check) => check.label === "Ready to publish");
   if (readyIndex >= 0) {
-    checkRows[readyIndex] = {
-      ...checkRows[readyIndex],
-      status: requiredPassed ? "passed" : status === "failed" ? "failed" : "pending",
-      message: requiredPassed ? "Required setup checks passed. You can publish this server." : "Complete the required checks before publishing.",
+    rowsWithProgress[readyIndex] = {
+      ...rowsWithProgress[readyIndex],
+      status: verificationProgress.running ? rowsWithProgress[readyIndex].status : requiredPassed ? "passed" : status === "failed" ? "failed" : "pending",
+      message: verificationProgress.running
+        ? rowsWithProgress[readyIndex].message
+        : requiredPassed
+          ? "Required setup checks passed. You can publish this server."
+          : "Complete the required checks before publishing.",
     };
   }
 
-  const attention = checkRows.filter((check) => check.status === "failed" || check.status === "warning");
+  const attention = rowsWithProgress.filter((check) => check.status === "failed" || check.status === "warning");
   if (status === "success") {
     return {
       status,
       title: "Ready to go live",
       message: "Your server is connected. DZN can detect your DayZ service and will begin syncing stats from ADM logs as data becomes available.",
       requiredPassed,
-      checks: checkRows,
+      checks: rowsWithProgress,
       attention,
     };
   }
@@ -1493,7 +1704,7 @@ function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild;
       title: "Almost ready",
       message: "Your server was found, but some optional sync checks are still waiting for Nitrado log activity.",
       requiredPassed,
-      checks: checkRows,
+      checks: rowsWithProgress,
       attention,
     };
   }
@@ -1503,7 +1714,7 @@ function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild;
       title: "Setup needs attention",
       message: "We could not complete verification. Fix the issue below and run the test again.",
       requiredPassed,
-      checks: checkRows,
+      checks: rowsWithProgress,
       attention,
     };
   }
@@ -1512,12 +1723,12 @@ function getSetupReviewState({ guild, service, checks }: { guild?: DiscordGuild;
     title: "Run verification",
     message: "Run the test to confirm Discord, Nitrado, DayZ service, metadata, and ADM readiness.",
     requiredPassed,
-    checks: checkRows,
+    checks: rowsWithProgress,
     attention,
   };
 }
 
-function SetupResultBanner({ review, busy }: { review: SetupReviewState; busy: boolean }) {
+function SetupResultBanner({ review, busy, progress }: { review: SetupReviewState; busy: boolean; progress: VerificationProgress }) {
   const tone = review.status === "success" ? "emerald" : review.status === "failed" ? "red" : review.status === "warning" ? "orange" : "violet";
   const className = {
     emerald: "border-emerald-300/25 bg-emerald-400/10 text-emerald-50",
@@ -1525,13 +1736,33 @@ function SetupResultBanner({ review, busy }: { review: SetupReviewState; busy: b
     orange: "border-orange-300/25 bg-orange-400/10 text-orange-50",
     violet: "border-violet-300/20 bg-violet-400/10 text-violet-50",
   }[tone];
+  const percent = getVerificationPercent(progress);
+  const activeStage = progress.running ? VERIFICATION_STAGES[progress.activeIndex] : null;
   return (
     <div className={`mt-5 rounded-lg border p-4 ${className}`}>
       <div className="flex items-start gap-3">
-        {review.status === "failed" ? <AlertTriangle className="mt-1 h-5 w-5 shrink-0" /> : review.status === "success" ? <CheckCircle2 className="mt-1 h-5 w-5 shrink-0" /> : <ShieldCheck className="mt-1 h-5 w-5 shrink-0" />}
-        <div>
+        {progress.running ? <Loader2 className="mt-1 h-5 w-5 shrink-0 animate-spin" /> : review.status === "failed" ? <AlertTriangle className="mt-1 h-5 w-5 shrink-0" /> : review.status === "success" ? <CheckCircle2 className="mt-1 h-5 w-5 shrink-0" /> : <ShieldCheck className="mt-1 h-5 w-5 shrink-0" />}
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-black uppercase opacity-75">{busy ? "Verification running" : review.title}</p>
           <p className="mt-1 text-sm font-bold leading-6 text-white">{busy ? "Running setup checks..." : review.message}</p>
+          {progress.running ? (
+            <div className="mt-4">
+              <div className="flex items-center justify-between gap-3 text-xs font-black uppercase text-white/75">
+                <span>{activeStage ? `Current step: ${activeStage.label}` : "Starting verification"}</span>
+                <span>{percent}%</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/35">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-violet-300 via-cyan-200 to-emerald-200 transition-[width] duration-300"
+                  style={{ width: `${percent}%` }}
+                />
+              </div>
+            </div>
+          ) : progress.lastCheckedAt ? (
+            <p className="mt-3 text-xs font-bold uppercase tracking-[0.12em] opacity-70">
+              Last checked at {formatCheckedAt(progress.lastCheckedAt)}
+            </p>
+          ) : null}
           {review.attention.length && review.status !== "pending" ? (
             <ul className="mt-3 space-y-1 text-sm leading-6">
               {review.attention.slice(0, 3).map((item) => (
@@ -1546,12 +1777,12 @@ function SetupResultBanner({ review, busy }: { review: SetupReviewState; busy: b
 }
 
 function SetupCheckCard({ check }: { check: FriendlyCheck }) {
-  const Icon = check.status === "passed" ? CheckCircle2 : check.status === "failed" ? X : check.status === "warning" ? AlertTriangle : ShieldCheck;
+  const Icon = check.status === "passed" ? CheckCircle2 : check.status === "failed" ? X : check.status === "warning" ? AlertTriangle : check.status === "running" ? Loader2 : ShieldCheck;
   return (
     <div className={`rounded-lg border p-4 ${setupStatusClass(check.status)}`}>
       <div className="flex items-start gap-3">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-current/20 bg-black/20">
-          <Icon className="h-5 w-5" />
+          <Icon className={`h-5 w-5 ${check.status === "running" ? "animate-spin" : ""}`} />
         </span>
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1571,6 +1802,7 @@ function setupStatusClass(status: FriendlyCheck["status"]) {
   if (status === "passed") return "border-emerald-300/25 bg-emerald-400/10 text-emerald-100";
   if (status === "failed") return "border-red-300/25 bg-red-400/10 text-red-100";
   if (status === "warning") return "border-orange-300/25 bg-orange-400/10 text-orange-100";
+  if (status === "running") return "border-cyan-300/25 bg-cyan-400/10 text-cyan-100";
   return "border-white/10 bg-white/[0.04] text-zinc-300";
 }
 
@@ -1578,6 +1810,7 @@ function statusLabel(status: FriendlyCheck["status"]) {
   if (status === "passed") return "Passed";
   if (status === "failed") return "Failed";
   if (status === "warning") return "Warning";
+  if (status === "running") return "Running";
   return "Pending";
 }
 
@@ -1986,6 +2219,32 @@ function friendlyFailureReason(value: string) {
 function formatCheckedAt(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function getVerificationPercent(progress: VerificationProgress) {
+  if (!progress.running) {
+    return progress.completedCount >= VERIFICATION_STAGES.length ? 100 : 0;
+  }
+  const startedSteps = Math.max(progress.completedCount, progress.activeIndex + 1, 1);
+  return Math.min(98, Math.max(5, Math.round((startedSteps / VERIFICATION_STAGES.length) * 100)));
+}
+
+function mergeChecksWithBotStatus(
+  checks: OnboardingChecks | null,
+  status: DiscordBotStatusResponse | null,
+  selectedGuildId: string,
+): OnboardingChecks | null {
+  if (!checks || !status?.guild_id || !selectedGuildId || status.guild_id !== selectedGuildId) return checks;
+  return {
+    ...checks,
+    discordBotConnected: Boolean(status.bot_connected),
+    discordChannelsAvailable: Boolean(status.channels_available),
+    discordPostableChannelCount: status.postable_channels_count,
+    discordBotGuildId: status.guild_id,
+    discordBotCheckedAt: status.checked_at,
+    discordBotErrorCode: status.error_code,
+    discordBotErrorMessage: status.error_message,
+  };
 }
 
 function extractNitradoServiceId(value: string) {

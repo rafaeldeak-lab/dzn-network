@@ -794,7 +794,7 @@ function ServerDashboard({
       if (activeServerIdRef.current !== requestServerId) return false;
       setAdvancedStats(data);
       setAdvancedStatsError(data.available === false
-        ? data.reason ?? "advanced_stats_snapshot_pending"
+        ? friendlyAdvancedStatsReason(data.reason)
         : "");
       return true;
     } catch (error) {
@@ -10206,6 +10206,16 @@ function formatStatusLabel(value: string) {
   return value
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function friendlyAdvancedStatsReason(value: string | null | undefined) {
+  if (!value || value === "advanced_stats_snapshot_pending") {
+    return "Advanced stats snapshot pending. DZN found ADM logs. Stats will appear after the next readable activity import.";
+  }
+  if (value === "advanced_stats_snapshot_unavailable") {
+    return "Advanced stats snapshot unavailable. DZN will retry after the next readable activity import.";
+  }
+  return formatStatusLabel(value);
 }
 
 function getAdmCursorValidationMessage(status: string | null | undefined) {

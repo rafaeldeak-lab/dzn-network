@@ -108,6 +108,38 @@ assert.equal(setupWizardSource.includes("Installing the DZN bot lets DZN read ch
 assert.equal(setupWizardSource.includes("discordBotConnected"), true);
 assert.equal(setupWizardSource.includes("discordChannelsAvailable"), true);
 assert.equal(setupWizardSource.includes("DZN Bot is not installed in this Discord server yet"), true);
+assert.equal(setupWizardSource.includes("mergeChecksWithBotStatus"), true);
+assert.equal(setupWizardSource.includes("status.guild_id !== selectedGuildId"), true);
+assert.equal(setupWizardSource.includes("Bot token readable"), true);
+assert.equal(setupWizardSource.includes("VERIFICATION_STAGES"), true);
+assert.equal(setupWizardSource.includes("verificationProgress"), true);
+assert.equal(setupWizardSource.includes("Current step:"), true);
+assert.equal(setupWizardSource.includes("Run the test to confirm DZN can read DISCORD_BOT_TOKEN at runtime."), true);
+assert.equal(setupWizardSource.includes("Use either Method A or Method B. You do not need both."), true);
+assert.equal(setupWizardSource.includes("Preferred when you already know the Service ID."), true);
+assert.equal(setupWizardSource.includes("Use this only if you do not know the Service ID."), true);
+assert.equal(setupWizardSource.includes("DZN only needs the service permission"), true);
+assert.equal(setupWizardSource.includes("The same Nitrado long-life token can be reused for multiple services"), true);
+assert.equal(setupWizardSource.includes("DZN encrypts it and never shows it again."), true);
+assert.equal(setupWizardSource.includes("ADM logs found. Stats will appear after the next readable activity import."), true);
+
+const onboardingTestSource = readFileSync("functions/api/onboarding/test.ts", "utf8");
+assert.equal(onboardingTestSource.includes("verifyDiscordBotForSetup"), true);
+assert.equal(onboardingTestSource.includes("linkedServer.guild_id"), true);
+assert.equal(onboardingTestSource.includes("discordBotGuildId"), true);
+assert.equal(onboardingTestSource.includes("discordBotCheckedAt"), true);
+assert.equal(onboardingTestSource.includes("discordBotErrorMessage"), true);
+assert.equal(onboardingTestSource.includes("Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy."), true);
+assert.equal(onboardingTestSource.includes("Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token."), true);
+assert.equal(onboardingTestSource.includes("DISCORD_BOT_TOKEN is missing from Cloudflare Pages production. Add or rotate it, redeploy Pages, then click Verify Bot Connection."), true);
+
+const tokenValidationSource = readFileSync("functions/api/nitrado/validate-token.ts", "utf8");
+assert.equal(tokenValidationSource.includes("storePendingNitradoToken"), true);
+assert.equal(tokenValidationSource.includes("classifyTokenSaveError"), true);
+assert.equal(tokenValidationSource.includes("Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy."), true);
+assert.equal(tokenValidationSource.includes("Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token."), true);
+
+assert.equal(botStatusSource.includes("DISCORD_BOT_TOKEN is missing from Cloudflare Pages production. Add/rotate it, redeploy Pages, then click Verify Bot Connection."), true);
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("function selectChannel"), true);

@@ -85,6 +85,31 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       if (error.code === "not_dayz") return json({ error: "This service does not look like a DayZ server" }, { status: 400 });
       return json({ error: "Nitrado API unavailable" }, { status: 503 });
     }
+    const tokenSaveError = classifyTokenSaveError(error);
+    if (tokenSaveError) {
+      return json({
+        error: tokenSaveError.message,
+        error_code: tokenSaveError.code,
+        tokenValid: false,
+      }, { status: 500 });
+    }
     return json({ error: "Nitrado API unavailable" }, { status: 503 });
   }
 };
+
+function classifyTokenSaveError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/TOKEN_ENCRYPTION_KEY is not configured/i.test(message)) {
+    return {
+      code: "missing_token_encryption_key",
+      message: "Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy.",
+    };
+  }
+  if (/decrypt|operation|authentication|tag|cipher|iv|key/i.test(message)) {
+    return {
+      code: "token_decrypt_failed",
+      message: "Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token.",
+    };
+  }
+  return null;
+}

@@ -1,11 +1,11 @@
 import { getCurrentLinkedServer, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
-import { fetchDiscordPostingChannels } from "../../_lib/discord-posting";
+import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_lib/discord-posting";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getLatestNitradoToken } from "../../_lib/onboarding";
 import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
-import type { PagesFunction } from "../../_lib/types";
+import type { Env, PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "POST") return methodNotAllowed();
@@ -22,34 +22,55 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ error: "No Nitrado service selected" }, { status: 400 });
   }
 
-  const metadataResult = await refreshNitradoServerMetadata(env, {
-    linkedServerId: linkedServer.id,
-    userId: user.id,
-    force: true,
-  }).catch(() => null);
-  const nitradoToken = isMockNitrado(env.MOCK_NITRADO) ? "" : (await getLatestNitradoToken(env, user.id)) ?? "";
-  const savedAdmPath = typeof linkedServer.adm_path === "string" ? linkedServer.adm_path : "";
-  const admLog = isMockNitrado(env.MOCK_NITRADO)
-    ? mockAdmLogDetection()
-    : savedAdmPath
-      ? await testExactNitradoAdmPath(nitradoToken, linkedServer.nitrado_service_id, savedAdmPath)
-      : await detectNitradoAdmLogs(nitradoToken, linkedServer.nitrado_service_id);
+  let tokenValid = true;
+  let tokenErrorCode: string | null = null;
+  let tokenErrorMessage: string | null = null;
+  let nitradoToken = "";
+  if (!isMockNitrado(env.MOCK_NITRADO)) {
+    try {
+      const latestToken = await getLatestNitradoToken(env, user.id);
+      if (!latestToken) {
+        tokenValid = false;
+        tokenErrorCode = "missing_nitrado_token";
+        tokenErrorMessage = "No saved Nitrado token was found. Paste your Nitrado long-life token and validate this service again.";
+      } else {
+        nitradoToken = latestToken;
+      }
+    } catch (error) {
+      tokenValid = false;
+      const classified = classifyNitradoTokenError(error);
+      tokenErrorCode = classified.code;
+      tokenErrorMessage = classified.message;
+    }
+  }
 
-  const admStoragePath = getAdmLogStoragePath(admLog);
-  if (admLog.admFileExists && admStoragePath) {
+  const metadataResult = tokenValid
+    ? await refreshNitradoServerMetadata(env, {
+        linkedServerId: linkedServer.id,
+        userId: user.id,
+        force: true,
+      }).catch(() => null)
+    : null;
+  const savedAdmPath = typeof linkedServer.adm_path === "string" ? linkedServer.adm_path : "";
+  const admLog = !tokenValid
+    ? null
+    : isMockNitrado(env.MOCK_NITRADO)
+      ? mockAdmLogDetection()
+      : savedAdmPath
+        ? await testExactNitradoAdmPath(nitradoToken, linkedServer.nitrado_service_id, savedAdmPath)
+        : await detectNitradoAdmLogs(nitradoToken, linkedServer.nitrado_service_id);
+
+  const admStoragePath = admLog ? getAdmLogStoragePath(admLog) : null;
+  if (admLog?.admFileExists && admStoragePath) {
     await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
   }
-  const discordChannels = isMockAuth(env.MOCK_AUTH)
-    ? [{ can_post: true }, { can_post: true }]
-    : typeof linkedServer.guild_id === "string" && linkedServer.guild_id
-      ? await fetchDiscordPostingChannels(env, linkedServer.guild_id).catch(() => [])
-      : [];
+  const discordCheck = await verifyDiscordBotForSetup(env, linkedServer.guild_id);
 
   const checks = {
-    token_valid: 1,
-    service_access: 1,
-    adm_logs_found: admLog.found ? 1 : 0,
-    dayz_service_detected: 1,
+    token_valid: tokenValid ? 1 : 0,
+    service_access: tokenValid ? 1 : 0,
+    adm_logs_found: admLog?.found ? 1 : 0,
+    dayz_service_detected: tokenValid ? 1 : 0,
   };
 
   const db = requireDb(env);
@@ -98,15 +119,119 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   return json({
     ok: true,
     checks: {
-      tokenValid: true,
-      serviceAccess: true,
+      tokenValid,
+      serviceAccess: tokenValid,
       admLogsFound: Boolean(checks.adm_logs_found),
-      dayzServiceDetected: true,
+      dayzServiceDetected: Boolean(checks.dayz_service_detected),
       metadataSynced: Boolean(metadataResult?.ok),
-      discordBotConnected: discordChannels.length > 0,
-      discordChannelsAvailable: discordChannels.length > 0,
-      discordPostableChannelCount: discordChannels.filter((channel) => channel.can_post).length,
-      admLog,
+      discordBotConnected: discordCheck.botConnected,
+      discordChannelsAvailable: discordCheck.channelsAvailable,
+      discordPostableChannelCount: discordCheck.postableChannelCount,
+      discordBotGuildId: discordCheck.guildId,
+      discordBotCheckedAt: discordCheck.checkedAt,
+      discordBotErrorCode: discordCheck.errorCode,
+      discordBotErrorMessage: discordCheck.errorMessage,
+      tokenErrorCode,
+      tokenErrorMessage,
+      admLog: admLog ?? undefined,
     },
   });
 };
+
+async function verifyDiscordBotForSetup(env: Env, guildId: unknown) {
+  const checkedAt = new Date().toISOString();
+  const normalizedGuildId = typeof guildId === "string" && guildId.trim() ? guildId.trim() : null;
+  if (!normalizedGuildId) {
+    return {
+      guildId: null,
+      botConnected: false,
+      channelsAvailable: false,
+      postableChannelCount: 0,
+      errorCode: "missing_guild_id",
+      errorMessage: "No Discord server is selected. Please choose a server first.",
+      checkedAt,
+    };
+  }
+  if (isMockAuth(env.MOCK_AUTH)) {
+    return {
+      guildId: normalizedGuildId,
+      botConnected: true,
+      channelsAvailable: true,
+      postableChannelCount: 2,
+      errorCode: null,
+      errorMessage: null,
+      checkedAt,
+    };
+  }
+  try {
+    const channels = await fetchDiscordPostingChannels(env, normalizedGuildId);
+    return {
+      guildId: normalizedGuildId,
+      botConnected: true,
+      channelsAvailable: channels.length > 0,
+      postableChannelCount: channels.filter((channel) => channel.can_post).length,
+      errorCode: null,
+      errorMessage: null,
+      checkedAt,
+    };
+  } catch (error) {
+    const classified = classifyDiscordSetupError(error);
+    return {
+      guildId: normalizedGuildId,
+      botConnected: false,
+      channelsAvailable: false,
+      postableChannelCount: 0,
+      errorCode: classified.code,
+      errorMessage: classified.message,
+      checkedAt,
+    };
+  }
+}
+
+function classifyDiscordSetupError(error: unknown) {
+  if (error instanceof DiscordChannelFetchError) {
+    if (error.code === "missing_bot_token") {
+      return {
+        code: "missing_bot_token",
+        message: "DISCORD_BOT_TOKEN is missing from Cloudflare Pages production. Add or rotate it, redeploy Pages, then click Verify Bot Connection. If the bot is already installed, DZN cannot verify or control it until the token is configured.",
+      };
+    }
+    if (error.code === "bot_not_in_guild") {
+      return {
+        code: "bot_not_in_guild",
+        message: "DZN Bot is not installed in the selected Discord server yet.",
+      };
+    }
+    if (error.code === "discord_api_403") {
+      return {
+        code: "discord_api_403",
+        message: "Discord returned 403 while DZN checked bot access. Reconnect the bot or check server permissions.",
+      };
+    }
+    return { code: error.code, message: error.message };
+  }
+  return {
+    code: "discord_api_error",
+    message: error instanceof Error ? error.message : "Discord bot verification failed. Try again shortly.",
+  };
+}
+
+function classifyNitradoTokenError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/TOKEN_ENCRYPTION_KEY is not configured/i.test(message)) {
+    return {
+      code: "missing_token_encryption_key",
+      message: "Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy.",
+    };
+  }
+  if (/decrypt|operation|authentication|tag|cipher|iv|key/i.test(message)) {
+    return {
+      code: "token_decrypt_failed",
+      message: "Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token.",
+    };
+  }
+  return {
+    code: "nitrado_token_unavailable",
+    message: "DZN could not read the saved Nitrado token. Re-save your Nitrado long-life token and try again.",
+  };
+}

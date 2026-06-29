@@ -295,6 +295,12 @@ export type OnboardingChecks = {
   discordBotConnected?: boolean;
   discordChannelsAvailable?: boolean;
   discordPostableChannelCount?: number;
+  discordBotGuildId?: string | null;
+  discordBotCheckedAt?: string | null;
+  discordBotErrorCode?: string | null;
+  discordBotErrorMessage?: string | null;
+  tokenErrorCode?: "missing_token_encryption_key" | "token_decrypt_failed" | "missing_nitrado_token" | "nitrado_token_unavailable" | string | null;
+  tokenErrorMessage?: string | null;
   admLog?: AdmLogDetection;
 };
 
