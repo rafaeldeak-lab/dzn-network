@@ -190,6 +190,7 @@ assert.equal(serverMetadataSource.includes("syncPublicCacheFromMetadataRefresh")
 assert.equal(serverMetadataSource.includes("patchHomeStatsPlayerCountsFromFreshMetadata"), true, "Metadata refresh should patch home-stats player snapshots.");
 assert.equal(serverMetadataSource.includes("metadata.player_count_status !== \"fresh\""), true, "Only confirmed fresh Nitrado counts should update public cache.");
 assert.equal(serverMetadataSource.includes("result.ok && result.player_count_status === \"fresh\""), true, "Worker metadata refresh must update public player cache only after a successful numeric Nitrado result.");
+assert.equal(serverMetadataSource.includes("adm_playerlist"), true, "Fresh ADM PlayerList snapshots must be eligible as a canonical player-count fallback.");
 assert.equal(serverMetadataSource.includes("serverOnline: result.ok ? metadataOnlineValue(result.metadata) : null"), true, "Failed metadata attempts must not refresh public-facing server status fields.");
 assert.equal(playerCountsSource.includes("getPublicPlayerCountSummary"), true, "Player counts should have a canonical public summary helper.");
 assert.equal(playerCountsSource.includes("writePublicApiCache(env, snapshot.key"), true, "Home-stats snapshot player counts should be refreshed after metadata updates.");

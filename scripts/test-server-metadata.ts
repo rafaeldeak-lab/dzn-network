@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveLivePlayerCounts, resolveNitradoCurrentPlayerCount } from "../functions/_lib/server-metadata";
+import { detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveAdmPlayerListFallback, resolveLivePlayerCounts, resolveNitradoCurrentPlayerCount } from "../functions/_lib/server-metadata";
 
 assert.equal(detectServerModeFromText(["NukeTown DEATHMATCH"]), "DEATHMATCH");
 assert.equal(detectServerModeFromText(["Weekend raids KOS faction wars"]), "PVP");
@@ -97,6 +97,28 @@ assert.deepEqual(resolveLivePlayerCounts({
   maxMissing: false,
   player_count_status: "fresh",
 });
+const freshAdmFallback = resolveAdmPlayerListFallback([
+  {
+    raw_line: "06:08:10 | ##### PlayerList log: 2 players",
+    adm_file: "DayZServer_PS4_x64_2026-06-29_06-02-10.ADM",
+    source_line_number: 14,
+    created_at: "2026-06-29T06:08:11.000Z",
+  },
+], Date.parse("2026-06-29T06:20:00.000Z"));
+assert.equal(freshAdmFallback?.currentPlayers, 2);
+assert.equal(freshAdmFallback?.admFile, "DayZServer_PS4_x64_2026-06-29_06-02-10.ADM");
+assert.equal(
+  resolveAdmPlayerListFallback([
+    {
+      raw_line: "06:08:10 | ##### PlayerList log: 2 players",
+      adm_file: "DayZServer_PS4_x64_2026-06-29_06-02-10.ADM",
+      source_line_number: 14,
+      created_at: "2026-06-29T06:08:11.000Z",
+    },
+  ], Date.parse("2026-06-29T07:20:00.000Z")),
+  null,
+  "ADM PlayerList fallback must not promote stale snapshots as live counts.",
+);
 
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8");
 assert.equal(admSyncSource.includes("force: triggerType === \"manual\" || triggerType === \"scheduled\""), true);
@@ -115,6 +137,8 @@ assert.equal(serverMetadataSource.includes("player_count_status: PlayerCountStat
 assert.equal(serverMetadataSource.includes("/gameservers/games/players"), true, "Live player count should use Nitrado's online player endpoint when available.");
 assert.equal(serverMetadataSource.includes("gameservers_games_players"), true, "Live player count source should be recorded without storing player lists.");
 assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT SOURCE CONFLICT RESOLVED"), true);
+assert.equal(serverMetadataSource.includes("DZN PLAYER COUNT ADM PLAYERLIST FALLBACK"), true);
+assert.equal(serverMetadataSource.includes("adm_playerlist"), true);
 assert.equal(serverMetadataSource.includes("fetchNitradoMetadataSnapshot"), true);
 assert.equal(serverMetadataSource.includes("extractNitradoOnlinePlayerCount"), true, "Online player endpoint payloads should be reduced to a count only.");
 assert.equal(serverMetadataSource.includes("currentMissing = rawCurrent === null"), true);

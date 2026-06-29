@@ -12,12 +12,15 @@ import {
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { geolocateServerIp, shouldRefreshServerGeo } from "./geoip";
 import { isMockNitrado } from "./mock";
+import { parseAdmLine } from "./adm-parser";
 import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
 import type { Env } from "./types";
 
 const NITRADO_API = "https://api.nitrado.net";
 const METADATA_STALE_MS = 2 * 60 * 1000;
+const ADM_PLAYERLIST_FALLBACK_FRESH_MS = 30 * 60 * 1000;
 export type PlayerCountStatus = "fresh" | "stale" | "unavailable" | "unknown";
+export type PlayerCountSource = "nitrado" | "mock_nitrado" | "adm_playerlist";
 
 export type ScheduledMetadataSyncServerResult = {
   linked_server_id: string;
@@ -28,6 +31,7 @@ export type ScheduledMetadataSyncServerResult = {
   current_players: number | null;
   max_players: number | null;
   player_count_status: PlayerCountStatus;
+  player_count_source?: string | null;
   player_count_last_checked_at: string | null;
   metadata_last_checked_at: string | null;
   message: string;
@@ -78,7 +82,7 @@ export type LinkedServerMetadata = {
   metadata_hash: string;
   metadata_last_checked_at: string;
   player_count_last_checked_at: string;
-  player_count_source: "nitrado" | "mock_nitrado";
+  player_count_source: PlayerCountSource;
   player_count_status: PlayerCountStatus;
 };
 
@@ -469,6 +473,143 @@ export async function refreshMetadataIfStale(env: Env, linkedServerId: string, u
   return refreshNitradoServerMetadata(env, { linkedServerId, userId, force: false, softFail: true }).catch(() => null);
 }
 
+type AdmPlayerListFallbackRow = {
+  raw_line: string | null;
+  adm_file: string | null;
+  source_line_number: number | null;
+  created_at: string | null;
+};
+
+export type AdmPlayerListFallback = {
+  currentPlayers: number;
+  occurredAt: string;
+  admFile: string | null;
+  sourceLineNumber: number | null;
+  ageMs: number;
+};
+
+function extractAdmDateFromFilename(filename: string | null | undefined): string | undefined {
+  const match = String(filename ?? "").match(/DayZServer_[^_]+_[^_]+_(\d{4}-\d{2}-\d{2})_/i);
+  return match?.[1];
+}
+
+export function resolveAdmPlayerListFallback(
+  rows: AdmPlayerListFallbackRow[],
+  nowMs = Date.now(),
+  maxAgeMs = ADM_PLAYERLIST_FALLBACK_FRESH_MS,
+): AdmPlayerListFallback | null {
+  let selected: AdmPlayerListFallback | null = null;
+  for (const row of rows) {
+    if (!row.raw_line) continue;
+    const parsed = parseAdmLine(row.raw_line, { admDate: extractAdmDateFromFilename(row.adm_file) });
+    if (parsed.eventType !== "playerlist_snapshot" || parsed.playerCount === null) continue;
+    if (!parsed.occurredAt) continue;
+    const occurredMs = Date.parse(parsed.occurredAt);
+    if (!Number.isFinite(occurredMs)) continue;
+    const ageMs = nowMs - occurredMs;
+    if (ageMs < 0 || ageMs > maxAgeMs) continue;
+    const candidate: AdmPlayerListFallback = {
+      currentPlayers: parsed.playerCount,
+      occurredAt: parsed.occurredAt,
+      admFile: row.adm_file,
+      sourceLineNumber: row.source_line_number,
+      ageMs,
+    };
+    if (!selected || Date.parse(candidate.occurredAt) > Date.parse(selected.occurredAt)) {
+      selected = candidate;
+    }
+  }
+  return selected;
+}
+
+async function readLatestAdmPlayerListFallback(
+  db: D1Database,
+  linkedServerId: string,
+  nowMs: number,
+): Promise<AdmPlayerListFallback | null> {
+  try {
+    const result = await db
+      .prepare(
+        `SELECT raw_line, source_adm_file AS adm_file, source_line_number, created_at
+         FROM adm_raw_events
+         WHERE linked_server_id = ?
+           AND event_type = 'playerlist_snapshot'
+         ORDER BY occurred_at DESC, source_line_number DESC
+         LIMIT 20`,
+      )
+      .bind(linkedServerId)
+      .all<AdmPlayerListFallbackRow>();
+    return resolveAdmPlayerListFallback(result.results ?? [], nowMs);
+  } catch (error) {
+    console.warn("DZN ADM PLAYERLIST FALLBACK UNAVAILABLE", {
+      linkedServerId,
+      message: error instanceof Error ? error.message : "latest ADM PlayerList query failed",
+    });
+    return null;
+  }
+}
+
+async function applyAdmPlayerListPlayerCountFallback(
+  db: D1Database,
+  row: AutomationSyncServer,
+  linkedServer: LinkedServerMetadataRow,
+  now: string,
+  message: string,
+) {
+  const fallback = await readLatestAdmPlayerListFallback(db, row.id, Date.parse(now));
+  if (!fallback) return null;
+
+  const previousCurrent = cleanNumber(row.current_players);
+  const previousMax = cleanNumber(row.max_players);
+  await db
+    .prepare(
+      `UPDATE linked_servers SET
+        current_players = ?,
+        max_players = COALESCE(?, max_players),
+        player_count_last_checked_at = ?,
+        player_count_source = 'adm_playerlist',
+        player_count_status = 'fresh',
+        metadata_last_checked_at = ?,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(fallback.currentPlayers, previousMax, now, now, row.id)
+    .run();
+
+  console.log("DZN PLAYER COUNT ADM PLAYERLIST FALLBACK", {
+    linkedServerId: row.id,
+    serviceId: row.nitrado_service_id,
+    selectedSource: "adm_playerlist",
+    parsedCurrentPlayers: fallback.currentPlayers,
+    parsedAt: fallback.occurredAt,
+    admFile: fallback.admFile,
+    previousStoredCurrentPlayers: previousCurrent,
+    previousStoredMaxPlayers: previousMax,
+  });
+
+  return {
+    ok: true,
+    changed: fallback.currentPlayers !== previousCurrent,
+    skipped: false,
+    message,
+    metadata_last_checked_at: now,
+    metadata_last_changed_at: null,
+    metadata_source: "adm_playerlist",
+    player_count_last_checked_at: now,
+    player_count_source: "adm_playerlist" as const,
+    player_count_status: "fresh" as const,
+    metadata: {
+      ...rowToMetadata(linkedServer),
+      current_players: fallback.currentPlayers,
+      max_players: previousMax,
+      metadata_last_checked_at: now,
+      player_count_last_checked_at: now,
+      player_count_source: "adm_playerlist" as const,
+      player_count_status: "fresh" as const,
+    },
+  };
+}
+
 async function refreshNitradoServerPlayerCountOnly(
   env: Env,
   row: AutomationSyncServer,
@@ -498,7 +639,7 @@ async function refreshNitradoServerPlayerCountOnly(
     metadata_last_checked_at: row.metadata_last_checked_at,
     metadata_last_changed_at: null,
     player_count_last_checked_at: row.player_count_last_checked_at,
-    player_count_source: "nitrado",
+    player_count_source: (row.player_count_source as PlayerCountSource | null) ?? "nitrado",
     player_count_status: row.player_count_status,
     geo_latitude: null,
     geo_longitude: null,
@@ -521,6 +662,15 @@ async function refreshNitradoServerPlayerCountOnly(
         }
       : await fetchNitradoOnlinePlayerCount(nitradoToken ?? "", row.nitrado_service_id ?? "", now, options.timeoutMs);
     if (!livePlayerCount) {
+      const admFallback = await applyAdmPlayerListPlayerCountFallback(
+        db,
+        row,
+        linkedServer,
+        now,
+        "Nitrado live player count endpoint unavailable; using latest ADM PlayerList snapshot",
+      );
+      if (admFallback) return admFallback;
+
       await updatePlayerCountFreshness(db, row.id, {
         checkedAt: now,
         source: "nitrado",
@@ -614,6 +764,15 @@ async function refreshNitradoServerPlayerCountOnly(
       },
     };
   } catch (error) {
+    const admFallback = await applyAdmPlayerListPlayerCountFallback(
+      db,
+      row,
+      linkedServer,
+      now,
+      "Nitrado live player count refresh failed; using latest ADM PlayerList snapshot",
+    ).catch(() => null);
+    if (admFallback) return admFallback;
+
     await updatePlayerCountFreshness(db, row.id, {
       checkedAt: now,
       source: "nitrado",
@@ -700,6 +859,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         current_players: cleanNumber(row.current_players),
         max_players: cleanNumber(row.max_players),
         player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        player_count_source: row.player_count_source ?? null,
         player_count_last_checked_at: row.player_count_last_checked_at,
         metadata_last_checked_at: row.metadata_last_checked_at,
         message: "Metadata refresh budget exhausted before this server",
@@ -720,6 +880,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         current_players: cleanNumber(row.current_players),
         max_players: cleanNumber(row.max_players),
         player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        player_count_source: row.player_count_source ?? null,
         player_count_last_checked_at: row.player_count_last_checked_at,
         metadata_last_checked_at: row.metadata_last_checked_at,
         message: "Live player count checked recently; skipped fallback refresh",
@@ -742,6 +903,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         current_players: cleanNumber(row.current_players),
         max_players: cleanNumber(row.max_players),
         player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        player_count_source: row.player_count_source ?? null,
         player_count_last_checked_at: row.player_count_last_checked_at,
         metadata_last_checked_at: row.metadata_last_checked_at,
         message: "Active metadata lock is still within lease; skipped this server",
@@ -805,10 +967,15 @@ export async function refreshLivePlayerCountsForActiveServers(
         current_players: resultCurrent,
         max_players: resultMax,
         player_count_status: normalizePlayerCountStatus(result.player_count_status),
+        player_count_source: result.player_count_source ?? result.metadata?.player_count_source ?? null,
         player_count_last_checked_at: result.player_count_last_checked_at ?? null,
         metadata_last_checked_at: result.metadata_last_checked_at ?? null,
         message: result.message,
-        phase: result.ok ? "nitrado_live_count_success" : "nitrado_live_count_unavailable",
+        phase: result.ok && (result.player_count_source ?? result.metadata?.player_count_source) === "adm_playerlist"
+          ? "adm_playerlist_fallback"
+          : result.ok
+            ? "nitrado_live_count_success"
+            : "nitrado_live_count_unavailable",
       });
     } catch (error) {
       failed += 1;
@@ -829,6 +996,7 @@ export async function refreshLivePlayerCountsForActiveServers(
         current_players: cleanNumber(row.current_players),
         max_players: cleanNumber(row.max_players),
         player_count_status: "unavailable",
+        player_count_source: row.player_count_source ?? null,
         player_count_last_checked_at: row.player_count_last_checked_at,
         metadata_last_checked_at: row.metadata_last_checked_at,
         message: error instanceof Error ? error.message : "Nitrado metadata refresh failed",
@@ -883,7 +1051,7 @@ async function getDueMetadataRefreshServersFast(
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_status, server_subscriptions.plan_key,
+              linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
               server_sync_state.next_adm_pull_due_at
@@ -945,7 +1113,7 @@ async function getDueMetadataRefreshServersFast(
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_status, server_subscriptions.plan_key,
+              linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
               server_sync_state.next_adm_pull_due_at

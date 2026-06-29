@@ -514,6 +514,32 @@ assertRealAdmFixtureCounts("DayZServer_PS4_x64_2026-05-20_10-02-17.ADM", {
   disconnects: 4,
   playerlistSnapshots: 11,
 });
+assertRealAdmFixtureCounts("DayZServer_PS4_x64_2026-06-29_05-01-57.ADM", {
+  pvpKills: 0,
+  joins: 1,
+  disconnects: 1,
+  playerlistSnapshots: 1,
+}, "2026-06-29");
+assertRealAdmFixtureCounts("DayZServer_PS4_x64_2026-06-29_06-02-10.ADM", {
+  pvpKills: 1,
+  joins: 3,
+  disconnects: 1,
+  playerlistSnapshots: 2,
+}, "2026-06-29");
+
+const ownerSampleAdmEvents = parseAdmLines(
+  readFileSync("scripts/fixtures/DayZServer_PS4_x64_2026-06-29_06-02-10.ADM", "utf8").split(/\r?\n/),
+  { admDate: "2026-06-29" },
+);
+const ownerSampleHit = ownerSampleAdmEvents.find((event) => event.eventType === "player_hit" && event.weapon === "M4-A1");
+const ownerSampleKill = ownerSampleAdmEvents.find((event) => event.eventType === "player_killed" && event.isCreditedKill);
+assert.equal(ownerSampleHit?.attackerName, "NukeRunner");
+assert.equal(ownerSampleHit?.victimName, "BanditTwo");
+assert.equal(ownerSampleHit?.ammo, "Bullet_556x45");
+assert.equal(ownerSampleHit?.distance, 12.7866);
+assert.equal(ownerSampleKill?.killerName, "NukeRunner");
+assert.equal(ownerSampleKill?.victimName, "BanditTwo");
+assert.equal(ownerSampleAdmEvents.some((event) => event.eventType === "player_choosing_respawn"), true);
 
 console.log("DZN ADM IMPORT DEBUG REPORT", uploadedImportReport);
 
@@ -536,11 +562,12 @@ function assertRealAdmFixtureCounts(
     disconnects: number;
     playerlistSnapshots: number;
   },
+  admDate = "2026-05-20",
 ) {
   const lines = readFileSync(`scripts/fixtures/${filename}`, "utf8")
     .split(/\r?\n/)
     .filter((line) => line.trim().length > 0);
-  const events = parseAdmLines(lines, { admDate: "2026-05-20" });
+  const events = parseAdmLines(lines, { admDate });
   assert.equal(events.filter((event) => event.eventType === "player_killed" && event.isCreditedKill).length, expected.pvpKills, `${filename} PvP kill count`);
   assert.equal(events.filter((event) => event.eventType === "player_connected").length, expected.joins, `${filename} connected count`);
   assert.equal(events.filter((event) => event.eventType === "player_disconnected").length, expected.disconnects, `${filename} disconnect count`);

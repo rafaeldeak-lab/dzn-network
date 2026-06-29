@@ -4,6 +4,7 @@ import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getLatestNitradoToken } from "../../_lib/onboarding";
+import { planAdmBackfillJobsForServer } from "../../_lib/adm-sync";
 import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -63,6 +64,41 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const admStoragePath = admLog ? getAdmLogStoragePath(admLog) : null;
   if (admLog?.admFileExists && admStoragePath) {
     await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
+  }
+  let admBackfill = null;
+  if (tokenValid && (admLog?.admFileExists || admLog?.found)) {
+    admBackfill = isMockNitrado(env.MOCK_NITRADO)
+      ? {
+          ok: true,
+          status: "mock_adm_ready",
+          message: "Mock ADM logs are available for setup verification.",
+          files_found: 1,
+          newest_available_adm_file: admLog?.newestAdmFileName ?? "mock.ADM",
+          newest_readable_adm_file: admLog?.newestAdmFileName ?? "mock.ADM",
+          latest_processed_adm_file: null,
+          created_jobs: [],
+          active_job: null,
+        }
+      : await planAdmBackfillJobsForServer(env, user.id, linkedServer.id, {
+          maxJobsToCreate: 1,
+          triggerType: "setup",
+          processImmediately: true,
+          chunksToProcess: 1,
+          scheduledBudgeted: false,
+          skipMetadataRefresh: true,
+        })
+          .then((result) => summarizeAdmBackfillForSetup(result))
+          .catch((error) => ({
+            ok: false,
+            status: "adm_backfill_unavailable",
+            message: error instanceof Error ? error.message : "DZN found ADM logs, but the initial import could not start. Try again shortly.",
+            files_found: admLog?.found ? 1 : 0,
+            newest_available_adm_file: admLog?.newestAdmFileName ?? null,
+            newest_readable_adm_file: admLog?.sampleReadSucceeded ? admLog.newestAdmFileName ?? null : null,
+            latest_processed_adm_file: null,
+            created_jobs: [],
+            active_job: null,
+          }));
   }
   const discordCheck = await verifyDiscordBotForSetup(env, linkedServer.guild_id);
 
@@ -134,9 +170,40 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       tokenErrorCode,
       tokenErrorMessage,
       admLog: admLog ?? undefined,
+      admBackfill: admBackfill ?? undefined,
     },
   });
 };
+
+function summarizeAdmBackfillForSetup(result: Awaited<ReturnType<typeof planAdmBackfillJobsForServer>>) {
+  const completedJob = (result.created_jobs ?? []).find((job) => /complete|caught_up/i.test(String(job.status ?? "")));
+  return {
+    ok: result.ok,
+    status: result.status,
+    message: result.message,
+    files_found: result.files_found,
+    newest_available_adm_file: result.newest_available_adm_file ?? null,
+    newest_readable_adm_file: result.newest_readable_adm_file ?? null,
+    latest_processed_adm_file: completedJob?.adm_file ?? null,
+    queued_files: (result.created_jobs ?? []).map((job) => job.adm_file),
+    created_jobs: (result.created_jobs ?? []).map((job) => ({
+      id: job.id,
+      adm_file: job.adm_file,
+      status: job.status,
+      line_start: job.line_start,
+      line_end: job.line_end,
+    })),
+    active_job: result.active_job
+      ? {
+          id: result.active_job.id,
+          adm_file: result.active_job.adm_file,
+          status: result.active_job.status,
+          line_start: result.active_job.line_start,
+          line_end: result.active_job.line_end,
+        }
+      : null,
+  };
+}
 
 async function verifyDiscordBotForSetup(env: Env, guildId: unknown) {
   const checkedAt = new Date().toISOString();

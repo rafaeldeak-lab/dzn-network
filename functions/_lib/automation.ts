@@ -50,6 +50,7 @@ export type AutomationSyncServer = {
   current_players: number | null;
   max_players: number | null;
   player_count_last_checked_at: string | null;
+  player_count_source?: string | null;
   metadata_last_checked_at: string | null;
   player_count_status: string | null;
   plan_key: PlanKey;
@@ -404,7 +405,7 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_status, server_subscriptions.plan_key,
+              linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
               server_sync_state.next_adm_pull_due_at

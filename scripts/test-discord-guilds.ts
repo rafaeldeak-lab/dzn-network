@@ -122,6 +122,12 @@ assert.equal(setupWizardSource.includes("DZN only needs the service permission")
 assert.equal(setupWizardSource.includes("The same Nitrado long-life token can be reused for multiple services"), true);
 assert.equal(setupWizardSource.includes("DZN encrypts it and never shows it again."), true);
 assert.equal(setupWizardSource.includes("ADM logs found. Stats will appear after the next readable activity import."), true);
+assert.equal(setupWizardSource.includes("admBackfill"), true);
+assert.equal(setupWizardSource.includes("Processing newest ADM logs"), true);
+assert.equal(setupWizardSource.includes("Newest visible file"), true);
+assert.equal(setupWizardSource.includes("Latest processed ADM file"), true);
+assert.equal(setupWizardSource.includes("Server Category"), true);
+assert.equal((setupWizardSource.match(/Server Category/g) ?? []).length, 1, "Setup should expose one primary category selector.");
 
 const onboardingTestSource = readFileSync("functions/api/onboarding/test.ts", "utf8");
 assert.equal(onboardingTestSource.includes("verifyDiscordBotForSetup"), true);
@@ -132,6 +138,10 @@ assert.equal(onboardingTestSource.includes("discordBotErrorMessage"), true);
 assert.equal(onboardingTestSource.includes("Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy."), true);
 assert.equal(onboardingTestSource.includes("Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token."), true);
 assert.equal(onboardingTestSource.includes("DISCORD_BOT_TOKEN is missing from Cloudflare Pages production. Add or rotate it, redeploy Pages, then click Verify Bot Connection."), true);
+assert.equal(onboardingTestSource.includes("planAdmBackfillJobsForServer"), true);
+assert.equal(onboardingTestSource.includes("triggerType: \"setup\""), true);
+assert.equal(onboardingTestSource.includes("skipMetadataRefresh: true"), true);
+assert.equal(onboardingTestSource.includes("admBackfill"), true);
 
 const tokenValidationSource = readFileSync("functions/api/nitrado/validate-token.ts", "utf8");
 assert.equal(tokenValidationSource.includes("storePendingNitradoToken"), true);

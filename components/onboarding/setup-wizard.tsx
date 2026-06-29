@@ -1552,8 +1552,32 @@ function getSetupReviewState({
   botStatus?: DiscordBotStatusResponse | null;
   verificationProgress?: VerificationProgress;
 }): SetupReviewState {
-  const admDiscovered = Boolean(checks?.admLogsFound || checks?.admLog?.admFileExists);
-  const admReadable = Boolean(checks?.admLogsFound && checks?.admLog?.sampleReadSucceeded);
+  const admBackfill = checks?.admBackfill;
+  const newestAdmFile = admBackfill?.newest_available_adm_file ?? checks?.admLog?.newestAdmFileName ?? null;
+  const newestReadableAdmFile = admBackfill?.newest_readable_adm_file ?? (checks?.admLog?.sampleReadSucceeded ? checks.admLog.newestAdmFileName : null) ?? null;
+  const latestProcessedAdmFile = admBackfill?.latest_processed_adm_file ?? null;
+  const admBackfillStatus = String(admBackfill?.status ?? "").toLowerCase();
+  const activeBackfillJobs = (admBackfill?.created_jobs ?? []).filter((job) => /queued|running|processing|created|pending|retry/i.test(String(job.status ?? "")));
+  const activeAdmBackfillJob = admBackfill?.active_job && /queued|running|processing|created|pending|retry/i.test(String(admBackfill.active_job.status ?? ""))
+    ? admBackfill.active_job
+    : null;
+  const admImportInProgress = Boolean(
+    activeAdmBackfillJob
+      || activeBackfillJobs.length > 0
+      || ["created", "queued", "processing", "in_progress", "scheduled"].some((value) => admBackfillStatus.includes(value)),
+  );
+  const admDiscovered = Boolean(
+    checks?.admLogsFound
+      || checks?.admLog?.admFileExists
+      || newestAdmFile
+      || (admBackfill?.files_found ?? 0) > 0,
+  );
+  const admReadable = Boolean(
+    (checks?.admLogsFound && checks?.admLog?.sampleReadSucceeded)
+      || newestReadableAdmFile
+      || latestProcessedAdmFile
+      || admImportInProgress,
+  );
   const metadataSynced = checks ? Boolean(checks.metadataSynced) : Boolean(service?.name);
   const selectedGuildId = guild?.guild_id ?? null;
   const freshBotStatus = botStatus?.guild_id && selectedGuildId && botStatus.guild_id === selectedGuildId ? botStatus : null;
@@ -1632,16 +1656,22 @@ function getSetupReviewState({
       message: !checks
         ? "Run the test to search for ADM logs."
         : admDiscovered
-          ? "ADM log files discovered."
+          ? newestAdmFile
+            ? `ADM log files discovered. Newest visible file: ${newestAdmFile}.`
+            : "ADM log files discovered."
           : "DZN connected to Nitrado, but could not find ADM log files yet. Restart the server and try again after the next log update.",
     },
     {
       label: "Stats sync",
-      status: !checks ? "pending" : admReadable ? "passed" : admDiscovered ? "warning" : "warning",
+      status: !checks ? "pending" : admImportInProgress ? "running" : latestProcessedAdmFile ? "passed" : admReadable ? "warning" : admDiscovered ? "warning" : "warning",
       message: !checks
         ? "Stats sync checks run after ADM discovery."
-        : admReadable
-          ? "Readable ADM activity is available for sync."
+        : admImportInProgress
+          ? `Processing newest ADM logs${newestReadableAdmFile ? ` (${newestReadableAdmFile})` : ""}.`
+          : latestProcessedAdmFile
+            ? `Latest processed ADM file: ${latestProcessedAdmFile}.`
+            : admReadable
+              ? "Readable ADM activity is available. Stats will appear after the next readable activity import."
           : admDiscovered
             ? "ADM logs found. Stats will appear after the next readable activity import."
             : "PvP stats will begin syncing once ADM logs are discovered and readable.",
@@ -1814,6 +1844,12 @@ function statusLabel(status: FriendlyCheck["status"]) {
   return "Pending";
 }
 
+function formatInternalStatusLabel(value: string | null | undefined) {
+  return String(value ?? "Waiting")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
 function AdvancedDiagnostics({
   checks,
   manualAdmPath,
@@ -1829,6 +1865,7 @@ function AdvancedDiagnostics({
 }) {
   const [open, setOpen] = useState(false);
   const admLog = checks?.admLog;
+  const admBackfill = checks?.admBackfill;
   return (
     <div className="mt-6 rounded-lg border border-violet-300/15 bg-violet-950/10 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1874,6 +1911,14 @@ function AdvancedDiagnostics({
               <Summary label="ADM path found" value={redactDiagnosticValue(admLog.admPath ?? "Not found")} />
               <Summary label="Last checked" value={formatCheckedAt(admLog.lastCheckedAt)} />
               <Summary label="Sample read" value={admLog.sampleReadSucceeded ? "Succeeded" : "Waiting for readable ADM data"} />
+            </div>
+          ) : null}
+          {admBackfill ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <Summary label="ADM backfill status" value={formatInternalStatusLabel(admBackfill.status)} />
+              <Summary label="Newest available ADM" value={redactDiagnosticValue(admBackfill.newest_available_adm_file ?? "Not found")} />
+              <Summary label="Newest readable ADM" value={redactDiagnosticValue(admBackfill.newest_readable_adm_file ?? "Waiting")} />
+              <Summary label="Latest processed ADM" value={redactDiagnosticValue(admBackfill.latest_processed_adm_file ?? "Waiting")} />
             </div>
           ) : null}
           {admLog?.debug ? <AdmApiDebugPanel debug={admLog.debug} /> : null}

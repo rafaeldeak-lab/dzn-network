@@ -231,6 +231,8 @@ assert.equal(serverMetadata.includes("UPDATE server_public_cache SET"), true, "F
 assert.equal(serverMetadata.includes("WHERE guild_id = ?"), true, "Public cache sync must target the existing guild row.");
 assert.equal(serverMetadata.includes("refreshNitradoServerPlayerCountOnly"), true, "Cron metadata refresh must use the lightweight live-count path.");
 assert.equal(serverMetadata.includes("fetchNitradoOnlinePlayerCount"), true, "Cron metadata refresh must use the dedicated Nitrado player-count endpoint.");
+assert.equal(serverMetadata.includes("DZN PLAYER COUNT ADM PLAYERLIST FALLBACK"), true, "Cron metadata refresh must fall back to fresh ADM PlayerList snapshots before marking live count unavailable.");
+assert.equal(serverMetadata.includes("adm_playerlist_fallback"), true, "Scheduler diagnostics should identify ADM PlayerList fallback separately from live Nitrado success.");
 
 type SchedulerBody = Record<string, unknown>;
 

@@ -238,6 +238,36 @@ async function main() {
   assert.equal(postResetPlan.oldestMissingFile, postResetFiles[1]);
   assert.equal(postResetPlan.newestMissingFile, postResetFiles[3]);
 
+  const setupWindowFiles = [
+    "DayZServer_PS4_x64_2026-06-27_04-02-10.ADM",
+    "DayZServer_PS4_x64_2026-06-29_05-01-57.ADM",
+    "DayZServer_PS4_x64_2026-06-29_06-02-10.ADM",
+  ];
+  const setupBackfillPlan = buildAdmBackfillPlan({
+    files: setupWindowFiles.map((name) => ({ name, readable: true })),
+    handledFilenames: [],
+    existingJobs: [],
+    planKey: "starter",
+    nowMs: Date.UTC(2026, 5, 29, 6, 20, 0),
+    windowHours: 24,
+    maxWindowFiles: 2,
+    maxJobsToCreate: 1,
+  });
+  assert.deepEqual(setupBackfillPlan.missingFiles, setupWindowFiles.slice(1));
+  assert.deepEqual(setupBackfillPlan.createFiles, [setupWindowFiles[1]], "Setup backfill should queue one bounded recent ADM file and let scheduled sync continue.");
+  const setupFollowUpPlan = buildAdmBackfillPlan({
+    files: setupWindowFiles.map((name) => ({ name, readable: true })),
+    handledFilenames: [setupWindowFiles[1]],
+    existingJobs: [],
+    planKey: "starter",
+    nowMs: Date.UTC(2026, 5, 29, 6, 25, 0),
+    windowHours: 24,
+    maxWindowFiles: 2,
+    maxJobsToCreate: 1,
+  });
+  assert.equal(setupFollowUpPlan.skippedAlreadyImported.includes(setupWindowFiles[1]), true);
+  assert.deepEqual(setupFollowUpPlan.createFiles, [setupWindowFiles[2]], "Follow-up sync should process the next new ADM file instead of reprocessing the completed file.");
+
   const manualDedupeBackfillPlan = buildAdmBackfillPlan({
     files: backfillFixtureNames.map((name) => ({ name, readable: true })),
     handledFilenames: [backfillFixtureNames[0]],

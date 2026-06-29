@@ -302,6 +302,31 @@ export type OnboardingChecks = {
   tokenErrorCode?: "missing_token_encryption_key" | "token_decrypt_failed" | "missing_nitrado_token" | "nitrado_token_unavailable" | string | null;
   tokenErrorMessage?: string | null;
   admLog?: AdmLogDetection;
+  admBackfill?: {
+    ok: boolean;
+    status: string;
+    message: string;
+    files_found?: number;
+    newest_available_adm_file?: string | null;
+    newest_readable_adm_file?: string | null;
+    latest_processed_adm_file?: string | null;
+    queued_files?: string[];
+    created_jobs?: Array<{
+      id: string;
+      adm_file: string;
+      status: string;
+      line_start?: number | null;
+      line_end?: number | null;
+    }>;
+    active_job?: {
+      id: string;
+      adm_file: string;
+      status: string;
+      line_start?: number | null;
+      line_end?: number | null;
+    } | null;
+    processed_chunks?: number;
+  };
 };
 
 export type DiscordBotStatusResponse = {
