@@ -5,6 +5,11 @@ import {
 } from "./public-api-cache";
 import { calculateServerScoreBreakdown, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 const PUBLIC_HOME_STATS_ADM_SNAPSHOT_KEYS = [
   { key: "home-stats:preview", accessLevel: "preview" as const },
@@ -33,6 +38,7 @@ const PUBLIC_SERVER_SCOPE = `
   SELECT id
   FROM linked_servers
   WHERE lower(status) = 'live'
+    AND ${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
     AND lower(COALESCE(listing_visibility, 'public')) != 'hidden'
     AND (
       merged_into_server_id IS NULL
@@ -460,6 +466,7 @@ async function getCanonicalServerRankNumber(db: D1Database, linkedServerId: stri
         LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
         LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
         WHERE lower(linked_servers.status) = 'live'
+          AND ${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
       ),
       scored AS (

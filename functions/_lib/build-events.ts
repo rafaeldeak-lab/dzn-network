@@ -1,6 +1,11 @@
 import type { ParsedAdmEvent } from "./adm-parser";
 import { requireDb } from "./db";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 export type BuildEventType =
   | "built"
@@ -420,6 +425,7 @@ export async function getRankedBuildServers(env: Env, limit = 10): Promise<Publi
        FROM linked_servers
        LEFT JOIN server_build_stats ON server_build_stats.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY build_score DESC, structures_built DESC, last_build_at DESC
        LIMIT ?`,

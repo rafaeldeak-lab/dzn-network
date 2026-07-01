@@ -34,6 +34,11 @@ import type { Env, PagesFunction } from "../../_lib/types";
 import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
 import { buildServerBadgeCollection, type PublicLockedBadge, type ServerBadgeCollection } from "../../../lib/badges/rules";
 import { normalizeListingPlanKey } from "../../../lib/billing/plans";
+import {
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../../lib/server-lifecycle";
 
 type PublicServerRow = {
   id: string;
@@ -437,6 +442,7 @@ async function queryPublicServerById(env: Env, linkedServerId: string) {
 }
 
 async function querySinglePublicServer(env: Env, whereClause: string, value: string) {
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const row = await requireDb(env)
     .prepare(
       `SELECT
@@ -540,6 +546,7 @@ async function querySinglePublicServer(env: Env, whereClause: string, value: str
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        WHERE ${whereClause}
          AND lower(linked_servers.status) = 'live'
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,
@@ -591,6 +598,7 @@ function lightweightRankingFromPublicRow(row: PublicServerRow): PublicServerRank
 }
 
 async function queryPublicServersPreview(env: Env) {
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const result = await requireDb(env)
     .prepare(
       `SELECT
@@ -689,6 +697,7 @@ async function queryPublicServersPreview(env: Env) {
        LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
@@ -733,6 +742,7 @@ async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | nul
 
 async function queryPublicServers(env: Env) {
   const db = requireDb(env);
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const baseQuery = `
     SELECT
       linked_servers.id,
@@ -844,6 +854,7 @@ async function queryPublicServers(env: Env) {
     LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
     LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
     WHERE lower(linked_servers.status) = 'live'
+      AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
       AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
       AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
   `;
@@ -933,6 +944,7 @@ async function resolveSlugAliasLinkedServerId(env: Env, slug: string) {
 
 async function ensurePublicSlugsForLiveServers(env: Env) {
   const db = requireDb(env);
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const result = await db
     .prepare(
       `SELECT
@@ -944,6 +956,7 @@ async function ensurePublicSlugsForLiveServers(env: Env) {
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.public_slug IS NULL OR linked_servers.public_slug = '')`,
     )

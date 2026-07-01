@@ -5,6 +5,10 @@ import {
   type ServerCategory,
   type ServerCategoryInput,
 } from "./server-categories";
+import {
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  normalizeServerLifecycleStatus,
+} from "../../lib/server-lifecycle";
 
 export type ServerWarRulesetKey =
   | "deathmatch_war"
@@ -185,11 +189,14 @@ export function isPublicServerWarsEligibleServer(row: {
   listing_visibility?: unknown;
   public_visibility?: unknown;
   public_slug?: unknown;
+  lifecycle_status?: unknown;
 }) {
   const status = String(row.status ?? "").trim().toLowerCase();
   if (status !== "live") return false;
   const visibility = String(row.listing_visibility ?? row.public_visibility ?? "public").trim().toLowerCase();
   if (["private", "unlisted", "hidden", "deleted", "archived"].includes(visibility)) return false;
+  const lifecycleStatus = normalizeServerLifecycleStatus(row);
+  if (!SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES.includes(lifecycleStatus)) return false;
   return true;
 }
 

@@ -47,6 +47,11 @@ import {
   patchHomeStatsAdmStatsFromCanonicalEvents,
 } from "./server-stats";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 export type SyncLinkedServer = {
   id: string;
@@ -621,6 +626,19 @@ export type AdmSyncStatus = {
   nitrado_server_log_enabled: boolean | null;
   nitrado_log_settings_last_checked_at: string | null;
   nitrado_log_settings_last_error: string | null;
+  lifecycle_status: string | null;
+  lifecycle_reason: string | null;
+  owner_action_required: boolean;
+  owner_action_reason: string | null;
+  stale_since: string | null;
+  expired_detected_at: string | null;
+  final_sync_attempted_at: string | null;
+  final_sync_completed_at: string | null;
+  final_sync_result: string | null;
+  final_adm_filename: string | null;
+  latest_imported_event_at: string | null;
+  next_retry_after: string | null;
+  last_skip_reason: string | null;
   last_sync_trigger: string | null;
   last_scheduled_sync_at: string | null;
   last_manual_sync_at: string | null;
@@ -5826,6 +5844,19 @@ export async function getAdmSyncStatus(
         server_sync_state.nitrado_server_log_enabled,
         server_sync_state.nitrado_log_settings_last_checked_at,
         server_sync_state.nitrado_log_settings_last_error,
+        linked_servers.lifecycle_status,
+        linked_servers.lifecycle_reason,
+        linked_servers.owner_action_required,
+        linked_servers.owner_action_reason,
+        linked_servers.stale_since,
+        linked_servers.expired_detected_at,
+        linked_servers.final_sync_attempted_at,
+        linked_servers.final_sync_completed_at,
+        linked_servers.final_sync_result,
+        linked_servers.final_adm_filename,
+        linked_servers.latest_imported_event_at,
+        server_sync_state.next_retry_after,
+        server_sync_state.last_skip_reason,
         server_stats.total_kills,
         server_stats.total_deaths,
         server_stats.total_joins,
@@ -5912,6 +5943,19 @@ export async function getAdmSyncStatus(
     nitrado_server_log_enabled: nullableBoolean(row?.nitrado_server_log_enabled),
     nitrado_log_settings_last_checked_at: typeof row?.nitrado_log_settings_last_checked_at === "string" ? row.nitrado_log_settings_last_checked_at : null,
     nitrado_log_settings_last_error: typeof row?.nitrado_log_settings_last_error === "string" ? row.nitrado_log_settings_last_error : null,
+    lifecycle_status: typeof row?.lifecycle_status === "string" ? row.lifecycle_status : "active_live",
+    lifecycle_reason: typeof row?.lifecycle_reason === "string" ? row.lifecycle_reason : null,
+    owner_action_required: Number(row?.owner_action_required ?? 0) === 1,
+    owner_action_reason: typeof row?.owner_action_reason === "string" ? row.owner_action_reason : null,
+    stale_since: typeof row?.stale_since === "string" ? row.stale_since : null,
+    expired_detected_at: typeof row?.expired_detected_at === "string" ? row.expired_detected_at : null,
+    final_sync_attempted_at: typeof row?.final_sync_attempted_at === "string" ? row.final_sync_attempted_at : null,
+    final_sync_completed_at: typeof row?.final_sync_completed_at === "string" ? row.final_sync_completed_at : null,
+    final_sync_result: typeof row?.final_sync_result === "string" ? row.final_sync_result : null,
+    final_adm_filename: typeof row?.final_adm_filename === "string" ? row.final_adm_filename : null,
+    latest_imported_event_at: typeof row?.latest_imported_event_at === "string" ? row.latest_imported_event_at : null,
+    next_retry_after: typeof row?.next_retry_after === "string" ? row.next_retry_after : null,
+    last_skip_reason: typeof row?.last_skip_reason === "string" ? row.last_skip_reason : null,
     last_sync_trigger: recentRuns[0]?.trigger_type ?? null,
     last_scheduled_sync_at: lastScheduledRun?.finished_at ?? lastScheduledRun?.started_at ?? null,
     last_manual_sync_at: lastManualRun?.finished_at ?? lastManualRun?.started_at ?? null,
@@ -6442,6 +6486,12 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
   metadata_stale: number | null;
   next_adm_discovery_due_at: string | null;
   next_adm_pull_due_at: string | null;
+  next_retry_after: string | null;
+  lifecycle_status: string | null;
+  lifecycle_reason: string | null;
+  owner_action_required: number | null;
+  owner_action_reason: string | null;
+  final_sync_attempted_at: string | null;
   last_worker_selected_at: string | null;
   next_worker_due_at: string | null;
   selected_count: number | null;
@@ -7122,6 +7172,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
   const metadataStaleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const linkedServerId = options.linkedServerId ?? null;
   const force = options.force === true ? 1 : 0;
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const row = await requireDb(env)
     .prepare(
       `WITH cursor AS (
@@ -7151,6 +7202,12 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
            worker_selection.last_selection_reason,
            server_sync_state.next_adm_discovery_due_at,
            server_sync_state.next_adm_pull_due_at,
+           server_sync_state.next_retry_after,
+           ${lifecycleStatusSql} AS lifecycle_status,
+           linked_servers.lifecycle_reason,
+           linked_servers.owner_action_required,
+           linked_servers.owner_action_reason,
+           linked_servers.final_sync_attempted_at,
            CASE
              WHEN linked_servers.metadata_last_checked_at IS NULL
                OR linked_servers.metadata_last_checked_at <= ?
@@ -7264,6 +7321,16 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
            AND linked_servers.nitrado_service_id != ''
            AND lower(server_subscriptions.status) IN ('active', 'trialing')
            AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+           AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
+           AND (
+             ${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring')
+             OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?
+             OR (? IS NOT NULL AND ? = 1)
+           )
+           AND (
+             ${lifecycleStatusSql} != 'final_sync_pending'
+             OR linked_servers.final_sync_attempted_at IS NULL
+           )
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND (? IS NULL OR linked_servers.id = ?)
            AND (
@@ -7319,6 +7386,9 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
       metadataStaleBefore,
       SCHEDULED_ADM_IMPORT_SOURCE,
       OWNER_SUPPLIED_ADM_RECOVERY_SOURCE,
+      now,
+      linkedServerId,
+      force,
       linkedServerId,
       linkedServerId,
       force,
