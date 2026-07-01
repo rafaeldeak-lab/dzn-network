@@ -167,12 +167,15 @@ jobs:
           const payload = JSON.parse(fs.readFileSync("archive-update.json", "utf8"));
           const rows = Array.isArray(payload) ? payload.flatMap((entry) => entry.results || []) : [];
           const changed = Number(rows.at(-1)?.changed ?? 0);
-          if (changed !== 1) {
-            console.error(`::error::Expected to archive exactly one row, changed=${changed}.`);
+          if (![0, 1].includes(changed)) {
+            console.error(`::error::Expected to archive zero or one row, changed=${changed}.`);
             process.exit(1);
           }
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "- Row update: linked_servers.status='archived', listing_visibility='hidden' for service 900002\n");
-          console.log("Archived Warlords PvP service 900002.");
+          const summary = changed === 1
+            ? "- Row update: linked_servers.status='archived', listing_visibility='hidden' for service 900002\n"
+            : "- Row update: service 900002 was already archived/hidden before this rerun\n";
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          console.log(changed === 1 ? "Archived Warlords PvP service 900002." : "Warlords PvP service 900002 was already archived.");
           NODE
 
       - name: Verify target row after archive
@@ -243,7 +246,7 @@ jobs:
             throw new Error("Pulse flags changed unexpectedly.");
           }
 
-          const fs = require("node:fs");
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "- Public verification: Warlords removed; public routes 200; Pulse enabled; Discord Pulse disabled\n");
+          const { appendFileSync } = await import("node:fs");
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, "- Public verification: Warlords removed; public routes 200; Pulse enabled; Discord Pulse disabled\n");
           console.log("Public surfaces verified after Warlords archive.");
           NODE
