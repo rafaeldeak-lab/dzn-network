@@ -1,0 +1,249 @@
+name: DZN Archive Test Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_archive_test_server:
+        description: "Must equal ARCHIVE_TEST_SERVER_900002"
+        required: true
+        type: string
+
+concurrency:
+  group: dzn-archive-test-server
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+      PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+      TARGET_SERVICE_ID: "900002"
+      TARGET_PUBLIC_SLUG: warlords-pvp
+      TARGET_NAME: Warlords PvP
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate archive guard
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Archive cleanup may only run on main."
+            exit 1
+          fi
+          if [ "${{ inputs.confirm_archive_test_server }}" != "ARCHIVE_TEST_SERVER_900002" ]; then
+            echo "::error::Manual dispatch must confirm ARCHIVE_TEST_SERVER_900002."
+            exit 1
+          fi
+
+          CF_TOKEN="${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}}}"
+          if [ -z "${CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token."
+            exit 1
+          fi
+          echo "::add-mask::${CF_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${CF_TOKEN}" >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+          {
+            echo "## DZN Archive Test Server"
+            echo "- Source commit: ${GITHUB_SHA}"
+            echo "- Production D1 database: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- Target service id: ${TARGET_SERVICE_ID}"
+            echo "- Target slug: ${TARGET_PUBLIC_SLUG}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm production D1 identity
+        run: |
+          set -euo pipefail
+
+          D1_LIST="$(npx wrangler d1 list --json)"
+          D1_LIST="${D1_LIST}" node <<'NODE'
+          const list = JSON.parse(process.env.D1_LIST || "[]");
+          const expectedName = process.env.PRODUCTION_D1_DATABASE_NAME;
+          const expectedId = process.env.PRODUCTION_D1_DATABASE_ID;
+          const db = list.find((entry) => entry.name === expectedName);
+          if (!db) {
+            console.error(`::error::Production D1 database ${expectedName} was not found.`);
+            process.exit(1);
+          }
+          if (db.uuid !== expectedId) {
+            console.error(`::error::Production D1 id mismatch for ${expectedName}.`);
+            process.exit(1);
+          }
+          console.log(`Production D1 verified: ${db.name} (${db.uuid})`);
+          NODE
+
+      - name: Create production D1 Time Travel bookmark
+        run: |
+          set -euo pipefail
+
+          BOOKMARK_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          npx wrangler d1 time-travel info "${PRODUCTION_D1_DATABASE_NAME}" \
+            --timestamp "${BOOKMARK_TIMESTAMP}" \
+            --json > d1-time-travel-before-archive-900002.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync("d1-time-travel-before-archive-900002.json", "utf8"));
+          const info = Array.isArray(payload) ? payload[0] : payload;
+          const bookmark = info?.bookmark || info?.result?.bookmark || info?.bookmarks?.[0]?.bookmark || null;
+          if (!bookmark) {
+            console.error("::error::Cloudflare did not return a D1 Time Travel bookmark.");
+            process.exit(1);
+          }
+          fs.writeFileSync("d1-bookmark.txt", bookmark);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Production D1 backup/bookmark: ${bookmark}\n`);
+          console.log(`Production D1 Time Travel bookmark created: ${bookmark}`);
+          NODE
+
+      - name: Inspect target row before archive
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT linked_servers.id, linked_servers.nitrado_service_id, linked_servers.public_slug, linked_servers.status, linked_servers.listing_visibility, COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS resolved_name, linked_servers.current_players, linked_servers.max_players, linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at, adm_sync_state.latest_adm_file, adm_sync_state.last_processed_file, adm_sync_state.last_sync_status FROM linked_servers LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id WHERE linked_servers.nitrado_service_id = '${TARGET_SERVICE_ID}';" \
+            > target-before.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync("target-before.json", "utf8"));
+          const rows = Array.isArray(payload) ? payload.flatMap((entry) => entry.results || []) : [];
+          if (rows.length !== 1) {
+            console.error(`::error::Expected exactly one linked_servers row for service 900002, found ${rows.length}.`);
+            process.exit(1);
+          }
+          const row = rows[0];
+          const name = String(row.resolved_name || "");
+          if (String(row.nitrado_service_id) !== "900002" || String(row.public_slug || "") !== "warlords-pvp" || !/warlords/i.test(name)) {
+            console.error("::error::Target row identity did not match Warlords PvP service 900002.");
+            process.exit(1);
+          }
+          if (["18765761", "17428528"].includes(String(row.nitrado_service_id))) {
+            console.error("::error::Refusing to touch NukeTown or PANDORA service id.");
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Target before: ${name}; status=${row.status}; visibility=${row.listing_visibility}; latest_adm=${row.latest_adm_file || "none"}\n`);
+          console.log(`Target verified: ${name} (${row.nitrado_service_id})`);
+          NODE
+
+      - name: Archive Warlords test listing
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "UPDATE linked_servers SET status = 'archived', listing_visibility = 'hidden', updated_at = CURRENT_TIMESTAMP WHERE nitrado_service_id = '${TARGET_SERVICE_ID}' AND lower(COALESCE(public_slug, '')) = '${TARGET_PUBLIC_SLUG}' AND lower(COALESCE(NULLIF(display_name, ''), NULLIF(hostname, ''), server_name, nitrado_service_name, '')) LIKE '%warlords%' AND COALESCE(nitrado_service_id, '') NOT IN ('18765761', '17428528'); SELECT changes() AS changed;" \
+            > archive-update.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync("archive-update.json", "utf8"));
+          const rows = Array.isArray(payload) ? payload.flatMap((entry) => entry.results || []) : [];
+          const changed = Number(rows.at(-1)?.changed ?? 0);
+          if (changed !== 1) {
+            console.error(`::error::Expected to archive exactly one row, changed=${changed}.`);
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "- Row update: linked_servers.status='archived', listing_visibility='hidden' for service 900002\n");
+          console.log("Archived Warlords PvP service 900002.");
+          NODE
+
+      - name: Verify target row after archive
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT id, nitrado_service_id, public_slug, status, listing_visibility, updated_at FROM linked_servers WHERE nitrado_service_id = '${TARGET_SERVICE_ID}';" \
+            > target-after.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync("target-after.json", "utf8"));
+          const rows = Array.isArray(payload) ? payload.flatMap((entry) => entry.results || []) : [];
+          if (rows.length !== 1) {
+            console.error(`::error::Expected one target row after archive, found ${rows.length}.`);
+            process.exit(1);
+          }
+          const row = rows[0];
+          if (String(row.status).toLowerCase() !== "archived" || String(row.listing_visibility).toLowerCase() !== "hidden") {
+            console.error("::error::Target row was not archived/hidden.");
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Target after: status=${row.status}; visibility=${row.listing_visibility}; updated_at=${row.updated_at}\n`);
+          console.log(`Target after archive: status=${row.status}; visibility=${row.listing_visibility}`);
+          NODE
+
+      - name: Verify production public surfaces
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const base = process.env.PRODUCTION_BASE_URL || "https://dzn-network.pages.dev";
+          const forbiddenMarkers = ["Request failed: 503", "SERVER UNAVAILABLE", "Error 1102", "exceeded resource limits"];
+
+          async function getJson(path) {
+            const response = await fetch(`${base}${path}`, { headers: { accept: "application/json", "user-agent": "dzn-archive-test-server" } });
+            const text = await response.text();
+            if (response.status !== 200) throw new Error(`${path} returned HTTP ${response.status}`);
+            for (const marker of forbiddenMarkers) {
+              if (text.includes(marker)) throw new Error(`${path} contained ${marker}`);
+            }
+            try {
+              return JSON.parse(text);
+            } catch {
+              throw new Error(`${path} did not return JSON`);
+            }
+          }
+
+          function containsWarlords(value) {
+            return JSON.stringify(value).toLowerCase().includes("warlords-pvp")
+              || JSON.stringify(value).toLowerCase().includes("warlords pvp")
+              || JSON.stringify(value).includes("900002");
+          }
+
+          const servers = await getJson("/api/public/servers");
+          const home = await getJson("/api/public/home-stats");
+          const rail = await getJson("/api/public/server-rail");
+          const leaderboards = await fetch(`${base}/leaderboards`, { headers: { "user-agent": "dzn-archive-test-server" } });
+          if (leaderboards.status !== 200) throw new Error(`/leaderboards returned HTTP ${leaderboards.status}`);
+
+          if (containsWarlords(servers)) throw new Error("Warlords still appears in /api/public/servers.");
+          if (containsWarlords(home.topServers || []) || containsWarlords(home.map_nodes || [])) throw new Error("Warlords still appears in home stats public preview surfaces.");
+          if (containsWarlords(rail)) throw new Error("Warlords still appears in /api/public/server-rail.");
+
+          const pulse = await getJson("/api/dzn-pulse/config");
+          if (pulse.dznPulseEnabled !== true || pulse.discordNotificationsEnabled !== false) {
+            throw new Error("Pulse flags changed unexpectedly.");
+          }
+
+          const fs = require("node:fs");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "- Public verification: Warlords removed; public routes 200; Pulse enabled; Discord Pulse disabled\n");
+          console.log("Public surfaces verified after Warlords archive.");
+          NODE
