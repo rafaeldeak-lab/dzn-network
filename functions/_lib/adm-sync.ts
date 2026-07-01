@@ -6672,14 +6672,41 @@ export async function runAdmWorkerSyncTick(
         selectedServerId: selected.id,
         remainingBudgetMs: Math.max(0, deadlineMs - phaseStartedAtMs),
       });
-      const discoveryPlan = await planAdmBackfillJobsForServer(env, selected.user_id, selected.id, {
-        triggerType: "scheduled_worker",
-        chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
-        processImmediately: false,
-        maxJobsToCreate: 1,
-        scheduledBudgeted: true,
-        skipMetadataRefresh: true,
-      });
+      let discoveryPlan: Awaited<ReturnType<typeof planAdmBackfillJobsForServer>>;
+      try {
+        discoveryPlan = await planAdmBackfillJobsForServer(env, selected.user_id, selected.id, {
+          triggerType: "scheduled_worker",
+          chunksToProcess: SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK,
+          processImmediately: false,
+          maxJobsToCreate: 1,
+          scheduledBudgeted: true,
+          skipMetadataRefresh: true,
+        });
+      } catch (error) {
+        if (!isNitradoTokenDecryptFailure(error)) throw error;
+        const tokenMessage = "Saved Nitrado token cannot be decrypted. Re-save the server owner's Nitrado long-life token.";
+        const selectedFile = selected.target_adm_file ?? selected.latest_adm_file ?? fileNameFromPath(selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path);
+        await incrementAdmReadFailureCounter(env, selected.id, selectedFile, tokenMessage).catch(() => null);
+        await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+        console.warn("DZN ADM WORKER DISCOVERY TOKEN DECRYPT SKIPPED SERVER", {
+          selectedServiceId: selected.nitrado_service_id,
+          selectedServerId: selected.id,
+          message: "token_decrypt_failed",
+        });
+        return admWorkerResult({
+          metadata,
+          selectedLinkedServerId: selected.id,
+          selectedServiceId: selected.nitrado_service_id,
+          selectedAdmFile: selectedFile,
+          selectedAdmPath: selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path,
+          workerPhase: "due_discovery",
+          workerPhaseStartedAtMs: phaseStartedAtMs,
+          pendingJobs,
+          unavailable: 1,
+          skippedNotDue: 1,
+          message: tokenMessage,
+        });
+      }
       await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       const selectedJob = discoveryPlan.active_job ?? discoveryPlan.created_jobs[0] ?? null;
       const selectedFile = selectedJob?.filename ?? discoveryPlan.newest_available_adm_file ?? selected.target_adm_file ?? selected.latest_adm_file;
@@ -10729,6 +10756,10 @@ function safeSyncErrorMessage(error: unknown) {
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/token=([^&\s]+)/gi, "token=[redacted]")
     .slice(0, 500);
+}
+
+function isNitradoTokenDecryptFailure(error: unknown) {
+  return /decrypt|TOKEN_ENCRYPTION_KEY|AES-GCM|ciphertext authentication|operation-specific reason/i.test(safeSyncErrorMessage(error));
 }
 
 function classifyNitradoExceptionStatus(error: unknown, latestAdmFile: string | null): AdmSyncStatusCode {

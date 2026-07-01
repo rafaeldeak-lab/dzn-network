@@ -190,6 +190,9 @@ assert.equal(admSyncSource.includes("const admWorkDueNow = isIsoDueNow(selected.
 assert.match(admSyncSource, /admWorkDueNow[\s\S]*\?\s+"due_discovery"[\s\S]*Number\(selected\.metadata_stale/, "Due ADM discovery/pull must not be skipped as metadata-only stale work.");
 assert.equal(admSyncSource.includes("Saved Nitrado token cannot be decrypted. Re-save the server owner's Nitrado long-life token."), true);
 assert.equal(admSyncSource.includes("DZN ADM WORKER TOKEN DECRYPT SKIPPED SERVER"), true);
+assert.equal(admSyncSource.includes("DZN ADM WORKER DISCOVERY TOKEN DECRYPT SKIPPED SERVER"), true);
+assert.equal(admSyncSource.includes("isNitradoTokenDecryptFailure"), true);
+assert.match(admSyncSource, /planAdmBackfillJobsForServer[\s\S]*catch \(error\)[\s\S]*isNitradoTokenDecryptFailure[\s\S]*updateAdmWorkerCursor[\s\S]*unavailable: 1/, "Discovery token decrypt failures must be isolated as recoverable per-server states.");
 assert.match(admSyncSource, /catch \(error\)[\s\S]*updateAdmWorkerCursor[\s\S]*unavailable: 1/, "A bad saved Nitrado token must be isolated as a recoverable per-server state.");
 assert.equal(admSyncSource.includes("refreshNitradoServerMetadata(env, {"), true);
 assert.equal(admSyncSource.includes("skipMetadataRefresh: true"), true);
