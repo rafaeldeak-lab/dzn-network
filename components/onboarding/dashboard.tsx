@@ -7695,6 +7695,7 @@ function AutoSyncDashboard({
         <AutomationStatusGrid state={state} dashboardHealth={dashboardHealth} syncStatus={syncStatus} latestAdmFile={latestAdmFile} />
       </section>
       <ImportantAutoHealth state={state} dashboardHealth={dashboardHealth} syncStatus={syncStatus} />
+      <LifecycleResourceControlPanel dashboardHealth={dashboardHealth} syncStatus={syncStatus} />
       <AutomaticAdmImportJobPanel syncStatus={syncStatus} dashboardHealth={dashboardHealth} />
       <section className="grid gap-5 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
         <LiveSyncStats stats={stats} canonicalStatsStatusDetail={canonicalStatsStatusDetail} showingLastKnownStats={showingLastKnownStats} />
@@ -7850,6 +7851,88 @@ function formatAdmSourceLabel(value: string | null) {
   return "Automatic ADM tracking";
 }
 
+function normalizeLifecycleStatus(value: string | null | undefined) {
+  const normalized = String(value ?? "active_live").trim().toLowerCase();
+  return normalized || "active_live";
+}
+
+function getLifecycleDisplay(status: string) {
+  const displays: Record<string, { label: string; message: string; ownerAction: string }> = {
+    active_live: {
+      label: "Active live",
+      message: "Full sync is enabled for this live server.",
+      ownerAction: "No action needed.",
+    },
+    active_degraded: {
+      label: "Active degraded",
+      message: "DZN is preserving last-known data and running sync with backoff.",
+      ownerAction: "DZN will retry automatically.",
+    },
+    token_needs_resave: {
+      label: "Token needs re-save",
+      message: "Expensive sync is paused until the saved Nitrado token is re-saved and verified.",
+      ownerAction: "Re-save Nitrado token.",
+    },
+    nitrado_upstream_down: {
+      label: "Nitrado temporarily unavailable",
+      message: "DZN is backing off retries while Nitrado is unavailable.",
+      ownerAction: "DZN will retry automatically.",
+    },
+    stale_monitoring: {
+      label: "Stale monitoring",
+      message: "This server has not produced new readable activity recently, so checks are reduced.",
+      ownerAction: "Run a manual check if the server is active again.",
+    },
+    expired_detected: {
+      label: "Server appears expired",
+      message: "DZN detected an expired or unavailable service and is preparing a bounded final sync.",
+      ownerAction: "Reconnect service or run final sync.",
+    },
+    deletion_imminent: {
+      label: "Deletion imminent",
+      message: "DZN will attempt one bounded final sync before stopping live sync.",
+      ownerAction: "Run final sync or mark as legacy/offline.",
+    },
+    final_sync_pending: {
+      label: "Final sync pending",
+      message: "Only one bounded final sync is eligible. Historical stats will be preserved.",
+      ownerAction: "Run final sync.",
+    },
+    final_sync_complete: {
+      label: "Final sync completed",
+      message: "Live sync has stopped. Historical stats remain preserved.",
+      ownerAction: "Reactivate sync only if the server is live again.",
+    },
+    legacy_offline: {
+      label: "Legacy offline",
+      message: "Historical stats are preserved and recurring live sync is stopped.",
+      ownerAction: "Reactivate sync if the server returns.",
+    },
+    archived_hidden: {
+      label: "Archived / hidden",
+      message: "This server is hidden from active public surfaces and no active sync is running.",
+      ownerAction: "Reactivate or unhide only if this server is real and live.",
+    },
+  };
+  return displays[status] ?? displays.active_live;
+}
+
+function formatLifecycleSkipReason(value: string | null) {
+  if (!value) return "No skip recorded";
+  const normalized = value.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    skipped_archived: "Skipped archived",
+    skipped_legacy: "Skipped legacy",
+    skipped_token_needs_resave: "Skipped until token is re-saved",
+    skipped_backoff: "Skipped until retry backoff elapses",
+    skipped_no_due_work: "Skipped because no work is due",
+    skipped_final_sync_complete: "Skipped because final sync is complete",
+    skipped_owner_paused: "Skipped because owner paused sync",
+    skipped_inactive: "Skipped inactive server",
+  };
+  return labels[normalized] ?? formatStatusLabel(normalized);
+}
+
 function ImportantAutoHealth({
   state,
   dashboardHealth,
@@ -7884,6 +7967,56 @@ function ImportantAutoHealth({
         />
         <AutoHealthSignal label="Retry Mode" value="Automatic" detail="DZN retries unreadable ADM files automatically" tone="cyan" />
         <AutoHealthSignal label="Queue Status" value={queueStatus} detail={state.nextAction} tone={activeJob ? "emerald" : "zinc"} />
+      </div>
+    </DashboardPanel>
+  );
+}
+
+function LifecycleResourceControlPanel({
+  dashboardHealth,
+  syncStatus,
+}: {
+  dashboardHealth: DashboardHealthResult | null;
+  syncStatus: AdmSyncStatus | null;
+}) {
+  const status = normalizeLifecycleStatus(
+    dashboardHealth?.autoSync?.lifecycleStatus
+      ?? dashboardHealth?.server.lifecycle_status
+      ?? syncStatus?.lifecycle_status
+      ?? "active_live",
+  );
+  const display = getLifecycleDisplay(status);
+  const ownerAction = dashboardHealth?.autoSync?.ownerActionReason
+    ?? dashboardHealth?.server.owner_action_reason
+    ?? syncStatus?.owner_action_reason
+    ?? display.ownerAction;
+  const nextRetry = dashboardHealth?.autoSync?.nextRetryAfter ?? syncStatus?.next_retry_after ?? null;
+  const finalSyncAttempted = syncStatus?.final_sync_attempted_at ?? null;
+  const finalSyncCompleted = syncStatus?.final_sync_completed_at ?? null;
+  const tone = status === "active_live"
+    ? "emerald"
+    : status === "token_needs_resave" || status === "expired_detected" || status === "deletion_imminent"
+      ? "orange"
+      : status === "archived_hidden" || status === "legacy_offline" || status === "final_sync_complete"
+        ? "zinc"
+        : "cyan";
+
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Lifecycle & Resource Control" />
+          <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-zinc-300">{display.message}</p>
+        </div>
+        <SmallBadge tone={tone}>{display.label}</SmallBadge>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MiniInfo label="Lifecycle State" value={display.label} />
+        <MiniInfo label="Owner Action" value={ownerAction} />
+        <MiniInfo label="Next Retry" value={nextRetry ? formatDueOrDashboardDate(nextRetry) : "No backoff active"} />
+        <MiniInfo label="Last Skip Reason" value={formatLifecycleSkipReason(syncStatus?.last_skip_reason ?? null)} />
+        {finalSyncAttempted ? <MiniInfo label="Final Sync Attempted" value={formatDashboardDate(finalSyncAttempted)} /> : null}
+        {finalSyncCompleted ? <MiniInfo label="Final Sync Completed" value={formatDashboardDate(finalSyncCompleted)} /> : null}
       </div>
     </DashboardPanel>
   );

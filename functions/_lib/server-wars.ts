@@ -98,6 +98,7 @@ type ServerWarServerRow = {
   server_mode: string | null;
   status: string | null;
   listing_visibility: string | null;
+  lifecycle_status: string | null;
   plan_key: string | null;
   subscription_status: string | null;
 };
@@ -564,6 +565,7 @@ async function readServerForWars(env: Env, serverIdOrSlug: string): Promise<Serv
               linked_servers.server_mode,
               linked_servers.status,
               linked_servers.listing_visibility,
+              linked_servers.lifecycle_status,
               server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status
        FROM linked_servers
@@ -626,7 +628,8 @@ async function getEventParticipants(env: Env, eventId: string, options: { public
               COALESCE(linked_servers.display_name, linked_servers.server_name, linked_servers.hostname, linked_servers.nitrado_service_name, 'DZN Server') AS server_name,
               linked_servers.public_slug,
               linked_servers.status AS server_status,
-              linked_servers.listing_visibility
+              linked_servers.listing_visibility,
+              linked_servers.lifecycle_status
        FROM server_war_participants participants
        INNER JOIN linked_servers ON linked_servers.id = participants.server_id
        WHERE participants.event_id = ?
@@ -644,9 +647,10 @@ async function getEventParticipants(env: Env, eventId: string, options: { public
       public_slug: string | null;
       server_status: string | null;
       listing_visibility: string | null;
+      lifecycle_status: string | null;
     }>();
   return (rows.results ?? [])
-    .filter((row) => !options.publicOnly || isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility }))
+    .filter((row) => !options.publicOnly || isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility, lifecycle_status: row.lifecycle_status }))
     .map((row) => ({
       serverId: row.server_id,
       serverName: row.server_name ?? "DZN Server",
@@ -665,7 +669,8 @@ async function getEventResults(env: Env, eventId: string, options: { publicOnly:
               COALESCE(linked_servers.display_name, linked_servers.server_name, linked_servers.hostname, linked_servers.nitrado_service_name, 'DZN Server') AS server_name,
               linked_servers.public_slug,
               linked_servers.status AS server_status,
-              linked_servers.listing_visibility
+              linked_servers.listing_visibility,
+              linked_servers.lifecycle_status
        FROM server_war_results results
        INNER JOIN linked_servers ON linked_servers.id = results.server_id
        WHERE results.event_id = ?
@@ -684,9 +689,10 @@ async function getEventResults(env: Env, eventId: string, options: { publicOnly:
       public_slug: string | null;
       server_status: string | null;
       listing_visibility: string | null;
+      lifecycle_status: string | null;
     }>();
   return (rows.results ?? [])
-    .filter((row) => !options.publicOnly || isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility }))
+    .filter((row) => !options.publicOnly || isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility, lifecycle_status: row.lifecycle_status }))
     .map((row) => ({
       serverId: row.server_id,
       serverName: row.server_name ?? "DZN Server",
@@ -705,6 +711,7 @@ async function getEventTrophies(env: Env, eventId: string, options: { publicOnly
       `SELECT trophies.*,
               linked_servers.status AS server_status,
               linked_servers.listing_visibility,
+              linked_servers.lifecycle_status,
               linked_servers.public_slug
        FROM server_trophies trophies
        INNER JOIN linked_servers ON linked_servers.id = trophies.server_id
@@ -726,10 +733,11 @@ async function getEventTrophies(env: Env, eventId: string, options: { publicOnly
       metadata: string | null;
       server_status: string | null;
       listing_visibility: string | null;
+      lifecycle_status: string | null;
       public_slug: string | null;
     }>();
   return (rows.results ?? [])
-    .filter((row) => !options.publicOnly || isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility, public_slug: row.public_slug }))
+    .filter((row) => !options.publicOnly || isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility, public_slug: row.public_slug, lifecycle_status: row.lifecycle_status }))
     .map(serializeTrophy);
 }
 
@@ -827,7 +835,8 @@ async function getCurrentChampionTitles(env: Env, options: { limit: number }) {
               COALESCE(linked_servers.display_name, linked_servers.server_name, linked_servers.hostname, linked_servers.nitrado_service_name, 'DZN Server') AS server_name,
               linked_servers.public_slug,
               linked_servers.status AS server_status,
-              linked_servers.listing_visibility
+              linked_servers.listing_visibility,
+              linked_servers.lifecycle_status
        FROM server_champion_titles titles
        INNER JOIN linked_servers ON linked_servers.id = titles.server_id
        WHERE titles.active = 1
@@ -836,7 +845,7 @@ async function getCurrentChampionTitles(env: Env, options: { limit: number }) {
     )
     .all<Record<string, unknown>>();
   return (rows.results ?? [])
-    .filter((row) => isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility }))
+    .filter((row) => isPublicServerWarsEligibleServer({ status: row.server_status, listing_visibility: row.listing_visibility, lifecycle_status: row.lifecycle_status }))
     .map((row) => ({
       serverId: String(row.server_id ?? ""),
       serverName: String(row.server_name ?? "DZN Server"),
@@ -852,12 +861,12 @@ async function publicEligibleServerIds(env: Env, serverIds: string[]) {
   const placeholders = serverIds.map(() => "?").join(", ");
   const rows = await requireDb(env)
     .prepare(
-      `SELECT id, status, listing_visibility, public_slug
+      `SELECT id, status, listing_visibility, public_slug, lifecycle_status
        FROM linked_servers
        WHERE id IN (${placeholders})`,
     )
     .bind(...serverIds)
-    .all<{ id: string; status: string | null; listing_visibility: string | null; public_slug: string | null }>();
+    .all<{ id: string; status: string | null; listing_visibility: string | null; public_slug: string | null; lifecycle_status: string | null }>();
   return new Set((rows.results ?? [])
     .filter(isPublicServerWarsEligibleServer)
     .map((row) => row.id));

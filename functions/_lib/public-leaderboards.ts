@@ -3,10 +3,16 @@ import { getRankedBuildServers, type PublicBuildLeaderboardRow } from "./build-e
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { calculateServerScore, calculateServerScoreBreakdown, rankServers, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 export { calculateServerScore, calculateServerScoreBreakdown };
 
 const MOCK_PLAYER_PREFIXES = ["MockSurvivor", "MockBandit", "MockRunner"];
+const PUBLIC_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})`;
 
 export type PublicLeaderboardPlayer = {
   rank: number;
@@ -272,6 +278,7 @@ export async function getRankedPublicServers(env: Env, limit: number) {
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_LIFECYCLE_SQL}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 500`,
     )
@@ -347,6 +354,7 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, o
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_LIFECYCLE_SQL}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.killer_name IS NOT NULL
          AND ${mockNameFilterSql("kill_events.killer_name")}
@@ -371,6 +379,7 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, o
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_LIFECYCLE_SQL}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.victim_name IS NOT NULL
          AND ${mockNameFilterSql("kill_events.victim_name")}
@@ -403,6 +412,7 @@ async function getLongestKillSummary(env: Env, limit: number) {
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_LIFECYCLE_SQL}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.killer_name IS NOT NULL
          AND kill_events.victim_name IS NOT NULL
@@ -430,6 +440,7 @@ async function getLongestKillSummary(env: Env, limit: number) {
        FROM kill_events
        INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_LIFECYCLE_SQL}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND kill_events.killer_name IS NOT NULL
          AND kill_events.victim_name IS NOT NULL
@@ -688,6 +699,7 @@ async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric
        FROM player_profiles
        INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_LIFECYCLE_SQL}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND player_profiles.player_name IS NOT NULL
          AND ${mockNameFilterSql("player_profiles.player_name")}
@@ -806,6 +818,7 @@ async function resolvePublicLinkedServerId(env: Env, slug: string) {
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_LIFECYCLE_SQL}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 500`,
     )

@@ -6,6 +6,7 @@ import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import { calculateServerScore } from "../../../../_lib/server-ranking";
 import { getCanonicalServerRank, getCanonicalServerStats } from "../../../../_lib/server-stats";
 import type { PagesFunction } from "../../../../_lib/types";
+import { getServerLifecycleDisplay, normalizeServerLifecycleStatus } from "../../../../../lib/server-lifecycle";
 
 type ServerRow = {
   id: string;
@@ -40,6 +41,12 @@ type ServerRow = {
   last_successful_sync_at?: string | null;
   last_sync_message: string | null;
   consecutive_failed_adm_reads: number | null;
+  lifecycle_status: string | null;
+  lifecycle_reason: string | null;
+  owner_action_required: number | null;
+  owner_action_reason: string | null;
+  next_retry_after: string | null;
+  last_skip_reason: string | null;
 };
 
 type StatsRow = {
@@ -189,7 +196,13 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
                 adm_sync_state.last_sync_status,
                 adm_sync_state.last_sync_at,
                 adm_sync_state.last_sync_message,
-                adm_sync_state.consecutive_failed_adm_reads
+                adm_sync_state.consecutive_failed_adm_reads,
+                linked_servers.lifecycle_status,
+                linked_servers.lifecycle_reason,
+                linked_servers.owner_action_required,
+                linked_servers.owner_action_reason,
+                server_sync_state.next_retry_after,
+                server_sync_state.last_skip_reason
          FROM linked_servers
          LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
          LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
@@ -304,6 +317,11 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     ]);
 
     if (!server) return dashboardHealthError(404, "server_not_found", "Server not found.");
+    const lifecycleStatus = normalizeServerLifecycleStatus({
+      lifecycle_status: server.lifecycle_status,
+      status: server.linked_status,
+    });
+    const lifecycleDisplay = getServerLifecycleDisplay(lifecycleStatus);
     const [latestDiagnostic, latestCompletedImport, preferredSourceState, canonicalStats] = await Promise.all([
       db.prepare(
         `SELECT file_name, file_path, method, endpoint_kind, status, http_status, error_code, error_message, created_at
@@ -392,6 +410,10 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         max_players: numberOrNull(server.max_players ?? server.player_slots),
         player_count_last_checked_at: server.player_count_last_checked_at,
         player_count_status: server.player_count_status,
+        lifecycle_status: lifecycleStatus,
+        lifecycle_reason: server.lifecycle_reason,
+        owner_action_required: Number(server.owner_action_required ?? 0) === 1,
+        owner_action_reason: server.owner_action_reason,
       },
       current_plan: currentPlan,
       configured_plan: planKey,
@@ -430,6 +452,10 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         backoffEnabled: true,
         queueStatus: activeJobSnapshot ? "importing" : numberOrZero(queuedJobs?.count) > 0 ? "import_queued" : canonicalError ? "retrying" : "waiting",
         manualActionRequired: canonicalError === "NITRADO_UNAUTHORIZED" || canonicalError === "NITRADO_FORBIDDEN",
+        lifecycleStatus,
+        lifecycleMessage: lifecycleDisplay.message,
+        ownerActionReason: server.owner_action_reason ?? lifecycleDisplay.ownerAction,
+        nextRetryAfter: server.next_retry_after,
         currentLiveAdm,
       },
       recent_events_count: events.length,

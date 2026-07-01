@@ -4,6 +4,11 @@ import {
   writePublicApiCache,
 } from "./public-api-cache";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 const PUBLIC_PLAYER_COUNT_FRESHNESS_MS = 30 * 60 * 1000;
 
@@ -11,6 +16,7 @@ const PUBLIC_HOME_STATS_PLAYER_COUNT_SNAPSHOT_KEYS = [
   { key: "home-stats:preview", accessLevel: "preview" as const },
   { key: "home-stats:full", accessLevel: "full" as const },
 ] as const;
+const PUBLIC_PLAYER_COUNT_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})`;
 
 export const PUBLIC_PLAYER_COUNT_FRESHNESS_CUTOFF_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes')";
 
@@ -180,6 +186,7 @@ export async function getPublicPlayerCountSummary(db: D1Database, nowMs = Date.n
        FROM linked_servers
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${PUBLIC_PLAYER_COUNT_LIFECYCLE_SQL}
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
     )

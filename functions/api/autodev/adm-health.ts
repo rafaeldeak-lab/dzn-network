@@ -1,6 +1,7 @@
 import { requireCronSecret } from "../../_lib/cron-auth";
 import { json } from "../../_lib/http";
 import type { Env, PagesFunction } from "../../_lib/types";
+import { serverLifecycleSqlExpression } from "../../../lib/server-lifecycle";
 
 type ServiceRow = {
   id: string;
@@ -22,6 +23,12 @@ type ServiceRow = {
   last_sync_status: string | null;
   last_sync_message: string | null;
   last_sync_at: string | null;
+  lifecycle_status: string | null;
+  lifecycle_reason: string | null;
+  owner_action_required: number | null;
+  owner_action_reason: string | null;
+  next_retry_after: string | null;
+  last_skip_reason: string | null;
 };
 
 type FileStateRow = {
@@ -165,6 +172,7 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
 
   const warnings: string[] = [];
   const fatalErrors: string[] = [];
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const servicesResult = await safeAll<ServiceRow>(warnings, "linked ADM services", db.prepare(
     `SELECT linked_servers.id,
             linked_servers.display_name,
@@ -184,13 +192,21 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
             adm_sync_state.last_processed_file,
             adm_sync_state.last_sync_status,
             adm_sync_state.last_sync_message,
-            adm_sync_state.last_sync_at
+            adm_sync_state.last_sync_at,
+            ${lifecycleStatusSql} AS lifecycle_status,
+            linked_servers.lifecycle_reason,
+            linked_servers.owner_action_required,
+            linked_servers.owner_action_reason,
+            server_sync_state.next_retry_after,
+            server_sync_state.last_skip_reason
      FROM linked_servers
      LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+     LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
      LEFT JOIN adm_worker_selection_state worker_selection ON worker_selection.linked_server_id = linked_servers.id
      WHERE linked_servers.nitrado_service_id IS NOT NULL
        AND linked_servers.nitrado_service_id <> ''
        AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'archived', 'inactive', 'suspended')
+       AND ${lifecycleStatusSql} NOT IN ('archived_hidden', 'legacy_offline', 'final_sync_complete')
        AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
      ORDER BY linked_servers.created_at DESC
      LIMIT 50`,
@@ -280,8 +296,12 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
 
     const latestClassifiedError = canonicalError(diagnostic?.error_code ?? fileState?.last_error ?? service.last_sync_message);
     const latestStatus = normalizeStatus(service.last_sync_status ?? latestClassifiedError ?? fileState?.status ?? importJob?.status ?? "awaiting_first_sync");
-    const manualActionRequired = ATTENTION_ERRORS.has(latestClassifiedError ?? "") || /unauthorized|forbidden|auth_error/i.test(latestStatus);
+    const lifecycleStatus = String(service.lifecycle_status ?? "active_live").toLowerCase();
+    const lifecycleWarningOnly = ["token_needs_resave", "nitrado_upstream_down"].includes(lifecycleStatus);
+    const manualActionRequired = !lifecycleWarningOnly && (ATTENTION_ERRORS.has(latestClassifiedError ?? "") || /unauthorized|forbidden|auth_error/i.test(latestStatus));
     const recoverable = !manualActionRequired && (
+      lifecycleWarningOnly
+      ||
       RECOVERABLE_STATUSES.has(latestStatus)
       || isRecoverableError(latestClassifiedError)
       || Boolean(fileState?.next_retry_at)
@@ -327,6 +347,12 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
         preferred: Number(source.preferred ?? 0) === 1,
         nextTestAt: source.next_test_at,
       })),
+      lifecycleStatus,
+      lifecycleReason: service.lifecycle_reason,
+      ownerActionRequired: Number(service.owner_action_required ?? 0) === 1,
+      ownerActionReason: service.owner_action_reason,
+      nextRetryAfter: service.next_retry_after,
+      lastSkipReason: service.last_skip_reason,
       lastSyncMessage: sanitize(service.last_sync_message),
       latestFileState: fileState ? {
         fileName: fileState.adm_file,
