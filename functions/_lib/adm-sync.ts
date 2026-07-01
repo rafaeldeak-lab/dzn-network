@@ -6440,6 +6440,8 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
   target_adm_path: string | null;
   active_import_jobs: number | null;
   metadata_stale: number | null;
+  next_adm_discovery_due_at: string | null;
+  next_adm_pull_due_at: string | null;
   last_worker_selected_at: string | null;
   next_worker_due_at: string | null;
   selected_count: number | null;
@@ -6525,10 +6527,13 @@ export async function runAdmWorkerSyncTick(
     }
 
     const activeImportJobs = Number(selected.active_import_jobs ?? 0);
+    const admWorkDueNow = isIsoDueNow(selected.next_adm_discovery_due_at) || isIsoDueNow(selected.next_adm_pull_due_at);
     const selectionReason = selected.target_adm_file
         ? "target_adm_file"
         : activeImportJobs > 0
           ? "active_import_job"
+          : admWorkDueNow
+            ? "due_discovery"
           : Number(selected.metadata_stale ?? 0) === 1
             ? "stale_metadata"
             : "due_discovery";
@@ -7094,6 +7099,8 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
            worker_selection.next_worker_due_at,
            worker_selection.selected_count,
            worker_selection.last_selection_reason,
+           server_sync_state.next_adm_discovery_due_at,
+           server_sync_state.next_adm_pull_due_at,
            CASE
              WHEN linked_servers.metadata_last_checked_at IS NULL
                OR linked_servers.metadata_last_checked_at <= ?
@@ -7368,6 +7375,11 @@ function mergeScheduledMetadataResults(...values: ScheduledMetadataSyncResult[])
 function isIsoOlderThan(value: string | null | undefined, ageMs: number) {
   const time = Date.parse(String(value ?? ""));
   return !Number.isFinite(time) || Date.now() - time > ageMs;
+}
+
+function isIsoDueNow(value: string | null | undefined) {
+  const time = Date.parse(String(value ?? ""));
+  return Number.isFinite(time) && time <= Date.now();
 }
 
 async function recordAdmWorkerServiceSelection(env: Env, selected: AdmWorkerSelectedServer, reason: string) {
