@@ -159,7 +159,7 @@ jobs:
           set -euo pipefail
 
           npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
-            --command "UPDATE linked_servers SET status = 'archived', listing_visibility = 'hidden', updated_at = CURRENT_TIMESTAMP WHERE nitrado_service_id = '${TARGET_SERVICE_ID}' AND lower(COALESCE(public_slug, '')) = '${TARGET_PUBLIC_SLUG}' AND lower(COALESCE(NULLIF(display_name, ''), NULLIF(hostname, ''), server_name, nitrado_service_name, '')) LIKE '%warlords%' AND COALESCE(nitrado_service_id, '') NOT IN ('18765761', '17428528'); SELECT changes() AS changed;" \
+            --command "UPDATE linked_servers SET status = 'archived', listing_visibility = 'hidden', updated_at = CURRENT_TIMESTAMP WHERE nitrado_service_id = '${TARGET_SERVICE_ID}' AND lower(COALESCE(public_slug, '')) = '${TARGET_PUBLIC_SLUG}' AND lower(COALESCE(NULLIF(display_name, ''), NULLIF(hostname, ''), server_name, nitrado_service_name, '')) LIKE '%warlords%' AND COALESCE(nitrado_service_id, '') NOT IN ('18765761', '17428528') AND (lower(COALESCE(status, '')) <> 'archived' OR lower(COALESCE(listing_visibility, '')) <> 'hidden'); SELECT changes() AS changed;" \
             > archive-update.json
 
           node <<'NODE'
