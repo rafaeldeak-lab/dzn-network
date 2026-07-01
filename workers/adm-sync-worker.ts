@@ -381,6 +381,7 @@ function classifyHeartbeatErrorCode(body: Record<string, unknown>, message: stri
   if (/WORKER_SUBREQUEST_LIMIT|subrequest/i.test(combined)) return "WORKER_SUBREQUEST_LIMIT";
   if (/NITRADO_RATE_LIMITED|HTTP\s*429|rate limit/i.test(combined)) return "NITRADO_RATE_LIMITED";
   if (/NITRADO_UPSTREAM_DOWN|HTTP\s*50[0234]|upstream/i.test(combined)) return "NITRADO_UPSTREAM_DOWN";
+  if (/nitrado_auth_invalid|token.*decrypt|cannot be decrypted|TOKEN_ENCRYPTION_KEY|AES-GCM|ciphertext authentication/i.test(combined)) return "nitrado_auth_invalid";
   if (/NITRADO_FILE_NOT_FOUND|FILE_MISSING_OR_ROTATED|HTTP\s*404/i.test(combined)) return "file_missing_or_rotated";
   if (/latest_adm_unreadable|adm.*unreadable|not readable/i.test(combined)) return "latest_adm_unreadable";
   if (/no_new_adm|backfill caught up|no due ADM/i.test(combined)) return "no_new_adm";
@@ -391,6 +392,7 @@ function isRecoverableHeartbeatError(errorCode: string | null) {
   return [
     "NITRADO_UPSTREAM_DOWN",
     "NITRADO_RATE_LIMITED",
+    "nitrado_auth_invalid",
     "WORKER_SUBREQUEST_LIMIT",
     "file_missing_or_rotated",
     "latest_adm_unreadable",

@@ -6816,7 +6816,30 @@ export async function runAdmWorkerSyncTick(
       });
     }
 
-    const token = await decryptToken(selected.encrypted_token, selected.token_iv, selected.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+    let token: string;
+    try {
+      token = await decryptToken(selected.encrypted_token, selected.token_iv, selected.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+    } catch (error) {
+      const tokenMessage = "Saved Nitrado token cannot be decrypted. Re-save the server owner's Nitrado long-life token.";
+      await incrementAdmReadFailureCounter(env, selected.id, directFileName, tokenMessage).catch(() => null);
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      console.warn("DZN ADM WORKER TOKEN DECRYPT SKIPPED SERVER", {
+        selectedServiceId: selected.nitrado_service_id,
+        selectedServerId: selected.id,
+        message: error instanceof Error ? "token_decrypt_failed" : "token_decrypt_failed_unknown",
+      });
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
+        selectedAdmFile: directFileName,
+        selectedAdmPath: directPath ?? `dayzps/config/${directFileName}`,
+        pendingJobs,
+        unavailable: 1,
+        skippedNotDue: 1,
+        message: tokenMessage,
+      });
+    }
     if (!hasTickBudget(1_000)) {
       await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
       return admWorkerResult({

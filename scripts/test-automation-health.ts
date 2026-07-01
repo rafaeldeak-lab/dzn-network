@@ -91,6 +91,8 @@ assert.equal(workerSource.includes("results.push(await runDirectAdmSync(env, opt
 assert.equal(workerSource.includes("/api/sync/metadata/run"), false);
 assert.equal(workerSource.includes("runCronEndpoint(CRON_ENDPOINTS[0], baseUrl, secret, options, budget)"), true);
 assert.equal(workerSource.includes("hasScheduledRuntimeBudget"), true);
+assert.equal(workerSource.includes("nitrado_auth_invalid"), true);
+assert.equal(workerSource.includes("cannot be decrypted"), true);
 
 const workflowSource = readFileSync(".github/workflows/dzn-adm-sync.yml", "utf8");
 assert.equal(workflowSource.includes("name: DZN ADM Worker Manual Trigger"), true);
