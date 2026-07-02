@@ -7,6 +7,12 @@ on:
         description: Approved lifecycle branch to deploy
         required: true
         default: feature/server-lifecycle-resource-control
+      approved_commit:
+        description: Exact feature branch commit SHA from the successful lifecycle preview run
+        required: true
+      approved_preview_run_url:
+        description: Successful DZN Server Lifecycle Preview run URL for approved_commit
+        required: true
       confirm_production_rollout:
         description: Must equal APPROVE_LIFECYCLE_ROLLOUT
         required: true
@@ -29,16 +35,16 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   rollout:
     runs-on: ubuntu-latest
     env:
-      APPROVED_PREVIEW_RUN_URL: https://github.com/rafaeldeak-lab/dzn-network/actions/runs/28585826007
       APPROVED_BRANCH: feature/server-lifecycle-resource-control
-      APPROVED_MINIMUM_SHA: 743fbbd6aee2272d70aebd0179423fbf9f6567f3
       PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
       PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+      GITHUB_TOKEN: ${{ github.token }}
       CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
       CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
       CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
@@ -77,6 +83,25 @@ jobs:
             echo "::error::Server lifecycle rollout may only deploy ${APPROVED_BRANCH}."
             exit 1
           fi
+          APPROVED_COMMIT="${{ inputs.approved_commit }}"
+          APPROVED_PREVIEW_RUN_URL="${{ inputs.approved_preview_run_url }}"
+          if ! [[ "${APPROVED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::approved_commit must be the exact 40-character SHA that passed DZN Server Lifecycle Preview."
+            exit 1
+          fi
+          EXPECTED_PREVIEW_RUN_PREFIX="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          case "${APPROVED_PREVIEW_RUN_URL}" in
+            "${EXPECTED_PREVIEW_RUN_PREFIX}"*) ;;
+            *)
+              echo "::error::approved_preview_run_url must be a DZN Server Lifecycle Preview run URL in ${GITHUB_REPOSITORY}."
+              exit 1
+              ;;
+          esac
+          APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_URL##*/}"
+          if ! [[ "${APPROVED_PREVIEW_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::approved_preview_run_url must end with a numeric GitHub Actions run id."
+            exit 1
+          fi
           if [ "${{ inputs.production_db_name }}" != "dzn_network_db" ]; then
             echo "::error::production_db_name must equal dzn_network_db."
             exit 1
@@ -105,6 +130,56 @@ jobs:
             echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
             exit 1
           fi
+
+          git fetch origin main "${APPROVED_BRANCH}"
+          if ! git cat-file -e "${APPROVED_COMMIT}^{commit}" 2>/dev/null; then
+            echo "::error::Approved commit is not present on the selected branch; rerun preview for the current branch head."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${APPROVED_COMMIT}" HEAD; then
+            echo "::error::Approved commit is not present on the selected branch; rerun preview for the current branch head."
+            exit 1
+          fi
+          ROLLOUT_COMMIT_SHA="$(git rev-parse HEAD)"
+          if [ "${ROLLOUT_COMMIT_SHA}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::Selected branch HEAD ${ROLLOUT_COMMIT_SHA} does not match preview-approved commit ${APPROVED_COMMIT}; rerun preview for the current branch head."
+            exit 1
+          fi
+          echo "ROLLOUT_COMMIT_SHA=${ROLLOUT_COMMIT_SHA}" >> "$GITHUB_ENV"
+          echo "APPROVED_PREVIEW_RUN_URL=${APPROVED_PREVIEW_RUN_URL}" >> "$GITHUB_ENV"
+
+          APPROVED_COMMIT="${APPROVED_COMMIT}" APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_ID}" node <<'NODE'
+          (async () => {
+            const token = process.env.GITHUB_TOKEN;
+            if (!token) {
+              throw new Error("GITHUB_TOKEN is unavailable for preview approval verification.");
+            }
+            const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.APPROVED_PREVIEW_RUN_ID}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            });
+            if (!response.ok) {
+              throw new Error(`Could not verify approved preview run: GitHub API returned ${response.status}.`);
+            }
+            const run = await response.json();
+            if (run.name !== "DZN Server Lifecycle Preview") {
+              throw new Error(`Approved run is ${run.name || "unknown"}, not DZN Server Lifecycle Preview.`);
+            }
+            if (run.event !== "workflow_dispatch") {
+              throw new Error("Approved preview run must be a manual workflow_dispatch run.");
+            }
+            if (run.conclusion !== "success") {
+              throw new Error(`Approved preview run is not green; conclusion=${run.conclusion || "missing"}.`);
+            }
+            console.log(`Approved preview run verified: ${run.html_url}`);
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
+          NODE
 
           ROLLOUT_CF_TOKEN=""
           ROLLOUT_CF_TOKEN_SOURCE=""
@@ -151,15 +226,9 @@ jobs:
           else
             echo "PROTECTED_CRON_SECRET_SOURCE=SYNC_CRON_SECRET" >> "$GITHUB_ENV"
           fi
-
-          git fetch origin main "${APPROVED_BRANCH}"
-          git merge-base --is-ancestor "${APPROVED_MINIMUM_SHA}" HEAD
-          ROLLOUT_COMMIT_SHA="$(git rev-parse HEAD)"
-          echo "ROLLOUT_COMMIT_SHA=${ROLLOUT_COMMIT_SHA}" >> "$GITHUB_ENV"
-
           {
             echo "## DZN Server Lifecycle Production Rollout"
-            echo "- Approved preview run: ${APPROVED_PREVIEW_RUN_URL}"
+            echo "- Approved preview run: ${{ inputs.approved_preview_run_url }}"
             echo "- Branch: ${{ inputs.branch }}"
             echo "- Commit: ${ROLLOUT_COMMIT_SHA}"
             echo "- Production D1: ${{ inputs.production_db_name }}"
@@ -411,26 +480,31 @@ jobs:
           set -euo pipefail
 
           node <<'NODE'
-          const token = process.env.LIFECYCLE_CF_TOKEN;
-          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-          async function api(path) {
-            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            const parsed = await response.json().catch(() => ({}));
-            if (!response.ok || parsed.success === false) {
-              throw new Error(parsed.errors?.map((error) => error.message).join("; ") || `Cloudflare API ${response.status}`);
+          (async () => {
+            const token = process.env.LIFECYCLE_CF_TOKEN;
+            const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+            async function api(path) {
+              const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const parsed = await response.json().catch(() => ({}));
+              if (!response.ok || parsed.success === false) {
+                throw new Error(parsed.errors?.map((error) => error.message).join("; ") || `Cloudflare API ${response.status}`);
+              }
+              return parsed.result ?? [];
             }
-            return parsed.result ?? [];
-          }
-          const secrets = await api("/workers/scripts/dzn-adm-sync-worker/secrets");
-          const names = new Set(secrets.map((secret) => secret.name));
-          for (const required of ["TOKEN_ENCRYPTION_KEY", "DZN_CRON_SECRET"]) {
-            if (!names.has(required)) {
-              throw new Error(`ADM Worker missing required secret ${required}`);
+            const secrets = await api("/workers/scripts/dzn-adm-sync-worker/secrets");
+            const names = new Set(secrets.map((secret) => secret.name));
+            for (const required of ["TOKEN_ENCRYPTION_KEY", "DZN_CRON_SECRET"]) {
+              if (!names.has(required)) {
+                throw new Error(`ADM Worker missing required secret ${required}`);
+              }
             }
-          }
-          console.log("ADM Worker required secrets are configured.");
+            console.log("ADM Worker required secrets are configured.");
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
           NODE
 
       - name: Deploy ADM Worker
@@ -447,127 +521,132 @@ jobs:
 
           node <<'NODE'
           const fs = require("node:fs");
-          const base = process.env.PRODUCTION_BASE_URL;
-          const cronSecret = process.env.PROTECTED_CRON_SECRET;
-          const forbidden = [
-            "Request failed: 503",
-            "SERVER UNAVAILABLE",
-            "Error 1102",
-            "Worker exceeded resource limits",
-            "Minified React error #",
-          ];
-          async function request(path, init = {}) {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 45000);
-            try {
-              const response = await fetch(`${base}${path}`, {
-                redirect: "follow",
-                headers: { "User-Agent": "dzn-lifecycle-production-rollout", ...(init.headers ?? {}) },
-                ...init,
-                signal: controller.signal,
-              });
-              const text = await response.text();
-              return { response, text };
-            } finally {
-              clearTimeout(timeout);
+          (async () => {
+            const base = process.env.PRODUCTION_BASE_URL;
+            const cronSecret = process.env.PROTECTED_CRON_SECRET;
+            const forbidden = [
+              "Request failed: 503",
+              "SERVER UNAVAILABLE",
+              "Error 1102",
+              "Worker exceeded resource limits",
+              "Minified React error #",
+            ];
+            async function request(path, init = {}) {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 45000);
+              try {
+                const response = await fetch(`${base}${path}`, {
+                  redirect: "follow",
+                  headers: { "User-Agent": "dzn-lifecycle-production-rollout", ...(init.headers ?? {}) },
+                  ...init,
+                  signal: controller.signal,
+                });
+                const text = await response.text();
+                return { response, text };
+              } finally {
+                clearTimeout(timeout);
+              }
             }
-          }
-          async function expect(path, statuses = [200], tries = 3) {
-            let lastStatus = 0;
-            for (let attempt = 1; attempt <= tries; attempt += 1) {
-              const { response, text } = await request(path);
-              lastStatus = response.status;
-              if (!statuses.includes(response.status)) {
-                if (attempt === tries) throw new Error(`${path} returned HTTP ${response.status}, expected ${statuses.join("/")}`);
-                await new Promise((resolve) => setTimeout(resolve, 5000));
-                continue;
+            async function expect(path, statuses = [200], tries = 3) {
+              let lastStatus = 0;
+              for (let attempt = 1; attempt <= tries; attempt += 1) {
+                const { response, text } = await request(path);
+                lastStatus = response.status;
+                if (!statuses.includes(response.status)) {
+                  if (attempt === tries) throw new Error(`${path} returned HTTP ${response.status}, expected ${statuses.join("/")}`);
+                  await new Promise((resolve) => setTimeout(resolve, 5000));
+                  continue;
+                }
+                for (const marker of forbidden) {
+                  if (text.includes(marker)) throw new Error(`${path} contained runtime marker ${marker}`);
+                }
+                return { status: response.status, text };
+              }
+              throw new Error(`${path} failed with HTTP ${lastStatus}`);
+            }
+            async function json(path, statuses = [200], tries = 3) {
+              const result = await expect(path, statuses, tries);
+              try {
+                return JSON.parse(result.text || "{}");
+              } catch {
+                throw new Error(`${path} did not return JSON`);
+              }
+            }
+            async function protectedPost(path, body) {
+              const result = await request(path, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-dzn-cron-secret": cronSecret,
+                  "x-sync-cron-secret": cronSecret,
+                  "x-cron-secret": cronSecret,
+                  Authorization: `Bearer ${cronSecret}`,
+                },
+                body: JSON.stringify(body ?? {}),
+              });
+              if (![200, 202].includes(result.response.status)) {
+                throw new Error(`${path} protected verification returned HTTP ${result.response.status}: ${result.text.slice(0, 200)}`);
               }
               for (const marker of forbidden) {
-                if (text.includes(marker)) throw new Error(`${path} contained runtime marker ${marker}`);
+                if (result.text.includes(marker)) throw new Error(`${path} contained runtime marker ${marker}`);
               }
-              return { status: response.status, text };
+              return result.text;
             }
-            throw new Error(`${path} failed with HTTP ${lastStatus}`);
-          }
-          async function json(path, statuses = [200], tries = 3) {
-            const result = await expect(path, statuses, tries);
-            try {
-              return JSON.parse(result.text || "{}");
-            } catch {
-              throw new Error(`${path} did not return JSON`);
+
+            await expect("/", [200], 5);
+            await expect("/servers", [200], 5);
+            await expect("/dzn-pulse", [200], 5);
+            await expect("/dashboard", [200], 3);
+            await expect("/api/public/server-rail", [200], 10);
+            await expect("/api/public/servers", [200], 10);
+            await expect("/api/public/home-stats", [200], 10);
+            await expect("/api/public/leaderboards", [200], 10);
+            await expect("/api/public/leaderboards/advanced", [200], 10);
+            await expect("/api/public/server-wars", [200], 10);
+
+            const pulse = await json("/api/dzn-pulse/config", [200], 6);
+            if (pulse.dznPulseEnabled !== true) throw new Error("DZN Pulse is not enabled.");
+            if (pulse.discordNotificationsEnabled !== false) throw new Error("DZN Discord Pulse delivery is not false.");
+
+            const servers = await json("/api/public/servers", [200], 5);
+            const serverText = JSON.stringify(servers);
+            if (serverText.includes("warlords") || serverText.includes("900002")) {
+              throw new Error("Warlords appears in public active server surfaces.");
             }
-          }
-          async function protectedPost(path, body) {
-            const result = await request(path, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-dzn-cron-secret": cronSecret,
-                "x-sync-cron-secret": cronSecret,
-                "x-cron-secret": cronSecret,
-                Authorization: `Bearer ${cronSecret}`,
-              },
-              body: JSON.stringify(body ?? {}),
-            });
-            if (![200, 202].includes(result.response.status)) {
-              throw new Error(`${path} protected verification returned HTTP ${result.response.status}: ${result.text.slice(0, 200)}`);
+
+            const rail = await json("/api/public/server-rail", [200], 5);
+            const railText = JSON.stringify(rail);
+            if (railText.includes("warlords") || railText.includes("900002")) {
+              throw new Error("Warlords appears in public server rail.");
             }
-            for (const marker of forbidden) {
-              if (result.text.includes(marker)) throw new Error(`${path} contained runtime marker ${marker}`);
+
+            await protectedPost("/api/autodev/adm-health", { source: "lifecycle-rollout", max_servers: 5 });
+            await protectedPost("/api/sync/metadata/run", { source: "lifecycle-rollout", cron: "github-actions", max_servers: 3, deadline_ms: 8000 });
+            await protectedPost("/api/cron/server-wars/refresh", { source: "lifecycle-rollout", max_events: 1, max_finalizations: 1, max_challenge_expirations: 5, deadline_ms: 5000 });
+            await protectedPost("/api/sync/discord-posts/run", { source: "lifecycle-rollout", cron: "github-actions", max_jobs: 3, deadline_ms: 5000 });
+
+            const protectedRoutes = [
+              "/api/dzn-pulse/summary",
+              "/api/dzn-pulse/notifications/unread-count",
+              "/api/dzn-pulse/notifications",
+              "/api/dzn-pulse/event-popups",
+            ];
+            for (const path of protectedRoutes) {
+              await expect(path, [401, 403], 3);
             }
-            return result.text;
-          }
 
-          await expect("/", [200], 5);
-          await expect("/servers", [200], 5);
-          await expect("/dzn-pulse", [200], 5);
-          await expect("/dashboard", [200], 3);
-          await expect("/api/public/server-rail", [200], 10);
-          await expect("/api/public/servers", [200], 10);
-          await expect("/api/public/home-stats", [200], 10);
-          await expect("/api/public/leaderboards", [200], 10);
-          await expect("/api/public/leaderboards/advanced", [200], 10);
-          await expect("/api/public/server-wars", [200], 10);
-
-          const pulse = await json("/api/dzn-pulse/config", [200], 6);
-          if (pulse.dznPulseEnabled !== true) throw new Error("DZN Pulse is not enabled.");
-          if (pulse.discordNotificationsEnabled !== false) throw new Error("DZN Discord Pulse delivery is not false.");
-
-          const servers = await json("/api/public/servers", [200], 5);
-          const serverText = JSON.stringify(servers);
-          if (serverText.includes("warlords") || serverText.includes("900002")) {
-            throw new Error("Warlords appears in public active server surfaces.");
-          }
-
-          const rail = await json("/api/public/server-rail", [200], 5);
-          const railText = JSON.stringify(rail);
-          if (railText.includes("warlords") || railText.includes("900002")) {
-            throw new Error("Warlords appears in public server rail.");
-          }
-
-          await protectedPost("/api/autodev/adm-health", { source: "lifecycle-rollout", max_servers: 5 });
-          await protectedPost("/api/sync/metadata/run", { source: "lifecycle-rollout", cron: "github-actions", max_servers: 3, deadline_ms: 8000 });
-          await protectedPost("/api/cron/server-wars/refresh", { source: "lifecycle-rollout", max_events: 1, max_finalizations: 1, max_challenge_expirations: 5, deadline_ms: 5000 });
-          await protectedPost("/api/sync/discord-posts/run", { source: "lifecycle-rollout", cron: "github-actions", max_jobs: 3, deadline_ms: 5000 });
-
-          const protectedRoutes = [
-            "/api/dzn-pulse/summary",
-            "/api/dzn-pulse/notifications/unread-count",
-            "/api/dzn-pulse/notifications",
-            "/api/dzn-pulse/event-popups",
-          ];
-          for (const path of protectedRoutes) {
-            await expect(path, [401, 403], 3);
-          }
-
-          fs.writeFileSync("lifecycle-production-route-results.txt", [
-            "public routes: passed",
-            "pulse config: enabled=true discord=false",
-            "warlords public exclusion: passed",
-            "protected scheduler endpoints: passed",
-            "logged-out pulse protection: passed",
-          ].join("\n"));
-          console.log("Production lifecycle rollout verification passed.");
+            fs.writeFileSync("lifecycle-production-route-results.txt", [
+              "public routes: passed",
+              "pulse config: enabled=true discord=false",
+              "warlords public exclusion: passed",
+              "protected scheduler endpoints: passed",
+              "logged-out pulse protection: passed",
+            ].join("\n"));
+            console.log("Production lifecycle rollout verification passed.");
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
           NODE
 
           {
