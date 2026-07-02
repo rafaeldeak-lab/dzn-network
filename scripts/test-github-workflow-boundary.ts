@@ -5,6 +5,22 @@ function read(path: string) {
   return readFileSync(path, "utf8");
 }
 
+function extractInsertColumns(source: string, table: string) {
+  const match = source.match(new RegExp(`INSERT\\s+INTO\\s+${table}\\s*\\(([\\s\\S]*?)\\)\\s*VALUES`, "i"));
+  assert.notEqual(match, null, `Expected lifecycle preview seed INSERT INTO ${table}.`);
+  return match![1]
+    .split(",")
+    .map((column) => column.trim().replace(/^["'`]|["'`]$/g, ""))
+    .filter(Boolean);
+}
+
+function assertInsertColumnsKnown(source: string, table: string, knownColumns: readonly string[]) {
+  const known = new Set(knownColumns);
+  const columns = extractInsertColumns(source, table);
+  const missing = columns.filter((column) => !known.has(column));
+  assert.deepEqual(missing, [], `${table} seed references missing columns.`);
+}
+
 const admWorkflow = read(".github/workflows/dzn-adm-sync.yml");
 const diagnosticsWorkflow = read(".github/workflows/dzn-nitrado-diagnostics.yml");
 const autoUpdateWorkflow = read(".github/workflows/dzn-auto-update-schedulers.yml");
@@ -229,9 +245,93 @@ assert.equal(dznServerLifecyclePreviewWorkflow.includes("discord_guild_id"), tru
 assert.equal(dznServerLifecyclePreviewWorkflow.includes("nitrado_service_id"), true);
 assert.equal(dznServerLifecyclePreviewWorkflow.includes("ip_address"), true);
 assert.equal(dznServerLifecyclePreviewWorkflow.includes("player_slots"), true);
+assertInsertColumnsKnown(dznServerLifecyclePreviewWorkflow, "users", [
+  "id",
+  "discord_id",
+  "username",
+  "avatar",
+  "created_at",
+  "updated_at",
+]);
+assertInsertColumnsKnown(dznServerLifecyclePreviewWorkflow, "discord_guilds", [
+  "id",
+  "guild_id",
+  "owner_user_id",
+  "name",
+  "icon",
+  "icon_url",
+  "permissions",
+  "is_owner",
+  "created_at",
+  "updated_at",
+]);
+assertInsertColumnsKnown(dznServerLifecyclePreviewWorkflow, "linked_servers", [
+  "id",
+  "user_id",
+  "guild_id",
+  "discord_guild_id",
+  "nitrado_service_id",
+  "nitrado_service_name",
+  "server_name",
+  "server_type",
+  "server_category",
+  "ip_address",
+  "player_slots",
+  "public_slug",
+  "status",
+  "listing_visibility",
+  "lifecycle_status",
+  "lifecycle_reason",
+  "lifecycle_updated_at",
+  "owner_action_required",
+  "owner_action_reason",
+  "created_at",
+  "updated_at",
+]);
+assertInsertColumnsKnown(dznServerLifecyclePreviewWorkflow, "server_public_cache", [
+  "id",
+  "guild_id",
+  "plan_key",
+  "public_server_name",
+  "current_player_count",
+  "max_player_count",
+  "server_online",
+  "server_status",
+  "last_status_update_at",
+  "updated_at",
+]);
+assertInsertColumnsKnown(dznServerLifecyclePreviewWorkflow, "server_sync_state", [
+  "id",
+  "guild_id",
+  "last_status_check_at",
+  "last_adm_discovery_check_at",
+  "last_adm_pull_at",
+  "next_status_check_due_at",
+  "next_adm_discovery_due_at",
+  "next_adm_pull_due_at",
+  "next_metadata_check_at",
+  "next_player_count_check_at",
+  "next_adm_discovery_at",
+  "next_adm_processing_at",
+  "next_retry_after",
+  "last_skip_reason",
+  "created_at",
+  "updated_at",
+]);
 assert.equal(/INSERT INTO linked_servers \([\s\S]*\bserver_id\b/.test(dznServerLifecyclePreviewWorkflow), false);
 assert.equal(/INSERT INTO linked_servers \([\s\S]*\bserver_ip\b/.test(dznServerLifecyclePreviewWorkflow), false);
 assert.equal(/INSERT INTO linked_servers \([\s\S]*\bserver_port\b/.test(dznServerLifecyclePreviewWorkflow), false);
+const lifecyclePublicCacheSeedColumns = extractInsertColumns(dznServerLifecyclePreviewWorkflow, "server_public_cache");
+assert.equal(lifecyclePublicCacheSeedColumns.includes("server_name"), false);
+assert.equal(lifecyclePublicCacheSeedColumns.includes("name"), false);
+assert.equal(lifecyclePublicCacheSeedColumns.includes("current_players"), false);
+assert.equal(lifecyclePublicCacheSeedColumns.includes("max_players"), false);
+assert.equal(lifecyclePublicCacheSeedColumns.includes("last_seen_at"), false);
+const lifecycleSyncStateSeedColumns = extractInsertColumns(dznServerLifecyclePreviewWorkflow, "server_sync_state");
+assert.equal(lifecycleSyncStateSeedColumns.includes("linked_server_id"), false);
+assert.equal(lifecycleSyncStateSeedColumns.includes("service_id"), false);
+assert.equal(lifecycleSyncStateSeedColumns.includes("last_adm_discovery_at"), false);
+assert.equal(lifecycleSyncStateSeedColumns.includes("last_adm_read_at"), false);
 assert.equal(dznServerLifecyclePreviewWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"'), true);
 assert.equal(dznServerLifecyclePreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false"), true);
 assert.equal(dznServerLifecyclePreviewWorkflow.includes("MOCK_AUTH=true"), true);

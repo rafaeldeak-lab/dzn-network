@@ -339,6 +339,7 @@ jobs:
           npx wrangler d1 migrations apply DB --config wrangler.server-lifecycle-preview.toml --remote | tee server-lifecycle-preview-migrations.txt
           npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "PRAGMA table_info(linked_servers);" > lifecycle-linked-server-columns.json
           npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "PRAGMA table_info(server_sync_state);" > lifecycle-sync-state-columns.json
+          npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "PRAGMA table_info(server_public_cache);" > lifecycle-public-cache-columns.json
           npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%lifecycle%' ORDER BY name;" > lifecycle-preview-indexes.json
           npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "PRAGMA foreign_key_check;" > lifecycle-preview-foreign-key-check.json
 
@@ -376,6 +377,24 @@ jobs:
           ]) {
             if (!syncColumns.has(name)) {
               console.error(`server_sync_state is missing ${name}.`);
+              process.exit(1);
+            }
+          }
+          const publicCacheColumns = new Set(rowsFromWranglerJson("lifecycle-public-cache-columns.json").map((row) => row.name));
+          for (const name of [
+            "id",
+            "guild_id",
+            "plan_key",
+            "public_server_name",
+            "current_player_count",
+            "max_player_count",
+            "server_online",
+            "server_status",
+            "last_status_update_at",
+            "updated_at",
+          ]) {
+            if (!publicCacheColumns.has(name)) {
+              console.error(`server_public_cache is missing ${name}.`);
               process.exit(1);
             }
           }
@@ -483,42 +502,55 @@ jobs:
             owner_action_reason = excluded.owner_action_reason,
             updated_at = CURRENT_TIMESTAMP;
 
-          INSERT INTO server_public_cache (guild_id, server_name, name, current_players, max_players, last_seen_at, updated_at)
-          VALUES
-            ('388000000000000001', 'Lifecycle Active', 'Lifecycle Active', 2, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000002', 'Lifecycle Archived', 'Lifecycle Archived', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000003', 'Lifecycle Legacy', 'Lifecycle Legacy', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000005', 'Lifecycle Final Sync', 'Lifecycle Final Sync', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000006', 'Lifecycle Degraded', 'Lifecycle Degraded', 1, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000007', 'Lifecycle Nitrado Upstream', 'Lifecycle Nitrado Upstream', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000008', 'Lifecycle Stale Monitoring', 'Lifecycle Stale Monitoring', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000009', 'Lifecycle Final Complete', 'Lifecycle Final Complete', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000010', 'NukeTown Lifecycle Preview', 'NukeTown Lifecycle Preview', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000011', 'PANDORA Lifecycle Preview', 'PANDORA Lifecycle Preview', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('388000000000000012', 'Warlords PvP Lifecycle Preview', 'Warlords PvP Lifecycle Preview', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-          ON CONFLICT(guild_id) DO UPDATE SET server_name = excluded.server_name, name = excluded.name, updated_at = CURRENT_TIMESTAMP;
-
-          INSERT INTO server_sync_state (
-            guild_id, linked_server_id, service_id, last_status_check_at, last_adm_discovery_at, last_adm_read_at,
-            next_metadata_check_at, next_player_count_check_at, next_adm_discovery_at, next_adm_processing_at,
-            next_retry_after, last_skip_reason, updated_at
+          INSERT INTO server_public_cache (
+            id, guild_id, plan_key, public_server_name, current_player_count, max_player_count,
+            server_online, server_status, last_status_update_at, updated_at
           )
           VALUES
-            ('388000000000000001', 'lifecycle-active-server', '388001', NULL, NULL, NULL, datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), NULL, NULL, CURRENT_TIMESTAMP),
-            ('388000000000000002', 'lifecycle-archived-server', '388002', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_archived', CURRENT_TIMESTAMP),
-            ('388000000000000003', 'lifecycle-legacy-server', '388003', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_legacy', CURRENT_TIMESTAMP),
-            ('388000000000000004', 'lifecycle-token-server', '388004', NULL, NULL, NULL, NULL, NULL, NULL, NULL, datetime('now', '+1 day'), 'skipped_token_needs_resave', CURRENT_TIMESTAMP),
-            ('388000000000000005', 'lifecycle-final-server', '388005', NULL, NULL, NULL, datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), NULL, NULL, CURRENT_TIMESTAMP),
-            ('388000000000000006', 'lifecycle-degraded-server', '388006', NULL, NULL, NULL, datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), 'skipped_backoff', CURRENT_TIMESTAMP),
-            ('388000000000000007', 'lifecycle-upstream-server', '388007', NULL, NULL, NULL, datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), 'skipped_backoff', CURRENT_TIMESTAMP),
-            ('388000000000000008', 'lifecycle-stale-server', '388008', NULL, NULL, NULL, datetime('now', '+6 hours'), datetime('now', '+6 hours'), datetime('now', '+6 hours'), datetime('now', '+6 hours'), NULL, 'skipped_no_due_work', CURRENT_TIMESTAMP),
-            ('388000000000000009', 'lifecycle-final-complete-server', '388009', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_final_sync_complete', CURRENT_TIMESTAMP),
-            ('388000000000000010', 'lifecycle-nuketown-server', '18765761', NULL, NULL, NULL, datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), NULL, NULL, CURRENT_TIMESTAMP),
-            ('388000000000000011', 'lifecycle-pandora-server', '388011', NULL, NULL, NULL, datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), 'skipped_backoff', CURRENT_TIMESTAMP),
-            ('388000000000000012', 'lifecycle-warlords-server', '900002', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_archived', CURRENT_TIMESTAMP)
+            ('lifecycle-cache-active', '388000000000000001', 'starter', 'Lifecycle Active', 2, 10, 1, 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-archived', '388000000000000002', 'starter', 'Lifecycle Archived', 0, 10, 0, 'archived', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-legacy', '388000000000000003', 'starter', 'Lifecycle Legacy', 0, 10, 0, 'offline', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-final', '388000000000000005', 'starter', 'Lifecycle Final Sync', 0, 10, 0, 'offline', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-degraded', '388000000000000006', 'starter', 'Lifecycle Degraded', 1, 10, 1, 'degraded', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-upstream', '388000000000000007', 'starter', 'Lifecycle Nitrado Upstream', 0, 10, 0, 'unavailable', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-stale', '388000000000000008', 'starter', 'Lifecycle Stale Monitoring', 0, 10, 0, 'stale', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-final-complete', '388000000000000009', 'starter', 'Lifecycle Final Complete', 0, 10, 0, 'offline', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-nuketown', '388000000000000010', 'starter', 'NukeTown Lifecycle Preview', 0, 10, 0, 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-pandora', '388000000000000011', 'starter', 'PANDORA Lifecycle Preview', 0, 10, 0, 'unavailable', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-cache-warlords', '388000000000000012', 'starter', 'Warlords PvP Lifecycle Preview', 0, 10, 0, 'archived', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           ON CONFLICT(guild_id) DO UPDATE SET
-            linked_server_id = excluded.linked_server_id,
-            service_id = excluded.service_id,
+            plan_key = excluded.plan_key,
+            public_server_name = excluded.public_server_name,
+            current_player_count = excluded.current_player_count,
+            max_player_count = excluded.max_player_count,
+            server_online = excluded.server_online,
+            server_status = excluded.server_status,
+            last_status_update_at = excluded.last_status_update_at,
+            updated_at = excluded.updated_at;
+
+          INSERT INTO server_sync_state (
+            id, guild_id, last_status_check_at, last_adm_discovery_check_at, last_adm_pull_at,
+            next_status_check_due_at, next_adm_discovery_due_at, next_adm_pull_due_at,
+            next_metadata_check_at, next_player_count_check_at, next_adm_discovery_at, next_adm_processing_at,
+            next_retry_after, last_skip_reason, created_at, updated_at
+          )
+          VALUES
+            ('lifecycle-sync-active', '388000000000000001', NULL, NULL, NULL, datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-archived', '388000000000000002', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_archived', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-legacy', '388000000000000003', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_legacy', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-token', '388000000000000004', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, datetime('now', '+1 day'), 'skipped_token_needs_resave', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-final', '388000000000000005', NULL, NULL, NULL, datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-degraded', '388000000000000006', NULL, NULL, NULL, datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), datetime('now', '+2 hours'), 'skipped_backoff', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-upstream', '388000000000000007', NULL, NULL, NULL, datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), 'skipped_backoff', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-stale', '388000000000000008', NULL, NULL, NULL, datetime('now', '+6 hours'), datetime('now', '+6 hours'), datetime('now', '+6 hours'), datetime('now', '+6 hours'), datetime('now', '+6 hours'), datetime('now', '+6 hours'), datetime('now', '+6 hours'), NULL, 'skipped_no_due_work', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-final-complete', '388000000000000009', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_final_sync_complete', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-nuketown', '388000000000000010', NULL, NULL, NULL, datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), datetime('now', '-1 minute'), NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-pandora', '388000000000000011', NULL, NULL, NULL, datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), datetime('now', '+3 hours'), 'skipped_backoff', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('lifecycle-sync-warlords', '388000000000000012', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'skipped_archived', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(guild_id) DO UPDATE SET
+            next_status_check_due_at = excluded.next_status_check_due_at,
+            next_adm_discovery_due_at = excluded.next_adm_discovery_due_at,
+            next_adm_pull_due_at = excluded.next_adm_pull_due_at,
             next_metadata_check_at = excluded.next_metadata_check_at,
             next_player_count_check_at = excluded.next_player_count_check_at,
             next_adm_discovery_at = excluded.next_adm_discovery_at,
@@ -527,6 +559,43 @@ jobs:
             last_skip_reason = excluded.last_skip_reason,
             updated_at = CURRENT_TIMESTAMP;
           SQL
+
+          npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "PRAGMA table_info(linked_servers);" > lifecycle-seed-linked-server-columns.json
+          npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "PRAGMA table_info(server_sync_state);" > lifecycle-seed-sync-state-columns.json
+          npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "PRAGMA table_info(server_public_cache);" > lifecycle-seed-public-cache-columns.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rowsFromWranglerJson(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          function extractInsertColumns(sql, table) {
+            const pattern = new RegExp(`INSERT\\s+INTO\\s+${table}\\s*\\(([\\s\\S]*?)\\)\\s*VALUES`, "i");
+            const match = sql.match(pattern);
+            if (!match) {
+              console.error(`Preview seed does not include INSERT INTO ${table}.`);
+              process.exit(1);
+            }
+            return match[1].split(",").map((column) => column.trim().replace(/^["'`]|["'`]$/g, "")).filter(Boolean);
+          }
+          const sql = fs.readFileSync("server-lifecycle-preview-data.sql", "utf8");
+          const schemas = {
+            linked_servers: new Set(rowsFromWranglerJson("lifecycle-seed-linked-server-columns.json").map((row) => row.name)),
+            server_sync_state: new Set(rowsFromWranglerJson("lifecycle-seed-sync-state-columns.json").map((row) => row.name)),
+            server_public_cache: new Set(rowsFromWranglerJson("lifecycle-seed-public-cache-columns.json").map((row) => row.name)),
+          };
+          for (const [table, columns] of Object.entries(schemas)) {
+            const seedColumns = extractInsertColumns(sql, table);
+            const missing = seedColumns.filter((column) => !columns.has(column));
+            if (missing.length > 0) {
+              console.error(`${table} preview seed references missing columns: ${missing.join(", ")}`);
+              process.exit(1);
+            }
+          }
+          console.log("Preview lifecycle seed columns match D1 schema.");
+          NODE
 
           npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --file server-lifecycle-preview-data.sql
           echo "Preview-only lifecycle seed applied."
@@ -603,7 +672,7 @@ jobs:
           set -euo pipefail
 
           npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "SELECT id, lifecycle_status, status, listing_visibility, owner_action_required FROM linked_servers WHERE id LIKE 'lifecycle-%' ORDER BY id;" > lifecycle-preview-servers.json
-          npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "SELECT linked_server_id, next_retry_after, last_skip_reason FROM server_sync_state WHERE linked_server_id LIKE 'lifecycle-%' ORDER BY linked_server_id;" > lifecycle-preview-sync-state.json
+          npx wrangler d1 execute DB --config wrangler.server-lifecycle-preview.toml --remote --json --command "SELECT linked_servers.id AS linked_server_id, server_sync_state.next_retry_after, server_sync_state.last_skip_reason FROM server_sync_state INNER JOIN linked_servers ON linked_servers.guild_id = server_sync_state.guild_id WHERE linked_servers.id LIKE 'lifecycle-%' ORDER BY linked_servers.id;" > lifecycle-preview-sync-state.json
 
           node <<'NODE'
           const fs = require("node:fs");
