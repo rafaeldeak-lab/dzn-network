@@ -412,6 +412,12 @@ assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("DROP|TRUNCATE
 assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("DELETE\\s+FROM"), true);
 assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("d1 time-travel info"), true);
 assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("D1_BACKUP_BOOKMARK"), true);
+assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("lifecycle-linked-columns-before.json"), true);
+assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("lifecycle-sync-columns-before.json"), true);
+assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("Pre-migration linked_servers columns:"), true);
+assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("Pre-migration server_sync_state columns:"), true);
+assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("LIFECYCLE_0054_COLUMNS_PRESENT"), true);
+assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("COALESCE(lifecycle_status, 'pre_0054')"), false);
 assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("Unexpected pending production D1 migrations"), true);
 assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("0054_server_lifecycle_resource_control.sql"), true);
 assert.equal(dznServerLifecycleProductionRolloutWorkflow.includes("npx wrangler d1 migrations apply \"${{ inputs.production_db_name }}\" --remote"), true);

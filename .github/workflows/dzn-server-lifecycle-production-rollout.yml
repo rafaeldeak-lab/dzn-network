@@ -343,11 +343,99 @@ jobs:
           set -euo pipefail
 
           npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
-            --command "SELECT id, public_slug, nitrado_service_id, status, listing_visibility, COALESCE(lifecycle_status, 'pre_0054') AS lifecycle_status FROM linked_servers WHERE nitrado_service_id IN ('18765761','900002') OR lower(COALESCE(server_name,'')) LIKE '%pandora%' ORDER BY nitrado_service_id, id;" \
-            > lifecycle-key-rows-before.json
+            --command "PRAGMA table_info(linked_servers);" \
+            > lifecycle-linked-columns-before.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "PRAGMA table_info(server_sync_state);" \
+            > lifecycle-sync-columns-before.json
           npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
             --command "SELECT 'linked_servers' AS table_name, COUNT(*) AS row_count FROM linked_servers UNION ALL SELECT 'server_sync_state', COUNT(*) FROM server_sync_state;" \
             > lifecycle-counts-before.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rows(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            return Array.isArray(parsed) ? parsed.flatMap((entry) => entry.results || []) : [];
+          }
+          const linkedColumns = new Set(rows("lifecycle-linked-columns-before.json").map((row) => row.name));
+          const syncColumns = new Set(rows("lifecycle-sync-columns-before.json").map((row) => row.name));
+          const linkedRequiredBefore0054 = ["id"];
+          for (const column of linkedRequiredBefore0054) {
+            if (!linkedColumns.has(column)) {
+              throw new Error(`Pre-migration linked_servers schema is missing required column ${column}.`);
+            }
+          }
+          if (syncColumns.size === 0) {
+            throw new Error("Pre-migration server_sync_state schema could not be inspected.");
+          }
+
+          const required0054LinkedColumns = [
+            "lifecycle_status",
+            "lifecycle_reason",
+            "lifecycle_updated_at",
+            "owner_action_required",
+            "owner_action_reason",
+            "stale_since",
+            "expired_detected_at",
+            "final_sync_attempted_at",
+            "final_sync_completed_at",
+            "final_sync_result",
+            "final_adm_filename",
+            "latest_imported_event_at",
+            "auto_archive_after",
+          ];
+          const required0054SyncColumns = [
+            "next_metadata_check_at",
+            "next_player_count_check_at",
+            "next_adm_discovery_at",
+            "next_adm_processing_at",
+            "next_retry_after",
+            "last_skip_reason",
+          ];
+          const all0054ColumnsPresent = required0054LinkedColumns.every((column) => linkedColumns.has(column)) &&
+            required0054SyncColumns.every((column) => syncColumns.has(column));
+          fs.appendFileSync(process.env.GITHUB_ENV, `LIFECYCLE_0054_COLUMNS_PRESENT=${all0054ColumnsPresent ? "yes" : "no"}\n`);
+
+          const optionalSelectColumns = [
+            "id",
+            "public_slug",
+            "nitrado_service_id",
+            "status",
+            "listing_visibility",
+            "server_name",
+            "display_name",
+            "hostname",
+            "nitrado_service_name",
+          ];
+          const selectList = optionalSelectColumns
+            .map((column) => linkedColumns.has(column) ? column : `NULL AS ${column}`)
+            .join(", ");
+          const whereParts = [];
+          if (linkedColumns.has("nitrado_service_id")) {
+            whereParts.push("CAST(nitrado_service_id AS TEXT) IN ('18765761','900002')");
+          }
+          const nameSearchColumns = ["server_name", "display_name", "hostname", "nitrado_service_name"].filter((column) => linkedColumns.has(column));
+          if (nameSearchColumns.length > 0) {
+            whereParts.push(`lower(COALESCE(${nameSearchColumns.join(", ")}, '')) LIKE '%pandora%'`);
+          }
+          const whereClause = whereParts.length > 0 ? whereParts.join(" OR ") : "1 = 0";
+          const orderColumn = linkedColumns.has("nitrado_service_id") ? "nitrado_service_id, id" : "id";
+          fs.writeFileSync("lifecycle-key-rows-before.sql", `SELECT ${selectList} FROM linked_servers WHERE ${whereClause} ORDER BY ${orderColumn};`);
+
+          const linkedColumnList = [...linkedColumns].sort();
+          const syncColumnList = [...syncColumns].sort();
+          console.log(`Pre-migration linked_servers columns: ${linkedColumnList.join(", ")}`);
+          console.log(`Pre-migration server_sync_state columns: ${syncColumnList.join(", ")}`);
+          console.log(`Lifecycle 0054 columns already present: ${all0054ColumnsPresent}`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Pre-migration linked_servers columns: ${linkedColumnList.join(", ")}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Pre-migration server_sync_state columns: ${syncColumnList.join(", ")}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Lifecycle 0054 columns already present before migration: ${all0054ColumnsPresent}\n`);
+          NODE
+
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --file lifecycle-key-rows-before.sql \
+            > lifecycle-key-rows-before.json
 
       - name: Apply only migration 0054 if needed
         run: |
@@ -368,13 +456,18 @@ jobs:
           if (unexpected.length > 0) {
             throw new Error(`Unexpected pending production D1 migrations: ${unexpected.join(", ")}`);
           }
-          fs.writeFileSync("d1-pending-0054.txt", pending.includes(allowed) ? "yes" : "no");
+          const schemaAlreadyHas0054 = process.env.LIFECYCLE_0054_COLUMNS_PRESENT === "yes";
+          const shouldApply = pending.includes(allowed) && !schemaAlreadyHas0054;
+          fs.writeFileSync("d1-pending-0054.txt", shouldApply ? "yes" : "no");
           console.log(`Pending migration 0054: ${pending.includes(allowed) ? "yes" : "no"}`);
+          console.log(`Lifecycle 0054 schema already present: ${schemaAlreadyHas0054 ? "yes" : "no"}`);
           NODE
 
           if [ "$(cat d1-pending-0054.txt)" = "yes" ]; then
             npx wrangler d1 migrations apply "${{ inputs.production_db_name }}" --remote
             echo "- Migration 0054: applied" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${LIFECYCLE_0054_COLUMNS_PRESENT:-no}" = "yes" ]; then
+            echo "- Migration 0054: already applied by schema" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Migration 0054: already applied" >> "$GITHUB_STEP_SUMMARY"
           fi
