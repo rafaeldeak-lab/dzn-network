@@ -1,0 +1,899 @@
+name: DZN Owner Console Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to preview
+        default: feature/owner-console
+        required: true
+      mode:
+        description: Action to run
+        required: true
+        type: choice
+        default: full-preview
+        options:
+          - full-preview
+      confirm_preview_only:
+        description: Must equal PREVIEW_ONLY
+        required: true
+      preview_project_name:
+        description: Dedicated preview Pages project
+        required: true
+        default: dzn-network-owner-console-preview
+      preview_db_name:
+        description: Preview D1 database name
+        required: true
+        default: dzn_network_db_owner_console_preview
+
+concurrency:
+  group: dzn-owner-console-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  owner-console-preview:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}
+      INPUT_BRANCH: ${{ inputs.branch }}
+      MODE: ${{ inputs.mode }}
+      CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
+      PREVIEW_PROJECT_NAME: ${{ inputs.preview_project_name }}
+      PREVIEW_DB_NAME: ${{ inputs.preview_db_name }}
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+      DZN_PULSE_ENABLED: "true"
+      PREVIEW_BASE_URL: https://${{ inputs.preview_project_name }}.pages.dev
+
+    steps:
+      - name: Checkout requested branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate preview-only inputs
+        run: |
+          set -euo pipefail
+
+          if [ "${CONFIRM_PREVIEW_ONLY}" != "PREVIEW_ONLY" ]; then
+            echo "::error::confirm_preview_only must equal PREVIEW_ONLY."
+            exit 1
+          fi
+
+          if [ "${MODE}" != "full-preview" ]; then
+            echo "::error::Owner console preview only supports full-preview mode."
+            exit 1
+          fi
+
+          if [ "${INPUT_BRANCH}" != "feature/owner-console" ]; then
+            echo "::error::Owner console preview may only run against feature/owner-console."
+            exit 1
+          fi
+
+          if [ "${INPUT_BRANCH}" = "main" ]; then
+            echo "::error::Preview branch must never be main."
+            exit 1
+          fi
+
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Preview Pages project must not equal the production Pages project."
+            exit 1
+          fi
+
+          case "${PREVIEW_PROJECT_NAME}" in
+            *owner*console*preview*|*owner-console-preview*) ;;
+            *)
+              echo "::error::Preview Pages project name must contain owner console preview."
+              exit 1
+              ;;
+          esac
+
+          if [ "${PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
+            echo "::error::Preview D1 database must not equal production D1 database."
+            exit 1
+          fi
+
+          case "${PREVIEW_DB_NAME}" in
+            *owner_console_preview*) ;;
+            *)
+              echo "::error::Preview D1 database name must contain owner_console_preview."
+              exit 1
+              ;;
+          esac
+
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+
+          if [ -z "${DZN_PLATFORM_OWNER_DISCORD_IDS:-}" ]; then
+            echo "::error::Missing DZN_PLATFORM_OWNER_DISCORD_IDS for owner console preview."
+            exit 1
+          fi
+          echo "::add-mask::${DZN_PLATFORM_OWNER_DISCORD_IDS}"
+
+          CF_TOKEN="${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+          if [ -z "${CF_TOKEN:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_PULSE_PREVIEW_TOKEN or CLOUDFLARE_API_TOKEN GitHub secret."
+            exit 1
+          fi
+          echo "::add-mask::$CF_TOKEN"
+          if [ "${#CF_TOKEN}" -le 20 ]; then
+            echo "::error::Cloudflare preview token is present but too short to be valid."
+            exit 1
+          fi
+          {
+            printf "OWNER_CONSOLE_CF_TOKEN=%s\n" "$CF_TOKEN"
+            printf "CLOUDFLARE_API_TOKEN=%s\n" "$CF_TOKEN"
+          } >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+          if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like a 32-character Cloudflare account id."
+            exit 1
+          fi
+
+          OWNER_PREVIEW_SESSION_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+          echo "::add-mask::$OWNER_PREVIEW_SESSION_SECRET"
+          printf "OWNER_PREVIEW_SESSION_SECRET=%s\n" "$OWNER_PREVIEW_SESSION_SECRET" >> "$GITHUB_ENV"
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const ownerIds = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS ?? "")
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter((entry) => /^\d+$/.test(entry));
+          if (ownerIds.length === 0) {
+            console.error("Missing DZN_PLATFORM_OWNER_DISCORD_IDS for owner console preview.");
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_PREVIEW_OWNER_ID=${ownerIds[0]}\n`);
+
+          const source = fs.readFileSync("wrangler.toml", "utf8");
+          const name = source.match(/database_name\s*=\s*"([^"]+)"/)?.[1] ?? "";
+          const id = source.match(/database_id\s*=\s*"([^"]+)"/)?.[1] ?? "";
+          if (!name || !id) {
+            console.error("Could not detect production D1 database name/id from wrangler.toml.");
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `DETECTED_PRODUCTION_D1_DATABASE_NAME=${name}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `DETECTED_PRODUCTION_D1_DATABASE_ID=${id}\n`);
+          console.log(`Detected production D1 database name: ${name}`);
+          console.log(`Detected production D1 database id: ${id}`);
+          NODE
+
+          {
+            echo "## DZN Owner Console Preview Guard"
+            echo ""
+            echo "- Mode: ${MODE}"
+            echo "- Branch: ${INPUT_BRANCH}"
+            echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
+            echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
+            echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
+            echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
+            echo "- DZN_PULSE_ENABLED: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate branch
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          npm run test
+          npm run test:owner-console
+          npm run test:public-access-gating
+          npm run test:server-lifecycle-resource-control
+          npm run test:server-advertising-packages
+          npm run test:github-workflows
+          git diff --check
+
+      - name: Diagnose Cloudflare preview auth
+        run: |
+          set -euo pipefail
+          echo "Wrangler version: $(npx wrangler --version)"
+          echo "Selected branch: ${INPUT_BRANCH}"
+          echo "Preview D1 database name: ${PREVIEW_DB_NAME}"
+          echo "Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
+          echo "Cloudflare preview token present: yes"
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.OWNER_CONSOLE_CF_TOKEN;
+          function maskId(id) {
+            return typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : "unavailable";
+          }
+          function category(errors) {
+            const first = Array.isArray(errors) ? errors[0] : null;
+            return {
+              code: first?.code ?? "unknown",
+              message: first?.message ? String(first.message).replace(/[A-Za-z0-9_-]{20,}/g, "[redacted]") : "unknown",
+            };
+          }
+          async function cloudflare(path) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ code: `http_${response.status}`, message: "non_json_response" }] };
+            }
+            return { response, parsed };
+          }
+          void (async () => {
+            const verify = await cloudflare("/user/tokens/verify");
+            if (!verify.response.ok || verify.parsed.success !== true) {
+              const error = category(verify.parsed.errors);
+              console.log(`Cloudflare token verify success=false code=${error.code} category=${error.message}`);
+              console.error("Cloudflare token invalid or expired.");
+              process.exit(1);
+            }
+            console.log("Cloudflare token verify success=true");
+            const d1 = await cloudflare(`/accounts/${accountId}/d1/database?per_page=100`);
+            if (!d1.response.ok || d1.parsed.success !== true) {
+              const error = category(d1.parsed.errors);
+              console.log(`Cloudflare D1 list success=false code=${error.code} category=${error.message}`);
+              console.error("Cloudflare token lacks D1/account permission.");
+              process.exit(1);
+            }
+            const databases = Array.isArray(d1.parsed.result) ? d1.parsed.result : d1.parsed.result?.databases ?? [];
+            console.log("Cloudflare D1 list success=true");
+            for (const database of databases) {
+              console.log(`D1 database: ${database?.name ?? "unnamed"} id=${maskId(database?.uuid ?? database?.id ?? "")}`);
+            }
+          })().catch((error) => {
+            console.error(error?.message ?? "Cloudflare auth diagnostic failed.");
+            process.exit(1);
+          });
+          NODE
+
+      - name: Resolve or create preview D1 database
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *owner_console_preview*) ;;
+            *)
+              echo "::error::Refusing D1 command for non-preview owner console database name."
+              exit 1
+              ;;
+          esac
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.OWNER_CONSOLE_CF_TOKEN;
+          const previewName = process.env.PREVIEW_DB_NAME;
+          const productionName = process.env.DETECTED_PRODUCTION_D1_DATABASE_NAME || process.env.PRODUCTION_D1_DATABASE_NAME;
+          const productionId = process.env.DETECTED_PRODUCTION_D1_DATABASE_ID;
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ message: "Cloudflare API returned non-JSON response." }] };
+            }
+            if (!response.ok || parsed.success === false) {
+              const message = parsed.errors?.map((error) => error.message).join("; ") || `HTTP ${response.status}`;
+              throw new Error(message);
+            }
+            return parsed;
+          }
+          void (async () => {
+            if (previewName === productionName) throw new Error("preview_db_name equals production database name.");
+            const list = await api("/d1/database?per_page=100");
+            const databases = Array.isArray(list.result) ? list.result : list.result?.databases ?? [];
+            let database = databases.find((item) => item?.name === previewName);
+            if (!database) {
+              database = (await api("/d1/database", {
+                method: "POST",
+                body: JSON.stringify({ name: previewName }),
+              })).result;
+            }
+            const previewId = database?.uuid ?? database?.id;
+            if (!previewId) throw new Error("Could not resolve preview D1 database id.");
+            if (previewId === productionId) throw new Error("Preview D1 database id equals production D1 database id.");
+            fs.writeFileSync("owner-console-preview-d1.json", JSON.stringify({ name: previewName, id: previewId }, null, 2));
+            fs.writeFileSync("wrangler.owner-console-preview.toml", [
+              'name = "dzn-owner-console-preview-d1"',
+              'compatibility_date = "2026-05-13"',
+              "",
+              "[[d1_databases]]",
+              'binding = "DB"',
+              `database_name = "${previewName}"`,
+              `database_id = "${previewId}"`,
+              "",
+            ].join("\n"));
+            fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_D1_DATABASE_ID=${previewId}\n`);
+            console.log(`Preview D1 database name: ${previewName}`);
+            console.log(`Preview D1 database id: ${previewId}`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Apply preview D1 migrations
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *owner_console_preview*) ;;
+            *)
+              echo "::error::Refusing migration for non-preview owner console database name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing migration because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          npx wrangler d1 migrations apply DB --config wrangler.owner-console-preview.toml --remote | tee owner-console-preview-migrations.txt
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA table_info(linked_servers);" > owner-console-linked-columns.json
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA table_info(server_sync_state);" > owner-console-sync-columns.json
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA foreign_key_check;" > owner-console-preview-foreign-key-check.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rowsFromWranglerJson(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          const linkedColumns = new Set(rowsFromWranglerJson("owner-console-linked-columns.json").map((row) => row.name));
+          for (const name of ["lifecycle_status", "lifecycle_reason", "owner_action_required", "owner_action_reason", "latest_imported_event_at", "listing_visibility"]) {
+            if (!linkedColumns.has(name)) {
+              console.error(`linked_servers is missing ${name}.`);
+              process.exit(1);
+            }
+          }
+          const syncColumns = new Set(rowsFromWranglerJson("owner-console-sync-columns.json").map((row) => row.name));
+          for (const name of ["next_metadata_check_at", "next_player_count_check_at", "next_adm_discovery_at", "next_adm_processing_at", "next_retry_after", "last_skip_reason"]) {
+            if (!syncColumns.has(name)) {
+              console.error(`server_sync_state is missing ${name}.`);
+              process.exit(1);
+            }
+          }
+          const fkRows = rowsFromWranglerJson("owner-console-preview-foreign-key-check.json");
+          if (fkRows.length > 0) {
+            console.error("Preview D1 foreign_key_check returned rows.");
+            process.exit(1);
+          }
+          console.log("Owner console preview D1 schema verified.");
+          NODE
+
+      - name: Seed preview-only owner console data
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            *owner_console_preview*) ;;
+            *)
+              echo "::error::Refusing preview seed for non-preview owner console database name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing seed because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const ownerDiscordId = process.env.OWNER_CONSOLE_PREVIEW_OWNER_ID;
+          const sessionSecret = process.env.OWNER_PREVIEW_SESSION_SECRET;
+          const ownerToken = "owner-console-preview-owner-token";
+          const nonOwnerToken = "owner-console-preview-non-owner-token";
+          function hmac(value) {
+            return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
+          }
+          function sql(value) {
+            if (value === null || value === undefined) return "NULL";
+            return `'${String(value).replaceAll("'", "''")}'`;
+          }
+          const expires = "2099-01-01T00:00:00.000Z";
+          const statements = `
+          INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at)
+          VALUES
+            ('owner-console-platform-owner', ${sql(ownerDiscordId)}, 'OwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-non-owner-user', '999000000000000001', 'NonOwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-server-owner', '999000000000000002', 'ServerOwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = CURRENT_TIMESTAMP;
+
+          DELETE FROM sessions WHERE id IN ('owner-console-owner-session', 'owner-console-non-owner-session');
+          INSERT INTO sessions (id, user_id, session_token_hash, expires_at, created_at)
+          VALUES
+            ('owner-console-owner-session', 'owner-console-platform-owner', ${sql(hmac(ownerToken))}, ${sql(expires)}, CURRENT_TIMESTAMP),
+            ('owner-console-non-owner-session', 'owner-console-non-owner-user', ${sql(hmac(nonOwnerToken))}, ${sql(expires)}, CURRENT_TIMESTAMP);
+
+          INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at)
+          VALUES
+            ('owner-console-nuketown-guild-row', 'owner-console-nuketown-guild', 'owner-console-server-owner', 'NukeTown Owner Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-pandora-guild-row', 'owner-console-pandora-guild', 'owner-console-server-owner', 'PANDORA Owner Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-warlords-guild-row', 'owner-console-warlords-guild', 'owner-console-server-owner', 'Warlords Test Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(guild_id) DO UPDATE SET name = excluded.name, owner_user_id = excluded.owner_user_id, updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO linked_servers (
+            id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name, server_name, server_type,
+            tags_json, region, status, public_slug, listing_visibility, lifecycle_status, lifecycle_reason,
+            lifecycle_updated_at, owner_action_required, owner_action_reason, latest_imported_event_at, created_at, updated_at
+          )
+          VALUES
+            ('owner-console-nuketown', 'owner-console-server-owner', 'owner-console-nuketown-guild', 'owner-console-nuketown-guild-row', '18765761', 'NukeTown DEATHMATCH', 'NukeTown DEATHMATCH', 'DEATHMATCH',
+              '["deathmatch"]', 'EU', 'live', 'owner-console-nuketown', 'public', 'active_live', 'healthy_active_sync', CURRENT_TIMESTAMP, 0, NULL, '2026-07-01T18:05:22.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-pandora', 'owner-console-server-owner', 'owner-console-pandora-guild', 'owner-console-pandora-guild-row', '17428528', 'PANDORA', 'PANDORA', 'PVP',
+              '["legacy"]', 'EU', 'inactive', 'owner-console-pandora', 'public', 'legacy_offline', 'historical_stats_preserved', CURRENT_TIMESTAMP, 0, NULL, '2026-06-29T13:48:58.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-warlords', 'owner-console-server-owner', 'owner-console-warlords-guild', 'owner-console-warlords-guild-row', '900002', 'Warlords PvP', 'Warlords PvP', 'PVP',
+              '["test"]', 'EU', 'archived', 'owner-console-warlords', 'hidden', 'archived_hidden', 'owner_confirmed_fake_test_listing', CURRENT_TIMESTAMP, 0, NULL, '2026-06-01T00:00:00.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET
+            nitrado_service_id = excluded.nitrado_service_id,
+            server_name = excluded.server_name,
+            status = excluded.status,
+            public_slug = excluded.public_slug,
+            listing_visibility = excluded.listing_visibility,
+            lifecycle_status = excluded.lifecycle_status,
+            lifecycle_reason = excluded.lifecycle_reason,
+            owner_action_required = excluded.owner_action_required,
+            owner_action_reason = excluded.owner_action_reason,
+            latest_imported_event_at = excluded.latest_imported_event_at,
+            updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, plan_key, status, created_at, updated_at)
+          VALUES
+            ('owner-console-nuketown-sub', 'owner-console-nuketown-guild', '999000000000000002', 'pro', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-pandora-sub', 'owner-console-pandora-guild', '999000000000000002', 'starter', 'inactive', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-warlords-sub', 'owner-console-warlords-guild', '999000000000000002', 'starter', 'inactive', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(guild_id) DO UPDATE SET plan_key = excluded.plan_key, status = excluded.status, updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO server_sync_state (
+            id, guild_id, last_status_check_at, next_status_check_due_at, last_successful_status_check_at, current_player_count,
+            max_player_count, server_online, server_status, status_data_freshness, last_successful_adm_pull_at,
+            last_seen_adm_filename, last_processed_adm_filename, last_processed_adm_offset, adm_status,
+            next_metadata_check_at, next_player_count_check_at, next_adm_discovery_at, next_adm_processing_at, next_retry_after, last_skip_reason,
+            created_at, updated_at
+          )
+          VALUES
+            ('owner-console-nuketown-sync', 'owner-console-nuketown-guild', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 10, 1, 'online', 'nitrado_live',
+              CURRENT_TIMESTAMP, 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 4096, 'caught_up_waiting_for_growth',
+              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-pandora-sync', 'owner-console-pandora-guild', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 60, 0, 'legacy_offline', 'last_known',
+              '2026-06-29T13:48:58.000Z', 'DayZServer_PS4_x64_2026-06-29_13-02-07.ADM', 'DayZServer_PS4_x64_2026-06-29_13-02-07.ADM', 2048, 'final_sync_complete',
+              NULL, NULL, NULL, NULL, NULL, 'skipped_legacy', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-warlords-sync', 'owner-console-warlords-guild', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 0, 0, 'archived_hidden', 'hidden',
+              '2026-06-01T00:00:00.000Z', 'WarlordsTest.ADM', 'WarlordsTest.ADM', 0, 'archived',
+              NULL, NULL, NULL, NULL, NULL, 'skipped_archived', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(guild_id) DO UPDATE SET
+            current_player_count = excluded.current_player_count,
+            max_player_count = excluded.max_player_count,
+            server_status = excluded.server_status,
+            status_data_freshness = excluded.status_data_freshness,
+            last_seen_adm_filename = excluded.last_seen_adm_filename,
+            last_processed_adm_filename = excluded.last_processed_adm_filename,
+            last_processed_adm_offset = excluded.last_processed_adm_offset,
+            adm_status = excluded.adm_status,
+            last_skip_reason = excluded.last_skip_reason,
+            updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO adm_sync_state (id, linked_server_id, latest_adm_file, last_processed_file, last_processed_line, last_processed_offset, last_sync_status, last_sync_message, last_sync_at, created_at, updated_at)
+          VALUES
+            ('owner-console-nuketown-adm', 'owner-console-nuketown', 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 144, 4096, 'success', 'caught_up_waiting_for_growth', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-pandora-adm', 'owner-console-pandora', 'DayZServer_PS4_x64_2026-06-29_13-02-07.ADM', 'DayZServer_PS4_x64_2026-06-29_13-02-07.ADM', 88, 2048, 'final_sync_complete', 'historical_stats_preserved', '2026-06-29T13:48:58.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-warlords-adm', 'owner-console-warlords', 'WarlordsTest.ADM', 'WarlordsTest.ADM', 1, 0, 'archived', 'owner_confirmed_fake_test_listing', '2026-06-01T00:00:00.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(linked_server_id) DO UPDATE SET
+            latest_adm_file = excluded.latest_adm_file,
+            last_processed_file = excluded.last_processed_file,
+            last_processed_line = excluded.last_processed_line,
+            last_processed_offset = excluded.last_processed_offset,
+            last_sync_status = excluded.last_sync_status,
+            last_sync_message = excluded.last_sync_message,
+            last_sync_at = excluded.last_sync_at,
+            updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO server_stats (id, linked_server_id, total_kills, total_deaths, total_joins, total_disconnects, unique_players, last_event_at, updated_at)
+          VALUES
+            ('owner-console-nuketown-stats', 'owner-console-nuketown', 14, 14, 22, 20, 9, '2026-07-01T18:05:22.000Z', CURRENT_TIMESTAMP),
+            ('owner-console-pandora-stats', 'owner-console-pandora', 42, 39, 130, 128, 31, '2026-06-29T13:48:58.000Z', CURRENT_TIMESTAMP),
+            ('owner-console-warlords-stats', 'owner-console-warlords', 1, 1, 2, 2, 1, '2026-06-01T00:00:00.000Z', CURRENT_TIMESTAMP)
+          ON CONFLICT(linked_server_id) DO UPDATE SET
+            total_kills = excluded.total_kills,
+            total_deaths = excluded.total_deaths,
+            total_joins = excluded.total_joins,
+            total_disconnects = excluded.total_disconnects,
+            unique_players = excluded.unique_players,
+            last_event_at = excluded.last_event_at,
+            updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO server_build_stats (id, linked_server_id, nitrado_service_id, structures_built, build_items_placed, storage_items_placed, traps_placed, build_score, top_builder_name, top_builder_count, last_build_at, updated_at)
+          VALUES
+            ('owner-console-pandora-builds', 'owner-console-pandora', '17428528', 6, 10, 3, 1, 28, 'PandoraBuilder', 6, '2026-06-29T12:30:00.000Z', CURRENT_TIMESTAMP)
+          ON CONFLICT(linked_server_id) DO UPDATE SET
+            build_score = excluded.build_score,
+            last_build_at = excluded.last_build_at,
+            updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO server_public_cache (id, guild_id, plan_key, public_server_name, current_player_count, max_player_count, server_online, server_status, last_status_update_at, last_adm_update_at, updated_at)
+          VALUES
+            ('owner-console-nuketown-cache', 'owner-console-nuketown-guild', 'pro', 'NukeTown DEATHMATCH', 1, 10, 1, 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-pandora-cache', 'owner-console-pandora-guild', 'starter', 'PANDORA', 0, 60, 0, 'legacy_offline', CURRENT_TIMESTAMP, '2026-06-29T13:48:58.000Z', CURRENT_TIMESTAMP)
+          ON CONFLICT(guild_id) DO UPDATE SET
+            public_server_name = excluded.public_server_name,
+            current_player_count = excluded.current_player_count,
+            max_player_count = excluded.max_player_count,
+            server_online = excluded.server_online,
+            server_status = excluded.server_status,
+            updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO automation_cron_runs (id, source, endpoint, job_type, started_at, finished_at, status, error_message, processed_count, skipped_count, failed_count, created_at)
+          VALUES
+            ('owner-console-public-health', 'github-preview', '/api/public/servers', 'public', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'success', NULL, 4, 0, 0, CURRENT_TIMESTAMP),
+            ('owner-console-adm-cycle', 'github-preview', '/api/autodev/adm-health', 'adm-cycle-watch', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'success', NULL, 2, 1, 0, CURRENT_TIMESTAMP),
+            ('owner-console-auto-update', 'github-preview', '/api/sync/metadata/run', 'auto-update', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'success', NULL, 2, 1, 0, CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET status = excluded.status, processed_count = excluded.processed_count, skipped_count = excluded.skipped_count, failed_count = excluded.failed_count, created_at = CURRENT_TIMESTAMP;
+          `;
+
+          fs.writeFileSync("owner-console-preview-seed.sql", statements);
+          fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_OWNER_COOKIE=dzn_session=${ownerToken}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_NON_OWNER_COOKIE=dzn_session=${nonOwnerToken}\n`);
+          NODE
+
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --file owner-console-preview-seed.sql
+          echo "Owner console preview seed completed."
+
+      - name: Resolve or create preview Pages project
+        run: |
+          set -euo pipefail
+
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Refusing to resolve owner console preview against production Pages project."
+            exit 1
+          fi
+          case "${PREVIEW_PROJECT_NAME}" in
+            *owner*console*preview*|*owner-console-preview*) ;;
+            *)
+              echo "::error::Refusing non-preview owner console Pages project name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing preview Pages configuration because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.OWNER_CONSOLE_CF_TOKEN;
+          const projectName = process.env.PREVIEW_PROJECT_NAME;
+          const branch = process.env.INPUT_BRANCH;
+          const previewBaseUrl = process.env.PREVIEW_BASE_URL;
+          const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
+          const previewDbName = process.env.PREVIEW_DB_NAME;
+          function fail(message) {
+            console.error(message);
+            process.exit(1);
+          }
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ code: "non_json", message: "Cloudflare API returned non-JSON response." }] };
+            }
+            return { ok: response.ok, status: response.status, parsed };
+          }
+          function envVars(config) {
+            return config?.env_vars && typeof config.env_vars === "object" ? config.env_vars : {};
+          }
+          function d1Databases(config) {
+            return config?.d1_databases && typeof config.d1_databases === "object" ? config.d1_databases : {};
+          }
+          function mergeConfig(config) {
+            return {
+              ...config,
+              env_vars: {
+                ...envVars(config),
+                DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
+                DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+                DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
+              },
+              d1_databases: {
+                ...d1Databases(config),
+                DB: { id: d1Id },
+              },
+            };
+          }
+          function errorMessage(result, fallback) {
+            const errors = result.parsed?.errors;
+            if (Array.isArray(errors) && errors.length > 0) {
+              return errors.map((error) => `[${error.code ?? "unknown"}] ${error.message ?? "Cloudflare API error"}`).join("; ");
+            }
+            return fallback;
+          }
+          void (async () => {
+            const get = await api(`/pages/projects/${projectName}`);
+            let project = null;
+            if (get.status === 404) {
+              const created = await api("/pages/projects", {
+                method: "POST",
+                body: JSON.stringify({ name: projectName, production_branch: branch }),
+              });
+              if (!created.ok || created.parsed.success === false) {
+                fail(errorMessage(created, "Failed to create preview Pages project."));
+              }
+              project = created.parsed.result ?? null;
+              console.log(`Created preview Pages project: ${projectName}`);
+            } else if (!get.ok || get.parsed.success === false) {
+              fail(errorMessage(get, "Failed to read preview Pages project."));
+            } else {
+              project = get.parsed.result ?? null;
+              console.log(`Reusing preview Pages project: ${projectName}`);
+            }
+
+            const patched = await api(`/pages/projects/${projectName}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                production_branch: branch,
+                deployment_configs: {
+                  production: mergeConfig(project?.deployment_configs?.production ?? {}),
+                  preview: mergeConfig(project?.deployment_configs?.preview ?? {}),
+                },
+              }),
+            });
+            if (!patched.ok || patched.parsed.success === false) {
+              fail(errorMessage(patched, "Failed to configure preview Pages project."));
+            }
+
+            const wranglerToml = [
+              `name = ${JSON.stringify(projectName)}`,
+              'compatibility_date = "2026-05-13"',
+              'pages_build_output_dir = "out"',
+              "",
+              "[vars]",
+              'DZN_PULSE_ENABLED = "true"',
+              'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+              `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              "",
+              "[[d1_databases]]",
+              'binding = "DB"',
+              `database_name = ${JSON.stringify(previewDbName)}`,
+              `database_id = ${JSON.stringify(d1Id)}`,
+              "",
+            ].join("\n");
+            fs.writeFileSync("wrangler.toml", wranglerToml);
+            console.log(`Configured preview Pages project: ${projectName}`);
+            console.log(`Configured preview URL: ${previewBaseUrl}`);
+            console.log(`Configured preview D1 binding DB id: ${d1Id}`);
+          })().catch((error) => {
+            fail(error instanceof Error ? error.message : String(error));
+          });
+          NODE
+
+      - name: Configure preview owner auth secrets
+        run: |
+          set -euo pipefail
+
+          printf "%s" "$DZN_PLATFORM_OWNER_DISCORD_IDS" | npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS --project-name "${PREVIEW_PROJECT_NAME}"
+          printf "%s" "$OWNER_PREVIEW_SESSION_SECRET" | npx wrangler pages secret put SESSION_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
+          echo "Owner console preview auth secrets configured."
+
+      - name: Deploy preview Pages project
+        run: |
+          set -euo pipefail
+
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Refusing to deploy owner console preview to production Pages project."
+            exit 1
+          fi
+          case "${PREVIEW_PROJECT_NAME}" in
+            *owner*console*preview*|*owner-console-preview*) ;;
+            *)
+              echo "::error::Refusing non-preview owner console Pages project name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing preview deploy because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          DZN_PULSE_ENABLED=true \
+          DZN_DISCORD_NOTIFICATIONS_ENABLED=false \
+          NEXT_PUBLIC_APP_URL="${PREVIEW_BASE_URL}" \
+          npm run build
+          npx wrangler pages deploy out \
+            --project-name "${PREVIEW_PROJECT_NAME}" \
+            --branch "${INPUT_BRANCH}" \
+            --commit-dirty=true \
+            | tee owner-console-pages-deploy.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployText = fs.readFileSync("owner-console-pages-deploy.txt", "utf8");
+          const immutableUrl = deployText.match(/https:\/\/[^\s]+\.pages\.dev/)?.[0] ?? "";
+          const stableUrl = `https://${process.env.PREVIEW_PROJECT_NAME}.pages.dev`;
+          fs.writeFileSync("owner-console-preview-url.txt", `${stableUrl}\n`);
+          if (immutableUrl) fs.writeFileSync("owner-console-preview-immutable-url.txt", `${immutableUrl}\n`);
+          console.log(`Preview URL: ${stableUrl}`);
+          if (immutableUrl) console.log(`Immutable preview URL: ${immutableUrl}`);
+          NODE
+
+      - name: Verify owner console preview
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const base = process.env.PREVIEW_BASE_URL;
+          const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE;
+          const nonOwnerCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE;
+          const ownerDiscordId = process.env.OWNER_CONSOLE_PREVIEW_OWNER_ID;
+          const forbiddenText = [
+            "Request failed: 503",
+            "SERVER UNAVAILABLE",
+            "Error 1102",
+            "Worker exceeded resource limits",
+            "Minified React error #",
+          ];
+          const forbiddenSecrets = [
+            "encrypted_token",
+            "token_iv",
+            "token_auth_tag",
+            "DISCORD_BOT_TOKEN",
+            "TOKEN_ENCRYPTION_KEY",
+            "SESSION_SECRET",
+            "DZN_PLATFORM_OWNER_DISCORD_IDS",
+            ownerDiscordId,
+          ].filter(Boolean);
+          function assert(condition, message) {
+            if (!condition) {
+              console.error(message);
+              process.exit(1);
+            }
+          }
+          async function fetchWithTimeout(path, init = {}) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 45000);
+            try {
+              return await fetch(`${base}${path}`, { ...init, signal: controller.signal });
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+          async function expectStatus(path, expected, init = {}) {
+            const response = await fetchWithTimeout(path, init);
+            const body = await response.text();
+            assert(response.status === expected, `${path} returned HTTP ${response.status}, expected ${expected}.`);
+            for (const snippet of forbiddenText) {
+              assert(!body.includes(snippet), `${path} contains forbidden runtime text: ${snippet}`);
+            }
+            return { response, body };
+          }
+          async function ownerJson(path, cookie, expected) {
+            const { response, body } = await expectStatus(path, expected, {
+              headers: cookie ? { cookie } : {},
+              redirect: "manual",
+            });
+            for (const secret of forbiddenSecrets) {
+              assert(!body.includes(secret), `${path} leaked forbidden owner/secret value.`);
+            }
+            let parsed = null;
+            try {
+              parsed = body ? JSON.parse(body) : null;
+            } catch {
+              parsed = null;
+            }
+            return { response, body, parsed };
+          }
+          void (async () => {
+            const loggedOutOwner = await fetchWithTimeout("/owner", { redirect: "manual" });
+            assert([302, 401, 403].includes(loggedOutOwner.status), `/owner logged-out returned ${loggedOutOwner.status}.`);
+            if (loggedOutOwner.status === 302) {
+              assert((loggedOutOwner.headers.get("location") ?? "").includes("/login"), "/owner logged-out redirect should point to login.");
+            }
+
+            await expectStatus("/owner", 403, { headers: { cookie: nonOwnerCookie }, redirect: "manual" });
+            await expectStatus("/owner", 200, { headers: { cookie: ownerCookie }, redirect: "manual" });
+
+            for (const path of ["/api/owner/overview", "/api/owner/servers", "/api/owner/servers/owner-console-nuketown", "/api/owner/audit-log"]) {
+              await ownerJson(path, "", 401);
+              await ownerJson(path, nonOwnerCookie, 403);
+              await ownerJson(path, ownerCookie, 200);
+            }
+
+            const overview = await ownerJson("/api/owner/overview", ownerCookie, 200);
+            assert(overview.parsed?.overview?.featureFlags?.discordNotificationsEnabled === false, "Owner overview should show Discord Pulse delivery disabled.");
+            assert(overview.parsed?.overview?.featureFlags?.dznPulseEnabled === true, "Owner overview should show DZN Pulse enabled in preview config.");
+            assert(overview.parsed?.overview?.knownServers?.nuketown?.lifecycleStatus === "active_live", "NukeTown should appear active_live.");
+            assert(overview.parsed?.overview?.knownServers?.pandora?.lifecycleStatus === "legacy_offline", "PANDORA should appear as historical/legacy.");
+            assert(overview.parsed?.overview?.knownServers?.warlords?.lifecycleStatus === "archived_hidden", "Warlords should appear archived_hidden internally.");
+
+            const servers = await ownerJson("/api/owner/servers", ownerCookie, 200);
+            const text = JSON.stringify(servers.parsed ?? {});
+            assert(text.includes("owner-console-nuketown"), "Owner servers should include NukeTown preview row.");
+            assert(text.includes("owner-console-pandora"), "Owner servers should include PANDORA preview row.");
+            assert(text.includes("owner-console-warlords"), "Owner servers should include Warlords internal archived row.");
+            assert(text.includes("Archived / hidden"), "Owner servers should include archived-hidden owner copy.");
+            assert(text.includes("Legacy offline"), "Owner servers should include legacy/offline owner copy.");
+            assert(!text.includes("encryptedToken"), "Owner servers should not expose encrypted token blobs.");
+
+            await expectStatus("/", 200);
+            await expectStatus("/servers", 200);
+            await expectStatus("/dashboard", 200);
+            await expectStatus("/dzn-pulse", 200);
+            await expectStatus("/api/public/servers", 200);
+            await expectStatus("/api/public/home-stats", 200);
+            await expectStatus("/api/public/server-rail", 200);
+            const pulseConfig = await ownerJson("/api/dzn-pulse/config", "", 200);
+            assert(pulseConfig.parsed?.dznPulseEnabled === true || pulseConfig.parsed?.config?.dznPulseEnabled === true, "DZN Pulse should remain enabled in preview config.");
+            assert(
+              pulseConfig.parsed?.discordNotificationsEnabled === false || pulseConfig.parsed?.config?.discordNotificationsEnabled === false,
+              "Discord Pulse delivery must remain false.",
+            );
+
+            console.log("Owner console preview verification passed.");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          {
+            echo "## DZN Owner Console Preview Result"
+            echo ""
+            echo "- Preview URL: ${PREVIEW_BASE_URL}"
+            echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
+            echo "- Preview D1 database id: ${PREVIEW_D1_DATABASE_ID}"
+            echo "- /owner logged-out protection: passed"
+            echo "- /owner non-owner 403: passed"
+            echo "- /owner allowlisted owner access: passed"
+            echo "- Owner API auth protection: passed"
+            echo "- Owner API secret redaction: passed"
+            echo "- Public routes/dashboard/dzn-pulse: passed"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Production D1 writes: none"
+            echo "- Production Pages deploy: none"
+          } >> "$GITHUB_STEP_SUMMARY"
