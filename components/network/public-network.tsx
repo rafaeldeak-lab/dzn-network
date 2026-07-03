@@ -54,6 +54,13 @@ type PublicServer = {
   server_type: string;
   tags_json: string;
   status: string;
+  lifecycle?: {
+    status: string;
+    label: string;
+    message: string;
+    owner_action?: string;
+    historical?: boolean;
+  };
   nitrado_service_name: string | null;
   guild_name: string | null;
   guild_icon_url: string | null;
@@ -1283,6 +1290,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
   const isLocked = Boolean(server.is_locked);
   const statsPending = server.stats_sync === "Pending";
   const statsActiveWithoutKills = server.stats_sync === "Active" && server.total_kills === 0;
+  const historicalLifecycle = Boolean(server.lifecycle?.historical);
   const players = server.top_players ?? [];
   const pvpLeaderboard = server.pvp_leaderboard ?? players;
   const kd = server.kd_label || calculateServerKd(server.total_kills, server.total_deaths);
@@ -1377,7 +1385,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">DZN Network</span>
-                <StatusPill label="Live" tone="emerald" pulse />
+                <StatusPill label={historicalLifecycle ? (server.lifecycle?.label ?? "Legacy / Offline") : "Live"} tone={historicalLifecycle ? "zinc" : "emerald"} pulse={!historicalLifecycle} />
               </div>
               <h1 className="mt-3 max-w-full break-words text-4xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-5xl lg:text-6xl">
                 {server.server_name}
@@ -1423,6 +1431,13 @@ function ServerProfile({ server }: { server: PublicServer }) {
           )}
         </div>
       </motion.header>
+
+      {historicalLifecycle ? (
+        <div className="mt-5 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-5 text-sm font-bold leading-6 text-cyan-50">
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100/75">{server.lifecycle?.label ?? "Legacy / Offline"}</p>
+          <p className="mt-2">{server.lifecycle?.message ?? "Historical stats are preserved and recurring live sync is stopped."}</p>
+        </div>
+      ) : null}
 
       {statsPending ? (
         <div className="mt-5 rounded-lg border border-orange-300/20 bg-orange-400/10 p-5 text-sm font-bold leading-6 text-orange-50">

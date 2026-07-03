@@ -2,7 +2,9 @@ import type { ParsedAdmEvent } from "./adm-parser";
 import { requireDb } from "./db";
 import type { Env } from "./types";
 import {
-  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
+  getServerLifecycleDisplay,
+  normalizeServerLifecycleStatus,
   serverLifecycleInSql,
   serverLifecycleSqlExpression,
 } from "../../lib/server-lifecycle";
@@ -62,6 +64,10 @@ export type PublicBuildLeaderboardRow = {
   server_id: string;
   server_name: string;
   slug: string | null;
+  lifecycle_status?: string;
+  lifecycle_label?: string;
+  lifecycle_message?: string;
+  historical?: boolean;
   structures_built: number;
   build_items_placed: number;
   storage_items_placed: number;
@@ -76,6 +82,7 @@ type BuildServerRow = {
   server_id: string;
   server_name: string | null;
   slug: string | null;
+  lifecycle_status: string | null;
   structures_built: number | null;
   build_items_placed: number | null;
   storage_items_placed: number | null;
@@ -414,6 +421,7 @@ export async function getRankedBuildServers(env: Env, limit = 10): Promise<Publi
         linked_servers.id AS server_id,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         linked_servers.public_slug AS slug,
+        ${serverLifecycleSqlExpression("linked_servers")} AS lifecycle_status,
         COALESCE(server_build_stats.structures_built, 0) AS structures_built,
         COALESCE(server_build_stats.build_items_placed, 0) AS build_items_placed,
         COALESCE(server_build_stats.storage_items_placed, 0) AS storage_items_placed,
@@ -424,8 +432,8 @@ export async function getRankedBuildServers(env: Env, limit = 10): Promise<Publi
         server_build_stats.last_build_at
        FROM linked_servers
        LEFT JOIN server_build_stats ON server_build_stats.linked_server_id = linked_servers.id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
+       WHERE ${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES)})
+         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY build_score DESC, structures_built DESC, last_build_at DESC
        LIMIT ?`,
@@ -433,20 +441,28 @@ export async function getRankedBuildServers(env: Env, limit = 10): Promise<Publi
     .bind(Math.min(Math.max(Math.trunc(limit), 1), 50))
     .all<BuildServerRow>();
 
-  return (result.results ?? []).map((row, index) => ({
-    rank: index + 1,
-    server_id: row.server_id,
-    server_name: row.server_name ?? "Unnamed DZN Server",
-    slug: row.slug ?? null,
-    structures_built: numberOrZero(row.structures_built),
-    build_items_placed: numberOrZero(row.build_items_placed),
-    storage_items_placed: numberOrZero(row.storage_items_placed),
-    traps_placed: numberOrZero(row.traps_placed),
-    build_score: numberOrZero(row.build_score),
-    top_builder_name: row.top_builder_name ?? null,
-    top_builder_count: numberOrZero(row.top_builder_count),
-    last_build_at: row.last_build_at ?? null,
-  }));
+  return (result.results ?? []).map((row, index) => {
+    const lifecycleStatus = normalizeServerLifecycleStatus(row.lifecycle_status);
+    const lifecycleDisplay = getServerLifecycleDisplay(lifecycleStatus);
+    return {
+      rank: index + 1,
+      server_id: row.server_id,
+      server_name: row.server_name ?? "Unnamed DZN Server",
+      slug: row.slug ?? null,
+      lifecycle_status: lifecycleStatus,
+      lifecycle_label: lifecycleDisplay.label,
+      lifecycle_message: lifecycleDisplay.message,
+      historical: lifecycleStatus === "legacy_offline" || lifecycleStatus === "final_sync_complete",
+      structures_built: numberOrZero(row.structures_built),
+      build_items_placed: numberOrZero(row.build_items_placed),
+      storage_items_placed: numberOrZero(row.storage_items_placed),
+      traps_placed: numberOrZero(row.traps_placed),
+      build_score: numberOrZero(row.build_score),
+      top_builder_name: row.top_builder_name ?? null,
+      top_builder_count: numberOrZero(row.top_builder_count),
+      last_build_at: row.last_build_at ?? null,
+    };
+  });
 }
 
 function classifyPlacedObject(placedClass: string | null, placedObject: string | null): BuildCategory {

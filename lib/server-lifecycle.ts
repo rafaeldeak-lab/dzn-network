@@ -74,6 +74,19 @@ export const SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES: ServerLifecycleStatus[] = [
   "stale_monitoring",
 ];
 
+export const SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES: ServerLifecycleStatus[] = [
+  "active_live",
+  "active_degraded",
+  "token_needs_resave",
+  "nitrado_upstream_down",
+  "stale_monitoring",
+  "expired_detected",
+  "deletion_imminent",
+  "final_sync_pending",
+  "final_sync_complete",
+  "legacy_offline",
+];
+
 export const SERVER_LIFECYCLE_HEALTH_WARNING_ONLY: ServerLifecycleStatus[] = [
   "token_needs_resave",
   "nitrado_upstream_down",

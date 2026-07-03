@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES,
   SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES,
+  SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
   SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
   canRunServerLifecycleTask,
   classifyServerLifecycleError,
@@ -29,6 +30,19 @@ assert.deepEqual(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES, [
   "nitrado_upstream_down",
   "stale_monitoring",
 ]);
+assert.deepEqual(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES, [
+  "active_live",
+  "active_degraded",
+  "token_needs_resave",
+  "nitrado_upstream_down",
+  "stale_monitoring",
+  "expired_detected",
+  "deletion_imminent",
+  "final_sync_pending",
+  "final_sync_complete",
+  "legacy_offline",
+]);
+assert.equal(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES.includes("archived_hidden"), false);
 
 assert.equal(normalizeServerLifecycleStatus({ status: "archived", lifecycle_status: "active_live" }), "archived_hidden");
 assert.equal(normalizeServerLifecycleStatus({ listing_visibility: "hidden", lifecycle_status: "active_live" }), "archived_hidden");
@@ -102,14 +116,14 @@ assert.equal(metadataSource.includes("serverLifecycleSqlExpression(\"linked_serv
 assert.equal(metadataSource.includes("next_retry_after"), true);
 
 for (const [file, snippets] of [
-  ["functions/api/public/servers.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES", "serverLifecycleSqlExpression(\"linked_servers\")"]],
+  ["functions/api/public/servers.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES", "SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES", "serverLifecycleSqlExpression(\"linked_servers\")"]],
   ["functions/api/public/server-rail.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES", "serverLifecycleSqlExpression(\"linked_servers\")"]],
-  ["functions/api/public/home-stats.ts", ["PUBLIC_LINKED_SERVER_LIFECYCLE_SQL", "PUBLIC_LIVE_KILL_SERVER_LIFECYCLE_SQL"]],
+  ["functions/api/public/home-stats.ts", ["PUBLIC_LINKED_SERVER_LIFECYCLE_SQL", "PUBLIC_HISTORICAL_LINKED_SERVER_LIFECYCLE_SQL", "PUBLIC_LIVE_KILL_SERVER_LIFECYCLE_SQL"]],
   ["functions/_lib/public-leaderboards.ts", ["PUBLIC_LIFECYCLE_SQL"]],
-  ["functions/_lib/advanced-leaderboards.ts", ["publicServerWhereSql", "SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES"]],
+  ["functions/_lib/advanced-leaderboards.ts", ["publicServerWhereSql", "SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES"]],
   ["functions/_lib/player-counts.ts", ["PUBLIC_PLAYER_COUNT_LIFECYCLE_SQL"]],
-  ["functions/_lib/server-stats.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES"]],
-  ["functions/_lib/build-events.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES"]],
+  ["functions/_lib/server-stats.ts", ["SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES", "PUBLIC_HISTORICAL_SERVER_SCOPE"]],
+  ["functions/_lib/build-events.ts", ["SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES"]],
 ] as const) {
   const source = readFileSync(file, "utf8");
   for (const snippet of snippets) {
@@ -152,5 +166,23 @@ assert.equal(
   false,
   "Dashboard must not render raw advanced_stats_snapshot_pending fallback text.",
 );
+
+const publicNetwork = readFileSync("components/network/public-network.tsx", "utf8");
+for (const snippet of [
+  "Legacy / Offline",
+  "Historical stats are preserved",
+  "server.lifecycle?.historical",
+]) {
+  assert.equal(publicNetwork.includes(snippet), true, `Public profile should include historical lifecycle copy ${snippet}.`);
+}
+
+const landingPage = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
+for (const snippet of [
+  "row.historical",
+  "lifecycle_label",
+  "Legacy / Offline",
+]) {
+  assert.equal(landingPage.includes(snippet), true, `Build tracking should preserve visible legacy labels with ${snippet}.`);
+}
 
 console.log("Server lifecycle resource-control tests passed.");

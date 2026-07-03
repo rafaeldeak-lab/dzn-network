@@ -29,12 +29,15 @@ import {
 } from "../../_lib/server-stats";
 import type { Env, PagesFunction } from "../../_lib/types";
 import {
+  SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
   SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
   serverLifecycleInSql,
   serverLifecycleSqlExpression,
 } from "../../../lib/server-lifecycle";
 
 const PUBLIC_LINKED_SERVER_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})`;
+const PUBLIC_HISTORICAL_LINKED_SERVER_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES)})`;
+const PUBLIC_HISTORICAL_BUILD_SERVER_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("build_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES)})`;
 const PUBLIC_LIVE_KILL_SERVER_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("live_kill_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})`;
 const PUBLIC_LIVE_DEATH_SERVER_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("live_death_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})`;
 const PUBLIC_LIVE_LONGEST_SERVER_LIFECYCLE_SQL = `${serverLifecycleSqlExpression("live_longest_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})`;
@@ -678,8 +681,22 @@ async function getTotals(db: D1Database) {
             AND lower(COALESCE(live_longest_servers.listing_visibility, 'public')) != 'hidden'
             AND (live_longest_servers.merged_into_server_id IS NULL OR live_longest_servers.merged_into_server_id = '')
         ) AS longestKill,
-        SUM(COALESCE(server_build_stats.structures_built, 0)) AS structuresBuilt,
-        SUM(COALESCE(server_build_stats.build_score, 0)) AS buildScore
+        (
+          SELECT SUM(COALESCE(server_build_stats.structures_built, 0))
+          FROM server_build_stats
+          INNER JOIN linked_servers AS build_servers ON build_servers.id = server_build_stats.linked_server_id
+          WHERE ${PUBLIC_HISTORICAL_BUILD_SERVER_LIFECYCLE_SQL}
+            AND lower(COALESCE(build_servers.listing_visibility, 'public')) != 'hidden'
+            AND (build_servers.merged_into_server_id IS NULL OR build_servers.merged_into_server_id = '')
+        ) AS structuresBuilt,
+        (
+          SELECT SUM(COALESCE(server_build_stats.build_score, 0))
+          FROM server_build_stats
+          INNER JOIN linked_servers AS build_servers ON build_servers.id = server_build_stats.linked_server_id
+          WHERE ${PUBLIC_HISTORICAL_BUILD_SERVER_LIFECYCLE_SQL}
+            AND lower(COALESCE(build_servers.listing_visibility, 'public')) != 'hidden'
+            AND (build_servers.merged_into_server_id IS NULL OR build_servers.merged_into_server_id = '')
+        ) AS buildScore
        FROM linked_servers
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
        LEFT JOIN server_build_stats ON server_build_stats.linked_server_id = linked_servers.id
@@ -950,8 +967,7 @@ async function getBuildLeaderboardBreakdowns(db: D1Database) {
         ) AS storage_expansion_built
        FROM build_events
        INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${PUBLIC_LINKED_SERVER_LIFECYCLE_SQL}
+       WHERE ${PUBLIC_HISTORICAL_LINKED_SERVER_LIFECYCLE_SQL}
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        GROUP BY build_events.linked_server_id`,
@@ -1068,15 +1084,14 @@ async function getCalculatedNetworkEventTotal(db: D1Database) {
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("player_events.player_name")}
          UNION ALL
-         SELECT COUNT(*) AS count
-         FROM build_events
-         INNER JOIN linked_servers ON linked_servers.id = build_events.linked_server_id
-         WHERE lower(linked_servers.status) = 'live'
-           AND ${PUBLIC_LINKED_SERVER_LIFECYCLE_SQL}
-           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
-           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-           AND ${mockNameFilterSql("build_events.player_name")}
-       )`,
+        SELECT COUNT(*) AS count
+        FROM build_events
+        INNER JOIN linked_servers AS build_servers ON build_servers.id = build_events.linked_server_id
+        WHERE ${PUBLIC_HISTORICAL_BUILD_SERVER_LIFECYCLE_SQL}
+          AND lower(COALESCE(build_servers.listing_visibility, 'public')) != 'hidden'
+          AND (build_servers.merged_into_server_id IS NULL OR build_servers.merged_into_server_id = '')
+          AND ${mockNameFilterSql("build_events.player_name")}
+      )`,
     )
     .first<{ count: number | null }>()
     .catch(() => null);
@@ -1095,8 +1110,7 @@ async function getServerStatsNetworkEventTotal(db: D1Database) {
       ) AS count
        FROM server_stats
        INNER JOIN linked_servers ON linked_servers.id = server_stats.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${PUBLIC_LINKED_SERVER_LIFECYCLE_SQL}
+       WHERE ${PUBLIC_HISTORICAL_LINKED_SERVER_LIFECYCLE_SQL}
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
     )

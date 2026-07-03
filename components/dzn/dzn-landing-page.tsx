@@ -194,6 +194,10 @@ type PublicBuildServer = {
   server_id: string;
   server_name: string;
   slug: string | null;
+  lifecycle_status?: string | null;
+  lifecycle_label?: string | null;
+  lifecycle_message?: string | null;
+  historical?: boolean;
   structures_built: number;
   build_items_placed: number;
   storage_items_placed: number;
@@ -1873,7 +1877,7 @@ function BuildTrackingLeaderboard({ leaderboard }: { leaderboard: PublicEventLea
                   </span>
                   <a href={href} className="dzn-build-table-server">
                     <span>{formatServerDisplayName(row.server_name || "Unknown Server")}</span>
-                    <em><i /> Build tracked</em>
+                    <em><i /> {row.historical ? (row.lifecycle_label ?? "Legacy / Offline") : "Build tracked"}</em>
                   </a>
                   <span className="dzn-build-table-metric">
                     <small>Build Score</small>
@@ -2006,6 +2010,10 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
         server_id: typeof row.server_id === "string" ? row.server_id : "",
         server_name: typeof row.server_name === "string" && row.server_name.trim() ? row.server_name : "Unnamed DZN Server",
         slug: typeof row.slug === "string" && row.slug.trim() ? row.slug : null,
+        lifecycle_status: typeof row.lifecycle_status === "string" ? row.lifecycle_status : null,
+        lifecycle_label: typeof row.lifecycle_label === "string" ? row.lifecycle_label : null,
+        lifecycle_message: typeof row.lifecycle_message === "string" ? row.lifecycle_message : null,
+        historical: row.historical === true,
         structures_built: numberOrZero(row.structures_built),
         build_items_placed: numberOrZero(row.build_items_placed),
         storage_items_placed: numberOrZero(row.storage_items_placed),
@@ -2294,6 +2302,10 @@ function normalizeBuildServerRow(value: unknown): PublicBuildServer {
     server_id: typeof row.server_id === "string" ? row.server_id : "",
     server_name: typeof row.server_name === "string" && row.server_name.trim() ? row.server_name : "Unnamed DZN Server",
     slug: typeof row.slug === "string" && row.slug.trim() ? row.slug : null,
+    lifecycle_status: typeof row.lifecycle_status === "string" ? row.lifecycle_status : null,
+    lifecycle_label: typeof row.lifecycle_label === "string" ? row.lifecycle_label : null,
+    lifecycle_message: typeof row.lifecycle_message === "string" ? row.lifecycle_message : null,
+    historical: row.historical === true,
     structures_built: numberOrZero(row.structures_built),
     build_items_placed: numberOrZero(row.build_items_placed),
     storage_items_placed: numberOrZero(row.storage_items_placed),
