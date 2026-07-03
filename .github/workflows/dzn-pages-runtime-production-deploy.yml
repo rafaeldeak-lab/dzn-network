@@ -1,0 +1,230 @@
+name: DZN Pages Runtime Production Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Approved runtime branch to deploy
+        required: true
+        default: feature/server-lifecycle-resource-control
+      approved_commit:
+        description: Exact approved runtime commit SHA
+        required: true
+        default: 05089038f3698dd9fa69453ac5644f9f44b72674
+      confirm_runtime_deploy:
+        description: Must equal APPROVE_PAGES_RUNTIME_DEPLOY
+        required: true
+      production_pages_project_name:
+        description: Production Pages project name
+        required: true
+        default: dzn-network
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: dzn-pages-runtime-production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  APPROVED_BRANCH: feature/server-lifecycle-resource-control
+  APPROVED_COMMIT: 05089038f3698dd9fa69453ac5644f9f44b72674
+  PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+  PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+  DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+  CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+  CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+  CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+  CLOUDFLARE_API_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(join(github.event.commits.*.message, '\n'), '[run-dzn-pages-runtime-production-deploy]')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate runtime deploy guard
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.confirm_runtime_deploy || '' }}" != "APPROVE_PAGES_RUNTIME_DEPLOY" ]; then
+              echo "::error::confirm_runtime_deploy must equal APPROVE_PAGES_RUNTIME_DEPLOY."
+              exit 1
+            fi
+            if [ "${{ inputs.branch || '' }}" != "${APPROVED_BRANCH}" ]; then
+              echo "::error::Runtime deploy may only deploy ${APPROVED_BRANCH}."
+              exit 1
+            fi
+            if [ "${{ inputs.approved_commit || '' }}" != "${APPROVED_COMMIT}" ]; then
+              echo "::error::approved_commit must equal ${APPROVED_COMMIT}."
+              exit 1
+            fi
+            if [ "${{ inputs.production_pages_project_name || '' }}" != "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+              echo "::error::production_pages_project_name must equal ${PRODUCTION_PAGES_PROJECT_NAME}."
+              exit 1
+            fi
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Production Pages runtime deploy may only be triggered from main."
+            exit 1
+          fi
+
+          if [ "${PRODUCTION_PAGES_PROJECT_NAME}" != "dzn-network" ]; then
+            echo "::error::Production Pages project guard failed."
+            exit 1
+          fi
+
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+
+          ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN:-${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-${CLOUDFLARE_API_TOKEN_FALLBACK:-}}}}"
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN, CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PRODUCTION_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}" >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+
+      - name: Checkout approved runtime commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.APPROVED_BRANCH }}
+          fetch-depth: 0
+
+      - name: Confirm approved commit
+        run: |
+          set -euo pipefail
+
+          git fetch origin "${APPROVED_BRANCH}"
+          RUNTIME_COMMIT="$(git rev-parse HEAD)"
+          if [ "${RUNTIME_COMMIT}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::Selected runtime branch HEAD ${RUNTIME_COMMIT} does not match approved commit ${APPROVED_COMMIT}."
+            exit 1
+          fi
+
+          {
+            echo "## DZN Pages Runtime Production Deploy"
+            echo "- Runtime branch: ${APPROVED_BRANCH}"
+            echo "- Runtime commit: ${RUNTIME_COMMIT}"
+            echo "- Production Pages project: ${PRODUCTION_PAGES_PROJECT_NAME}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- D1 migration: not run"
+            echo "- D1 writes: not performed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate runtime build
+        run: |
+          set -euo pipefail
+          npm run lint
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npm run test:server-lifecycle-resource-control
+          npm run test:public-access-gating
+          npm run test:metadata-sync-runner
+          npm run test:automation-schedulers
+          npm run test:server-advertising-packages
+          git diff --check
+
+      - name: Deploy production Pages runtime only
+        run: |
+          set -euo pipefail
+
+          npx wrangler pages deploy out \
+            --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
+            --branch main \
+            --commit-hash "${APPROVED_COMMIT}" \
+            --commit-message "Deploy PANDORA historical visibility runtime fix" \
+            | tee pages-runtime-production-deploy.txt
+
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' pages-runtime-production-deploy.txt | head -n 1 || true)"
+          if [ -z "${DEPLOY_URL:-}" ]; then
+            DEPLOY_URL="${PRODUCTION_BASE_URL}"
+          fi
+          echo "PRODUCTION_DEPLOY_URL=${DEPLOY_URL}" >> "$GITHUB_ENV"
+          {
+            echo "- Production stable URL: ${PRODUCTION_BASE_URL}"
+            echo "- Production deployment URL: ${DEPLOY_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify production public routes
+        run: |
+          set -euo pipefail
+
+          sleep 20
+
+          node <<'NODE'
+          const base = process.env.PRODUCTION_BASE_URL || "https://dzn-network.pages.dev";
+          const paths = [
+            "/",
+            "/servers",
+            "/api/public/servers",
+            "/api/public/home-stats",
+            "/api/public/server-rail",
+            "/api/public/leaderboards",
+            "/api/public/leaderboards/advanced",
+            "/api/public/server-wars",
+            "/api/dzn-pulse/config",
+          ];
+
+          async function fetchWithRetry(path) {
+            const url = `${base}${path}`;
+            let lastStatus = 0;
+            let lastText = "";
+            for (let attempt = 1; attempt <= 4; attempt += 1) {
+              const response = await fetch(url, {
+                headers: { "cache-control": "no-cache" },
+              });
+              lastStatus = response.status;
+              lastText = await response.text();
+              if (response.status === 200) {
+                if (lastText.includes("Error 1102") || lastText.includes("Minified React error #")) {
+                  throw new Error(`${path} returned runtime error text.`);
+                }
+                return { status: response.status, text: lastText };
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+            throw new Error(`${path} returned HTTP ${lastStatus}: ${lastText.slice(0, 160)}`);
+          }
+
+          const results = {};
+          for (const path of paths) {
+            results[path] = await fetchWithRetry(path);
+          }
+
+          const pulse = JSON.parse(results["/api/dzn-pulse/config"].text);
+          if (pulse.dznPulseEnabled !== true) {
+            throw new Error("DZN Pulse is not enabled after runtime deploy.");
+          }
+          if (pulse.discordNotificationsEnabled !== false) {
+            throw new Error("DZN Discord Pulse delivery is not false after runtime deploy.");
+          }
+
+          console.log("Production public route verification passed.");
+          NODE
+
+          {
+            echo "- Public route verification: passed"
+            echo "- DZN Pulse enabled: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
