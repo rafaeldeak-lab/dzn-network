@@ -426,7 +426,7 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
     owner: {
       userId: stringOrNull(row.user_id),
       username: stringOrNull(row.owner_username),
-      discordId: stringOrNull(row.owner_discord_id),
+      discordId: maskDiscordId(row.owner_discord_id),
     },
     guild: {
       guildId: stringOrNull(row.guild_id),
@@ -624,4 +624,11 @@ function safeStatusText(value: unknown) {
     .replace(/[A-Za-z0-9+/=]{32,}/g, "[redacted]")
     .replace(/(token|secret|key)=\S+/gi, "$1=[redacted]")
     .slice(0, 240);
+}
+
+function maskDiscordId(value: unknown) {
+  const text = stringOrNull(value);
+  if (!text) return null;
+  if (text.length <= 8) return "[redacted]";
+  return `${text.slice(0, 4)}...${text.slice(-4)}`;
 }

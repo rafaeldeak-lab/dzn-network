@@ -81,6 +81,16 @@ assert.equal(nuketown.knownRole, "nuketown");
 assert.equal(nuketown.lifecycleStatus, "active_live");
 assert.equal(nuketown.resource.consumingScheduledResources, true);
 
+const maskedOwner = mapOwnerServerRowForTest({
+  id: "server-owner-mask",
+  server_name: "Owner Mask Test",
+  owner_discord_id: "111111111111111111",
+  lifecycle_status: "active_live",
+  status: "live",
+});
+assert.equal(maskedOwner.owner.discordId, "1111...1111");
+assert.notEqual(maskedOwner.owner.discordId, "111111111111111111");
+
 const warlords = mapOwnerServerRowForTest({
   id: "server-warlords",
   server_name: "Warlords PvP",
