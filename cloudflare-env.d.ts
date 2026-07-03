@@ -38,6 +38,7 @@ interface CloudflareEnv {
   SYNC_WORKER_HEALTH_TOKEN?: string;
   DZN_ADMIN_DISCORD_IDS?: string;
   DZN_OWNER_DISCORD_IDS?: string;
+  DZN_PLATFORM_OWNER_DISCORD_IDS?: string;
   DZN_SUPPORT_DISCORD_IDS?: string;
   DZN_DEV_DISCORD_IDS?: string;
   DISCORD_BOT_TOKEN?: string;
