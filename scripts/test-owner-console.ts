@@ -10,6 +10,7 @@ import {
   getOwnerLifecycleLabel,
   mapOwnerServerRowForTest,
 } from "../functions/_lib/owner-console";
+import { buildOwnerDiscordPreviewEmbed } from "../functions/_lib/owner-discord-control";
 
 const ownerEnv = { DZN_PLATFORM_OWNER_DISCORD_IDS: "111111111111111111, 222222222222222222 , not-an-id" };
 
@@ -32,6 +33,21 @@ assert.deepEqual(authorizePlatformOwnerUser(ownerEnv, { discord_id: "33333333333
   reason: "forbidden",
 });
 assert.equal(authorizePlatformOwnerUser(ownerEnv, { discord_id: "111111111111111111" }).ok, true);
+
+const discordPreview = buildOwnerDiscordPreviewEmbed(
+  { DZN_DISCORD_NOTIFICATIONS_ENABLED: "false" },
+  { type: "new_server", title: "Custom owner preview", description: "Preview text only", colorHex: "#22d3ee" },
+);
+assert.equal(discordPreview.type, "new_server");
+assert.equal(discordPreview.title, "Custom owner preview");
+assert.equal(discordPreview.previewOnly, true);
+assert.equal(discordPreview.sent, false);
+assert.equal(discordPreview.footer, "Preview only - not sent");
+assert.doesNotMatch(JSON.stringify(discordPreview), /\btoken\b|\bsecret\b|\bwebhook\b|\bTOKEN_ENCRYPTION_KEY\b/i);
+
+const fallbackDiscordPreview = buildOwnerDiscordPreviewEmbed({}, { type: "unknown" });
+assert.equal(fallbackDiscordPreview.type, "weekly_recap");
+assert.equal(fallbackDiscordPreview.sent, false);
 
 const activeResources = buildOwnerResourceState({ lifecycle_status: "active_live", status: "live", listing_visibility: "public" });
 assert.equal(activeResources.admSyncEnabled, true);
@@ -136,6 +152,26 @@ for (const file of [
   assert.match(source, /methodNotAllowed/, `${file} must reject write methods`);
 }
 
+for (const file of [
+  "functions/api/owner/discord/overview.ts",
+  "functions/api/owner/discord/post-types.ts",
+  "functions/api/owner/discord/channels.ts",
+  "functions/api/owner/discord/templates.ts",
+]) {
+  const source = readFileSync(file, "utf8");
+  assert.match(source, /requirePlatformOwner/, `${file} must require platform-owner auth`);
+  assert.match(source, /onRequestGet/, `${file} must expose a read-only GET`);
+  assert.match(source, /methodNotAllowed/, `${file} must reject write methods`);
+  assert.doesNotMatch(source, /discord-posting|sendDiscord|sendOrEdit|webhook/i, `${file} must not use live Discord send paths`);
+}
+
+const previewEmbedApiSource = readFileSync("functions/api/owner/discord/preview-embed.ts", "utf8");
+assert.match(previewEmbedApiSource, /requirePlatformOwner/);
+assert.match(previewEmbedApiSource, /onRequestPost/);
+assert.match(previewEmbedApiSource, /sent:\s*false/);
+assert.match(previewEmbedApiSource, /preview_only/);
+assert.doesNotMatch(previewEmbedApiSource, /discord-posting|sendDiscord|sendOrEdit|fetch\s*\(|webhook/i);
+
 const ownerDataSource = readFileSync("functions/_lib/owner-console.ts", "utf8");
 assert.doesNotMatch(ownerDataSource, /\bnitrado_connections\b/i);
 assert.doesNotMatch(ownerDataSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_auth_tag\b|\bDISCORD_BOT_TOKEN\b|\bSESSION_SECRET\b/i);
@@ -144,12 +180,29 @@ assert.match(ownerDataSource, /server_sync_state/);
 assert.match(ownerDataSource, /adm_sync_state/);
 assert.match(ownerDataSource, /server_public_cache/);
 
+const ownerDiscordSource = readFileSync("functions/_lib/owner-discord-control.ts", "utf8");
+assert.match(ownerDiscordSource, /readDznFeatureFlags/);
+assert.match(ownerDiscordSource, /discordNotificationsEnabled/);
+assert.match(ownerDiscordSource, /botTokenPresent/);
+assert.match(ownerDiscordSource, /productionSendingDisabled:\s*true/);
+assert.match(ownerDiscordSource, /Preview only - not sent/);
+assert.doesNotMatch(ownerDiscordSource, /from "\.\/discord-posting"|sendDiscord|sendOrEdit|fetch\s*\(/i);
+assert.doesNotMatch(ownerDiscordSource, /TOKEN_ENCRYPTION_KEY|SESSION_SECRET|CLOUDFLARE/i);
+
 const ownerUiSource = readFileSync("components/owner/owner-console.tsx", "utf8");
 for (const label of [
   "Live sync active",
   "Token needs re-save",
   "Legacy offline - historical stats preserved",
   "Archived / hidden - active sync disabled",
+  "Discord Control",
+  "DZN Discord command centre",
+  "Auto Post Types",
+  "Embed Preview Builder",
+  "Channel Mapping",
+  "Production Discord posting",
+  "Preview only - not sent",
+  "Send test embed",
   "No owner actions recorded yet.",
   "Phase 2",
   "Read-only",

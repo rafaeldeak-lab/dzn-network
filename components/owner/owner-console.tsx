@@ -130,6 +130,81 @@ type AuditLog = {
   items: never[];
 };
 
+type DiscordPostingMode = "disabled" | "preview_only" | "production_disabled" | "ready_but_off";
+
+type DiscordOverview = {
+  integrationStatus: string;
+  botConfigured: boolean;
+  botTokenPresent: boolean;
+  discordPulseDeliveryEnabled: boolean;
+  discordNotificationsEnabled: boolean;
+  connectedGuildCount: number | null;
+  configuredChannelCount: number | null;
+  lastPostAttempt: {
+    postType: string | null;
+    guildId: string | null;
+    channelId: string | null;
+    status: string | null;
+    attemptedAt: string | null;
+    error: string | null;
+  } | null;
+  postingMode: DiscordPostingMode;
+  generatedAt: string;
+};
+
+type DiscordPostType = {
+  key: string;
+  label: string;
+  enabled: boolean;
+  productionSendingDisabled: boolean;
+  previewAvailable: boolean;
+  channelTarget: string | null;
+  channelConfigured: boolean;
+  lastGeneratedPreview: string | null;
+  requiredDataSource: string;
+};
+
+type DiscordChannelSlot = {
+  slot: string;
+  label: string;
+  status: "not_configured" | "configured" | "missing_permission" | "disabled" | "preview_only";
+  channelId: string | null;
+  guildId: string | null;
+  mappedPostTypes: string[];
+  webhookConfigured: boolean;
+};
+
+type DiscordPreviewType = "new_server" | "top_server" | "legacy_server" | "archived_server" | "server_wars_event" | "weekly_recap";
+
+type DiscordPreviewEmbed = {
+  type: DiscordPreviewType;
+  title: string;
+  description: string;
+  colorHex: string;
+  thumbnailUrl: string | null;
+  bannerUrl: string | null;
+  fields: Array<{ name: string; value: string; inline: boolean }>;
+  footer: string;
+  timestamp: string;
+  cta: { label: string; url: string } | null;
+  previewOnly: true;
+  sent: false;
+};
+
+type DiscordTemplate = {
+  type: DiscordPreviewType;
+  label: string;
+  description: string;
+  preview: DiscordPreviewEmbed;
+};
+
+type DiscordControlData = {
+  overview: DiscordOverview;
+  postTypes: DiscordPostType[];
+  channels: DiscordChannelSlot[];
+  templates: DiscordTemplate[];
+};
+
 const LIFECYCLE_COPY: { status: LifecycleStatus; label: string; description: string }[] = [
   { status: "active_live", label: "Live sync active", description: "Full ADM, metadata, player-count, posting and live eligibility remain enabled." },
   { status: "active_degraded", label: "Live but degraded", description: "Sync runs with backoff while preserving last known good values." },
@@ -149,6 +224,7 @@ const NAV_ITEMS = [
   "Servers",
   "Lifecycle",
   "Resource Control",
+  "Discord Control",
   "Audit Log",
   "Settings / Access",
 ] as const;
@@ -160,6 +236,7 @@ export function OwnerConsole() {
   const [overview, setOverview] = useState<OwnerOverview | null>(null);
   const [servers, setServers] = useState<OwnerServer[]>([]);
   const [auditLog, setAuditLog] = useState<AuditLog | null>(null);
+  const [discordControl, setDiscordControl] = useState<DiscordControlData | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unauthorized" | "forbidden" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -168,29 +245,38 @@ export function OwnerConsole() {
 
     async function loadOwnerConsole() {
       try {
-        const [overviewResponse, serversResponse, auditResponse] = await Promise.all([
+        const [overviewResponse, serversResponse, auditResponse, discordOverviewResponse, discordPostTypesResponse, discordChannelsResponse, discordTemplatesResponse] = await Promise.all([
           fetch("/api/owner/overview", { cache: "no-store" }),
           fetch("/api/owner/servers", { cache: "no-store" }),
           fetch("/api/owner/audit-log", { cache: "no-store" }),
+          fetch("/api/owner/discord/overview", { cache: "no-store" }),
+          fetch("/api/owner/discord/post-types", { cache: "no-store" }),
+          fetch("/api/owner/discord/channels", { cache: "no-store" }),
+          fetch("/api/owner/discord/templates", { cache: "no-store" }),
         ]);
 
         if (!active) return;
 
-        const firstBlocked = [overviewResponse, serversResponse, auditResponse].find((response) => response.status === 401 || response.status === 403);
+        const responses = [overviewResponse, serversResponse, auditResponse, discordOverviewResponse, discordPostTypesResponse, discordChannelsResponse, discordTemplatesResponse];
+        const firstBlocked = responses.find((response) => response.status === 401 || response.status === 403);
         if (firstBlocked) {
           setStatus(firstBlocked.status === 401 ? "unauthorized" : "forbidden");
           return;
         }
-        if (!overviewResponse.ok || !serversResponse.ok || !auditResponse.ok) {
+        if (responses.some((response) => !response.ok)) {
           setStatus("error");
           setError("Owner console data could not be loaded.");
           return;
         }
 
-        const [overviewJson, serversJson, auditJson] = await Promise.all([
+        const [overviewJson, serversJson, auditJson, discordOverviewJson, discordPostTypesJson, discordChannelsJson, discordTemplatesJson] = await Promise.all([
           overviewResponse.json(),
           serversResponse.json(),
           auditResponse.json(),
+          discordOverviewResponse.json(),
+          discordPostTypesResponse.json(),
+          discordChannelsResponse.json(),
+          discordTemplatesResponse.json(),
         ]);
 
         if (!active) return;
@@ -198,6 +284,12 @@ export function OwnerConsole() {
         setOverview(overviewJson.overview);
         setServers(serversJson.servers ?? []);
         setAuditLog(auditJson.auditLog);
+        setDiscordControl({
+          overview: discordOverviewJson.overview,
+          postTypes: discordPostTypesJson.postTypes ?? [],
+          channels: discordChannelsJson.channels ?? [],
+          templates: discordTemplatesJson.templates ?? [],
+        });
         setStatus("ready");
       } catch {
         if (!active) return;
@@ -253,6 +345,7 @@ export function OwnerConsole() {
       {activeView === "Servers" ? <ServersPanel servers={servers} /> : null}
       {activeView === "Lifecycle" ? <LifecyclePanel lifecycleCounts={lifecycleCounts} /> : null}
       {activeView === "Resource Control" ? <ResourceControlPanel servers={servers} /> : null}
+      {activeView === "Discord Control" && discordControl ? <DiscordControlPanel data={discordControl} /> : null}
       {activeView === "Audit Log" ? <AuditLogPanel auditLog={auditLog} /> : null}
       {activeView === "Settings / Access" && overview ? <SettingsPanel overview={overview} /> : null}
     </OwnerShell>
@@ -505,6 +598,224 @@ function ResourceControlPanel({ servers }: { servers: OwnerServer[] }) {
   );
 }
 
+function DiscordControlPanel({ data }: { data: DiscordControlData }) {
+  const [selectedType, setSelectedType] = useState<DiscordPreviewType>(data.templates[0]?.type ?? "weekly_recap");
+  const [preview, setPreview] = useState<DiscordPreviewEmbed | null>(data.templates[0]?.preview ?? null);
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">("idle");
+
+  const selectedTemplate = data.templates.find((template) => template.type === selectedType) ?? data.templates[0] ?? null;
+
+  async function generatePreview(type: DiscordPreviewType) {
+    setSelectedType(type);
+    setPreviewStatus("loading");
+    try {
+      const response = await fetch("/api/owner/discord/preview-embed", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type }),
+      });
+      if (!response.ok) throw new Error("preview_failed");
+      const json = await response.json();
+      setPreview(json.preview ?? selectedTemplate?.preview ?? null);
+      setPreviewStatus("idle");
+    } catch {
+      setPreview(selectedTemplate?.preview ?? preview);
+      setPreviewStatus("error");
+    }
+  }
+
+  const futureActions = [
+    "Send test embed",
+    "Enable post type",
+    "Disable post type",
+    "Set channel",
+    "Run Discord permission check",
+    "Send weekly recap now",
+    "Post announcement",
+    "Connect guild",
+    "Recheck bot permissions",
+  ];
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <PanelHeader eyebrow="Discord Control" title="DZN Discord command centre" description="Owner-only Discord status, post templates and embed previews. Phase 1 is read-only and never sends real Discord messages." />
+      <div className="grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-[360px_minmax(0,1fr)_420px]">
+        <div className="grid min-h-0 gap-3 overflow-auto pr-1">
+          <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <h2 className="text-lg font-black text-white">Discord Overview</h2>
+            <div className="mt-3 grid gap-2">
+              <StatusCard title="Integration status" value={ownerDiscordStatusLabel(data.overview.integrationStatus)} tone={data.overview.botConfigured ? "good" : "warn"} />
+              <StatusCard title="Bot token present" value={data.overview.botTokenPresent ? "Yes" : "No"} tone={data.overview.botTokenPresent ? "good" : "warn"} />
+              <StatusCard title="DZN_DISCORD_NOTIFICATIONS_ENABLED" value={data.overview.discordNotificationsEnabled ? "true" : "false"} tone={data.overview.discordNotificationsEnabled ? "warn" : "good"} />
+              <StatusCard title="Posting mode" value={postingModeLabel(data.overview.postingMode)} tone="good" />
+            </div>
+            <dl className="mt-3 grid gap-2 text-xs text-zinc-400">
+              <div className="flex justify-between gap-3 rounded border border-white/10 bg-black/25 px-3 py-2"><dt>Connected guilds</dt><dd>{data.overview.connectedGuildCount ?? "unknown"}</dd></div>
+              <div className="flex justify-between gap-3 rounded border border-white/10 bg-black/25 px-3 py-2"><dt>Configured channels</dt><dd>{data.overview.configuredChannelCount ?? "unknown"}</dd></div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <dt className="font-bold text-zinc-300">Last stored post attempt</dt>
+                <dd className="mt-1 text-zinc-500">
+                  {data.overview.lastPostAttempt
+                    ? `${data.overview.lastPostAttempt.postType ?? "unknown"} / ${data.overview.lastPostAttempt.status ?? "stored"} / ${formatDate(data.overview.lastPostAttempt.attemptedAt)}`
+                    : "No stored attempt found"}
+                </dd>
+                {data.overview.lastPostAttempt?.error ? <dd className="mt-1 text-amber-200">{data.overview.lastPostAttempt.error}</dd> : null}
+              </div>
+            </dl>
+          </section>
+
+          <section className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.04] p-3">
+            <h2 className="text-lg font-black text-white">Discord Safety / Guards</h2>
+            <div className="mt-3 grid gap-2">
+              <BooleanTile label="Production Discord posting" enabled={false} />
+              <BooleanTile label="Preview mode only" enabled />
+              <BooleanTile label="Secrets displayed" enabled={false} />
+              <BooleanTile label="Owner-only access" enabled />
+            </div>
+            <p className="mt-3 text-xs leading-5 text-zinc-400">
+              This console never returns bot tokens, client secrets, webhook URLs, Nitrado tokens, Cloudflare secrets or runtime encryption keys.
+            </p>
+          </section>
+
+          <section className="rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-3">
+            <h2 className="text-lg font-black text-white">Future Phase 2 Actions</h2>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              {futureActions.map((action) => (
+                <button key={action} type="button" disabled className="cursor-not-allowed rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-xs font-bold text-zinc-500">
+                  <span className="block text-[10px] uppercase tracking-[0.16em] text-amber-200">Phase 2</span>
+                  {action}
+                  <span className="mt-1 block text-[11px] text-zinc-600">Coming soon - read-only for now</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-white/[0.035]">
+          <div className="shrink-0 border-b border-white/10 p-3">
+            <h2 className="text-lg font-black text-white">Auto Post Types</h2>
+            <p className="mt-1 text-xs text-zinc-400">Production sending stays disabled. Each row shows stored channel state and preview availability.</p>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto p-3">
+            <div className="grid gap-2 lg:grid-cols-2">
+              {data.postTypes.map((postType) => (
+                <article key={postType.key} className="rounded-lg border border-white/10 bg-black/25 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-black text-white">{postType.label}</h3>
+                      <p className="mt-1 text-[11px] leading-4 text-zinc-500">{postType.requiredDataSource}</p>
+                    </div>
+                    <span className="rounded border border-cyan-300/20 bg-cyan-300/[0.06] px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-cyan-100">
+                      Preview
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-[11px] text-zinc-400 sm:grid-cols-2">
+                    <div>Enabled: {postType.enabled ? "yes" : "no"}</div>
+                    <div>Production: disabled</div>
+                    <div>Channel: {postType.channelTarget ?? "not configured"}</div>
+                    <div>Preview: {postType.previewAvailable ? "available" : "unavailable"}</div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <div className="grid min-h-0 gap-3 overflow-auto pr-1">
+          <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-white">Embed Preview Builder</h2>
+                <p className="mt-1 text-xs text-zinc-400">Local preview JSON only. Nothing is sent to Discord.</p>
+              </div>
+              <span className="rounded border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-amber-100">
+                Preview only - not sent
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {data.templates.map((template) => (
+                <button
+                  key={template.type}
+                  type="button"
+                  onClick={() => void generatePreview(template.type)}
+                  className={`rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${
+                    selectedType === template.type
+                      ? "border-cyan-300/40 bg-cyan-300/[0.10] text-white"
+                      : "border-white/10 bg-black/25 text-zinc-400 hover:border-white/20 hover:text-white"
+                  }`}
+                >
+                  {template.label}
+                  <span className="mt-1 block text-[11px] font-normal leading-4 text-zinc-500">{template.description}</span>
+                </button>
+              ))}
+            </div>
+            {previewStatus === "loading" ? <p className="mt-3 text-xs font-bold text-cyan-100">Generating preview...</p> : null}
+            {previewStatus === "error" ? <p className="mt-3 text-xs font-bold text-amber-200">Preview API failed. Showing stored template preview.</p> : null}
+            <DiscordEmbedPreview preview={preview ?? selectedTemplate?.preview ?? null} />
+          </section>
+
+          <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <h2 className="text-lg font-black text-white">Channel Mapping</h2>
+            <p className="mt-1 text-xs text-zinc-400">Read-only stored mappings. Live Discord permission checks are reserved for Phase 2.</p>
+            <div className="mt-3 grid gap-2">
+              {data.channels.map((channel) => (
+                <div key={channel.slot} className="rounded-lg border border-white/10 bg-black/25 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-black text-white">{channel.label}</h3>
+                      <p className="mt-1 text-[11px] text-zinc-500">{channel.mappedPostTypes.join(", ")}</p>
+                    </div>
+                    <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300">
+                      {channelStatusLabel(channel.status)}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid gap-1 text-xs text-zinc-500">
+                    <div>Guild: {channel.guildId ?? "not configured"}</div>
+                    <div>Channel: {channel.channelId ?? "not configured"}</div>
+                    <div>Webhook fallback: {channel.webhookConfigured ? "configured" : "not configured"}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DiscordEmbedPreview({ preview }: { preview: DiscordPreviewEmbed | null }) {
+  if (!preview) return null;
+  return (
+    <div className="mt-4 rounded-xl border border-[#2b2d31] bg-[#313338] p-3 text-[#dbdee1] shadow-[0_16px_50px_rgba(0,0,0,0.35)]">
+      <div className="rounded-lg border-l-4 bg-[#2b2d31] p-3" style={{ borderLeftColor: preview.colorHex }}>
+        {preview.bannerUrl ? <div className="mb-3 aspect-video rounded bg-black/30" /> : null}
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-black text-white">{preview.title}</h3>
+            <p className="mt-2 text-xs leading-5 text-[#b5bac1]">{preview.description}</p>
+          </div>
+          <div className="h-10 w-10 shrink-0 rounded-full border border-white/10 bg-cyan-300/10" aria-hidden />
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {preview.fields.map((field) => (
+            <div key={`${field.name}-${field.value}`} className={field.inline ? "" : "sm:col-span-2"}>
+              <div className="text-xs font-black text-white">{field.name}</div>
+              <div className="mt-1 text-xs leading-5 text-[#b5bac1]">{field.value}</div>
+            </div>
+          ))}
+        </div>
+        {preview.cta ? (
+          <div className="mt-3 inline-flex rounded bg-[#5865f2] px-3 py-2 text-xs font-black text-white">
+            {preview.cta.label}
+          </div>
+        ) : null}
+        <div className="mt-3 text-[11px] text-[#949ba4]">{preview.footer} - {formatDate(preview.timestamp)}</div>
+      </div>
+    </div>
+  );
+}
+
 function AuditLogPanel({ auditLog }: { auditLog: AuditLog | null }) {
   const actions = ["mark legacy_offline", "archive_hidden", "run final sync", "pause sync", "reactivate sync", "hide from public listing", "show as legacy profile"];
   return (
@@ -666,6 +977,33 @@ function BooleanTile({ label, enabled }: { label: string; enabled: boolean }) {
       <div className={`mt-1 text-sm font-black ${enabled ? "text-cyan-100" : "text-zinc-500"}`}>{enabled ? "Enabled" : "Disabled"}</div>
     </div>
   );
+}
+
+function ownerDiscordStatusLabel(value: string) {
+  if (value === "configured_preview_only") return "Configured - preview only";
+  if (value === "not_configured") return "Not configured";
+  return value.replace(/_/g, " ");
+}
+
+function postingModeLabel(value: DiscordPostingMode) {
+  const labels: Record<DiscordPostingMode, string> = {
+    disabled: "Disabled",
+    preview_only: "Preview only",
+    production_disabled: "Production disabled",
+    ready_but_off: "Ready but off",
+  };
+  return labels[value];
+}
+
+function channelStatusLabel(value: DiscordChannelSlot["status"]) {
+  const labels: Record<DiscordChannelSlot["status"], string> = {
+    not_configured: "Not configured",
+    configured: "Configured",
+    missing_permission: "Missing permission",
+    disabled: "Disabled",
+    preview_only: "Preview only",
+  };
+  return labels[value];
 }
 
 function formatDate(value?: string | null) {
