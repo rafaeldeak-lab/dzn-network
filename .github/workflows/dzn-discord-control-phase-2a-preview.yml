@@ -404,7 +404,7 @@ jobs:
                 ...(config?.env_vars ?? {}),
                 DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
                 DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
-                MOCK_AUTH: { type: "plain_text", value: "true" },
+                MOCK_AUTH: { type: "plain_text", value: "false" },
                 DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
                 NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
                 DISCORD_CLIENT_ID: { type: "plain_text", value: previewDiscordClientId },
@@ -453,7 +453,7 @@ jobs:
               "[vars]",
               'DZN_PULSE_ENABLED = "true"',
               'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
-              'MOCK_AUTH = "true"',
+              'MOCK_AUTH = "false"',
               `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
               `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
               `DISCORD_CLIENT_ID = ${JSON.stringify(previewDiscordClientId)}`,
@@ -489,7 +489,7 @@ jobs:
 
           DZN_PULSE_ENABLED=true \
           DZN_DISCORD_NOTIFICATIONS_ENABLED=false \
-          MOCK_AUTH=true \
+          MOCK_AUTH=false \
           DZN_APP_URL="${PREVIEW_BASE_URL}" \
           NEXT_PUBLIC_APP_URL="${PREVIEW_BASE_URL}" \
           DISCORD_CLIENT_ID="${DISCORD_PHASE_2A_PREVIEW_CLIENT_ID}" \
@@ -622,6 +622,7 @@ jobs:
             const discordStart = await fetchWithRetry("/api/auth/discord/start?returnTo=%2Fowner", { redirect: "manual" });
             assert(discordStart.status === 302, `/api/auth/discord/start?returnTo=%2Fowner returned HTTP ${discordStart.status}, expected 302.`);
             const discordLocation = discordStart.headers.get("location") ?? "";
+            console.log(`Discord auth start Location: ${discordLocation || "(missing)"}`);
             assert(discordLocation.startsWith("https://discord.com/oauth2/authorize"), "Discord auth start did not redirect to Discord.");
             const discordAuthorize = new URL(discordLocation);
             assert(discordAuthorize.searchParams.get("client_id") === expectedDiscordClientId, "Discord auth start used the wrong preview client id.");

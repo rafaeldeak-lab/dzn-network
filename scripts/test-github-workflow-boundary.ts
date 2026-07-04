@@ -680,8 +680,12 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler page
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler pages secret put DISCORD_CLIENT_SECRET"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('DISCORD_CLIENT_ID: { type: "plain_text", value: previewDiscordClientId }'), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('DISCORD_REDIRECT_URI: { type: "plain_text", value: previewDiscordRedirectUri }'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('MOCK_AUTH: { type: "plain_text", value: "false" }'), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("DISCORD_CLIENT_ID = ${JSON.stringify(previewDiscordClientId)}"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("DISCORD_REDIRECT_URI = ${JSON.stringify(previewDiscordRedirectUri)}"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('MOCK_AUTH = "false"'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("MOCK_AUTH=false"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("MOCK_AUTH=true"), false);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("deployment_configs"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("production: mergeConfig"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("preview: mergeConfig"), true);
@@ -695,6 +699,7 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Waiting for Disco
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview readiness attempt"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Discord Control Phase 2A preview route"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("/api/auth/discord/start?returnTo=%2Fowner"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Discord auth start Location:"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('discordLocation.startsWith("https://discord.com/oauth2/authorize")'), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('discordAuthorize.searchParams.get("client_id") === expectedDiscordClientId'), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('discordAuthorize.searchParams.get("redirect_uri") === expectedDiscordRedirectUri'), true);
