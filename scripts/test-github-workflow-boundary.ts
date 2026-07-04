@@ -736,6 +736,11 @@ assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("DZN Dis
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Approved preview run is not green"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Approved preview run was for"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("does not match approved_commit"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("APPROVED_PREVIEW_REPOSITORY=\"${GITHUB_REPOSITORY}\""), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("dzn-discord-control-phase-2a-preview.yml"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("checking workflow run list for exact run id"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("actions/workflows/${workflowFile}/runs"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Approved preview run ${runId} was not found"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Selected branch HEAD ${BRANCH_HEAD} does not match preview-approved commit ${APPROVED_COMMIT}; rerun preview for the current branch head."), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("production_pages_project_name must equal dzn-network"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("production_db_name must equal dzn_network_db"), true);
