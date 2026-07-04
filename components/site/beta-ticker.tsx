@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 
 const STORAGE_KEY = "dzn:beta-ticker:hidden:v1";
@@ -9,19 +10,26 @@ const TICKER_COPY =
   "DZN Network is live and actively being improved - Basic server listings are free during beta - Some features may change as the platform grows - Found a bug or have an idea? Send feedback";
 
 export function BetaTicker() {
+  const pathname = usePathname() ?? "";
+  const isOwnerRoute = pathname === "/owner" || pathname.startsWith("/owner/");
   const [mounted, setMounted] = useState(false);
   const [hidden, setHidden] = useState(true);
 
   useEffect(() => {
+    if (isOwnerRoute) {
+      document.documentElement.style.removeProperty("--dzn-beta-ticker-height");
+      return;
+    }
+
     const timer = window.setTimeout(() => {
       setHidden(window.localStorage.getItem(STORAGE_KEY) === "1");
       setMounted(true);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [isOwnerRoute]);
 
   useEffect(() => {
-    if (!mounted || hidden) {
+    if (isOwnerRoute || !mounted || hidden) {
       document.documentElement.style.removeProperty("--dzn-beta-ticker-height");
       return;
     }
@@ -29,9 +37,9 @@ export function BetaTicker() {
     return () => {
       document.documentElement.style.removeProperty("--dzn-beta-ticker-height");
     };
-  }, [hidden, mounted]);
+  }, [hidden, mounted, isOwnerRoute]);
 
-  if (!mounted || hidden) return null;
+  if (isOwnerRoute || !mounted || hidden) return null;
 
   function closeTicker() {
     window.localStorage.setItem(STORAGE_KEY, "1");

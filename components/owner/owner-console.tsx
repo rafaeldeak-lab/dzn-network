@@ -264,23 +264,32 @@ function OwnerShell({ activeView, setActiveView, children }: {
   setActiveView: (view: NavItem) => void;
   children: ReactNode;
 }) {
+  useEffect(() => {
+    document.documentElement.classList.add("dzn-owner-console-active");
+    document.body.classList.add("dzn-owner-console-active");
+    return () => {
+      document.documentElement.classList.remove("dzn-owner-console-active");
+      document.body.classList.remove("dzn-owner-console-active");
+    };
+  }, []);
+
   return (
-    <main className="min-h-screen bg-[#02030a] text-zinc-100">
+    <main className="h-dvh overflow-hidden bg-[#02030a] text-zinc-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_32%),radial-gradient(circle_at_80%_10%,rgba(168,85,247,0.14),transparent_30%)]" />
-      <div className="relative grid min-h-screen grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="border-b border-white/10 bg-black/40 p-5 backdrop-blur-xl lg:border-b-0 lg:border-r">
-          <Link href="/" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/5 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.26em] text-cyan-200">DZN Owner</p>
-            <h1 className="mt-2 text-2xl font-black text-white">Command Centre</h1>
+      <div className="relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)] lg:grid-rows-1">
+        <aside className="z-10 flex min-h-0 flex-col border-b border-white/10 bg-black/45 p-3 backdrop-blur-xl lg:h-dvh lg:border-b-0 lg:border-r">
+          <Link href="/" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/5 p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">DZN Owner</p>
+            <h1 className="mt-1 text-xl font-black text-white">Command Centre</h1>
           </Link>
 
-          <nav className="mt-6 space-y-2">
+          <nav className="mt-4 grid gap-1.5 overflow-auto pr-1">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item}
                 type="button"
                 onClick={() => setActiveView(item)}
-                className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-bold transition ${
+                className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-bold transition ${
                   activeView === item
                     ? "border-cyan-300/40 bg-cyan-300/[0.12] text-white shadow-[0_0_24px_rgba(34,211,238,0.12)]"
                     : "border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:text-white"
@@ -291,18 +300,18 @@ function OwnerShell({ activeView, setActiveView, children }: {
             ))}
           </nav>
 
-          <div className="mt-6 space-y-2">
-            <Link href="/" className="block rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-zinc-300 hover:border-cyan-300/30 hover:text-white">
+          <div className="mt-auto grid gap-1.5 pt-3">
+            <Link href="/" className="block rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-bold text-zinc-300 hover:border-cyan-300/30 hover:text-white">
               View Public Site
             </Link>
-            <Link href="/dashboard" className="block rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-bold text-zinc-300 hover:border-cyan-300/30 hover:text-white">
+            <Link href="/dashboard" className="block rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-bold text-zinc-300 hover:border-cyan-300/30 hover:text-white">
               View Server Owner Dashboard
             </Link>
           </div>
         </aside>
 
-        <section className="px-4 py-6 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-[1600px]">
+        <section className="min-h-0 overflow-hidden px-3 py-3 sm:px-4 lg:px-5">
+          <div className="mx-auto h-full min-h-0 max-w-[1600px]">
             {children}
           </div>
         </section>
@@ -313,41 +322,43 @@ function OwnerShell({ activeView, setActiveView, children }: {
 
 function OverviewPanel({ overview, lifecycleCounts }: { overview: OwnerOverview; lifecycleCounts: Array<typeof LIFECYCLE_COPY[number] & { count: number }> }) {
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-auto lg:overflow-hidden">
       <PanelHeader eyebrow="Platform Overview" title="DZN Network control state" description="Stored production state only. No live Nitrado or Discord calls are made from this console." />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Total linked servers" value={overview.counts.totalLinkedServers} accent="cyan" />
         <MetricCard label="Active live" value={overview.counts.active_live} accent="emerald" />
         <MetricCard label="Consuming sync resources" value={overview.counts.serversConsumingSyncResources} accent="violet" />
         <MetricCard label="Skipped from active sync" value={overview.counts.serversSkippedFromSync} accent="amber" />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-2 lg:grid-cols-3">
         <StatusCard title="DZN Pulse" value={overview.featureFlags.dznPulseEnabled ? "Enabled" : "Disabled"} tone={overview.featureFlags.dznPulseEnabled ? "good" : "warn"} />
         <StatusCard title="Discord Pulse delivery" value={overview.featureFlags.discordNotificationsEnabled ? "Enabled" : "Disabled"} tone={overview.featureFlags.discordNotificationsEnabled ? "warn" : "good"} />
         <StatusCard title="Free / Pro advertising" value={overview.featureFlags.freeProAdvertisingStatus === "live" ? "Live" : "Unknown"} tone="good" />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-2 xl:grid-cols-3">
         <KnownServerCard title="NukeTown" server={overview.knownServers.nuketown} />
         <KnownServerCard title="PANDORA" server={overview.knownServers.pandora} />
         <KnownServerCard title="Warlords" server={overview.knownServers.warlords} />
       </div>
 
-      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-        <h2 className="text-lg font-black text-white">Lifecycle totals</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="min-h-0 rounded-lg border border-white/10 bg-white/[0.035] p-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-black text-white">Lifecycle totals</h2>
+          <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Stored state</span>
+        </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-6">
           {lifecycleCounts.map((entry) => (
-            <div key={entry.status} className="rounded-lg border border-white/10 bg-black/25 p-4">
-              <div className="text-2xl font-black text-white">{entry.count}</div>
-              <div className="mt-1 text-sm font-bold text-zinc-200">{entry.label}</div>
-              <div className="mt-2 text-xs leading-5 text-zinc-500">{entry.description}</div>
+            <div key={entry.status} className="min-h-[54px] rounded-lg border border-white/10 bg-black/25 p-2">
+              <div className="text-xl font-black leading-none text-white">{entry.count}</div>
+              <div className="mt-1 line-clamp-2 text-[11px] font-bold leading-4 text-zinc-300">{entry.label}</div>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-2 lg:grid-cols-3">
         <HealthCard title="Public route health" health={overview.health.publicRoutes} />
         <HealthCard title="ADM Cycle Watch" health={overview.health.admCycleWatch} />
         <HealthCard title="Auto Update Scheduler" health={overview.health.autoUpdateScheduler} />
@@ -358,10 +369,10 @@ function OverviewPanel({ overview, lifecycleCounts }: { overview: OwnerOverview;
 
 function ServersPanel({ servers }: { servers: OwnerServer[] }) {
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
       <PanelHeader eyebrow="Server Management" title="All linked servers" description="Read-only operational inventory with lifecycle, token, ADM, player-count and public visibility state." />
-      <div className="overflow-hidden rounded-lg border border-white/10 bg-black/30">
-        <div className="max-h-[72vh] overflow-auto">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+        <div className="h-full overflow-auto">
           <table className="min-w-[1500px] w-full border-collapse text-left text-sm">
             <thead className="sticky top-0 z-10 bg-zinc-950/95 text-xs uppercase tracking-[0.16em] text-zinc-400 backdrop-blur">
               <tr>
@@ -435,19 +446,19 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
 
 function LifecyclePanel({ lifecycleCounts }: { lifecycleCounts: Array<typeof LIFECYCLE_COPY[number] & { count: number }> }) {
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
       <PanelHeader eyebrow="Lifecycle / Resource State" title="Read-only lifecycle policy map" description="Phase 1 displays the state model and current counts. Lifecycle changes are disabled until Phase 2." />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid min-h-0 gap-2 md:grid-cols-2 xl:grid-cols-4">
         {lifecycleCounts.map((entry) => (
-          <section key={entry.status} className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-            <div className="flex items-start justify-between gap-4">
+          <section key={entry.status} className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-black text-white">{entry.label}</h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-400">{entry.description}</p>
+                <h2 className="text-sm font-black leading-5 text-white">{entry.label}</h2>
+                <p className="mt-1 text-xs leading-5 text-zinc-400">{entry.description}</p>
               </div>
-              <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-lg font-black text-cyan-100">{entry.count}</div>
+              <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1.5 text-base font-black text-cyan-100">{entry.count}</div>
             </div>
-            <p className="mt-4 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{entry.status}</p>
+            <p className="mt-2 truncate text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">{entry.status}</p>
           </section>
         ))}
       </div>
@@ -457,16 +468,16 @@ function LifecyclePanel({ lifecycleCounts }: { lifecycleCounts: Array<typeof LIF
 
 function ResourceControlPanel({ servers }: { servers: OwnerServer[] }) {
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
       <PanelHeader eyebrow="Resource Control" title="Scheduled work eligibility" description="This read-only view shows which servers should consume worker/API/D1 resources and why others are skipped." />
-      <div className="grid gap-4">
+      <div className="grid min-h-0 flex-1 gap-2 overflow-auto pr-1">
         {servers.map((server) => (
-          <section key={server.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <section key={server.id} className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-start">
               <div>
-                <h2 className="text-xl font-black text-white">{server.serverName}</h2>
+                <h2 className="text-lg font-black text-white">{server.serverName}</h2>
                 <p className="mt-1 text-sm text-zinc-400">{server.lifecycleLabel}</p>
-                <p className="mt-2 text-xs text-zinc-500">Skip reason: {server.resource.skippedReason ?? server.lastSkipReason ?? "none"}</p>
+                <p className="mt-1 text-xs text-zinc-500">Skip reason: {server.resource.skippedReason ?? server.lastSkipReason ?? "none"}</p>
               </div>
               <StatusCard
                 title="Scheduled resources"
@@ -474,14 +485,14 @@ function ResourceControlPanel({ servers }: { servers: OwnerServer[] }) {
                 tone={server.resource.consumingScheduledResources ? "warn" : "good"}
               />
             </div>
-            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
               <BooleanTile label="ADM sync" enabled={server.resource.admSyncEnabled} />
               <BooleanTile label="Metadata refresh" enabled={server.resource.metadataRefreshEnabled} />
               <BooleanTile label="Player-count polling" enabled={server.resource.playerCountPollingEnabled} />
               <BooleanTile label="Discord posting" enabled={server.resource.discordPostingEnabled} />
               <BooleanTile label="Server Wars eligibility" enabled={server.resource.serverWarsEligible} />
             </div>
-            <div className="mt-4 grid gap-3 text-xs text-zinc-500 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-3 grid gap-2 text-xs text-zinc-500 md:grid-cols-2 xl:grid-cols-4">
               <div>Next retry: {formatDate(server.nextRetryAfter)}</div>
               <div>Public listing: {server.listingVisibility ?? "default"}</div>
               <div>Token status: {server.tokenStatus}</div>
@@ -497,17 +508,17 @@ function ResourceControlPanel({ servers }: { servers: OwnerServer[] }) {
 function AuditLogPanel({ auditLog }: { auditLog: AuditLog | null }) {
   const actions = ["mark legacy_offline", "archive_hidden", "run final sync", "pause sync", "reactivate sync", "hide from public listing", "show as legacy profile"];
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
       <PanelHeader eyebrow="Audit Log" title="Owner action history" description="Phase 1 is read-only. This space is prepared for future audited owner actions." />
-      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-6">
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
         <p className="text-lg font-black text-white">{auditLog?.message ?? "No owner actions recorded yet."}</p>
         <p className="mt-2 text-sm text-zinc-400">Future lifecycle/resource changes will be recorded here with actor, target, timestamp and safe reason.</p>
       </section>
-      <section className="rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-6">
+      <section className="rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-4">
         <h2 className="text-lg font-black text-white">Phase 2 actions</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           {actions.map((action) => (
-            <button key={action} type="button" disabled className="cursor-not-allowed rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm font-bold text-zinc-500">
+            <button key={action} type="button" disabled className="cursor-not-allowed rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-sm font-bold text-zinc-500">
               <span className="block text-xs uppercase tracking-[0.16em] text-amber-200">Phase 2</span>
               {action}
               <span className="mt-1 block text-xs text-zinc-600">Coming soon - read-only for now</span>
@@ -521,10 +532,10 @@ function AuditLogPanel({ auditLog }: { auditLog: AuditLog | null }) {
 
 function SettingsPanel({ overview }: { overview: OwnerOverview }) {
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
       <PanelHeader eyebrow="Settings / Access" title="Owner access guard" description="Access is based only on Discord user IDs in a secure runtime allowlist." />
-      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-6">
-        <div className="grid gap-4 md:grid-cols-2">
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="grid gap-3 md:grid-cols-2">
           <StatusCard title="DZN_PLATFORM_OWNER_DISCORD_IDS" value={overview.ownerAccess.allowlistConfigured ? "Configured" : "Not configured"} tone={overview.ownerAccess.allowlistConfigured ? "good" : "warn"} />
           <StatusCard title="Authentication basis" value="Discord ID allowlist" tone="good" />
         </div>
@@ -538,11 +549,11 @@ function SettingsPanel({ overview }: { overview: OwnerOverview }) {
 
 function LoadingPanel() {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-8">
+    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
       <div className="h-3 w-40 animate-pulse rounded bg-cyan-300/20" />
-      <div className="mt-6 h-10 w-96 max-w-full animate-pulse rounded bg-white/10" />
-      <div className="mt-4 grid gap-4 md:grid-cols-4">
-        {[0, 1, 2, 3].map((item) => <div key={item} className="h-28 animate-pulse rounded-lg bg-white/[0.04]" />)}
+      <div className="mt-4 h-8 w-96 max-w-full animate-pulse rounded bg-white/10" />
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        {[0, 1, 2, 3].map((item) => <div key={item} className="h-20 animate-pulse rounded-lg bg-white/[0.04]" />)}
       </div>
     </section>
   );
@@ -550,19 +561,19 @@ function LoadingPanel() {
 
 function ErrorPanel({ message }: { message: string }) {
   return (
-    <section className="rounded-lg border border-red-400/20 bg-red-950/20 p-8">
+    <section className="rounded-lg border border-red-400/20 bg-red-950/20 p-5">
       <p className="text-xs font-black uppercase tracking-[0.24em] text-red-200">Owner console error</p>
-      <h1 className="mt-3 text-3xl font-black text-white">{message}</h1>
+      <h1 className="mt-2 text-2xl font-black text-white">{message}</h1>
     </section>
   );
 }
 
 function PanelHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
   return (
-    <header className="rounded-lg border border-white/10 bg-black/35 p-6 shadow-[0_0_60px_rgba(34,211,238,0.08)]">
-      <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200">{eyebrow}</p>
-      <h1 className="mt-2 text-3xl font-black text-white md:text-4xl">{title}</h1>
-      <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">{description}</p>
+    <header className="shrink-0 rounded-lg border border-white/10 bg-black/35 p-4 shadow-[0_0_40px_rgba(34,211,238,0.07)]">
+      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">{eyebrow}</p>
+      <h1 className="mt-1 text-2xl font-black leading-tight text-white md:text-3xl">{title}</h1>
+      <p className="mt-1 max-w-4xl text-xs leading-5 text-zinc-400">{description}</p>
     </header>
   );
 }
@@ -575,35 +586,35 @@ function MetricCard({ label, value, accent }: { label: string; value: number; ac
     amber: "border-amber-300/20 text-amber-100 shadow-[0_0_28px_rgba(245,158,11,0.08)]",
   }[accent];
   return (
-    <section className={`rounded-lg border bg-white/[0.035] p-5 ${accentClasses}`}>
-      <div className="text-4xl font-black">{value}</div>
-      <div className="mt-2 text-sm font-bold text-zinc-300">{label}</div>
+    <section className={`rounded-lg border bg-white/[0.035] p-3 ${accentClasses}`}>
+      <div className="text-3xl font-black leading-none">{value}</div>
+      <div className="mt-1 text-xs font-bold text-zinc-300">{label}</div>
     </section>
   );
 }
 
 function StatusCard({ title, value, tone }: { title: string; value: string; tone: "good" | "warn" }) {
   return (
-    <section className={`rounded-lg border p-4 ${tone === "good" ? "border-emerald-300/20 bg-emerald-300/[0.04]" : "border-amber-300/20 bg-amber-300/[0.04]"}`}>
-      <div className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">{title}</div>
-      <div className="mt-2 text-lg font-black text-white">{value}</div>
+    <section className={`rounded-lg border p-3 ${tone === "good" ? "border-emerald-300/20 bg-emerald-300/[0.04]" : "border-amber-300/20 bg-amber-300/[0.04]"}`}>
+      <div className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">{title}</div>
+      <div className="mt-1 text-base font-black text-white">{value}</div>
     </section>
   );
 }
 
 function KnownServerCard({ title, server }: { title: string; server: KnownServerSummary | null }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-      <div className="text-xs font-black uppercase tracking-[0.18em] text-zinc-500">{title}</div>
+    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+      <div className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{title}</div>
       {server ? (
         <>
-          <h2 className="mt-2 text-xl font-black text-white">{server.name}</h2>
-          <p className="mt-2 text-sm font-bold text-cyan-100">{server.lifecycleLabel}</p>
-          <dl className="mt-4 space-y-2 text-sm text-zinc-400">
+          <h2 className="mt-1 truncate text-lg font-black text-white">{server.name}</h2>
+          <p className="mt-1 truncate text-xs font-bold text-cyan-100">{server.lifecycleLabel}</p>
+          <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs text-zinc-400 sm:grid-cols-2">
             <div className="flex justify-between gap-4"><dt>Status</dt><dd>{server.status ?? "unknown"}</dd></div>
             <div className="flex justify-between gap-4"><dt>Visibility</dt><dd>{server.publicVisibility ?? "default"}</dd></div>
             <div className="flex justify-between gap-4"><dt>Players</dt><dd>{server.playerCount}</dd></div>
-            <div className="flex justify-between gap-4"><dt>Latest ADM</dt><dd className="max-w-[220px] truncate">{server.latestAdmFile ?? "none"}</dd></div>
+            <div className="flex justify-between gap-4"><dt>Latest ADM</dt><dd className="max-w-[150px] truncate">{server.latestAdmFile ?? "none"}</dd></div>
             <div className="flex justify-between gap-4"><dt>Latest event</dt><dd>{formatDate(server.latestImportedEventAt)}</dd></div>
           </dl>
         </>
@@ -616,11 +627,11 @@ function KnownServerCard({ title, server }: { title: string; server: KnownServer
 
 function HealthCard({ title, health }: { title: string; health: StoredJobHealth | null }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
-      <div className="text-xs font-black uppercase tracking-[0.18em] text-zinc-500">{title}</div>
-      <h2 className="mt-2 text-xl font-black text-white">{health?.status ?? "No stored run"}</h2>
-      <p className="mt-2 text-sm text-zinc-400">{health?.jobType ?? health?.source ?? "Stored automation summary unavailable"}</p>
-      <p className="mt-2 text-xs text-zinc-500">{formatDate(health?.createdAt)}</p>
+    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+      <div className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{title}</div>
+      <h2 className="mt-1 text-lg font-black text-white">{health?.status ?? "No stored run"}</h2>
+      <p className="mt-1 truncate text-xs text-zinc-400">{health?.jobType ?? health?.source ?? "Stored automation summary unavailable"}</p>
+      <p className="mt-1 text-xs text-zinc-500">{formatDate(health?.createdAt)}</p>
       {health?.error ? <p className="mt-3 text-xs text-amber-200">{health.error}</p> : null}
     </section>
   );
@@ -650,9 +661,9 @@ function StatusPill({ value }: { value: OwnerServer["tokenStatus"] }) {
 
 function BooleanTile({ label, enabled }: { label: string; enabled: boolean }) {
   return (
-    <div className={`rounded-lg border p-4 ${enabled ? "border-cyan-300/20 bg-cyan-300/[0.05]" : "border-white/10 bg-black/25"}`}>
-      <div className="text-xs font-black uppercase tracking-[0.14em] text-zinc-500">{label}</div>
-      <div className={`mt-2 text-sm font-black ${enabled ? "text-cyan-100" : "text-zinc-500"}`}>{enabled ? "Enabled" : "Disabled"}</div>
+    <div className={`rounded-lg border p-3 ${enabled ? "border-cyan-300/20 bg-cyan-300/[0.05]" : "border-white/10 bg-black/25"}`}>
+      <div className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{label}</div>
+      <div className={`mt-1 text-sm font-black ${enabled ? "text-cyan-100" : "text-zinc-500"}`}>{enabled ? "Enabled" : "Disabled"}</div>
     </div>
   );
 }

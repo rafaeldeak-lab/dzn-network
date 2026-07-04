@@ -157,6 +157,21 @@ for (const label of [
   assert.match(ownerUiSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 }
 assert.doesNotMatch(ownerUiSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_auth_tag\b|\bDISCORD_BOT_TOKEN\b|\bTOKEN_ENCRYPTION_KEY\b/i);
+assert.match(ownerUiSource, /dzn-owner-console-active/, "Owner console must set a route-scoped app-shell class.");
+assert.match(ownerUiSource, /h-dvh overflow-hidden/, "Owner console shell must lock to viewport height.");
+assert.match(ownerUiSource, /lg:grid-cols-\[240px_minmax\(0,1fr\)\]/, "Owner console should keep a compact fixed desktop sidebar.");
+assert.match(ownerUiSource, /h-full min-h-0/, "Owner console panels must use constrained internal height.");
+assert.match(ownerUiSource, /overflow-auto/, "Large owner console lists should use internal scrolling.");
+
+const globalsSource = readFileSync("app/globals.css", "utf8");
+assert.match(globalsSource, /body\.dzn-owner-console-active/);
+assert.match(globalsSource, /overflow:\s*hidden/);
+assert.match(globalsSource, /body\.dzn-owner-console-active \.dzn-beta-ticker/);
+
+const betaTickerSource = readFileSync("components/site/beta-ticker.tsx", "utf8");
+assert.match(betaTickerSource, /usePathname/);
+assert.match(betaTickerSource, /pathname === "\/owner" \|\| pathname\.startsWith\("\/owner\/"\)/);
+assert.match(betaTickerSource, /if \(isOwnerRoute \|\| !mounted \|\| hidden\) return null;/);
 
 const pageSource = readFileSync("app/owner/page.tsx", "utf8");
 assert.match(pageSource, /OwnerConsole/);
