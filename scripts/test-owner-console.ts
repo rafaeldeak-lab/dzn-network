@@ -178,6 +178,7 @@ for (const file of [
   "functions/api/owner/discord/overview.ts",
   "functions/api/owner/discord/post-types.ts",
   "functions/api/owner/discord/channels.ts",
+  "functions/api/owner/discord/options.ts",
   "functions/api/owner/discord/templates.ts",
 ]) {
   const source = readFileSync(file, "utf8");
@@ -236,6 +237,15 @@ assert.match(ownerDiscordSource, /discordNotificationsEnabled/);
 assert.match(ownerDiscordSource, /botTokenPresent/);
 assert.match(ownerDiscordSource, /productionSendingDisabled:\s*true/);
 assert.match(ownerDiscordSource, /Preview only - not sent/);
+assert.match(ownerDiscordSource, /OWNER_DISCORD_PREVIEW_OPTIONS/);
+assert.match(ownerDiscordSource, /getOwnerDiscordOptions/);
+assert.match(ownerDiscordSource, /All Network \/ Network-wide/);
+assert.match(ownerDiscordSource, /New server joined DZN/);
+assert.match(ownerDiscordSource, /Daily network recap/);
+assert.match(ownerDiscordSource, /Longest kill update/);
+assert.match(ownerDiscordSource, /Milestone reached/);
+assert.match(ownerDiscordSource, /Free\/Pro\/Premium promotion post/);
+assert.match(ownerDiscordSource, /Valid Discord Server ID is required/);
 assert.match(ownerDiscordSource, /saveOwnerDiscordChannelMapping/);
 assert.match(ownerDiscordSource, /runOwnerDiscordPermissionCheck/);
 assert.match(ownerDiscordSource, /sendOwnerDiscordTestEmbed/);
@@ -260,12 +270,24 @@ for (const label of [
   "Archived / hidden - active sync disabled",
   "Discord Control",
   "DZN Discord command centre",
-  "Auto Post Types",
-  "Embed Preview Builder",
-  "Channel Mapping Setup",
-  "Run permission check",
+  "Post Preview Builder",
+  "What do you want to post?",
+  "Which DZN server is this about?",
+  "Where should this post?",
+  "Post destinations",
+  "Discord Server",
+  "Discord Server ID",
+  "Discord Server Name",
+  "Discord Channel ID",
+  "Friendly channel name",
+  "What is a Discord Server ID?",
+  "Discord internally calls a server a guild",
+  "All Network / Network-wide",
+  "Not configured yet",
+  "Preview Embed",
+  "Check permissions",
   "SEND_TEST_EMBED",
-  "Send one test embed",
+  "Send Test Embed",
   "Discord Audit Log",
   "Production Discord posting",
   "Preview only - not sent",
@@ -276,6 +298,10 @@ for (const label of [
 ]) {
   assert.match(ownerUiSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 }
+assert.doesNotMatch(ownerUiSource, /\bGuild ID\b|\bGuild name\b|Channel Mapping Setup|Embed Preview Builder/);
+assert.match(ownerUiSource, /testConfirmation !== "SEND_TEST_EMBED"/);
+assert.match(ownerUiSource, /selectedDestinationConfigured/);
+assert.match(ownerUiSource, /selectedDestinationPermissionOk/);
 assert.doesNotMatch(ownerUiSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_auth_tag\b|\bDISCORD_BOT_TOKEN\b|\bTOKEN_ENCRYPTION_KEY\b/i);
 assert.match(ownerUiSource, /dzn-owner-console-active/, "Owner console must set a route-scoped app-shell class.");
 assert.match(ownerUiSource, /h-dvh overflow-hidden/, "Owner console shell must lock to viewport height.");

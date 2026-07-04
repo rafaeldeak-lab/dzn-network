@@ -195,7 +195,18 @@ type DiscordChannelSlot = {
   updatedAt: string | null;
 };
 
-type DiscordPreviewType = "new_server" | "top_server" | "legacy_server" | "archived_server" | "server_wars_event" | "weekly_recap";
+type DiscordPreviewType =
+  | "new_server"
+  | "top_server"
+  | "legacy_server"
+  | "archived_server"
+  | "server_wars_event"
+  | "weekly_recap"
+  | "daily_recap"
+  | "longest_kill"
+  | "milestone"
+  | "dzn_announcement"
+  | "package_promotion";
 
 type DiscordPreviewEmbed = {
   type: DiscordPreviewType;
@@ -219,11 +230,36 @@ type DiscordTemplate = {
   preview: DiscordPreviewEmbed;
 };
 
+type DiscordPreviewOption = {
+  type: DiscordPreviewType;
+  label: string;
+  description: string;
+  networkWide: boolean;
+  suggestedSlot: string;
+};
+
+type DiscordLinkedServerOption = {
+  value: string;
+  label: string;
+  slug: string | null;
+  lifecycleStatus: string | null;
+  lifecycleLabel: string;
+  status: string | null;
+  role: "network" | "nuketown" | "pandora" | "warlords" | "server";
+};
+
+type DiscordOptions = {
+  postTypes: DiscordPreviewOption[];
+  linkedServers: DiscordLinkedServerOption[];
+  destinationSlots: DiscordChannelSlot[];
+};
+
 type DiscordControlData = {
   overview: DiscordOverview;
   postTypes: DiscordPostType[];
   channels: DiscordChannelSlot[];
   templates: DiscordTemplate[];
+  options: DiscordOptions;
   auditLog: AuditLogItem[];
 };
 
@@ -276,6 +312,7 @@ export function OwnerConsole() {
           discordChannelsResponse,
           discordMappingsResponse,
           discordTemplatesResponse,
+          discordOptionsResponse,
           discordAuditResponse,
         ] = await Promise.all([
           fetch("/api/owner/overview", { cache: "no-store" }),
@@ -286,6 +323,7 @@ export function OwnerConsole() {
           fetch("/api/owner/discord/channels", { cache: "no-store" }),
           fetch("/api/owner/discord/channel-mappings", { cache: "no-store" }),
           fetch("/api/owner/discord/templates", { cache: "no-store" }),
+          fetch("/api/owner/discord/options", { cache: "no-store" }),
           fetch("/api/owner/discord/audit-log", { cache: "no-store" }),
         ]);
 
@@ -300,6 +338,7 @@ export function OwnerConsole() {
           discordChannelsResponse,
           discordMappingsResponse,
           discordTemplatesResponse,
+          discordOptionsResponse,
           discordAuditResponse,
         ];
         const firstBlocked = responses.find((response) => response.status === 401 || response.status === 403);
@@ -322,6 +361,7 @@ export function OwnerConsole() {
           discordChannelsJson,
           discordMappingsJson,
           discordTemplatesJson,
+          discordOptionsJson,
           discordAuditJson,
         ] = await Promise.all([
           overviewResponse.json(),
@@ -332,6 +372,7 @@ export function OwnerConsole() {
           discordChannelsResponse.json(),
           discordMappingsResponse.json(),
           discordTemplatesResponse.json(),
+          discordOptionsResponse.json(),
           discordAuditResponse.json(),
         ]);
 
@@ -349,6 +390,11 @@ export function OwnerConsole() {
           postTypes: discordPostTypesJson.postTypes ?? [],
           channels: discordMappingsJson.mappings ?? discordChannelsJson.channels ?? [],
           templates: discordTemplatesJson.templates ?? [],
+          options: discordOptionsJson.options ?? {
+            postTypes: discordTemplatesJson.templates ?? [],
+            linkedServers: [{ value: "network", label: "All Network / Network-wide", slug: null, lifecycleStatus: null, lifecycleLabel: "Network-wide", status: null, role: "network" }],
+            destinationSlots: discordMappingsJson.mappings ?? discordChannelsJson.channels ?? [],
+          },
           auditLog: discordAuditJson.auditLog ?? [],
         });
         setStatus("ready");
@@ -531,7 +577,7 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
             <thead className="sticky top-0 z-10 bg-zinc-950/95 text-xs uppercase tracking-[0.16em] text-zinc-400 backdrop-blur">
               <tr>
                 <th className="px-4 py-3">Server</th>
-                <th className="px-4 py-3">Owner / Guild</th>
+                <th className="px-4 py-3">Owner / Discord Server</th>
                 <th className="px-4 py-3">Nitrado</th>
                 <th className="px-4 py-3">Lifecycle</th>
                 <th className="px-4 py-3">Visibility</th>
@@ -552,8 +598,8 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
                   <td className="px-4 py-4 text-zinc-300">
                     <div>{server.owner.username ?? "Unknown owner"}</div>
                     <div className="mt-1 text-xs text-zinc-500">{server.owner.discordId ?? "No Discord ID"}</div>
-                    <div className="mt-2 text-xs text-zinc-500">{server.guild.name ?? "Unknown guild"}</div>
-                    <div className="text-xs text-zinc-600">{server.guild.guildId ?? server.guild.discordGuildId ?? "No guild id"}</div>
+                    <div className="mt-2 text-xs text-zinc-500">{server.guild.name ?? "Unknown Discord server"}</div>
+                    <div className="text-xs text-zinc-600">{server.guild.guildId ?? server.guild.discordGuildId ?? "No Discord server id"}</div>
                   </td>
                   <td className="px-4 py-4 text-zinc-300">
                     <div>{server.nitradoServiceId ?? "No service"}</div>
@@ -662,11 +708,15 @@ function ResourceControlPanel({ servers }: { servers: OwnerServer[] }) {
 function DiscordControlPanel({ data }: { data: DiscordControlData }) {
   const [channels, setChannels] = useState<DiscordChannelSlot[]>(data.channels);
   const [auditLog, setAuditLog] = useState<AuditLogItem[]>(data.auditLog);
-  const [selectedType, setSelectedType] = useState<DiscordPreviewType>(data.templates[0]?.type ?? "weekly_recap");
+  const [selectedType, setSelectedType] = useState<DiscordPreviewType>(data.options.postTypes[0]?.type ?? data.templates[0]?.type ?? "weekly_recap");
+  const [selectedServer, setSelectedServer] = useState(data.options.linkedServers[0]?.value ?? "network");
+  const [selectedSlot, setSelectedSlot] = useState(data.options.postTypes[0]?.suggestedSlot ?? data.channels[0]?.slot ?? "announcements");
   const [preview, setPreview] = useState<DiscordPreviewEmbed | null>(data.templates[0]?.preview ?? null);
   const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">("idle");
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [inFlightAction, setInFlightAction] = useState<string | null>(null);
+  const [expandedSlot, setExpandedSlot] = useState<string | null>(null);
+  const [testConfirmation, setTestConfirmation] = useState("");
   const [mappingForms, setMappingForms] = useState<Record<string, {
     guildId: string;
     guildName: string;
@@ -684,7 +734,18 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
     },
   ])));
 
+  const postTypeOptions = data.options.postTypes.length > 0
+    ? data.options.postTypes
+    : data.templates.map((template) => ({ type: template.type, label: template.label, description: template.description, networkWide: false, suggestedSlot: "announcements" }));
+  const linkedServerOptions = data.options.linkedServers.length > 0
+    ? data.options.linkedServers
+    : [{ value: "network", label: "All Network / Network-wide", slug: null, lifecycleStatus: null, lifecycleLabel: "Network-wide", status: null, role: "network" as const }];
   const selectedTemplate = data.templates.find((template) => template.type === selectedType) ?? data.templates[0] ?? null;
+  const selectedPostType = postTypeOptions.find((option) => option.type === selectedType) ?? postTypeOptions[0] ?? null;
+  const selectedServerOption = linkedServerOptions.find((server) => server.value === selectedServer) ?? linkedServerOptions[0] ?? null;
+  const selectedDestination = channels.find((channel) => channel.slot === selectedSlot) ?? channels[0] ?? null;
+  const selectedDestinationConfigured = selectedDestination ? isDiscordDestinationConfigured(selectedDestination) : false;
+  const selectedDestinationPermissionOk = selectedDestination?.lastPermissionStatus === "ok";
 
   async function refreshDiscordState() {
     const [mappingsResponse, auditResponse] = await Promise.all([
@@ -757,18 +818,19 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
   async function generatePreview(type: DiscordPreviewType) {
     setSelectedType(type);
     setPreviewStatus("loading");
+    const fallbackTemplate = data.templates.find((template) => template.type === type) ?? selectedTemplate;
     try {
       const response = await fetch("/api/owner/discord/preview-embed", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type }),
+        body: JSON.stringify({ type, serverId: selectedServer, destinationSlot: selectedSlot }),
       });
       if (!response.ok) throw new Error("preview_failed");
       const json = await response.json();
-      setPreview(json.preview ?? selectedTemplate?.preview ?? null);
+      setPreview(json.preview ?? fallbackTemplate?.preview ?? null);
       setPreviewStatus("idle");
     } catch {
-      setPreview(selectedTemplate?.preview ?? preview);
+      setPreview(fallbackTemplate?.preview ?? preview);
       setPreviewStatus("error");
     }
   }
@@ -778,7 +840,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
     "Disable post type",
     "Send weekly recap now",
     "Post announcement",
-    "Connect guild",
+    "Connect Discord server",
     "Recheck bot permissions",
   ];
 
@@ -796,7 +858,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
               <StatusCard title="Posting mode" value={postingModeLabel(data.overview.postingMode)} tone="good" />
             </div>
             <dl className="mt-3 grid gap-2 text-xs text-zinc-400">
-              <div className="flex justify-between gap-3 rounded border border-white/10 bg-black/25 px-3 py-2"><dt>Connected guilds</dt><dd>{data.overview.connectedGuildCount ?? "unknown"}</dd></div>
+              <div className="flex justify-between gap-3 rounded border border-white/10 bg-black/25 px-3 py-2"><dt>Connected Discord servers</dt><dd>{data.overview.connectedGuildCount ?? "unknown"}</dd></div>
               <div className="flex justify-between gap-3 rounded border border-white/10 bg-black/25 px-3 py-2"><dt>Configured channels</dt><dd>{data.overview.configuredChannelCount ?? "unknown"}</dd></div>
               <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
                 <dt className="font-bold text-zinc-300">Last stored post attempt</dt>
@@ -819,9 +881,17 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
               <BooleanTile label="Owner-only access" enabled />
             </div>
             <p className="mt-3 text-xs leading-5 text-zinc-400">
-              Auto posting stays off. DZN_DISCORD_NOTIFICATIONS_ENABLED=false. This console never returns bot tokens, client secrets, webhook URLs, Nitrado tokens, Cloudflare secrets or runtime encryption keys.
+              Auto posting stays off. DZN_DISCORD_NOTIFICATIONS_ENABLED=false. Preview does not send unless Send Test Embed is confirmed. This console never returns bot tokens, client secrets, webhook URLs, Nitrado tokens, Cloudflare secrets or runtime encryption keys.
             </p>
             {actionStatus ? <p className="mt-3 rounded border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-100">{actionStatus}</p> : null}
+          </section>
+
+          <section className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.04] p-3">
+            <h2 className="text-lg font-black text-white">What is a Discord Server ID?</h2>
+            <p className="mt-2 text-xs leading-5 text-zinc-400">
+              Discord internally calls a server a guild. That internal ID is just the unique ID for your Discord server. In DZN we show this as Discord Server ID to make it clearer.
+            </p>
+            <p className="mt-2 text-xs leading-5 text-zinc-500">Channel ID is the unique ID for a Discord channel like #announcements.</p>
           </section>
 
           <section className="rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-3">
@@ -838,110 +908,228 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
           </section>
         </div>
 
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-white/[0.035]">
-          <div className="shrink-0 border-b border-white/10 p-3">
-            <h2 className="text-lg font-black text-white">Auto Post Types</h2>
-            <p className="mt-1 text-xs text-zinc-400">Production sending stays disabled. Each row shows stored channel state and preview availability.</p>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto p-3">
-            <div className="grid gap-2 lg:grid-cols-2">
-              {data.postTypes.map((postType) => (
-                <article key={postType.key} className="rounded-lg border border-white/10 bg-black/25 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-black text-white">{postType.label}</h3>
-                      <p className="mt-1 text-[11px] leading-4 text-zinc-500">{postType.requiredDataSource}</p>
-                    </div>
-                    <span className="rounded border border-cyan-300/20 bg-cyan-300/[0.06] px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-cyan-100">
-                      Preview
-                    </span>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-[11px] text-zinc-400 sm:grid-cols-2">
-                    <div>Enabled: {postType.enabled ? "yes" : "no"}</div>
-                    <div>Production: disabled</div>
-                    <div>Channel: {postType.channelTarget ?? "not configured"}</div>
-                    <div>Preview: {postType.previewAvailable ? "available" : "unavailable"}</div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <div className="grid min-h-0 gap-3 overflow-auto pr-1">
+        <div className="grid min-h-0 gap-3 overflow-hidden">
           <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-black text-white">Embed Preview Builder</h2>
-                <p className="mt-1 text-xs text-zinc-400">Local preview JSON only. Nothing is sent to Discord.</p>
+                <h2 className="text-lg font-black text-white">Post Preview Builder</h2>
+                <p className="mt-1 text-xs text-zinc-400">Choose what to post, which DZN server it is about and where it should post.</p>
               </div>
               <span className="rounded border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-amber-100">
                 Preview only - not sent
               </span>
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {data.templates.map((template) => (
-                <button
-                  key={template.type}
-                  type="button"
-                  onClick={() => void generatePreview(template.type)}
-                  className={`rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${
-                    selectedType === template.type
-                      ? "border-cyan-300/40 bg-cyan-300/[0.10] text-white"
-                      : "border-white/10 bg-black/25 text-zinc-400 hover:border-white/20 hover:text-white"
-                  }`}
+            <div className="mt-3 grid gap-3">
+              <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                What do you want to post?
+                <select
+                  value={selectedType}
+                  onChange={(event) => {
+                    const nextType = event.target.value as DiscordPreviewType;
+                    const nextOption = postTypeOptions.find((option) => option.type === nextType);
+                    setSelectedType(nextType);
+                    if (nextOption?.suggestedSlot) setSelectedSlot(nextOption.suggestedSlot);
+                  }}
+                  className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40"
                 >
-                  {template.label}
-                  <span className="mt-1 block text-[11px] font-normal leading-4 text-zinc-500">{template.description}</span>
-                </button>
-              ))}
+                  {postTypeOptions.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                Which DZN server is this about?
+                <select
+                  value={selectedServer}
+                  onChange={(event) => setSelectedServer(event.target.value)}
+                  className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40"
+                >
+                  {linkedServerOptions.map((server) => <option key={server.value} value={server.value}>{server.label} - {server.lifecycleLabel}</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                Where should this post?
+                <select
+                  value={selectedSlot}
+                  onChange={(event) => setSelectedSlot(event.target.value)}
+                  className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40"
+                >
+                  {channels.map((channel) => (
+                    <option key={channel.slot} value={channel.slot}>
+                      {discordChannelLabel(channel)} - {isDiscordDestinationConfigured(channel) ? channelStatusLabel(channel.status) : "Not configured yet"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="mt-3 grid gap-2 rounded-lg border border-white/10 bg-black/25 p-3 text-xs text-zinc-400 md:grid-cols-3">
+              <div>
+                <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Post type group</span>
+                <span className="mt-1 block text-white">{selectedPostType?.label ?? "Unknown post type"}</span>
+              </div>
+              <div>
+                <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">DZN server</span>
+                <span className="mt-1 block text-white">{selectedServerOption?.label ?? "All Network / Network-wide"}</span>
+                <span className="text-zinc-500">{selectedServerOption?.lifecycleLabel ?? "Network-wide"}</span>
+              </div>
+              <div>
+                <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Destination</span>
+                <span className="mt-1 block text-white">{selectedDestination ? discordChannelLabel(selectedDestination) : "Not configured yet"}</span>
+                <span className={selectedDestinationPermissionOk ? "text-emerald-200" : "text-amber-200"}>
+                  {selectedDestinationPermissionOk ? "Permission check passed" : "Permission check required"}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-end">
+              <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-100">
+                Type SEND_TEST_EMBED
+                <input
+                  value={testConfirmation}
+                  onChange={(event) => setTestConfirmation(event.target.value)}
+                  placeholder="SEND_TEST_EMBED"
+                  className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-amber-300/40"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={previewStatus === "loading"}
+                onClick={() => void generatePreview(selectedType)}
+                className="rounded border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {previewStatus === "loading" ? "Previewing..." : "Preview Embed"}
+              </button>
+              <button
+                type="button"
+                disabled={inFlightAction !== null || !selectedDestination || !selectedDestinationConfigured || !selectedDestinationPermissionOk || testConfirmation !== "SEND_TEST_EMBED"}
+                onClick={() => void runDiscordAction(`test-${selectedSlot}`, async () => {
+                  const result = await postJson("/api/owner/discord/test-embed", {
+                    slot: selectedSlot,
+                    type: selectedType,
+                    confirmation: testConfirmation,
+                    reason: "Owner-triggered Discord Phase 2A test embed",
+                  });
+                  return result.sent ? `${selectedDestination?.label ?? "Selected destination"} test embed sent manually.` : `${selectedDestination?.label ?? "Selected destination"} test embed preview generated.`;
+                })}
+                className="rounded border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs font-black text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {inFlightAction === `test-${selectedSlot}` ? "Sending..." : "Send Test Embed"}
+              </button>
             </div>
             {previewStatus === "loading" ? <p className="mt-3 text-xs font-bold text-cyan-100">Generating preview...</p> : null}
             {previewStatus === "error" ? <p className="mt-3 text-xs font-bold text-amber-200">Preview API failed. Showing stored template preview.</p> : null}
+          </section>
+
+          <section className="min-h-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <h2 className="text-lg font-black text-white">Auto post types</h2>
+            <p className="mt-1 text-xs text-zinc-400">Every type remains disabled for automatic production sending. Use the dropdown above to preview one at a time.</p>
+            <div className="mt-3 flex flex-wrap gap-1.5 overflow-auto">
+              {data.postTypes.map((postType) => (
+                <span key={postType.key} className="rounded border border-white/10 bg-black/25 px-2 py-1 text-[11px] font-bold text-zinc-300">
+                  {postType.label}
+                </span>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="grid min-h-0 gap-3 overflow-auto pr-1">
+          <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-white">Live embed preview</h2>
+                <p className="mt-1 text-xs text-zinc-400">Discord-style preview for the selected post. Nothing is sent to Discord.</p>
+              </div>
+              <span className="rounded border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-amber-100">
+                Preview only - not sent
+              </span>
+            </div>
+            <div className="mt-3 rounded-lg border border-white/10 bg-black/25 p-3 text-xs text-zinc-400">
+              <div className="font-black text-white">{selectedPostType?.label ?? "Selected post"}</div>
+              <div className="mt-1">{selectedPostType?.description ?? "Owner-selected Discord preview."}</div>
+              <div className="mt-2 grid gap-1 text-[11px] text-zinc-500">
+                <div>Discord Server: {selectedDestination?.guildName || "Not configured yet"}</div>
+                <div>Discord Channel: {selectedDestination ? discordChannelLabel(selectedDestination) : "Not configured yet"}</div>
+                <div>DZN server: {selectedServerOption?.label ?? "All Network / Network-wide"}</div>
+              </div>
+            </div>
             <DiscordEmbedPreview preview={preview ?? selectedTemplate?.preview ?? null} />
           </section>
 
           <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-            <h2 className="text-lg font-black text-white">Channel Mapping Setup</h2>
-            <p className="mt-1 text-xs text-zinc-400">Manual channel ID setup. Permission checks and test sends are owner-triggered and audited.</p>
+            <h2 className="text-lg font-black text-white">Post destinations</h2>
+            <p className="mt-1 text-xs text-zinc-400">Compact destination setup. Configure rows only when you need to edit Discord IDs.</p>
             <div className="mt-3 grid gap-2">
               {channels.map((channel) => {
                 const form = mappingForms[channel.slot] ?? { guildId: "", guildName: "", channelId: "", channelName: "", confirmation: "" };
                 const permissionPassed = channel.lastPermissionStatus === "ok";
-                const configured = Boolean(channel.guildId && channel.channelId && channel.status !== "disabled");
+                const configured = isDiscordDestinationConfigured(channel);
                 return (
-                <div key={channel.slot} className="rounded-lg border border-white/10 bg-black/25 p-3">
-                  <div className="flex items-start justify-between gap-3">
+                <div key={channel.slot} className="rounded-lg border border-white/10 bg-black/25 p-2.5">
+                  <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                     <div>
-                      <h3 className="text-sm font-black text-white">{channel.label}</h3>
-                      <p className="mt-1 text-[11px] text-zinc-500">{channel.mappedPostTypes.join(", ")}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-black text-white">{channel.label}</h3>
+                        <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300">
+                          {channelStatusLabel(channel.status)}
+                        </span>
+                      </div>
+                      <div className="mt-1 grid gap-1 text-[11px] text-zinc-500 sm:grid-cols-2">
+                        <div>Discord Server: {channel.guildName || (configured ? "Configured" : "Not configured yet")}</div>
+                        <div>Channel: {discordChannelLabel(channel)}</div>
+                        <div>Permissions: <span className={permissionPassed ? "text-emerald-200" : "text-amber-200"}>{permissionPassed ? "Passed" : channel.lastPermissionStatus ?? "Not checked"}</span></div>
+                        <div>Post type group: {summarizePostTypes(channel.mappedPostTypes)}</div>
+                      </div>
                     </div>
-                    <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300">
-                      {channelStatusLabel(channel.status)}
-                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button type="button" onClick={() => setExpandedSlot(expandedSlot === channel.slot ? null : channel.slot)} className="rounded border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-[11px] font-black text-cyan-100">Configure</button>
+                      <button
+                        type="button"
+                        disabled={inFlightAction !== null || !configured}
+                        onClick={() => void runDiscordAction(`check-${channel.slot}`, async () => {
+                          await postJson(`/api/owner/discord/channel-mappings/${channel.slot}/permission-check`, { reason: "Owner console permission check" });
+                          return `${channel.label} permission check completed.`;
+                        })}
+                        className="rounded border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-[11px] font-black text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {inFlightAction === `check-${channel.slot}` ? "Checking..." : "Check permissions"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={inFlightAction !== null || !configured}
+                        onClick={() => void runDiscordAction(`disable-${channel.slot}`, async () => {
+                          await postJson(`/api/owner/discord/channel-mappings/${channel.slot}/disable`, { reason: "Owner console mapping disable" });
+                          return `${channel.label} mapping disabled.`;
+                        })}
+                        className="rounded border border-red-300/30 bg-red-300/10 px-2 py-1 text-[11px] font-black text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Disable
+                      </button>
+                    </div>
                   </div>
+                  {expandedSlot === channel.slot ? (
+                  <>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
-                      Guild ID
+                      Discord Server ID
                       <input value={form.guildId} onChange={(event) => updateMappingForm(channel.slot, "guildId", event.target.value)} placeholder="123456789012345678" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
                     </label>
                     <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
-                      Channel ID
+                      Discord Channel ID
                       <input value={form.channelId} onChange={(event) => updateMappingForm(channel.slot, "channelId", event.target.value)} placeholder="123456789012345678" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
                     </label>
                     <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
-                      Guild name
-                      <input value={form.guildName} onChange={(event) => updateMappingForm(channel.slot, "guildName", event.target.value)} placeholder="Optional stored label" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
+                      Discord Server Name
+                      <input value={form.guildName} onChange={(event) => updateMappingForm(channel.slot, "guildName", event.target.value)} placeholder="DZN Network" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
                     </label>
                     <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
-                      Channel name
-                      <input value={form.channelName} onChange={(event) => updateMappingForm(channel.slot, "channelName", event.target.value)} placeholder="Optional stored label" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
+                      Friendly channel name
+                      <input value={form.channelName} onChange={(event) => updateMappingForm(channel.slot, "channelName", event.target.value)} placeholder="announcements" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
                     </label>
                   </div>
+                  <p className="mt-2 text-[11px] leading-4 text-zinc-500">Discord calls your server a guild internally. You only need the Discord Server ID if auto-detection is unavailable.</p>
                   <div className="mt-2 grid gap-1 text-xs text-zinc-500">
                     <div>Last permission check: {channel.lastPermissionCheckedAt ? formatDate(channel.lastPermissionCheckedAt) : "not checked"}</div>
                     <div>Permission status: {channel.lastPermissionStatus ?? "unknown"}</div>
                     <div>Updated by: {channel.updatedBy ?? "unknown"} / {formatDate(channel.updatedAt)}</div>
+                    {configured ? <div>Advanced details: Server ID {channel.guildId}; Channel ID {channel.channelId}</div> : null}
                     {channel.lastPermissionError ? <div className="text-amber-200">{channel.lastPermissionError}</div> : null}
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -955,13 +1143,13 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                           guildName: form.guildName,
                           channelId: form.channelId,
                           channelName: form.channelName,
-                          reason: "Owner console channel mapping save",
+                          reason: "Owner console post destination save",
                         });
-                        return `${channel.label} mapping saved.`;
+                        return `${channel.label} destination saved.`;
                       })}
                       className="rounded border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {inFlightAction === `save-${channel.slot}` ? "Saving..." : "Save mapping"}
+                      {inFlightAction === `save-${channel.slot}` ? "Saving..." : "Save destination"}
                     </button>
                     <button
                       type="button"
@@ -972,7 +1160,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                       })}
                       className="rounded border border-emerald-300/30 bg-emerald-300/10 px-3 py-2 text-xs font-black text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {inFlightAction === `check-${channel.slot}` ? "Checking..." : "Run permission check"}
+                      {inFlightAction === `check-${channel.slot}` ? "Checking..." : "Check permissions"}
                     </button>
                     <button
                       type="button"
@@ -1005,10 +1193,12 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                       })}
                       className="mt-2 w-full rounded border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs font-black text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {inFlightAction === `test-${channel.slot}` ? "Sending..." : "Send one test embed"}
+                      {inFlightAction === `test-${channel.slot}` ? "Sending..." : "Send Test Embed"}
                     </button>
                     <p className="mt-2 text-[11px] leading-4 text-zinc-500">Requires configured channel, passing permission check and typed confirmation. This does not enable auto-posting.</p>
                   </div>
+                  </>
+                  ) : null}
                 </div>
               );
               })}
@@ -1026,7 +1216,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                     <div className="font-black text-white">{entry.action}</div>
                     <span className={entry.result === "success" ? "text-emerald-200" : "text-amber-200"}>{entry.result}</span>
                   </div>
-                  <div className="mt-1 text-zinc-500">{entry.targetSlot ?? "general"} / {entry.channelId ?? "no channel"} / {formatDate(entry.createdAt)}</div>
+                  <div className="mt-1 text-zinc-500">{entry.targetSlot ?? "general"} / {entry.channelId ? `Channel ID ${entry.channelId}` : "no channel"} / {formatDate(entry.createdAt)}</div>
                   {entry.reason ? <div className="mt-1 text-zinc-500">{entry.reason}</div> : null}
                 </div>
               ))}
@@ -1097,7 +1287,7 @@ function AuditLogPanel({ auditLog }: { auditLog: AuditLog | null }) {
               <div className="mt-2 grid gap-1 text-xs text-zinc-500 sm:grid-cols-2">
                 <div>Actor: {item.actorDiscordId ?? "unknown"}</div>
                 <div>Created: {formatDate(item.createdAt)}</div>
-                <div>Guild: {item.guildId ?? "none"}</div>
+                <div>Discord Server ID: {item.guildId ?? "none"}</div>
                 <div>Request: {item.requestId ?? "none"}</div>
               </div>
               {item.reason ? <p className="mt-2 text-xs text-zinc-400">{item.reason}</p> : null}
@@ -1131,7 +1321,7 @@ function SettingsPanel({ overview }: { overview: OwnerOverview }) {
           <StatusCard title="Authentication basis" value="Discord ID allowlist" tone="good" />
         </div>
         <p className="mt-5 text-sm leading-6 text-zinc-400">
-          The allowlist values are never returned to this page. Display names, usernames, emails and guild nicknames are not used for platform-owner access.
+          The allowlist values are never returned to this page. Display names, usernames, emails and Discord server nicknames are not used for platform-owner access.
         </p>
       </section>
     </div>
@@ -1284,6 +1474,21 @@ function channelStatusLabel(value: DiscordChannelSlot["status"]) {
     preview_only: "Preview only",
   };
   return labels[value];
+}
+
+function isDiscordDestinationConfigured(channel: DiscordChannelSlot) {
+  return Boolean(channel.guildId && channel.channelId && channel.status !== "disabled" && channel.status !== "not_configured");
+}
+
+function discordChannelLabel(channel: DiscordChannelSlot) {
+  if (!channel.channelId || channel.status === "not_configured") return "Not configured yet";
+  return channel.channelName ? `#${channel.channelName}` : "Channel configured";
+}
+
+function summarizePostTypes(postTypes: string[]) {
+  if (postTypes.length === 0) return "No post types mapped";
+  if (postTypes.length <= 2) return postTypes.join(", ");
+  return `${postTypes.slice(0, 2).join(", ")} +${postTypes.length - 2}`;
 }
 
 function formatDate(value?: string | null) {

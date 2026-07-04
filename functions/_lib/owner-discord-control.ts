@@ -67,7 +67,36 @@ export type OwnerDiscordPreviewType =
   | "legacy_server"
   | "archived_server"
   | "server_wars_event"
-  | "weekly_recap";
+  | "weekly_recap"
+  | "daily_recap"
+  | "longest_kill"
+  | "milestone"
+  | "dzn_announcement"
+  | "package_promotion";
+
+export type OwnerDiscordPreviewOption = {
+  type: OwnerDiscordPreviewType;
+  label: string;
+  description: string;
+  networkWide: boolean;
+  suggestedSlot: string;
+};
+
+export type OwnerDiscordLinkedServerOption = {
+  value: string;
+  label: string;
+  slug: string | null;
+  lifecycleStatus: string | null;
+  lifecycleLabel: string;
+  status: string | null;
+  role: "network" | "nuketown" | "pandora" | "warlords" | "server";
+};
+
+export type OwnerDiscordOptions = {
+  postTypes: OwnerDiscordPreviewOption[];
+  linkedServers: OwnerDiscordLinkedServerOption[];
+  destinationSlots: OwnerDiscordChannelSlot[];
+};
 
 export type OwnerDiscordPreviewEmbed = {
   type: OwnerDiscordPreviewType;
@@ -177,6 +206,15 @@ type StoredAuditRow = {
   created_at: string | null;
 };
 
+type StoredLinkedServerOptionRow = {
+  id: string;
+  server_name: string | null;
+  public_slug: string | null;
+  status: string | null;
+  lifecycle_status: string | null;
+  nitrado_service_id: string | null;
+};
+
 const POST_TYPES: Array<{ key: string; label: string; requiredDataSource: string }> = [
   { key: "new_server_added", label: "New server added", requiredDataSource: "linked_servers, server_public_cache" },
   { key: "server_went_live", label: "Server went live", requiredDataSource: "server_sync_state" },
@@ -207,6 +245,20 @@ export const OWNER_DISCORD_CHANNEL_SLOTS: Array<{ slot: string; label: string; p
   { slot: "admin-alerts", label: "Admin alerts", postTypes: ["server_token_needs_resave", "server_archived_hidden"] },
   { slot: "owner-alerts", label: "Owner alerts", postTypes: ["legacy_offline_preserved", "milestone_reached"] },
   { slot: "audit-log", label: "Audit log", postTypes: ["server_archived_hidden", "dzn_announcement"] },
+];
+
+export const OWNER_DISCORD_PREVIEW_OPTIONS: OwnerDiscordPreviewOption[] = [
+  { type: "new_server", label: "New server joined DZN", description: "Announce a newly listed DZN server.", networkWide: false, suggestedSlot: "announcements" },
+  { type: "top_server", label: "Top server update", description: "Preview a stored leaderboard or server highlight.", networkWide: false, suggestedSlot: "leaderboard-updates" },
+  { type: "legacy_server", label: "PANDORA legacy/offline history preserved", description: "Explain that historical stats remain visible after live sync stops.", networkWide: false, suggestedSlot: "server-updates" },
+  { type: "archived_server", label: "Warlords archived/hidden internal notice", description: "Internal owner notice for hidden fake/test data.", networkWide: false, suggestedSlot: "admin-alerts" },
+  { type: "server_wars_event", label: "Server Wars event promo", description: "Preview an event promo without changing Server Wars scoring.", networkWide: true, suggestedSlot: "server-wars" },
+  { type: "weekly_recap", label: "Weekly DZN network recap", description: "Network-wide weekly recap generated from stored public data.", networkWide: true, suggestedSlot: "announcements" },
+  { type: "daily_recap", label: "Daily network recap", description: "Network-wide daily snapshot generated from stored public data.", networkWide: true, suggestedSlot: "announcements" },
+  { type: "longest_kill", label: "Longest kill update", description: "Highlight a stored longest-kill stat without changing scoring.", networkWide: false, suggestedSlot: "leaderboard-updates" },
+  { type: "milestone", label: "Milestone reached", description: "Preview a server or network milestone announcement.", networkWide: false, suggestedSlot: "owner-alerts" },
+  { type: "dzn_announcement", label: "DZN announcement", description: "Owner-authored DZN network announcement preview.", networkWide: true, suggestedSlot: "announcements" },
+  { type: "package_promotion", label: "Free/Pro/Premium promotion post", description: "Preview package messaging while auto posting stays disabled.", networkWide: true, suggestedSlot: "announcements" },
 ];
 
 export async function getOwnerDiscordOverview(env: Env): Promise<OwnerDiscordOverview> {
@@ -298,12 +350,24 @@ export async function getOwnerDiscordChannelMappings(env: Env): Promise<OwnerDis
 }
 
 export async function getOwnerDiscordTemplates(env: Env): Promise<OwnerDiscordTemplate[]> {
-  return (["new_server", "top_server", "legacy_server", "archived_server", "server_wars_event", "weekly_recap"] as const).map((type) => ({
-    type,
-    label: getPreviewTypeLabel(type),
-    description: getPreviewTypeDescription(type),
-    preview: buildOwnerDiscordPreviewEmbed(env, { type }),
+  return OWNER_DISCORD_PREVIEW_OPTIONS.map((option) => ({
+    type: option.type,
+    label: option.label,
+    description: option.description,
+    preview: buildOwnerDiscordPreviewEmbed(env, { type: option.type }),
   }));
+}
+
+export async function getOwnerDiscordOptions(env: Env): Promise<OwnerDiscordOptions> {
+  const [destinationSlots, linkedServers] = await Promise.all([
+    getOwnerDiscordChannels(env),
+    getOwnerDiscordLinkedServerOptions(env),
+  ]);
+  return {
+    postTypes: OWNER_DISCORD_PREVIEW_OPTIONS,
+    linkedServers,
+    destinationSlots,
+  };
 }
 
 export async function saveOwnerDiscordChannelMapping(env: Env, user: SessionUser, input: {
@@ -319,7 +383,7 @@ export async function saveOwnerDiscordChannelMapping(env: Env, user: SessionUser
   const slot = normalizeChannelSlot(input.slot);
   if (!slot) return { ok: false as const, status: 400, error: "Invalid Discord channel slot." };
   const guildId = sanitizeDiscordId(input.guildId);
-  if (!guildId) return { ok: false as const, status: 400, error: "Valid Discord guild ID is required." };
+  if (!guildId) return { ok: false as const, status: 400, error: "Valid Discord Server ID is required." };
   const channelId = sanitizeDiscordId(input.channelId);
   if (!channelId) return { ok: false as const, status: 400, error: "Valid Discord channel ID is required." };
   const guildName = safeText(input.guildName, 120);
@@ -717,6 +781,56 @@ async function getStoredDestinations(env: Env): Promise<StoredDestination[]> {
   }
 }
 
+async function getOwnerDiscordLinkedServerOptions(env: Env): Promise<OwnerDiscordLinkedServerOption[]> {
+  const options: OwnerDiscordLinkedServerOption[] = [
+    {
+      value: "network",
+      label: "All Network / Network-wide",
+      slug: null,
+      lifecycleStatus: null,
+      lifecycleLabel: "Network-wide",
+      status: null,
+      role: "network",
+    },
+  ];
+  try {
+    if (!(await tableExists(env, "linked_servers"))) return options;
+    const result = await requireDb(env)
+      .prepare(
+        `SELECT id, server_name, public_slug, status, lifecycle_status, nitrado_service_id
+           FROM linked_servers
+          ORDER BY
+            CASE
+              WHEN nitrado_service_id = '18765761' THEN 0
+              WHEN lower(COALESCE(server_name, '')) LIKE '%pandora%' THEN 1
+              WHEN nitrado_service_id = '900002' OR lower(COALESCE(server_name, '')) LIKE '%warlords%' THEN 2
+              ELSE 3
+            END,
+            lower(COALESCE(server_name, id)) ASC
+          LIMIT 200`,
+      )
+      .all<StoredLinkedServerOptionRow>();
+    for (const row of result.results ?? []) {
+      const id = stringOrNull(row.id);
+      if (!id) continue;
+      const label = safeText(row.server_name, 120) ?? id;
+      const lifecycleStatus = stringOrNull(row.lifecycle_status);
+      options.push({
+        value: id,
+        label,
+        slug: stringOrNull(row.public_slug),
+        lifecycleStatus,
+        lifecycleLabel: lifecycleOptionLabel(lifecycleStatus),
+        status: stringOrNull(row.status),
+        role: knownServerRole(row),
+      });
+    }
+  } catch {
+    return options;
+  }
+  return options;
+}
+
 async function getStoredChannelMappings(env: Env): Promise<StoredChannelMapping[]> {
   try {
     if (!(await tableExists(env, "discord_channel_mappings"))) return [];
@@ -963,6 +1077,32 @@ function toAuditLogEntry(row: StoredAuditRow): OwnerDiscordAuditLogEntry {
   };
 }
 
+function knownServerRole(row: Pick<StoredLinkedServerOptionRow, "server_name" | "nitrado_service_id">): OwnerDiscordLinkedServerOption["role"] {
+  const name = String(row.server_name ?? "").toLowerCase();
+  const serviceId = String(row.nitrado_service_id ?? "");
+  if (serviceId === "18765761" || name.includes("nuketown")) return "nuketown";
+  if (name.includes("pandora")) return "pandora";
+  if (serviceId === "900002" || name.includes("warlords")) return "warlords";
+  return "server";
+}
+
+function lifecycleOptionLabel(status: string | null) {
+  const labels: Record<string, string> = {
+    active_live: "Active",
+    active_degraded: "Active degraded",
+    token_needs_resave: "Token needs re-save",
+    nitrado_upstream_down: "Nitrado temporarily unavailable",
+    stale_monitoring: "Stale monitoring",
+    expired_detected: "Server appears expired",
+    deletion_imminent: "Deletion may be imminent",
+    final_sync_pending: "Final sync pending",
+    final_sync_complete: "Final sync complete",
+    legacy_offline: "Legacy / Offline",
+    archived_hidden: "Archived / Hidden",
+  };
+  return status ? labels[status] ?? status.replace(/_/g, " ") : "Unknown";
+}
+
 function getPreviewBase(type: OwnerDiscordPreviewType): Omit<OwnerDiscordPreviewEmbed, "timestamp" | "previewOnly" | "sent"> {
   if (type === "new_server") {
     return {
@@ -1049,6 +1189,91 @@ function getPreviewBase(type: OwnerDiscordPreviewType): Omit<OwnerDiscordPreview
       cta: { label: "View Event", url: "https://dzn-network.pages.dev/server-wars" },
     };
   }
+  if (type === "daily_recap") {
+    return {
+      type,
+      title: "Daily DZN network recap",
+      description: "A daily owner-reviewed snapshot of stored DZN Network activity.",
+      colorHex: "#06b6d4",
+      thumbnailUrl: null,
+      bannerUrl: null,
+      fields: [
+        { name: "Scope", value: "All Network", inline: true },
+        { name: "Mode", value: "Manual preview only", inline: true },
+        { name: "Safety", value: "Automatic posting remains disabled.", inline: false },
+      ],
+      footer: "Preview only - not sent",
+      cta: { label: "Open DZN", url: "https://dzn-network.pages.dev" },
+    };
+  }
+  if (type === "longest_kill") {
+    return {
+      type,
+      title: "Longest kill update",
+      description: "A stored longest-kill highlight ready for owner review.",
+      colorHex: "#f97316",
+      thumbnailUrl: null,
+      bannerUrl: null,
+      fields: [
+        { name: "Source", value: "Stored ADM kill events", inline: true },
+        { name: "Scoring", value: "No scoring rules changed", inline: true },
+        { name: "Delivery", value: "Owner-controlled preview before any send.", inline: false },
+      ],
+      footer: "Preview only - not sent",
+      cta: { label: "View Leaderboards", url: "https://dzn-network.pages.dev/leaderboards" },
+    };
+  }
+  if (type === "milestone") {
+    return {
+      type,
+      title: "Milestone reached",
+      description: "A DZN server or network milestone is ready for announcement review.",
+      colorHex: "#facc15",
+      thumbnailUrl: null,
+      bannerUrl: null,
+      fields: [
+        { name: "Milestone", value: "Stored achievement or activity threshold", inline: true },
+        { name: "Approval", value: "Owner reviewed", inline: true },
+        { name: "Auto posting", value: "Disabled", inline: false },
+      ],
+      footer: "Preview only - not sent",
+      cta: { label: "Open DZN", url: "https://dzn-network.pages.dev" },
+    };
+  }
+  if (type === "dzn_announcement") {
+    return {
+      type,
+      title: "DZN announcement",
+      description: "An owner-authored DZN Network announcement preview.",
+      colorHex: "#22d3ee",
+      thumbnailUrl: null,
+      bannerUrl: null,
+      fields: [
+        { name: "Audience", value: "DZN community", inline: true },
+        { name: "Status", value: "Preview only", inline: true },
+        { name: "Safety", value: "No message is sent unless the owner uses the guarded test path.", inline: false },
+      ],
+      footer: "Preview only - not sent",
+      cta: { label: "Visit DZN", url: "https://dzn-network.pages.dev" },
+    };
+  }
+  if (type === "package_promotion") {
+    return {
+      type,
+      title: "Free / Pro listing promotion",
+      description: "A package promotion preview that keeps paid visibility separate from competitive stats.",
+      colorHex: "#a3e635",
+      thumbnailUrl: null,
+      bannerUrl: null,
+      fields: [
+        { name: "Free Listing", value: "Useful public discovery basics", inline: true },
+        { name: "Pro Listing", value: "Enhanced presentation without stat advantage", inline: true },
+        { name: "Fairness", value: "No paid rank, K/D, score, review, crown or season-win advantage.", inline: false },
+      ],
+      footer: "Preview only - not sent",
+      cta: { label: "View Listings", url: "https://dzn-network.pages.dev" },
+    };
+  }
   return {
     type,
     title: "Weekly DZN network recap",
@@ -1066,30 +1291,6 @@ function getPreviewBase(type: OwnerDiscordPreviewType): Omit<OwnerDiscordPreview
   };
 }
 
-function getPreviewTypeLabel(type: OwnerDiscordPreviewType) {
-  const labels: Record<OwnerDiscordPreviewType, string> = {
-    new_server: "New server joined DZN",
-    top_server: "NukeTown top server update",
-    legacy_server: "PANDORA legacy/offline history preserved",
-    archived_server: "Warlords archived/hidden internal notice",
-    server_wars_event: "Server Wars event promo",
-    weekly_recap: "Weekly DZN network recap",
-  };
-  return labels[type];
-}
-
-function getPreviewTypeDescription(type: OwnerDiscordPreviewType) {
-  const descriptions: Record<OwnerDiscordPreviewType, string> = {
-    new_server: "A public listing announcement generated from stored server data.",
-    top_server: "A leaderboard-style preview that does not alter ranking, score or stats.",
-    legacy_server: "A lifecycle notice showing preserved history without active sync.",
-    archived_server: "An internal safety notice for archived fake/test listings.",
-    server_wars_event: "A promotional event embed using existing Server Wars data only.",
-    weekly_recap: "A network recap template for future scheduled posting.",
-  };
-  return descriptions[type];
-}
-
 function normalizePreviewType(value: unknown): OwnerDiscordPreviewType {
   const normalized = stringOrNull(value);
   if (
@@ -1098,7 +1299,12 @@ function normalizePreviewType(value: unknown): OwnerDiscordPreviewType {
     normalized === "legacy_server" ||
     normalized === "archived_server" ||
     normalized === "server_wars_event" ||
-    normalized === "weekly_recap"
+    normalized === "weekly_recap" ||
+    normalized === "daily_recap" ||
+    normalized === "longest_kill" ||
+    normalized === "milestone" ||
+    normalized === "dzn_announcement" ||
+    normalized === "package_promotion"
   ) {
     return normalized;
   }
