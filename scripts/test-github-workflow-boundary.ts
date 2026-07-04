@@ -687,6 +687,10 @@ assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("/api/public/se
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("/api/public/home-stats"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("/api/public/leaderboards/advanced"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("/api/public/server-wars"), true);
+assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("/servers/profile?slug=pandora-dayz"), true);
+assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("NukeTown public visibility: passed"), true);
+assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("PANDORA public profile/history route: passed"), true);
+assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("Warlords archived_hidden active-public exclusion: passed"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("/api/dzn-pulse/config"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: false"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("D1 migration: not run"), true);

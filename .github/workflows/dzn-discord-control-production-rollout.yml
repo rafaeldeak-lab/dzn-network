@@ -349,11 +349,20 @@ jobs:
             await expect("/dashboard", [200]);
             await expect("/dzn-pulse", [200]);
             await expect("/api/public/server-rail", [200]);
-            await expect("/api/public/servers", [200]);
+            const publicServers = await expectJson("/api/public/servers", [200]);
             await expect("/api/public/home-stats", [200]);
             await expect("/api/public/leaderboards", [200]);
             await expect("/api/public/leaderboards/advanced", [200]);
             await expect("/api/public/server-wars", [200]);
+            await expect("/servers/profile?slug=pandora-dayz", [200]);
+
+            const publicServerText = JSON.stringify(publicServers).toLowerCase();
+            if (!publicServerText.includes("nuketown") && !publicServerText.includes("18765761")) {
+              throw new Error("NukeTown was not visible in public server data after Discord Control deploy.");
+            }
+            if (publicServerText.includes("warlords") || publicServerText.includes("900002")) {
+              throw new Error("Warlords archived_hidden data appeared in active public server data.");
+            }
 
             const owner = await expect("/owner", [200, 302, 303, 307, 308, 401, 403], {}, 8);
             if ([302, 303, 307, 308].includes(owner.status)) {
@@ -393,6 +402,9 @@ jobs:
           {
             echo "### Production verification"
             echo "- Public routes: passed"
+            echo "- NukeTown public visibility: passed"
+            echo "- PANDORA public profile/history route: passed"
+            echo "- Warlords archived_hidden active-public exclusion: passed"
             echo "- /owner logged-out protection: passed"
             echo "- Discord owner APIs logged-out protection: passed"
             echo "- Preview embed endpoint unauthenticated protection: passed"
