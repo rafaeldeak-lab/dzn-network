@@ -42,6 +42,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}
+      DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_ID: ${{ vars.DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_ID || vars.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID || vars.DZN_PULSE_PREVIEW_DISCORD_CLIENT_ID }}
+      DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}
       INPUT_BRANCH: ${{ inputs.branch }}
       MODE: ${{ inputs.mode }}
       CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
@@ -145,6 +147,26 @@ jobs:
           echo "::add-mask::$PREVIEW_SESSION_SECRET"
           printf "DISCORD_CONTROL_PREVIEW_SESSION_SECRET=%s\n" "$PREVIEW_SESSION_SECRET" >> "$GITHUB_ENV"
 
+          DISCORD_CONTROL_PREVIEW_CLIENT_ID="${DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_ID:-1504270029795885178}"
+          DISCORD_CONTROL_PREVIEW_REDIRECT_URI="${PREVIEW_BASE_URL}/api/auth/discord/callback"
+          if ! [[ "${DISCORD_CONTROL_PREVIEW_CLIENT_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::Discord Control preview Discord client id must be numeric."
+            exit 1
+          fi
+          if [ "${DISCORD_CONTROL_PREVIEW_CLIENT_ID}" != "1504270029795885178" ]; then
+            echo "::error::Discord Control preview must use DISCORD_CLIENT_ID=1504270029795885178."
+            exit 1
+          fi
+          if [ -z "${DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET:-}" ]; then
+            echo "::error::Missing DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET, DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET, or DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET for Discord Control preview OAuth."
+            exit 1
+          fi
+          echo "::add-mask::$DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET"
+          {
+            printf "DISCORD_CONTROL_PREVIEW_CLIENT_ID=%s\n" "$DISCORD_CONTROL_PREVIEW_CLIENT_ID"
+            printf "DISCORD_CONTROL_PREVIEW_REDIRECT_URI=%s\n" "$DISCORD_CONTROL_PREVIEW_REDIRECT_URI"
+          } >> "$GITHUB_ENV"
+
           node <<'NODE'
           const fs = require("node:fs");
           const ownerIds = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS ?? "")
@@ -176,6 +198,10 @@ jobs:
             echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
             echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
             echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
+            echo "- DISCORD_CLIENT_ID: ${DISCORD_CONTROL_PREVIEW_CLIENT_ID}"
+            echo "- DISCORD_REDIRECT_URI: ${DISCORD_CONTROL_PREVIEW_REDIRECT_URI}"
+            echo "- DZN_APP_URL: ${PREVIEW_BASE_URL}"
+            echo "- NEXT_PUBLIC_APP_URL: ${PREVIEW_BASE_URL}"
             echo "- DZN_PULSE_ENABLED: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -402,6 +428,8 @@ jobs:
           const projectName = process.env.PREVIEW_PROJECT_NAME;
           const branch = process.env.INPUT_BRANCH;
           const previewBaseUrl = process.env.PREVIEW_BASE_URL;
+          const previewDiscordClientId = process.env.DISCORD_CONTROL_PREVIEW_CLIENT_ID;
+          const previewDiscordRedirectUri = process.env.DISCORD_CONTROL_PREVIEW_REDIRECT_URI;
           const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
           const previewDbName = process.env.PREVIEW_DB_NAME;
           async function api(path, init = {}) {
@@ -431,6 +459,8 @@ jobs:
                 DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
                 DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
                 NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                DISCORD_CLIENT_ID: { type: "plain_text", value: previewDiscordClientId },
+                DISCORD_REDIRECT_URI: { type: "plain_text", value: previewDiscordRedirectUri },
               },
               d1_databases: {
                 ...(config?.d1_databases ?? {}),
@@ -476,6 +506,8 @@ jobs:
               'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
               `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
               `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              `DISCORD_CLIENT_ID = ${JSON.stringify(previewDiscordClientId)}`,
+              `DISCORD_REDIRECT_URI = ${JSON.stringify(previewDiscordRedirectUri)}`,
               "",
               "[[d1_databases]]",
               'binding = "DB"',
@@ -495,7 +527,8 @@ jobs:
           set -euo pipefail
           printf "%s" "$DZN_PLATFORM_OWNER_DISCORD_IDS" | npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS --project-name "${PREVIEW_PROJECT_NAME}"
           printf "%s" "$DISCORD_CONTROL_PREVIEW_SESSION_SECRET" | npx wrangler pages secret put SESSION_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
-          echo "Discord Control preview owner secrets configured."
+          printf "%s" "$DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET" | npx wrangler pages secret put DISCORD_CLIENT_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
+          echo "Discord Control preview owner and OAuth secrets configured."
 
       - name: Deploy preview Pages project
         run: |
@@ -512,6 +545,8 @@ jobs:
           DZN_DISCORD_NOTIFICATIONS_ENABLED=false \
           DZN_APP_URL="${PREVIEW_BASE_URL}" \
           NEXT_PUBLIC_APP_URL="${PREVIEW_BASE_URL}" \
+          DISCORD_CLIENT_ID="${DISCORD_CONTROL_PREVIEW_CLIENT_ID}" \
+          DISCORD_REDIRECT_URI="${DISCORD_CONTROL_PREVIEW_REDIRECT_URI}" \
           npm run build
           npx wrangler pages deploy out \
             --project-name "${PREVIEW_PROJECT_NAME}" \
@@ -530,6 +565,8 @@ jobs:
           const ownerCookie = process.env.DISCORD_CONTROL_OWNER_COOKIE;
           const nonOwnerCookie = process.env.DISCORD_CONTROL_NON_OWNER_COOKIE;
           const ownerDiscordId = process.env.DISCORD_CONTROL_PREVIEW_OWNER_ID;
+          const expectedDiscordClientId = process.env.DISCORD_CONTROL_PREVIEW_CLIENT_ID;
+          const expectedDiscordRedirectUri = process.env.DISCORD_CONTROL_PREVIEW_REDIRECT_URI;
           const retryableStatuses = new Set([522, 523, 524, 525, 526, 530]);
           const forbiddenText = ["Request failed: 503", "SERVER UNAVAILABLE", "Error 1102", "Worker exceeded resource limits", "Minified React error #"];
           const forbiddenSecrets = ["encrypted_token", "token_iv", "token_auth_tag", "DISCORD_BOT_TOKEN", "TOKEN_ENCRYPTION_KEY", "SESSION_SECRET", "DZN_PLATFORM_OWNER_DISCORD_IDS", ownerDiscordId].filter(Boolean);
@@ -591,6 +628,14 @@ jobs:
           }
           void (async () => {
             await expectStatus("/", 200);
+            const discordStart = await fetchWithRetry("/api/auth/discord/start?returnTo=%2Fowner", { redirect: "manual" });
+            assert(discordStart.status === 302, `/api/auth/discord/start?returnTo=%2Fowner returned HTTP ${discordStart.status}, expected 302.`);
+            const discordLocation = discordStart.headers.get("location") ?? "";
+            assert(discordLocation.startsWith("https://discord.com/oauth2/authorize"), "Discord auth start did not redirect to Discord.");
+            const discordAuthorize = new URL(discordLocation);
+            assert(discordAuthorize.searchParams.get("client_id") === expectedDiscordClientId, "Discord auth start used the wrong preview client id.");
+            assert(discordAuthorize.searchParams.get("redirect_uri") === expectedDiscordRedirectUri, "Discord auth start used the wrong preview callback URL.");
+
             const loggedOutOwner = await fetchWithRetry("/owner", { redirect: "manual" });
             assert([302, 401, 403].includes(loggedOutOwner.status), `/owner logged-out returned ${loggedOutOwner.status}.`);
             await expectStatus("/owner", 403, { headers: { cookie: nonOwnerCookie }, redirect: "manual" });
@@ -633,6 +678,7 @@ jobs:
             echo "- /owner auth protection: passed"
             echo "- Discord owner APIs auth protection: passed"
             echo "- Preview embed endpoint: preview-only, not sent"
+            echo "- Discord OAuth authorize start: passed"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
             echo "- Production D1 writes: none"
             echo "- Production Pages deploy: none"
