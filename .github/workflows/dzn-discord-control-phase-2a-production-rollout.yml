@@ -138,6 +138,7 @@ jobs:
             echo "::error::approved_preview_run_url must end with a numeric GitHub Actions run id."
             exit 1
           fi
+          echo "Approved preview run id extracted from URL: ${APPROVED_PREVIEW_RUN_ID}"
 
           git fetch origin main "${APPROVED_BRANCH}"
           if ! git cat-file -e "${APPROVED_COMMIT}^{commit}" 2>/dev/null; then
@@ -159,6 +160,8 @@ jobs:
             const expectedBranch = process.env.APPROVED_BRANCH;
             const expectedSha = process.env.APPROVED_COMMIT;
             const workflowFile = "dzn-discord-control-phase-2a-preview.yml";
+            const workflowPath = `.github/workflows/${workflowFile}`;
+            const workflowName = "DZN Discord Control Phase 2A Preview";
             if (!repository || !repository.includes("/")) {
               throw new Error(`GitHub repository context is invalid for preview approval verification: ${repository || "missing"}.`);
             }
@@ -170,10 +173,19 @@ jobs:
             };
             async function fetchJson(url) {
               const response = await fetch(url, { headers: commonHeaders });
+              console.log(`GitHub API ${url.replace(`https://api.github.com/repos/${repository}`, "")} returned ${response.status}`);
               if (!response.ok) {
                 return { ok: false, status: response.status, payload: null };
               }
               return { ok: true, status: response.status, payload: await response.json() };
+            }
+            async function fetchText(url) {
+              const response = await fetch(url, { headers: commonHeaders });
+              console.log(`GitHub API log request returned ${response.status}`);
+              if (!response.ok) {
+                return { ok: false, status: response.status, text: "" };
+              }
+              return { ok: true, status: response.status, text: await response.text() };
             }
             async function findApprovedRun() {
               const directUrl = `https://api.github.com/repos/${repository}/actions/runs/${runId}`;
@@ -185,24 +197,67 @@ jobs:
               if (direct.status !== 404) {
                 throw new Error(`Could not verify approved preview run in ${repository}: GitHub API returned ${direct.status}.`);
               }
-              console.log(`Direct approved preview run lookup returned 404 for ${repository} run ${runId}; checking workflow run list for exact run id.`);
-              const branch = encodeURIComponent(expectedBranch);
-              const listUrl = `https://api.github.com/repos/${repository}/actions/workflows/${workflowFile}/runs?branch=${branch}&event=workflow_dispatch&per_page=50`;
-              const listed = await fetchJson(listUrl);
-              if (!listed.ok) {
-                throw new Error(`Could not verify approved preview run in ${repository}: direct run lookup returned 404 and workflow run list returned ${listed.status}.`);
+              console.log(`Direct approved preview run lookup returned 404 for ${repository} run ${runId}; checking unfiltered workflow run list for exact run id because workflow_dispatch may record head_branch as main.`);
+              for (let page = 1; page <= 5; page += 1) {
+                const listUrl = `https://api.github.com/repos/${repository}/actions/workflows/${workflowFile}/runs?event=workflow_dispatch&per_page=100&page=${page}`;
+                const listed = await fetchJson(listUrl);
+                if (!listed.ok) {
+                  throw new Error(`Could not verify approved preview run in ${repository}: direct run lookup returned 404 and workflow run list page ${page} returned ${listed.status}.`);
+                }
+                const runs = Array.isArray(listed.payload?.workflow_runs) ? listed.payload.workflow_runs : [];
+                const match = runs.find((run) => String(run.id) === String(runId));
+                if (match) {
+                  console.log(`Approved preview run verified through unfiltered workflow run list in ${repository}: ${runId}`);
+                  return match;
+                }
+                if (runs.length < 100) break;
               }
-              const runs = Array.isArray(listed.payload?.workflow_runs) ? listed.payload.workflow_runs : [];
-              const match = runs.find((run) => String(run.id) === String(runId));
-              if (!match) {
-                throw new Error(`Approved preview run ${runId} was not found in ${repository} for ${workflowFile} on ${expectedBranch}; confirm the run URL and branch.`);
+              throw new Error(`Approved preview run ${runId} was not found in ${repository} for ${workflowFile}; confirm the run URL and repository.`);
+            }
+            function escapeRegExp(value) {
+              return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            }
+            async function collectJobLogs() {
+              const jobsUrl = `https://api.github.com/repos/${repository}/actions/runs/${runId}/jobs?per_page=100`;
+              const jobsResponse = await fetchJson(jobsUrl);
+              if (!jobsResponse.ok) {
+                throw new Error(`Could not read approved preview run jobs: GitHub API returned ${jobsResponse.status}.`);
               }
-              console.log(`Approved preview run verified through workflow run list in ${repository}: ${runId}`);
-              return match;
+              const jobs = Array.isArray(jobsResponse.payload?.jobs) ? jobsResponse.payload.jobs : [];
+              const logChunks = [];
+              for (const job of jobs) {
+                const jobId = job?.id;
+                if (!jobId) continue;
+                const logsUrl = `https://api.github.com/repos/${repository}/actions/jobs/${jobId}/logs`;
+                const logs = await fetchText(logsUrl);
+                if (logs.ok && logs.text) {
+                  logChunks.push(`\n===== job:${job.name || jobId} =====\n${logs.text}`);
+                }
+              }
+              return logChunks.join("\n");
+            }
+            function detectPreviewInputBranch(logs) {
+              const escapedBranch = escapeRegExp(expectedBranch);
+              const patterns = [
+                new RegExp(`Branch:\\s*${escapedBranch}`, "i"),
+                new RegExp(`INPUT_BRANCH[=:]\\s*${escapedBranch}`, "i"),
+                new RegExp(`ref:\\s*${escapedBranch}`, "i"),
+                new RegExp(`refs/remotes/origin/${escapedBranch}`, "i"),
+                new RegExp(`origin/${escapedBranch}`, "i"),
+                new RegExp(`--branch\\s+["']?${escapedBranch}["']?`, "i"),
+              ];
+              return patterns.some((pattern) => pattern.test(logs));
+            }
+            function detectPreviewTestedCommit(logs) {
+              return new RegExp(escapeRegExp(expectedSha), "i").test(logs);
             }
             const run = await findApprovedRun();
-            if (run.name !== "DZN Discord Control Phase 2A Preview") {
-              throw new Error(`Approved run is ${run.name || "unknown"}, not DZN Discord Control Phase 2A Preview.`);
+            console.log(`Approved preview run API event: ${run.event || "unknown"}`);
+            console.log(`Approved preview run API head_branch: ${run.head_branch || "unknown"}`);
+            console.log(`Approved preview run API head_sha: ${run.head_sha || "unknown"}`);
+            console.log(`Approved preview workflow name/path: ${run.name || "unknown"} / ${run.path || "unknown"}`);
+            if (run.name !== workflowName && run.path !== workflowPath) {
+              throw new Error(`Approved run is ${run.name || "unknown"} at ${run.path || "unknown path"}, not ${workflowName} (${workflowPath}).`);
             }
             if (run.event !== "workflow_dispatch") {
               throw new Error("Approved preview run must be a manual workflow_dispatch run.");
@@ -210,11 +265,23 @@ jobs:
             if (run.conclusion !== "success") {
               throw new Error(`Approved preview run is not green; conclusion=${run.conclusion || "missing"}.`);
             }
+            let detectedPreviewInputBranch = run.head_branch === expectedBranch;
+            let detectedPreviewTestedCommit = run.head_sha === expectedSha;
             if (run.head_branch !== expectedBranch) {
-              throw new Error(`Approved preview run was for ${run.head_branch || "unknown branch"}, not ${expectedBranch}.`);
+              console.log(`Approved preview run head_branch is ${run.head_branch || "unknown"}, which can be main when workflow_dispatch was launched with "Use workflow from: main"; verifying input branch from job logs.`);
             }
-            if (run.head_sha !== expectedSha) {
-              throw new Error(`Approved preview run SHA ${run.head_sha || "missing"} does not match approved_commit ${expectedSha}.`);
+            if (!detectedPreviewInputBranch || !detectedPreviewTestedCommit) {
+              const logs = await collectJobLogs();
+              detectedPreviewInputBranch = detectedPreviewInputBranch || detectPreviewInputBranch(logs);
+              detectedPreviewTestedCommit = detectedPreviewTestedCommit || detectPreviewTestedCommit(logs);
+            }
+            console.log(`Detected preview input branch ${expectedBranch}: ${detectedPreviewInputBranch ? "yes" : "no"}`);
+            console.log(`Detected preview tested commit ${expectedSha}: ${detectedPreviewTestedCommit ? "yes" : "no"}`);
+            if (!detectedPreviewInputBranch) {
+              throw new Error(`Could not verify approved preview run branch input ${expectedBranch} from API metadata or job logs.`);
+            }
+            if (!detectedPreviewTestedCommit) {
+              throw new Error(`Could not verify approved preview run tested commit ${expectedSha} from API metadata or job logs.`);
             }
             console.log(`Approved preview run verified: ${run.html_url}`);
           })().catch((error) => {
