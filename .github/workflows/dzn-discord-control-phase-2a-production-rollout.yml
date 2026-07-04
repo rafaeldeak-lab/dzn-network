@@ -1,0 +1,646 @@
+name: DZN Discord Control Phase 2A Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Approved Discord Control Phase 2A branch to deploy
+        required: true
+        default: feature/discord-control-phase-2a
+      approved_commit:
+        description: Exact Discord Control Phase 2A feature commit SHA approved in preview
+        required: true
+      approved_preview_run_url:
+        description: Successful DZN Discord Control Phase 2A Preview run URL for approved_commit
+        required: true
+      confirm_production_rollout:
+        description: Must equal APPROVE_DISCORD_PHASE_2A_ROLLOUT
+        required: true
+      production_db_name:
+        description: Production D1 database name
+        required: true
+        default: dzn_network_db
+      production_pages_project_name:
+        description: Production Pages project name
+        required: true
+        default: dzn-network
+      migration_name:
+        description: Migration file to apply
+        required: true
+        default: 0055_discord_control_phase_2a.sql
+
+concurrency:
+  group: dzn-discord-control-phase-2a-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    env:
+      APPROVED_BRANCH: feature/discord-control-phase-2a
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+      PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+      GITHUB_TOKEN: ${{ github.token }}
+      CLOUDFLARE_DISCORD_PHASE_2A_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_DISCORD_PHASE_2A_PRODUCTION_TOKEN }}
+      CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN }}
+      CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_API_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+
+    steps:
+      - name: Checkout main workflow source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install workflow source dependencies
+        run: npm ci
+
+      - name: Validate workflow boundary on main
+        run: npm run test:github-workflows
+
+      - name: Validate Discord Control Phase 2A production rollout guards
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.confirm_production_rollout }}" != "APPROVE_DISCORD_PHASE_2A_ROLLOUT" ]; then
+            echo "::error::confirm_production_rollout must equal APPROVE_DISCORD_PHASE_2A_ROLLOUT."
+            exit 1
+          fi
+          if [ "${{ inputs.branch }}" != "${APPROVED_BRANCH}" ]; then
+            echo "::error::Discord Control Phase 2A rollout may only deploy ${APPROVED_BRANCH}."
+            exit 1
+          fi
+          if [ "${{ inputs.branch }}" = "main" ]; then
+            echo "::error::Discord Control Phase 2A rollout must not deploy main as the feature branch."
+            exit 1
+          fi
+          if [ "${{ inputs.production_pages_project_name }}" != "dzn-network" ]; then
+            echo "::error::production_pages_project_name must equal dzn-network."
+            exit 1
+          fi
+          if [ "${{ inputs.production_db_name }}" != "dzn_network_db" ]; then
+            echo "::error::production_db_name must equal dzn_network_db."
+            exit 1
+          fi
+          if [ "${{ inputs.migration_name }}" != "0055_discord_control_phase_2a.sql" ]; then
+            echo "::error::migration_name must equal 0055_discord_control_phase_2a.sql."
+            exit 1
+          fi
+          case "${{ inputs.production_pages_project_name }}" in
+            *preview*|*phase-2a-preview*|*discord-control-preview*)
+              echo "::error::Refusing preview Pages project for Discord Phase 2A production rollout."
+              exit 1
+              ;;
+          esac
+          case "${{ inputs.production_db_name }}" in
+            *preview*|*phase_2a_preview*|*discord_control_preview*)
+              echo "::error::Refusing preview D1 database name for Discord Phase 2A production rollout."
+              exit 1
+              ;;
+          esac
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+
+          APPROVED_COMMIT="${{ inputs.approved_commit }}"
+          APPROVED_PREVIEW_RUN_URL="${{ inputs.approved_preview_run_url }}"
+          if ! [[ "${APPROVED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::approved_commit must be the exact 40-character SHA that passed DZN Discord Control Phase 2A Preview."
+            exit 1
+          fi
+          EXPECTED_PREVIEW_RUN_PREFIX="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          case "${APPROVED_PREVIEW_RUN_URL}" in
+            "${EXPECTED_PREVIEW_RUN_PREFIX}"*) ;;
+            *)
+              echo "::error::approved_preview_run_url must be a DZN Discord Control Phase 2A Preview run URL in ${GITHUB_REPOSITORY}."
+              exit 1
+              ;;
+          esac
+          APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_URL##*/}"
+          if ! [[ "${APPROVED_PREVIEW_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::approved_preview_run_url must end with a numeric GitHub Actions run id."
+            exit 1
+          fi
+
+          git fetch origin main "${APPROVED_BRANCH}"
+          if ! git cat-file -e "${APPROVED_COMMIT}^{commit}" 2>/dev/null; then
+            echo "::error::Approved commit is not present on the selected branch; rerun preview for the current branch head."
+            exit 1
+          fi
+          BRANCH_HEAD="$(git rev-parse "origin/${APPROVED_BRANCH}")"
+          if [ "${BRANCH_HEAD}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::Selected branch HEAD ${BRANCH_HEAD} does not match preview-approved commit ${APPROVED_COMMIT}; rerun preview for the current branch head."
+            exit 1
+          fi
+
+          APPROVED_COMMIT="${APPROVED_COMMIT}" APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_ID}" node <<'NODE'
+          (async () => {
+            const token = process.env.GITHUB_TOKEN;
+            if (!token) throw new Error("GITHUB_TOKEN is unavailable for preview approval verification.");
+            const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.APPROVED_PREVIEW_RUN_ID}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            });
+            if (!response.ok) throw new Error(`Could not verify approved preview run: GitHub API returned ${response.status}.`);
+            const run = await response.json();
+            if (run.name !== "DZN Discord Control Phase 2A Preview") {
+              throw new Error(`Approved run is ${run.name || "unknown"}, not DZN Discord Control Phase 2A Preview.`);
+            }
+            if (run.event !== "workflow_dispatch") {
+              throw new Error("Approved preview run must be a manual workflow_dispatch run.");
+            }
+            if (run.conclusion !== "success") {
+              throw new Error(`Approved preview run is not green; conclusion=${run.conclusion || "missing"}.`);
+            }
+            console.log(`Approved preview run verified: ${run.html_url}`);
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
+          NODE
+
+          ROLLOUT_CF_TOKEN=""
+          ROLLOUT_CF_TOKEN_SOURCE=""
+          if [ -n "${CLOUDFLARE_DISCORD_PHASE_2A_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_DISCORD_PHASE_2A_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_DISCORD_PHASE_2A_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_PULSE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_PULSE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_API_TOKEN_FALLBACK:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_API_TOKEN_FALLBACK}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_API_TOKEN"
+          fi
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_DISCORD_PHASE_2A_PRODUCTION_TOKEN, CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN, CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN, CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN, CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PRODUCTION_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          {
+            printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}"
+            printf "ROLLOUT_CF_TOKEN_SOURCE=%s\n" "${ROLLOUT_CF_TOKEN_SOURCE}"
+            printf "ROLLOUT_COMMIT_SHA=%s\n" "${APPROVED_COMMIT}"
+            printf "APPROVED_PREVIEW_RUN_URL=%s\n" "${APPROVED_PREVIEW_RUN_URL}"
+          } >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+          if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like a 32-character Cloudflare account id."
+            exit 1
+          fi
+
+          {
+            echo "## DZN Discord Control Phase 2A Production Rollout"
+            echo "- Branch: ${{ inputs.branch }}"
+            echo "- Commit: ${APPROVED_COMMIT}"
+            echo "- Approved preview: ${APPROVED_PREVIEW_RUN_URL}"
+            echo "- Production Pages project: ${{ inputs.production_pages_project_name }}"
+            echo "- Production D1: ${{ inputs.production_db_name }}"
+            echo "- Migration: ${{ inputs.migration_name }}"
+            echo "- Cloudflare token source: ${ROLLOUT_CF_TOKEN_SOURCE}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Worker deploy: not run"
+            echo "- Production test embed: not sent"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout approved Discord Control Phase 2A commit
+        run: |
+          set -euo pipefail
+          git checkout --detach "${ROLLOUT_COMMIT_SHA}"
+          test "$(git rev-parse HEAD)" = "${ROLLOUT_COMMIT_SHA}"
+
+      - name: Confirm Phase 2A implementation files
+        run: |
+          set -euo pipefail
+
+          test -f migrations/0055_discord_control_phase_2a.sql
+          test -f functions/_lib/owner-discord-control.ts
+          test -f functions/api/owner/discord/channel-mappings.ts
+          test -f functions/api/owner/discord/channel-mappings/[slot]/disable.ts
+          test -f functions/api/owner/discord/channel-mappings/[slot]/permission-check.ts
+          test -f functions/api/owner/discord/test-embed.ts
+          test -f functions/api/owner/discord/audit-log.ts
+          test -f components/owner/owner-console.tsx
+
+          grep -q "confirmation !== \"SEND_TEST_EMBED\"" functions/_lib/owner-discord-control.ts
+          grep -q "previewOnly" functions/_lib/owner-discord-control.ts
+          grep -q "sent: false" functions/api/owner/discord/preview-embed.ts
+          grep -q "autoPostingEnabled: false" functions/api/owner/discord/test-embed.ts
+
+      - name: Install approved feature dependencies
+        run: npm ci
+
+      - name: Final Discord Control Phase 2A checks
+        run: |
+          set -euo pipefail
+          npm run lint
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npm run test
+          npm run test:owner-console
+          npm run test:github-workflows
+          npm run test:public-access-gating
+          npm run test:server-lifecycle-resource-control
+          npm run test:server-advertising-packages
+          git diff --check
+
+      - name: Review migration 0055 safety
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = `migrations/${process.env.MIGRATION_NAME}`;
+          const source = fs.readFileSync(path, "utf8");
+          const withoutComments = source
+            .split(/\r?\n/)
+            .filter((line) => !line.trim().startsWith("--"))
+            .join("\n");
+          if (/\b(DROP|TRUNCATE)\b|DELETE\s+FROM|ALTER\s+TABLE/i.test(withoutComments)) {
+            throw new Error("Migration 0055 contains destructive or non-additive SQL.");
+          }
+          const protectedTables = /(player_profiles|player_stats|kill_events|player_events|build_events|adm_raw_events|server_public_cache|leaderboard|server_wars|linked_servers|server_sync_state|server_advertising_state|subscriptions|nitrado)/i;
+          if (protectedTables.test(withoutComments)) {
+            throw new Error("Migration 0055 references protected gameplay, server, billing, or Nitrado tables.");
+          }
+          const statements = withoutComments.split(";").map((part) => part.trim()).filter(Boolean);
+          for (const statement of statements) {
+            const createAllowedTable = /^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(discord_channel_mappings|discord_owner_audit_log)\s*\(/i.test(statement);
+            const createAllowedIndex = /^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+idx_discord_(channel_mappings|owner_audit_log)_[a-z_]+\s+ON\s+(discord_channel_mappings|discord_owner_audit_log)\s*\(/i.test(statement);
+            if (!createAllowedTable && !createAllowedIndex) {
+              throw new Error(`Migration 0055 contains unsupported statement: ${statement.slice(0, 140)}`);
+            }
+          }
+          console.log("Migration 0055 is additive-only and scoped to Discord Control Phase 2A support tables.");
+          NODE
+        env:
+          MIGRATION_NAME: ${{ inputs.migration_name }}
+
+      - name: Confirm production D1 identity
+        run: |
+          set -euo pipefail
+
+          D1_LIST="$(npx wrangler d1 list --json)"
+          D1_LIST="${D1_LIST}" node <<'NODE'
+          const list = JSON.parse(process.env.D1_LIST || "[]");
+          const db = list.find((entry) => entry.name === "dzn_network_db");
+          if (!db) throw new Error("Production D1 database dzn_network_db was not found.");
+          if (db.uuid !== process.env.PRODUCTION_D1_DATABASE_ID) throw new Error("Production D1 database id mismatch.");
+          console.log(`Production D1 verified: ${db.name} (${db.uuid})`);
+          NODE
+
+      - name: Verify production Pages env names
+        run: |
+          set -euo pipefail
+
+          npx wrangler pages secret list --project-name "${{ inputs.production_pages_project_name }}" > discord-phase-2a-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_OWNER_DISCORD_IDS" discord-phase-2a-production-pages-secrets.txt
+          grep -q "DZN_DISCORD_NOTIFICATIONS_ENABLED" discord-phase-2a-production-pages-secrets.txt
+          echo "DZN_PLATFORM_OWNER_DISCORD_IDS listed in production Pages secrets: true"
+          echo "DZN_DISCORD_NOTIFICATIONS_ENABLED listed in production Pages secrets: true"
+
+      - name: Create production D1 Time Travel bookmark
+        run: |
+          set -euo pipefail
+
+          BOOKMARK_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          npx wrangler d1 time-travel info "${{ inputs.production_db_name }}" \
+            --timestamp "${BOOKMARK_TIMESTAMP}" \
+            --json > d1-time-travel-before-0055.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync("d1-time-travel-before-0055.json", "utf8"));
+          const info = Array.isArray(payload) ? payload[0] : payload;
+          const bookmark = info?.bookmark || info?.result?.bookmark || info?.bookmarks?.[0]?.bookmark || null;
+          if (!bookmark) throw new Error("Cloudflare did not return a D1 Time Travel bookmark.");
+          fs.appendFileSync(process.env.GITHUB_ENV, `D1_BACKUP_BOOKMARK=${bookmark}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Production D1 backup/bookmark: ${bookmark}\n`);
+          console.log(`Production D1 Time Travel bookmark created: ${bookmark}`);
+          NODE
+
+      - name: Inspect production rows before migration
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "PRAGMA table_info(discord_channel_mappings);" \
+            > discord-channel-columns-before.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "PRAGMA table_info(discord_owner_audit_log);" \
+            > discord-audit-columns-before.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT 'linked_servers' AS table_name, COUNT(*) AS row_count FROM linked_servers UNION ALL SELECT 'player_profiles', COUNT(*) FROM player_profiles UNION ALL SELECT 'kill_events', COUNT(*) FROM kill_events UNION ALL SELECT 'player_events', COUNT(*) FROM player_events UNION ALL SELECT 'build_events', COUNT(*) FROM build_events;" \
+            > discord-protected-counts-before.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT id, public_slug, nitrado_service_id, status, listing_visibility, lifecycle_status FROM linked_servers WHERE nitrado_service_id IN ('18765761','900002') OR lower(COALESCE(server_name,'')) LIKE '%pandora%' ORDER BY nitrado_service_id, id;" \
+            > discord-key-server-rows-before.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rows(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            return Array.isArray(parsed) ? parsed.flatMap((entry) => entry.results || []) : [];
+          }
+          const channelColumns = rows("discord-channel-columns-before.json").map((row) => row.name).filter(Boolean);
+          const auditColumns = rows("discord-audit-columns-before.json").map((row) => row.name).filter(Boolean);
+          const keyRows = rows("discord-key-server-rows-before.json");
+          if (!keyRows.some((row) => String(row.nitrado_service_id) === "18765761")) {
+            throw new Error("NukeTown row missing before migration.");
+          }
+          if (!keyRows.some((row) => String(row.nitrado_service_id) === "900002")) {
+            throw new Error("Warlords row missing before migration.");
+          }
+          const schemaAlreadyPresent = channelColumns.includes("slot") && auditColumns.includes("action");
+          fs.appendFileSync(process.env.GITHUB_ENV, `DISCORD_0055_SCHEMA_PRESENT=${schemaAlreadyPresent ? "yes" : "no"}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Discord 0055 schema already present before migration: ${schemaAlreadyPresent}\n`);
+          console.log(`Pre-migration discord_channel_mappings columns: ${channelColumns.join(", ") || "(table missing)"}`);
+          console.log(`Pre-migration discord_owner_audit_log columns: ${auditColumns.join(", ") || "(table missing)"}`);
+          NODE
+
+      - name: Apply only migration 0055 if needed
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT name FROM d1_migrations ORDER BY id;" > d1-applied-migrations.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const appliedPayload = JSON.parse(fs.readFileSync("d1-applied-migrations.json", "utf8"));
+          const appliedRows = Array.isArray(appliedPayload) ? appliedPayload.flatMap((entry) => entry.results || []) : [];
+          const applied = new Set(appliedRows.map((row) => row.name));
+          const local = fs.readdirSync("migrations").filter((name) => name.endsWith(".sql")).sort();
+          const pending = local.filter((name) => !applied.has(name));
+          const allowed = "0055_discord_control_phase_2a.sql";
+          const unexpected = pending.filter((name) => name !== allowed);
+          if (unexpected.length > 0) {
+            throw new Error(`Unexpected pending production D1 migrations: ${unexpected.join(", ")}`);
+          }
+          const schemaAlreadyPresent = process.env.DISCORD_0055_SCHEMA_PRESENT === "yes";
+          const shouldApply = pending.includes(allowed) && !schemaAlreadyPresent;
+          if (!pending.includes(allowed) && !schemaAlreadyPresent) {
+            throw new Error("Migration 0055 is not pending, but required Discord Control Phase 2A schema is missing.");
+          }
+          fs.writeFileSync("d1-pending-0055.txt", shouldApply ? "yes" : "no");
+          console.log(`Pending migration 0055: ${pending.includes(allowed) ? "yes" : "no"}`);
+          console.log(`Discord 0055 schema already present: ${schemaAlreadyPresent ? "yes" : "no"}`);
+          NODE
+
+          if [ "$(cat d1-pending-0055.txt)" = "yes" ]; then
+            npx wrangler d1 migrations apply "${{ inputs.production_db_name }}" --remote
+            echo "- Migration 0055: applied" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${DISCORD_0055_SCHEMA_PRESENT:-no}" = "yes" ]; then
+            echo "- Migration 0055: already applied by schema" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Migration 0055: already applied" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Verify production schema after migration
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "PRAGMA table_info(discord_channel_mappings);" > discord-channel-columns-after.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "PRAGMA table_info(discord_owner_audit_log);" > discord-audit-columns-after.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_discord_channel_mappings_slot','idx_discord_channel_mappings_guild_channel','idx_discord_channel_mappings_enabled','idx_discord_owner_audit_log_created_at','idx_discord_owner_audit_log_action','idx_discord_owner_audit_log_target') ORDER BY name;" > discord-indexes-after.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "PRAGMA foreign_key_check;" > discord-foreign-key-check-after.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT 'linked_servers' AS table_name, COUNT(*) AS row_count FROM linked_servers UNION ALL SELECT 'player_profiles', COUNT(*) FROM player_profiles UNION ALL SELECT 'kill_events', COUNT(*) FROM kill_events UNION ALL SELECT 'player_events', COUNT(*) FROM player_events UNION ALL SELECT 'build_events', COUNT(*) FROM build_events;" > discord-protected-counts-after.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT id, public_slug, nitrado_service_id, status, listing_visibility, lifecycle_status FROM linked_servers WHERE nitrado_service_id IN ('18765761','900002') OR lower(COALESCE(server_name,'')) LIKE '%pandora%' ORDER BY nitrado_service_id, id;" > discord-key-server-rows-after.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rows(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            return Array.isArray(parsed) ? parsed.flatMap((entry) => entry.results || []) : [];
+          }
+          const channelColumns = new Set(rows("discord-channel-columns-after.json").map((row) => row.name));
+          for (const column of ["id", "slot", "guild_id", "channel_id", "enabled", "last_permission_status", "created_by", "updated_by", "created_at", "updated_at"]) {
+            if (!channelColumns.has(column)) throw new Error(`Missing discord_channel_mappings.${column}`);
+          }
+          const auditColumns = new Set(rows("discord-audit-columns-after.json").map((row) => row.name));
+          for (const column of ["id", "actor_user_id", "actor_discord_id", "action", "target_type", "target_slot", "guild_id", "channel_id", "before_json", "after_json", "result", "request_id", "created_at"]) {
+            if (!auditColumns.has(column)) throw new Error(`Missing discord_owner_audit_log.${column}`);
+          }
+          const indexes = new Set(rows("discord-indexes-after.json").map((row) => row.name));
+          for (const index of ["idx_discord_channel_mappings_slot", "idx_discord_channel_mappings_guild_channel", "idx_discord_channel_mappings_enabled", "idx_discord_owner_audit_log_created_at", "idx_discord_owner_audit_log_action", "idx_discord_owner_audit_log_target"]) {
+            if (!indexes.has(index)) throw new Error(`Missing Discord Phase 2A index ${index}`);
+          }
+          if (rows("discord-foreign-key-check-after.json").length > 0) {
+            throw new Error("PRAGMA foreign_key_check returned violations.");
+          }
+          const countFor = (list, table) => list.find((row) => row.table_name === table)?.row_count;
+          const beforeCounts = rows("discord-protected-counts-before.json");
+          const afterCounts = rows("discord-protected-counts-after.json");
+          for (const table of ["linked_servers", "player_profiles", "kill_events", "player_events", "build_events"]) {
+            if (countFor(beforeCounts, table) !== countFor(afterCounts, table)) {
+              throw new Error(`Unexpected protected row count change for ${table}`);
+            }
+          }
+          const afterRows = rows("discord-key-server-rows-after.json");
+          if (!afterRows.some((row) => String(row.nitrado_service_id) === "18765761")) throw new Error("NukeTown row missing after migration.");
+          if (!afterRows.some((row) => String(row.nitrado_service_id) === "900002")) throw new Error("Warlords row missing after migration.");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "- Production Discord Phase 2A schema verification: passed\n");
+          console.log("Production Discord Phase 2A schema verification passed.");
+          NODE
+
+      - name: Deploy production Pages from approved Discord Phase 2A commit
+        run: |
+          set -euo pipefail
+
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npx wrangler pages deploy out \
+            --project-name "${{ inputs.production_pages_project_name }}" \
+            --branch main \
+            --commit-hash "${ROLLOUT_COMMIT_SHA}" \
+            --commit-message "Deploy Discord Control Phase 2A" \
+            --commit-dirty=true \
+            | tee discord-phase-2a-production-pages-deploy.txt
+
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' discord-phase-2a-production-pages-deploy.txt | head -n 1 || true)"
+          if [ -z "${DEPLOY_URL:-}" ]; then
+            DEPLOY_URL="${PRODUCTION_BASE_URL}"
+          fi
+          echo "PRODUCTION_DEPLOY_URL=${DEPLOY_URL}" >> "$GITHUB_ENV"
+          {
+            echo "- Production stable URL: ${PRODUCTION_BASE_URL}"
+            echo "- Production deployment URL: ${DEPLOY_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify production Discord Phase 2A rollout
+        run: |
+          set -euo pipefail
+          sleep 25
+
+          node <<'NODE'
+          (async () => {
+            const base = process.env.PRODUCTION_BASE_URL || "https://dzn-network.pages.dev";
+            const forbidden = [
+              "Request failed: 503",
+              "SERVER UNAVAILABLE",
+              "Error 1102",
+              "Worker exceeded resource limits",
+              "Minified React error #",
+              "TOKEN_ENCRYPTION_KEY",
+              "DISCORD_BOT_TOKEN",
+              "DISCORD_CLIENT_SECRET",
+              "SESSION_SECRET",
+              "encrypted_token",
+              "token_auth_tag",
+              "discord.com/api/webhooks/",
+            ];
+            async function request(path, init = {}) {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 45000);
+              try {
+                const response = await fetch(`${base}${path}`, {
+                  redirect: "manual",
+                  headers: { "User-Agent": "dzn-discord-phase-2a-production-rollout", ...(init.headers ?? {}) },
+                  ...init,
+                  signal: controller.signal,
+                });
+                const text = await response.text();
+                return { response, text };
+              } finally {
+                clearTimeout(timeout);
+              }
+            }
+            async function expect(path, statuses = [200], init = {}, tries = 5) {
+              let lastStatus = 0;
+              let lastText = "";
+              for (let attempt = 1; attempt <= tries; attempt += 1) {
+                const { response, text } = await request(path, init);
+                lastStatus = response.status;
+                lastText = text.slice(0, 280);
+                if (statuses.includes(response.status)) {
+                  for (const marker of forbidden) {
+                    if (text.includes(marker)) throw new Error(`${path} contained forbidden marker ${marker}`);
+                  }
+                  return { status: response.status, text, headers: response.headers };
+                }
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+              }
+              throw new Error(`${path} returned HTTP ${lastStatus}; expected ${statuses.join("/")}. Body: ${lastText}`);
+            }
+            async function expectJson(path, statuses = [200], init = {}) {
+              const result = await expect(path, statuses, init);
+              try {
+                return JSON.parse(result.text || "{}");
+              } catch {
+                throw new Error(`${path} did not return JSON.`);
+              }
+            }
+
+            await expect("/", [200]);
+            await expect("/servers", [200]);
+            await expect("/dashboard", [200]);
+            await expect("/dzn-pulse", [200]);
+            await expect("/api/public/server-rail", [200]);
+            const publicServers = await expectJson("/api/public/servers", [200]);
+            await expect("/api/public/home-stats", [200]);
+            await expect("/api/public/leaderboards", [200]);
+            await expect("/api/public/leaderboards/advanced", [200]);
+            await expect("/api/public/server-wars", [200]);
+            await expect("/servers/profile?slug=pandora-dayz", [200]);
+
+            const publicServerText = JSON.stringify(publicServers).toLowerCase();
+            if (!publicServerText.includes("nuketown") && !publicServerText.includes("18765761")) {
+              throw new Error("NukeTown was not visible in public server data after Discord Phase 2A deploy.");
+            }
+            if (publicServerText.includes("warlords") || publicServerText.includes("900002")) {
+              throw new Error("Warlords archived_hidden data appeared in active public server data.");
+            }
+
+            const owner = await expect("/owner", [200, 302, 303, 307, 308, 401, 403], {}, 8);
+            if ([302, 303, 307, 308].includes(owner.status)) {
+              const location = owner.headers.get("location") || "";
+              if (!location.includes("/login")) throw new Error(`/owner redirected to unexpected location ${location}`);
+            } else if (owner.status === 200 && !/login|403|Owner|Platform|Discord Control/i.test(owner.text)) {
+              throw new Error("/owner returned 200 but did not look like a protected owner/login response.");
+            }
+
+            for (const path of [
+              "/api/owner/discord/channel-mappings",
+              "/api/owner/discord/audit-log",
+            ]) {
+              await expect(path, [401, 403]);
+            }
+            await expect("/api/owner/discord/test-embed", [401, 403], {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ slot: "announcements", type: "weekly_recap" }),
+            });
+            await expect("/api/owner/discord/preview-embed", [401, 403], {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ type: "weekly_recap" }),
+            });
+
+            const pulse = await expectJson("/api/dzn-pulse/config", [200]);
+            const dznPulseEnabled = pulse.dznPulseEnabled ?? pulse.config?.dznPulseEnabled;
+            const discordNotificationsEnabled = pulse.discordNotificationsEnabled ?? pulse.config?.discordNotificationsEnabled;
+            if (dznPulseEnabled !== true) throw new Error("DZN Pulse is not enabled.");
+            if (discordNotificationsEnabled !== false) throw new Error("DZN Discord notifications are not false.");
+
+            console.log("Production Discord Control Phase 2A rollout verification passed.");
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
+          NODE
+
+          {
+            echo "### Production verification"
+            echo "- Public routes: passed"
+            echo "- NukeTown public visibility: passed"
+            echo "- PANDORA public profile/history route: passed"
+            echo "- Warlords archived_hidden active-public exclusion: passed"
+            echo "- /owner logged-out protection: passed"
+            echo "- Discord Phase 2A owner APIs logged-out protection: passed"
+            echo "- Preview embed endpoint unauthenticated protection: passed"
+            echo "- Test embed endpoint unauthenticated protection: passed"
+            echo "- Production test embed: not sent"
+            echo "- Auto posting enabled: false"
+            echo "- DZN Pulse enabled: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Worker deploy: not run"
+          } >> "$GITHUB_STEP_SUMMARY"
