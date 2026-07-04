@@ -652,6 +652,11 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview D1 databa
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("dzn-network-discord-phase-2a-preview"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("dzn_network_db_discord_phase_2a_preview"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("DZN_DISCORD_PHASE_2A_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_DISCORD_PHASE_2A_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('DISCORD_PHASE_2A_PREVIEW_CLIENT_ID="${DZN_DISCORD_PHASE_2A_PREVIEW_DISCORD_CLIENT_ID:-1504270029795885178}"'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('DISCORD_PHASE_2A_PREVIEW_REDIRECT_URI="${PREVIEW_BASE_URL}/api/auth/discord/callback"'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Discord Control Phase 2A preview must use DISCORD_CLIENT_ID=1504270029795885178."), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Missing DZN_DISCORD_PHASE_2A_PREVIEW_DISCORD_CLIENT_SECRET, DZN_DISCORD_CONTROL_PREVIEW_DISCORD_CLIENT_SECRET, DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET, or DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET for Discord Control Phase 2A preview OAuth."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('CF_TOKEN="${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"'), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Missing CLOUDFLARE_PULSE_PREVIEW_TOKEN or CLOUDFLARE_API_TOKEN GitHub secret."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Cloudflare preview token is present but too short to be valid."), true);
@@ -672,6 +677,11 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Resolve or create
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Configure preview owner auth secrets"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler pages secret put SESSION_SECRET"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler pages secret put DISCORD_CLIENT_SECRET"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('DISCORD_CLIENT_ID: { type: "plain_text", value: previewDiscordClientId }'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('DISCORD_REDIRECT_URI: { type: "plain_text", value: previewDiscordRedirectUri }'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("DISCORD_CLIENT_ID = ${JSON.stringify(previewDiscordClientId)}"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("DISCORD_REDIRECT_URI = ${JSON.stringify(previewDiscordRedirectUri)}"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("deployment_configs"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("production: mergeConfig"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("preview: mergeConfig"), true);
@@ -684,6 +694,10 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("const retryablePr
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Waiting for Discord Control Phase 2A preview readiness"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview readiness attempt"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Discord Control Phase 2A preview route"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("/api/auth/discord/start?returnTo=%2Fowner"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('discordLocation.startsWith("https://discord.com/oauth2/authorize")'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('discordAuthorize.searchParams.get("client_id") === expectedDiscordClientId'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('discordAuthorize.searchParams.get("redirect_uri") === expectedDiscordRedirectUri'), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Refusing production Pages project."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("--project-name dzn-network"), false);
