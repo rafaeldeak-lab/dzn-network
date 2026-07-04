@@ -161,4 +161,12 @@ assert.doesNotMatch(ownerUiSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_aut
 const pageSource = readFileSync("app/owner/page.tsx", "utf8");
 assert.match(pageSource, /OwnerConsole/);
 
+const packageJson = readFileSync("package.json", "utf8");
+assert.match(packageJson, /node scripts\/patch-pages-routes\.mjs/, "Build must patch Cloudflare Pages routes for owner page protection.");
+
+const routesPatch = readFileSync("scripts/patch-pages-routes.mjs", "utf8");
+assert.match(routesPatch, /"\/owner"/, "Cloudflare Pages routes must include the exact /owner page.");
+assert.match(routesPatch, /"\/owner\/\*"/, "Cloudflare Pages routes must include nested owner routes.");
+assert.match(routesPatch, /"\/api\/\*"/, "Cloudflare Pages routes must preserve API function routing.");
+
 console.log("Owner console read-only access and data contract checks passed.");
