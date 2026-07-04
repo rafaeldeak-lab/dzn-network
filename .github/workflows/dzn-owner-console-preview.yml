@@ -783,10 +783,16 @@ jobs:
           set -euo pipefail
 
           node <<'NODE'
+          const fs = require("node:fs");
           const base = process.env.PREVIEW_BASE_URL;
+          const deployedBase = fs.existsSync("owner-console-preview-immutable-url.txt")
+            ? fs.readFileSync("owner-console-preview-immutable-url.txt", "utf8").trim()
+            : "";
+          const verificationBase = deployedBase || base;
           const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE;
           const nonOwnerCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE;
           const ownerDiscordId = process.env.OWNER_CONSOLE_PREVIEW_OWNER_ID;
+          const retryablePreviewStatuses = new Set([522, 523, 524, 525, 526, 530]);
           const forbiddenText = [
             "Request failed: 503",
             "SERVER UNAVAILABLE",
@@ -810,14 +816,66 @@ jobs:
               process.exit(1);
             }
           }
-          async function fetchWithTimeout(path, init = {}) {
+          function delay(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+          }
+          async function fetchOnce(path, init = {}) {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 45000);
             try {
-              return await fetch(`${base}${path}`, { ...init, signal: controller.signal });
+              return await fetch(`${verificationBase}${path}`, { ...init, signal: controller.signal });
             } finally {
               clearTimeout(timeout);
             }
+          }
+          async function fetchWithTimeout(path, init = {}, options = {}) {
+            const attempts = options.attempts ?? 12;
+            const waitMs = options.waitMs ?? 7500;
+            let lastError = null;
+            let lastResponse = null;
+            for (let attempt = 1; attempt <= attempts; attempt += 1) {
+              try {
+                const response = await fetchOnce(path, init);
+                lastResponse = response;
+                console.log(`Owner console preview route ${path} attempt ${attempt}/${attempts}: HTTP ${response.status}`);
+                if (!retryablePreviewStatuses.has(response.status)) {
+                  return response;
+                }
+              } catch (error) {
+                lastError = error;
+                console.log(`Owner console preview route ${path} attempt ${attempt}/${attempts}: ${error instanceof Error ? error.name : "fetch_error"}`);
+              }
+              if (attempt < attempts) {
+                await delay(waitMs);
+              }
+            }
+            if (lastResponse) return lastResponse;
+            throw lastError ?? new Error(`Failed to fetch ${path}.`);
+          }
+          async function waitForPreviewReady() {
+            console.log(`Waiting for owner console preview readiness at ${verificationBase}`);
+            const maxAttempts = 40;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+              try {
+                const response = await fetchOnce("/", { redirect: "manual" });
+                const body = await response.text();
+                console.log(`Owner console preview readiness attempt ${attempt}/${maxAttempts}: HTTP ${response.status}`);
+                if (response.status === 200 && !forbiddenText.some((snippet) => body.includes(snippet))) {
+                  return;
+                }
+                if (!retryablePreviewStatuses.has(response.status) && response.status !== 404) {
+                  assert(response.status !== 503, "Preview readiness returned HTTP 503.");
+                  assert(!body.includes("Error 1102"), "Preview readiness returned Error 1102.");
+                }
+              } catch (error) {
+                console.log(`Owner console preview readiness attempt ${attempt}/${maxAttempts}: ${error instanceof Error ? error.name : "fetch_error"}`);
+              }
+              if (attempt < maxAttempts) {
+                await delay(7500);
+              }
+            }
+            console.error("Owner console preview did not become ready within 5 minutes.");
+            process.exit(1);
           }
           async function expectStatus(path, expected, init = {}) {
             const response = await fetchWithTimeout(path, init);
@@ -845,6 +903,7 @@ jobs:
             return { response, body, parsed };
           }
           void (async () => {
+            await waitForPreviewReady();
             const loggedOutOwner = await fetchWithTimeout("/owner", { redirect: "manual" });
             assert([302, 401, 403].includes(loggedOutOwner.status), `/owner logged-out returned ${loggedOutOwner.status}.`);
             if (loggedOutOwner.status === 302) {

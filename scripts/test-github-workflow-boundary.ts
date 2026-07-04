@@ -522,6 +522,11 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler pages secret 
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("--project-name dzn-network"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("wrangler pages deploy out"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("owner-console-preview-immutable-url.txt"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("const retryablePreviewStatuses = new Set([522, 523, 524, 525, 526, 530])"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Waiting for owner console preview readiness"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview readiness attempt"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview did not become ready within 5 minutes."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npm run test:owner-console"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/overview"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/servers"), true);
