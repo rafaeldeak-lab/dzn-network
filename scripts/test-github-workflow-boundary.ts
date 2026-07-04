@@ -516,6 +516,7 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("Refusing migration for non
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Refusing preview seed for non-preview owner console database name."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Preview D1 database id equals production D1 database id"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler d1 migrations apply DB --config wrangler.owner-console-preview.toml --remote"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("PRAGMA table_info(server_build_stats)"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler pages secret put SESSION_SECRET"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
@@ -541,6 +542,20 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn-adm-sync-worker"), fal
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn-auto-update-worker"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("db:migrate:remote"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db --remote"), false);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("INSERT INTO server_build_stats (id,"), false);
+assertInsertColumnsKnown(dznOwnerConsolePreviewWorkflow, "server_build_stats", [
+  "linked_server_id",
+  "nitrado_service_id",
+  "structures_built",
+  "build_items_placed",
+  "storage_items_placed",
+  "traps_placed",
+  "build_score",
+  "top_builder_name",
+  "top_builder_count",
+  "last_build_at",
+  "updated_at",
+]);
 
 assert.equal(dznPulseProductionRolloutWorkflow.includes("name: DZN Pulse Production Rollout"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("workflow_dispatch:"), true);

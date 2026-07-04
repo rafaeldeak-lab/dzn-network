@@ -364,6 +364,7 @@ jobs:
           npx wrangler d1 migrations apply DB --config wrangler.owner-console-preview.toml --remote | tee owner-console-preview-migrations.txt
           npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA table_info(linked_servers);" > owner-console-linked-columns.json
           npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA table_info(server_sync_state);" > owner-console-sync-columns.json
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA table_info(server_build_stats);" > owner-console-build-stats-columns.json
           npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA foreign_key_check;" > owner-console-preview-foreign-key-check.json
 
           node <<'NODE'
@@ -384,6 +385,13 @@ jobs:
           for (const name of ["next_metadata_check_at", "next_player_count_check_at", "next_adm_discovery_at", "next_adm_processing_at", "next_retry_after", "last_skip_reason"]) {
             if (!syncColumns.has(name)) {
               console.error(`server_sync_state is missing ${name}.`);
+              process.exit(1);
+            }
+          }
+          const buildStatsColumns = new Set(rowsFromWranglerJson("owner-console-build-stats-columns.json").map((row) => row.name));
+          for (const name of ["linked_server_id", "nitrado_service_id", "structures_built", "build_items_placed", "storage_items_placed", "traps_placed", "build_score", "top_builder_name", "top_builder_count", "last_build_at", "updated_at"]) {
+            if (!buildStatsColumns.has(name)) {
+              console.error(`server_build_stats is missing ${name}.`);
               process.exit(1);
             }
           }
@@ -537,11 +545,19 @@ jobs:
             last_event_at = excluded.last_event_at,
             updated_at = CURRENT_TIMESTAMP;
 
-          INSERT INTO server_build_stats (id, linked_server_id, nitrado_service_id, structures_built, build_items_placed, storage_items_placed, traps_placed, build_score, top_builder_name, top_builder_count, last_build_at, updated_at)
+          DELETE FROM server_build_stats WHERE linked_server_id IN ('owner-console-nuketown', 'owner-console-pandora', 'owner-console-warlords');
+          INSERT INTO server_build_stats (linked_server_id, nitrado_service_id, structures_built, build_items_placed, storage_items_placed, traps_placed, build_score, top_builder_name, top_builder_count, last_build_at, updated_at)
           VALUES
-            ('owner-console-pandora-builds', 'owner-console-pandora', '17428528', 6, 10, 3, 1, 28, 'PandoraBuilder', 6, '2026-06-29T12:30:00.000Z', CURRENT_TIMESTAMP)
+            ('owner-console-pandora', '17428528', 6, 10, 3, 1, 28, 'PandoraBuilder', 6, '2026-06-29T12:30:00.000Z', CURRENT_TIMESTAMP)
           ON CONFLICT(linked_server_id) DO UPDATE SET
+            nitrado_service_id = excluded.nitrado_service_id,
+            structures_built = excluded.structures_built,
+            build_items_placed = excluded.build_items_placed,
+            storage_items_placed = excluded.storage_items_placed,
+            traps_placed = excluded.traps_placed,
             build_score = excluded.build_score,
+            top_builder_name = excluded.top_builder_name,
+            top_builder_count = excluded.top_builder_count,
             last_build_at = excluded.last_build_at,
             updated_at = CURRENT_TIMESTAMP;
 
