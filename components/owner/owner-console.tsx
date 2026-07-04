@@ -126,8 +126,22 @@ type StoredJobHealth = {
 
 type AuditLog = {
   message: string;
-  phase: "phase_1_read_only";
-  items: never[];
+  phase: "phase_1_read_only" | "phase_2a_discord";
+  items: AuditLogItem[];
+};
+
+type AuditLogItem = {
+  id: string;
+  actorDiscordId: string | null;
+  action: string;
+  targetType: string | null;
+  targetSlot: string | null;
+  guildId: string | null;
+  channelId: string | null;
+  result: string;
+  reason: string | null;
+  requestId: string | null;
+  createdAt: string | null;
 };
 
 type DiscordPostingMode = "disabled" | "preview_only" | "production_disabled" | "ready_but_off";
@@ -169,9 +183,16 @@ type DiscordChannelSlot = {
   label: string;
   status: "not_configured" | "configured" | "missing_permission" | "disabled" | "preview_only";
   channelId: string | null;
+  channelName: string | null;
   guildId: string | null;
+  guildName: string | null;
   mappedPostTypes: string[];
   webhookConfigured: boolean;
+  lastPermissionCheckedAt: string | null;
+  lastPermissionStatus: string | null;
+  lastPermissionError: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
 };
 
 type DiscordPreviewType = "new_server" | "top_server" | "legacy_server" | "archived_server" | "server_wars_event" | "weekly_recap";
@@ -203,6 +224,7 @@ type DiscordControlData = {
   postTypes: DiscordPostType[];
   channels: DiscordChannelSlot[];
   templates: DiscordTemplate[];
+  auditLog: AuditLogItem[];
 };
 
 const LIFECYCLE_COPY: { status: LifecycleStatus; label: string; description: string }[] = [
@@ -245,19 +267,41 @@ export function OwnerConsole() {
 
     async function loadOwnerConsole() {
       try {
-        const [overviewResponse, serversResponse, auditResponse, discordOverviewResponse, discordPostTypesResponse, discordChannelsResponse, discordTemplatesResponse] = await Promise.all([
+        const [
+          overviewResponse,
+          serversResponse,
+          auditResponse,
+          discordOverviewResponse,
+          discordPostTypesResponse,
+          discordChannelsResponse,
+          discordMappingsResponse,
+          discordTemplatesResponse,
+          discordAuditResponse,
+        ] = await Promise.all([
           fetch("/api/owner/overview", { cache: "no-store" }),
           fetch("/api/owner/servers", { cache: "no-store" }),
           fetch("/api/owner/audit-log", { cache: "no-store" }),
           fetch("/api/owner/discord/overview", { cache: "no-store" }),
           fetch("/api/owner/discord/post-types", { cache: "no-store" }),
           fetch("/api/owner/discord/channels", { cache: "no-store" }),
+          fetch("/api/owner/discord/channel-mappings", { cache: "no-store" }),
           fetch("/api/owner/discord/templates", { cache: "no-store" }),
+          fetch("/api/owner/discord/audit-log", { cache: "no-store" }),
         ]);
 
         if (!active) return;
 
-        const responses = [overviewResponse, serversResponse, auditResponse, discordOverviewResponse, discordPostTypesResponse, discordChannelsResponse, discordTemplatesResponse];
+        const responses = [
+          overviewResponse,
+          serversResponse,
+          auditResponse,
+          discordOverviewResponse,
+          discordPostTypesResponse,
+          discordChannelsResponse,
+          discordMappingsResponse,
+          discordTemplatesResponse,
+          discordAuditResponse,
+        ];
         const firstBlocked = responses.find((response) => response.status === 401 || response.status === 403);
         if (firstBlocked) {
           setStatus(firstBlocked.status === 401 ? "unauthorized" : "forbidden");
@@ -269,26 +313,43 @@ export function OwnerConsole() {
           return;
         }
 
-        const [overviewJson, serversJson, auditJson, discordOverviewJson, discordPostTypesJson, discordChannelsJson, discordTemplatesJson] = await Promise.all([
+        const [
+          overviewJson,
+          serversJson,
+          auditJson,
+          discordOverviewJson,
+          discordPostTypesJson,
+          discordChannelsJson,
+          discordMappingsJson,
+          discordTemplatesJson,
+          discordAuditJson,
+        ] = await Promise.all([
           overviewResponse.json(),
           serversResponse.json(),
           auditResponse.json(),
           discordOverviewResponse.json(),
           discordPostTypesResponse.json(),
           discordChannelsResponse.json(),
+          discordMappingsResponse.json(),
           discordTemplatesResponse.json(),
+          discordAuditResponse.json(),
         ]);
 
         if (!active) return;
 
         setOverview(overviewJson.overview);
         setServers(serversJson.servers ?? []);
-        setAuditLog(auditJson.auditLog);
+        setAuditLog({
+          message: (discordAuditJson.auditLog ?? []).length > 0 ? "Discord owner actions recorded." : auditJson.auditLog?.message ?? "No owner actions recorded yet.",
+          phase: (discordAuditJson.auditLog ?? []).length > 0 ? "phase_2a_discord" : auditJson.auditLog?.phase ?? "phase_1_read_only",
+          items: discordAuditJson.auditLog ?? auditJson.auditLog?.items ?? [],
+        });
         setDiscordControl({
           overview: discordOverviewJson.overview,
           postTypes: discordPostTypesJson.postTypes ?? [],
-          channels: discordChannelsJson.channels ?? [],
+          channels: discordMappingsJson.mappings ?? discordChannelsJson.channels ?? [],
           templates: discordTemplatesJson.templates ?? [],
+          auditLog: discordAuditJson.auditLog ?? [],
         });
         setStatus("ready");
       } catch {
@@ -599,11 +660,99 @@ function ResourceControlPanel({ servers }: { servers: OwnerServer[] }) {
 }
 
 function DiscordControlPanel({ data }: { data: DiscordControlData }) {
+  const [channels, setChannels] = useState<DiscordChannelSlot[]>(data.channels);
+  const [auditLog, setAuditLog] = useState<AuditLogItem[]>(data.auditLog);
   const [selectedType, setSelectedType] = useState<DiscordPreviewType>(data.templates[0]?.type ?? "weekly_recap");
   const [preview, setPreview] = useState<DiscordPreviewEmbed | null>(data.templates[0]?.preview ?? null);
   const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [inFlightAction, setInFlightAction] = useState<string | null>(null);
+  const [mappingForms, setMappingForms] = useState<Record<string, {
+    guildId: string;
+    guildName: string;
+    channelId: string;
+    channelName: string;
+    confirmation: string;
+  }>>(() => Object.fromEntries(data.channels.map((channel) => [
+    channel.slot,
+    {
+      guildId: channel.guildId ?? "",
+      guildName: channel.guildName ?? "",
+      channelId: channel.channelId ?? "",
+      channelName: channel.channelName ?? "",
+      confirmation: "",
+    },
+  ])));
 
   const selectedTemplate = data.templates.find((template) => template.type === selectedType) ?? data.templates[0] ?? null;
+
+  async function refreshDiscordState() {
+    const [mappingsResponse, auditResponse] = await Promise.all([
+      fetch("/api/owner/discord/channel-mappings", { cache: "no-store" }),
+      fetch("/api/owner/discord/audit-log", { cache: "no-store" }),
+    ]);
+    if (mappingsResponse.ok) {
+      const json = await mappingsResponse.json();
+      const nextChannels = json.mappings ?? [];
+      setChannels(nextChannels);
+      setMappingForms((current) => ({
+        ...current,
+        ...Object.fromEntries(nextChannels.map((channel: DiscordChannelSlot) => [
+          channel.slot,
+          {
+            guildId: channel.guildId ?? "",
+            guildName: channel.guildName ?? "",
+            channelId: channel.channelId ?? "",
+            channelName: channel.channelName ?? "",
+            confirmation: current[channel.slot]?.confirmation ?? "",
+          },
+        ])),
+      }));
+    }
+    if (auditResponse.ok) {
+      const json = await auditResponse.json();
+      setAuditLog(json.auditLog ?? []);
+    }
+  }
+
+  function updateMappingForm(slot: string, key: "guildId" | "guildName" | "channelId" | "channelName" | "confirmation", value: string) {
+    setMappingForms((current) => ({
+      ...current,
+      [slot]: {
+        guildId: current[slot]?.guildId ?? "",
+        guildName: current[slot]?.guildName ?? "",
+        channelId: current[slot]?.channelId ?? "",
+        channelName: current[slot]?.channelName ?? "",
+        confirmation: current[slot]?.confirmation ?? "",
+        [key]: value,
+      },
+    }));
+  }
+
+  async function runDiscordAction(actionKey: string, action: () => Promise<string>) {
+    setInFlightAction(actionKey);
+    setActionStatus(null);
+    try {
+      const message = await action();
+      setActionStatus(message);
+      await refreshDiscordState();
+    } catch (error) {
+      setActionStatus(error instanceof Error ? error.message : "Discord owner action failed.");
+    } finally {
+      setInFlightAction(null);
+    }
+  }
+
+  async function postJson(path: string, body: unknown) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(json?.error ?? `Request failed with HTTP ${response.status}.`);
+    return json;
+  }
 
   async function generatePreview(type: DiscordPreviewType) {
     setSelectedType(type);
@@ -625,11 +774,8 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
   }
 
   const futureActions = [
-    "Send test embed",
     "Enable post type",
     "Disable post type",
-    "Set channel",
-    "Run Discord permission check",
     "Send weekly recap now",
     "Post announcement",
     "Connect guild",
@@ -638,7 +784,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <PanelHeader eyebrow="Discord Control" title="DZN Discord command centre" description="Owner-only Discord status, post templates and embed previews. Phase 1 is read-only and never sends real Discord messages." />
+      <PanelHeader eyebrow="Discord Control" title="DZN Discord command centre" description="Owner-only Discord setup actions. Auto-posting remains disabled; only a confirmed manual test embed can send." />
       <div className="grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-[360px_minmax(0,1fr)_420px]">
         <div className="grid min-h-0 gap-3 overflow-auto pr-1">
           <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
@@ -668,13 +814,14 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
             <h2 className="text-lg font-black text-white">Discord Safety / Guards</h2>
             <div className="mt-3 grid gap-2">
               <BooleanTile label="Production Discord posting" enabled={false} />
-              <BooleanTile label="Preview mode only" enabled />
+              <BooleanTile label="Manual test send only" enabled />
               <BooleanTile label="Secrets displayed" enabled={false} />
               <BooleanTile label="Owner-only access" enabled />
             </div>
             <p className="mt-3 text-xs leading-5 text-zinc-400">
-              This console never returns bot tokens, client secrets, webhook URLs, Nitrado tokens, Cloudflare secrets or runtime encryption keys.
+              Auto posting stays off. DZN_DISCORD_NOTIFICATIONS_ENABLED=false. This console never returns bot tokens, client secrets, webhook URLs, Nitrado tokens, Cloudflare secrets or runtime encryption keys.
             </p>
+            {actionStatus ? <p className="mt-3 rounded border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-100">{actionStatus}</p> : null}
           </section>
 
           <section className="rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-3">
@@ -755,10 +902,14 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
           </section>
 
           <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-            <h2 className="text-lg font-black text-white">Channel Mapping</h2>
-            <p className="mt-1 text-xs text-zinc-400">Read-only stored mappings. Live Discord permission checks are reserved for Phase 2.</p>
+            <h2 className="text-lg font-black text-white">Channel Mapping Setup</h2>
+            <p className="mt-1 text-xs text-zinc-400">Manual channel ID setup. Permission checks and test sends are owner-triggered and audited.</p>
             <div className="mt-3 grid gap-2">
-              {data.channels.map((channel) => (
+              {channels.map((channel) => {
+                const form = mappingForms[channel.slot] ?? { guildId: "", guildName: "", channelId: "", channelName: "", confirmation: "" };
+                const permissionPassed = channel.lastPermissionStatus === "ok";
+                const configured = Boolean(channel.guildId && channel.channelId && channel.status !== "disabled");
+                return (
                 <div key={channel.slot} className="rounded-lg border border-white/10 bg-black/25 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -769,11 +920,114 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                       {channelStatusLabel(channel.status)}
                     </span>
                   </div>
-                  <div className="mt-2 grid gap-1 text-xs text-zinc-500">
-                    <div>Guild: {channel.guildId ?? "not configured"}</div>
-                    <div>Channel: {channel.channelId ?? "not configured"}</div>
-                    <div>Webhook fallback: {channel.webhookConfigured ? "configured" : "not configured"}</div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                      Guild ID
+                      <input value={form.guildId} onChange={(event) => updateMappingForm(channel.slot, "guildId", event.target.value)} placeholder="123456789012345678" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
+                    </label>
+                    <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                      Channel ID
+                      <input value={form.channelId} onChange={(event) => updateMappingForm(channel.slot, "channelId", event.target.value)} placeholder="123456789012345678" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
+                    </label>
+                    <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                      Guild name
+                      <input value={form.guildName} onChange={(event) => updateMappingForm(channel.slot, "guildName", event.target.value)} placeholder="Optional stored label" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
+                    </label>
+                    <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                      Channel name
+                      <input value={form.channelName} onChange={(event) => updateMappingForm(channel.slot, "channelName", event.target.value)} placeholder="Optional stored label" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
+                    </label>
                   </div>
+                  <div className="mt-2 grid gap-1 text-xs text-zinc-500">
+                    <div>Last permission check: {channel.lastPermissionCheckedAt ? formatDate(channel.lastPermissionCheckedAt) : "not checked"}</div>
+                    <div>Permission status: {channel.lastPermissionStatus ?? "unknown"}</div>
+                    <div>Updated by: {channel.updatedBy ?? "unknown"} / {formatDate(channel.updatedAt)}</div>
+                    {channel.lastPermissionError ? <div className="text-amber-200">{channel.lastPermissionError}</div> : null}
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <button
+                      type="button"
+                      disabled={inFlightAction !== null}
+                      onClick={() => void runDiscordAction(`save-${channel.slot}`, async () => {
+                        await postJson("/api/owner/discord/channel-mappings", {
+                          slot: channel.slot,
+                          guildId: form.guildId,
+                          guildName: form.guildName,
+                          channelId: form.channelId,
+                          channelName: form.channelName,
+                          reason: "Owner console channel mapping save",
+                        });
+                        return `${channel.label} mapping saved.`;
+                      })}
+                      className="rounded border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {inFlightAction === `save-${channel.slot}` ? "Saving..." : "Save mapping"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={inFlightAction !== null || !configured}
+                      onClick={() => void runDiscordAction(`check-${channel.slot}`, async () => {
+                        await postJson(`/api/owner/discord/channel-mappings/${channel.slot}/permission-check`, { reason: "Owner console permission check" });
+                        return `${channel.label} permission check completed.`;
+                      })}
+                      className="rounded border border-emerald-300/30 bg-emerald-300/10 px-3 py-2 text-xs font-black text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {inFlightAction === `check-${channel.slot}` ? "Checking..." : "Run permission check"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={inFlightAction !== null || !configured}
+                      onClick={() => void runDiscordAction(`disable-${channel.slot}`, async () => {
+                        await postJson(`/api/owner/discord/channel-mappings/${channel.slot}/disable`, { reason: "Owner console mapping disable" });
+                        return `${channel.label} mapping disabled.`;
+                      })}
+                      className="rounded border border-red-300/30 bg-red-300/10 px-3 py-2 text-xs font-black text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Disable
+                    </button>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-2">
+                    <label className="grid gap-1 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-100">
+                      Type SEND_TEST_EMBED
+                      <input value={form.confirmation} onChange={(event) => updateMappingForm(channel.slot, "confirmation", event.target.value)} placeholder="SEND_TEST_EMBED" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-amber-300/40" />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={inFlightAction !== null || !configured || !permissionPassed || form.confirmation !== "SEND_TEST_EMBED"}
+                      onClick={() => void runDiscordAction(`test-${channel.slot}`, async () => {
+                        const result = await postJson("/api/owner/discord/test-embed", {
+                          slot: channel.slot,
+                          type: selectedType,
+                          confirmation: form.confirmation,
+                          reason: "Owner-triggered Discord Phase 2A test embed",
+                        });
+                        return result.sent ? `${channel.label} test embed sent manually.` : `${channel.label} test embed preview generated.`;
+                      })}
+                      className="mt-2 w-full rounded border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs font-black text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {inFlightAction === `test-${channel.slot}` ? "Sending..." : "Send one test embed"}
+                    </button>
+                    <p className="mt-2 text-[11px] leading-4 text-zinc-500">Requires configured channel, passing permission check and typed confirmation. This does not enable auto-posting.</p>
+                  </div>
+                </div>
+              );
+              })}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+            <h2 className="text-lg font-black text-white">Discord Audit Log</h2>
+            <p className="mt-1 text-xs text-zinc-400">Owner Discord setup actions are stored with safe metadata only.</p>
+            <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1">
+              {auditLog.length === 0 ? <p className="text-xs text-zinc-500">No Discord owner actions recorded yet.</p> : null}
+              {auditLog.map((entry) => (
+                <div key={entry.id} className="rounded-lg border border-white/10 bg-black/25 p-3 text-xs text-zinc-400">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="font-black text-white">{entry.action}</div>
+                    <span className={entry.result === "success" ? "text-emerald-200" : "text-amber-200"}>{entry.result}</span>
+                  </div>
+                  <div className="mt-1 text-zinc-500">{entry.targetSlot ?? "general"} / {entry.channelId ?? "no channel"} / {formatDate(entry.createdAt)}</div>
+                  {entry.reason ? <div className="mt-1 text-zinc-500">{entry.reason}</div> : null}
                 </div>
               ))}
             </div>
@@ -818,12 +1072,38 @@ function DiscordEmbedPreview({ preview }: { preview: DiscordPreviewEmbed | null 
 
 function AuditLogPanel({ auditLog }: { auditLog: AuditLog | null }) {
   const actions = ["mark legacy_offline", "archive_hidden", "run final sync", "pause sync", "reactivate sync", "hide from public listing", "show as legacy profile"];
+  const items = auditLog?.items ?? [];
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
-      <PanelHeader eyebrow="Audit Log" title="Owner action history" description="Phase 1 is read-only. This space is prepared for future audited owner actions." />
-      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <PanelHeader eyebrow="Audit Log" title="Owner action history" description="Discord Phase 2A setup actions are audited. Lifecycle/resource controls remain read-only." />
+      <section className="min-h-0 flex-1 overflow-hidden rounded-lg border border-white/10 bg-white/[0.035] p-4">
         <p className="text-lg font-black text-white">{auditLog?.message ?? "No owner actions recorded yet."}</p>
-        <p className="mt-2 text-sm text-zinc-400">Future lifecycle/resource changes will be recorded here with actor, target, timestamp and safe reason.</p>
+        <p className="mt-2 text-sm text-zinc-400">Audit rows use safe metadata only. Tokens, secrets, webhook URLs and encrypted blobs are never shown.</p>
+        <div className="mt-4 grid max-h-[45vh] gap-2 overflow-auto pr-1">
+          {items.length === 0 ? <p className="rounded-lg border border-white/10 bg-black/25 p-4 text-sm text-zinc-500">No owner actions recorded yet.</p> : null}
+          {items.map((item) => (
+            <article key={item.id} className="rounded-lg border border-white/10 bg-black/25 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-black text-white">{item.action}</h2>
+                  <p className="mt-1 text-xs text-zinc-500">{item.targetSlot ?? item.targetType ?? "general"} / {item.channelId ?? "no channel"}</p>
+                </div>
+                <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${
+                  item.result === "success" ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-100" : "border-amber-300/20 bg-amber-300/[0.06] text-amber-100"
+                }`}>
+                  {item.result}
+                </span>
+              </div>
+              <div className="mt-2 grid gap-1 text-xs text-zinc-500 sm:grid-cols-2">
+                <div>Actor: {item.actorDiscordId ?? "unknown"}</div>
+                <div>Created: {formatDate(item.createdAt)}</div>
+                <div>Guild: {item.guildId ?? "none"}</div>
+                <div>Request: {item.requestId ?? "none"}</div>
+              </div>
+              {item.reason ? <p className="mt-2 text-xs text-zinc-400">{item.reason}</p> : null}
+            </article>
+          ))}
+        </div>
       </section>
       <section className="rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-4">
         <h2 className="text-lg font-black text-white">Phase 2 actions</h2>

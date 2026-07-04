@@ -10,7 +10,10 @@ import {
   getOwnerLifecycleLabel,
   mapOwnerServerRowForTest,
 } from "../functions/_lib/owner-console";
-import { buildOwnerDiscordPreviewEmbed } from "../functions/_lib/owner-discord-control";
+import {
+  buildOwnerDiscordPreviewEmbed,
+  sanitizeOwnerDiscordChannelMappingInput,
+} from "../functions/_lib/owner-discord-control";
 
 const ownerEnv = { DZN_PLATFORM_OWNER_DISCORD_IDS: "111111111111111111, 222222222222222222 , not-an-id" };
 
@@ -48,6 +51,25 @@ assert.doesNotMatch(JSON.stringify(discordPreview), /\btoken\b|\bsecret\b|\bwebh
 const fallbackDiscordPreview = buildOwnerDiscordPreviewEmbed({}, { type: "unknown" });
 assert.equal(fallbackDiscordPreview.type, "weekly_recap");
 assert.equal(fallbackDiscordPreview.sent, false);
+
+assert.deepEqual(sanitizeOwnerDiscordChannelMappingInput({
+  slot: "announcements",
+  guildId: "123456789012345678",
+  channelId: "234567890123456789",
+}), {
+  slot: "announcements",
+  guildId: "123456789012345678",
+  channelId: "234567890123456789",
+});
+assert.deepEqual(sanitizeOwnerDiscordChannelMappingInput({
+  slot: "bad-slot",
+  guildId: "not-a-guild",
+  channelId: "bad-channel",
+}), {
+  slot: null,
+  guildId: null,
+  channelId: null,
+});
 
 const activeResources = buildOwnerResourceState({ lifecycle_status: "active_live", status: "live", listing_visibility: "public" });
 assert.equal(activeResources.admSyncEnabled, true);
@@ -172,6 +194,34 @@ assert.match(previewEmbedApiSource, /sent:\s*false/);
 assert.match(previewEmbedApiSource, /preview_only/);
 assert.doesNotMatch(previewEmbedApiSource, /discord-posting|sendDiscord|sendOrEdit|fetch\s*\(|webhook/i);
 
+for (const file of [
+  "functions/api/owner/discord/channel-mappings.ts",
+  "functions/api/owner/discord/channel-mappings/[slot]/disable.ts",
+  "functions/api/owner/discord/channel-mappings/[slot]/permission-check.ts",
+  "functions/api/owner/discord/test-embed.ts",
+  "functions/api/owner/discord/audit-log.ts",
+]) {
+  const source = readFileSync(file, "utf8");
+  assert.match(source, /requirePlatformOwner/, `${file} must require platform-owner auth`);
+  assert.doesNotMatch(source, /DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|encrypted_token|discord_webhook_url/i, `${file} must not return or reference secret values`);
+}
+
+const channelMappingsApiSource = readFileSync("functions/api/owner/discord/channel-mappings.ts", "utf8");
+assert.match(channelMappingsApiSource, /onRequestGet/);
+assert.match(channelMappingsApiSource, /onRequestPost/);
+assert.match(channelMappingsApiSource, /productionSendingDisabled:\s*true/);
+assert.match(channelMappingsApiSource, /autoPostingEnabled:\s*false/);
+
+const permissionCheckApiSource = readFileSync("functions/api/owner/discord/channel-mappings/[slot]/permission-check.ts", "utf8");
+assert.match(permissionCheckApiSource, /runOwnerDiscordPermissionCheck/);
+assert.match(permissionCheckApiSource, /autoPostingEnabled:\s*false/);
+
+const testEmbedApiSource = readFileSync("functions/api/owner/discord/test-embed.ts", "utf8");
+assert.match(testEmbedApiSource, /sendOwnerDiscordTestEmbed/);
+assert.match(testEmbedApiSource, /confirmation/);
+assert.match(testEmbedApiSource, /productionSendingDisabled:\s*true/);
+assert.match(testEmbedApiSource, /autoPostingEnabled:\s*false/);
+
 const ownerDataSource = readFileSync("functions/_lib/owner-console.ts", "utf8");
 assert.doesNotMatch(ownerDataSource, /\bnitrado_connections\b/i);
 assert.doesNotMatch(ownerDataSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_auth_tag\b|\bDISCORD_BOT_TOKEN\b|\bSESSION_SECRET\b/i);
@@ -186,8 +236,21 @@ assert.match(ownerDiscordSource, /discordNotificationsEnabled/);
 assert.match(ownerDiscordSource, /botTokenPresent/);
 assert.match(ownerDiscordSource, /productionSendingDisabled:\s*true/);
 assert.match(ownerDiscordSource, /Preview only - not sent/);
-assert.doesNotMatch(ownerDiscordSource, /from "\.\/discord-posting"|sendDiscord|sendOrEdit|fetch\s*\(/i);
+assert.match(ownerDiscordSource, /saveOwnerDiscordChannelMapping/);
+assert.match(ownerDiscordSource, /runOwnerDiscordPermissionCheck/);
+assert.match(ownerDiscordSource, /sendOwnerDiscordTestEmbed/);
+assert.match(ownerDiscordSource, /confirmation !== "SEND_TEST_EMBED"/);
+assert.match(ownerDiscordSource, /test_embed_preview_generated/);
+assert.match(ownerDiscordSource, /test_embed_sent/);
+assert.match(ownerDiscordSource, /auto_posting_enabled:\s*false/);
+assert.match(ownerDiscordSource, /discord_owner_audit_log/);
 assert.doesNotMatch(ownerDiscordSource, /TOKEN_ENCRYPTION_KEY|SESSION_SECRET|CLOUDFLARE/i);
+assert.doesNotMatch(ownerDiscordSource, /DZN_DISCORD_NOTIFICATIONS_ENABLED\s*=\s*["']true["']|discordNotificationsEnabled\s*=\s*true/i);
+
+const phase2aMigration = readFileSync("migrations/0055_discord_control_phase_2a.sql", "utf8");
+assert.match(phase2aMigration, /CREATE TABLE IF NOT EXISTS discord_channel_mappings/);
+assert.match(phase2aMigration, /CREATE TABLE IF NOT EXISTS discord_owner_audit_log/);
+assert.doesNotMatch(phase2aMigration, /DROP\s+TABLE|DELETE\s+FROM|TRUNCATE|CREATE TABLE IF NOT EXISTS player_stats|ALTER TABLE\s+player_profiles/i);
 
 const ownerUiSource = readFileSync("components/owner/owner-console.tsx", "utf8");
 for (const label of [
@@ -199,13 +262,17 @@ for (const label of [
   "DZN Discord command centre",
   "Auto Post Types",
   "Embed Preview Builder",
-  "Channel Mapping",
+  "Channel Mapping Setup",
+  "Run permission check",
+  "SEND_TEST_EMBED",
+  "Send one test embed",
+  "Discord Audit Log",
   "Production Discord posting",
   "Preview only - not sent",
-  "Send test embed",
+  "Manual test send only",
   "No owner actions recorded yet.",
   "Phase 2",
-  "Read-only",
+  "Coming soon - read-only for now",
 ]) {
   assert.match(ownerUiSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 }

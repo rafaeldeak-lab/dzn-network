@@ -1,5 +1,7 @@
+import { checkDiscordPostingPermissions, verifyDiscordPostingChannel } from "./discord-posting";
 import { readDznFeatureFlags } from "./feature-flags";
-import type { Env } from "./types";
+import { requireDb } from "./db";
+import type { Env, SessionUser } from "./types";
 
 export type OwnerDiscordPostingMode = "disabled" | "preview_only" | "production_disabled" | "ready_but_off";
 
@@ -40,9 +42,16 @@ export type OwnerDiscordChannelSlot = {
   label: string;
   status: "not_configured" | "configured" | "missing_permission" | "disabled" | "preview_only";
   channelId: string | null;
+  channelName: string | null;
   guildId: string | null;
+  guildName: string | null;
   mappedPostTypes: string[];
   webhookConfigured: boolean;
+  lastPermissionCheckedAt: string | null;
+  lastPermissionStatus: string | null;
+  lastPermissionError: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
 };
 
 export type OwnerDiscordTemplate = {
@@ -75,6 +84,43 @@ export type OwnerDiscordPreviewEmbed = {
   sent: false;
 };
 
+export type OwnerDiscordPermissionCheck = {
+  ok: boolean;
+  status: "ok" | "missing_permissions" | "not_configured" | "discord_error";
+  checkedAt: string;
+  mode: string;
+  canViewChannel: boolean;
+  canSendMessages: boolean;
+  canEmbedLinks: boolean;
+  canReadMessageHistory: boolean;
+  canAttachFiles: boolean | null;
+  missingPermissions: string[];
+  warning: string | null;
+  channelName: string | null;
+  permissionSource: string | null;
+};
+
+export type OwnerDiscordChannelMapping = OwnerDiscordChannelSlot & {
+  enabled: boolean;
+  permissionCheck: OwnerDiscordPermissionCheck | null;
+};
+
+export type OwnerDiscordAuditLogEntry = {
+  id: string;
+  actorDiscordId: string | null;
+  action: string;
+  targetType: string | null;
+  targetSlot: string | null;
+  guildId: string | null;
+  channelId: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  result: string;
+  reason: string | null;
+  requestId: string | null;
+  createdAt: string | null;
+};
+
 type StoredDestination = {
   guild_id?: unknown;
   post_type?: unknown;
@@ -94,6 +140,41 @@ type StoredPostState = {
   last_edited_at?: unknown;
   last_error?: unknown;
   updated_at?: unknown;
+};
+
+type StoredChannelMapping = {
+  id: string;
+  slot: string;
+  guild_id: string;
+  guild_name: string | null;
+  channel_id: string;
+  channel_name: string | null;
+  enabled: number | null;
+  last_permission_status: string | null;
+  last_permission_checked_at: string | null;
+  last_permission_error: string | null;
+  last_permission_json: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type StoredAuditRow = {
+  id: string;
+  actor_user_id: string | null;
+  actor_discord_id: string | null;
+  action: string;
+  target_type: string | null;
+  target_slot: string | null;
+  guild_id: string | null;
+  channel_id: string | null;
+  before_json: string | null;
+  after_json: string | null;
+  result: string;
+  reason: string | null;
+  request_id: string | null;
+  created_at: string | null;
 };
 
 const POST_TYPES: Array<{ key: string; label: string; requiredDataSource: string }> = [
@@ -116,7 +197,7 @@ const POST_TYPES: Array<{ key: string; label: string; requiredDataSource: string
   { key: "package_promotion", label: "Free/Pro/Premium promotion post", requiredDataSource: "billing package metadata" },
 ];
 
-const CHANNEL_SLOTS: Array<{ slot: string; label: string; postTypes: string[] }> = [
+export const OWNER_DISCORD_CHANNEL_SLOTS: Array<{ slot: string; label: string; postTypes: string[] }> = [
   { slot: "announcements", label: "Announcements", postTypes: ["new_server_added", "dzn_announcement", "package_promotion"] },
   { slot: "server-updates", label: "Server updates", postTypes: ["server_went_live", "server_went_offline", "server_token_needs_resave", "legacy_offline_preserved", "server_archived_hidden"] },
   { slot: "leaderboard-updates", label: "Leaderboard updates", postTypes: ["top_server_update", "longest_kill_update"] },
@@ -133,7 +214,7 @@ export async function getOwnerDiscordOverview(env: Env): Promise<OwnerDiscordOve
   const botTokenPresent = stringOrNull(env.DISCORD_BOT_TOKEN)?.length ? true : false;
   const [connectedGuildCount, configuredChannelCount, lastPostAttempt] = await Promise.all([
     countRows(env, "discord_guilds"),
-    countRows(env, "server_posting_destinations"),
+    countConfiguredOwnerChannels(env),
     getLastStoredPostAttempt(env),
   ]);
 
@@ -152,20 +233,24 @@ export async function getOwnerDiscordOverview(env: Env): Promise<OwnerDiscordOve
 }
 
 export async function getOwnerDiscordPostTypes(env: Env): Promise<OwnerDiscordPostType[]> {
-  const destinations = await getStoredDestinations(env);
+  const [destinations, mappings] = await Promise.all([getStoredDestinations(env), getStoredChannelMappings(env)]);
   const destinationByPostType = new Map(destinations.map((destination) => [stringOrNull(destination.post_type), destination]));
+  const channelBySlot = new Map(mappings.map((mapping) => [mapping.slot, mapping]));
 
   return POST_TYPES.map((postType) => {
     const destination = destinationByPostType.get(postType.key) ?? null;
-    const enabled = truthy(destination?.enabled);
+    const mappedSlot = OWNER_DISCORD_CHANNEL_SLOTS.find((slot) => slot.postTypes.includes(postType.key));
+    const mapping = mappedSlot ? channelBySlot.get(mappedSlot.slot) ?? null : null;
+    const channelTarget = stringOrNull(destination?.discord_channel_id) ?? mapping?.channel_id ?? null;
+    const channelConfigured = Boolean(channelTarget);
     return {
       key: postType.key,
       label: postType.label,
-      enabled,
+      enabled: false,
       productionSendingDisabled: true,
       previewAvailable: true,
-      channelTarget: stringOrNull(destination?.discord_channel_id),
-      channelConfigured: Boolean(stringOrNull(destination?.discord_channel_id)),
+      channelTarget,
+      channelConfigured,
       lastGeneratedPreview: null,
       requiredDataSource: postType.requiredDataSource,
     };
@@ -173,22 +258,43 @@ export async function getOwnerDiscordPostTypes(env: Env): Promise<OwnerDiscordPo
 }
 
 export async function getOwnerDiscordChannels(env: Env): Promise<OwnerDiscordChannelSlot[]> {
-  const destinations = await getStoredDestinations(env);
+  const mappings = await getStoredChannelMappings(env);
+  const mappingBySlot = new Map(mappings.map((mapping) => [mapping.slot, mapping]));
+  const legacyDestinations = await getStoredDestinations(env);
 
-  return CHANNEL_SLOTS.map((slot) => {
-    const matching = destinations.find((destination) => slot.postTypes.includes(stringOrNull(destination.post_type) ?? ""));
+  return OWNER_DISCORD_CHANNEL_SLOTS.map((slot) => {
+    const mapping = mappingBySlot.get(slot.slot) ?? null;
+    if (mapping) return toChannelSlot(slot, mapping);
+
+    const matching = legacyDestinations.find((destination) => slot.postTypes.includes(stringOrNull(destination.post_type) ?? ""));
     const enabled = truthy(matching?.enabled);
     const channelId = stringOrNull(matching?.discord_channel_id);
     return {
       slot: slot.slot,
       label: slot.label,
-      status: channelId ? (enabled ? "configured" : "disabled") : "not_configured",
+      status: channelId ? (enabled ? "preview_only" : "disabled") : "not_configured",
       channelId,
+      channelName: null,
       guildId: stringOrNull(matching?.guild_id),
+      guildName: null,
       mappedPostTypes: slot.postTypes,
       webhookConfigured: Boolean(stringOrNull(matching?.discord_webhook_url)),
+      lastPermissionCheckedAt: null,
+      lastPermissionStatus: null,
+      lastPermissionError: null,
+      updatedBy: null,
+      updatedAt: stringOrNull(matching?.updated_at),
     };
   });
+}
+
+export async function getOwnerDiscordChannelMappings(env: Env): Promise<OwnerDiscordChannelMapping[]> {
+  const slots = await getOwnerDiscordChannels(env);
+  return slots.map((slot) => ({
+    ...slot,
+    enabled: slot.status !== "disabled" && slot.status !== "not_configured",
+    permissionCheck: parsePermissionJsonForApi((slot as OwnerDiscordChannelSlot & { lastPermissionJson?: string | null }).lastPermissionJson ?? null),
+  }));
 }
 
 export async function getOwnerDiscordTemplates(env: Env): Promise<OwnerDiscordTemplate[]> {
@@ -198,6 +304,292 @@ export async function getOwnerDiscordTemplates(env: Env): Promise<OwnerDiscordTe
     description: getPreviewTypeDescription(type),
     preview: buildOwnerDiscordPreviewEmbed(env, { type }),
   }));
+}
+
+export async function saveOwnerDiscordChannelMapping(env: Env, user: SessionUser, input: {
+  slot?: unknown;
+  guildId?: unknown;
+  guildName?: unknown;
+  channelId?: unknown;
+  channelName?: unknown;
+  reason?: unknown;
+  requestId?: unknown;
+}) {
+  await ensureOwnerDiscordControlSchema(env);
+  const slot = normalizeChannelSlot(input.slot);
+  if (!slot) return { ok: false as const, status: 400, error: "Invalid Discord channel slot." };
+  const guildId = sanitizeDiscordId(input.guildId);
+  if (!guildId) return { ok: false as const, status: 400, error: "Valid Discord guild ID is required." };
+  const channelId = sanitizeDiscordId(input.channelId);
+  if (!channelId) return { ok: false as const, status: 400, error: "Valid Discord channel ID is required." };
+  const guildName = safeText(input.guildName, 120);
+  const channelName = safeText(input.channelName, 120);
+  const reason = safeText(input.reason, 240);
+  const requestId = safeRequestId(input.requestId);
+  const db = requireDb(env);
+  const before = await getStoredChannelMappingBySlot(env, slot.slot);
+  const now = new Date().toISOString();
+
+  await db
+    .prepare(
+      `INSERT INTO discord_channel_mappings (
+        id, slot, guild_id, guild_name, channel_id, channel_name, enabled,
+        last_permission_status, last_permission_checked_at, last_permission_error, last_permission_json,
+        created_by, updated_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, NULL, NULL, NULL, NULL, ?, ?, ?, ?)
+      ON CONFLICT(slot) DO UPDATE SET
+        guild_id = excluded.guild_id,
+        guild_name = excluded.guild_name,
+        channel_id = excluded.channel_id,
+        channel_name = excluded.channel_name,
+        enabled = 1,
+        last_permission_status = CASE
+          WHEN discord_channel_mappings.guild_id = excluded.guild_id
+           AND discord_channel_mappings.channel_id = excluded.channel_id
+          THEN discord_channel_mappings.last_permission_status ELSE NULL END,
+        last_permission_checked_at = CASE
+          WHEN discord_channel_mappings.guild_id = excluded.guild_id
+           AND discord_channel_mappings.channel_id = excluded.channel_id
+          THEN discord_channel_mappings.last_permission_checked_at ELSE NULL END,
+        last_permission_error = CASE
+          WHEN discord_channel_mappings.guild_id = excluded.guild_id
+           AND discord_channel_mappings.channel_id = excluded.channel_id
+          THEN discord_channel_mappings.last_permission_error ELSE NULL END,
+        last_permission_json = CASE
+          WHEN discord_channel_mappings.guild_id = excluded.guild_id
+           AND discord_channel_mappings.channel_id = excluded.channel_id
+          THEN discord_channel_mappings.last_permission_json ELSE NULL END,
+        updated_by = excluded.updated_by,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(crypto.randomUUID(), slot.slot, guildId, guildName, channelId, channelName, user.discord_id, user.discord_id, now, now)
+    .run();
+
+  const after = await getStoredChannelMappingBySlot(env, slot.slot);
+  await insertOwnerDiscordAuditLog(env, user, {
+    action: "channel_mapping_saved",
+    targetType: "discord_channel_mapping",
+    targetSlot: slot.slot,
+    guildId,
+    channelId,
+    before,
+    after,
+    result: "success",
+    reason,
+    requestId,
+  });
+  return { ok: true as const, mapping: after ? toChannelSlot(slot, after) : null };
+}
+
+export async function disableOwnerDiscordChannelMapping(env: Env, user: SessionUser, input: {
+  slot?: unknown;
+  reason?: unknown;
+  requestId?: unknown;
+}) {
+  await ensureOwnerDiscordControlSchema(env);
+  const slot = normalizeChannelSlot(input.slot);
+  if (!slot) return { ok: false as const, status: 400, error: "Invalid Discord channel slot." };
+  const reason = safeText(input.reason, 240);
+  const requestId = safeRequestId(input.requestId);
+  const before = await getStoredChannelMappingBySlot(env, slot.slot);
+  if (!before) return { ok: false as const, status: 404, error: "Discord channel mapping was not found." };
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare("UPDATE discord_channel_mappings SET enabled = 0, updated_by = ?, updated_at = ? WHERE slot = ?")
+    .bind(user.discord_id, now, slot.slot)
+    .run();
+  const after = await getStoredChannelMappingBySlot(env, slot.slot);
+  await insertOwnerDiscordAuditLog(env, user, {
+    action: "channel_mapping_disabled",
+    targetType: "discord_channel_mapping",
+    targetSlot: slot.slot,
+    guildId: before.guild_id,
+    channelId: before.channel_id,
+    before,
+    after,
+    result: "success",
+    reason,
+    requestId,
+  });
+  return { ok: true as const, mapping: after ? toChannelSlot(slot, after) : null };
+}
+
+export async function runOwnerDiscordPermissionCheck(env: Env, user: SessionUser, input: {
+  slot?: unknown;
+  reason?: unknown;
+  requestId?: unknown;
+}) {
+  await ensureOwnerDiscordControlSchema(env);
+  const slot = normalizeChannelSlot(input.slot);
+  if (!slot) return { ok: false as const, status: 400, error: "Invalid Discord channel slot." };
+  const requestId = safeRequestId(input.requestId);
+  const reason = safeText(input.reason, 240);
+  const mapping = await getStoredChannelMappingBySlot(env, slot.slot);
+  if (!mapping || Number(mapping.enabled ?? 0) !== 1) {
+    return { ok: false as const, status: 404, error: "Configure and enable this channel mapping before checking permissions." };
+  }
+
+  const before = mapping;
+  const permissionCheck = await performPermissionCheck(env, mapping);
+  const now = permissionCheck.checkedAt;
+  await requireDb(env)
+    .prepare(
+      `UPDATE discord_channel_mappings
+          SET last_permission_status = ?,
+              last_permission_checked_at = ?,
+              last_permission_error = ?,
+              last_permission_json = ?,
+              channel_name = COALESCE(?, channel_name),
+              updated_by = ?,
+              updated_at = ?
+        WHERE slot = ?`,
+    )
+    .bind(
+      permissionCheck.status,
+      now,
+      permissionCheck.warning,
+      JSON.stringify(permissionCheck),
+      permissionCheck.channelName,
+      user.discord_id,
+      now,
+      slot.slot,
+    )
+    .run();
+  const after = await getStoredChannelMappingBySlot(env, slot.slot);
+  await insertOwnerDiscordAuditLog(env, user, {
+    action: "permission_check_run",
+    targetType: "discord_channel_mapping",
+    targetSlot: slot.slot,
+    guildId: mapping.guild_id,
+    channelId: mapping.channel_id,
+    before,
+    after,
+    result: permissionCheck.ok ? "success" : "failed",
+    reason: reason ?? permissionCheck.warning,
+    requestId,
+  });
+  return { ok: true as const, permissionCheck, mapping: after ? toChannelSlot(slot, after) : null };
+}
+
+export async function sendOwnerDiscordTestEmbed(env: Env, user: SessionUser, input: {
+  slot?: unknown;
+  type?: unknown;
+  confirmation?: unknown;
+  previewOnly?: unknown;
+  reason?: unknown;
+  requestId?: unknown;
+}) {
+  await ensureOwnerDiscordControlSchema(env);
+  const slot = normalizeChannelSlot(input.slot);
+  if (!slot) return { ok: false as const, status: 400, error: "Invalid Discord channel slot." };
+  const confirmation = String(input.confirmation ?? "").trim();
+  if (confirmation !== "SEND_TEST_EMBED") {
+    return { ok: false as const, status: 400, error: "Type SEND_TEST_EMBED to send a Discord test embed." };
+  }
+  const mapping = await getStoredChannelMappingBySlot(env, slot.slot);
+  if (!mapping || Number(mapping.enabled ?? 0) !== 1) {
+    return { ok: false as const, status: 409, error: "Configure this channel mapping before sending a test embed." };
+  }
+  const permission = parsePermissionJson(mapping.last_permission_json) ?? await performPermissionCheck(env, mapping);
+  if (!permission.ok) {
+    await insertOwnerDiscordAuditLog(env, user, {
+      action: "test_embed_failed",
+      targetType: "discord_test_embed",
+      targetSlot: slot.slot,
+      guildId: mapping.guild_id,
+      channelId: mapping.channel_id,
+      before: mapping,
+      after: { permission },
+      result: "failed",
+      reason: permission.warning ?? "Discord permission check has not passed.",
+      requestId: safeRequestId(input.requestId),
+    });
+    return { ok: false as const, status: 409, error: "Run a passing Discord permission check before sending a test embed.", permissionCheck: permission };
+  }
+
+  const preview = buildOwnerDiscordPreviewEmbed(env, {
+    type: input.type,
+    title: "DZN test embed - owner triggered",
+    description: "This is a single manually triggered DZN owner-console test embed. Automatic Discord posting remains disabled.",
+    colorHex: "#22d3ee",
+  });
+  const previewOnly = parseBoolean(input.previewOnly);
+  const requestId = safeRequestId(input.requestId);
+  const reason = safeText(input.reason, 240);
+
+  await insertOwnerDiscordAuditLog(env, user, {
+    action: "test_embed_preview_generated",
+    targetType: "discord_test_embed",
+    targetSlot: slot.slot,
+    guildId: mapping.guild_id,
+    channelId: mapping.channel_id,
+    before: null,
+    after: { preview_type: preview.type, title: preview.title, preview_only: true },
+    result: "success",
+    reason,
+    requestId,
+  });
+
+  if (previewOnly) {
+    return {
+      ok: true as const,
+      sent: false,
+      mode: "preview_only",
+      preview,
+      permissionCheck: permission,
+      messageId: null,
+      autoPostingEnabled: false,
+    };
+  }
+
+  const delivery = await sendOwnerDiscordMessage(env, mapping.channel_id, preview)
+    .then((messageId) => ({ ok: true as const, messageId }))
+    .catch((error) => ({ ok: false as const, messageId: null, error: safeText(error instanceof Error ? error.message : error, 240) ?? "Discord test embed failed." }));
+
+  await insertOwnerDiscordAuditLog(env, user, {
+    action: delivery.ok ? "test_embed_sent" : "test_embed_failed",
+    targetType: "discord_test_embed",
+    targetSlot: slot.slot,
+    guildId: mapping.guild_id,
+    channelId: mapping.channel_id,
+    before: null,
+    after: { preview_type: preview.type, message_id: delivery.messageId, auto_posting_enabled: false },
+    result: delivery.ok ? "success" : "failed",
+    reason: delivery.ok ? reason : delivery.error,
+    requestId,
+  });
+
+  if (!delivery.ok) {
+    return { ok: false as const, status: 502, error: delivery.error, permissionCheck: permission, preview };
+  }
+  return {
+    ok: true as const,
+    sent: true,
+    mode: "manual_owner_test",
+    preview,
+    permissionCheck: permission,
+    messageId: delivery.messageId,
+    autoPostingEnabled: false,
+  };
+}
+
+export async function getOwnerDiscordAuditLog(env: Env, limit = 50): Promise<OwnerDiscordAuditLogEntry[]> {
+  try {
+    if (!(await tableExists(env, "discord_owner_audit_log"))) return [];
+    const rows = await requireDb(env)
+      .prepare(
+        `SELECT id, actor_user_id, actor_discord_id, action, target_type, target_slot,
+                guild_id, channel_id, before_json, after_json, result, reason, request_id, created_at
+           FROM discord_owner_audit_log
+          ORDER BY created_at DESC
+          LIMIT ?`,
+      )
+      .bind(Math.max(1, Math.min(Math.trunc(limit), 100)))
+      .all<StoredAuditRow>();
+    return (rows.results ?? []).map(toAuditLogEntry);
+  } catch {
+    return [];
+  }
 }
 
 export function buildOwnerDiscordPreviewEmbed(
@@ -221,6 +613,65 @@ export function buildOwnerDiscordPreviewEmbed(
   };
 }
 
+export async function ensureOwnerDiscordControlSchema(env: Env) {
+  const db = requireDb(env);
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS discord_channel_mappings (
+      id TEXT PRIMARY KEY,
+      slot TEXT NOT NULL UNIQUE,
+      guild_id TEXT NOT NULL,
+      guild_name TEXT,
+      channel_id TEXT NOT NULL,
+      channel_name TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_permission_status TEXT,
+      last_permission_checked_at TEXT,
+      last_permission_error TEXT,
+      last_permission_json TEXT,
+      created_by TEXT,
+      updated_by TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_channel_mappings_slot ON discord_channel_mappings(slot)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_channel_mappings_guild_channel ON discord_channel_mappings(guild_id, channel_id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_channel_mappings_enabled ON discord_channel_mappings(enabled, updated_at)").run();
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS discord_owner_audit_log (
+      id TEXT PRIMARY KEY,
+      actor_user_id TEXT,
+      actor_discord_id TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_slot TEXT,
+      guild_id TEXT,
+      channel_id TEXT,
+      before_json TEXT,
+      after_json TEXT,
+      result TEXT NOT NULL,
+      reason TEXT,
+      request_id TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+  ).run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_owner_audit_log_created_at ON discord_owner_audit_log(created_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_owner_audit_log_action ON discord_owner_audit_log(action, created_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_discord_owner_audit_log_target ON discord_owner_audit_log(target_type, target_slot, created_at)").run();
+}
+
+export function sanitizeOwnerDiscordChannelMappingInput(input: {
+  slot?: unknown;
+  guildId?: unknown;
+  channelId?: unknown;
+}) {
+  return {
+    slot: normalizeChannelSlot(input.slot)?.slot ?? null,
+    guildId: sanitizeDiscordId(input.guildId),
+    channelId: sanitizeDiscordId(input.channelId),
+  };
+}
+
 function getPostingMode(botTokenPresent: boolean, discordNotificationsEnabled: boolean): OwnerDiscordPostingMode {
   if (discordNotificationsEnabled) return "ready_but_off";
   if (botTokenPresent) return "production_disabled";
@@ -232,6 +683,20 @@ async function countRows(env: Env, tableName: string): Promise<number | null> {
     if (!(await tableExists(env, tableName))) return null;
     const row = await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).first<{ count?: number }>();
     return Number(row?.count ?? 0);
+  } catch {
+    return null;
+  }
+}
+
+async function countConfiguredOwnerChannels(env: Env) {
+  try {
+    if (await tableExists(env, "discord_channel_mappings")) {
+      const row = await requireDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM discord_channel_mappings WHERE COALESCE(enabled, 0) = 1")
+        .first<{ count?: number }>();
+      return Number(row?.count ?? 0);
+    }
+    return countRows(env, "server_posting_destinations");
   } catch {
     return null;
   }
@@ -252,7 +717,51 @@ async function getStoredDestinations(env: Env): Promise<StoredDestination[]> {
   }
 }
 
+async function getStoredChannelMappings(env: Env): Promise<StoredChannelMapping[]> {
+  try {
+    if (!(await tableExists(env, "discord_channel_mappings"))) return [];
+    const result = await requireDb(env)
+      .prepare(
+        `SELECT id, slot, guild_id, guild_name, channel_id, channel_name, enabled,
+                last_permission_status, last_permission_checked_at, last_permission_error,
+                last_permission_json, created_by, updated_by, created_at, updated_at
+           FROM discord_channel_mappings
+          ORDER BY slot ASC`,
+      )
+      .all<StoredChannelMapping>();
+    return result.results ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function getStoredChannelMappingBySlot(env: Env, slot: string) {
+  if (!(await tableExists(env, "discord_channel_mappings"))) return null;
+  return requireDb(env)
+    .prepare(
+      `SELECT id, slot, guild_id, guild_name, channel_id, channel_name, enabled,
+              last_permission_status, last_permission_checked_at, last_permission_error,
+              last_permission_json, created_by, updated_by, created_at, updated_at
+         FROM discord_channel_mappings
+        WHERE slot = ?
+        LIMIT 1`,
+    )
+    .bind(slot)
+    .first<StoredChannelMapping>();
+}
+
 async function getLastStoredPostAttempt(env: Env): Promise<OwnerDiscordOverview["lastPostAttempt"]> {
+  const audit = await getOwnerDiscordAuditLog(env, 1);
+  if (audit[0]) {
+    return {
+      postType: audit[0].action,
+      guildId: audit[0].guildId,
+      channelId: audit[0].channelId,
+      status: audit[0].result,
+      attemptedAt: audit[0].createdAt,
+      error: audit[0].result === "failed" ? audit[0].reason : null,
+    };
+  }
   try {
     if (!(await tableExists(env, "server_posting_state"))) return null;
     const row = await env.DB.prepare(
@@ -275,9 +784,183 @@ async function getLastStoredPostAttempt(env: Env): Promise<OwnerDiscordOverview[
   }
 }
 
+async function performPermissionCheck(env: Env, mapping: Pick<StoredChannelMapping, "guild_id" | "channel_id">): Promise<OwnerDiscordPermissionCheck> {
+  const checkedAt = new Date().toISOString();
+  if (!stringOrNull(env.DISCORD_BOT_TOKEN)) {
+    return {
+      ok: false,
+      status: "not_configured",
+      checkedAt,
+      mode: "not_configured",
+      canViewChannel: false,
+      canSendMessages: false,
+      canEmbedLinks: false,
+      canReadMessageHistory: false,
+      canAttachFiles: null,
+      missingPermissions: [],
+      warning: "DISCORD_BOT_TOKEN is not configured in the runtime.",
+      channelName: null,
+      permissionSource: null,
+    };
+  }
+
+  const verifiedChannel = await verifyDiscordPostingChannel(env, mapping.guild_id, mapping.channel_id).catch(() => null);
+  if (verifiedChannel) {
+    return {
+      ok: verifiedChannel.can_post,
+      status: verifiedChannel.can_post ? "ok" : "missing_permissions",
+      checkedAt,
+      mode: "bot",
+      canViewChannel: verifiedChannel.can_view,
+      canSendMessages: verifiedChannel.can_send,
+      canEmbedLinks: verifiedChannel.can_embed,
+      canReadMessageHistory: verifiedChannel.can_read_history,
+      canAttachFiles: null,
+      missingPermissions: verifiedChannel.missing_permissions,
+      warning: verifiedChannel.can_post ? null : `Missing: ${verifiedChannel.missing_permissions.join(", ")}.`,
+      channelName: verifiedChannel.channel_name,
+      permissionSource: verifiedChannel.permission_source,
+    };
+  }
+
+  const fallback = await checkDiscordPostingPermissions(env, {
+    discord_channel_id: mapping.channel_id,
+    discord_webhook_url: null,
+  });
+  return {
+    ok: fallback.ok,
+    status: fallback.ok ? "ok" : fallback.mode === "not_configured" ? "not_configured" : "missing_permissions",
+    checkedAt: fallback.checked_at ?? checkedAt,
+    mode: fallback.mode,
+    canViewChannel: fallback.ok || !fallback.missing_permissions.includes("View Channel"),
+    canSendMessages: fallback.ok || !fallback.missing_permissions.includes("Send Messages"),
+    canEmbedLinks: fallback.ok || !fallback.missing_permissions.includes("Embed Links"),
+    canReadMessageHistory: fallback.ok || !fallback.missing_permissions.includes("Read Message History"),
+    canAttachFiles: null,
+    missingPermissions: fallback.missing_permissions,
+    warning: fallback.warning,
+    channelName: null,
+    permissionSource: null,
+  };
+}
+
+async function sendOwnerDiscordMessage(env: Env, channelId: string, preview: OwnerDiscordPreviewEmbed) {
+  const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
+  if (!botToken) throw new Error("DISCORD_BOT_TOKEN is not configured in the runtime.");
+  const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    headers: {
+      authorization: `Bot ${botToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      allowed_mentions: { parse: [] },
+      embeds: [
+        {
+          title: preview.title,
+          description: preview.description,
+          color: parseInt(preview.colorHex.replace("#", ""), 16),
+          fields: preview.fields,
+          footer: { text: "DZN test embed - owner triggered. Auto posting remains disabled." },
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    }),
+  });
+  const parsed = await response.json().catch(() => null) as { id?: string; message?: string } | null;
+  if (!response.ok) {
+    throw new Error(`Discord test embed failed with HTTP ${response.status}. ${safeText(parsed?.message, 160) ?? ""}`.trim());
+  }
+  return typeof parsed?.id === "string" ? parsed.id : null;
+}
+
+async function insertOwnerDiscordAuditLog(env: Env, user: SessionUser, input: {
+  action: string;
+  targetType: string;
+  targetSlot: string | null;
+  guildId: string | null;
+  channelId: string | null;
+  before: unknown;
+  after: unknown;
+  result: "success" | "failed" | string;
+  reason: string | null;
+  requestId: string | null;
+}) {
+  await ensureOwnerDiscordControlSchema(env);
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO discord_owner_audit_log (
+        id, actor_user_id, actor_discord_id, action, target_type, target_slot,
+        guild_id, channel_id, before_json, after_json, result, reason, request_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      user.id ?? null,
+      user.discord_id ?? null,
+      safeAction(input.action),
+      safeText(input.targetType, 80),
+      input.targetSlot,
+      sanitizeDiscordId(input.guildId) ?? input.guildId,
+      sanitizeDiscordId(input.channelId) ?? input.channelId,
+      stringifySafeJson(input.before),
+      stringifySafeJson(input.after),
+      safeText(input.result, 40) ?? "unknown",
+      safeText(input.reason, 240),
+      input.requestId,
+      new Date().toISOString(),
+    )
+    .run();
+}
+
 async function tableExists(env: Env, tableName: string): Promise<boolean> {
   const row = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").bind(tableName).first<{ name?: string }>();
   return row?.name === tableName;
+}
+
+function toChannelSlot(slot: typeof OWNER_DISCORD_CHANNEL_SLOTS[number], mapping: StoredChannelMapping): OwnerDiscordChannelSlot & { lastPermissionJson?: string | null } {
+  const enabled = Number(mapping.enabled ?? 0) === 1;
+  const permissionStatus = stringOrNull(mapping.last_permission_status);
+  const status = !enabled
+    ? "disabled"
+    : permissionStatus === "missing_permissions" || permissionStatus === "discord_error"
+      ? "missing_permission"
+      : "configured";
+  return {
+    slot: slot.slot,
+    label: slot.label,
+    status,
+    channelId: mapping.channel_id,
+    channelName: mapping.channel_name,
+    guildId: mapping.guild_id,
+    guildName: mapping.guild_name,
+    mappedPostTypes: slot.postTypes,
+    webhookConfigured: false,
+    lastPermissionCheckedAt: mapping.last_permission_checked_at,
+    lastPermissionStatus: mapping.last_permission_status,
+    lastPermissionError: mapping.last_permission_error,
+    updatedBy: maskDiscordId(mapping.updated_by),
+    updatedAt: mapping.updated_at,
+    lastPermissionJson: mapping.last_permission_json,
+  };
+}
+
+function toAuditLogEntry(row: StoredAuditRow): OwnerDiscordAuditLogEntry {
+  return {
+    id: row.id,
+    actorDiscordId: maskDiscordId(row.actor_discord_id),
+    action: row.action,
+    targetType: row.target_type,
+    targetSlot: row.target_slot,
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    before: parseSafeJson(row.before_json),
+    after: parseSafeJson(row.after_json),
+    result: row.result,
+    reason: safeText(row.reason, 240),
+    requestId: row.request_id,
+    createdAt: row.created_at,
+  };
 }
 
 function getPreviewBase(type: OwnerDiscordPreviewType): Omit<OwnerDiscordPreviewEmbed, "timestamp" | "previewOnly" | "sent"> {
@@ -422,12 +1105,23 @@ function normalizePreviewType(value: unknown): OwnerDiscordPreviewType {
   return "weekly_recap";
 }
 
+function normalizeChannelSlot(value: unknown) {
+  const normalized = stringOrNull(value);
+  return OWNER_DISCORD_CHANNEL_SLOTS.find((slot) => slot.slot === normalized) ?? null;
+}
+
+function sanitizeDiscordId(value: unknown) {
+  const text = stringOrNull(value);
+  return text && /^\d{8,32}$/.test(text) ? text : null;
+}
+
 function safeText(value: unknown, maxLength: number) {
   const text = stringOrNull(value);
   if (!text) return null;
   return text
     .replace(/[A-Za-z0-9+/=]{32,}/g, "[redacted]")
-    .replace(/(token|secret|key|webhook)=\S+/gi, "$1=[redacted]")
+    .replace(/(token|secret|key|webhook|authorization)=\S+/gi, "$1=[redacted]")
+    .replace(/https:\/\/discord\.com\/api\/webhooks\/\S+/gi, "https://discord.com/api/webhooks/[redacted]")
     .slice(0, maxLength);
 }
 
@@ -435,6 +1129,78 @@ function safeColorHex(value: unknown) {
   const text = stringOrNull(value);
   if (!text) return null;
   return /^#[0-9a-f]{6}$/i.test(text) ? text : null;
+}
+
+function safeRequestId(value: unknown) {
+  const text = stringOrNull(value);
+  return text && /^[a-zA-Z0-9_.:-]{1,96}$/.test(text) ? text : crypto.randomUUID();
+}
+
+function safeAction(value: unknown) {
+  return safeText(value, 80)?.replace(/[^a-z0-9_.:-]/gi, "_").toLowerCase() ?? "unknown";
+}
+
+function stringifySafeJson(value: unknown) {
+  if (value === null || value === undefined) return null;
+  return JSON.stringify(redactUnsafe(value));
+}
+
+function parseSafeJson(value: string | null) {
+  if (!value) return null;
+  try {
+    return redactUnsafe(JSON.parse(value)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function redactUnsafe(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactUnsafe);
+  if (!value || typeof value !== "object") return safeText(value, 1000) ?? value;
+  const result: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (/token|secret|webhook|authorization|encrypted|auth_tag|iv|key/i.test(key)) {
+      result[key] = "[redacted]";
+    } else {
+      result[key] = redactUnsafe(raw);
+    }
+  }
+  return result;
+}
+
+function parsePermissionJson(value: string | null): OwnerDiscordPermissionCheck | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as OwnerDiscordPermissionCheck;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsePermissionJsonForApi(value: string | null) {
+  const parsed = parsePermissionJson(value);
+  if (!parsed) return null;
+  return {
+    ...parsed,
+    warning: safeText(parsed.warning, 240),
+  };
+}
+
+function normalizeBotToken(value: string | undefined | null) {
+  if (!value?.trim()) return null;
+  return value.trim().replace(/^Bot\s+/i, "");
+}
+
+function maskDiscordId(value: unknown) {
+  const text = stringOrNull(value);
+  if (!text) return null;
+  return text.length <= 8 ? "[redacted]" : `${text.slice(0, 4)}...${text.slice(-4)}`;
+}
+
+function parseBoolean(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
 function stringOrNull(value: unknown) {
