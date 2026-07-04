@@ -1,0 +1,404 @@
+name: DZN Discord Control Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Approved Discord Control branch to deploy
+        required: true
+        default: feature/discord-control-centre
+      approved_commit:
+        description: Exact Discord Control feature commit SHA approved in preview
+        required: true
+      approved_preview_run_url:
+        description: Successful DZN Discord Control Preview run URL for approved_commit
+        required: true
+      confirm_production_rollout:
+        description: Must equal APPROVE_DISCORD_CONTROL_ROLLOUT
+        required: true
+      production_db_name:
+        description: Production D1 database name guard only
+        required: true
+        default: dzn_network_db
+      production_pages_project_name:
+        description: Production Pages project name
+        required: true
+        default: dzn-network
+
+concurrency:
+  group: dzn-discord-control-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    env:
+      APPROVED_BRANCH: feature/discord-control-centre
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+      GITHUB_TOKEN: ${{ github.token }}
+      CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN }}
+      CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_API_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+
+    steps:
+      - name: Checkout approved Discord Control branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate Discord Control production rollout guards
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.confirm_production_rollout }}" != "APPROVE_DISCORD_CONTROL_ROLLOUT" ]; then
+            echo "::error::confirm_production_rollout must equal APPROVE_DISCORD_CONTROL_ROLLOUT."
+            exit 1
+          fi
+          if [ "${{ inputs.branch }}" != "${APPROVED_BRANCH}" ]; then
+            echo "::error::Discord Control rollout may only deploy ${APPROVED_BRANCH}."
+            exit 1
+          fi
+          if [ "${{ inputs.production_pages_project_name }}" != "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::production_pages_project_name must equal dzn-network."
+            exit 1
+          fi
+          if [ "${{ inputs.production_db_name }}" != "${PRODUCTION_D1_DATABASE_NAME}" ]; then
+            echo "::error::production_db_name must equal dzn_network_db."
+            exit 1
+          fi
+          case "${{ inputs.production_pages_project_name }}" in
+            *preview*)
+              echo "::error::Refusing preview Pages project for Discord Control production rollout."
+              exit 1
+              ;;
+          esac
+          case "${{ inputs.production_db_name }}" in
+            *preview*)
+              echo "::error::Refusing preview D1 database name for Discord Control production rollout."
+              exit 1
+              ;;
+          esac
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+
+          APPROVED_COMMIT="${{ inputs.approved_commit }}"
+          APPROVED_PREVIEW_RUN_URL="${{ inputs.approved_preview_run_url }}"
+          if ! [[ "${APPROVED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::approved_commit must be the exact 40-character SHA that passed DZN Discord Control Preview."
+            exit 1
+          fi
+          EXPECTED_PREVIEW_RUN_PREFIX="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          case "${APPROVED_PREVIEW_RUN_URL}" in
+            "${EXPECTED_PREVIEW_RUN_PREFIX}"*) ;;
+            *)
+              echo "::error::approved_preview_run_url must be a DZN Discord Control Preview run URL in ${GITHUB_REPOSITORY}."
+              exit 1
+              ;;
+          esac
+          APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_URL##*/}"
+          if ! [[ "${APPROVED_PREVIEW_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::approved_preview_run_url must end with a numeric GitHub Actions run id."
+            exit 1
+          fi
+
+          git fetch origin main "${APPROVED_BRANCH}"
+          if ! git cat-file -e "${APPROVED_COMMIT}^{commit}" 2>/dev/null; then
+            echo "::error::Approved commit is not present on the selected branch; rerun preview for the current branch head."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${APPROVED_COMMIT}" HEAD; then
+            echo "::error::Approved commit is not present on the selected branch; rerun preview for the current branch head."
+            exit 1
+          fi
+          ROLLOUT_COMMIT_SHA="$(git rev-parse HEAD)"
+          if [ "${ROLLOUT_COMMIT_SHA}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::Selected branch HEAD ${ROLLOUT_COMMIT_SHA} does not match preview-approved commit ${APPROVED_COMMIT}; rerun preview for the current branch head."
+            exit 1
+          fi
+
+          APPROVED_COMMIT="${APPROVED_COMMIT}" APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_ID}" node <<'NODE'
+          (async () => {
+            const token = process.env.GITHUB_TOKEN;
+            if (!token) throw new Error("GITHUB_TOKEN is unavailable for preview approval verification.");
+            const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.APPROVED_PREVIEW_RUN_ID}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            });
+            if (!response.ok) throw new Error(`Could not verify approved preview run: GitHub API returned ${response.status}.`);
+            const run = await response.json();
+            if (run.name !== "DZN Discord Control Preview") {
+              throw new Error(`Approved run is ${run.name || "unknown"}, not DZN Discord Control Preview.`);
+            }
+            if (run.event !== "workflow_dispatch") {
+              throw new Error("Approved preview run must be a manual workflow_dispatch run.");
+            }
+            if (run.conclusion !== "success") {
+              throw new Error(`Approved preview run is not green; conclusion=${run.conclusion || "missing"}.`);
+            }
+            console.log(`Approved preview run verified: ${run.html_url}`);
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
+          NODE
+
+          ROLLOUT_CF_TOKEN=""
+          ROLLOUT_CF_TOKEN_SOURCE=""
+          if [ -n "${CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_PULSE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_PULSE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_API_TOKEN_FALLBACK:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_API_TOKEN_FALLBACK}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_API_TOKEN"
+          fi
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_DISCORD_CONTROL_PRODUCTION_TOKEN, CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN, CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN, CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PRODUCTION_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          {
+            printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}"
+            printf "ROLLOUT_CF_TOKEN_SOURCE=%s\n" "${ROLLOUT_CF_TOKEN_SOURCE}"
+            printf "ROLLOUT_COMMIT_SHA=%s\n" "${ROLLOUT_COMMIT_SHA}"
+            printf "APPROVED_PREVIEW_RUN_URL=%s\n" "${APPROVED_PREVIEW_RUN_URL}"
+          } >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+          if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like a 32-character Cloudflare account id."
+            exit 1
+          fi
+
+          test -f functions/api/owner/discord/overview.ts
+          test -f functions/api/owner/discord/post-types.ts
+          test -f functions/api/owner/discord/channels.ts
+          test -f functions/api/owner/discord/templates.ts
+          test -f functions/api/owner/discord/preview-embed.ts
+          test -f functions/_lib/owner-discord-control.ts
+          test -f components/owner/owner-console.tsx
+
+          if git diff --name-only origin/main...HEAD | grep -q '^migrations/'; then
+            echo "::error::Discord Control Phase 1 rollout must not include migrations."
+            git diff --name-only origin/main...HEAD | grep '^migrations/' || true
+            exit 1
+          fi
+
+          {
+            echo "## DZN Discord Control Production Rollout"
+            echo "- Branch: ${{ inputs.branch }}"
+            echo "- Commit: ${ROLLOUT_COMMIT_SHA}"
+            echo "- Approved preview: ${APPROVED_PREVIEW_RUN_URL}"
+            echo "- Production Pages project: ${{ inputs.production_pages_project_name }}"
+            echo "- Production D1 guard: ${{ inputs.production_db_name }}"
+            echo "- Cloudflare token source: ${ROLLOUT_CF_TOKEN_SOURCE}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- D1 migration: not run"
+            echo "- D1 writes: not performed"
+            echo "- Worker deploy: not run"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install
+        run: npm ci
+
+      - name: Final Discord Control checks
+        run: |
+          set -euo pipefail
+          npm run lint
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npm run test
+          npm run test:owner-console
+          npm run test:github-workflows
+          npm run test:public-access-gating
+          npm run test:server-lifecycle-resource-control
+          npm run test:server-advertising-packages
+          git diff --check
+
+      - name: Verify production Pages env names
+        run: |
+          set -euo pipefail
+          npx wrangler pages secret list --project-name "${{ inputs.production_pages_project_name }}" | tee discord-control-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_OWNER_DISCORD_IDS" discord-control-production-pages-secrets.txt
+          echo "DZN_PLATFORM_OWNER_DISCORD_IDS listed in production Pages secrets: true"
+
+      - name: Deploy production Pages from approved Discord Control commit
+        run: |
+          set -euo pipefail
+
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npx wrangler pages deploy out \
+            --project-name "${{ inputs.production_pages_project_name }}" \
+            --branch main \
+            --commit-hash "${ROLLOUT_COMMIT_SHA}" \
+            --commit-message "Deploy Discord Control Phase 1" \
+            --commit-dirty=true \
+            | tee discord-control-production-pages-deploy.txt
+
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' discord-control-production-pages-deploy.txt | head -n 1 || true)"
+          if [ -z "${DEPLOY_URL:-}" ]; then
+            DEPLOY_URL="${PRODUCTION_BASE_URL}"
+          fi
+          echo "PRODUCTION_DEPLOY_URL=${DEPLOY_URL}" >> "$GITHUB_ENV"
+          {
+            echo "- Production stable URL: ${PRODUCTION_BASE_URL}"
+            echo "- Production deployment URL: ${DEPLOY_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify production Discord Control rollout
+        run: |
+          set -euo pipefail
+          sleep 25
+
+          node <<'NODE'
+          (async () => {
+            const base = process.env.PRODUCTION_BASE_URL || "https://dzn-network.pages.dev";
+            const forbidden = [
+              "Request failed: 503",
+              "SERVER UNAVAILABLE",
+              "Error 1102",
+              "Worker exceeded resource limits",
+              "Minified React error #",
+              "TOKEN_ENCRYPTION_KEY",
+              "DISCORD_BOT_TOKEN",
+              "DISCORD_CLIENT_SECRET",
+              "SESSION_SECRET",
+              "encrypted_token",
+              "token_auth_tag",
+            ];
+            async function request(path, init = {}) {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 45000);
+              try {
+                const response = await fetch(`${base}${path}`, {
+                  redirect: "manual",
+                  headers: { "User-Agent": "dzn-discord-control-production-rollout", ...(init.headers ?? {}) },
+                  ...init,
+                  signal: controller.signal,
+                });
+                const text = await response.text();
+                return { response, text };
+              } finally {
+                clearTimeout(timeout);
+              }
+            }
+            async function expect(path, statuses = [200], init = {}, tries = 5) {
+              let lastStatus = 0;
+              let lastText = "";
+              for (let attempt = 1; attempt <= tries; attempt += 1) {
+                const { response, text } = await request(path, init);
+                lastStatus = response.status;
+                lastText = text.slice(0, 280);
+                if (statuses.includes(response.status)) {
+                  for (const marker of forbidden) {
+                    if (text.includes(marker)) throw new Error(`${path} contained forbidden marker ${marker}`);
+                  }
+                  return { status: response.status, text, headers: response.headers };
+                }
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+              }
+              throw new Error(`${path} returned HTTP ${lastStatus}; expected ${statuses.join("/")}. Body: ${lastText}`);
+            }
+            async function expectJson(path, statuses = [200], init = {}) {
+              const result = await expect(path, statuses, init);
+              try {
+                return JSON.parse(result.text || "{}");
+              } catch {
+                throw new Error(`${path} did not return JSON.`);
+              }
+            }
+
+            await expect("/", [200]);
+            await expect("/servers", [200]);
+            await expect("/dashboard", [200]);
+            await expect("/dzn-pulse", [200]);
+            await expect("/api/public/server-rail", [200]);
+            await expect("/api/public/servers", [200]);
+            await expect("/api/public/home-stats", [200]);
+            await expect("/api/public/leaderboards", [200]);
+            await expect("/api/public/leaderboards/advanced", [200]);
+            await expect("/api/public/server-wars", [200]);
+
+            const owner = await expect("/owner", [200, 302, 303, 307, 308, 401, 403], {}, 8);
+            if ([302, 303, 307, 308].includes(owner.status)) {
+              const location = owner.headers.get("location") || "";
+              if (!location.includes("/login")) throw new Error(`/owner redirected to unexpected location ${location}`);
+            } else if (owner.status === 200 && !/login|403|Owner|Platform/i.test(owner.text)) {
+              throw new Error("/owner returned 200 but did not look like a protected owner/login response.");
+            }
+
+            for (const path of [
+              "/api/owner/discord/overview",
+              "/api/owner/discord/post-types",
+              "/api/owner/discord/channels",
+              "/api/owner/discord/templates",
+            ]) {
+              await expect(path, [401, 403]);
+            }
+            await expect("/api/owner/discord/preview-embed", [401, 403], {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ type: "weekly_recap" }),
+            });
+
+            const pulse = await expectJson("/api/dzn-pulse/config", [200]);
+            const dznPulseEnabled = pulse.dznPulseEnabled ?? pulse.config?.dznPulseEnabled;
+            const discordNotificationsEnabled = pulse.discordNotificationsEnabled ?? pulse.config?.discordNotificationsEnabled;
+            if (dznPulseEnabled !== true) throw new Error("DZN Pulse is not enabled.");
+            if (discordNotificationsEnabled !== false) throw new Error("DZN Discord notifications are not false.");
+
+            console.log("Production Discord Control rollout verification passed.");
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
+          NODE
+
+          {
+            echo "### Production verification"
+            echo "- Public routes: passed"
+            echo "- /owner logged-out protection: passed"
+            echo "- Discord owner APIs logged-out protection: passed"
+            echo "- Preview embed endpoint unauthenticated protection: passed"
+            echo "- DZN Pulse enabled: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- D1 migration: not run"
+            echo "- D1 writes: not performed"
+            echo "- Worker deploy: not run"
+          } >> "$GITHUB_STEP_SUMMARY"
