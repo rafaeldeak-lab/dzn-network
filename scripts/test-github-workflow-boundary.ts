@@ -669,6 +669,13 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler d1 m
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("discord_channel_mappings"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("discord_owner_audit_log"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Resolve or create preview Pages project"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("out/_routes.json does not include /owner or /owner/*."), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("out/_routes.json does not include /api/owner/*."), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("discord-phase-2a-preview-immutable-url.txt"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("const retryablePreviewStatuses = new Set([404, 522, 523, 524, 525, 526, 530])"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Waiting for Discord Control Phase 2A preview readiness"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview readiness attempt"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Discord Control Phase 2A preview route"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Refusing production Pages project."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("--project-name dzn-network"), false);

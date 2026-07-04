@@ -400,7 +400,34 @@ jobs:
           NODE
 
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false MOCK_AUTH=true npm run build
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const routesPath = "out/_routes.json";
+          if (!fs.existsSync(routesPath)) {
+            throw new Error("out/_routes.json was not generated for Pages Functions routing.");
+          }
+          const routes = JSON.parse(fs.readFileSync(routesPath, "utf8"));
+          const include = Array.isArray(routes.include) ? routes.include : [];
+          const hasOwnerRoute = include.some((route) => route === "/owner" || route === "/owner/*" || route === "/*");
+          const hasOwnerApiRoute = include.some((route) => route === "/api/owner/*" || route === "/api/*" || route === "/*");
+          if (!hasOwnerRoute) throw new Error("out/_routes.json does not include /owner or /owner/*.");
+          if (!hasOwnerApiRoute) throw new Error("out/_routes.json does not include /api/owner/*.");
+          console.log("Pages Functions routing includes /owner and /api/owner.");
+          NODE
+
           npx wrangler pages deploy out --project-name "${PREVIEW_PROJECT_NAME}" --branch "${INPUT_BRANCH}" --commit-dirty=true | tee discord-phase-2a-preview-deploy.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployText = fs.readFileSync("discord-phase-2a-preview-deploy.txt", "utf8");
+          const immutableUrl = deployText.match(/https:\/\/[^\s]+\.pages\.dev/)?.[0] ?? "";
+          const stableUrl = `https://${process.env.PREVIEW_PROJECT_NAME}.pages.dev`;
+          fs.writeFileSync("discord-phase-2a-preview-url.txt", `${stableUrl}\n`);
+          if (immutableUrl) fs.writeFileSync("discord-phase-2a-preview-immutable-url.txt", `${immutableUrl}\n`);
+          console.log(`Preview URL: ${stableUrl}`);
+          if (immutableUrl) console.log(`Immutable preview URL: ${immutableUrl}`);
+          NODE
 
       - name: Verify Discord Control Phase 2A preview
         if: ${{ inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
@@ -410,8 +437,13 @@ jobs:
           node <<'NODE'
           const fs = require("node:fs");
           const base = process.env.PREVIEW_BASE_URL;
+          const deployedBase = fs.existsSync("discord-phase-2a-preview-immutable-url.txt")
+            ? fs.readFileSync("discord-phase-2a-preview-immutable-url.txt", "utf8").trim()
+            : "";
+          const verificationBase = deployedBase || base;
           const { ownerToken, nonOwnerToken } = JSON.parse(fs.readFileSync("discord-phase-2a-preview-cookies.json", "utf8"));
-          const forbiddenText = ["Request failed: 503", "Error 1102", "Worker exceeded resource limits", "Minified React error #"];
+          const retryablePreviewStatuses = new Set([404, 522, 523, 524, 525, 526, 530]);
+          const forbiddenText = ["Request failed: 503", "SERVER UNAVAILABLE", "Error 1102", "Worker exceeded resource limits", "Minified React error #"];
 
           function assert(condition, message) {
             if (!condition) {
@@ -419,26 +451,58 @@ jobs:
               process.exit(1);
             }
           }
-          async function fetchWithTimeout(path, init = {}) {
+          const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          async function fetchOnce(path, init = {}) {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 45000);
             try {
-              return await fetch(`${base}${path}`, { ...init, signal: controller.signal, redirect: "manual" });
+              return await fetch(`${verificationBase}${path}`, { ...init, signal: controller.signal, redirect: "manual" });
             } finally {
               clearTimeout(timeout);
             }
           }
+          async function fetchWithRetry(path, init = {}, options = {}) {
+            const attempts = options.attempts ?? 12;
+            const waitMs = options.waitMs ?? 7500;
+            let lastResponse = null;
+            let lastError = null;
+            for (let attempt = 1; attempt <= attempts; attempt += 1) {
+              try {
+                const response = await fetchOnce(path, init);
+                lastResponse = response;
+                console.log(`Discord Control Phase 2A preview route ${path} attempt ${attempt}/${attempts}: HTTP ${response.status}`);
+                if (!retryablePreviewStatuses.has(response.status)) return response;
+              } catch (error) {
+                lastError = error;
+                console.log(`Discord Control Phase 2A preview route ${path} attempt ${attempt}/${attempts}: ${error instanceof Error ? error.name : "fetch_error"}`);
+              }
+              if (attempt < attempts) await delay(waitMs);
+            }
+            if (lastResponse) return lastResponse;
+            throw lastError ?? new Error(`Failed to fetch ${path}.`);
+          }
           async function waitForPreview() {
-            for (let attempt = 1; attempt <= 60; attempt += 1) {
-              const response = await fetchWithTimeout("/");
-              console.log(`Preview readiness attempt ${attempt}: HTTP ${response.status}`);
-              if (![522, 523, 524, 525, 526, 530].includes(response.status)) return;
-              await new Promise((resolve) => setTimeout(resolve, 5000));
+            console.log(`Waiting for Discord Control Phase 2A preview readiness at ${verificationBase}`);
+            const maxAttempts = 40;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+              try {
+                const response = await fetchOnce("/", { redirect: "manual" });
+                const body = await response.text();
+                console.log(`Preview readiness attempt ${attempt}/${maxAttempts}: HTTP ${response.status}`);
+                if (response.status === 200 && !forbiddenText.some((snippet) => body.includes(snippet))) return;
+                if (!retryablePreviewStatuses.has(response.status)) {
+                  assert(response.status !== 503, "Preview readiness returned HTTP 503.");
+                  assert(!body.includes("Error 1102"), "Preview readiness returned Error 1102.");
+                }
+              } catch (error) {
+                console.log(`Preview readiness attempt ${attempt}/${maxAttempts}: ${error instanceof Error ? error.name : "fetch_error"}`);
+              }
+              if (attempt < maxAttempts) await delay(7500);
             }
             throw new Error("Preview site did not become ready.");
           }
           async function text(path, init = {}) {
-            const response = await fetchWithTimeout(path, init);
+            const response = await fetchWithRetry(path, init);
             const body = await response.text();
             for (const snippet of forbiddenText) {
               assert(!body.includes(snippet), `${path} contains forbidden runtime text: ${snippet}`);
@@ -446,7 +510,7 @@ jobs:
             return { response, body };
           }
           async function jsonRequest(path, init = {}) {
-            const response = await fetchWithTimeout(path, init);
+            const response = await fetchWithRetry(path, init);
             const raw = await response.text();
             let parsed = null;
             try { parsed = raw ? JSON.parse(raw) : null; } catch {}
