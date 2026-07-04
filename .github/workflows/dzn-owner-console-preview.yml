@@ -42,6 +42,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}
+      DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID: ${{ vars.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID || vars.DZN_PULSE_PREVIEW_DISCORD_CLIENT_ID }}
+      DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}
       INPUT_BRANCH: ${{ inputs.branch }}
       MODE: ${{ inputs.mode }}
       CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
@@ -154,6 +156,22 @@ jobs:
           echo "::add-mask::$OWNER_PREVIEW_SESSION_SECRET"
           printf "OWNER_PREVIEW_SESSION_SECRET=%s\n" "$OWNER_PREVIEW_SESSION_SECRET" >> "$GITHUB_ENV"
 
+          OWNER_PREVIEW_DISCORD_CLIENT_ID="${DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID:-1504270029795885178}"
+          OWNER_PREVIEW_DISCORD_REDIRECT_URI="${PREVIEW_BASE_URL}/api/auth/discord/callback"
+          if ! [[ "${OWNER_PREVIEW_DISCORD_CLIENT_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::Owner console preview Discord client id must be numeric."
+            exit 1
+          fi
+          if [ -z "${DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET:-}" ]; then
+            echo "::error::Missing DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET or DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET for owner console preview Discord OAuth."
+            exit 1
+          fi
+          echo "::add-mask::$DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET"
+          {
+            printf "OWNER_PREVIEW_DISCORD_CLIENT_ID=%s\n" "$OWNER_PREVIEW_DISCORD_CLIENT_ID"
+            printf "OWNER_PREVIEW_DISCORD_REDIRECT_URI=%s\n" "$OWNER_PREVIEW_DISCORD_REDIRECT_URI"
+          } >> "$GITHUB_ENV"
+
           node <<'NODE'
           const fs = require("node:fs");
           const ownerIds = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS ?? "")
@@ -188,6 +206,8 @@ jobs:
             echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
             echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
             echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
+            echo "- Discord OAuth client id configured: true"
+            echo "- Discord OAuth redirect URI: ${OWNER_PREVIEW_DISCORD_REDIRECT_URI}"
             echo "- DZN_PULSE_ENABLED: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -616,6 +636,8 @@ jobs:
           const projectName = process.env.PREVIEW_PROJECT_NAME;
           const branch = process.env.INPUT_BRANCH;
           const previewBaseUrl = process.env.PREVIEW_BASE_URL;
+          const ownerPreviewDiscordClientId = process.env.OWNER_PREVIEW_DISCORD_CLIENT_ID || "1504270029795885178";
+          const previewRedirectUri = process.env.OWNER_PREVIEW_DISCORD_REDIRECT_URI || `${previewBaseUrl}/api/auth/discord/callback`;
           const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
           const previewDbName = process.env.PREVIEW_DB_NAME;
           function fail(message) {
@@ -655,6 +677,8 @@ jobs:
                 DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
                 DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
                 NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                DISCORD_CLIENT_ID: { type: "plain_text", value: ownerPreviewDiscordClientId },
+                DISCORD_REDIRECT_URI: { type: "plain_text", value: previewRedirectUri },
               },
               d1_databases: {
                 ...d1Databases(config),
@@ -713,6 +737,8 @@ jobs:
               'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
               `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
               `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              `DISCORD_CLIENT_ID = ${JSON.stringify(ownerPreviewDiscordClientId)}`,
+              `DISCORD_REDIRECT_URI = ${JSON.stringify(previewRedirectUri)}`,
               "",
               "[[d1_databases]]",
               'binding = "DB"',
@@ -723,6 +749,7 @@ jobs:
             fs.writeFileSync("wrangler.toml", wranglerToml);
             console.log(`Configured preview Pages project: ${projectName}`);
             console.log(`Configured preview URL: ${previewBaseUrl}`);
+            console.log(`Configured preview Discord callback URL: ${previewRedirectUri}`);
             console.log(`Configured preview D1 binding DB id: ${d1Id}`);
           })().catch((error) => {
             fail(error instanceof Error ? error.message : String(error));
@@ -735,6 +762,7 @@ jobs:
 
           printf "%s" "$DZN_PLATFORM_OWNER_DISCORD_IDS" | npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS --project-name "${PREVIEW_PROJECT_NAME}"
           printf "%s" "$OWNER_PREVIEW_SESSION_SECRET" | npx wrangler pages secret put SESSION_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
+          printf "%s" "$DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET" | npx wrangler pages secret put DISCORD_CLIENT_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
           echo "Owner console preview auth secrets configured."
 
       - name: Deploy preview Pages project
@@ -759,7 +787,10 @@ jobs:
 
           DZN_PULSE_ENABLED=true \
           DZN_DISCORD_NOTIFICATIONS_ENABLED=false \
+          DZN_APP_URL="${PREVIEW_BASE_URL}" \
           NEXT_PUBLIC_APP_URL="${PREVIEW_BASE_URL}" \
+          DISCORD_CLIENT_ID="${OWNER_PREVIEW_DISCORD_CLIENT_ID}" \
+          DISCORD_REDIRECT_URI="${OWNER_PREVIEW_DISCORD_REDIRECT_URI}" \
           npm run build
           npx wrangler pages deploy out \
             --project-name "${PREVIEW_PROJECT_NAME}" \
@@ -792,6 +823,8 @@ jobs:
           const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE;
           const nonOwnerCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE;
           const ownerDiscordId = process.env.OWNER_CONSOLE_PREVIEW_OWNER_ID;
+          const expectedDiscordClientId = process.env.OWNER_PREVIEW_DISCORD_CLIENT_ID;
+          const expectedDiscordRedirectUri = process.env.OWNER_PREVIEW_DISCORD_REDIRECT_URI;
           const retryablePreviewStatuses = new Set([522, 523, 524, 525, 526, 530]);
           const forbiddenText = [
             "Request failed: 503",
@@ -904,6 +937,17 @@ jobs:
           }
           void (async () => {
             await waitForPreviewReady();
+            const discordStart = await fetchWithTimeout("/api/auth/discord/start?returnTo=%2Fowner", { redirect: "manual" });
+            assert(discordStart.status === 302, `/api/auth/discord/start?returnTo=%2Fowner returned HTTP ${discordStart.status}, expected 302.`);
+            const discordLocation = discordStart.headers.get("location") ?? "";
+            assert(discordLocation.startsWith("https://discord.com/oauth2/authorize"), "Discord auth start did not redirect to Discord.");
+            const discordAuthorize = new URL(discordLocation);
+            assert(discordAuthorize.searchParams.get("client_id") === expectedDiscordClientId, "Discord auth start used the wrong preview client id.");
+            assert(
+              discordAuthorize.searchParams.get("redirect_uri") === expectedDiscordRedirectUri,
+              "Discord auth start used the wrong preview callback URL.",
+            );
+
             const loggedOutOwner = await fetchWithTimeout("/owner", { redirect: "manual" });
             assert([302, 401, 403].includes(loggedOutOwner.status), `/owner logged-out returned ${loggedOutOwner.status}.`);
             if (loggedOutOwner.status === 302) {
@@ -963,6 +1007,7 @@ jobs:
             echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
             echo "- Preview D1 database id: ${PREVIEW_D1_DATABASE_ID}"
             echo "- /owner logged-out protection: passed"
+            echo "- Discord OAuth start route: passed"
             echo "- /owner non-owner 403: passed"
             echo "- /owner allowlisted owner access: passed"
             echo "- Owner API auth protection: passed"

@@ -509,6 +509,11 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("Preview Pages project must
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Preview D1 database must not equal production D1 database."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Missing DZN_PLATFORM_OWNER_DISCORD_IDS for owner console preview."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID: ${{ vars.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID || vars.DZN_PULSE_PREVIEW_DISCORD_CLIENT_ID }}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Missing DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET or DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET for owner console preview Discord OAuth."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes('DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID:-1504270029795885178'), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes('OWNER_PREVIEW_DISCORD_REDIRECT_URI="${PREVIEW_BASE_URL}/api/auth/discord/callback"'), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: \"false\""), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_PULSE_ENABLED: \"true\""), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Refusing D1 command for non-preview owner console database name."), true);
@@ -519,6 +524,11 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler d1 migrations
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("PRAGMA table_info(server_build_stats)"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler pages secret put SESSION_SECRET"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("npx wrangler pages secret put DISCORD_CLIENT_SECRET"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DISCORD_CLIENT_ID: { type: \"plain_text\", value: ownerPreviewDiscordClientId }"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DISCORD_REDIRECT_URI: { type: \"plain_text\", value: previewRedirectUri }"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DISCORD_CLIENT_ID = ${JSON.stringify(ownerPreviewDiscordClientId)}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DISCORD_REDIRECT_URI = ${JSON.stringify(previewRedirectUri)}"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("--project-name dzn-network"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("wrangler pages deploy out"), true);
@@ -531,6 +541,10 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("npm run test:owner-console
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/overview"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/servers"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/audit-log"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/auth/discord/start?returnTo=%2Fowner"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/auth/discord/callback"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Discord auth start did not redirect to Discord."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Discord OAuth start route: passed"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/owner logged-out protection: passed"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/owner non-owner 403: passed"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/owner allowlisted owner access: passed"), true);
@@ -548,6 +562,7 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn-auto-update-worker"), 
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("db:migrate:remote"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db --remote"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("INSERT INTO server_build_stats (id,"), false);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("https://dzn-network.pages.dev/api/auth/discord/callback"), false);
 assertInsertColumnsKnown(dznOwnerConsolePreviewWorkflow, "server_build_stats", [
   "linked_server_id",
   "nitrado_service_id",
