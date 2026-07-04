@@ -33,6 +33,7 @@ const dznServerLifecycleProductionRolloutWorkflow = read(".github/workflows/dzn-
 const dznPagesRuntimeProductionDeployWorkflow = read(".github/workflows/dzn-pages-runtime-production-deploy.yml");
 const dznOwnerConsolePreviewWorkflow = read(".github/workflows/dzn-owner-console-preview.yml");
 const dznOwnerConsoleProductionRolloutWorkflow = read(".github/workflows/dzn-owner-console-production-rollout.yml");
+const dznDiscordControlPreviewWorkflow = read(".github/workflows/dzn-discord-control-preview.yml");
 const protectedRouteAuthRepairWorkflow = read(".github/workflows/dzn-protected-route-auth-repair.yml");
 const productionDiscordAuthRepairWorkflow = read(".github/workflows/dzn-production-discord-auth-repair.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
@@ -577,6 +578,48 @@ assertInsertColumnsKnown(dznOwnerConsolePreviewWorkflow, "server_build_stats", [
   "last_build_at",
   "updated_at",
 ]);
+
+assert.equal(dznDiscordControlPreviewWorkflow.includes("name: DZN Discord Control Preview"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("\n  push:"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("\n  schedule:"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("feature/discord-control-centre"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("confirm_preview_only must equal PREVIEW_ONLY"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Preview branch must never be main."), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("dzn-network-discord-control-preview"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("dzn_network_db_discord_control_preview"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Preview Pages project must not equal production Pages project."), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Preview D1 database must not equal production D1 database."), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Missing DZN_PLATFORM_OWNER_DISCORD_IDS for Discord Control preview."), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"'), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes('DZN_PULSE_ENABLED: "true"'), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Refusing D1 command for non-preview Discord Control database name."), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Refusing migration for non-preview Discord Control database name."), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Refusing preview seed for non-preview Discord Control database name."), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Preview D1 database id equals production D1 database id"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("npx wrangler d1 migrations apply DB --config wrangler.discord-control-preview.toml --remote"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("server_posting_destinations"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("server_posting_state"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("npx wrangler pages secret put SESSION_SECRET"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("wrangler pages deploy out"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("--project-name \"${PREVIEW_PROJECT_NAME}\""), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("--project-name dzn-network"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("/api/owner/discord/overview"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("/api/owner/discord/post-types"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("/api/owner/discord/channels"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("/api/owner/discord/templates"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("/api/owner/discord/preview-embed"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("preview?.sent === false"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: false"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Production D1 writes: none"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("Production Pages deploy: none"), true);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("wrangler.adm-sync.toml"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("wrangler.auto-update.toml"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("dzn-adm-sync-worker"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("dzn-auto-update-worker"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("db:migrate:remote"), false);
+assert.equal(dznDiscordControlPreviewWorkflow.includes("dzn_network_db --remote"), false);
 
 assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("name: DZN Owner Console Production Rollout"), true);
 assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("workflow_dispatch:"), true);
