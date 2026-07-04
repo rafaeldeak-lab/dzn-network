@@ -284,7 +284,13 @@ jobs:
           const ownerIds = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS || "").split(",").map((id) => id.trim()).filter((id) => /^\d+$/.test(id));
           const ownerDiscordId = ownerIds[0];
           if (!ownerDiscordId) throw new Error("DZN_PLATFORM_OWNER_DISCORD_IDS did not contain a numeric Discord ID.");
-          const nonOwnerDiscordId = "333333333333333333";
+          let nonOwnerDiscordId = "333333333333333333";
+          if (ownerIds.includes(nonOwnerDiscordId)) {
+            nonOwnerDiscordId = "333333333333333334";
+          }
+          if (ownerIds.includes(nonOwnerDiscordId)) {
+            throw new Error("Preview non-owner Discord ID unexpectedly appears in the platform owner allowlist.");
+          }
           const sql = `
           INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at)
           VALUES
@@ -322,7 +328,14 @@ jobs:
             updated_at = CURRENT_TIMESTAMP;
           `;
           fs.writeFileSync("discord-phase-2a-preview-seed.sql", sql);
-          fs.writeFileSync("discord-phase-2a-preview-cookies.json", JSON.stringify({ ownerToken, nonOwnerToken, ownerDiscordId, ownerAllowlistConfigured: ownerIds.length > 0 }, null, 2));
+          fs.writeFileSync("discord-phase-2a-preview-cookies.json", JSON.stringify({
+            ownerToken,
+            nonOwnerToken,
+            ownerDiscordId,
+            nonOwnerDiscordId,
+            ownerAllowlistConfigured: ownerIds.length > 0,
+            nonOwnerAllowlistMember: ownerIds.includes(nonOwnerDiscordId),
+          }, null, 2));
           NODE
 
           npx wrangler d1 execute DB --config wrangler.discord-phase-2a-preview.toml --remote --file discord-phase-2a-preview-seed.sql
@@ -333,9 +346,14 @@ jobs:
           set -euo pipefail
 
           node <<'NODE'
+          const fs = require("node:fs");
           const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
           const token = process.env.CLOUDFLARE_API_TOKEN;
           const projectName = process.env.PREVIEW_PROJECT_NAME;
+          const branch = process.env.INPUT_BRANCH;
+          const previewBaseUrl = process.env.PREVIEW_BASE_URL;
+          const previewDbName = process.env.PREVIEW_DB_NAME;
+          const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
           async function api(path, init = {}) {
             const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
               ...init,
@@ -351,53 +369,90 @@ jobs:
             }
             return parsed;
           }
+          function mergeConfig(config) {
+            return {
+              ...config,
+              env_vars: {
+                ...(config?.env_vars ?? {}),
+                DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
+                DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+                MOCK_AUTH: { type: "plain_text", value: "true" },
+                DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
+              },
+              d1_databases: {
+                ...(config?.d1_databases ?? {}),
+                DB: { id: d1Id },
+              },
+            };
+          }
           void (async () => {
             if (projectName === "dzn-network") throw new Error("Refusing production Pages project.");
-            const list = await api("/pages/projects");
-            const projects = Array.isArray(list.result) ? list.result : [];
-            if (!projects.some((project) => project?.name === projectName)) {
-              await api("/pages/projects", {
+            const getResponse = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/${projectName}`, {
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            });
+            const getParsed = await getResponse.json().catch(() => null);
+            let project = null;
+            if (getResponse.status === 404) {
+              project = (await api("/pages/projects", {
                 method: "POST",
-                body: JSON.stringify({ name: projectName, production_branch: "main" }),
-              });
+                body: JSON.stringify({ name: projectName, production_branch: branch }),
+              })).result ?? null;
+              console.log(`Created preview Pages project: ${projectName}`);
+            } else if (!getResponse.ok || getParsed?.success === false) {
+              throw new Error(getParsed?.errors?.map((error) => error.message).join("; ") || `HTTP ${getResponse.status}`);
+            } else {
+              project = getParsed?.result ?? null;
+              console.log(`Reusing preview Pages project: ${projectName}`);
             }
-            console.log(`Preview Pages project ready: ${projectName}`);
+            await api(`/pages/projects/${projectName}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                production_branch: branch,
+                deployment_configs: {
+                  production: mergeConfig(project?.deployment_configs?.production ?? {}),
+                  preview: mergeConfig(project?.deployment_configs?.preview ?? {}),
+                },
+              }),
+            });
+            fs.writeFileSync("wrangler.toml", [
+              `name = ${JSON.stringify(projectName)}`,
+              'compatibility_date = "2026-05-13"',
+              'pages_build_output_dir = "out"',
+              "",
+              "[vars]",
+              'DZN_PULSE_ENABLED = "true"',
+              'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+              'MOCK_AUTH = "true"',
+              `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              "",
+              "[[d1_databases]]",
+              'binding = "DB"',
+              `database_name = ${JSON.stringify(previewDbName)}`,
+              `database_id = ${JSON.stringify(d1Id)}`,
+              "",
+            ].join("\n"));
+            console.log(`Configured preview Pages project: ${projectName}`);
           })().catch((error) => {
             console.error(error.message);
             process.exit(1);
           });
           NODE
 
+      - name: Configure preview owner auth secrets
+        if: ${{ inputs.mode == 'deploy-preview' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          printf "%s" "$DZN_PLATFORM_OWNER_DISCORD_IDS" | npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS --project-name "${PREVIEW_PROJECT_NAME}"
+          printf "%s" "$PREVIEW_SESSION_SECRET" | npx wrangler pages secret put SESSION_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
+          echo "Discord Control Phase 2A preview owner auth secrets configured."
+
       - name: Configure and deploy preview Pages project
         if: ${{ inputs.mode == 'deploy-preview' || inputs.mode == 'full-preview' }}
         run: |
           set -euo pipefail
-
-          node <<'NODE'
-          const fs = require("node:fs");
-          const previewBaseUrl = process.env.PREVIEW_BASE_URL;
-          const dbName = process.env.PREVIEW_DB_NAME;
-          const dbId = process.env.PREVIEW_D1_DATABASE_ID;
-          fs.writeFileSync("wrangler.toml", [
-            `name = ${JSON.stringify(process.env.PREVIEW_PROJECT_NAME)}`,
-            'compatibility_date = "2026-05-13"',
-            "",
-            "[vars]",
-            'DZN_PULSE_ENABLED = "true"',
-            'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
-            'MOCK_AUTH = "true"',
-            `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
-            `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
-            `SESSION_SECRET = ${JSON.stringify(process.env.PREVIEW_SESSION_SECRET)}`,
-            `DZN_PLATFORM_OWNER_DISCORD_IDS = ${JSON.stringify(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS)}`,
-            "",
-            "[[d1_databases]]",
-            'binding = "DB"',
-            `database_name = ${JSON.stringify(dbName)}`,
-            `database_id = ${JSON.stringify(dbId)}`,
-            "",
-          ].join("\n"));
-          NODE
 
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false MOCK_AUTH=true npm run build
 

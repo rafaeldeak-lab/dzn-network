@@ -669,6 +669,14 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler d1 m
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("discord_channel_mappings"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("discord_owner_audit_log"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Resolve or create preview Pages project"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Configure preview owner auth secrets"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("npx wrangler pages secret put SESSION_SECRET"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("deployment_configs"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("production: mergeConfig"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("preview: mergeConfig"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('pages_build_output_dir = "out"'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview non-owner Discord ID unexpectedly appears in the platform owner allowlist."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("out/_routes.json does not include /owner or /owner/*."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("out/_routes.json does not include /api/owner/*."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("discord-phase-2a-preview-immutable-url.txt"), true);
