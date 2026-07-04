@@ -661,7 +661,9 @@ assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("functions/api/
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("functions/api/owner/discord/channels.ts"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("functions/api/owner/discord/templates.ts"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("functions/api/owner/discord/preview-embed.ts"), true);
-assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("Discord Control Phase 1 rollout must not include migrations."), true);
+assert.equal(dznDiscordControlProductionRolloutWorkflow.includes('DISCORD_CONTROL_CHANGED_FILES="$(git diff-tree --no-commit-id --name-only -r "${APPROVED_COMMIT}")"'), true);
+assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("Discord Control Phase 1 rollout must not include new or modified migration files in the approved Discord Control commit."), true);
+assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("git diff --name-only origin/main...HEAD | grep -q '^migrations/'"), false);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("npm run lint"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("npm run build"), true);
 assert.equal(dznDiscordControlProductionRolloutWorkflow.includes("npm run test"), true);
