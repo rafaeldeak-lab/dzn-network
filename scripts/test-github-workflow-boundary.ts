@@ -32,6 +32,7 @@ const dznServerLifecyclePreviewWorkflow = read(".github/workflows/dzn-server-lif
 const dznServerLifecycleProductionRolloutWorkflow = read(".github/workflows/dzn-server-lifecycle-production-rollout.yml");
 const dznPagesRuntimeProductionDeployWorkflow = read(".github/workflows/dzn-pages-runtime-production-deploy.yml");
 const dznOwnerConsolePreviewWorkflow = read(".github/workflows/dzn-owner-console-preview.yml");
+const dznOwnerConsoleProductionRolloutWorkflow = read(".github/workflows/dzn-owner-console-production-rollout.yml");
 const protectedRouteAuthRepairWorkflow = read(".github/workflows/dzn-protected-route-auth-repair.yml");
 const productionDiscordAuthRepairWorkflow = read(".github/workflows/dzn-production-discord-auth-repair.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
@@ -576,6 +577,59 @@ assertInsertColumnsKnown(dznOwnerConsolePreviewWorkflow, "server_build_stats", [
   "last_build_at",
   "updated_at",
 ]);
+
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("name: DZN Owner Console Production Rollout"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("confirm_production_rollout"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("APPROVE_OWNER_CONSOLE_ROLLOUT"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("feature/owner-console"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("160c460648f9807b459f1c4a4a54d67b0b273f20"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("production_pages_project_name must equal dzn-network"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Refusing preview Pages project for owner console production rollout."), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Missing DZN_PLATFORM_OWNER_DISCORD_IDS for owner console production rollout."), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run test:github-workflows"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run lint"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run build"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run test"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run test:owner-console"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run test:public-access-gating"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run test:server-lifecycle-resource-control"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npm run test:server-advertising-packages"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("git diff --check"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npx wrangler pages deploy out"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("--project-name \"${PRODUCTION_PROJECT}\""), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("--commit-hash \"${ROLLOUT_COMMIT_SHA}\""), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("wrangler d1"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("d1 migrations"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("d1 execute"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("d1 time-travel"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npx wrangler deploy --config wrangler.adm-sync.toml"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("npx wrangler deploy --config wrangler.auto-update.toml"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("wrangler.adm-sync.toml"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("wrangler.auto-update.toml"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("secrets.TOKEN_ENCRYPTION_KEY"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("secrets.DISCORD_BOT_TOKEN"), false);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/owner"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/owner/overview"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/owner/servers"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/owner/audit-log"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/public/server-rail"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/public/servers"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/public/home-stats"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/public/leaderboards/advanced"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/public/server-wars"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("/api/dzn-pulse/config"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Minified React error #"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Error 1102"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Production D1 migration: not run"), true);
+assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Worker deploy: not run"), true);
 
 assert.equal(dznPulseProductionRolloutWorkflow.includes("name: DZN Pulse Production Rollout"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("workflow_dispatch:"), true);

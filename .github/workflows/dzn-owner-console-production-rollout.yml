@@ -1,0 +1,385 @@
+name: DZN Owner Console Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Approved owner console branch to deploy
+        required: true
+        default: feature/owner-console
+      approved_commit:
+        description: Exact owner console feature commit SHA approved in preview
+        required: true
+      approved_preview_run_url:
+        description: Successful DZN Owner Console Preview run URL for approved_commit
+        required: true
+      confirm_production_rollout:
+        description: Must equal APPROVE_OWNER_CONSOLE_ROLLOUT
+        required: true
+      production_pages_project_name:
+        description: Production Pages project name
+        required: true
+        default: dzn-network
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/dzn-owner-console-production-rollout.yml"
+      - "scripts/test-github-workflow-boundary.ts"
+
+concurrency:
+  group: dzn-owner-console-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollout:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[run-dzn-owner-console-production-rollout]')
+    runs-on: ubuntu-latest
+    env:
+      APPROVED_BRANCH: feature/owner-console
+      EXPECTED_OWNER_CONSOLE_COMMIT: 160c460648f9807b459f1c4a4a54d67b0b273f20
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+      CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_API_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+
+    steps:
+      - name: Checkout main workflow source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install workflow source dependencies
+        run: npm ci
+
+      - name: Validate workflow boundary on main
+        run: npm run test:github-workflows
+
+      - name: Validate owner console production rollout guards
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            ROLLOUT_BRANCH="${{ inputs.branch }}"
+            APPROVED_COMMIT="${{ inputs.approved_commit }}"
+            APPROVED_PREVIEW_RUN_URL="${{ inputs.approved_preview_run_url }}"
+            PRODUCTION_PROJECT="${{ inputs.production_pages_project_name }}"
+            if [ "${{ inputs.confirm_production_rollout }}" != "APPROVE_OWNER_CONSOLE_ROLLOUT" ]; then
+              echo "::error::confirm_production_rollout must equal APPROVE_OWNER_CONSOLE_ROLLOUT."
+              exit 1
+            fi
+          else
+            ROLLOUT_BRANCH="${APPROVED_BRANCH}"
+            APPROVED_COMMIT="${EXPECTED_OWNER_CONSOLE_COMMIT}"
+            APPROVED_PREVIEW_RUN_URL="Owner Console Preview #4 manually confirmed before rollout registration"
+            PRODUCTION_PROJECT="${PRODUCTION_PAGES_PROJECT_NAME}"
+            if ! echo "${{ github.event.head_commit.message }}" | grep -q "\[run-dzn-owner-console-production-rollout\]"; then
+              echo "::error::Push-triggered rollout requires [run-dzn-owner-console-production-rollout]."
+              exit 1
+            fi
+          fi
+
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::Owner console production rollout may only run from main."
+            exit 1
+          fi
+          if [ "${ROLLOUT_BRANCH}" != "${APPROVED_BRANCH}" ]; then
+            echo "::error::Owner console rollout may only deploy ${APPROVED_BRANCH}."
+            exit 1
+          fi
+          if ! [[ "${APPROVED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::approved_commit must be a 40-character SHA."
+            exit 1
+          fi
+          if [ "${PRODUCTION_PROJECT}" != "dzn-network" ]; then
+            echo "::error::production_pages_project_name must equal dzn-network."
+            exit 1
+          fi
+          case "${PRODUCTION_PROJECT}" in
+            *preview*)
+              echo "::error::Refusing preview Pages project for owner console production rollout."
+              exit 1
+              ;;
+          esac
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+          if [ -z "${DZN_PLATFORM_OWNER_DISCORD_IDS:-}" ]; then
+            echo "::error::Missing DZN_PLATFORM_OWNER_DISCORD_IDS for owner console production rollout."
+            exit 1
+          fi
+          echo "::add-mask::${DZN_PLATFORM_OWNER_DISCORD_IDS}"
+
+          node <<'NODE'
+          const ids = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS ?? "")
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+          if (ids.length === 0 || ids.some((entry) => !/^\d+$/.test(entry))) {
+            throw new Error("DZN_PLATFORM_OWNER_DISCORD_IDS must contain only comma-separated Discord numeric user IDs.");
+          }
+          console.log(`Owner allowlist configured: true (${ids.length} id(s))`);
+          NODE
+
+          ROLLOUT_CF_TOKEN=""
+          ROLLOUT_CF_TOKEN_SOURCE=""
+          if [ -n "${CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_PULSE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_PULSE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_API_TOKEN_FALLBACK:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_API_TOKEN_FALLBACK}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_API_TOKEN"
+          fi
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare token. Provide CLOUDFLARE_OWNER_CONSOLE_PRODUCTION_TOKEN, CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN, CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN, CLOUDFLARE_PULSE_PRODUCTION_TOKEN, or CLOUDFLARE_API_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          {
+            printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}"
+            printf "OWNER_CONSOLE_CF_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}"
+            printf "ROLLOUT_CF_TOKEN_SOURCE=%s\n" "${ROLLOUT_CF_TOKEN_SOURCE}"
+            printf "ROLLOUT_BRANCH=%s\n" "${ROLLOUT_BRANCH}"
+            printf "APPROVED_COMMIT=%s\n" "${APPROVED_COMMIT}"
+            printf "APPROVED_PREVIEW_RUN_URL=%s\n" "${APPROVED_PREVIEW_RUN_URL}"
+            printf "PRODUCTION_PROJECT=%s\n" "${PRODUCTION_PROJECT}"
+          } >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+            exit 1
+          fi
+          if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like a 32-character Cloudflare account id."
+            exit 1
+          fi
+
+          git fetch origin "${ROLLOUT_BRANCH}" main
+          git checkout --detach "origin/${ROLLOUT_BRANCH}"
+          ROLLOUT_COMMIT_SHA="$(git rev-parse HEAD)"
+          if [ "${ROLLOUT_COMMIT_SHA}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::Selected branch HEAD ${ROLLOUT_COMMIT_SHA} does not match preview-approved commit ${APPROVED_COMMIT}; rerun preview for the current branch head."
+            exit 1
+          fi
+          {
+            printf "ROLLOUT_COMMIT_SHA=%s\n" "${ROLLOUT_COMMIT_SHA}"
+          } >> "$GITHUB_ENV"
+
+          test -f app/owner/page.tsx
+          test -f components/owner/owner-console.tsx
+          test -f functions/_lib/platform-owner.ts
+          test -f functions/_lib/owner-console.ts
+          test -f functions/api/owner/overview.ts
+          test -f functions/api/owner/servers.ts
+          test -f functions/api/owner/servers/[serverId].ts
+          test -f functions/api/owner/audit-log.ts
+
+          {
+            echo "## DZN Owner Console Production Rollout"
+            echo "- Branch: ${ROLLOUT_BRANCH}"
+            echo "- Commit: ${ROLLOUT_COMMIT_SHA}"
+            echo "- Approved preview: ${APPROVED_PREVIEW_RUN_URL}"
+            echo "- Production Pages project: ${PRODUCTION_PROJECT}"
+            echo "- Cloudflare token source: ${ROLLOUT_CF_TOKEN_SOURCE}"
+            echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Production D1 migration: not run"
+            echo "- Worker deploy: not run"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install approved feature dependencies
+        run: npm ci
+
+      - name: Final owner console checks
+        run: |
+          set -euo pipefail
+          npm run lint
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npm run test
+          npm run test:owner-console
+          npm run test:public-access-gating
+          npm run test:server-lifecycle-resource-control
+          npm run test:server-advertising-packages
+          git diff --check
+
+      - name: Provision owner console production env
+        run: |
+          set -euo pipefail
+
+          printf "%s" "${DZN_PLATFORM_OWNER_DISCORD_IDS}" |
+            npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS \
+              --project-name "${PRODUCTION_PROJECT}"
+
+          printf "false" |
+            npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED \
+              --project-name "${PRODUCTION_PROJECT}"
+
+          npx wrangler pages secret list --project-name "${PRODUCTION_PROJECT}" | tee owner-console-pages-secrets.txt
+          grep -q "DZN_PLATFORM_OWNER_DISCORD_IDS" owner-console-pages-secrets.txt
+          grep -q "DZN_DISCORD_NOTIFICATIONS_ENABLED" owner-console-pages-secrets.txt
+          echo "DZN_PLATFORM_OWNER_DISCORD_IDS listed after rollout: true"
+          echo "DZN_DISCORD_NOTIFICATIONS_ENABLED listed after rollout: true"
+
+      - name: Deploy production Pages from approved owner console commit
+        run: |
+          set -euo pipefail
+
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          npx wrangler pages deploy out \
+            --project-name "${PRODUCTION_PROJECT}" \
+            --branch main \
+            --commit-hash "${ROLLOUT_COMMIT_SHA}" \
+            --commit-message "Deploy Owner Console Phase 1" \
+            --commit-dirty=true \
+            | tee owner-console-production-pages-deploy.txt
+
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' owner-console-production-pages-deploy.txt | head -n 1 || true)"
+          if [ -z "${DEPLOY_URL:-}" ]; then
+            DEPLOY_URL="${PRODUCTION_BASE_URL}"
+          fi
+          echo "PRODUCTION_DEPLOY_URL=${DEPLOY_URL}" >> "$GITHUB_ENV"
+          {
+            echo "- Production stable URL: ${PRODUCTION_BASE_URL}"
+            echo "- Production deployment URL: ${DEPLOY_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify production owner console rollout
+        run: |
+          set -euo pipefail
+          sleep 25
+
+          node <<'NODE'
+          (async () => {
+            const base = process.env.PRODUCTION_BASE_URL;
+            const forbidden = [
+              "Request failed: 503",
+              "SERVER UNAVAILABLE",
+              "Error 1102",
+              "Worker exceeded resource limits",
+              "Minified React error #",
+              "TOKEN_ENCRYPTION_KEY",
+              "DISCORD_BOT_TOKEN",
+              "encrypted_token",
+              "token_auth_tag",
+            ];
+            async function request(path, init = {}) {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 45000);
+              try {
+                const response = await fetch(`${base}${path}`, {
+                  redirect: "manual",
+                  headers: { "User-Agent": "dzn-owner-console-production-rollout", ...(init.headers ?? {}) },
+                  ...init,
+                  signal: controller.signal,
+                });
+                const text = await response.text();
+                return { response, text };
+              } finally {
+                clearTimeout(timeout);
+              }
+            }
+            async function expect(path, statuses = [200], tries = 4) {
+              let lastStatus = 0;
+              let lastText = "";
+              for (let attempt = 1; attempt <= tries; attempt += 1) {
+                const { response, text } = await request(path);
+                lastStatus = response.status;
+                lastText = text.slice(0, 240);
+                if (!statuses.includes(response.status)) {
+                  await new Promise((resolve) => setTimeout(resolve, 5000));
+                  continue;
+                }
+                for (const marker of forbidden) {
+                  if (text.includes(marker)) throw new Error(`${path} contained forbidden marker ${marker}`);
+                }
+                return { status: response.status, text, headers: response.headers };
+              }
+              throw new Error(`${path} returned HTTP ${lastStatus}; expected ${statuses.join("/")}. Body: ${lastText}`);
+            }
+            async function expectJson(path, statuses = [200]) {
+              const result = await expect(path, statuses);
+              try {
+                return JSON.parse(result.text || "{}");
+              } catch {
+                throw new Error(`${path} did not return JSON.`);
+              }
+            }
+
+            await expect("/", [200]);
+            await expect("/servers", [200]);
+            await expect("/dzn-pulse", [200]);
+            await expect("/api/public/server-rail", [200]);
+            await expect("/api/public/servers", [200]);
+            await expect("/api/public/home-stats", [200]);
+            await expect("/api/public/leaderboards", [200]);
+            await expect("/api/public/leaderboards/advanced", [200]);
+            await expect("/api/public/server-wars", [200]);
+
+            const ownerPage = await expect("/owner", [302, 303, 307, 308, 401, 403, 200], 8);
+            if ([302, 303, 307, 308].includes(ownerPage.status)) {
+              const location = ownerPage.headers.get("location") || "";
+              if (!location.includes("/login")) {
+                throw new Error(`/owner redirected to unexpected location ${location}`);
+              }
+            } else if (ownerPage.status === 200 && !/login|403|Platform owner|Owner/i.test(ownerPage.text)) {
+              throw new Error("/owner returned 200 but did not look like a protected owner/login response.");
+            }
+
+            for (const path of [
+              "/api/owner/overview",
+              "/api/owner/servers",
+              "/api/owner/servers/owner-console-nuketown",
+              "/api/owner/audit-log",
+            ]) {
+              await expect(path, [401, 403]);
+            }
+
+            const pulse = await expectJson("/api/dzn-pulse/config", [200]);
+            if (pulse.discordNotificationsEnabled !== false) {
+              throw new Error("DZN Discord Pulse delivery is not false.");
+            }
+
+            console.log("Production owner console rollout verification passed.");
+          })().catch((error) => {
+            console.error(`::error::${error.message}`);
+            process.exit(1);
+          });
+          NODE
+
+          {
+            echo "### Production verification"
+            echo "- Public routes: passed"
+            echo "- /owner logged-out protection: passed"
+            echo "- Owner APIs logged-out protection: passed"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- D1 migration: not run"
+            echo "- Worker deploy: not run"
+          } >> "$GITHUB_STEP_SUMMARY"
