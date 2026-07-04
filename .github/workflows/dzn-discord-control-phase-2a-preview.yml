@@ -40,7 +40,8 @@ jobs:
   discord-control-phase-2a-preview:
     runs-on: ubuntu-latest
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}
       INPUT_BRANCH: ${{ inputs.branch }}
@@ -115,13 +116,26 @@ jobs:
           echo "::add-mask::${DZN_PLATFORM_OWNER_DISCORD_IDS}"
 
           if [ "${MODE}" != "validate" ]; then
-            if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-              echo "::error::Missing CLOUDFLARE_API_TOKEN or CLOUDFLARE_PULSE_PREVIEW_TOKEN GitHub secret."
+            CF_TOKEN="${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+            if [ -z "${CF_TOKEN:-}" ]; then
+              echo "::error::Missing CLOUDFLARE_PULSE_PREVIEW_TOKEN or CLOUDFLARE_API_TOKEN GitHub secret."
               exit 1
             fi
-            echo "::add-mask::${CLOUDFLARE_API_TOKEN}"
+            if [ "${#CF_TOKEN}" -le 20 ]; then
+              echo "::error::Cloudflare preview token is present but too short to be valid."
+              exit 1
+            fi
+            echo "::add-mask::${CF_TOKEN}"
+            {
+              printf "DISCORD_PHASE_2A_CF_TOKEN=%s\n" "${CF_TOKEN}"
+              printf "CLOUDFLARE_API_TOKEN=%s\n" "${CF_TOKEN}"
+            } >> "$GITHUB_ENV"
             if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
               echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+              exit 1
+            fi
+            if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+              echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like a 32-character Cloudflare account id."
               exit 1
             fi
           fi
@@ -140,6 +154,13 @@ jobs:
             echo "- Preview D1 database: ${PREVIEW_DB_NAME}"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
             echo "- Owner allowlist configured: true"
+            if [ "${MODE}" != "validate" ]; then
+              if [ -n "${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-}" ]; then
+                echo "- Cloudflare token source: CLOUDFLARE_PULSE_PREVIEW_TOKEN"
+              else
+                echo "- Cloudflare token source: CLOUDFLARE_API_TOKEN fallback"
+              fi
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install

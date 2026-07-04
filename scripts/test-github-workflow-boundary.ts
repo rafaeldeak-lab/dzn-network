@@ -651,6 +651,15 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview Pages pro
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview D1 database must not equal production D1 database."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("dzn-network-discord-phase-2a-preview"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("dzn_network_db_discord_phase_2a_preview"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('CF_TOKEN="${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Missing CLOUDFLARE_PULSE_PREVIEW_TOKEN or CLOUDFLARE_API_TOKEN GitHub secret."), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Cloudflare preview token is present but too short to be valid."), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('printf "DISCORD_PHASE_2A_CF_TOKEN=%s\\n" "${CF_TOKEN}"'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('printf "CLOUDFLARE_API_TOKEN=%s\\n" "${CF_TOKEN}"'), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("CLOUDFLARE_ACCOUNT_ID does not look like a 32-character Cloudflare account id."), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Cloudflare token source: CLOUDFLARE_PULSE_PREVIEW_TOKEN"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Cloudflare token source: CLOUDFLARE_API_TOKEN fallback"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"'), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Missing DZN_PLATFORM_OWNER_DISCORD_IDS for Discord Control Phase 2A preview."), true);
