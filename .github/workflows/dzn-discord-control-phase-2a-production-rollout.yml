@@ -6,7 +6,7 @@ on:
       branch:
         description: Approved Discord Control Phase 2A branch to deploy
         required: true
-        default: feature/discord-control-phase-2a
+        default: feature/discord-control-phase-2a-ux
       approved_commit:
         description: Exact Discord Control Phase 2A feature commit SHA approved in preview
         required: true
@@ -41,7 +41,7 @@ jobs:
   rollout:
     runs-on: ubuntu-latest
     env:
-      APPROVED_BRANCH: feature/discord-control-phase-2a
+      APPROVED_BRANCH: feature/discord-control-phase-2a-ux
       PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
       PRODUCTION_BASE_URL: https://dzn-network.pages.dev
       GITHUB_TOKEN: ${{ github.token }}
@@ -82,12 +82,12 @@ jobs:
             echo "::error::confirm_production_rollout must equal APPROVE_DISCORD_PHASE_2A_ROLLOUT."
             exit 1
           fi
-          if [ "${{ inputs.branch }}" != "${APPROVED_BRANCH}" ]; then
-            echo "::error::Discord Control Phase 2A rollout may only deploy ${APPROVED_BRANCH}."
-            exit 1
-          fi
           if [ "${{ inputs.branch }}" = "main" ]; then
             echo "::error::Discord Control Phase 2A rollout must not deploy main as the feature branch."
+            exit 1
+          fi
+          if [ "${{ inputs.branch }}" != "${APPROVED_BRANCH}" ]; then
+            echo "::error::Discord Control Phase 2A rollout may only deploy ${APPROVED_BRANCH}; rerun preview for the approved UX branch before rollout."
             exit 1
           fi
           if [ "${{ inputs.production_pages_project_name }}" != "dzn-network" ]; then
@@ -150,7 +150,7 @@ jobs:
             exit 1
           fi
 
-          APPROVED_COMMIT="${APPROVED_COMMIT}" APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_ID}" node <<'NODE'
+          APPROVED_COMMIT="${APPROVED_COMMIT}" APPROVED_BRANCH="${APPROVED_BRANCH}" APPROVED_PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_ID}" node <<'NODE'
           (async () => {
             const token = process.env.GITHUB_TOKEN;
             if (!token) throw new Error("GITHUB_TOKEN is unavailable for preview approval verification.");
@@ -171,6 +171,12 @@ jobs:
             }
             if (run.conclusion !== "success") {
               throw new Error(`Approved preview run is not green; conclusion=${run.conclusion || "missing"}.`);
+            }
+            if (run.head_branch !== process.env.APPROVED_BRANCH) {
+              throw new Error(`Approved preview run was for ${run.head_branch || "unknown branch"}, not ${process.env.APPROVED_BRANCH}.`);
+            }
+            if (run.head_sha !== process.env.APPROVED_COMMIT) {
+              throw new Error(`Approved preview run SHA ${run.head_sha || "missing"} does not match approved_commit ${process.env.APPROVED_COMMIT}.`);
             }
             console.log(`Approved preview run verified: ${run.html_url}`);
           })().catch((error) => {
@@ -261,6 +267,12 @@ jobs:
           grep -q "previewOnly" functions/_lib/owner-discord-control.ts
           grep -q "sent: false" functions/api/owner/discord/preview-embed.ts
           grep -q "autoPostingEnabled: false" functions/api/owner/discord/test-embed.ts
+          grep -q "What do you want to post?" components/owner/owner-console.tsx
+          grep -q "Which DZN server is this about?" components/owner/owner-console.tsx
+          grep -q "Where should this post?" components/owner/owner-console.tsx
+          grep -q "Post destinations" components/owner/owner-console.tsx
+          grep -q "Discord Server" components/owner/owner-console.tsx
+          grep -q "testConfirmation !== \"SEND_TEST_EMBED\"" components/owner/owner-console.tsx
 
       - name: Install approved feature dependencies
         run: npm ci

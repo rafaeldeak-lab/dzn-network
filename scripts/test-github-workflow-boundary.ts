@@ -728,10 +728,14 @@ assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("\n  sch
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("confirm_production_rollout"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("APPROVE_DISCORD_PHASE_2A_ROLLOUT"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("feature/discord-control-phase-2a"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("feature/discord-control-phase-2a-ux"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("rerun preview for the approved UX branch before rollout"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("approved_commit"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("approved_preview_run_url"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("DZN Discord Control Phase 2A Preview"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Approved preview run is not green"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Approved preview run was for"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("does not match approved_commit"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Selected branch HEAD ${BRANCH_HEAD} does not match preview-approved commit ${APPROVED_COMMIT}; rerun preview for the current branch head."), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("production_pages_project_name must equal dzn-network"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("production_db_name must equal dzn_network_db"), true);
@@ -755,6 +759,11 @@ assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("functio
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("functions/api/owner/discord/channel-mappings/[slot]/permission-check.ts"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("functions/api/owner/discord/test-embed.ts"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("functions/api/owner/discord/audit-log.ts"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("What do you want to post?"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Which DZN server is this about?"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Where should this post?"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Post destinations"), true);
+assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Discord Server"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("migrations/0055_discord_control_phase_2a.sql"), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("Migration 0055 is additive-only and scoped to Discord Control Phase 2A support tables."), true);
 assert.equal(dznDiscordControlPhase2aProductionRolloutWorkflow.includes("DROP|TRUNCATE"), true);
