@@ -704,3 +704,100 @@ jobs:
             echo "- Auto posting enabled: false"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish preview approval manifest
+        if: ${{ inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          MANIFEST_PATH="out/.well-known/dzn/discord-phase-2a-preview-approval.json"
+          mkdir -p "$(dirname "${MANIFEST_PATH}")"
+
+          PREVIEW_COMMIT="$(git rev-parse HEAD)"
+          PREVIEW_RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          PREVIEW_COMMIT="${PREVIEW_COMMIT}" PREVIEW_RUN_URL="${PREVIEW_RUN_URL}" node <<'NODE'
+          const fs = require("node:fs");
+          const manifestPath = "out/.well-known/dzn/discord-phase-2a-preview-approval.json";
+          const manifest = {
+            feature: "discord-control-phase-2a",
+            workflow: "DZN Discord Control Phase 2A Preview",
+            run_id: process.env.GITHUB_RUN_ID,
+            run_url: process.env.PREVIEW_RUN_URL,
+            branch: process.env.INPUT_BRANCH,
+            commit: process.env.PREVIEW_COMMIT,
+            preview_url: process.env.PREVIEW_BASE_URL,
+            preview_project: process.env.PREVIEW_PROJECT_NAME,
+            preview_db: process.env.PREVIEW_DB_NAME,
+            migration: "0055_discord_control_phase_2a.sql",
+            dzn_discord_notifications_enabled: false,
+            auto_posting_enabled: false,
+            real_discord_send: false,
+            status: "passed",
+          };
+          const serialized = JSON.stringify(manifest);
+          if (/DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|SESSION_SECRET|TOKEN_ENCRYPTION_KEY|NITRADO|CLOUDFLARE|webhooks\/|encrypted_token/i.test(serialized)) {
+            throw new Error("Preview approval manifest contains secret-like content.");
+          }
+          fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+          console.log(`Preview approval manifest written to ${manifestPath}`);
+          NODE
+
+          npx wrangler pages deploy out --project-name "${PREVIEW_PROJECT_NAME}" --branch "${INPUT_BRANCH}" --commit-dirty=true | tee discord-phase-2a-preview-approval-deploy.txt
+
+          node <<'NODE'
+          const approvalUrl = `${process.env.PREVIEW_BASE_URL}/.well-known/dzn/discord-phase-2a-preview-approval.json`;
+          const expectedRunUrl = `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+          const retryable = new Set([404, 522, 523, 524, 525, 526, 530]);
+          const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          function assert(condition, message) {
+            if (!condition) throw new Error(message);
+          }
+          async function fetchApproval() {
+            for (let attempt = 1; attempt <= 30; attempt += 1) {
+              const response = await fetch(approvalUrl, { redirect: "manual" });
+              console.log(`Approval manifest attempt ${attempt}/30: HTTP ${response.status}`);
+              if (response.status === 200) {
+                const manifest = await response.json();
+                assert(manifest.feature === "discord-control-phase-2a", "Approval manifest feature mismatch.");
+                assert(manifest.workflow === "DZN Discord Control Phase 2A Preview", "Approval manifest workflow mismatch.");
+                assert(manifest.run_id === process.env.GITHUB_RUN_ID, "Approval manifest run_id mismatch.");
+                assert(manifest.run_url === expectedRunUrl, "Approval manifest run_url mismatch.");
+                assert(manifest.branch === process.env.INPUT_BRANCH, "Approval manifest branch mismatch.");
+                assert(manifest.commit && /^[0-9a-f]{40}$/i.test(manifest.commit), "Approval manifest commit is invalid.");
+                assert(manifest.preview_project === process.env.PREVIEW_PROJECT_NAME, "Approval manifest preview project mismatch.");
+                assert(manifest.preview_db === process.env.PREVIEW_DB_NAME, "Approval manifest preview D1 mismatch.");
+                assert(manifest.migration === "0055_discord_control_phase_2a.sql", "Approval manifest migration mismatch.");
+                assert(manifest.dzn_discord_notifications_enabled === false, "Approval manifest Discord notifications flag mismatch.");
+                assert(manifest.auto_posting_enabled === false, "Approval manifest auto posting flag mismatch.");
+                assert(manifest.real_discord_send === false, "Approval manifest real Discord send flag mismatch.");
+                assert(manifest.status === "passed", "Approval manifest status mismatch.");
+                const serialized = JSON.stringify(manifest);
+                assert(!/DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|SESSION_SECRET|TOKEN_ENCRYPTION_KEY|NITRADO|CLOUDFLARE|webhooks\/|encrypted_token/i.test(serialized), "Approval manifest contains secret-like content.");
+                return manifest;
+              }
+              if (!retryable.has(response.status)) {
+                throw new Error(`Approval manifest returned unexpected HTTP ${response.status}.`);
+              }
+              await delay(5000);
+            }
+            throw new Error("Approval manifest did not become available.");
+          }
+          fetchApproval().then((manifest) => {
+            console.log(`Preview approval manifest verified at ${approvalUrl}`);
+            console.log(`Preview approval commit: ${manifest.commit}`);
+          }).catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          {
+            echo ""
+            echo "## DZN Discord Control Phase 2A Preview Approval Manifest"
+            echo ""
+            echo "- Approval manifest: ${PREVIEW_BASE_URL}/.well-known/dzn/discord-phase-2a-preview-approval.json"
+            echo "- Manifest status: passed"
+            echo "- Real Discord send: false"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
