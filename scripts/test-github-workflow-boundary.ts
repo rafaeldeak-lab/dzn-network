@@ -645,6 +645,9 @@ assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("workflow_dispatch
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("\n  push:"), false);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("\n  schedule:"), false);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("feature/discord-control-phase-2a"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("feature/discord-control-phase-2a-ux"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("feature/discord-control-phase-2a|feature/discord-control-phase-2a-ux"), true);
+assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Unknown/random branches are refused."), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("confirm_preview_only:"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("confirm_preview_only must equal PREVIEW_ONLY"), true);
 assert.equal(dznDiscordControlPhase2aPreviewWorkflow.includes("Preview branch must never be main."), true);
