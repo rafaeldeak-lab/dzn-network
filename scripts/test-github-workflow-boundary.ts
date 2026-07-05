@@ -473,6 +473,14 @@ assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("echo \"${ROLLOUT_
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("echo \"$ROLLOUT_CF_TOKEN\""), false);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run lint"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run build"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npx wrangler pages functions build functions"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("cp .pages-functions/index.js out/_worker.js"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("Pages Functions worker and owner API routes verified."), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("/api/owner/overview"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("/api/owner/discord/options"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("fetchProtectedOwnerApi"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("expected protected 401/403"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("Owner API protected route verification: passed"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run test:server-lifecycle-resource-control"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run test:public-access-gating"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run test:metadata-sync-runner"), true);

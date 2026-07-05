@@ -138,6 +138,26 @@ jobs:
           set -euo pipefail
           npm run lint
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
+          rm -rf .pages-functions
+          mkdir -p .pages-functions
+          npx wrangler pages functions build functions \
+            --outdir .pages-functions \
+            --build-output-directory out \
+            --output-routes-path out/_routes.json \
+            --minify
+          cp .pages-functions/index.js out/_worker.js
+          test -s out/_worker.js
+          node <<'NODE'
+          const fs = require("node:fs");
+          const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
+          const include = Array.isArray(routes.include) ? routes.include : [];
+          for (const route of ["/owner", "/api/owner/overview", "/api/owner/servers", "/api/owner/discord/options", "/api/owner/discord/channel-mappings"]) {
+            if (!include.includes(route) && !include.includes("/api/*")) {
+              throw new Error(`Missing Pages Functions route ${route}`);
+            }
+          }
+          console.log("Pages Functions worker and owner API routes verified.");
+          NODE
           npm run test:server-lifecycle-resource-control
           npm run test:public-access-gating
           npm run test:metadata-sync-runner
@@ -236,9 +256,40 @@ jobs:
             throw new Error(`${path} returned HTTP ${lastStatus}: ${lastText.slice(0, 160)}`);
           }
 
+          async function fetchProtectedOwnerApi(path) {
+            const url = `${base}${path}`;
+            let lastStatus = 0;
+            let lastText = "";
+            for (let attempt = 1; attempt <= 8; attempt += 1) {
+              const response = await fetch(url, {
+                redirect: "manual",
+                headers: { "cache-control": "no-cache" },
+              });
+              lastStatus = response.status;
+              lastText = await response.text();
+              if (response.status === 401 || response.status === 403) {
+                return { status: response.status, text: lastText };
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+            throw new Error(`${path} expected protected 401/403, got HTTP ${lastStatus}: ${lastText.slice(0, 160)}`);
+          }
+
           const results = {};
           for (const path of paths) {
             results[path] = await fetchWithRetry(path);
+          }
+
+          for (const path of [
+            "/api/owner/overview",
+            "/api/owner/servers",
+            "/api/owner/audit-log",
+            "/api/owner/discord/overview",
+            "/api/owner/discord/options",
+            "/api/owner/discord/channel-mappings",
+          ]) {
+            const result = await fetchProtectedOwnerApi(path);
+            console.log(`${path}: protected HTTP ${result.status}`);
           }
 
           const pulse = JSON.parse(results["/api/dzn-pulse/config"].text);
@@ -254,6 +305,7 @@ jobs:
 
           {
             echo "- Public route verification: passed"
+            echo "- Owner API protected route verification: passed"
             echo "- DZN Pulse enabled: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
           } >> "$GITHUB_STEP_SUMMARY"
