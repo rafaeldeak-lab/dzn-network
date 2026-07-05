@@ -283,6 +283,12 @@ for (const label of [
   "What is a Discord Server ID?",
   "DZN keeps raw IDs in advanced details",
   "All Network / Network-wide",
+  "Discord calls a server a guild internally",
+  "View channel",
+  "Send messages",
+  "Embed links",
+  "Attach files",
+  "This sends one manual owner-triggered test embed only. Auto posting stays disabled.",
   "Not configured yet",
   "Not configured",
   "Preview Embed",
@@ -304,7 +310,15 @@ assert.match(ownerUiSource, /discordDestinationOptionLabel/);
 assert.match(ownerUiSource, /\$\{channel\.label\} — \$\{isDiscordDestinationConfigured\(channel\) \? discordChannelLabel\(channel\) : "Not configured"\}/);
 assert.equal(ownerUiSource.includes("Not configured yet - Not configured yet"), false);
 assert.doesNotMatch(ownerUiSource, /discordChannelLabel\(channel\)} - \{isDiscordDestinationConfigured\(channel\) \? channelStatusLabel\(channel\.status\) : "Not configured yet"\}/);
-assert.match(ownerUiSource, /testConfirmation !== "SEND_TEST_EMBED"/);
+assert.match(ownerUiSource, /form\.confirmation !== "SEND_TEST_EMBED"/);
+assert.match(ownerUiSource, /DiscordDestinationModalPanel/);
+assert.match(ownerUiSource, /role="dialog"/);
+assert.match(ownerUiSource, /aria-modal="true"/);
+assert.match(ownerUiSource, /setDestinationModal\(\{ kind: "configure", slot: channel\.slot \}\)/);
+assert.match(ownerUiSource, /setDestinationModal\(\{ kind: "permissions", slot: channel\.slot \}\)/);
+assert.match(ownerUiSource, /setDestinationModal\(\{ kind: "test", slot: channel\.slot \}\)/);
+assert.match(ownerUiSource, /PermissionCheckRow/);
+assert.match(ownerUiSource, /return `Configure \$\{label\} destination`/);
 assert.match(ownerUiSource, /selectedDestinationConfigured/);
 assert.match(ownerUiSource, /selectedDestinationPermissionOk/);
 assert.doesNotMatch(ownerUiSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_auth_tag\b|\bDISCORD_BOT_TOKEN\b|\bTOKEN_ENCRYPTION_KEY\b/i);
@@ -313,6 +327,8 @@ assert.match(ownerUiSource, /h-dvh overflow-hidden/, "Owner console shell must l
 assert.match(ownerUiSource, /lg:grid-cols-\[240px_minmax\(0,1fr\)\]/, "Owner console should keep a compact fixed desktop sidebar.");
 assert.match(ownerUiSource, /h-full min-h-0/, "Owner console panels must use constrained internal height.");
 assert.match(ownerUiSource, /overflow-auto/, "Large owner console lists should use internal scrolling.");
+assert.match(ownerUiSource, /overflow-x-hidden/, "Discord Control modals and destination lists must prevent horizontal scrolling.");
+assert.equal(ownerUiSource.includes("expandedSlot"), false, "Post destination setup must not expand inline rows.");
 
 const globalsSource = readFileSync("app/globals.css", "utf8");
 assert.match(globalsSource, /body\.dzn-owner-console-active/);
