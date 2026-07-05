@@ -954,7 +954,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                 >
                   {channels.map((channel) => (
                     <option key={channel.slot} value={channel.slot}>
-                      {discordChannelLabel(channel)} - {isDiscordDestinationConfigured(channel) ? channelStatusLabel(channel.status) : "Not configured yet"}
+                      {discordDestinationOptionLabel(channel)}
                     </option>
                   ))}
                 </select>
@@ -1505,6 +1505,10 @@ function isDiscordDestinationConfigured(channel: DiscordChannelSlot) {
 function discordChannelLabel(channel: DiscordChannelSlot) {
   if (!channel.channelId || channel.status === "not_configured") return "Not configured yet";
   return channel.channelName ? `#${channel.channelName}` : "Channel configured";
+}
+
+function discordDestinationOptionLabel(channel: DiscordChannelSlot) {
+  return `${channel.label} — ${isDiscordDestinationConfigured(channel) ? discordChannelLabel(channel) : "Not configured"}`;
 }
 
 function summarizePostTypes(postTypes: string[]) {

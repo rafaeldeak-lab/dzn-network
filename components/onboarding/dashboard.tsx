@@ -5421,15 +5421,13 @@ function DiscordAutoPostsPanel({
   const channelCanPost = selectedChannel ? selectedChannelPermission.canPost || webhookFallbackConfigured : webhookFallbackConfigured;
   const canSave = Boolean(channelForSave && selectedPostTypes.length && selectedLockedCount === 0 && channelCanPost);
   const diagnostics = channelsResponse?.diagnostics;
-  const botStatus = channelsResponse?.bot_connected === true
-    ? "Connected"
-    : usingCachedChannelState && channelCache?.last_bot_connected_state === true
-      ? "Connected (last known)"
-      : responseErrorCode === "missing_bot_token"
-      ? "Bot token missing"
-      : channelsResponse?.bot_connected === false
-        ? "Not connected"
-        : "Unknown";
+  const hasPermissionWarnings = channels.some((channel) => channel.can_view && !channel.can_post) || setups.some((setup) => setup.missing_permissions.length > 0);
+  const botStatus = formatDiscordBotStatus({
+    botConnected: channelsResponse?.bot_connected,
+    usingCachedConnectedState: usingCachedChannelState && channelCache?.last_bot_connected_state === true,
+    responseErrorCode,
+    hasPermissionWarnings,
+  });
   const channelCountLabel = channelsLoading
     ? "Loading"
     : usingCachedChannelState && channelCache
@@ -5437,6 +5435,14 @@ function DiscordAutoPostsPanel({
       : String(channels.length);
   const channelWarningText = channelsWarning || (channelFetchFailure?.message ?? "");
   const retryableChannelFetch = Boolean(channelFetchFailure?.retryable || channelsResponse?.retryable);
+  const activeSetupCount = setups.filter((setup) => setup.status === "active").length;
+  const saveHelperText = getDiscordAutoPostSaveHelper({
+    hasChannel: Boolean(channelForSave),
+    selectedPostTypesCount: selectedPostTypes.length,
+    selectedLockedCount,
+    channelCanPost,
+    canSave,
+  });
 
   function togglePostType(postType: string) {
     setSelectedPostTypes((current) => current.includes(postType)
@@ -5615,13 +5621,18 @@ function DiscordAutoPostsPanel({
           </p>
         </div>
         <div className="rounded-lg border border-white/10 bg-black/24 px-3 py-2 text-[10px] font-black uppercase text-zinc-300">
-          {setups.filter((setup) => setup.status === "active").length} active setups
+          {activeSetupCount} active setups
         </div>
       </div>
+      {activeSetupCount === 0 ? (
+        <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold leading-5 text-amber-50">
+          No auto posts are active yet. Choose a channel, select post types, then save setup.
+        </p>
+      ) : null}
 
       <div className="mt-4 grid gap-3 rounded-xl border border-cyan-300/15 bg-cyan-400/5 p-3 sm:grid-cols-2 lg:grid-cols-4">
         <MiniInfo label="Discord Server" value={channelsResponse?.guild_name ?? connectedServerName ?? "Unknown"} />
-        <MiniInfo label="Bot" value={botStatus} />
+        <MiniInfo label="Bot status" value={botStatus} />
         <MiniInfo label="Channels Found" value={channelCountLabel} />
         <MiniInfo label="Plan" value={planName} />
       </div>
@@ -5765,11 +5776,9 @@ function DiscordAutoPostsPanel({
             >
               {saving ? "Saving..." : "Save Auto Post Setup"}
             </button>
-            {!canSave ? (
-              <p className="text-[11px] font-bold leading-5 text-amber-200">
-                Choose a channel and allowed posts. If bot mode cannot work, add a webhook fallback.
-              </p>
-            ) : null}
+            <p className={`text-[11px] font-bold leading-5 ${canSave ? "text-emerald-200" : "text-amber-200"}`}>
+              {saveHelperText}
+            </p>
           </div>
         </div>
 
@@ -5957,7 +5966,7 @@ function DiscordAutoPostsPanel({
           );
         }) : (
           <div className="rounded-lg border border-dashed border-white/15 bg-black/20 px-4 py-5 text-sm font-bold text-zinc-400">
-            No Discord auto-post setups yet. Choose a channel and select the embeds DZN should keep updated.
+            No auto posts are active yet. Choose a channel, select post types, then save setup.
           </div>
         )}
       </div>
@@ -7241,17 +7250,68 @@ function friendlyChannelFetchWarning(response: DiscordChannelsResponse, hasSaved
     : base;
 }
 
-function formatChannelLabel(channel: Pick<DiscordPostingChannel, "channel_name" | "category_name">) {
-  return channel.category_name ? `${channel.category_name} / #${channel.channel_name}` : `#${channel.channel_name}`;
+function formatChannelLabel(channel: Pick<DiscordPostingChannel, "channel_id" | "channel_name" | "category_name">) {
+  const channelName = normalizeDiscordChannelName(channel.channel_name, channel.channel_id);
+  if (channelName) return `#${channelName}`;
+  return `Saved channel — ending ${formatDiscordIdEnding(channel.channel_id)}`;
 }
 
 function resolveSetupChannelLabel(setup: PostingChannelSetup, channelById: Map<string, DiscordPostingChannel>) {
   const channel = channelById.get(setup.channel_id);
   if (channel) return formatChannelLabel(channel);
-  if (setup.channel_name && setup.channel_name !== "Unknown channel" && setup.channel_name !== setup.channel_id) {
-    return setup.channel_label || `#${setup.channel_name}`;
+  const setupChannelName = normalizeDiscordChannelName(setup.channel_name, setup.channel_id);
+  if (setupChannelName) return `#${setupChannelName}`;
+  const labelChannelName = normalizeDiscordChannelName(extractChannelNameFromLabel(setup.channel_label), setup.channel_id);
+  if (labelChannelName) return `#${labelChannelName}`;
+  return `Configured channel — ID ending ${formatDiscordIdEnding(setup.channel_id)}`;
+}
+
+function extractChannelNameFromLabel(value: string | null | undefined) {
+  const match = value?.match(/#([a-z0-9_.-]+)/i);
+  return match?.[1] ?? null;
+}
+
+function normalizeDiscordChannelName(value: string | null | undefined, channelId?: string | null) {
+  const normalized = value?.trim().replace(/^#/, "") ?? "";
+  if (!normalized) return null;
+  if (normalized === "Unknown channel") return null;
+  if (channelId && normalized === channelId) return null;
+  if (/^saved-\d{2,}$/i.test(normalized)) return null;
+  return normalized;
+}
+
+function formatDiscordIdEnding(value: string | null | undefined) {
+  const normalized = String(value ?? "").replace(/\D/g, "");
+  return normalized ? normalized.slice(-4) : "unknown";
+}
+
+function formatDiscordBotStatus(input: {
+  botConnected?: boolean | null;
+  usingCachedConnectedState: boolean;
+  responseErrorCode: string | null;
+  hasPermissionWarnings: boolean;
+}) {
+  if (input.responseErrorCode === "missing_bot_token") return "Not configured";
+  if (input.botConnected === true || input.usingCachedConnectedState) {
+    return input.hasPermissionWarnings ? "Missing permissions" : "Connected";
   }
-  return "Unknown channel";
+  if (input.botConnected === false) return "Not configured";
+  return "Not checked yet";
+}
+
+function getDiscordAutoPostSaveHelper(input: {
+  hasChannel: boolean;
+  selectedPostTypesCount: number;
+  selectedLockedCount: number;
+  channelCanPost: boolean;
+  canSave: boolean;
+}) {
+  if (!input.hasChannel) return "Choose a channel first.";
+  if (input.selectedPostTypesCount === 0) return "Select at least one post type.";
+  if (input.selectedLockedCount > 0) return "One or more selected post types require a plan upgrade.";
+  if (!input.channelCanPost) return "Selected channel needs posting permission or a webhook fallback.";
+  if (input.canSave) return "Ready to save auto post setup.";
+  return "Choose a channel first.";
 }
 
 function postingModeClass(mode: string | null | undefined) {

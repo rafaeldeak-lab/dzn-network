@@ -284,6 +284,7 @@ for (const label of [
   "DZN keeps raw IDs in advanced details",
   "All Network / Network-wide",
   "Not configured yet",
+  "Not configured",
   "Preview Embed",
   "Check permissions",
   "SEND_TEST_EMBED",
@@ -299,6 +300,10 @@ for (const label of [
   assert.match(ownerUiSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 }
 assert.doesNotMatch(ownerUiSource, /\bGuild ID\b|\bGuild name\b|Channel Mapping Setup|Embed Preview Builder/);
+assert.match(ownerUiSource, /discordDestinationOptionLabel/);
+assert.match(ownerUiSource, /\$\{channel\.label\} — \$\{isDiscordDestinationConfigured\(channel\) \? discordChannelLabel\(channel\) : "Not configured"\}/);
+assert.equal(ownerUiSource.includes("Not configured yet - Not configured yet"), false);
+assert.doesNotMatch(ownerUiSource, /discordChannelLabel\(channel\)} - \{isDiscordDestinationConfigured\(channel\) \? channelStatusLabel\(channel\.status\) : "Not configured yet"\}/);
 assert.match(ownerUiSource, /testConfirmation !== "SEND_TEST_EMBED"/);
 assert.match(ownerUiSource, /selectedDestinationConfigured/);
 assert.match(ownerUiSource, /selectedDestinationPermissionOk/);
@@ -321,6 +326,24 @@ assert.match(betaTickerSource, /if \(isOwnerRoute \|\| !mounted \|\| hidden\) re
 
 const pageSource = readFileSync("app/owner/page.tsx", "utf8");
 assert.match(pageSource, /OwnerConsole/);
+
+const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+assert.match(dashboardSource, /Bot status/);
+assert.match(dashboardSource, /Not checked yet/);
+assert.match(dashboardSource, /Missing permissions/);
+assert.match(dashboardSource, /Saved channel — ending/);
+assert.match(dashboardSource, /Configured channel — ID ending/);
+assert.match(dashboardSource, /No auto posts are active yet\. Choose a channel, select post types, then save setup\./);
+assert.match(dashboardSource, /Choose a channel first\./);
+assert.match(dashboardSource, /Select at least one post type\./);
+assert.match(dashboardSource, /Ready to save auto post setup\./);
+assert.match(dashboardSource, /formatDiscordBotStatus/);
+assert.match(dashboardSource, /getDiscordAutoPostSaveHelper/);
+assert.doesNotMatch(dashboardSource, /<MiniInfo label="Bot"/);
+assert.equal(dashboardSource.includes('label="Bot status" value={botStatus}'), true);
+assert.equal(dashboardSource.includes("Saved destinations / #"), false);
+assert.doesNotMatch(dashboardSource, /#saved-/);
+assert.doesNotMatch(dashboardSource, /Choose a channel and allowed posts/);
 
 const packageJson = readFileSync("package.json", "utf8");
 assert.match(packageJson, /node scripts\/patch-pages-routes\.mjs/, "Build must patch Cloudflare Pages routes for owner page protection.");
