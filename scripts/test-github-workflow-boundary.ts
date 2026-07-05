@@ -463,8 +463,8 @@ assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("workflow_dispatch
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("\n  push:"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("[run-dzn-pages-runtime-production-deploy]"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("APPROVE_PAGES_RUNTIME_DEPLOY"), true);
-assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("feature/server-lifecycle-resource-control"), true);
-assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("05089038f3698dd9fa69453ac5644f9f44b72674"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("feature/discord-control-phase-2a-ux"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("d7272be0a9320cd55cf7ed19a7000522d07416b0"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: \"false\""), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN"), true);

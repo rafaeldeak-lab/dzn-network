@@ -6,11 +6,11 @@ on:
       branch:
         description: Approved runtime branch to deploy
         required: true
-        default: feature/server-lifecycle-resource-control
+        default: feature/discord-control-phase-2a-ux
       approved_commit:
         description: Exact approved runtime commit SHA
         required: true
-        default: 05089038f3698dd9fa69453ac5644f9f44b72674
+        default: d7272be0a9320cd55cf7ed19a7000522d07416b0
       confirm_runtime_deploy:
         description: Must equal APPROVE_PAGES_RUNTIME_DEPLOY
         required: true
@@ -30,8 +30,8 @@ permissions:
   contents: read
 
 env:
-  APPROVED_BRANCH: feature/server-lifecycle-resource-control
-  APPROVED_COMMIT: 05089038f3698dd9fa69453ac5644f9f44b72674
+  APPROVED_BRANCH: feature/discord-control-phase-2a-ux
+  APPROVED_COMMIT: d7272be0a9320cd55cf7ed19a7000522d07416b0
   PRODUCTION_PAGES_PROJECT_NAME: dzn-network
   PRODUCTION_BASE_URL: https://dzn-network.pages.dev
   DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
@@ -153,7 +153,7 @@ jobs:
             --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
             --branch main \
             --commit-hash "${APPROVED_COMMIT}" \
-            --commit-message "Deploy PANDORA historical visibility runtime fix" \
+            --commit-message "Deploy Discord Control post destinations UI polish" \
             | tee pages-runtime-production-deploy.txt
 
           DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' pages-runtime-production-deploy.txt | head -n 1 || true)"
