@@ -41,6 +41,7 @@ import { DznLogo } from "@/components/dzn/dzn-logo";
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
+import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardAdvancedStats, getDashboardHealth, getDashboardLiveStats, getDashboardServerWars, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
@@ -3230,7 +3231,7 @@ function ServerDashboard({
           <p className="text-xs font-black uppercase text-zinc-200">Need help?</p>
           <p className="mt-2 text-xs leading-5 text-zinc-500">Everything you need to manage your server.</p>
           <Link href="/setup#review-test" className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white">View Setup Guide</Link>
-          <a href="https://discord.gg/T2cgcTYPFV" target="_blank" rel="noreferrer" className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100">Support Discord</a>
+          <a href={DZN_PUBLIC_DISCORD_INVITE_URL} target="_blank" rel="noreferrer" className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100">Support Discord</a>
         </div>
       </aside>
       <div className="min-w-0">

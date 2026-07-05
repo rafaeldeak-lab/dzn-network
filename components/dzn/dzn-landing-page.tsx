@@ -38,6 +38,7 @@ import { SiteHeader } from "@/components/site-header";
 import { LiveServerRail } from "@/components/servers/live-server-rail";
 import type { AuthResponse } from "@/components/onboarding/types";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
+import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 import { DznLogo } from "./dzn-logo";
 import type { DznOperationalGlobeNode } from "./dzn-operational-globe";
 
@@ -340,9 +341,6 @@ const HOME_STATS_LAST_GOOD_KEY = "dzn:lastGoodHomeStats";
 const HOME_STATS_LAST_GOOD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 type HomeStatsLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "error_initial";
 const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
-const DZN_DISCORD_INVITE_URL =
-  process.env.NEXT_PUBLIC_DZN_DISCORD_INVITE_URL ||
-  "https://discord.gg/T2cgcTYPFV";
 const BUILD_IMAGE_ASSETS = {
   hero: "/dzn/build/build-hero.webp",
   walls: "/dzn/build/full-walls.webp",
@@ -967,7 +965,7 @@ function HeroDashboard({
                     <ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
                   </a>
                   <a
-                    href={DZN_DISCORD_INVITE_URL}
+                    href={DZN_PUBLIC_DISCORD_INVITE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="group inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-zinc-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-cyan-300/10 hover:text-white"

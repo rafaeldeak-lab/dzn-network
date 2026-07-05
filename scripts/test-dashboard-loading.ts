@@ -373,7 +373,7 @@ const siteHeader = source("components/site-header.tsx");
 includesAll(siteHeader, [
   "SiteHeader",
   "/media/dzn-logo.png",
-  "DZN_DISCORD_INVITE_URL",
+  "DZN_PUBLIC_DISCORD_INVITE_URL",
   "/#features",
   "/leaderboards",
   "/servers",
@@ -389,6 +389,30 @@ includesAll(siteHeader, [
   "dzn-header-links",
   "dzn-header-actions",
 ]);
+
+const publicDiscordConfig = source("lib/public-discord.ts");
+includesAll(publicDiscordConfig, [
+  "DZN_PUBLIC_DISCORD_INVITE_URL",
+  "https://discord.gg/XPaycZqchQ",
+]);
+
+const landingPage = source("components/dzn/dzn-landing-page.tsx");
+const dashboardSource = source("components/onboarding/dashboard.tsx");
+const expiredDznInviteCode = ["T2cgc", "TYPFV"].join("");
+for (const [label, file] of [
+  ["public Discord config", publicDiscordConfig],
+  ["site header", siteHeader],
+  ["landing page", landingPage],
+  ["dashboard", dashboardSource],
+] as const) {
+  assert.equal(file.includes(expiredDznInviteCode), false, `${label} must not contain the expired DZN Discord invite code.`);
+  assert.equal(file.includes(`discord.com/invite/${expiredDznInviteCode}`), false, `${label} must not contain the expired discord.com invite.`);
+  assert.equal(file.includes(`discord.gg/${expiredDznInviteCode}`), false, `${label} must not contain the expired discord.gg invite.`);
+}
+assert.equal(siteHeader.includes("href={DZN_PUBLIC_DISCORD_INVITE_URL}"), true);
+assert.equal(landingPage.includes("href={DZN_PUBLIC_DISCORD_INVITE_URL}"), true);
+assert.equal(dashboardSource.includes("href={DZN_PUBLIC_DISCORD_INVITE_URL}"), true);
+assert.equal(dashboardSource.includes("Support Discord"), true);
 
 for (const assetPath of [
   "public/leaderboards/leaderboard-hero-battlefield.png",

@@ -5,10 +5,7 @@ import { useEffect, useState } from "react";
 
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
-
-const DZN_DISCORD_INVITE_URL =
-  process.env.NEXT_PUBLIC_DZN_DISCORD_INVITE_URL ||
-  "https://discord.gg/T2cgcTYPFV";
+import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
 type SiteHeaderActive = "features" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
 
@@ -93,7 +90,7 @@ export function SiteHeader({
 
         <div className="dzn-header-actions">
           {resolvedAuthenticated ? <DznPulseBell className="dzn-header-pulse-bell" /> : null}
-          <a href={DZN_DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer" className="dzn-header-action dzn-header-action--discord">
+          <a href={DZN_PUBLIC_DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer" className="dzn-header-action dzn-header-action--discord">
             Discord
           </a>
           <Link href="/dashboard" className="dzn-header-action">
