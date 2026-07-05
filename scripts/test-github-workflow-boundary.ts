@@ -479,6 +479,8 @@ assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run test:meta
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run test:automation-schedulers"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run test:server-advertising-packages"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("git diff --check"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("Pages production branch verified: main"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("production_branch"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npx wrangler pages deploy out"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("--project-name \"${PRODUCTION_PAGES_PROJECT_NAME}\""), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("D1 migration: not run"), true);
