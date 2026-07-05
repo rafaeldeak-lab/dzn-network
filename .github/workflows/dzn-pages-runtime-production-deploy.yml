@@ -10,7 +10,7 @@ on:
       approved_commit:
         description: Exact approved runtime commit SHA
         required: true
-        default: d7272be0a9320cd55cf7ed19a7000522d07416b0
+        default: 65f055ff88ca669aa21bb38fac3f8a49f7d5b325
       confirm_runtime_deploy:
         description: Must equal APPROVE_PAGES_RUNTIME_DEPLOY
         required: true
@@ -31,7 +31,7 @@ permissions:
 
 env:
   APPROVED_BRANCH: feature/discord-control-phase-2a-ux
-  APPROVED_COMMIT: d7272be0a9320cd55cf7ed19a7000522d07416b0
+  APPROVED_COMMIT: 65f055ff88ca669aa21bb38fac3f8a49f7d5b325
   PRODUCTION_PAGES_PROJECT_NAME: dzn-network
   PRODUCTION_BASE_URL: https://dzn-network.pages.dev
   DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
@@ -182,7 +182,7 @@ jobs:
             --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
             --branch main \
             --commit-hash "${APPROVED_COMMIT}" \
-            --commit-message "Deploy Discord Control post destinations UI polish" \
+            --commit-message "Deploy Discord UI label cleanup" \
             | tee pages-runtime-production-deploy.txt
 
           DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' pages-runtime-production-deploy.txt | head -n 1 || true)"
