@@ -281,7 +281,7 @@ for (const label of [
   "Discord Channel ID",
   "Friendly channel name",
   "What is a Discord Server ID?",
-  "Discord internally calls a server a guild",
+  "DZN keeps raw IDs in advanced details",
   "All Network / Network-wide",
   "Not configured yet",
   "Preview Embed",

@@ -889,7 +889,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
           <section className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.04] p-3">
             <h2 className="text-lg font-black text-white">What is a Discord Server ID?</h2>
             <p className="mt-2 text-xs leading-5 text-zinc-400">
-              Discord internally calls a server a guild. That internal ID is just the unique ID for your Discord server. In DZN we show this as Discord Server ID to make it clearer.
+              Discord Server ID is the unique ID for your Discord server. DZN keeps raw IDs in advanced details and uses readable Discord Server labels everywhere else.
             </p>
             <p className="mt-2 text-xs leading-5 text-zinc-500">Channel ID is the unique ID for a Discord channel like #announcements.</p>
           </section>
@@ -1056,30 +1056,48 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
           <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
             <h2 className="text-lg font-black text-white">Post destinations</h2>
             <p className="mt-1 text-xs text-zinc-400">Compact destination setup. Configure rows only when you need to edit Discord IDs.</p>
-            <div className="mt-3 grid gap-2">
+            <div className="mt-3 hidden grid-cols-[minmax(8rem,1.1fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(6rem,0.7fr)_minmax(6rem,0.7fr)_minmax(8rem,0.8fr)] gap-3 rounded border border-white/10 bg-black/30 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500 2xl:grid">
+              <span>Destination</span>
+              <span>Discord Server</span>
+              <span>Discord Channel</span>
+              <span>Status</span>
+              <span>Permission</span>
+              <span>Actions</span>
+            </div>
+            <div className="mt-3 grid max-h-[44vh] gap-2 overflow-auto pr-1">
               {channels.map((channel) => {
                 const form = mappingForms[channel.slot] ?? { guildId: "", guildName: "", channelId: "", channelName: "", confirmation: "" };
                 const permissionPassed = channel.lastPermissionStatus === "ok";
                 const configured = isDiscordDestinationConfigured(channel);
+                const permissionLabel = permissionPassed ? "Passed" : channel.lastPermissionStatus ?? "Not checked";
                 return (
-                <div key={channel.slot} className="rounded-lg border border-white/10 bg-black/25 p-2.5">
-                  <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-black text-white">{channel.label}</h3>
-                        <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300">
-                          {channelStatusLabel(channel.status)}
-                        </span>
-                      </div>
-                      <div className="mt-1 grid gap-1 text-[11px] text-zinc-500 sm:grid-cols-2">
-                        <div>Discord Server: {channel.guildName || (configured ? "Configured" : "Not configured yet")}</div>
-                        <div>Channel: {discordChannelLabel(channel)}</div>
-                        <div>Permissions: <span className={permissionPassed ? "text-emerald-200" : "text-amber-200"}>{permissionPassed ? "Passed" : channel.lastPermissionStatus ?? "Not checked"}</span></div>
-                        <div>Post type group: {summarizePostTypes(channel.mappedPostTypes)}</div>
-                      </div>
+                <article key={channel.slot} className="rounded-lg border border-white/10 bg-black/25 p-3">
+                  <div className="grid gap-3 2xl:grid-cols-[minmax(8rem,1.1fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(6rem,0.7fr)_minmax(6rem,0.7fr)_minmax(8rem,0.8fr)] 2xl:items-start">
+                    <div className="min-w-0">
+                      <span className="block text-[10px] font-black uppercase tracking-[0.14em] text-zinc-600 2xl:hidden">Destination</span>
+                      <h3 className="mt-1 truncate text-sm font-black text-white" title={channel.label}>{channel.label}</h3>
+                      <p className="mt-1 text-[11px] leading-4 text-zinc-500">Post type group: {summarizePostTypes(channel.mappedPostTypes)}</p>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <button type="button" onClick={() => setExpandedSlot(expandedSlot === channel.slot ? null : channel.slot)} className="rounded border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-[11px] font-black text-cyan-100">Configure</button>
+                    <div className="min-w-0">
+                      <span className="block text-[10px] font-black uppercase tracking-[0.14em] text-zinc-600 2xl:hidden">Discord Server</span>
+                      <p className="mt-1 truncate text-xs font-bold text-zinc-200" title={channel.guildName || undefined}>{channel.guildName || (configured ? "Configured" : "Not configured yet")}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="block text-[10px] font-black uppercase tracking-[0.14em] text-zinc-600 2xl:hidden">Discord Channel</span>
+                      <p className="mt-1 truncate text-xs font-bold text-zinc-200" title={discordChannelLabel(channel)}>{discordChannelLabel(channel)}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="block text-[10px] font-black uppercase tracking-[0.14em] text-zinc-600 2xl:hidden">Status</span>
+                      <span className="mt-1 inline-flex max-w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300">
+                        <span className="truncate">{channelStatusLabel(channel.status)}</span>
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="block text-[10px] font-black uppercase tracking-[0.14em] text-zinc-600 2xl:hidden">Permission</span>
+                      <p className={`mt-1 truncate text-xs font-black ${permissionPassed ? "text-emerald-200" : "text-amber-200"}`} title={permissionLabel}>{permissionLabel}</p>
+                    </div>
+                    <div className="grid min-w-0 gap-1.5 sm:grid-cols-3 2xl:grid-cols-1">
+                      <button type="button" onClick={() => setExpandedSlot(expandedSlot === channel.slot ? null : channel.slot)} className="w-full whitespace-nowrap rounded border border-cyan-300/30 bg-cyan-300/10 px-2 py-1.5 text-center text-[11px] font-black text-cyan-100">Configure</button>
                       <button
                         type="button"
                         disabled={inFlightAction !== null || !configured}
@@ -1087,7 +1105,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                           await postJson(`/api/owner/discord/channel-mappings/${channel.slot}/permission-check`, { reason: "Owner console permission check" });
                           return `${channel.label} permission check completed.`;
                         })}
-                        className="rounded border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-[11px] font-black text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="w-full whitespace-nowrap rounded border border-emerald-300/30 bg-emerald-300/10 px-2 py-1.5 text-center text-[11px] font-black text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {inFlightAction === `check-${channel.slot}` ? "Checking..." : "Check permissions"}
                       </button>
@@ -1098,12 +1116,17 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                           await postJson(`/api/owner/discord/channel-mappings/${channel.slot}/disable`, { reason: "Owner console mapping disable" });
                           return `${channel.label} mapping disabled.`;
                         })}
-                        className="rounded border border-red-300/30 bg-red-300/10 px-2 py-1 text-[11px] font-black text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="w-full whitespace-nowrap rounded border border-red-300/30 bg-red-300/10 px-2 py-1.5 text-center text-[11px] font-black text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Disable
                       </button>
                     </div>
                   </div>
+                  {configured ? (
+                    <p className="mt-2 text-[10px] leading-4 text-zinc-600">
+                      Advanced details: Discord Server ID <span className="break-all">{channel.guildId}</span> / Discord Channel ID <span className="break-all">{channel.channelId}</span>
+                    </p>
+                  ) : null}
                   {expandedSlot === channel.slot ? (
                   <>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -1124,12 +1147,11 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                       <input value={form.channelName} onChange={(event) => updateMappingForm(channel.slot, "channelName", event.target.value)} placeholder="announcements" className="rounded border border-white/10 bg-black/40 px-2 py-2 text-xs font-semibold normal-case tracking-normal text-white outline-none focus:border-cyan-300/40" />
                     </label>
                   </div>
-                  <p className="mt-2 text-[11px] leading-4 text-zinc-500">Discord calls your server a guild internally. You only need the Discord Server ID if auto-detection is unavailable.</p>
+                  <p className="mt-2 text-[11px] leading-4 text-zinc-500">Use Discord Server ID only if auto-detection is unavailable.</p>
                   <div className="mt-2 grid gap-1 text-xs text-zinc-500">
                     <div>Last permission check: {channel.lastPermissionCheckedAt ? formatDate(channel.lastPermissionCheckedAt) : "not checked"}</div>
                     <div>Permission status: {channel.lastPermissionStatus ?? "unknown"}</div>
                     <div>Updated by: {channel.updatedBy ?? "unknown"} / {formatDate(channel.updatedAt)}</div>
-                    {configured ? <div>Advanced details: Server ID {channel.guildId}; Channel ID {channel.channelId}</div> : null}
                     {channel.lastPermissionError ? <div className="text-amber-200">{channel.lastPermissionError}</div> : null}
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -1199,7 +1221,7 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
                   </div>
                   </>
                   ) : null}
-                </div>
+                </article>
               );
               })}
             </div>
