@@ -1,10 +1,7 @@
-import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
 import { advertisingSortScore, publicAdvertisingFromState, type PublicAdvertising } from "../../_lib/advertising";
-import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
+import { requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
-import { uniquePublicSlug } from "../../_lib/onboarding";
-import { ensureBillingSchema } from "../../_lib/plans";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
 import {
   logPublicApi503RootCause,
@@ -360,12 +357,6 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
   if (slug) {
     return getPublicServerProfileFastPayload(env, slug, viewerLoggedIn);
   }
-
-  await ensureLinkedServerMetadataColumns(env);
-  await ensureServerLogConfigTable(env);
-  await ensureAdmSyncSchema(env);
-  await ensureBillingSchema(env);
-  await ensurePublicSlugsForLiveServers(env);
 
   const [rows, rankedServers] = await Promise.all([queryPublicServers(env), getRankedPublicServers(env, 500)]);
   const rankingById = new Map(rankedServers.map((server) => [server.server_id, server]));
@@ -953,55 +944,6 @@ async function resolveSlugAliasLinkedServerId(env: Env, slug: string) {
     .bind(slug)
     .first<{ linked_server_id: string }>();
   return row?.linked_server_id ?? null;
-}
-
-async function ensurePublicSlugsForLiveServers(env: Env) {
-  const db = requireDb(env);
-  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const result = await db
-    .prepare(
-      `SELECT
-        linked_servers.id,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name) AS server_name,
-        linked_servers.nitrado_service_name,
-        linked_servers.public_slug,
-        discord_guilds.name AS guild_name
-       FROM linked_servers
-       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
-         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
-         AND (linked_servers.public_slug IS NULL OR linked_servers.public_slug = '')`,
-    )
-    .all<{ id: string; server_name: string | null; nitrado_service_name: string | null; public_slug: string | null; guild_name: string | null }>();
-
-  for (const server of result.results ?? []) {
-    const sourceName = firstString(server.guild_name, server.server_name, server.nitrado_service_name) ?? "dayz-server";
-    const slug = await uniquePublicSlug(env, sourceName, server.id);
-    await db
-      .prepare("UPDATE linked_servers SET public_slug = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(slug, server.id)
-      .run();
-  }
-}
-
-async function ensureServerLogConfigTable(env: Env) {
-  const db = requireDb(env);
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS server_log_config (
-        id TEXT PRIMARY KEY,
-        linked_server_id TEXT UNIQUE NOT NULL,
-        adm_path TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id)
-      )`,
-    )
-    .run();
-  await db
-    .prepare("CREATE INDEX IF NOT EXISTS idx_server_log_config_linked_server_id ON server_log_config(linked_server_id)")
-    .run();
 }
 
 async function toSafePublicServer(

@@ -174,6 +174,13 @@ for (const file of [
   assert.match(source, /methodNotAllowed/, `${file} must reject write methods`);
 }
 
+const ownerAuditRouteSource = readFileSync("functions/api/owner/audit-log.ts", "utf8");
+const ownerAuditHandlerBody = ownerAuditRouteSource.slice(ownerAuditRouteSource.indexOf("export const onRequestGet"));
+assert.ok(
+  ownerAuditHandlerBody.indexOf("requirePlatformOwner") < ownerAuditHandlerBody.indexOf("getOwnerAuditLog"),
+  "Owner audit-log route must authenticate before touching audit-log data.",
+);
+
 for (const file of [
   "functions/api/owner/discord/overview.ts",
   "functions/api/owner/discord/post-types.ts",

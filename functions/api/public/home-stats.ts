@@ -1,7 +1,6 @@
-﻿import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
-import { ensureBuildEventSchema, getRankedBuildServers } from "../../_lib/build-events";
+import { getRankedBuildServers } from "../../_lib/build-events";
 import type { PublicBuildLeaderboardRow } from "../../_lib/build-events";
-import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
+import { requireDb } from "../../_lib/db";
 import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
@@ -276,10 +275,6 @@ function homeStatsResponseHeaders(viewerLoggedIn: boolean) {
     : publicAccessCacheHeaders(viewerLoggedIn);
 }
 
-function isFreshPublicHomeStatsSnapshot(generatedAt: string | null | undefined) {
-  return isFreshHomeStatsSnapshot(generatedAt, false);
-}
-
 function isFreshHomeStatsSnapshot(generatedAt: string | null | undefined, viewerLoggedIn: boolean) {
   const timestamp = Date.parse(generatedAt ?? "");
   const maxAgeMs = viewerLoggedIn ? HOME_STATS_AUTH_FAST_PATH_MAX_AGE_MS : HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS;
@@ -303,12 +298,9 @@ async function refreshHomeStatsLiveCounters<T extends {
 
 export async function getPublicHomeStatsPayload(env: Env, viewerLoggedIn: boolean) {
   if (!env.DB) throw new Error("Database binding is missing.");
-  await ensureLinkedServerMetadataColumns(env);
   if (!viewerLoggedIn) {
     return applyHomeStatsAccess(await buildPreviewHomeStats(env), false);
   }
-  await ensureAdmSyncSchema(env);
-  await ensureBuildEventSchema(env);
   return applyHomeStatsAccess(await buildHomeStats(env), true);
 }
 

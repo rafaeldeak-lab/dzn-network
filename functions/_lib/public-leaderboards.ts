@@ -1,6 +1,5 @@
-import { ensureAdmSyncSchema } from "./adm-sync";
 import { getRankedBuildServers, type PublicBuildLeaderboardRow } from "./build-events";
-import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
+import { requireDb } from "./db";
 import { calculateServerScore, calculateServerScoreBreakdown, rankServers, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
 import {
@@ -228,8 +227,7 @@ export async function getPublicServerLeaderboardById(env: Env, linkedServerId: s
 }
 
 async function ensurePublicLeaderboardSchema(env: Env) {
-  await ensureLinkedServerMetadataColumns(env);
-  await ensureAdmSyncSchema(env);
+  void env;
 }
 
 export async function getRankedPublicServers(env: Env, limit: number) {
