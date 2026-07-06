@@ -10,7 +10,7 @@ on:
       approved_commit:
         description: Exact approved runtime commit SHA
         required: true
-        default: f666e6fad46b78a5651f3bd3a637e060998e1359
+        default: a328aabe518590f3a8caa68be310e62fb2ff50e2
       confirm_runtime_deploy:
         description: Must equal APPROVE_PAGES_RUNTIME_DEPLOY
         required: true
@@ -31,7 +31,7 @@ permissions:
 
 env:
   APPROVED_BRANCH: feature/discord-control-phase-2a-ux
-  APPROVED_COMMIT: f666e6fad46b78a5651f3bd3a637e060998e1359
+  APPROVED_COMMIT: a328aabe518590f3a8caa68be310e62fb2ff50e2
   PRODUCTION_PAGES_PROJECT_NAME: dzn-network
   PRODUCTION_BASE_URL: https://dzn-network.pages.dev
   DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
