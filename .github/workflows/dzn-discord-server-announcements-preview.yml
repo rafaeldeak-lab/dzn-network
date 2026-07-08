@@ -1,0 +1,522 @@
+name: DZN Discord Server Announcements Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to preview
+        default: feature/discord-server-announcements
+        required: true
+      mode:
+        description: Action to run
+        required: true
+        type: choice
+        options:
+          - validate
+          - phase1-flag-off
+          - phase2-migration
+          - verify-preview
+          - full-preview
+      confirm_preview_only:
+        description: Must equal PREVIEW_ONLY
+        required: true
+      preview_project_name:
+        description: Preview Pages project
+        required: true
+        default: dzn-network-discord-announcements-preview
+      preview_db_name:
+        description: Preview D1 database name
+        required: true
+        default: dzn_network_db_discord_announcements_preview
+
+concurrency:
+  group: dzn-discord-server-announcements-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  discord-server-announcements-preview:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}
+      INPUT_BRANCH: ${{ inputs.branch }}
+      MODE: ${{ inputs.mode }}
+      CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
+      PREVIEW_PROJECT_NAME: ${{ inputs.preview_project_name }}
+      PREVIEW_DB_NAME: ${{ inputs.preview_db_name }}
+      PRODUCTION_PAGES_PROJECT_NAME: dzn-network
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+      DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+      PREVIEW_BASE_URL: https://${{ inputs.preview_project_name }}.pages.dev
+      PREVIEW_SESSION_SECRET: discord-server-announcements-preview-session-secret
+
+    steps:
+      - name: Checkout requested branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate preview-only guards
+        run: |
+          set -euo pipefail
+
+          if [ "${CONFIRM_PREVIEW_ONLY}" != "PREVIEW_ONLY" ]; then
+            echo "::error::confirm_preview_only must equal PREVIEW_ONLY."
+            exit 1
+          fi
+          if [ "${INPUT_BRANCH}" != "feature/discord-server-announcements" ]; then
+            echo "::error::Discord server announcements preview may only run against feature/discord-server-announcements."
+            exit 1
+          fi
+          if [ "${INPUT_BRANCH}" = "main" ]; then
+            echo "::error::Preview branch must never be main."
+            exit 1
+          fi
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Preview Pages project must not equal production Pages project."
+            exit 1
+          fi
+          case "${PREVIEW_PROJECT_NAME}" in
+            *discord*announcements*preview*) ;;
+            *)
+              echo "::error::Preview Pages project name must contain discord, announcements, and preview."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
+            echo "::error::Preview D1 database must not equal production D1 database."
+            exit 1
+          fi
+          case "${PREVIEW_DB_NAME}" in
+            *discord_announcements_preview*|*discord_server_announcements_preview*) ;;
+            *)
+              echo "::error::Preview D1 database name must contain discord_announcements_preview or discord_server_announcements_preview."
+              exit 1
+              ;;
+          esac
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+          if [ "${DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED must remain false for Phase 1 preview."
+            exit 1
+          fi
+          if [ -z "${DZN_PLATFORM_OWNER_DISCORD_IDS:-}" ]; then
+            echo "::error::Missing DZN_PLATFORM_OWNER_DISCORD_IDS for Discord announcements preview."
+            exit 1
+          fi
+          echo "::add-mask::${DZN_PLATFORM_OWNER_DISCORD_IDS}"
+
+          if [ "${MODE}" != "validate" ]; then
+            if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+              echo "::error::Missing CLOUDFLARE_PULSE_PREVIEW_TOKEN or CLOUDFLARE_API_TOKEN GitHub secret."
+              exit 1
+            fi
+            echo "::add-mask::${CLOUDFLARE_API_TOKEN}"
+            if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+              echo "::error::Missing CLOUDFLARE_ACCOUNT_ID GitHub secret or repository variable."
+              exit 1
+            fi
+          fi
+
+          test -f migrations/0056_discord_server_announcements.sql
+          if grep -Ei "DROP\s+TABLE|DELETE\s+FROM|TRUNCATE|CREATE TABLE IF NOT EXISTS player_stats|ALTER TABLE\s+player_profiles" migrations/0056_discord_server_announcements.sql; then
+            echo "::error::Discord server announcements migration must be additive-only."
+            exit 1
+          fi
+          if grep -R "DZN_DISCORD_ADVERTISE_CHANNEL_ID" .env.example cloudflare-env.d.ts functions scripts components package.json; then
+            echo "::error::Use DZN_DISCORD_ADVERT_CHANNEL_ID, not DZN_DISCORD_ADVERTISE_CHANNEL_ID."
+            exit 1
+          fi
+
+          {
+            echo "## DZN Discord Server Announcements Preview Guard"
+            echo ""
+            echo "- Branch: ${INPUT_BRANCH}"
+            echo "- Preview Pages project: ${PREVIEW_PROJECT_NAME}"
+            echo "- Preview D1 database: ${PREVIEW_DB_NAME}"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
+            echo "- Owner allowlist configured: true"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install
+        run: npm ci
+
+      - name: Validate branch
+        if: ${{ inputs.mode == 'validate' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+          npm run test:discord-server-announcements
+          npm run test:owner-console
+          npm run test
+          npm run lint
+          npm run build
+          git diff --check
+
+      - name: Resolve or create preview D1
+        if: ${{ inputs.mode == 'phase1-flag-off' || inputs.mode == 'phase2-migration' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const previewName = process.env.PREVIEW_DB_NAME;
+          const productionName = process.env.PRODUCTION_D1_DATABASE_NAME;
+
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const parsed = await response.json().catch(() => null);
+            if (!response.ok || parsed?.success === false) {
+              throw new Error(parsed?.errors?.map((error) => error.message).join("; ") || `HTTP ${response.status}`);
+            }
+            return parsed;
+          }
+
+          void (async () => {
+            if (previewName === productionName) throw new Error("preview_db_name equals production database name.");
+            const list = await api("/d1/database?per_page=100");
+            const databases = Array.isArray(list.result) ? list.result : list.result?.databases ?? [];
+            let database = databases.find((item) => item?.name === previewName);
+            if (!database) {
+              database = (await api("/d1/database", {
+                method: "POST",
+                body: JSON.stringify({ name: previewName }),
+              })).result;
+            }
+            const previewId = database?.uuid ?? database?.id;
+            if (!previewId) throw new Error("Could not resolve preview D1 database id.");
+            fs.writeFileSync("wrangler.discord-announcements-preview.toml", [
+              'name = "dzn-discord-server-announcements-preview"',
+              'compatibility_date = "2026-05-13"',
+              "",
+              "[[d1_databases]]",
+              'binding = "DB"',
+              `database_name = "${previewName}"`,
+              `database_id = "${previewId}"`,
+              "",
+            ].join("\n"));
+            fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_D1_DATABASE_ID=${previewId}\n`);
+            console.log(`Preview D1 database name: ${previewName}`);
+            console.log(`Preview D1 database id: ${previewId}`);
+          })().catch((error) => {
+            console.error(error.message);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Apply preview migrations through 0055 only
+        if: ${{ inputs.mode == 'phase1-flag-off' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+          case "${PREVIEW_DB_NAME}" in
+            *discord_announcements_preview*|*discord_server_announcements_preview*) ;;
+            *)
+              echo "::error::Refusing migration for non-preview Discord announcements database name."
+              exit 1
+              ;;
+          esac
+
+          mkdir -p preview-held-migrations
+          mv migrations/0056_discord_server_announcements.sql preview-held-migrations/
+          npx wrangler d1 migrations apply DB --config wrangler.discord-announcements-preview.toml --remote
+          mv preview-held-migrations/0056_discord_server_announcements.sql migrations/
+
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'discord_announcement_posts' LIMIT 1;" > pre-0056-table.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const parsed = JSON.parse(fs.readFileSync("pre-0056-table.json", "utf8"));
+          const rows = (Array.isArray(parsed) ? parsed : [parsed]).flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? []);
+          if (rows.some((row) => row.name === "discord_announcement_posts")) {
+            throw new Error("discord_announcement_posts already exists before Phase 2 migration. Use a fresh preview_db_name for the missing-table safety check.");
+          }
+          console.log("Preview D1 verified through 0055 only; discord_announcement_posts is absent.");
+          NODE
+
+      - name: Seed preview owner sessions
+        if: ${{ inputs.mode == 'phase1-flag-off' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const sessionSecret = process.env.PREVIEW_SESSION_SECRET;
+          const ownerToken = "discord-announcements-owner-session";
+          const nonOwnerToken = "discord-announcements-non-owner-session";
+          const hmac = (value) => crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
+          const ownerIds = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS || "").split(",").map((id) => id.trim()).filter((id) => /^\d+$/.test(id));
+          const ownerDiscordId = ownerIds[0];
+          if (!ownerDiscordId) throw new Error("DZN_PLATFORM_OWNER_DISCORD_IDS did not contain a numeric Discord ID.");
+          const nonOwnerDiscordId = "344444444444444444";
+          const sql = `
+          INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at)
+          VALUES
+            ('announcements-owner-preview-user', '${ownerDiscordId}', 'AnnouncementOwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('announcements-non-owner-preview-user', '${nonOwnerDiscordId}', 'AnnouncementNonOwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET username = excluded.username, discord_id = excluded.discord_id, updated_at = CURRENT_TIMESTAMP;
+
+          INSERT INTO sessions (id, user_id, session_token_hash, expires_at, created_at)
+          VALUES
+            ('announcements-owner-preview-session-row', 'announcements-owner-preview-user', '${hmac(ownerToken)}', datetime('now', '+7 days'), CURRENT_TIMESTAMP),
+            ('announcements-non-owner-preview-session-row', 'announcements-non-owner-preview-user', '${hmac(nonOwnerToken)}', datetime('now', '+7 days'), CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET session_token_hash = excluded.session_token_hash, expires_at = excluded.expires_at;
+          `;
+          fs.writeFileSync("discord-announcements-preview-seed.sql", sql);
+          fs.writeFileSync("discord-announcements-preview-cookies.json", JSON.stringify({ ownerToken, nonOwnerToken, ownerDiscordId, ownerAllowlistConfigured: ownerIds.length > 0 }, null, 2));
+          NODE
+
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --file discord-announcements-preview-seed.sql
+
+      - name: Resolve or create preview Pages project
+        if: ${{ inputs.mode == 'phase1-flag-off' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.PREVIEW_PROJECT_NAME;
+          async function api(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const parsed = await response.json().catch(() => null);
+            if (!response.ok || parsed?.success === false) {
+              throw new Error(parsed?.errors?.map((error) => error.message).join("; ") || `HTTP ${response.status}`);
+            }
+            return parsed;
+          }
+          void (async () => {
+            if (projectName === "dzn-network") throw new Error("Refusing production Pages project.");
+            const list = await api("/pages/projects");
+            const projects = Array.isArray(list.result) ? list.result : [];
+            if (!projects.some((project) => project?.name === projectName)) {
+              await api("/pages/projects", {
+                method: "POST",
+                body: JSON.stringify({ name: projectName, production_branch: "main" }),
+              });
+            }
+            console.log(`Preview Pages project ready: ${projectName}`);
+          })().catch((error) => {
+            console.error(error.message);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Configure and deploy preview Pages with announcements disabled
+        if: ${{ inputs.mode == 'phase1-flag-off' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const previewBaseUrl = process.env.PREVIEW_BASE_URL;
+          const dbName = process.env.PREVIEW_DB_NAME;
+          const dbId = process.env.PREVIEW_D1_DATABASE_ID;
+          fs.writeFileSync("wrangler.toml", [
+            `name = ${JSON.stringify(process.env.PREVIEW_PROJECT_NAME)}`,
+            'compatibility_date = "2026-05-13"',
+            "",
+            "[vars]",
+            'DZN_PULSE_ENABLED = "true"',
+            'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+            'DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED = "false"',
+            'MOCK_AUTH = "true"',
+            `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+            `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+            `SESSION_SECRET = ${JSON.stringify(process.env.PREVIEW_SESSION_SECRET)}`,
+            `DZN_PLATFORM_OWNER_DISCORD_IDS = ${JSON.stringify(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS)}`,
+            "",
+            "[[d1_databases]]",
+            'binding = "DB"',
+            `database_name = ${JSON.stringify(dbName)}`,
+            `database_id = ${JSON.stringify(dbId)}`,
+            "",
+          ].join("\n"));
+          NODE
+
+          DZN_PULSE_ENABLED=true \
+          DZN_DISCORD_NOTIFICATIONS_ENABLED=false \
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false \
+          MOCK_AUTH=true \
+          npm run build
+          npx wrangler pages deploy out --project-name "${PREVIEW_PROJECT_NAME}" --branch "${INPUT_BRANCH}" --commit-dirty=true | tee discord-announcements-preview-deploy.txt
+
+      - name: Verify Phase 1 preview with announcements disabled
+        if: ${{ inputs.mode == 'verify-preview' || inputs.mode == 'phase1-flag-off' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const base = process.env.PREVIEW_BASE_URL;
+          const { ownerToken, nonOwnerToken } = JSON.parse(fs.readFileSync("discord-announcements-preview-cookies.json", "utf8"));
+          const forbiddenText = ["Request failed: 503", "Error 1102", "Worker exceeded resource limits", "Minified React error #", "Owner console data could not be loaded"];
+
+          function assert(condition, message) {
+            if (!condition) {
+              console.error(message);
+              process.exit(1);
+            }
+          }
+          async function fetchWithTimeout(path, init = {}) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 45000);
+            try {
+              return await fetch(`${base}${path}`, { ...init, signal: controller.signal, redirect: "manual" });
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+          async function waitForPreview() {
+            for (let attempt = 1; attempt <= 60; attempt += 1) {
+              const response = await fetchWithTimeout("/");
+              console.log(`Preview readiness attempt ${attempt}: HTTP ${response.status}`);
+              if (![404, 522, 523, 524, 525, 526, 530].includes(response.status)) return;
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+            throw new Error("Preview site did not become ready.");
+          }
+          async function text(path, init = {}) {
+            const response = await fetchWithTimeout(path, init);
+            const body = await response.text();
+            for (const snippet of forbiddenText) {
+              assert(!body.includes(snippet), `${path} contains forbidden runtime text: ${snippet}`);
+            }
+            return { response, body };
+          }
+          async function jsonRequest(path, init = {}) {
+            const response = await fetchWithTimeout(path, init);
+            const raw = await response.text();
+            let parsed = null;
+            try { parsed = raw ? JSON.parse(raw) : null; } catch {}
+            return { response, raw, parsed };
+          }
+          const ownerCookie = `dzn_session=${ownerToken}`;
+          const nonOwnerCookie = `dzn_session=${nonOwnerToken}`;
+          const ownerHeaders = { cookie: ownerCookie, "content-type": "application/json" };
+
+          void (async () => {
+            await waitForPreview();
+            for (const path of ["/", "/servers", "/dashboard", "/dzn-pulse", "/api/public/servers", "/api/public/home-stats"]) {
+              const result = await text(path, path.startsWith("/api/") ? {} : { headers: { cookie: ownerCookie } });
+              assert(result.response.status === 200, `${path} returned HTTP ${result.response.status}.`);
+            }
+            assert((await text("/owner")).response.status === 302, "/owner logged-out should redirect safely.");
+            assert((await text("/owner", { headers: { cookie: nonOwnerCookie } })).response.status === 403, "/owner non-owner should return 403.");
+            const ownerPage = await text("/owner", { headers: { cookie: ownerCookie } });
+            assert(ownerPage.response.status === 200, "/owner owner should return 200.");
+            assert(ownerPage.body.includes("Discord Announcement System"), "Owner Console should render Discord Announcement System panel.");
+
+            const overview = await jsonRequest("/api/owner/discord/overview", { headers: ownerHeaders });
+            assert(overview.response.status === 200, `Owner Discord overview returned ${overview.response.status}.`);
+            assert(overview.parsed?.serverAnnouncements?.featureEnabled === false, "Discord server announcements must be disabled in Phase 1 preview.");
+            assert(overview.parsed?.serverAnnouncements?.lastServerAnnouncement === null, "Missing announcement table should return empty server announcement history.");
+            assert(overview.parsed?.serverAnnouncements?.lastBumpPost === null, "Missing announcement table should return empty bump history.");
+            assert(overview.parsed?.serverAnnouncements?.recentFailures?.length === 0, "Missing announcement table should return no recent failures.");
+            const serialized = JSON.stringify(overview.parsed ?? {});
+            assert(!/DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|webhooks\/|encrypted_token/i.test(serialized), "Owner Discord overview leaked secret-like data.");
+
+            const pulse = await jsonRequest("/api/dzn-pulse/config");
+            assert(pulse.response.status === 200, `/api/dzn-pulse/config returned ${pulse.response.status}.`);
+            assert(pulse.parsed?.discordNotificationsEnabled === false, "DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false.");
+
+            console.log("Phase 1 preview passed with DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false. No Discord API sends were configured or invoked.");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Apply preview-only migration 0056
+        if: ${{ inputs.mode == 'phase2-migration' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+          case "${PREVIEW_DB_NAME}" in
+            *discord_announcements_preview*|*discord_server_announcements_preview*) ;;
+            *)
+              echo "::error::Refusing migration 0056 for non-preview Discord announcements database name."
+              exit 1
+              ;;
+          esac
+          npx wrangler d1 migrations apply DB --config wrangler.discord-announcements-preview.toml --remote
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "PRAGMA table_info(discord_announcement_posts);" > post-0056-table.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const parsed = JSON.parse(fs.readFileSync("post-0056-table.json", "utf8"));
+          const rows = (Array.isArray(parsed) ? parsed : [parsed]).flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? []);
+          const names = new Set(rows.map((row) => row.name));
+          for (const name of ["id", "server_id", "event_type", "channel_id", "message_id", "thread_id", "dedupe_key", "status", "failure_reason", "created_at", "updated_at"]) {
+            if (!names.has(name)) throw new Error(`discord_announcement_posts missing ${name}.`);
+          }
+          console.log("Preview D1 migration 0056 verified: discord_announcement_posts exists.");
+          NODE
+
+      - name: Verify Phase 2 owner health after migration 0056
+        if: ${{ inputs.mode == 'phase2-migration' || inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const base = process.env.PREVIEW_BASE_URL;
+          const { ownerToken } = JSON.parse(fs.readFileSync("discord-announcements-preview-cookies.json", "utf8"));
+          async function request(path, init = {}) {
+            const response = await fetch(`${base}${path}`, { ...init, redirect: "manual" });
+            const raw = await response.text();
+            let parsed = null;
+            try { parsed = raw ? JSON.parse(raw) : null; } catch {}
+            return { response, raw, parsed };
+          }
+          void (async () => {
+            const overview = await request("/api/owner/discord/overview", { headers: { cookie: `dzn_session=${ownerToken}` } });
+            if (overview.response.status !== 200) throw new Error(`Owner Discord overview returned ${overview.response.status}.`);
+            if (overview.parsed?.serverAnnouncements?.featureEnabled !== false) throw new Error("Announcements must remain disabled after preview migration 0056.");
+            if (overview.parsed?.serverAnnouncements?.lastServerAnnouncement !== null) throw new Error("Empty preview announcement history should stay empty.");
+            if (/DISCORD_BOT_TOKEN|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|webhooks\/|encrypted_token/i.test(JSON.stringify(overview.parsed ?? {}))) {
+              throw new Error("Owner Discord overview leaked secret-like data.");
+            }
+            console.log("Phase 2 preview migration health check passed with announcements disabled and empty history.");
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          {
+            echo "## DZN Discord Server Announcements Preview Result"
+            echo ""
+            echo "- Preview URL: ${PREVIEW_BASE_URL}"
+            echo "- Phase 1 flag off: passed"
+            echo "- Migration 0056 preview-only: applied and verified"
+            echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Private Discord test messages: not sent by this workflow"
+          } >> "$GITHUB_STEP_SUMMARY"
