@@ -516,6 +516,14 @@ assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Apply previe
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("PRAGMA table_info(discord_announcement_posts)"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Discord Announcement System"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("serverAnnouncements?.featureEnabled === false"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("RESOLVED_PREVIEW_BASE_URL"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("discord-announcements-preview-url.txt"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Deployment URL candidates"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("curl -I --max-time 30"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Resolved preview verification URL"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Preview readiness attempt ${attempt}/60: ${base}/ HTTP"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Stable preview URL: ${PREVIEW_BASE_URL}"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Resolved preview URL: ${RESOLVED_PREVIEW_BASE_URL:-${PREVIEW_BASE_URL}}"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Private Discord test messages: not sent by this workflow"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("wrangler pages secret put DISCORD_BOT_TOKEN"), false);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("secrets.DZN_DISCORD_SERVER_ANNOUNCEMENTS_PREVIEW_BOT_TOKEN"), false);
