@@ -1,4 +1,5 @@
 import { checkDiscordPostingPermissions, verifyDiscordPostingChannel } from "./discord-posting";
+import { getDiscordAnnouncementHealth, type DiscordAnnouncementHealth } from "./discord-server-announcements";
 import { readDznFeatureFlags } from "./feature-flags";
 import { requireDb } from "./db";
 import type { Env, SessionUser } from "./types";
@@ -21,6 +22,7 @@ export type OwnerDiscordOverview = {
     attemptedAt: string | null;
     error: string | null;
   } | null;
+  serverAnnouncements: DiscordAnnouncementHealth;
   postingMode: OwnerDiscordPostingMode;
   generatedAt: string;
 };
@@ -264,10 +266,11 @@ export const OWNER_DISCORD_PREVIEW_OPTIONS: OwnerDiscordPreviewOption[] = [
 export async function getOwnerDiscordOverview(env: Env): Promise<OwnerDiscordOverview> {
   const flags = readDznFeatureFlags(env);
   const botTokenPresent = stringOrNull(env.DISCORD_BOT_TOKEN)?.length ? true : false;
-  const [connectedGuildCount, configuredChannelCount, lastPostAttempt] = await Promise.all([
+  const [connectedGuildCount, configuredChannelCount, lastPostAttempt, serverAnnouncements] = await Promise.all([
     countRows(env, "discord_guilds"),
     countConfiguredOwnerChannels(env),
     getLastStoredPostAttempt(env),
+    getDiscordAnnouncementHealth(env),
   ]);
 
   return {
@@ -279,6 +282,7 @@ export async function getOwnerDiscordOverview(env: Env): Promise<OwnerDiscordOve
     connectedGuildCount,
     configuredChannelCount,
     lastPostAttempt,
+    serverAnnouncements,
     postingMode: getPostingMode(botTokenPresent, flags.discordNotificationsEnabled),
     generatedAt: new Date().toISOString(),
   };

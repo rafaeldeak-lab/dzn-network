@@ -11,10 +11,10 @@ const broadEnsureIndex = publicServers.indexOf("await ensureLinkedServerMetadata
 const broadRankingIndex = publicServers.indexOf("getRankedPublicServers(env, 500)");
 
 assert.notEqual(slugFastPathIndex, -1, "Public profile slug requests must have a fast core path.");
-assert.notEqual(broadEnsureIndex, -1, "Public listing path still owns broad schema helpers.");
+assert.equal(broadEnsureIndex, -1, "Public listing GET must not own broad schema repair helpers.");
 assert.notEqual(broadRankingIndex, -1, "Public listing path still owns broad ranking generation.");
 assert.equal(
-  slugFastPathIndex < broadEnsureIndex && slugFastPathIndex < broadRankingIndex,
+  slugFastPathIndex < broadRankingIndex,
   true,
   "Public profile slug requests must return before broad listing/ranking work.",
 );

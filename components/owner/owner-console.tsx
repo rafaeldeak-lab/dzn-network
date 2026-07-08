@@ -146,6 +146,29 @@ type AuditLogItem = {
 
 type DiscordPostingMode = "disabled" | "preview_only" | "production_disabled" | "ready_but_off";
 
+type DiscordAnnouncementSummary = {
+  id: string;
+  serverId: string | null;
+  eventType: string;
+  channelConfigured: boolean;
+  status: string;
+  failureReason: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+type DiscordAnnouncementHealth = {
+  featureEnabled: boolean;
+  advertChannelConfigured: boolean;
+  showcaseChannelConfigured: boolean;
+  botTokenConfigured: boolean;
+  lastServerAnnouncement: DiscordAnnouncementSummary | null;
+  lastBumpPost: DiscordAnnouncementSummary | null;
+  lastWeeklySpotlight: DiscordAnnouncementSummary | null;
+  recentFailures: DiscordAnnouncementSummary[];
+  generatedAt: string;
+};
+
 type DiscordOverview = {
   integrationStatus: string;
   botConfigured: boolean;
@@ -162,6 +185,7 @@ type DiscordOverview = {
     attemptedAt: string | null;
     error: string | null;
   } | null;
+  serverAnnouncements: DiscordAnnouncementHealth | null;
   postingMode: DiscordPostingMode;
   generatedAt: string;
 };
@@ -923,6 +947,8 @@ function DiscordControlPanel({ data }: { data: DiscordControlData }) {
             {actionStatus ? <p className="mt-3 rounded border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-100">{actionStatus}</p> : null}
           </section>
 
+          <DiscordAnnouncementSystemPanel health={data.overview.serverAnnouncements} />
+
           <section className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.04] p-3">
             <h2 className="text-lg font-black text-white">What is a Discord Server ID?</h2>
             <p className="mt-2 text-xs leading-5 text-zinc-400">
@@ -1505,6 +1531,62 @@ function SettingsPanel({ overview }: { overview: OwnerOverview }) {
       </section>
     </div>
   );
+}
+
+function DiscordAnnouncementSystemPanel({ health }: { health: DiscordAnnouncementHealth | null }) {
+  return (
+    <section className="rounded-lg border border-violet-300/20 bg-violet-300/[0.04] p-3">
+      <h2 className="text-lg font-black text-white">Discord Announcement System</h2>
+      <p className="mt-1 text-xs leading-5 text-zinc-400">Read-only health for server listing announcements. Live posting stays disabled until the dedicated feature flag is turned on.</p>
+      <div className="mt-3 grid gap-2">
+        <BooleanTile label="Feature enabled" enabled={Boolean(health?.featureEnabled)} />
+        <BooleanTile label="Advert channel configured" enabled={Boolean(health?.advertChannelConfigured)} />
+        <BooleanTile label="Showcase channel configured" enabled={Boolean(health?.showcaseChannelConfigured)} />
+        <BooleanTile label="Bot token configured" enabled={Boolean(health?.botTokenConfigured)} />
+      </div>
+      <dl className="mt-3 grid gap-2 text-xs text-zinc-400">
+        <DiscordAnnouncementSummaryRow label="Last server announcement" summary={health?.lastServerAnnouncement ?? null} />
+        <DiscordAnnouncementSummaryRow label="Last bump post" summary={health?.lastBumpPost ?? null} />
+        <DiscordAnnouncementSummaryRow label="Last weekly spotlight" summary={health?.lastWeeklySpotlight ?? null} />
+      </dl>
+      <div className="mt-3 rounded border border-white/10 bg-black/25 px-3 py-2">
+        <div className="text-xs font-bold text-zinc-300">Recent failures</div>
+        {health?.recentFailures?.length ? (
+          <ul className="mt-2 grid gap-1 text-[11px] text-amber-100">
+            {health.recentFailures.slice(0, 3).map((failure) => (
+              <li key={failure.id} className="min-w-0 truncate">
+                {discordAnnouncementEventLabel(failure.eventType)} - {failure.failureReason ?? failure.status} - {formatDate(failure.updatedAt)}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-2 text-[11px] text-zinc-500">No recent failures.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DiscordAnnouncementSummaryRow({ label, summary }: { label: string; summary: DiscordAnnouncementSummary | null }) {
+  return (
+    <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+      <dt className="font-bold text-zinc-300">{label}</dt>
+      <dd className="mt-1 text-zinc-500">
+        {summary
+          ? `${discordAnnouncementEventLabel(summary.eventType)} / ${summary.status} / ${formatDate(summary.updatedAt ?? summary.createdAt)}`
+          : "No stored post found"}
+      </dd>
+      {summary?.failureReason ? <dd className="mt-1 text-amber-200">{summary.failureReason}</dd> : null}
+    </div>
+  );
+}
+
+function discordAnnouncementEventLabel(value: string) {
+  if (value === "new_server") return "New server listed";
+  if (value === "server_bump") return "Server bump";
+  if (value === "pro_showcase_thread") return "Pro showcase thread";
+  if (value === "weekly_spotlight") return "Weekly spotlight";
+  return value.replace(/_/g, " ");
 }
 
 function LoadingPanel() {

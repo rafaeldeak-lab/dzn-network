@@ -203,9 +203,21 @@ function normalizeDiscordInvite(value: unknown): ValidationResult<string | null>
   if (cleaned.length > PUBLIC_LISTING_LIMITS.discordInvite || containsUnsafeScheme(cleaned) || containsRawHtml(cleaned)) {
     return { ok: false, error: "Invalid Discord invite.", reason: "invalid_discord_invite" };
   }
-  const match = cleaned.match(/^(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/|discord(?:app)?\.com\/invite\/)([a-zA-Z0-9-]{2,64})(?:[/?#].*)?$/);
-  if (!match) return { ok: false, error: "Invalid Discord invite.", reason: "invalid_discord_invite" };
-  return { ok: true, value: `https://discord.gg/${match[1]}` };
+  try {
+    const url = new URL(cleaned);
+    if (url.protocol !== "https:") return { ok: false, error: "Invalid Discord invite.", reason: "invalid_discord_invite" };
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.replace(/\/+$/, "");
+    if ((host === "discord.gg" || host === "www.discord.gg") && /^\/[a-zA-Z0-9-]{2,64}$/.test(path)) {
+      return { ok: true, value: url.toString() };
+    }
+    if ((host === "discord.com" || host === "www.discord.com") && /^\/invite\/[a-zA-Z0-9-]{2,64}$/.test(path)) {
+      return { ok: true, value: url.toString() };
+    }
+    return { ok: false, error: "Invalid Discord invite.", reason: "invalid_discord_invite" };
+  } catch {
+    return { ok: false, error: "Invalid Discord invite.", reason: "invalid_discord_invite" };
+  }
 }
 
 function normalizeWebsiteUrl(value: unknown): ValidationResult<string | null> {

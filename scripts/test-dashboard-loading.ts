@@ -86,7 +86,7 @@ includesAll(homeStatsRoute, [
   "HOME_STATS_NO_STORE_HEADERS",
   "HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS",
   "homeStatsResponseHeaders",
-  "isFreshPublicHomeStatsSnapshot",
+  "isFreshHomeStatsSnapshot",
   "Updated from cached public ADM snapshot",
   "logPublicApiLoadFailed",
   "logPublicApiSnapshotFallbackServed",

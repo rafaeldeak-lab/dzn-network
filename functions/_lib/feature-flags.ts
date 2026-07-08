@@ -3,12 +3,14 @@ import type { Env } from "./types";
 export type DznFeatureFlags = {
   dznPulseEnabled: boolean;
   discordNotificationsEnabled: boolean;
+  discordServerAnnouncementsEnabled: boolean;
 };
 
 export function readDznFeatureFlags(env: Partial<Env> | Record<string, unknown> = {}): DznFeatureFlags {
   return {
     dznPulseEnabled: parseBooleanFlag((env as Record<string, unknown>).DZN_PULSE_ENABLED),
     discordNotificationsEnabled: parseBooleanFlag((env as Record<string, unknown>).DZN_DISCORD_NOTIFICATIONS_ENABLED),
+    discordServerAnnouncementsEnabled: parseBooleanFlag((env as Record<string, unknown>).DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED),
   };
 }
 
@@ -18,6 +20,10 @@ export function isDznPulseEnabled(env: Partial<Env> | Record<string, unknown> = 
 
 export function isDiscordNotificationsEnabled(env: Partial<Env> | Record<string, unknown> = {}) {
   return readDznFeatureFlags(env).discordNotificationsEnabled;
+}
+
+export function isDiscordServerAnnouncementsEnabled(env: Partial<Env> | Record<string, unknown> = {}) {
+  return readDznFeatureFlags(env).discordServerAnnouncementsEnabled;
 }
 
 function parseBooleanFlag(value: unknown) {
