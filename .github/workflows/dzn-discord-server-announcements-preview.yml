@@ -136,8 +136,9 @@ jobs:
             echo "::error::Discord server announcements migration must be additive-only."
             exit 1
           fi
-          if grep -R "DZN_DISCORD_ADVERTISE_CHANNEL_ID" .env.example cloudflare-env.d.ts functions scripts components package.json; then
-            echo "::error::Use DZN_DISCORD_ADVERT_CHANNEL_ID, not DZN_DISCORD_ADVERTISE_CHANNEL_ID."
+          LEGACY_ADVERT_CHANNEL_ENV="DZN_DISCORD_ADVERTISE""_CHANNEL_ID"
+          if grep -R "$LEGACY_ADVERT_CHANNEL_ENV" .env.example cloudflare-env.d.ts functions scripts components package.json; then
+            echo "::error::Use DZN_DISCORD_ADVERT_CHANNEL_ID, not ${LEGACY_ADVERT_CHANNEL_ENV}."
             exit 1
           fi
 

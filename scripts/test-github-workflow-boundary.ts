@@ -503,8 +503,10 @@ assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("dzn_network_
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: \"false\""), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: \"false\""), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED must remain false for Phase 1 preview"), true);
-assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("DZN_DISCORD_ADVERTISE_CHANNEL_ID"), true);
-assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Use DZN_DISCORD_ADVERT_CHANNEL_ID, not DZN_DISCORD_ADVERTISE_CHANNEL_ID"), true);
+const legacyAdvertChannelEnv = "DZN_DISCORD_ADVERTISE" + "_CHANNEL_ID";
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes(legacyAdvertChannelEnv), false);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes('LEGACY_ADVERT_CHANNEL_ENV="DZN_DISCORD_ADVERTISE""_CHANNEL_ID"'), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Use DZN_DISCORD_ADVERT_CHANNEL_ID, not ${LEGACY_ADVERT_CHANNEL_ENV}"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("migrations/0056_discord_server_announcements.sql"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("DROP\\s+TABLE|DELETE\\s+FROM|TRUNCATE"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Apply preview migrations through 0055 only"), true);
