@@ -370,6 +370,26 @@ jobs:
           npm run build
           npx wrangler pages deploy out --project-name "${PREVIEW_PROJECT_NAME}" --branch "${INPUT_BRANCH}" --commit-dirty=true | tee discord-announcements-preview-deploy.txt
 
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployText = fs.readFileSync("discord-announcements-preview-deploy.txt", "utf8");
+          const stableUrl = process.env.PREVIEW_BASE_URL;
+          const candidates = [...new Set((deployText.match(/https:\/\/[^\s"'<>]+?\.pages\.dev/g) ?? []).map((url) => url.replace(/[),.;]+$/, "")))];
+          const resolved = candidates.find((url) => url !== stableUrl) ?? candidates[0] ?? stableUrl;
+          fs.writeFileSync("discord-announcements-preview-url.txt", `${resolved}\n`);
+          fs.writeFileSync("discord-announcements-preview-url-candidates.txt", `${candidates.join("\n")}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `RESOLVED_PREVIEW_BASE_URL=${resolved}\n`);
+          console.log(`Stable preview URL: ${stableUrl}`);
+          console.log(`Deployment URL candidates: ${candidates.length ? candidates.join(", ") : "(none)"}`);
+          console.log(`Resolved preview URL for verification: ${resolved}`);
+          NODE
+
+          RESOLVED_PREVIEW_BASE_URL="$(cat discord-announcements-preview-url.txt)"
+          echo "Preview deploy diagnostics for ${RESOLVED_PREVIEW_BASE_URL}"
+          curl -I --max-time 30 "${RESOLVED_PREVIEW_BASE_URL}/" || true
+          curl -I --max-time 30 "${RESOLVED_PREVIEW_BASE_URL}/owner" || true
+          curl -I --max-time 30 "${RESOLVED_PREVIEW_BASE_URL}/api/owner/discord/overview" || true
+
       - name: Verify Phase 1 preview with announcements disabled
         if: ${{ inputs.mode == 'verify-preview' || inputs.mode == 'phase1-flag-off' || inputs.mode == 'full-preview' }}
         run: |
@@ -377,7 +397,7 @@ jobs:
 
           node <<'NODE'
           const fs = require("node:fs");
-          const base = process.env.PREVIEW_BASE_URL;
+          const base = process.env.RESOLVED_PREVIEW_BASE_URL || process.env.PREVIEW_BASE_URL;
           const { ownerToken, nonOwnerToken } = JSON.parse(fs.readFileSync("discord-announcements-preview-cookies.json", "utf8"));
           const forbiddenText = ["Request failed: 503", "Error 1102", "Worker exceeded resource limits", "Minified React error #", "Owner console data could not be loaded"];
 
@@ -397,13 +417,15 @@ jobs:
             }
           }
           async function waitForPreview() {
+            console.log(`Resolved preview verification URL: ${base}`);
             for (let attempt = 1; attempt <= 60; attempt += 1) {
               const response = await fetchWithTimeout("/");
-              console.log(`Preview readiness attempt ${attempt}: HTTP ${response.status}`);
+              const location = response.headers.get("location");
+              console.log(`Preview readiness attempt ${attempt}/60: ${base}/ HTTP ${response.status}${location ? ` location=${location}` : ""}`);
               if (![404, 522, 523, 524, 525, 526, 530].includes(response.status)) return;
               await new Promise((resolve) => setTimeout(resolve, 5000));
             }
-            throw new Error("Preview site did not become ready.");
+            throw new Error(`Preview site did not become ready at ${base}.`);
           }
           async function text(path, init = {}) {
             const response = await fetchWithTimeout(path, init);
@@ -487,7 +509,7 @@ jobs:
 
           node <<'NODE'
           const fs = require("node:fs");
-          const base = process.env.PREVIEW_BASE_URL;
+          const base = process.env.RESOLVED_PREVIEW_BASE_URL || process.env.PREVIEW_BASE_URL;
           const { ownerToken } = JSON.parse(fs.readFileSync("discord-announcements-preview-cookies.json", "utf8"));
           async function request(path, init = {}) {
             const response = await fetch(`${base}${path}`, { ...init, redirect: "manual" });
@@ -514,7 +536,8 @@ jobs:
           {
             echo "## DZN Discord Server Announcements Preview Result"
             echo ""
-            echo "- Preview URL: ${PREVIEW_BASE_URL}"
+            echo "- Stable preview URL: ${PREVIEW_BASE_URL}"
+            echo "- Resolved preview URL: ${RESOLVED_PREVIEW_BASE_URL:-${PREVIEW_BASE_URL}}"
             echo "- Phase 1 flag off: passed"
             echo "- Migration 0056 preview-only: applied and verified"
             echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
