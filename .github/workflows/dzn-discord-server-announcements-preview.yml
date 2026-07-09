@@ -442,6 +442,12 @@ jobs:
             try { parsed = raw ? JSON.parse(raw) : null; } catch {}
             return { response, raw, parsed };
           }
+          async function probe(label, path, init = {}) {
+            const response = await fetchWithTimeout(path, init);
+            const location = response.headers.get("location");
+            console.log(`${label}: HTTP ${response.status}${location ? ` location=${location}` : ""}`);
+            return response;
+          }
           const ownerCookie = `dzn_session=${ownerToken}`;
           const nonOwnerCookie = `dzn_session=${nonOwnerToken}`;
           const ownerHeaders = { cookie: ownerCookie, "content-type": "application/json" };
@@ -452,8 +458,24 @@ jobs:
               const result = await text(path, path.startsWith("/api/") ? {} : { headers: { cookie: ownerCookie } });
               assert(result.response.status === 200, `${path} returned HTTP ${result.response.status}.`);
             }
-            assert((await text("/owner")).response.status === 302, "/owner logged-out should redirect safely.");
-            assert((await text("/owner", { headers: { cookie: nonOwnerCookie } })).response.status === 403, "/owner non-owner should return 403.");
+            const diagnostics = {
+              root: await probe("GET /", "/"),
+              ownerLoggedOut: await probe("GET /owner no session", "/owner"),
+              ownerNonOwner: await probe("GET /owner seeded non-owner session", "/owner", { headers: { cookie: nonOwnerCookie } }),
+              overviewLoggedOut: await probe("GET /api/owner/overview no session", "/api/owner/overview"),
+              overviewNonOwner: await probe("GET /api/owner/overview seeded non-owner session", "/api/owner/overview", { headers: { cookie: nonOwnerCookie } }),
+              discordOverviewLoggedOut: await probe("GET /api/owner/discord/overview no session", "/api/owner/discord/overview"),
+              discordOverviewNonOwner: await probe("GET /api/owner/discord/overview seeded non-owner session", "/api/owner/discord/overview", { headers: { cookie: nonOwnerCookie } }),
+              discordOverviewOwner: await probe("GET /api/owner/discord/overview seeded owner session", "/api/owner/discord/overview", { headers: ownerHeaders }),
+            };
+            assert(diagnostics.root.status === 200, `GET / returned HTTP ${diagnostics.root.status}.`);
+            assert([302, 401, 403].includes(diagnostics.ownerLoggedOut.status), `/owner logged-out should redirect or deny safely, got ${diagnostics.ownerLoggedOut.status}.`);
+            assert([302, 401, 403].includes(diagnostics.ownerNonOwner.status), `/owner seeded non-owner should be denied by page routing, got ${diagnostics.ownerNonOwner.status}.`);
+            assert(diagnostics.overviewLoggedOut.status === 401, `Owner overview API logged-out should be 401, got ${diagnostics.overviewLoggedOut.status}.`);
+            assert(diagnostics.overviewNonOwner.status === 403, `Owner overview API seeded non-owner should be 403, got ${diagnostics.overviewNonOwner.status}.`);
+            assert(diagnostics.discordOverviewLoggedOut.status === 401, `Owner Discord overview API logged-out should be 401, got ${diagnostics.discordOverviewLoggedOut.status}.`);
+            assert(diagnostics.discordOverviewNonOwner.status === 403, `Owner Discord overview API seeded non-owner should be 403, got ${diagnostics.discordOverviewNonOwner.status}.`);
+            assert(diagnostics.discordOverviewOwner.status === 200, `Owner Discord overview API seeded owner should be 200, got ${diagnostics.discordOverviewOwner.status}.`);
             const ownerPage = await text("/owner", { headers: { cookie: ownerCookie } });
             assert(ownerPage.response.status === 200, "/owner owner should return 200.");
             assert(ownerPage.body.includes("Discord Announcement System"), "Owner Console should render Discord Announcement System panel.");

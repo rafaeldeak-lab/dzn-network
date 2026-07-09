@@ -524,6 +524,11 @@ assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Resolved pre
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Preview readiness attempt ${attempt}/60: ${base}/ HTTP"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Stable preview URL: ${PREVIEW_BASE_URL}"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Resolved preview URL: ${RESOLVED_PREVIEW_BASE_URL:-${PREVIEW_BASE_URL}}"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("GET /owner seeded non-owner session"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("GET /api/owner/overview seeded non-owner session"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("GET /api/owner/discord/overview seeded owner session"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Owner overview API seeded non-owner should be 403"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Owner Discord overview API seeded owner should be 200"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Private Discord test messages: not sent by this workflow"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("wrangler pages secret put DISCORD_BOT_TOKEN"), false);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("secrets.DZN_DISCORD_SERVER_ANNOUNCEMENTS_PREVIEW_BOT_TOKEN"), false);
