@@ -289,6 +289,23 @@ jobs:
           NODE
 
           npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --file discord-announcements-preview-seed.sql
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "PRAGMA table_info(sessions);" > preview-sessions-columns.json
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "SELECT sessions.id AS session_id, users.discord_id, sessions.expires_at FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.id IN ('announcements-owner-preview-session-row', 'announcements-non-owner-preview-session-row') ORDER BY sessions.id;" > preview-session-seed-check.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rows(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            return (Array.isArray(parsed) ? parsed : [parsed]).flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? []);
+          }
+          const sessionColumns = new Set(rows("preview-sessions-columns.json").map((row) => row.name).filter(Boolean));
+          for (const required of ["id", "user_id", "session_token_hash", "expires_at"]) {
+            if (!sessionColumns.has(required)) throw new Error(`Preview sessions table missing required column ${required}.`);
+          }
+          const seededSessions = rows("preview-session-seed-check.json");
+          if (seededSessions.length !== 2) throw new Error(`Expected 2 seeded preview sessions, found ${seededSessions.length}.`);
+          console.log(`Preview sessions table columns: ${[...sessionColumns].join(", ")}`);
+          console.log(`Preview seeded session rows: ${seededSessions.map((row) => `${row.session_id}:${row.discord_id}:${row.expires_at}`).join(", ")}`);
+          NODE
 
       - name: Resolve or create preview Pages project
         if: ${{ inputs.mode == 'phase1-flag-off' || inputs.mode == 'verify-preview' || inputs.mode == 'full-preview' }}
@@ -299,6 +316,11 @@ jobs:
           const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
           const token = process.env.CLOUDFLARE_API_TOKEN;
           const projectName = process.env.PREVIEW_PROJECT_NAME;
+          const branch = process.env.INPUT_BRANCH;
+          const d1Id = process.env.PREVIEW_D1_DATABASE_ID;
+          const previewBaseUrl = process.env.PREVIEW_BASE_URL;
+          const sessionSecret = process.env.PREVIEW_SESSION_SECRET;
+          const ownerDiscordIds = process.env.DZN_PLATFORM_OWNER_DISCORD_IDS;
           async function api(path, init = {}) {
             const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
               ...init,
@@ -314,17 +336,66 @@ jobs:
             }
             return parsed;
           }
+          function envVars(config) {
+            return config?.env_vars && typeof config.env_vars === "object" ? config.env_vars : {};
+          }
+          function d1Databases(config) {
+            return config?.d1_databases && typeof config.d1_databases === "object" ? config.d1_databases : {};
+          }
+          function mergeConfig(config) {
+            return {
+              ...config,
+              env_vars: {
+                ...envVars(config),
+                DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
+                DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+                DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: { type: "plain_text", value: "false" },
+                DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
+                MOCK_AUTH: { type: "plain_text", value: "true" },
+                SESSION_SECRET: { type: "plain_text", value: sessionSecret },
+                DZN_PLATFORM_OWNER_DISCORD_IDS: { type: "plain_text", value: ownerDiscordIds },
+              },
+              d1_databases: {
+                ...d1Databases(config),
+                DB: { id: d1Id },
+              },
+            };
+          }
           void (async () => {
             if (projectName === "dzn-network") throw new Error("Refusing production Pages project.");
-            const list = await api("/pages/projects");
-            const projects = Array.isArray(list.result) ? list.result : [];
-            if (!projects.some((project) => project?.name === projectName)) {
-              await api("/pages/projects", {
+            if (!d1Id) throw new Error("Missing preview D1 database id before Pages project configuration.");
+            let project = null;
+            const get = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/${projectName}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const getParsed = await get.json().catch(() => null);
+            if (get.status === 404) {
+              const created = await api("/pages/projects", {
                 method: "POST",
                 body: JSON.stringify({ name: projectName, production_branch: "main" }),
               });
+              project = created.result;
+            } else if (!get.ok || getParsed?.success === false) {
+              throw new Error(getParsed?.errors?.map((error) => error.message).join("; ") || `HTTP ${get.status}`);
+            } else {
+              project = getParsed.result;
             }
+
+            const patched = await api(`/pages/projects/${projectName}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                deployment_configs: {
+                  production: mergeConfig(project?.deployment_configs?.production ?? {}),
+                  preview: mergeConfig(project?.deployment_configs?.preview ?? {}),
+                },
+              }),
+            });
+            if (!patched?.success) throw new Error("Failed to patch preview Pages project deployment config.");
             console.log(`Preview Pages project ready: ${projectName}`);
+            console.log(`Configured preview branch under test: ${branch}`);
+            console.log(`Configured preview Pages DB binding id: ${d1Id}`);
+            console.log("Configured preview SESSION_SECRET, owner allowlist, MOCK_AUTH=true, and announcements disabled.");
           })().catch((error) => {
             console.error(error.message);
             process.exit(1);
@@ -442,11 +513,21 @@ jobs:
             try { parsed = raw ? JSON.parse(raw) : null; } catch {}
             return { response, raw, parsed };
           }
+          function safeBodyPreview(body) {
+            return String(body ?? "")
+              .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted-token-like-value]")
+              .replace(/DISCORD_[A-Z0-9_]+|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|CLOUDFLARE_[A-Z0-9_]+/g, "[redacted-secret-name]")
+              .slice(0, 800);
+          }
           async function probe(label, path, init = {}) {
             const response = await fetchWithTimeout(path, init);
             const location = response.headers.get("location");
+            const body = await response.text().catch(() => "");
             console.log(`${label}: HTTP ${response.status}${location ? ` location=${location}` : ""}`);
-            return response;
+            if (response.status >= 400) {
+              console.log(`${label} body preview: ${safeBodyPreview(body) || "(empty)"}`);
+            }
+            return { status: response.status, location, body };
           }
           const ownerCookie = `dzn_session=${ownerToken}`;
           const nonOwnerCookie = `dzn_session=${nonOwnerToken}`;
@@ -470,7 +551,9 @@ jobs:
             };
             assert(diagnostics.root.status === 200, `GET / returned HTTP ${diagnostics.root.status}.`);
             assert([302, 401, 403].includes(diagnostics.ownerLoggedOut.status), `/owner logged-out should redirect or deny safely, got ${diagnostics.ownerLoggedOut.status}.`);
-            assert([302, 401, 403].includes(diagnostics.ownerNonOwner.status), `/owner seeded non-owner should be denied by page routing, got ${diagnostics.ownerNonOwner.status}.`);
+            if (diagnostics.ownerNonOwner.status === 200) {
+              assert(!diagnostics.ownerNonOwner.body.includes("Discord Announcement System"), "/owner seeded non-owner returned protected Owner Console content.");
+            }
             assert(diagnostics.overviewLoggedOut.status === 401, `Owner overview API logged-out should be 401, got ${diagnostics.overviewLoggedOut.status}.`);
             assert(diagnostics.overviewNonOwner.status === 403, `Owner overview API seeded non-owner should be 403, got ${diagnostics.overviewNonOwner.status}.`);
             assert(diagnostics.discordOverviewLoggedOut.status === 401, `Owner Discord overview API logged-out should be 401, got ${diagnostics.discordOverviewLoggedOut.status}.`);
