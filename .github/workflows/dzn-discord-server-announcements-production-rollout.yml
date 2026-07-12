@@ -370,11 +370,46 @@ jobs:
               --project-name "${{ inputs.production_pages_project_name }}"
           echo "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false and DZN_DISCORD_NOTIFICATIONS_ENABLED=false configured for production Pages."
 
+      - name: Ensure Pages production branch is main
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = "${{ inputs.production_pages_project_name }}";
+          const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/${projectName}`;
+
+          const response = await fetch(url, {
+            method: "PATCH",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ production_branch: "main" }),
+          });
+          const body = await response.json().catch(() => null);
+          if (!response.ok || body?.success === false) {
+            const firstError = Array.isArray(body?.errors) ? body.errors[0] : null;
+            throw new Error(`Failed to set Pages production branch. status=${response.status} code=${firstError?.code ?? "unknown"}`);
+          }
+          if (body?.result?.production_branch !== "main") {
+            throw new Error("Pages production branch did not resolve to main.");
+          }
+          console.log("Pages production branch verified: main");
+          NODE
+
       - name: Deploy production Pages runtime from approved commit
         run: |
           set -euo pipefail
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false npm run build
-          npx wrangler pages functions build functions
+          rm -rf .pages-functions
+          mkdir -p .pages-functions
+          npx wrangler pages functions build functions \
+            --outdir .pages-functions \
+            --build-output-directory out \
+            --output-routes-path out/_routes.json \
+            --minify
           test -s .pages-functions/index.js
           cp .pages-functions/index.js out/_worker.js
           test -s out/_worker.js
@@ -387,13 +422,23 @@ jobs:
           }
           console.log("Pages Functions worker and owner/API routes verified before deploy.");
           NODE
+          set +e
           npx wrangler pages deploy out \
             --project-name "${{ inputs.production_pages_project_name }}" \
             --branch main \
             --commit-hash "${ROLLOUT_COMMIT_SHA}" \
             --commit-message "Deploy Discord server announcements disabled" \
-            --commit-dirty=true \
-            | tee discord-server-announcements-production-pages-deploy.txt
+            2>&1 | tee discord-server-announcements-production-pages-deploy.txt
+          DEPLOY_STATUS="${PIPESTATUS[0]}"
+          set -e
+          if [ "${DEPLOY_STATUS}" -ne 0 ]; then
+            echo "::error::Wrangler Pages deploy failed with exit code ${DEPLOY_STATUS}."
+            echo "::group::Sanitized Wrangler deploy log tail"
+            tail -n 160 discord-server-announcements-production-pages-deploy.txt |
+              sed -E 's/(Authorization: Bearer )[[:alnum:]_.-]+/\1[redacted]/g; s/((api[_-]?token|token)=)[^[:space:]]+/\1[redacted]/Ig'
+            echo "::endgroup::"
+            exit "${DEPLOY_STATUS}"
+          fi
           DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' discord-server-announcements-production-pages-deploy.txt | head -n 1 || true)"
           echo "PRODUCTION_DEPLOY_URL=${DEPLOY_URL:-${PRODUCTION_BASE_URL}}" >> "$GITHUB_ENV"
           echo "- Production deploy URL: ${DEPLOY_URL:-${PRODUCTION_BASE_URL}}" >> "$GITHUB_STEP_SUMMARY"
