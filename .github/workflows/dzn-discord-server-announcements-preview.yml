@@ -519,6 +519,27 @@ jobs:
               .replace(/DISCORD_[A-Z0-9_]+|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|CLOUDFLARE_[A-Z0-9_]+/g, "[redacted-secret-name]")
               .slice(0, 800);
           }
+          function ownerDiscordOverviewPayload(parsed) {
+            return parsed?.overview ?? parsed;
+          }
+          function ownerAnnouncementHealth(parsed) {
+            return ownerDiscordOverviewPayload(parsed)?.serverAnnouncements ?? null;
+          }
+          function logSafeOwnerDiscordOverview(parsed) {
+            const overview = ownerDiscordOverviewPayload(parsed);
+            const serverAnnouncements = overview?.serverAnnouncements ?? {};
+            const safeSummary = {
+              featureFlagEnabled: serverAnnouncements.featureEnabled === true,
+              serverAnnouncementsEnabled: serverAnnouncements.featureEnabled === true,
+              notificationsEnabled: overview?.discordNotificationsEnabled === true,
+              advertChannelConfigured: serverAnnouncements.advertChannelConfigured === true,
+              showcaseChannelConfigured: serverAnnouncements.showcaseChannelConfigured === true,
+              botTokenConfigured: serverAnnouncements.botTokenConfigured === true,
+              lastServerAnnouncementExists: serverAnnouncements.lastServerAnnouncement != null,
+              recentFailuresCount: Array.isArray(serverAnnouncements.recentFailures) ? serverAnnouncements.recentFailures.length : 0,
+            };
+            console.log(`Owner Discord overview safe summary: ${JSON.stringify(safeSummary)}`);
+          }
           async function probe(label, path, init = {}) {
             const response = await fetchWithTimeout(path, init);
             const location = response.headers.get("location");
@@ -578,10 +599,14 @@ jobs:
 
             const overview = await jsonRequest("/api/owner/discord/overview", { headers: ownerHeaders });
             assert(overview.response.status === 200, `Owner Discord overview returned ${overview.response.status}.`);
-            assert(overview.parsed?.serverAnnouncements?.featureEnabled === false, "Discord server announcements must be disabled in Phase 1 preview.");
-            assert(overview.parsed?.serverAnnouncements?.lastServerAnnouncement === null, "Missing announcement table should return empty server announcement history.");
-            assert(overview.parsed?.serverAnnouncements?.lastBumpPost === null, "Missing announcement table should return empty bump history.");
-            assert(overview.parsed?.serverAnnouncements?.recentFailures?.length === 0, "Missing announcement table should return no recent failures.");
+            logSafeOwnerDiscordOverview(overview.parsed);
+            const overviewPayload = ownerDiscordOverviewPayload(overview.parsed);
+            const serverAnnouncements = ownerAnnouncementHealth(overview.parsed);
+            assert(overviewPayload?.discordNotificationsEnabled === false, "DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false in owner Discord overview.");
+            assert(serverAnnouncements?.featureEnabled === false, "Discord server announcements must be disabled in Phase 1 preview.");
+            assert(serverAnnouncements?.lastServerAnnouncement === null, "Missing announcement table should return empty server announcement history.");
+            assert(serverAnnouncements?.lastBumpPost === null, "Missing announcement table should return empty bump history.");
+            assert(serverAnnouncements?.recentFailures?.length === 0, "Missing announcement table should return no recent failures.");
             const serialized = JSON.stringify(overview.parsed ?? {});
             assert(!/DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|webhooks\/|encrypted_token/i.test(serialized), "Owner Discord overview leaked secret-like data.");
 
@@ -636,11 +661,19 @@ jobs:
             try { parsed = raw ? JSON.parse(raw) : null; } catch {}
             return { response, raw, parsed };
           }
+          function ownerDiscordOverviewPayload(parsed) {
+            return parsed?.overview ?? parsed;
+          }
+          function ownerAnnouncementHealth(parsed) {
+            return ownerDiscordOverviewPayload(parsed)?.serverAnnouncements ?? null;
+          }
           void (async () => {
             const overview = await request("/api/owner/discord/overview", { headers: { cookie: `dzn_session=${ownerToken}` } });
             if (overview.response.status !== 200) throw new Error(`Owner Discord overview returned ${overview.response.status}.`);
-            if (overview.parsed?.serverAnnouncements?.featureEnabled !== false) throw new Error("Announcements must remain disabled after preview migration 0056.");
-            if (overview.parsed?.serverAnnouncements?.lastServerAnnouncement !== null) throw new Error("Empty preview announcement history should stay empty.");
+            const serverAnnouncements = ownerAnnouncementHealth(overview.parsed);
+            if (ownerDiscordOverviewPayload(overview.parsed)?.discordNotificationsEnabled !== false) throw new Error("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false after preview migration 0056.");
+            if (serverAnnouncements?.featureEnabled !== false) throw new Error("Announcements must remain disabled after preview migration 0056.");
+            if (serverAnnouncements?.lastServerAnnouncement !== null) throw new Error("Empty preview announcement history should stay empty.");
             if (/DISCORD_BOT_TOKEN|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|webhooks\/|encrypted_token/i.test(JSON.stringify(overview.parsed ?? {}))) {
               throw new Error("Owner Discord overview leaked secret-like data.");
             }

@@ -515,6 +515,10 @@ assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("discord_anno
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Apply preview-only migration 0056"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("PRAGMA table_info(discord_announcement_posts)"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Discord Announcement System"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("ownerDiscordOverviewPayload(parsed)"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Owner Discord overview safe summary"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("notificationsEnabled"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("recentFailuresCount"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("serverAnnouncements?.featureEnabled === false"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("deployment_configs"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("SESSION_SECRET: { type: \"plain_text\", value: sessionSecret }"), true);

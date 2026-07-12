@@ -15,6 +15,9 @@ import { validatePublicListingInput } from "../functions/_lib/review-moderation"
 assert.equal(readDznFeatureFlags({}).discordServerAnnouncementsEnabled, false);
 assert.equal(readDznFeatureFlags({ DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false" }).discordServerAnnouncementsEnabled, false);
 assert.equal(readDznFeatureFlags({ DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "true" }).discordServerAnnouncementsEnabled, true);
+for (const value of ["", "0", "1", "no", "yes", "on", "TRUE", " true ", true, false, null, undefined]) {
+  assert.equal(readDznFeatureFlags({ DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: value }).discordServerAnnouncementsEnabled, false, `${String(value)} should not enable Discord server announcements`);
+}
 
 for (const invite of [
   "https://discord.gg/XPaycZqchQ",
