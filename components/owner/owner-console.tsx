@@ -1539,7 +1539,7 @@ function DiscordAnnouncementSystemPanel({ health }: { health: DiscordAnnouncemen
       <h2 className="text-lg font-black text-white">Discord Announcement System</h2>
       <p className="mt-1 text-xs leading-5 text-zinc-400">Read-only health for server listing announcements. Live posting stays disabled until the dedicated feature flag is turned on.</p>
       <div className="mt-3 grid gap-2">
-        <BooleanTile label="Feature enabled" enabled={Boolean(health?.featureEnabled)} />
+        <BooleanTile label="Feature flag enabled" enabled={Boolean(health?.featureEnabled)} />
         <BooleanTile label="Advert channel configured" enabled={Boolean(health?.advertChannelConfigured)} />
         <BooleanTile label="Showcase channel configured" enabled={Boolean(health?.showcaseChannelConfigured)} />
         <BooleanTile label="Bot token configured" enabled={Boolean(health?.botTokenConfigured)} />

@@ -130,7 +130,7 @@ assert.match(ownerDiscordSource, /serverAnnouncements/);
 const ownerUiSource = readFileSync("components/owner/owner-console.tsx", "utf8");
 for (const label of [
   "Discord Announcement System",
-  "Feature enabled",
+  "Feature flag enabled",
   "Advert channel configured",
   "Showcase channel configured",
   "Bot token configured",

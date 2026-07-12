@@ -536,6 +536,9 @@ assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("GET /api/own
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("GET /api/owner/discord/overview seeded owner session"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Owner overview API seeded non-owner should be 403"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Owner Discord overview API seeded owner should be 200"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("fs.readFileSync(\"components/owner/owner-console.tsx\", \"utf8\")"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Feature flag enabled"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Owner Console should render Discord Announcement System panel."), false);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("body preview"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("/owner seeded non-owner returned protected Owner Console content."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Private Discord test messages: not sent by this workflow"), true);
