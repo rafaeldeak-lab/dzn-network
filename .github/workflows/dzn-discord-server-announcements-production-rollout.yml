@@ -1,0 +1,456 @@
+name: DZN Discord Server Announcements Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Approved Discord server announcements branch
+        required: true
+        default: feature/discord-server-announcements
+      approved_commit:
+        description: Exact feature commit SHA from successful preview
+        required: true
+        default: 37eff56e39c670160d5c16168509c2bbf93fecc0
+      approved_preview_run_url:
+        description: Successful DZN Discord Server Announcements Preview run URL
+        required: true
+        default: https://github.com/rafaeldeak-lab/dzn-network/actions/runs/29190148323
+      confirm_production_rollout:
+        description: Must equal APPROVE_DISCORD_SERVER_ANNOUNCEMENTS_DISABLED_ROLLOUT
+        required: true
+      production_pages_project_name:
+        description: Production Cloudflare Pages project
+        required: true
+        default: dzn-network
+      production_db_name:
+        description: Production D1 database
+        required: true
+        default: dzn_network_db
+      migration_name:
+        description: Migration file to apply
+        required: true
+        default: 0056_discord_server_announcements.sql
+      announcements_enabled:
+        description: Must be false for this disabled rollout
+        required: true
+        default: "false"
+
+concurrency:
+  group: dzn-discord-server-announcements-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    env:
+      APPROVED_BRANCH: feature/discord-server-announcements
+      APPROVED_COMMIT: 37eff56e39c670160d5c16168509c2bbf93fecc0
+      APPROVED_PREVIEW_RUN_URL: https://github.com/rafaeldeak-lab/dzn-network/actions/runs/29190148323
+      PRODUCTION_BASE_URL: https://dzn-network.pages.dev
+      GITHUB_TOKEN: ${{ github.token }}
+      CLOUDFLARE_DISCORD_SERVER_ANNOUNCEMENTS_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_DISCORD_SERVER_ANNOUNCEMENTS_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN }}
+      CLOUDFLARE_PULSE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_API_TOKEN_FALLBACK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+      DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+
+    steps:
+      - name: Checkout approved feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate disabled rollout guards
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.confirm_production_rollout }}" != "APPROVE_DISCORD_SERVER_ANNOUNCEMENTS_DISABLED_ROLLOUT" ]; then
+            echo "::error::confirm_production_rollout must equal APPROVE_DISCORD_SERVER_ANNOUNCEMENTS_DISABLED_ROLLOUT."
+            exit 1
+          fi
+          if [ "${{ inputs.branch }}" != "${APPROVED_BRANCH}" ]; then
+            echo "::error::Discord server announcements production rollout may only deploy ${APPROVED_BRANCH}."
+            exit 1
+          fi
+          if [ "${{ inputs.approved_commit }}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::approved_commit must equal ${APPROVED_COMMIT}."
+            exit 1
+          fi
+          if [ "${{ inputs.approved_preview_run_url }}" != "${APPROVED_PREVIEW_RUN_URL}" ]; then
+            echo "::error::approved_preview_run_url must equal the successful Discord Server Announcements Preview run URL."
+            exit 1
+          fi
+          if [ "${{ inputs.production_pages_project_name }}" != "dzn-network" ]; then
+            echo "::error::production_pages_project_name must equal dzn-network."
+            exit 1
+          fi
+          if [ "${{ inputs.production_db_name }}" != "dzn_network_db" ]; then
+            echo "::error::production_db_name must equal dzn_network_db."
+            exit 1
+          fi
+          if [ "${{ inputs.migration_name }}" != "0056_discord_server_announcements.sql" ]; then
+            echo "::error::migration_name must equal 0056_discord_server_announcements.sql."
+            exit 1
+          fi
+          if [ "${{ inputs.announcements_enabled }}" != "false" ]; then
+            echo "::error::announcements_enabled=true is rejected for this disabled rollout."
+            exit 1
+          fi
+          if [ "${DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED must remain false."
+            exit 1
+          fi
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+          case "${{ inputs.production_pages_project_name }}" in
+            *preview*)
+              echo "::error::Refusing preview Pages project for production rollout."
+              exit 1
+              ;;
+          esac
+          case "${{ inputs.production_db_name }}" in
+            *preview*)
+              echo "::error::Refusing preview D1 database for production rollout."
+              exit 1
+              ;;
+          esac
+
+          git fetch origin main "${APPROVED_BRANCH}"
+          if ! git cat-file -e "${APPROVED_COMMIT}^{commit}" 2>/dev/null; then
+            echo "::error::Approved commit is not present locally."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${APPROVED_COMMIT}" HEAD; then
+            echo "::error::Approved commit is not present on selected branch."
+            exit 1
+          fi
+          ROLLOUT_COMMIT_SHA="$(git rev-parse HEAD)"
+          if [ "${ROLLOUT_COMMIT_SHA}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::Selected branch HEAD ${ROLLOUT_COMMIT_SHA} does not match approved commit ${APPROVED_COMMIT}."
+            exit 1
+          fi
+          echo "ROLLOUT_COMMIT_SHA=${ROLLOUT_COMMIT_SHA}" >> "$GITHUB_ENV"
+
+          PREVIEW_RUN_ID="${APPROVED_PREVIEW_RUN_URL##*/}"
+          if ! [[ "${PREVIEW_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::approved_preview_run_url must end with a numeric run id."
+            exit 1
+          fi
+          echo "Approved preview run URL accepted: ${APPROVED_PREVIEW_RUN_URL}"
+
+          ROLLOUT_CF_TOKEN=""
+          ROLLOUT_CF_TOKEN_SOURCE=""
+          if [ -n "${CLOUDFLARE_DISCORD_SERVER_ANNOUNCEMENTS_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_DISCORD_SERVER_ANNOUNCEMENTS_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_DISCORD_SERVER_ANNOUNCEMENTS_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_ADVERTISING_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_PULSE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_PULSE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_PULSE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN"
+          elif [ -n "${CLOUDFLARE_API_TOKEN_FALLBACK:-}" ]; then
+            ROLLOUT_CF_TOKEN="${CLOUDFLARE_API_TOKEN_FALLBACK}"
+            ROLLOUT_CF_TOKEN_SOURCE="CLOUDFLARE_API_TOKEN"
+          fi
+          if [ -z "${ROLLOUT_CF_TOKEN:-}" ]; then
+            echo "::error::Missing Cloudflare production token."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_CF_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_CF_TOKEN}" >> "$GITHUB_ENV"
+          echo "ROLLOUT_CF_TOKEN_SOURCE=${ROLLOUT_CF_TOKEN_SOURCE}" >> "$GITHUB_ENV"
+
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID."
+            exit 1
+          fi
+          if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like a 32-character account id."
+            exit 1
+          fi
+
+          {
+            echo "## DZN Discord Server Announcements Disabled Production Rollout"
+            echo "- Branch: ${{ inputs.branch }}"
+            echo "- Approved commit: ${ROLLOUT_COMMIT_SHA}"
+            echo "- Approved preview: ${{ inputs.approved_preview_run_url }}"
+            echo "- Production Pages project: ${{ inputs.production_pages_project_name }}"
+            echo "- Production D1 database: ${{ inputs.production_db_name }}"
+            echo "- Migration: ${{ inputs.migration_name }}"
+            echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Discord bot token required: no"
+            echo "- Live Discord channel IDs required: no"
+            echo "- Discord messages sent by rollout: no"
+            echo "- Cloudflare token source: ${ROLLOUT_CF_TOKEN_SOURCE}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install
+        run: npm ci
+
+      - name: Confirm implementation files
+        run: |
+          set -euo pipefail
+          test -f migrations/0056_discord_server_announcements.sql
+          test -f functions/_lib/discord-server-announcements.ts
+          test -f functions/api/owner/discord/overview.ts
+          grep -q "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED" functions/_lib/discord-server-announcements.ts
+          grep -q "DZN_DISCORD_ADVERT_CHANNEL_ID" functions/_lib/discord-server-announcements.ts
+          LEGACY_ADVERT_CHANNEL_ENV="DZN_DISCORD_ADVERTISE""_CHANNEL_ID"
+          grep -q "${LEGACY_ADVERT_CHANNEL_ENV}" functions/_lib/discord-server-announcements.ts && {
+            echo "::error::Use DZN_DISCORD_ADVERT_CHANNEL_ID, not ${LEGACY_ADVERT_CHANNEL_ENV}."
+            exit 1
+          } || true
+
+      - name: Final local checks
+        run: |
+          set -euo pipefail
+          npm run test:discord-server-announcements
+          npm run test:owner-console
+          npm run test
+          npm run lint
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false npm run build
+          git diff --check
+
+      - name: Review migration 0056 safety
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = "migrations/0056_discord_server_announcements.sql";
+          const source = fs.readFileSync(path, "utf8");
+          const withoutComments = source
+            .split(/\r?\n/)
+            .filter((line) => !line.trim().startsWith("--"))
+            .join("\n");
+          if (/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|ALTER)\b/i.test(withoutComments)) {
+            throw new Error("Migration 0056 must be schema-only and additive; destructive or data mutation SQL found.");
+          }
+          if (/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?player_stats/i.test(withoutComments)) {
+            throw new Error("Migration 0056 must never create player_stats.");
+          }
+          const protectedNames = /(player_profiles|kill_events|player_events|build_events|adm_raw_events|leaderboard|server_wars|subscriptions|nitrado|linked_servers)/i;
+          if (protectedNames.test(withoutComments)) {
+            throw new Error("Migration 0056 references protected gameplay, billing, Nitrado, or linked server tables.");
+          }
+          const statements = withoutComments.split(";").map((part) => part.trim()).filter(Boolean);
+          for (const statement of statements) {
+            const createsAnnouncementTable = /^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+discord_announcement_posts\s*\(/i.test(statement);
+            const createsAnnouncementIndex = /^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+idx_discord_announcement_posts_/i.test(statement);
+            if (!createsAnnouncementTable && !createsAnnouncementIndex) {
+              throw new Error(`Migration 0056 contains unsupported statement: ${statement.slice(0, 140)}`);
+            }
+          }
+          if (!/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+discord_announcement_posts/i.test(withoutComments)) {
+            throw new Error("Migration 0056 must create discord_announcement_posts.");
+          }
+          console.log("Migration 0056 is schema-only, additive, and scoped to discord_announcement_posts.");
+          NODE
+
+      - name: Confirm production D1 identity
+        run: |
+          set -euo pipefail
+          D1_LIST="$(npx wrangler d1 list --json)"
+          D1_LIST="${D1_LIST}" node <<'NODE'
+          const list = JSON.parse(process.env.D1_LIST || "[]");
+          const db = list.find((entry) => entry.name === "dzn_network_db");
+          if (!db) throw new Error("Production D1 database dzn_network_db was not found.");
+          console.log(`Production D1 verified: ${db.name} (${db.uuid || db.id || "id-unavailable"})`);
+          NODE
+
+      - name: Create production D1 Time Travel bookmark
+        run: |
+          set -euo pipefail
+          BOOKMARK_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          npx wrangler d1 time-travel info "${{ inputs.production_db_name }}" \
+            --timestamp "${BOOKMARK_TIMESTAMP}" \
+            --json > d1-time-travel-before-0056.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync("d1-time-travel-before-0056.json", "utf8"));
+          const info = Array.isArray(payload) ? payload[0] : payload;
+          const bookmark = info?.bookmark || info?.result?.bookmark || info?.bookmarks?.[0]?.bookmark || null;
+          if (!bookmark) throw new Error("Cloudflare did not return a D1 Time Travel bookmark.");
+          fs.appendFileSync(process.env.GITHUB_ENV, `D1_BACKUP_BOOKMARK=${bookmark}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- Production D1 bookmark before 0056: ${bookmark}\n`);
+          console.log(`Production D1 Time Travel bookmark created: ${bookmark}`);
+          NODE
+
+      - name: Apply only migration 0056
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT name FROM d1_migrations ORDER BY id;" > d1-applied-migrations.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync("d1-applied-migrations.json", "utf8"));
+          const rows = (Array.isArray(payload) ? payload : [payload]).flatMap((entry) => entry.results ?? entry.result?.[0]?.results ?? []);
+          const applied = new Set(rows.map((row) => row.name));
+          const local = fs.readdirSync("migrations").filter((name) => name.endsWith(".sql")).sort();
+          const pending = local.filter((name) => !applied.has(name));
+          const allowed = "0056_discord_server_announcements.sql";
+          const unexpected = pending.filter((name) => name !== allowed);
+          if (unexpected.length > 0) {
+            throw new Error(`Unexpected pending production D1 migrations: ${unexpected.join(", ")}`);
+          }
+          fs.writeFileSync("d1-pending-0056.txt", pending.includes(allowed) ? "yes" : "no");
+          console.log(`Pending migration 0056: ${pending.includes(allowed) ? "yes" : "no"}`);
+          NODE
+
+          if [ "$(cat d1-pending-0056.txt)" = "yes" ]; then
+            npx wrangler d1 migrations apply "${{ inputs.production_db_name }}" --remote
+            echo "- Migration 0056: applied" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Migration 0056: already applied" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Verify production schema after migration 0056
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "PRAGMA table_info(discord_announcement_posts);" > announcement-table-columns.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_discord_announcement_posts_server_event_created','idx_discord_announcement_posts_event_status_created','idx_discord_announcement_posts_status_updated') ORDER BY name;" > announcement-indexes.json
+          npx wrangler d1 execute "${{ inputs.production_db_name }}" --remote --json \
+            --command "SELECT COUNT(*) AS row_count FROM discord_announcement_posts;" > announcement-row-count.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function rows(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            return (Array.isArray(parsed) ? parsed : [parsed]).flatMap((entry) => entry.results ?? entry.result?.[0]?.results ?? []);
+          }
+          const columns = new Set(rows("announcement-table-columns.json").map((row) => row.name));
+          for (const column of ["id", "server_id", "event_type", "channel_id", "message_id", "thread_id", "dedupe_key", "status", "failure_reason", "created_at", "updated_at"]) {
+            if (!columns.has(column)) throw new Error(`discord_announcement_posts missing ${column}.`);
+          }
+          const indexes = new Set(rows("announcement-indexes.json").map((row) => row.name));
+          for (const index of ["idx_discord_announcement_posts_server_event_created", "idx_discord_announcement_posts_event_status_created", "idx_discord_announcement_posts_status_updated"]) {
+            if (!indexes.has(index)) throw new Error(`Missing announcement index ${index}.`);
+          }
+          const count = Number(rows("announcement-row-count.json")[0]?.row_count ?? -1);
+          if (count !== 0) {
+            throw new Error(`Migration 0056 should not insert announcement rows; found ${count}.`);
+          }
+          console.log("Production 0056 schema verification passed with zero announcement rows.");
+          NODE
+
+      - name: Keep production announcement flags disabled
+        run: |
+          set -euo pipefail
+          printf "false" |
+            npx wrangler pages secret put DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED \
+              --project-name "${{ inputs.production_pages_project_name }}"
+          printf "false" |
+            npx wrangler pages secret put DZN_DISCORD_NOTIFICATIONS_ENABLED \
+              --project-name "${{ inputs.production_pages_project_name }}"
+          echo "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false and DZN_DISCORD_NOTIFICATIONS_ENABLED=false configured for production Pages."
+
+      - name: Deploy production Pages runtime from approved commit
+        run: |
+          set -euo pipefail
+          DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false npm run build
+          npx wrangler pages functions build functions
+          test -s .pages-functions/index.js
+          cp .pages-functions/index.js out/_worker.js
+          test -s out/_worker.js
+          node <<'NODE'
+          const fs = require("node:fs");
+          const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
+          const include = routes.include ?? [];
+          for (const route of ["/api/*", "/owner", "/owner/*"]) {
+            if (!include.includes(route)) throw new Error(`out/_routes.json missing ${route}.`);
+          }
+          console.log("Pages Functions worker and owner/API routes verified before deploy.");
+          NODE
+          npx wrangler pages deploy out \
+            --project-name "${{ inputs.production_pages_project_name }}" \
+            --branch main \
+            --commit-hash "${ROLLOUT_COMMIT_SHA}" \
+            --commit-message "Deploy Discord server announcements disabled" \
+            --commit-dirty=true \
+            | tee discord-server-announcements-production-pages-deploy.txt
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.pages\.dev' discord-server-announcements-production-pages-deploy.txt | head -n 1 || true)"
+          echo "PRODUCTION_DEPLOY_URL=${DEPLOY_URL:-${PRODUCTION_BASE_URL}}" >> "$GITHUB_ENV"
+          echo "- Production deploy URL: ${DEPLOY_URL:-${PRODUCTION_BASE_URL}}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify disabled production rollout
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const base = process.env.PRODUCTION_BASE_URL;
+          const forbidden = [
+            "Error 1102",
+            "Worker exceeded resource limits",
+            "Minified React error #",
+            "Owner console data could not be loaded",
+            "Owner console error",
+          ];
+          async function request(path) {
+            const response = await fetch(`${base}${path}`, { redirect: "manual", headers: { "User-Agent": "dzn-discord-server-announcements-production-rollout" } });
+            const body = await response.text().catch(() => "");
+            for (const marker of forbidden) {
+              if (body.includes(marker)) throw new Error(`${path} contains forbidden marker: ${marker}`);
+            }
+            if (response.status === 503) throw new Error(`${path} returned 503.`);
+            return { status: response.status, location: response.headers.get("location"), body };
+          }
+          function assertStatus(result, expected, label) {
+            if (result.status !== expected) throw new Error(`${label} expected ${expected}, got ${result.status}.`);
+          }
+          const checks = [];
+          const root = await request("/");
+          assertStatus(root, 200, "/");
+          checks.push(`/ ${root.status}`);
+          const owner = await request("/owner");
+          if (owner.status !== 302) throw new Error(`/owner logged-out expected 302 to login, got ${owner.status}.`);
+          if (!String(owner.location || "").includes("/login")) throw new Error(`/owner logged-out redirect did not point to login: ${owner.location || "(none)"}`);
+          checks.push(`/owner ${owner.status}`);
+          const ownerOverview = await request("/api/owner/overview");
+          assertStatus(ownerOverview, 401, "/api/owner/overview logged-out");
+          checks.push(`/api/owner/overview ${ownerOverview.status}`);
+          const discordOverview = await request("/api/owner/discord/overview");
+          assertStatus(discordOverview, 401, "/api/owner/discord/overview logged-out");
+          checks.push(`/api/owner/discord/overview ${discordOverview.status}`);
+          for (const path of ["/servers", "/dashboard", "/dzn-pulse", "/api/public/servers", "/api/public/home-stats", "/api/dzn-pulse/config"]) {
+            const result = await request(path);
+            assertStatus(result, 200, path);
+            checks.push(`${path} ${result.status}`);
+            if (path === "/api/dzn-pulse/config") {
+              const parsed = JSON.parse(result.body);
+              if (parsed.discordNotificationsEnabled !== false) throw new Error("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false.");
+            }
+          }
+          console.log(`Disabled rollout route verification passed: ${checks.join(", ")}`);
+          console.log("Authenticated owner /owner validation must be completed manually; this workflow does not create production owner sessions.");
+          NODE
+          {
+            echo "- Logged-out route verification: passed"
+            echo "- Discord messages sent: none"
+            echo "- Authenticated owner browser validation: manual follow-up required"
+            echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+          } >> "$GITHUB_STEP_SUMMARY"
