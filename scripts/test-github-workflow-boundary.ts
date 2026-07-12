@@ -1037,6 +1037,7 @@ assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("fe
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("37eff56e39c670160d5c16168509c2bbf93fecc0"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("https://github.com/rafaeldeak-lab/dzn-network/actions/runs/29190148323"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("APPROVE_DISCORD_SERVER_ANNOUNCEMENTS_DISABLED_ROLLOUT"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("git checkout --detach \"${APPROVED_COMMIT}\""), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("announcements_enabled=true is rejected for this disabled rollout."), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: \"false\""), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: \"false\""), true);
