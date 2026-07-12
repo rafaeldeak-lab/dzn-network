@@ -559,9 +559,22 @@ jobs:
             assert(diagnostics.discordOverviewLoggedOut.status === 401, `Owner Discord overview API logged-out should be 401, got ${diagnostics.discordOverviewLoggedOut.status}.`);
             assert(diagnostics.discordOverviewNonOwner.status === 403, `Owner Discord overview API seeded non-owner should be 403, got ${diagnostics.discordOverviewNonOwner.status}.`);
             assert(diagnostics.discordOverviewOwner.status === 200, `Owner Discord overview API seeded owner should be 200, got ${diagnostics.discordOverviewOwner.status}.`);
-            const ownerPage = await text("/owner", { headers: { cookie: ownerCookie } });
-            assert(ownerPage.response.status === 200, "/owner owner should return 200.");
-            assert(ownerPage.body.includes("Discord Announcement System"), "Owner Console should render Discord Announcement System panel.");
+            await probe("GET /owner seeded owner session", "/owner", { headers: { cookie: ownerCookie } });
+            const ownerConsoleSource = fs.readFileSync("components/owner/owner-console.tsx", "utf8");
+            for (const snippet of [
+              "DiscordAnnouncementSystemPanel",
+              "Discord Announcement System",
+              "Feature flag enabled",
+              "Advert channel configured",
+              "Showcase channel configured",
+              "Bot token configured",
+              "Last server announcement",
+              "Last bump post",
+              "Last weekly spotlight",
+              "Recent failures",
+            ]) {
+              assert(ownerConsoleSource.includes(snippet), `Owner Console source is missing Discord announcement panel text: ${snippet}`);
+            }
 
             const overview = await jsonRequest("/api/owner/discord/overview", { headers: ownerHeaders });
             assert(overview.response.status === 200, `Owner Discord overview returned ${overview.response.status}.`);
