@@ -37,6 +37,7 @@ const dznDiscordControlPreviewWorkflow = read(".github/workflows/dzn-discord-con
 const dznDiscordControlProductionRolloutWorkflow = read(".github/workflows/dzn-discord-control-production-rollout.yml");
 const dznDiscordControlPhase2aPreviewWorkflow = read(".github/workflows/dzn-discord-control-phase-2a-preview.yml");
 const dznDiscordControlPhase2aProductionRolloutWorkflow = read(".github/workflows/dzn-discord-control-phase-2a-production-rollout.yml");
+const dznDiscordServerAnnouncementsPreviewWorkflow = read(".github/workflows/dzn-discord-server-announcements-preview.yml");
 const protectedRouteAuthRepairWorkflow = read(".github/workflows/dzn-protected-route-auth-repair.yml");
 const productionDiscordAuthRepairWorkflow = read(".github/workflows/dzn-production-discord-auth-repair.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
@@ -464,7 +465,7 @@ assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("\n  push:"), true
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("[run-dzn-pages-runtime-production-deploy]"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("APPROVE_PAGES_RUNTIME_DEPLOY"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("feature/discord-control-phase-2a-ux"), true);
-assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("f666e6fad46b78a5651f3bd3a637e060998e1359"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("a328aabe518590f3a8caa68be310e62fb2ff50e2"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: \"false\""), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN"), true);
@@ -1013,6 +1014,19 @@ assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Minified React e
 assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Error 1102"), true);
 assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Production D1 migration: not run"), true);
 assert.equal(dznOwnerConsoleProductionRolloutWorkflow.includes("Worker deploy: not run"), true);
+
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("name: DZN Discord Server Announcements Preview"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("\n  push:"), false);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: \"false\""), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("ownerDiscordOverviewPayload(parsed)"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Owner Discord overview safe summary"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("notificationsEnabled"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("recentFailuresCount"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("serverAnnouncements?.featureEnabled === false"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED = \"true\""), false);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("wrangler pages secret put DISCORD_BOT_TOKEN"), false);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Private Discord test messages: not sent by this workflow"), true);
 
 assert.equal(dznPulseProductionRolloutWorkflow.includes("name: DZN Pulse Production Rollout"), true);
 assert.equal(dznPulseProductionRolloutWorkflow.includes("workflow_dispatch:"), true);
