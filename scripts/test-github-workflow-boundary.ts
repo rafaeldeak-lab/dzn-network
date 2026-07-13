@@ -1071,6 +1071,12 @@ assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("ou
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("Final Pages routes summary"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("hasApiWildcard"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("hasOwnerWildcard"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("normalizeRoutes([...(routes.include ?? []), ...requiredIncludes])"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("assertNoSplatOverlap(finalRoutes.include, \"include\")"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("assertNoSplatOverlap(finalRoutes.exclude, \"exclude\")"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("removedOverlappedIncludeRoutes"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("removedOverlappedExcludeRoutes"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("includeSplatRoutes"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("Pages production branch verified: main"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("npx wrangler pages deploy out"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("--project-name \"${{ inputs.production_pages_project_name }}\""), true);
