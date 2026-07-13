@@ -416,16 +416,65 @@ jobs:
           test -s out/_worker.js
           node <<'NODE'
           const fs = require("node:fs");
-          const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
-          const include = routes.include ?? [];
-          const exclude = routes.exclude ?? [];
+          const routesPath = "out/_routes.json";
+          const routes = JSON.parse(fs.readFileSync(routesPath, "utf8"));
+          const requiredIncludes = ["/api/*", "/owner", "/owner/*"];
+          function uniqueRoutes(values) {
+            return [...new Set((Array.isArray(values) ? values : []).filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+          }
+          function isSplat(route) {
+            return route.endsWith("/*");
+          }
+          function splatPrefix(route) {
+            return route.slice(0, -1);
+          }
+          function normalizeRoutes(values) {
+            const source = uniqueRoutes(values);
+            const splats = source.filter(isSplat);
+            const removed = [];
+            const normalized = source.filter((route) => {
+              for (const splat of splats) {
+                if (route === splat) continue;
+                if (route.startsWith(splatPrefix(splat))) {
+                  removed.push({ route, coveredBy: splat });
+                  return false;
+                }
+              }
+              return true;
+            }).sort();
+            return { routes: normalized, removed };
+          }
+          function assertNoSplatOverlap(values, label) {
+            const routes = uniqueRoutes(values);
+            for (const splat of routes.filter(isSplat)) {
+              const prefix = splatPrefix(splat);
+              const overlap = routes.find((route) => route !== splat && route.startsWith(prefix));
+              if (overlap) throw new Error(`${label} route overlap: ${splat} covers ${overlap}.`);
+            }
+          }
+          const includeResult = normalizeRoutes([...(routes.include ?? []), ...requiredIncludes]);
+          const excludeResult = normalizeRoutes(routes.exclude ?? []);
+          const finalRoutes = {
+            version: routes.version ?? 1,
+            include: includeResult.routes,
+            exclude: excludeResult.routes,
+          };
+          assertNoSplatOverlap(finalRoutes.include, "include");
+          assertNoSplatOverlap(finalRoutes.exclude, "exclude");
+          fs.writeFileSync(routesPath, `${JSON.stringify(finalRoutes, null, 2)}\n`);
+          const include = finalRoutes.include;
+          const exclude = finalRoutes.exclude;
           console.log("Final Pages routes summary:", JSON.stringify({
-            version: routes.version ?? null,
-            include,
-            exclude,
+            version: finalRoutes.version,
+            includeCount: include.length,
+            excludeCount: exclude.length,
             hasApiWildcard: include.includes("/api/*"),
             hasOwner: include.includes("/owner"),
             hasOwnerWildcard: include.includes("/owner/*"),
+            removedOverlappedIncludeRoutes: includeResult.removed.length,
+            removedOverlappedExcludeRoutes: excludeResult.removed.length,
+            includeSplatRoutes: include.filter(isSplat),
+            excludeSplatRoutes: exclude.filter(isSplat),
           }));
           for (const route of ["/api/*", "/owner", "/owner/*"]) {
             if (!include.includes(route)) throw new Error(`out/_routes.json missing ${route}.`);
