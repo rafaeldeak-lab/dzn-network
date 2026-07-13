@@ -410,6 +410,7 @@ jobs:
             --build-output-directory out \
             --output-routes-path out/_routes.json \
             --minify
+          node scripts/patch-pages-routes.mjs
           test -s .pages-functions/index.js
           cp .pages-functions/index.js out/_worker.js
           test -s out/_worker.js
@@ -417,6 +418,15 @@ jobs:
           const fs = require("node:fs");
           const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
           const include = routes.include ?? [];
+          const exclude = routes.exclude ?? [];
+          console.log("Final Pages routes summary:", JSON.stringify({
+            version: routes.version ?? null,
+            include,
+            exclude,
+            hasApiWildcard: include.includes("/api/*"),
+            hasOwner: include.includes("/owner"),
+            hasOwnerWildcard: include.includes("/owner/*"),
+          }));
           for (const route of ["/api/*", "/owner", "/owner/*"]) {
             if (!include.includes(route)) throw new Error(`out/_routes.json missing ${route}.`);
           }
