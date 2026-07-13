@@ -1060,8 +1060,17 @@ assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("--
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("--build-output-directory out"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("--output-routes-path out/_routes.json"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("--minify"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("node scripts/patch-pages-routes.mjs"), true);
+assert.ok(
+  dznDiscordServerAnnouncementsProductionRolloutWorkflow.indexOf("--output-routes-path out/_routes.json") <
+    dznDiscordServerAnnouncementsProductionRolloutWorkflow.indexOf("node scripts/patch-pages-routes.mjs"),
+  "Discord announcements production rollout must patch Pages routes after Wrangler writes out/_routes.json.",
+);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("cp .pages-functions/index.js out/_worker.js"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("out/_routes.json missing"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("Final Pages routes summary"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("hasApiWildcard"), true);
+assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("hasOwnerWildcard"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("Pages production branch verified: main"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("npx wrangler pages deploy out"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("--project-name \"${{ inputs.production_pages_project_name }}\""), true);
