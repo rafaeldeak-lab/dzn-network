@@ -21,6 +21,55 @@ function assertInsertColumnsKnown(source: string, table: string, knownColumns: r
   assert.deepEqual(missing, [], `${table} seed references missing columns.`);
 }
 
+type DiscordAnnouncementsPreviewInput = {
+  workflowRefName: string;
+  inputBranch: string;
+  mode: string;
+  confirmPreviewOnly?: string;
+  previewProjectName?: string;
+  previewDbName?: string;
+  discordNotificationsEnabled?: string;
+  discordServerAnnouncementsEnabled?: string;
+};
+
+function acceptsDiscordAnnouncementsPreviewInput(input: DiscordAnnouncementsPreviewInput) {
+  const confirmPreviewOnly = input.confirmPreviewOnly ?? "PREVIEW_ONLY";
+  const previewProjectName = input.previewProjectName ?? "dzn-network-discord-announcements-preview";
+  const previewDbName = input.previewDbName ?? "dzn_network_db_discord_announcements_preview_alignment_test";
+  const discordNotificationsEnabled = input.discordNotificationsEnabled ?? "false";
+  const discordServerAnnouncementsEnabled = input.discordServerAnnouncementsEnabled ?? "false";
+  if (confirmPreviewOnly !== "PREVIEW_ONLY") return false;
+  if (!input.inputBranch) return false;
+  if (input.workflowRefName === "release/main-runtime-alignment" && input.inputBranch !== "release/main-runtime-alignment") return false;
+  if (input.inputBranch === "release/main-runtime-alignment" && input.workflowRefName !== "release/main-runtime-alignment") return false;
+  if (["main", "master", "production"].includes(input.inputBranch)) return false;
+  if (!["feature/discord-server-announcements", "release/main-runtime-alignment"].includes(input.inputBranch)) return false;
+  if (/preview-project|production-project|production_pages_project|production_db|dzn-network|dzn_network_db/.test(input.inputBranch)) return false;
+  if (!["validate", "phase1-flag-off", "phase2-migration", "verify-preview", "full-preview"].includes(input.mode)) return false;
+  if (input.inputBranch === "release/main-runtime-alignment") {
+    if (input.mode !== "full-preview") return false;
+    if (previewProjectName !== "dzn-network-discord-announcements-preview") return false;
+    if (!previewDbName.startsWith("dzn_network_db_discord_announcements_preview_alignment_")) return false;
+  }
+  if (previewProjectName === "dzn-network") return false;
+  if (!previewProjectName.includes("discord") || !previewProjectName.includes("announcements") || !previewProjectName.includes("preview")) return false;
+  if (previewDbName === "dzn_network_db") return false;
+  if (!previewDbName.includes("discord_announcements_preview") && !previewDbName.includes("discord_server_announcements_preview")) return false;
+  if (discordNotificationsEnabled !== "false") return false;
+  if (discordServerAnnouncementsEnabled !== "false") return false;
+  return true;
+}
+
+function legacyAdvertEnvScanFails(path: string, source: string) {
+  const runtimePath =
+    path === ".env.example" ||
+    path === "cloudflare-env.d.ts" ||
+    path === "package.json" ||
+    path.startsWith("functions/") ||
+    path.startsWith("components/");
+  return runtimePath && source.includes("DZN_DISCORD_ADVERTISE_CHANNEL_ID");
+}
+
 const admWorkflow = read(".github/workflows/dzn-adm-sync.yml");
 const diagnosticsWorkflow = read(".github/workflows/dzn-nitrado-diagnostics.yml");
 const autoUpdateWorkflow = read(".github/workflows/dzn-auto-update-schedulers.yml");
@@ -1023,12 +1072,17 @@ assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("\n  push:"),
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("feature/discord-server-announcements|release/main-runtime-alignment"), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Preview workflow must not run against ${INPUT_BRANCH}."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Preview branch input must not be empty."), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Use workflow from release/main-runtime-alignment requires branch=release/main-runtime-alignment."), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("branch=release/main-runtime-alignment requires Use workflow from release/main-runtime-alignment."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Discord server announcements preview may only run against feature/discord-server-announcements or release/main-runtime-alignment."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Preview branch name must not contain project or database names."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Alignment preview must be run with 'Use workflow from' release/main-runtime-alignment."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("release/main-runtime-alignment requires mode=full-preview."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("release/main-runtime-alignment requires preview_project_name=dzn-network-discord-announcements-preview."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("dzn_network_db_discord_announcements_preview_alignment_"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("LEGACY_RUNTIME_SCAN_TARGETS=(.env.example cloudflare-env.d.ts functions components package.json)"), true);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("functions scripts components package.json"), false);
+assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("\"${LEGACY_RUNTIME_SCAN_TARGETS[@]}\""), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("git switch --force-create \"${INPUT_BRANCH}\" \"origin/${INPUT_BRANCH}\""), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("HEAD_SHA=\"$(git rev-parse HEAD)\""), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("REMOTE_SHA=\"$(git rev-parse \"origin/${INPUT_BRANCH}\")\""), true);
@@ -1073,6 +1127,23 @@ assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("PRODUCTION_D
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Refusing production Pages project."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("preview_db_name equals production database name."), true);
 assert.equal(dznDiscordServerAnnouncementsPreviewWorkflow.includes("Private Discord test messages: not sent by this workflow"), true);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "release/main-runtime-alignment", mode: "full-preview" }), true);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "feature/discord-server-announcements", mode: "full-preview" }), false);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "main", inputBranch: "release/main-runtime-alignment", mode: "full-preview" }), false);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "feature/discord-server-announcements", inputBranch: "feature/discord-server-announcements", mode: "full-preview", previewDbName: "dzn_network_db_discord_announcements_preview" }), true);
+for (const inputBranch of ["main", "master", "production", "", "feature/arbitrary", "release/arbitrary"]) {
+  assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "main", inputBranch, mode: "full-preview" }), false);
+}
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "release/main-runtime-alignment", mode: "full-preview", previewProjectName: "dzn-network" }), false);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "release/main-runtime-alignment", mode: "full-preview", previewDbName: "dzn_network_db" }), false);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "release/main-runtime-alignment", mode: "validate" }), false);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "release/main-runtime-alignment", mode: "full-preview", previewDbName: "dzn_network_db_discord_announcements_preview" }), false);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "release/main-runtime-alignment", mode: "full-preview", discordServerAnnouncementsEnabled: "true" }), false);
+assert.equal(acceptsDiscordAnnouncementsPreviewInput({ workflowRefName: "release/main-runtime-alignment", inputBranch: "release/main-runtime-alignment", mode: "full-preview", discordNotificationsEnabled: "true" }), false);
+assert.equal(legacyAdvertEnvScanFails("functions/_lib/discord-server-announcements.ts", "DZN_DISCORD_ADVERT_CHANNEL_ID"), false);
+assert.equal(legacyAdvertEnvScanFails(".env.example", "DZN_DISCORD_ADVERTISE_CHANNEL_ID="), true);
+assert.equal(legacyAdvertEnvScanFails("functions/_lib/discord-server-announcements.ts", "DZN_DISCORD_ADVERTISE_CHANNEL_ID"), true);
+assert.equal(legacyAdvertEnvScanFails("scripts/test-github-workflow-boundary.ts", 'assert.equal(source.includes("DZN_DISCORD_ADVERTISE_CHANNEL_ID"), false);'), false);
 
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("name: DZN Discord Server Announcements Production Rollout"), true);
 assert.equal(dznDiscordServerAnnouncementsProductionRolloutWorkflow.includes("workflow_dispatch:"), true);
