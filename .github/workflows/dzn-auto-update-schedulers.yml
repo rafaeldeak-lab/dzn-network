@@ -2,34 +2,148 @@ name: DZN Auto Update Schedulers
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+    inputs:
+      confirm_production_updates:
+        description: Must equal APPROVE_SCHEDULED_PRODUCTION_UPDATES
+        required: true
+        type: string
+      task:
+        description: Select the scheduled production update task to run.
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - metadata-player-count
+          - server-wars
+          - discord-posts
   schedule:
     - cron: "17 * * * *"
 
+permissions:
+  contents: read
+
 concurrency:
-  group: dzn-auto-update-schedulers
+  group: dzn-auto-update-schedulers-production-updates
   cancel-in-progress: false
 
 jobs:
   auto-update:
     runs-on: ubuntu-latest
+    env:
+      PRODUCTION_APP_URL: https://dzn-network.pages.dev
+      CONFIRM_PRODUCTION_UPDATES: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates || '' }}
+      TASK_SELECTION: ${{ github.event_name == 'workflow_dispatch' && inputs.task || 'all' }}
+      DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
     steps:
+      - name: Validate scheduler event guard
+        run: |
+          set -euo pipefail
+
+          case "${{ github.event_name }}" in
+            schedule)
+              if [ "${TASK_SELECTION}" != "all" ]; then
+                echo "::error::Scheduled runs must execute the fixed all-task set."
+                exit 1
+              fi
+              ;;
+            workflow_dispatch)
+              if [ "${CONFIRM_PRODUCTION_UPDATES}" != "APPROVE_SCHEDULED_PRODUCTION_UPDATES" ]; then
+                echo "::error::confirm_production_updates must equal APPROVE_SCHEDULED_PRODUCTION_UPDATES."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Production updates are not allowed for event ${{ github.event_name }}."
+              exit 1
+              ;;
+          esac
+
+          case "${TASK_SELECTION}" in
+            all|metadata-player-count|server-wars|discord-posts)
+              ;;
+            *)
+              echo "::error::Invalid task selection."
+              exit 1
+              ;;
+          esac
+
+          if [ "${DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED must remain false."
+            exit 1
+          fi
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+
+          node - "${PRODUCTION_APP_URL}" <<'NODE'
+          const appUrl = process.argv[2];
+          const parsed = new URL(appUrl);
+          if (parsed.protocol !== "https:") {
+            throw new Error("Production update URL must use HTTPS.");
+          }
+          if (parsed.hostname !== "dzn-network.pages.dev") {
+            throw new Error("Production update URL hostname must be exactly dzn-network.pages.dev.");
+          }
+          if (["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) {
+            throw new Error("Production update URL must not target localhost.");
+          }
+          if (parsed.origin !== "https://dzn-network.pages.dev") {
+            throw new Error("Production update URL origin must be the canonical stable production URL.");
+          }
+          NODE
+
+          {
+            echo "## DZN Auto Update Schedulers Guard"
+            echo ""
+            echo "- Event: ${{ github.event_name }}"
+            echo "- Task selection: ${TASK_SELECTION}"
+            echo "- Production host validated: yes"
+            echo "- Discord server announcements enabled: false"
+            echo "- Discord notifications enabled: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run protected auto-update routes
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates == 'APPROVE_SCHEDULED_PRODUCTION_UPDATES') }}
         env:
-          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: |
           set -euo pipefail
 
-          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
-          if [ -z "$CRON_SECRET" ]; then
-            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET"
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${CONFIRM_PRODUCTION_UPDATES}" != "APPROVE_SCHEDULED_PRODUCTION_UPDATES" ]; then
+              echo "::error::Production POSTs are allowed only for schedule or approved workflow_dispatch."
+              exit 1
+            fi
+          fi
+
+          case "${TASK_SELECTION}" in
+            all|metadata-player-count|server-wars|discord-posts)
+              ;;
+            *)
+              echo "::error::Invalid task selection before production POST."
+              exit 1
+              ;;
+          esac
+
+          if [ "${PRODUCTION_APP_URL}" != "https://dzn-network.pages.dev" ]; then
+            echo "::error::Production update URL must be the canonical stable production URL."
             exit 1
           fi
-          APP_URL="${DZN_APP_URL:-https://dzn-network.pages.dev}"
+          if [ "${DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED}" != "false" ] || [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::Discord flags must remain false for scheduler updates."
+            exit 1
+          fi
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET."
+            exit 1
+          fi
+          echo "::add-mask::$CRON_SECRET"
 
           {
             echo "## DZN Auto Update Schedulers Backup"
@@ -37,9 +151,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           call_dzn() {
-            local name="$1"
-            local path="$2"
-            local payload="$3"
+            local key="$1"
+            local name="$2"
+            local path="$3"
+            local payload="$4"
             local body_file
             body_file="$(mktemp)"
             local curl_exit=0
@@ -47,12 +162,13 @@ jobs:
             http_code="$(curl --silent --show-error --max-time 75 \
               --output "$body_file" \
               --write-out "%{http_code}" \
-              -X POST "${APP_URL}${path}" \
+              -X POST "${PRODUCTION_APP_URL}${path}" \
               -H "x-dzn-cron-secret: ${CRON_SECRET}" \
               -H "x-sync-cron-secret: ${CRON_SECRET}" \
               -H "x-cron-secret: ${CRON_SECRET}" \
               -H "Authorization: Bearer ${CRON_SECRET}" \
               -H "Content-Type: application/json" \
+              -H "Idempotency-Key: dzn-auto-update-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${key}" \
               --data "${payload}")" || curl_exit=$?
             local body
             body="$(cat "$body_file")"
@@ -65,6 +181,11 @@ jobs:
           const fs = require("node:fs");
           const [name, codeText, body] = process.argv.slice(2);
           const code = Number(codeText);
+          const redact = (value) =>
+            String(value ?? "")
+              .replace(/(Bearer\s+)[A-Za-z0-9._~-]+/gi, "$1[redacted]")
+              .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[redacted]")
+              .slice(0, 240);
           let parsed = {};
           try {
             parsed = body ? JSON.parse(body) : {};
@@ -80,7 +201,7 @@ jobs:
           const safe = {
             ok: parsed.ok,
             taskStatus: parsed.taskStatus ?? parsed.task_status ?? parsed.status ?? null,
-            error: parsed.error ?? parsed.message ?? null,
+            error: redact(parsed.error ?? parsed.message ?? null),
             processed: countValue(parsed.processed ?? parsed.processedCount ?? parsed.processed_count),
             succeeded: countValue(parsed.succeeded),
             skipped: countValue(parsed.skipped ?? parsed.skippedCount ?? parsed.skipped_count),
@@ -88,10 +209,10 @@ jobs:
             updatedPlayerCounts: countValue(parsed.updated_player_counts),
             budgetExhausted: Boolean(parsed.budgetExhausted ?? parsed.budget_exhausted ?? false),
             accepted: parsed.accepted === true,
-            noOpReason: parsed.noOpReason ?? parsed.no_op_reason ?? null,
-            warningCode: parsed.warningCode ?? parsed.warning_code ?? null,
-            warning: parsed.warning ?? null,
-            errorCode: parsed.errorCode ?? parsed.error_code ?? null,
+            noOpReason: redact(parsed.noOpReason ?? parsed.no_op_reason ?? null),
+            warningCode: redact(parsed.warningCode ?? parsed.warning_code ?? null),
+            warning: redact(parsed.warning ?? null),
+            errorCode: redact(parsed.errorCode ?? parsed.error_code ?? null),
             snapshots: countValue(parsed.snapshots),
             finalized: countValue(parsed.finalized),
             expiredChallenges: countValue(parsed.expiredChallenges ?? parsed.expired_challenges ?? parsed.transitions?.expiredChallenges),
@@ -146,10 +267,32 @@ jobs:
           NODE
           }
 
+          run_task() {
+            case "$1" in
+              metadata-player-count)
+                call_dzn "metadata-player-count" "Metadata/player-count refresh backup" "/api/sync/metadata/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_servers":2,"deadline_ms":2500}'
+                ;;
+              server-wars)
+                call_dzn "server-wars" "Server Wars refresh backup" "/api/cron/server-wars/refresh" '{"source":"github-backup","max_events":1,"max_finalizations":1,"max_challenge_expirations":10,"deadline_ms":2500}'
+                ;;
+              discord-posts)
+                call_dzn "discord-posts" "Discord posts dispatch backup" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_jobs":2,"deadline_ms":2500}'
+                ;;
+              *)
+                echo "::error::Unknown fixed scheduler task."
+                return 1
+                ;;
+            esac
+          }
+
           overall=0
-          call_dzn "Metadata/player-count refresh backup" "/api/sync/metadata/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_servers":2,"deadline_ms":2500}' || overall=1
-          call_dzn "Server Wars refresh backup" "/api/cron/server-wars/refresh" '{"source":"github-backup","max_events":1,"max_finalizations":1,"max_challenge_expirations":10,"deadline_ms":2500}' || overall=1
-          call_dzn "Discord posts dispatch backup" "/api/sync/discord-posts/run" '{"source":"github-backup","cron":"dzn-auto-update-schedulers-backup","max_jobs":2,"deadline_ms":2500}' || overall=1
+          if [ "${TASK_SELECTION}" = "all" ]; then
+            for task in metadata-player-count server-wars discord-posts; do
+              run_task "$task" || overall=1
+            done
+          else
+            run_task "${TASK_SELECTION}" || overall=1
+          fi
 
           if [ "$overall" -ne 0 ]; then
             {

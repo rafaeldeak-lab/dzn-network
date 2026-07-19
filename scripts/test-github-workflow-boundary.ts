@@ -70,6 +70,49 @@ function legacyAdvertEnvScanFails(path: string, source: string) {
   return runtimePath && source.includes("DZN_DISCORD_ADVERTISE_CHANNEL_ID");
 }
 
+function topLevelBlock(source: string, key: string) {
+  const match = source.match(new RegExp(`^${key}:\\r?\\n`, "m"));
+  assert.notEqual(match, null, `Expected top-level ${key} block.`);
+  const rest = source.slice(match!.index! + match![0].length);
+  const nextTopLevel = rest.search(/^\S/m);
+  return nextTopLevel === -1 ? rest : rest.slice(0, nextTopLevel);
+}
+
+function hasWorkflowTrigger(source: string, trigger: string) {
+  return new RegExp(`^  ${trigger}:`, "m").test(topLevelBlock(source, "on"));
+}
+
+type AutoUpdateEventContext = {
+  eventName: string;
+  confirmProductionUpdates?: string;
+  taskSelection?: string;
+};
+
+const autoUpdateKnownTasks = ["metadata-player-count", "server-wars", "discord-posts"] as const;
+
+function evaluateAutoUpdateSchedulerRequests(context: AutoUpdateEventContext) {
+  const taskSelection = context.taskSelection ?? (context.eventName === "workflow_dispatch" ? "all" : "all");
+  const validTasks = new Set(["all", ...autoUpdateKnownTasks]);
+  if (!validTasks.has(taskSelection)) {
+    return { accepted: false, reason: "invalid_task", requests: [] as string[] };
+  }
+  if (context.eventName === "schedule") {
+    if (taskSelection !== "all") return { accepted: false, reason: "schedule_fixed_all_only", requests: [] as string[] };
+    return { accepted: true, reason: "schedule", requests: [...autoUpdateKnownTasks] };
+  }
+  if (context.eventName === "workflow_dispatch") {
+    if (context.confirmProductionUpdates !== "APPROVE_SCHEDULED_PRODUCTION_UPDATES") {
+      return { accepted: false, reason: "bad_confirmation", requests: [] as string[] };
+    }
+    return {
+      accepted: true,
+      reason: "approved_dispatch",
+      requests: taskSelection === "all" ? [...autoUpdateKnownTasks] : [taskSelection],
+    };
+  }
+  return { accepted: false, reason: "unsupported_event", requests: [] as string[] };
+}
+
 const admWorkflow = read(".github/workflows/dzn-adm-sync.yml");
 const diagnosticsWorkflow = read(".github/workflows/dzn-nitrado-diagnostics.yml");
 const autoUpdateWorkflow = read(".github/workflows/dzn-auto-update-schedulers.yml");
@@ -116,14 +159,124 @@ assert.equal(diagnosticsWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(diagnosticsWorkflow.includes("schedule:"), false);
 assert.equal(diagnosticsWorkflow.includes("- cron:"), false);
 
+assert.equal(autoUpdateWorkflow.includes("name: DZN Auto Update Schedulers"), true);
 assert.equal(autoUpdateWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "workflow_dispatch"), true);
 assert.equal(autoUpdateWorkflow.includes("schedule:"), true);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "schedule"), true);
 assert.equal(autoUpdateWorkflow.includes('cron: "17 * * * *"'), true);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "push"), false);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "pull_request"), false);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "workflow_run"), false);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "repository_dispatch"), false);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "release"), false);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "issues"), false);
+assert.equal(autoUpdateWorkflow.includes("confirm_production_updates:"), true);
+assert.equal(autoUpdateWorkflow.includes("APPROVE_SCHEDULED_PRODUCTION_UPDATES"), true);
+assert.equal(autoUpdateWorkflow.includes('confirm_production_updates must equal APPROVE_SCHEDULED_PRODUCTION_UPDATES'), true);
+assert.equal(autoUpdateWorkflow.includes("type: choice"), true);
+assert.equal(autoUpdateWorkflow.includes("- all"), true);
+assert.equal(autoUpdateWorkflow.includes("- metadata-player-count"), true);
+assert.equal(autoUpdateWorkflow.includes("- server-wars"), true);
+assert.equal(autoUpdateWorkflow.includes("- discord-posts"), true);
+assert.equal(autoUpdateWorkflow.includes("PRODUCTION_APP_URL: https://dzn-network.pages.dev"), true);
+assert.equal(autoUpdateWorkflow.includes("DZN_APP_URL"), false);
+assert.equal(autoUpdateWorkflow.includes("production_base_url"), false);
+assert.equal(autoUpdateWorkflow.includes("inputs.production"), false);
+assert.equal(autoUpdateWorkflow.includes("vars.DZN_APP_URL"), false);
+assert.equal(autoUpdateWorkflow.includes('parsed.protocol !== "https:"'), true);
+assert.equal(autoUpdateWorkflow.includes('parsed.hostname !== "dzn-network.pages.dev"'), true);
+assert.equal(autoUpdateWorkflow.includes('parsed.origin !== "https://dzn-network.pages.dev"'), true);
+assert.equal(autoUpdateWorkflow.includes("localhost"), true);
+assert.equal(autoUpdateWorkflow.includes("127.0.0.1"), true);
+assert.equal(autoUpdateWorkflow.includes("Production updates are not allowed for event"), true);
+assert.equal(autoUpdateWorkflow.includes("Production POSTs are allowed only for schedule or approved workflow_dispatch."), true);
+assert.equal(
+  autoUpdateWorkflow.includes("github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates == 'APPROVE_SCHEDULED_PRODUCTION_UPDATES')"),
+  true,
+);
+assert.equal(autoUpdateWorkflow.includes("concurrency:"), true);
+assert.equal(autoUpdateWorkflow.includes("group: dzn-auto-update-schedulers-production-updates"), true);
+assert.equal(autoUpdateWorkflow.includes("cancel-in-progress: false"), true);
+assert.equal(topLevelBlock(autoUpdateWorkflow, "permissions").includes("contents: read"), true);
+assert.equal(topLevelBlock(autoUpdateWorkflow, "permissions").includes("contents: write"), false);
+assert.equal(topLevelBlock(autoUpdateWorkflow, "permissions").includes("actions: write"), false);
+assert.equal(topLevelBlock(autoUpdateWorkflow, "permissions").includes("deployments: write"), false);
+assert.equal(topLevelBlock(autoUpdateWorkflow, "permissions").includes("pull-requests: write"), false);
+assert.equal(topLevelBlock(autoUpdateWorkflow, "permissions").includes("packages: write"), false);
+assert.equal(topLevelBlock(autoUpdateWorkflow, "permissions").includes("id-token: write"), false);
 assert.equal(autoUpdateWorkflow.includes("DZN Auto Update Schedulers Backup"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/sync/metadata/run"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/cron/server-wars/refresh"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/sync/discord-posts/run"), true);
 assert.equal(autoUpdateWorkflow.includes("/api/sync/adm/run"), false);
+assert.equal(autoUpdateWorkflow.includes("-X POST"), true);
+assert.equal(autoUpdateWorkflow.includes("--max-time 75"), true);
+assert.equal(autoUpdateWorkflow.includes("Idempotency-Key: dzn-auto-update-"), true);
+assert.equal(autoUpdateWorkflow.includes("echo \"$CRON_SECRET\""), false);
+assert.equal(autoUpdateWorkflow.includes("echo \"${CRON_SECRET}\""), false);
+assert.equal(autoUpdateWorkflow.includes("set -x"), false);
+assert.equal(autoUpdateWorkflow.includes("::add-mask::$CRON_SECRET"), true);
+assert.equal(autoUpdateWorkflow.includes("https://discord.com/api"), false);
+assert.equal(autoUpdateWorkflow.includes("/channels/"), false);
+assert.equal(autoUpdateWorkflow.includes("SEND_TEST_EMBED"), false);
+assert.equal(autoUpdateWorkflow.includes('DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"'), true);
+assert.equal(autoUpdateWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"'), true);
+assert.equal(autoUpdateWorkflow.includes('DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "true"'), false);
+assert.equal(autoUpdateWorkflow.includes('DZN_DISCORD_NOTIFICATIONS_ENABLED: "true"'), false);
+assert.equal(autoUpdateWorkflow.includes("wrangler d1 migrations apply"), false);
+assert.equal(autoUpdateWorkflow.includes("npx wrangler d1 migrations apply"), false);
+assert.equal(/wrangler\s+d1\s+execute/i.test(autoUpdateWorkflow), false);
+assert.equal(autoUpdateWorkflow.includes("wrangler pages deploy"), false);
+assert.equal(autoUpdateWorkflow.includes("wrangler deploy"), false);
+
+assert.deepEqual(evaluateAutoUpdateSchedulerRequests({ eventName: "push" }), {
+  accepted: false,
+  reason: "unsupported_event",
+  requests: [],
+});
+assert.deepEqual(evaluateAutoUpdateSchedulerRequests({ eventName: "pull_request" }), {
+  accepted: false,
+  reason: "unsupported_event",
+  requests: [],
+});
+assert.deepEqual(
+  evaluateAutoUpdateSchedulerRequests({
+    eventName: "workflow_dispatch",
+    confirmProductionUpdates: "APPROVE_SCHEDULED_PRODUCTION_UPDATES ",
+    taskSelection: "all",
+  }),
+  { accepted: false, reason: "bad_confirmation", requests: [] },
+);
+assert.deepEqual(
+  evaluateAutoUpdateSchedulerRequests({
+    eventName: "workflow_dispatch",
+    confirmProductionUpdates: "approve_scheduled_production_updates",
+    taskSelection: "all",
+  }),
+  { accepted: false, reason: "bad_confirmation", requests: [] },
+);
+assert.deepEqual(evaluateAutoUpdateSchedulerRequests({ eventName: "schedule" }), {
+  accepted: true,
+  reason: "schedule",
+  requests: ["metadata-player-count", "server-wars", "discord-posts"],
+});
+assert.deepEqual(
+  evaluateAutoUpdateSchedulerRequests({
+    eventName: "workflow_dispatch",
+    confirmProductionUpdates: "APPROVE_SCHEDULED_PRODUCTION_UPDATES",
+    taskSelection: "server-wars",
+  }),
+  { accepted: true, reason: "approved_dispatch", requests: ["server-wars"] },
+);
+assert.deepEqual(
+  evaluateAutoUpdateSchedulerRequests({
+    eventName: "workflow_dispatch",
+    confirmProductionUpdates: "APPROVE_SCHEDULED_PRODUCTION_UPDATES",
+    taskSelection: "/api/sync/metadata/run",
+  }),
+  { accepted: false, reason: "invalid_task", requests: [] },
+);
 assert.equal(autoUpdateWorkerConfig.includes('name = "dzn-auto-update-worker"'), true);
 assert.equal(autoUpdateWorkerConfig.includes('crons = ["* * * * *"]'), true);
 
