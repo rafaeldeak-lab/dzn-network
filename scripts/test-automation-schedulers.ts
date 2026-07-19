@@ -16,13 +16,21 @@ const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
 
 assert.equal(workflow.includes("name: DZN Auto Update Schedulers"), true);
 assert.equal(workflow.includes("workflow_dispatch:"), true);
-assert.equal(workflow.includes("push:"), true);
-assert.equal(workflow.includes("branches:"), true);
-assert.equal(workflow.includes("- main"), true);
-assert.equal(workflow.includes("schedule:"), true);
-assert.equal(workflow.includes('cron: "17 * * * *"'), true);
+assert.equal(workflow.includes("\n  push:"), false);
+assert.equal(workflow.includes("\n  pull_request:"), false);
+assert.equal(workflow.includes("\n  schedule:"), false);
+assert.equal(workflow.includes("- cron:"), false);
+assert.equal(workflow.includes('cron: "17 * * * *"'), false);
+assert.equal(workflow.includes("confirm_production_updates:"), true);
+assert.equal(workflow.includes("APPROVE_SCHEDULED_PRODUCTION_UPDATES"), true);
+assert.equal(workflow.includes("Production POSTs are allowed only for approved workflow_dispatch."), true);
+assert.equal(
+  workflow.includes("github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates == 'APPROVE_SCHEDULED_PRODUCTION_UPDATES'"),
+  true,
+);
 assert.equal(workflow.includes("DZN Auto Update Schedulers Backup"), true);
 assert.equal(workflow.includes("concurrency:"), true);
+assert.equal(workflow.includes("cancel-in-progress: false"), true);
 
 assert.equal(workflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
 assert.equal(workflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
@@ -50,7 +58,7 @@ assert.equal(workflow.includes("--max-time 75"), true);
 assert.equal(workflow.includes("overall=0"), true, "Backup workflow must aggregate all task results before deciding overall status.");
 assert.equal(workflow.includes('|| overall=1'), true, "Backup workflow must continue invoking later tasks after one task fails validation.");
 assert.equal(
-  workflow.indexOf('call_dzn "Server Wars refresh backup"') < workflow.indexOf('call_dzn "Discord posts dispatch backup"'),
+  workflow.indexOf('call_dzn "server-wars" "Server Wars refresh backup"') < workflow.indexOf('call_dzn "discord-posts" "Discord posts dispatch backup"'),
   true,
   "Discord backup must still be invoked after the Server Wars backup call.",
 );

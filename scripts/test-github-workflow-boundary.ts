@@ -96,10 +96,6 @@ function evaluateAutoUpdateSchedulerRequests(context: AutoUpdateEventContext) {
   if (!validTasks.has(taskSelection)) {
     return { accepted: false, reason: "invalid_task", requests: [] as string[] };
   }
-  if (context.eventName === "schedule") {
-    if (taskSelection !== "all") return { accepted: false, reason: "schedule_fixed_all_only", requests: [] as string[] };
-    return { accepted: true, reason: "schedule", requests: [...autoUpdateKnownTasks] };
-  }
   if (context.eventName === "workflow_dispatch") {
     if (context.confirmProductionUpdates !== "APPROVE_SCHEDULED_PRODUCTION_UPDATES") {
       return { accepted: false, reason: "bad_confirmation", requests: [] as string[] };
@@ -162,9 +158,10 @@ assert.equal(diagnosticsWorkflow.includes("- cron:"), false);
 assert.equal(autoUpdateWorkflow.includes("name: DZN Auto Update Schedulers"), true);
 assert.equal(autoUpdateWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "workflow_dispatch"), true);
-assert.equal(autoUpdateWorkflow.includes("schedule:"), true);
-assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "schedule"), true);
-assert.equal(autoUpdateWorkflow.includes('cron: "17 * * * *"'), true);
+assert.equal(autoUpdateWorkflow.includes("schedule:"), false);
+assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "schedule"), false);
+assert.equal(autoUpdateWorkflow.includes("- cron:"), false);
+assert.equal(autoUpdateWorkflow.includes('cron: "17 * * * *"'), false);
 assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "push"), false);
 assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "pull_request"), false);
 assert.equal(hasWorkflowTrigger(autoUpdateWorkflow, "workflow_run"), false);
@@ -190,9 +187,9 @@ assert.equal(autoUpdateWorkflow.includes('parsed.origin !== "https://dzn-network
 assert.equal(autoUpdateWorkflow.includes("localhost"), true);
 assert.equal(autoUpdateWorkflow.includes("127.0.0.1"), true);
 assert.equal(autoUpdateWorkflow.includes("Production updates are not allowed for event"), true);
-assert.equal(autoUpdateWorkflow.includes("Production POSTs are allowed only for schedule or approved workflow_dispatch."), true);
+assert.equal(autoUpdateWorkflow.includes("Production POSTs are allowed only for approved workflow_dispatch."), true);
 assert.equal(
-  autoUpdateWorkflow.includes("github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates == 'APPROVE_SCHEDULED_PRODUCTION_UPDATES')"),
+  autoUpdateWorkflow.includes("github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates == 'APPROVE_SCHEDULED_PRODUCTION_UPDATES'"),
   true,
 );
 assert.equal(autoUpdateWorkflow.includes("concurrency:"), true);
@@ -257,9 +254,9 @@ assert.deepEqual(
   { accepted: false, reason: "bad_confirmation", requests: [] },
 );
 assert.deepEqual(evaluateAutoUpdateSchedulerRequests({ eventName: "schedule" }), {
-  accepted: true,
-  reason: "schedule",
-  requests: ["metadata-player-count", "server-wars", "discord-posts"],
+  accepted: false,
+  reason: "unsupported_event",
+  requests: [],
 });
 assert.deepEqual(
   evaluateAutoUpdateSchedulerRequests({

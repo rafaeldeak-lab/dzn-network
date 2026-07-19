@@ -17,8 +17,6 @@ on:
           - metadata-player-count
           - server-wars
           - discord-posts
-  schedule:
-    - cron: "17 * * * *"
 
 permissions:
   contents: read
@@ -33,7 +31,7 @@ jobs:
     env:
       PRODUCTION_APP_URL: https://dzn-network.pages.dev
       CONFIRM_PRODUCTION_UPDATES: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates || '' }}
-      TASK_SELECTION: ${{ github.event_name == 'workflow_dispatch' && inputs.task || 'all' }}
+      TASK_SELECTION: ${{ inputs.task || 'all' }}
       DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
       DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
     steps:
@@ -42,12 +40,6 @@ jobs:
           set -euo pipefail
 
           case "${{ github.event_name }}" in
-            schedule)
-              if [ "${TASK_SELECTION}" != "all" ]; then
-                echo "::error::Scheduled runs must execute the fixed all-task set."
-                exit 1
-              fi
-              ;;
             workflow_dispatch)
               if [ "${CONFIRM_PRODUCTION_UPDATES}" != "APPROVE_SCHEDULED_PRODUCTION_UPDATES" ]; then
                 echo "::error::confirm_production_updates must equal APPROVE_SCHEDULED_PRODUCTION_UPDATES."
@@ -106,18 +98,16 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run protected auto-update routes
-        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates == 'APPROVE_SCHEDULED_PRODUCTION_UPDATES') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_production_updates == 'APPROVE_SCHEDULED_PRODUCTION_UPDATES' }}
         env:
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: |
           set -euo pipefail
 
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${CONFIRM_PRODUCTION_UPDATES}" != "APPROVE_SCHEDULED_PRODUCTION_UPDATES" ]; then
-              echo "::error::Production POSTs are allowed only for schedule or approved workflow_dispatch."
-              exit 1
-            fi
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${CONFIRM_PRODUCTION_UPDATES}" != "APPROVE_SCHEDULED_PRODUCTION_UPDATES" ]; then
+            echo "::error::Production POSTs are allowed only for approved workflow_dispatch."
+            exit 1
           fi
 
           case "${TASK_SELECTION}" in
