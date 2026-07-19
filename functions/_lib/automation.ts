@@ -12,6 +12,13 @@ import {
 import { rankServers } from "./server-ranking";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
+import {
+  SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES,
+  SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES,
+  classifyServerLifecycleError,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 export const ACTIVE_BILLING_STATUSES = ["active", "trialing"] as const;
 export const AUTOMATION_CRON_SOURCES = ["cloudflare", "github-backup", "manual"] as const;
@@ -58,6 +65,12 @@ export type AutomationSyncServer = {
   next_status_check_due_at: string | null;
   next_adm_discovery_due_at: string | null;
   next_adm_pull_due_at: string | null;
+  next_retry_after?: string | null;
+  lifecycle_status?: string | null;
+  lifecycle_reason?: string | null;
+  owner_action_required?: number | null;
+  owner_action_reason?: string | null;
+  final_sync_attempted_at?: string | null;
   newest_available_adm_filename?: string | null;
   newest_available_adm_timestamp?: string | null;
   newest_readable_adm_filename?: string | null;
@@ -72,6 +85,7 @@ export async function ensureAutomationSchema(env: Env) {
   for (const statement of AUTOMATION_SCHEMA_STATEMENTS) {
     await db.prepare(statement).run();
   }
+  await ensureLinkedServerLifecycleColumns(db);
   await ensureServerSyncStateAdmColumns(db);
   await ensureAutomationCronRunsColumns(db);
   await ensureServerPostingStateDispatchColumns(db);
@@ -80,6 +94,7 @@ export async function ensureAutomationSchema(env: Env) {
 export async function ensureAutomationRowsForLinkedServers(env: Env) {
   await ensureAutomationSchema(env);
   const db = requireDb(env);
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const rows = await db
     .prepare(
       `SELECT linked_servers.guild_id, linked_servers.server_name, linked_servers.display_name,
@@ -96,10 +111,11 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
        LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
        WHERE linked_servers.guild_id IS NOT NULL
          AND linked_servers.guild_id != ''
-         AND linked_servers.nitrado_service_id IS NOT NULL
-         AND linked_servers.nitrado_service_id != ''
-         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
+          AND linked_servers.nitrado_service_id IS NOT NULL
+          AND linked_servers.nitrado_service_id != ''
+          AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+          AND ${lifecycleStatusSql} NOT IN ('archived_hidden', 'legacy_offline', 'final_sync_complete')
+          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`,
     )
     .all<{
       guild_id: string;
@@ -221,6 +237,195 @@ function sanitizeAutomationError(value: string | null | undefined) {
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
     .replace(/(token|access_token|signature|sig|secret|key)=([^&\s]+)/gi, "$1=[redacted]")
     .slice(0, 240);
+}
+
+async function recordServerLifecycleOutcome(env: Env, input: {
+  guildId: string;
+  task: "metadata" | "adm_discovery" | "adm_processing";
+  ok: boolean;
+  error?: string | null;
+  finalAdmFile?: string | null;
+  latestImportedEventAt?: string | null;
+}) {
+  const db = requireDb(env);
+  const now = new Date().toISOString();
+  if (input.ok) {
+    if (input.task === "adm_processing") {
+      await db
+        .prepare(
+          `UPDATE linked_servers SET
+            lifecycle_status = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) = 'final_sync_pending' THEN 'final_sync_complete'
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave') THEN 'active_live'
+              ELSE lifecycle_status
+            END,
+            lifecycle_reason = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave', 'final_sync_pending') THEN NULL
+              ELSE lifecycle_reason
+            END,
+            lifecycle_updated_at = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave', 'final_sync_pending') THEN ?
+              ELSE lifecycle_updated_at
+            END,
+            owner_action_required = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave', 'final_sync_pending') THEN 0
+              ELSE owner_action_required
+            END,
+            owner_action_reason = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave', 'final_sync_pending') THEN NULL
+              ELSE owner_action_reason
+            END,
+            final_sync_attempted_at = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) = 'final_sync_pending' THEN COALESCE(final_sync_attempted_at, ?)
+              ELSE final_sync_attempted_at
+            END,
+            final_sync_completed_at = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) = 'final_sync_pending' THEN ?
+              ELSE final_sync_completed_at
+            END,
+            final_sync_result = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) = 'final_sync_pending' THEN 'complete'
+              ELSE final_sync_result
+            END,
+            final_adm_filename = COALESCE(?, final_adm_filename),
+            latest_imported_event_at = COALESCE(?, latest_imported_event_at)
+           WHERE guild_id = ?
+             AND lower(COALESCE(status, 'pending')) NOT IN ('archived', 'deleted', 'merged')
+             AND lower(COALESCE(lifecycle_status, 'active_live')) NOT IN ('archived_hidden', 'legacy_offline', 'final_sync_complete')`,
+        )
+        .bind(now, now, now, input.finalAdmFile ?? null, input.latestImportedEventAt ?? null, input.guildId)
+        .run();
+    } else {
+      await db
+        .prepare(
+          `UPDATE linked_servers SET
+            lifecycle_status = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave') THEN 'active_live'
+              ELSE lifecycle_status
+            END,
+            lifecycle_reason = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave') THEN NULL
+              ELSE lifecycle_reason
+            END,
+            lifecycle_updated_at = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave') THEN ?
+              ELSE lifecycle_updated_at
+            END,
+            owner_action_required = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave') THEN 0
+              ELSE owner_action_required
+            END,
+            owner_action_reason = CASE
+              WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('active_degraded', 'nitrado_upstream_down', 'token_needs_resave') THEN NULL
+              ELSE owner_action_reason
+            END
+           WHERE guild_id = ?
+             AND lower(COALESCE(status, 'pending')) NOT IN ('archived', 'deleted', 'merged')
+             AND lower(COALESCE(lifecycle_status, 'active_live')) NOT IN ('archived_hidden', 'legacy_offline', 'final_sync_complete', 'final_sync_pending')`,
+        )
+        .bind(now, input.guildId)
+        .run();
+    }
+
+    await db
+      .prepare(
+        `UPDATE server_sync_state SET
+          next_retry_after = NULL,
+          last_skip_reason = NULL,
+          updated_at = ?
+         WHERE guild_id = ?`,
+      )
+      .bind(now, input.guildId)
+      .run();
+    return;
+  }
+
+  const classified = classifyServerLifecycleError(input.error);
+  if (!classified.status) return;
+  const retryAfter = classified.retryAfterMs ? new Date(Date.now() + classified.retryAfterMs).toISOString() : null;
+  await db
+    .prepare(
+      `UPDATE linked_servers SET
+        lifecycle_status = CASE
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('archived_hidden', 'legacy_offline', 'final_sync_complete') THEN lifecycle_status
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) = 'final_sync_pending' AND ? = 'adm_processing' THEN lifecycle_status
+          ELSE ?
+        END,
+        lifecycle_reason = CASE
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('archived_hidden', 'legacy_offline', 'final_sync_complete') THEN lifecycle_reason
+          ELSE ?
+        END,
+        lifecycle_updated_at = CASE
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('archived_hidden', 'legacy_offline', 'final_sync_complete') THEN lifecycle_updated_at
+          ELSE ?
+        END,
+        owner_action_required = CASE
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('archived_hidden', 'legacy_offline', 'final_sync_complete') THEN owner_action_required
+          ELSE ?
+        END,
+        owner_action_reason = CASE
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) IN ('archived_hidden', 'legacy_offline', 'final_sync_complete') THEN owner_action_reason
+          ELSE ?
+        END,
+        expired_detected_at = CASE
+          WHEN ? = 'expired_detected' THEN COALESCE(expired_detected_at, ?)
+          ELSE expired_detected_at
+        END,
+        final_sync_attempted_at = CASE
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) = 'final_sync_pending' AND ? = 'adm_processing' THEN COALESCE(final_sync_attempted_at, ?)
+          ELSE final_sync_attempted_at
+        END,
+        final_sync_result = CASE
+          WHEN lower(COALESCE(lifecycle_status, 'active_live')) = 'final_sync_pending' AND ? = 'adm_processing' THEN ?
+          ELSE final_sync_result
+        END
+       WHERE guild_id = ?
+         AND lower(COALESCE(status, 'pending')) NOT IN ('archived', 'deleted', 'merged')`,
+    )
+    .bind(
+      input.task,
+      classified.status,
+      classified.reason,
+      now,
+      classified.ownerActionRequired ? 1 : 0,
+      classified.ownerActionReason,
+      classified.status,
+      now,
+      input.task,
+      now,
+      input.task,
+      sanitizeAutomationError(input.error) ?? classified.reason ?? "final_sync_failed",
+      input.guildId,
+    )
+    .run();
+
+  await db
+    .prepare(
+      `UPDATE server_sync_state SET
+        next_retry_after = ?,
+        last_skip_reason = ?,
+        next_metadata_check_at = CASE WHEN ? = 'metadata' THEN ? ELSE next_metadata_check_at END,
+        next_player_count_check_at = CASE WHEN ? = 'metadata' THEN ? ELSE next_player_count_check_at END,
+        next_adm_discovery_at = CASE WHEN ? = 'adm_discovery' THEN ? ELSE next_adm_discovery_at END,
+        next_adm_processing_at = CASE WHEN ? = 'adm_processing' THEN ? ELSE next_adm_processing_at END,
+        updated_at = ?
+       WHERE guild_id = ?`,
+    )
+    .bind(
+      retryAfter,
+      classified.status === "token_needs_resave" ? "skipped_token_needs_resave" : retryAfter ? "skipped_backoff" : "skipped_no_due_work",
+      input.task,
+      retryAfter,
+      input.task,
+      retryAfter,
+      input.task,
+      retryAfter,
+      input.task,
+      retryAfter,
+      now,
+      input.guildId,
+    )
+    .run();
 }
 
 async function insertAutomationCronRun(env: Env, input: {
@@ -398,6 +603,7 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
   await ensureAutomationRowsForLinkedServers(env);
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
@@ -405,24 +611,33 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
-              server_subscriptions.status AS subscription_status,
-              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
-              server_sync_state.next_adm_pull_due_at
+               linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
+               server_subscriptions.status AS subscription_status,
+               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+               server_sync_state.next_adm_pull_due_at, server_sync_state.next_retry_after,
+               ${lifecycleStatusSql} AS lifecycle_status,
+               linked_servers.lifecycle_reason,
+               linked_servers.owner_action_required,
+               linked_servers.owner_action_reason
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-         AND lower(server_subscriptions.status) IN ('active', 'trialing')
-         AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
-         AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-       ORDER BY server_sync_state.next_status_check_due_at ASC, linked_servers.updated_at DESC
-       LIMIT ?`,
+          AND lower(server_subscriptions.status) IN ('active', 'trialing')
+          AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
+          AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
+          AND (
+            ${lifecycleStatusSql} = 'active_live'
+            OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?
+          )
+          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+        ORDER BY server_sync_state.next_status_check_due_at ASC, linked_servers.updated_at DESC
+        LIMIT ?`,
     )
-    .bind(now, maxServers)
+    .bind(now, now, maxServers)
     .all<AutomationSyncServer>();
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
@@ -525,6 +740,8 @@ export async function recordStatusCheckResult(env: Env, values: {
       `UPDATE server_sync_state SET
         last_status_check_at = ?,
         next_status_check_due_at = ?,
+        next_metadata_check_at = ?,
+        next_player_count_check_at = ?,
         last_successful_status_check_at = CASE WHEN ? THEN ? ELSE last_successful_status_check_at END,
         last_failed_status_check_at = CASE WHEN ? THEN last_failed_status_check_at ELSE ? END,
         last_status_error = CASE WHEN ? THEN NULL ELSE ? END,
@@ -543,6 +760,8 @@ export async function recordStatusCheckResult(env: Env, values: {
     )
     .bind(
       now,
+      nextDue,
+      nextDue,
       nextDue,
       values.ok ? 1 : 0,
       now,
@@ -586,12 +805,19 @@ export async function recordStatusCheckResult(env: Env, values: {
       values.guildId,
     )
     .run();
+  await recordServerLifecycleOutcome(env, {
+    guildId: values.guildId,
+    task: "metadata",
+    ok: values.ok,
+    error: values.error ?? null,
+  });
 }
 
 export async function getDueAdmAutomationServers(env: Env, maxServers: number, minSyncIntervalMs: number, linkedServerId?: string | null): Promise<AutomationSyncServer[]> {
   await ensureAutomationRowsForLinkedServers(env);
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
@@ -601,10 +827,16 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
               linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
-              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
-              server_sync_state.next_adm_pull_due_at,
-              server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
-              server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
+               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+               server_sync_state.next_adm_pull_due_at,
+               server_sync_state.next_retry_after,
+               ${lifecycleStatusSql} AS lifecycle_status,
+               linked_servers.lifecycle_reason,
+               linked_servers.owner_action_required,
+               linked_servers.owner_action_reason,
+               linked_servers.final_sync_attempted_at,
+               server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
+               server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
@@ -613,18 +845,28 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND (? IS NULL OR linked_servers.id = ?)
-         AND lower(server_subscriptions.status) IN ('active', 'trialing')
-         AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
-         AND COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
-         AND (
-           adm_sync_state.last_sync_at IS NULL
-           OR (strftime('%s', 'now') - strftime('%s', adm_sync_state.last_sync_at)) * 1000 >= ?
+          AND lower(server_subscriptions.status) IN ('active', 'trialing')
+          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+          AND COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
+          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
+          AND (
+            ${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring')
+            OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?
+            OR ? IS NOT NULL
+          )
+          AND (
+            ${lifecycleStatusSql} != 'final_sync_pending'
+            OR linked_servers.final_sync_attempted_at IS NULL
+          )
+          AND (
+            adm_sync_state.last_sync_at IS NULL
+            OR (strftime('%s', 'now') - strftime('%s', adm_sync_state.last_sync_at)) * 1000 >= ?
          )
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-       ORDER BY server_sync_state.next_adm_pull_due_at ASC, linked_servers.updated_at DESC
-       LIMIT ?`,
+        ORDER BY server_sync_state.next_adm_pull_due_at ASC, linked_servers.updated_at DESC
+        LIMIT ?`,
     )
-    .bind(linkedServerId ?? null, linkedServerId ?? null, now, minSyncIntervalMs, maxServers)
+    .bind(linkedServerId ?? null, linkedServerId ?? null, now, now, linkedServerId ?? null, minSyncIntervalMs, maxServers)
     .all<AutomationSyncServer>();
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
@@ -633,6 +875,7 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
   await ensureAutomationRowsForLinkedServers(env);
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
@@ -642,10 +885,16 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
               linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
-              server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
-              server_sync_state.next_adm_pull_due_at,
-              server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
-              server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
+               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
+               server_sync_state.next_adm_pull_due_at,
+               server_sync_state.next_retry_after,
+               ${lifecycleStatusSql} AS lifecycle_status,
+               linked_servers.lifecycle_reason,
+               linked_servers.owner_action_required,
+               linked_servers.owner_action_reason,
+               linked_servers.final_sync_attempted_at,
+               server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
+               server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
@@ -653,14 +902,24 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND (? IS NULL OR linked_servers.id = ?)
-         AND lower(server_subscriptions.status) IN ('active', 'trialing')
-         AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
-         AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-       ORDER BY server_sync_state.next_adm_discovery_due_at ASC, linked_servers.updated_at DESC
-       LIMIT ?`,
+          AND lower(server_subscriptions.status) IN ('active', 'trialing')
+          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+          AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
+          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
+          AND (
+            ${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring')
+            OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?
+            OR ? IS NOT NULL
+          )
+          AND (
+            ${lifecycleStatusSql} != 'final_sync_pending'
+            OR linked_servers.final_sync_attempted_at IS NULL
+          )
+          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+        ORDER BY server_sync_state.next_adm_discovery_due_at ASC, linked_servers.updated_at DESC
+        LIMIT ?`,
     )
-    .bind(linkedServerId ?? null, linkedServerId ?? null, now, maxServers)
+    .bind(linkedServerId ?? null, linkedServerId ?? null, now, now, linkedServerId ?? null, maxServers)
     .all<AutomationSyncServer>();
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
@@ -720,6 +979,7 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
       `UPDATE server_sync_state SET
         last_adm_discovery_check_at = ?,
         next_adm_discovery_due_at = ?,
+        next_adm_discovery_at = ?,
         last_successful_adm_discovery_at = CASE WHEN ? THEN ? ELSE last_successful_adm_discovery_at END,
         last_failed_adm_discovery_at = CASE WHEN ? THEN last_failed_adm_discovery_at ELSE ? END,
         last_adm_discovery_error = CASE WHEN ? THEN NULL ELSE ? END,
@@ -745,6 +1005,7 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
     )
     .bind(
       now,
+      nextDue,
       nextDue,
       values.ok ? 1 : 0,
       now,
@@ -774,6 +1035,12 @@ export async function recordAdmDiscoveryResult(env: Env, values: {
       values.guildId,
     )
     .run();
+  await recordServerLifecycleOutcome(env, {
+    guildId: values.guildId,
+    task: "adm_discovery",
+    ok: values.ok,
+    error: values.error ?? null,
+  });
 }
 
 export async function recordAdmCadenceObservation(env: Env, values: {
@@ -909,6 +1176,7 @@ export async function recordAdmPullResult(env: Env, values: {
       `UPDATE server_sync_state SET
         last_adm_pull_at = ?,
         next_adm_pull_due_at = ?,
+        next_adm_processing_at = ?,
         last_successful_adm_pull_at = CASE WHEN ? THEN ? ELSE last_successful_adm_pull_at END,
         last_failed_adm_pull_at = CASE WHEN ? THEN last_failed_adm_pull_at ELSE ? END,
         last_adm_error = CASE WHEN ? THEN NULL ELSE ? END,
@@ -934,6 +1202,7 @@ export async function recordAdmPullResult(env: Env, values: {
     )
     .bind(
       now,
+      nextDue,
       nextDue,
       values.ok ? 1 : 0,
       now,
@@ -963,6 +1232,14 @@ export async function recordAdmPullResult(env: Env, values: {
       values.guildId,
     )
     .run();
+  await recordServerLifecycleOutcome(env, {
+    guildId: values.guildId,
+    task: "adm_processing",
+    ok: values.ok,
+    error: values.error ?? null,
+    finalAdmFile: values.processedAdmFile ?? newestReadableFile ?? newestAvailableFile,
+    latestImportedEventAt: values.lastUsefulAdmEventAt ?? values.lastPlayerlistAt ?? newestReadableTimestamp ?? newestAvailableTimestamp,
+  });
 }
 
 export async function upsertServerPublicCache(env: Env, input: {
@@ -1431,6 +1708,7 @@ export async function getAutomationHealth(env: Env) {
   await recoverStuckAutomationLocks(env);
   const db = requireDb(env);
   const now = new Date().toISOString();
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const statusLockCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const admLockCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const admImportJobCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
@@ -1534,26 +1812,37 @@ export async function getAutomationHealth(env: Env) {
       `SELECT COUNT(*) AS count
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
+       JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
        WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
+         AND (${lifecycleStatusSql} = 'active_live' OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
          AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?`,
-      now),
+      now, now),
     countFirst(db,
       `SELECT COUNT(*) AS count
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
+       JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
        WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+         AND (${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring') OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
+         AND (${lifecycleStatusSql} != 'final_sync_pending' OR linked_servers.final_sync_attempted_at IS NULL)
          AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?`,
-      now),
+      now, now),
     countFirst(db,
       `SELECT COUNT(*) AS count
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
+       JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
        WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
+         AND (${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring') OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
+         AND (${lifecycleStatusSql} != 'final_sync_pending' OR linked_servers.final_sync_attempted_at IS NULL)
          AND COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?`,
-      now),
+      now, now),
     countFirst(db, "SELECT COUNT(*) AS count FROM automation_jobs WHERE job_type = 'discord-post-update' AND status = 'queued'"),
     countFirst(db, "SELECT COUNT(*) AS count FROM automation_jobs WHERE status = 'failed'"),
     countFirst(db,
@@ -1589,12 +1878,26 @@ export async function getAutomationHealth(env: Env) {
           server_sync_state.currently_syncing_adm,
           server_sync_state.status_sync_started_at,
           server_sync_state.adm_sync_started_at,
+          server_sync_state.next_retry_after,
+          server_sync_state.last_skip_reason,
+          ${lifecycleStatusSql} AS lifecycle_status,
+          linked_servers.lifecycle_reason,
+          linked_servers.owner_action_required,
+          linked_servers.owner_action_reason,
           CASE
+            WHEN ${lifecycleStatusSql} = 'archived_hidden' THEN 'skipped_archived'
+            WHEN ${lifecycleStatusSql} = 'legacy_offline' THEN 'skipped_legacy'
+            WHEN ${lifecycleStatusSql} = 'final_sync_complete' THEN 'skipped_final_sync_complete'
+            WHEN ${lifecycleStatusSql} = 'token_needs_resave' THEN 'skipped_token_needs_resave'
             WHEN lower(COALESCE(linked_servers.status, 'pending')) != 'live' THEN 'not_live'
             WHEN linked_servers.nitrado_service_id IS NULL OR linked_servers.nitrado_service_id = '' THEN 'missing_nitrado_token'
             WHEN lower(COALESCE(server_subscriptions.status, '')) NOT IN ('active', 'trialing') THEN 'no_active_subscription'
             WHEN COALESCE(server_sync_state.currently_checking_status, 0) = 1 THEN 'currently_checking_status'
             WHEN COALESCE(server_sync_state.currently_syncing_adm, 0) = 1 THEN 'currently_syncing_adm'
+            WHEN ${lifecycleStatusSql} IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring')
+              AND COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') > ? THEN 'skipped_backoff'
+            WHEN ${lifecycleStatusSql} = 'final_sync_pending'
+              AND linked_servers.final_sync_attempted_at IS NOT NULL THEN 'skipped_final_sync_complete'
             WHEN COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
               OR COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
               OR COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
@@ -1610,7 +1913,7 @@ export async function getAutomationHealth(env: Env) {
          ORDER BY linked_servers.updated_at DESC
          LIMIT 50`,
       )
-      .bind(now, now, now)
+      .bind(now, now, now, now)
       .all<{
         linked_server_id: string;
         guild_id: string | null;
@@ -1626,6 +1929,12 @@ export async function getAutomationHealth(env: Env) {
         currently_syncing_adm: number | null;
         status_sync_started_at: string | null;
         adm_sync_started_at: string | null;
+        next_retry_after: string | null;
+        last_skip_reason: string | null;
+        lifecycle_status: string | null;
+        lifecycle_reason: string | null;
+        owner_action_required: number | null;
+        owner_action_reason: string | null;
         skipped_reason: string | null;
       }>(),
     db
@@ -2109,6 +2418,35 @@ async function ensureAutomationCronRunsColumns(db: D1Database) {
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_job_type ON automation_cron_runs(job_type)").run();
 }
 
+async function ensureLinkedServerLifecycleColumns(db: D1Database) {
+  const columns = await getTableColumns(db, "linked_servers");
+  const requiredColumns: Record<string, string> = {
+    lifecycle_status: "ALTER TABLE linked_servers ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active_live'",
+    lifecycle_reason: "ALTER TABLE linked_servers ADD COLUMN lifecycle_reason TEXT",
+    lifecycle_updated_at: "ALTER TABLE linked_servers ADD COLUMN lifecycle_updated_at TEXT",
+    owner_action_required: "ALTER TABLE linked_servers ADD COLUMN owner_action_required INTEGER NOT NULL DEFAULT 0",
+    owner_action_reason: "ALTER TABLE linked_servers ADD COLUMN owner_action_reason TEXT",
+    stale_since: "ALTER TABLE linked_servers ADD COLUMN stale_since TEXT",
+    expired_detected_at: "ALTER TABLE linked_servers ADD COLUMN expired_detected_at TEXT",
+    final_sync_attempted_at: "ALTER TABLE linked_servers ADD COLUMN final_sync_attempted_at TEXT",
+    final_sync_completed_at: "ALTER TABLE linked_servers ADD COLUMN final_sync_completed_at TEXT",
+    final_sync_result: "ALTER TABLE linked_servers ADD COLUMN final_sync_result TEXT",
+    final_adm_filename: "ALTER TABLE linked_servers ADD COLUMN final_adm_filename TEXT",
+    latest_imported_event_at: "ALTER TABLE linked_servers ADD COLUMN latest_imported_event_at TEXT",
+    auto_archive_after: "ALTER TABLE linked_servers ADD COLUMN auto_archive_after TEXT",
+  };
+
+  for (const [column, statement] of Object.entries(requiredColumns)) {
+    if (!columns.has(column)) {
+      await db.prepare(statement).run();
+    }
+  }
+
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_linked_servers_lifecycle_status ON linked_servers(lifecycle_status)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_linked_servers_lifecycle_visibility ON linked_servers(lifecycle_status, status, listing_visibility)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_linked_servers_owner_action ON linked_servers(owner_action_required, lifecycle_status)").run();
+}
+
 async function ensureServerSyncStateAdmColumns(db: D1Database) {
   const columns = await getTableColumns(db, "server_sync_state");
   const requiredColumns: Record<string, string> = {
@@ -2144,6 +2482,12 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
     nitrado_server_log_enabled: "ALTER TABLE server_sync_state ADD COLUMN nitrado_server_log_enabled INTEGER",
     nitrado_log_settings_last_checked_at: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_last_checked_at TEXT",
     nitrado_log_settings_last_error: "ALTER TABLE server_sync_state ADD COLUMN nitrado_log_settings_last_error TEXT",
+    next_metadata_check_at: "ALTER TABLE server_sync_state ADD COLUMN next_metadata_check_at TEXT",
+    next_player_count_check_at: "ALTER TABLE server_sync_state ADD COLUMN next_player_count_check_at TEXT",
+    next_adm_discovery_at: "ALTER TABLE server_sync_state ADD COLUMN next_adm_discovery_at TEXT",
+    next_adm_processing_at: "ALTER TABLE server_sync_state ADD COLUMN next_adm_processing_at TEXT",
+    next_retry_after: "ALTER TABLE server_sync_state ADD COLUMN next_retry_after TEXT",
+    last_skip_reason: "ALTER TABLE server_sync_state ADD COLUMN last_skip_reason TEXT",
   };
 
   for (const [column, statement] of Object.entries(requiredColumns)) {
@@ -2157,6 +2501,9 @@ async function ensureServerSyncStateAdmColumns(db: D1Database) {
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_last_useful_adm_event ON server_sync_state(last_useful_adm_event_at)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_status_started ON server_sync_state(status_sync_started_at)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_adm_started ON server_sync_state(adm_sync_started_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_metadata_due ON server_sync_state(next_metadata_check_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_player_count_due ON server_sync_state(next_player_count_check_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_sync_state_lifecycle_retry ON server_sync_state(next_retry_after, last_skip_reason)").run();
 }
 
 async function ensureServerPostingStateDispatchColumns(db: D1Database) {

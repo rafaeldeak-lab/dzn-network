@@ -7,6 +7,11 @@ import { resolveDznMapConfig } from "./map-configs";
 import { computeTravelStats, type TravelPositionSample, type TravelPlayerStats, type TravelServerStats } from "./travel-stats";
 import { getCanonicalServerStats } from "./server-stats";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 export type AdvancedBoardCategory =
   | "overall"
@@ -1046,7 +1051,7 @@ function groupSamplesByServer(samples: TravelPositionSample[]) {
 }
 
 function publicServerWhereSql() {
-  return `lower(linked_servers.status) = 'live'
+  return `${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES)})
     AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
     AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`;
 }

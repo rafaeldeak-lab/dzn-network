@@ -2,9 +2,10 @@ import { defaultBumpPeriod, evaluateListingBumpEligibility, periodExpired } from
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { ensureBillingSchema, getListingLimits, getOwnerEntitlements, getPlanConfig, type PlanEntitlements } from "../../../../_lib/plans";
+import { recordDiscordServerAnnouncementEvent } from "../../../../_lib/discord-server-announcements";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
-export const onRequest: PagesFunction = async ({ request, env, params }) => {
+export const onRequest: PagesFunction = async ({ request, env, params, waitUntil }) => {
   if (request.method !== "POST" && request.method !== "GET") return methodNotAllowed();
 
   const user = await resolveUser(env, request);
@@ -141,6 +142,19 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     .bind(crypto.randomUUID(), linkedServerId, user.discord_id, nowIso)
     .run();
   await recordListingEvent(env, linkedServerId, "bump_success", user.id, { plan: listingLimits.listingPlanKey, next_bump_at: nextBumpAt }, nowIso);
+  waitUntil(
+    recordDiscordServerAnnouncementEvent(env, {
+      eventType: "server_bump",
+      serverId: linkedServerId,
+      planKey: listingLimits.listingPlanKey,
+      reason: "server_listing_bump",
+    }).catch((error) => {
+      console.warn("DZN Discord bump announcement skipped", {
+        linkedServerId,
+        reason: error instanceof Error ? error.message : "unknown error",
+      });
+    }),
+  );
 
   console.log("DZN SERVER BUMPED", { linkedServerId });
   return json({

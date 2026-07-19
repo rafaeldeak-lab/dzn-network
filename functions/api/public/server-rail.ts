@@ -7,6 +7,11 @@ import {
 } from "../../_lib/player-counts";
 import type { Env, PagesFunction } from "../../_lib/types";
 import { normalizeListingPlanKey } from "../../../lib/billing/plans";
+import {
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../../lib/server-lifecycle";
 
 type RailRow = {
   id: string;
@@ -49,6 +54,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
 async function queryServerRail(env: Env) {
   const db = requireDb(env);
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const result = await db.prepare(
     `SELECT
        linked_servers.id,
@@ -78,6 +84,7 @@ async function queryServerRail(env: Env) {
         GROUP BY linked_server_id
      ) AS review_summary ON review_summary.linked_server_id = linked_servers.id
      WHERE lower(COALESCE(linked_servers.status, '')) = 'live'
+       AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
        AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
        AND linked_servers.public_slug IS NOT NULL
        AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')

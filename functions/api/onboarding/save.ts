@@ -14,6 +14,7 @@ import {
   validateServerType,
 } from "../../_lib/onboarding";
 import { validatePublicListingInput, type PublicListingInput } from "../../_lib/review-moderation";
+import { recordDiscordServerAnnouncementEvent } from "../../_lib/discord-server-announcements";
 import { ensureAutomationRowsForLinkedServers } from "../../_lib/automation";
 import { saveBotOnboardingConfig } from "../../_lib/ctf-tournaments";
 import { normalizeServerCategory } from "../../_lib/server-categories";
@@ -29,7 +30,7 @@ type SaveBody = {
   botAccessToken?: string;
 } & PublicListingInput;
 
-export const onRequest: PagesFunction = async ({ request, env }) => {
+export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
   if (request.method !== "POST") return methodNotAllowed();
 
   const user = await getSessionUser(env, request);
@@ -105,6 +106,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         .first<{ id: string }>();
 
   let linkedServerId: string;
+  let createdNewLinkedServer = false;
   if (existingSameService || existingDraft) {
     linkedServerId = (existingSameService ?? existingDraft)?.id ?? "";
     const slug = await uniquePublicSlug(env, service.name, linkedServerId);
@@ -190,6 +192,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     }
 
     linkedServerId = crypto.randomUUID();
+    createdNewLinkedServer = true;
     const slug = await uniquePublicSlug(env, service.name, linkedServerId);
     await db
       .prepare(
@@ -248,6 +251,20 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     botAccessToken: body.botAccessToken,
   });
   await ensureAutomationRowsForLinkedServers(env);
+  if (createdNewLinkedServer) {
+    waitUntil(
+      recordDiscordServerAnnouncementEvent(env, {
+        eventType: "new_server",
+        serverId: linkedServerId,
+        reason: "onboarding_server_created",
+      }).catch((error) => {
+        console.warn("DZN Discord server announcement skipped", {
+          linkedServerId,
+          reason: error instanceof Error ? error.message : "unknown error",
+        });
+      }),
+    );
+  }
   return json({ ok: true, linkedServerId });
 };
 

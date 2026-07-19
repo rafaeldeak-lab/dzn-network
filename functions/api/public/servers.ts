@@ -1,10 +1,7 @@
-import { ensureAdmSyncSchema } from "../../_lib/adm-sync";
 import { advertisingSortScore, publicAdvertisingFromState, type PublicAdvertising } from "../../_lib/advertising";
-import { ensureLinkedServerMetadataColumns, requireDb } from "../../_lib/db";
+import { requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
-import { uniquePublicSlug } from "../../_lib/onboarding";
-import { ensureBillingSchema } from "../../_lib/plans";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../_lib/public-auth";
 import {
   logPublicApi503RootCause,
@@ -34,6 +31,14 @@ import type { Env, PagesFunction } from "../../_lib/types";
 import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
 import { buildServerBadgeCollection, type PublicLockedBadge, type ServerBadgeCollection } from "../../../lib/badges/rules";
 import { normalizeListingPlanKey } from "../../../lib/billing/plans";
+import {
+  SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  getServerLifecycleDisplay,
+  normalizeServerLifecycleStatus,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../../lib/server-lifecycle";
 
 type PublicServerRow = {
   id: string;
@@ -42,6 +47,7 @@ type PublicServerRow = {
   server_type: string;
   tags_json: string | null;
   status: string;
+  lifecycle_status?: string | null;
   nitrado_service_id: string | null;
   nitrado_service_name: string | null;
   player_slots: number | null;
@@ -259,8 +265,15 @@ type SafePublicServer = {
   network_status?: {
     adm_status: "Connected" | "Discovered" | "Needs Review";
     stats_sync: "Active" | "Pending" | "Not Started";
-    public_listing: "Active";
+    public_listing: "Active" | "Historical";
     last_sync_at: string | null;
+  };
+  lifecycle?: {
+    status: string;
+    label: string;
+    message: string;
+    owner_action: string;
+    historical: boolean;
   };
   access_level?: "full" | "preview";
   is_locked?: boolean;
@@ -344,12 +357,6 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
   if (slug) {
     return getPublicServerProfileFastPayload(env, slug, viewerLoggedIn);
   }
-
-  await ensureLinkedServerMetadataColumns(env);
-  await ensureServerLogConfigTable(env);
-  await ensureAdmSyncSchema(env);
-  await ensureBillingSchema(env);
-  await ensurePublicSlugsForLiveServers(env);
 
   const [rows, rankedServers] = await Promise.all([queryPublicServers(env), getRankedPublicServers(env, 500)]);
   const rankingById = new Map(rankedServers.map((server) => [server.server_id, server]));
@@ -437,6 +444,7 @@ async function queryPublicServerById(env: Env, linkedServerId: string) {
 }
 
 async function querySinglePublicServer(env: Env, whereClause: string, value: string) {
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const row = await requireDb(env)
     .prepare(
       `SELECT
@@ -446,6 +454,7 @@ async function querySinglePublicServer(env: Env, whereClause: string, value: str
         COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         linked_servers.tags_json,
         linked_servers.status,
+        ${lifecycleStatusSql} AS lifecycle_status,
         linked_servers.nitrado_service_id,
         linked_servers.nitrado_service_name,
         COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, linked_servers.max_players, linked_servers.player_slots) AS player_slots,
@@ -539,7 +548,7 @@ async function querySinglePublicServer(env: Env, whereClause: string, value: str
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        WHERE ${whereClause}
-         AND lower(linked_servers.status) = 'live'
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES)})
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,
@@ -591,6 +600,7 @@ function lightweightRankingFromPublicRow(row: PublicServerRow): PublicServerRank
 }
 
 async function queryPublicServersPreview(env: Env) {
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const result = await requireDb(env)
     .prepare(
       `SELECT
@@ -600,6 +610,7 @@ async function queryPublicServersPreview(env: Env) {
         COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
         linked_servers.tags_json,
         linked_servers.status,
+        ${lifecycleStatusSql} AS lifecycle_status,
         linked_servers.nitrado_service_id,
         linked_servers.nitrado_service_name,
         COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, linked_servers.max_players, linked_servers.player_slots) AS player_slots,
@@ -689,6 +700,7 @@ async function queryPublicServersPreview(env: Env) {
        LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        WHERE lower(linked_servers.status) = 'live'
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
          AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        ORDER BY
@@ -733,6 +745,7 @@ async function getPublicServerProfileBySlug(env: Env, row: PublicServerRow | nul
 
 async function queryPublicServers(env: Env) {
   const db = requireDb(env);
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const baseQuery = `
     SELECT
       linked_servers.id,
@@ -741,6 +754,7 @@ async function queryPublicServers(env: Env) {
       COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
       linked_servers.tags_json,
       linked_servers.status,
+      ${lifecycleStatusSql} AS lifecycle_status,
       linked_servers.nitrado_service_id,
       linked_servers.nitrado_service_name,
       COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, linked_servers.max_players, linked_servers.player_slots) AS player_slots,
@@ -844,6 +858,7 @@ async function queryPublicServers(env: Env) {
     LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
     LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
     WHERE lower(linked_servers.status) = 'live'
+      AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
       AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
       AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
   `;
@@ -931,53 +946,6 @@ async function resolveSlugAliasLinkedServerId(env: Env, slug: string) {
   return row?.linked_server_id ?? null;
 }
 
-async function ensurePublicSlugsForLiveServers(env: Env) {
-  const db = requireDb(env);
-  const result = await db
-    .prepare(
-      `SELECT
-        linked_servers.id,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name) AS server_name,
-        linked_servers.nitrado_service_name,
-        linked_servers.public_slug,
-        discord_guilds.name AS guild_name
-       FROM linked_servers
-       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
-         AND (linked_servers.public_slug IS NULL OR linked_servers.public_slug = '')`,
-    )
-    .all<{ id: string; server_name: string | null; nitrado_service_name: string | null; public_slug: string | null; guild_name: string | null }>();
-
-  for (const server of result.results ?? []) {
-    const sourceName = firstString(server.guild_name, server.server_name, server.nitrado_service_name) ?? "dayz-server";
-    const slug = await uniquePublicSlug(env, sourceName, server.id);
-    await db
-      .prepare("UPDATE linked_servers SET public_slug = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(slug, server.id)
-      .run();
-  }
-}
-
-async function ensureServerLogConfigTable(env: Env) {
-  const db = requireDb(env);
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS server_log_config (
-        id TEXT PRIMARY KEY,
-        linked_server_id TEXT UNIQUE NOT NULL,
-        adm_path TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id)
-      )`,
-    )
-    .run();
-  await db
-    .prepare("CREATE INDEX IF NOT EXISTS idx_server_log_config_linked_server_id ON server_log_config(linked_server_id)")
-    .run();
-}
-
 async function toSafePublicServer(
   env: Env,
   row: PublicServerRow,
@@ -1062,6 +1030,12 @@ async function toSafePublicServer(
     featured_label: row.featured_label,
   });
   const activePromotions = parsePublicPromotions(row.active_promotions_json);
+  const lifecycleStatus = normalizeServerLifecycleStatus({
+    lifecycle_status: row.lifecycle_status,
+    status: row.status,
+  });
+  const lifecycleDisplay = getServerLifecycleDisplay(lifecycleStatus);
+  const historicalLifecycle = lifecycleStatus === "legacy_offline" || lifecycleStatus === "final_sync_complete";
   const visualShowcase = getServerVisualShowcase({
     planKey,
     reputationTier: reputation.tier,
@@ -1131,6 +1105,13 @@ async function toSafePublicServer(
     tags_json: tagsJson,
     tags,
     status: row.status,
+    lifecycle: {
+      status: lifecycleStatus,
+      label: lifecycleDisplay.label,
+      message: lifecycleDisplay.message,
+      owner_action: lifecycleDisplay.ownerAction,
+      historical: historicalLifecycle,
+    },
     nitrado_service_name: row.nitrado_service_name,
     guild_name: row.guild_name,
     guild_icon_url: row.guild_icon_url,
@@ -1206,7 +1187,7 @@ async function toSafePublicServer(
     network_status: {
       adm_status: admStatus,
       stats_sync: statsSync,
-      public_listing: "Active",
+      public_listing: historicalLifecycle ? "Historical" : "Active",
       last_sync_at: lastSyncAt,
     },
     recent_events: await getPublicRecentEvents(env, row.id).catch(() => []),

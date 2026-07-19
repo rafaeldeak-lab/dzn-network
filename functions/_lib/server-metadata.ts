@@ -15,6 +15,11 @@ import { isMockNitrado } from "./mock";
 import { parseAdmLine } from "./adm-parser";
 import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 const NITRADO_API = "https://api.nitrado.net";
 const METADATA_STALE_MS = 2 * 60 * 1000;
@@ -1045,6 +1050,7 @@ async function getDueMetadataRefreshServersFast(
   const livePlayerCountCutoff = new Date(Date.now() - livePlayerCountStaleMs).toISOString();
   const unavailableRetryCutoff = new Date(Date.now() - Math.max(2 * 60 * 1000, Math.min(livePlayerCountStaleMs * 3, 5 * 60 * 1000))).toISOString();
   const db = requireDb(env);
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const selectDueServersSql =
       `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
               linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
@@ -1054,7 +1060,11 @@ async function getDueMetadataRefreshServersFast(
               linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
-              server_sync_state.next_adm_pull_due_at
+              server_sync_state.next_adm_pull_due_at, server_sync_state.next_retry_after,
+              ${lifecycleStatusSql} AS lifecycle_status,
+              linked_servers.lifecycle_reason,
+              linked_servers.owner_action_required,
+              linked_servers.owner_action_reason
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
@@ -1062,6 +1072,11 @@ async function getDueMetadataRefreshServersFast(
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
+         AND (
+           ${lifecycleStatusSql} = 'active_live'
+           OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?
+         )
          AND (
            COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
            OR linked_servers.player_count_last_checked_at IS NULL
@@ -1100,7 +1115,7 @@ async function getDueMetadataRefreshServersFast(
        LIMIT ?`;
   const rows = await db
     .prepare(selectDueServersSql)
-    .bind(now, livePlayerCountCutoff, staleStatusLockCutoff, unavailableRetryCutoff, staleStatusLockCutoff, maxServers)
+    .bind(now, now, livePlayerCountCutoff, staleStatusLockCutoff, unavailableRetryCutoff, staleStatusLockCutoff, maxServers)
     .all<AutomationSyncServer>();
   const dueRows = rows.results ?? [];
   const sanitizedDebugServiceId = cleanServiceId(debugServiceId);
@@ -1116,13 +1131,18 @@ async function getDueMetadataRefreshServersFast(
               linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status,
               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
-              server_sync_state.next_adm_pull_due_at
+              server_sync_state.next_adm_pull_due_at, server_sync_state.next_retry_after,
+              ${lifecycleStatusSql} AS lifecycle_status,
+              linked_servers.lifecycle_reason,
+              linked_servers.owner_action_required,
+              linked_servers.owner_action_reason
        FROM linked_servers
        JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
        LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id = ?
          AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,
     )

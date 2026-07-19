@@ -13,7 +13,7 @@ import { buildPublicServerRatingSummaries, emptyPublicServerRatingSummary, type 
 const listing = validatePublicListingInput({
   public_short_description: "High-action PvP server with weekend raids.",
   public_description: "Events, traders, factions, and active admins.",
-  public_discord_invite: "discord.gg/nuketown",
+  public_discord_invite: "https://discord.gg/nuketown",
   public_website_url: "https://nuketown.dayz/rules",
   public_rules: "No cheating. Respect event rules.",
   public_language: "English",
@@ -26,6 +26,10 @@ if (listing.ok) {
   assert.equal(listing.value.public_website_url, "https://nuketown.dayz/rules");
 }
 
+assert.equal(validatePublicListingInput({ public_discord_invite: "discord.gg/nuketown" }).ok, false);
+assert.equal(validatePublicListingInput({ public_discord_invite: "http://discord.gg/nuketown" }).ok, false);
+assert.equal(validatePublicListingInput({ public_discord_invite: "https://discordapp.com/invite/nuketown" }).ok, false);
+assert.equal(validatePublicListingInput({ public_discord_invite: "https://www.discord.com/invite/nuketown" }).ok, true);
 assert.equal(validatePublicListingInput({ public_website_url: "javascript:alert(1)" }).ok, false);
 assert.equal(validatePublicListingInput({ public_discord_invite: "https://example.com/not-discord" }).ok, false);
 assert.equal(validatePublicListingInput({ public_short_description: "x".repeat(161) }).ok, false);

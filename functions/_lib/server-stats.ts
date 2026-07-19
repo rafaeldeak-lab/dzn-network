@@ -5,6 +5,12 @@ import {
 } from "./public-api-cache";
 import { calculateServerScoreBreakdown, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
+import {
+  SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
+  SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
+  serverLifecycleInSql,
+  serverLifecycleSqlExpression,
+} from "../../lib/server-lifecycle";
 
 const PUBLIC_HOME_STATS_ADM_SNAPSHOT_KEYS = [
   { key: "home-stats:preview", accessLevel: "preview" as const },
@@ -29,10 +35,10 @@ const MOCK_KILL_FILTER = `
   AND LOWER(COALESCE(killer_name, '')) NOT LIKE 'infected%'
 `;
 
-const PUBLIC_SERVER_SCOPE = `
+const PUBLIC_HISTORICAL_SERVER_SCOPE = `
   SELECT id
   FROM linked_servers
-  WHERE lower(status) = 'live'
+  WHERE ${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES)})
     AND lower(COALESCE(listing_visibility, 'public')) != 'hidden'
     AND (
       merged_into_server_id IS NULL
@@ -122,7 +128,7 @@ async function countPublicBuildEvents(db: D1Database): Promise<number> {
         `
         SELECT COUNT(*) AS total
         FROM build_events
-        WHERE linked_server_id IN (${PUBLIC_SERVER_SCOPE})
+        WHERE linked_server_id IN (${PUBLIC_HISTORICAL_SERVER_SCOPE})
       `,
       )
       .first<{ total: number | null }>();
@@ -139,7 +145,7 @@ async function latestPublicBuildEventAt(db: D1Database): Promise<string | null> 
         `
         SELECT MAX(COALESCE(occurred_at, created_at)) AS latest_at
         FROM build_events
-        WHERE linked_server_id IN (${PUBLIC_SERVER_SCOPE})
+        WHERE linked_server_id IN (${PUBLIC_HISTORICAL_SERVER_SCOPE})
       `,
       )
       .first<{ latest_at: string | null }>();
@@ -460,6 +466,7 @@ async function getCanonicalServerRankNumber(db: D1Database, linkedServerId: stri
         LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
         LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
         WHERE lower(linked_servers.status) = 'live'
+          AND ${serverLifecycleSqlExpression("linked_servers")} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES)})
           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
       ),
       scored AS (
@@ -521,7 +528,7 @@ export async function getPublicAdmStatsSummary(db: D1Database): Promise<PublicAd
           MAX(COALESCE(distance, 0)) AS longest_kill,
           MAX(COALESCE(occurred_at, created_at)) AS latest_at
         FROM kill_events
-        WHERE linked_server_id IN (${PUBLIC_SERVER_SCOPE})
+        WHERE linked_server_id IN (${PUBLIC_HISTORICAL_SERVER_SCOPE})
           AND ${MOCK_KILL_FILTER}
       `,
       )
@@ -536,7 +543,7 @@ export async function getPublicAdmStatsSummary(db: D1Database): Promise<PublicAd
           COUNT(*) AS total,
           MAX(COALESCE(occurred_at, created_at)) AS latest_at
         FROM player_events
-        WHERE linked_server_id IN (${PUBLIC_SERVER_SCOPE})
+        WHERE linked_server_id IN (${PUBLIC_HISTORICAL_SERVER_SCOPE})
           AND ${MOCK_PLAYER_FILTER}
       `,
       )
@@ -547,7 +554,7 @@ export async function getPublicAdmStatsSummary(db: D1Database): Promise<PublicAd
         `
         SELECT COUNT(*) AS total
         FROM player_profiles
-        WHERE linked_server_id IN (${PUBLIC_SERVER_SCOPE})
+        WHERE linked_server_id IN (${PUBLIC_HISTORICAL_SERVER_SCOPE})
       `,
       )
       .first<{ total: number | null }>(),
