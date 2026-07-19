@@ -56,10 +56,136 @@ jobs:
       PREVIEW_SESSION_SECRET: discord-server-announcements-preview-session-secret
 
     steps:
+      - name: Validate requested preview inputs
+        run: |
+          set -euo pipefail
+
+          if [ "${CONFIRM_PREVIEW_ONLY}" != "PREVIEW_ONLY" ]; then
+            echo "::error::confirm_preview_only must equal PREVIEW_ONLY."
+            exit 1
+          fi
+          if [ -z "${INPUT_BRANCH:-}" ]; then
+            echo "::error::Preview branch input must not be empty."
+            exit 1
+          fi
+          case "${INPUT_BRANCH}" in
+            main|master|production)
+              echo "::error::Preview workflow must not run against ${INPUT_BRANCH}."
+              exit 1
+              ;;
+            feature/discord-server-announcements|release/main-runtime-alignment) ;;
+            *)
+              echo "::error::Discord server announcements preview may only run against feature/discord-server-announcements or release/main-runtime-alignment."
+              exit 1
+              ;;
+          esac
+          case "${INPUT_BRANCH}" in
+            *preview-project*|*production-project*|*production_pages_project*|*production_db*|*dzn-network*|*dzn_network_db*)
+              echo "::error::Preview branch name must not contain project or database names."
+              exit 1
+              ;;
+          esac
+          case "${MODE}" in
+            validate|phase1-flag-off|phase2-migration|verify-preview|full-preview) ;;
+            *)
+              echo "::error::Unsupported preview mode."
+              exit 1
+              ;;
+          esac
+          if [ "${INPUT_BRANCH}" = "release/main-runtime-alignment" ]; then
+            if [ "${GITHUB_REF_NAME:-}" != "release/main-runtime-alignment" ]; then
+              echo "::error::Alignment preview must be run with 'Use workflow from' release/main-runtime-alignment."
+              exit 1
+            fi
+            if [ "${MODE}" != "full-preview" ]; then
+              echo "::error::release/main-runtime-alignment requires mode=full-preview."
+              exit 1
+            fi
+            if [ "${PREVIEW_PROJECT_NAME}" != "dzn-network-discord-announcements-preview" ]; then
+              echo "::error::release/main-runtime-alignment requires preview_project_name=dzn-network-discord-announcements-preview."
+              exit 1
+            fi
+            case "${PREVIEW_DB_NAME}" in
+              dzn_network_db_discord_announcements_preview_alignment_*) ;;
+              *)
+                echo "::error::release/main-runtime-alignment requires preview_db_name beginning with dzn_network_db_discord_announcements_preview_alignment_."
+                exit 1
+                ;;
+            esac
+          fi
+          if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Preview Pages project must not equal production Pages project."
+            exit 1
+          fi
+          case "${PREVIEW_PROJECT_NAME}" in
+            *discord*announcements*preview*) ;;
+            *)
+              echo "::error::Preview Pages project name must contain discord, announcements, and preview."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
+            echo "::error::Preview D1 database must not equal production D1 database."
+            exit 1
+          fi
+          case "${PREVIEW_DB_NAME}" in
+            *discord_announcements_preview*|*discord_server_announcements_preview*) ;;
+            *)
+              echo "::error::Preview D1 database name must contain discord_announcements_preview or discord_server_announcements_preview."
+              exit 1
+              ;;
+          esac
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+          if [ "${DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED must remain false for Phase 1 preview."
+            exit 1
+          fi
+
       - name: Checkout requested branch
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Verify checked-out preview ref
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags --prune origin "+refs/heads/${INPUT_BRANCH}:refs/remotes/origin/${INPUT_BRANCH}"
+          git switch --force-create "${INPUT_BRANCH}" "origin/${INPUT_BRANCH}"
+
+          CHECKED_OUT_BRANCH="$(git branch --show-current)"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          REMOTE_SHA="$(git rev-parse "origin/${INPUT_BRANCH}")"
+          TREE_SHA="$(git rev-parse "HEAD^{tree}")"
+
+          if [ "${HEAD_SHA}" != "${REMOTE_SHA}" ]; then
+            echo "::error::Checked-out HEAD ${HEAD_SHA} does not match origin/${INPUT_BRANCH} ${REMOTE_SHA}."
+            exit 1
+          fi
+          if [ "${INPUT_BRANCH}" = "release/main-runtime-alignment" ] && [ "${CHECKED_OUT_BRANCH}" != "release/main-runtime-alignment" ]; then
+            echo "::error::Checked-out branch must be release/main-runtime-alignment."
+            exit 1
+          fi
+
+          {
+            echo "CANDIDATE_BRANCH=${INPUT_BRANCH}"
+            echo "CANDIDATE_COMMIT_SHA=${HEAD_SHA}"
+            echo "CANDIDATE_TREE_SHA=${TREE_SHA}"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo "## DZN Discord Server Announcements Preview Candidate"
+            echo ""
+            echo "- Workflow ref: ${GITHUB_REF_NAME:-unknown}"
+            echo "- Candidate branch: ${INPUT_BRANCH}"
+            echo "- Checked-out branch: ${CHECKED_OUT_BRANCH}"
+            echo "- Candidate commit SHA: ${HEAD_SHA}"
+            echo "- Candidate tree SHA: ${TREE_SHA}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Node setup
         uses: actions/setup-node@v4
@@ -75,14 +201,17 @@ jobs:
             echo "::error::confirm_preview_only must equal PREVIEW_ONLY."
             exit 1
           fi
-          if [ "${INPUT_BRANCH}" != "feature/discord-server-announcements" ]; then
-            echo "::error::Discord server announcements preview may only run against feature/discord-server-announcements."
-            exit 1
-          fi
-          if [ "${INPUT_BRANCH}" = "main" ]; then
-            echo "::error::Preview branch must never be main."
-            exit 1
-          fi
+          case "${INPUT_BRANCH}" in
+            feature/discord-server-announcements|release/main-runtime-alignment) ;;
+            main|master|production)
+              echo "::error::Preview branch must never be ${INPUT_BRANCH}."
+              exit 1
+              ;;
+            *)
+              echo "::error::Discord server announcements preview may only run against feature/discord-server-announcements or release/main-runtime-alignment."
+              exit 1
+              ;;
+          esac
           if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
             echo "::error::Preview Pages project must not equal production Pages project."
             exit 1
@@ -146,10 +275,13 @@ jobs:
             echo "## DZN Discord Server Announcements Preview Guard"
             echo ""
             echo "- Branch: ${INPUT_BRANCH}"
+            echo "- Candidate commit SHA: ${CANDIDATE_COMMIT_SHA}"
+            echo "- Candidate tree SHA: ${CANDIDATE_TREE_SHA}"
             echo "- Preview Pages project: ${PREVIEW_PROJECT_NAME}"
             echo "- Preview D1 database: ${PREVIEW_DB_NAME}"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
             echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
+            echo "- Discord messages sent: false"
             echo "- Owner allowlist configured: true"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -439,7 +571,12 @@ jobs:
           DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false \
           MOCK_AUTH=true \
           npm run build
-          npx wrangler pages deploy out --project-name "${PREVIEW_PROJECT_NAME}" --branch "${INPUT_BRANCH}" --commit-dirty=true | tee discord-announcements-preview-deploy.txt
+          npx wrangler pages deploy out \
+            --project-name "${PREVIEW_PROJECT_NAME}" \
+            --branch "${INPUT_BRANCH}" \
+            --commit-hash "${CANDIDATE_COMMIT_SHA}" \
+            --commit-message "Preview Discord server announcements ${CANDIDATE_COMMIT_SHA}" \
+            --commit-dirty=true | tee discord-announcements-preview-deploy.txt
 
           node <<'NODE'
           const fs = require("node:fs");
@@ -455,6 +592,21 @@ jobs:
           console.log(`Resolved preview URL for verification: ${resolved}`);
           NODE
 
+          {
+            echo "## DZN Discord Server Announcements Preview Deployment"
+            echo ""
+            echo "- Candidate branch: ${CANDIDATE_BRANCH}"
+            echo "- Candidate commit SHA: ${CANDIDATE_COMMIT_SHA}"
+            echo "- Candidate tree SHA: ${CANDIDATE_TREE_SHA}"
+            echo "- Preview Pages project: ${PREVIEW_PROJECT_NAME}"
+            echo "- Preview D1 database: ${PREVIEW_DB_NAME}"
+            echo "- Stable preview URL: ${PREVIEW_BASE_URL}"
+            echo "- Immutable preview URL: ${RESOLVED_PREVIEW_BASE_URL:-$(cat discord-announcements-preview-url.txt)}"
+            echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
+            echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Discord messages sent: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           RESOLVED_PREVIEW_BASE_URL="$(cat discord-announcements-preview-url.txt)"
           echo "Preview deploy diagnostics for ${RESOLVED_PREVIEW_BASE_URL}"
           curl -I --max-time 30 "${RESOLVED_PREVIEW_BASE_URL}/" || true
@@ -469,8 +621,19 @@ jobs:
           node <<'NODE'
           const fs = require("node:fs");
           const base = process.env.RESOLVED_PREVIEW_BASE_URL || process.env.PREVIEW_BASE_URL;
-          const { ownerToken, nonOwnerToken } = JSON.parse(fs.readFileSync("discord-announcements-preview-cookies.json", "utf8"));
-          const forbiddenText = ["Request failed: 503", "Error 1102", "Worker exceeded resource limits", "Minified React error #", "Owner console data could not be loaded"];
+          const { ownerToken, nonOwnerToken, ownerDiscordId } = JSON.parse(fs.readFileSync("discord-announcements-preview-cookies.json", "utf8"));
+          const forbiddenText = [
+            "Request failed: 503",
+            "Error 1102",
+            "Worker exceeded resource limits",
+            "Minified React error #",
+            "Owner console data could not be loaded",
+            "Owner console error",
+            "Owner Console error",
+            "internal stack trace",
+            "route overlap",
+          ];
+          const secretLikePattern = /DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|CLOUDFLARE_API_TOKEN|Cloudflare token|webhooks\/|encrypted_token|dzn_session/i;
 
           function assert(condition, message) {
             if (!condition) {
@@ -501,17 +664,27 @@ jobs:
           async function text(path, init = {}) {
             const response = await fetchWithTimeout(path, init);
             const body = await response.text();
-            for (const snippet of forbiddenText) {
-              assert(!body.includes(snippet), `${path} contains forbidden runtime text: ${snippet}`);
-            }
+            assertNoForbiddenBody(path, body);
             return { response, body };
           }
           async function jsonRequest(path, init = {}) {
             const response = await fetchWithTimeout(path, init);
             const raw = await response.text();
+            assertNoForbiddenBody(path, raw);
             let parsed = null;
             try { parsed = raw ? JSON.parse(raw) : null; } catch {}
             return { response, raw, parsed };
+          }
+          function assertNoForbiddenBody(path, body) {
+            for (const snippet of forbiddenText) {
+              assert(!String(body ?? "").includes(snippet), `${path} contains forbidden runtime text: ${snippet}`);
+            }
+            assert(!secretLikePattern.test(String(body ?? "")), `${path} contains secret-like content.`);
+            assert(!String(body ?? "").includes(ownerToken), `${path} exposed the seeded owner session token.`);
+            assert(!String(body ?? "").includes(nonOwnerToken), `${path} exposed the seeded non-owner session token.`);
+            if (ownerDiscordId) {
+              assert(!String(body ?? "").includes(ownerDiscordId), `${path} exposed the raw owner Discord ID.`);
+            }
           }
           function safeBodyPreview(body) {
             return String(body ?? "")
@@ -544,6 +717,7 @@ jobs:
             const response = await fetchWithTimeout(path, init);
             const location = response.headers.get("location");
             const body = await response.text().catch(() => "");
+            assertNoForbiddenBody(path, body);
             console.log(`${label}: HTTP ${response.status}${location ? ` location=${location}` : ""}`);
             if (response.status >= 400) {
               console.log(`${label} body preview: ${safeBodyPreview(body) || "(empty)"}`);
@@ -556,8 +730,12 @@ jobs:
 
           void (async () => {
             await waitForPreview();
-            for (const path of ["/", "/servers", "/dashboard", "/dzn-pulse", "/api/public/servers", "/api/public/home-stats"]) {
-              const result = await text(path, path.startsWith("/api/") ? {} : { headers: { cookie: ownerCookie } });
+            for (const path of ["/", "/servers", "/leaderboards", "/events", "/seasons", "/dzn-pulse"]) {
+              const result = await text(path);
+              assert(result.response.status === 200, `${path} returned HTTP ${result.response.status}.`);
+            }
+            for (const path of ["/api/public/servers", "/api/public/home-stats", "/api/public/leaderboards", "/api/public/server-rail", "/api/dzn-pulse/config"]) {
+              const result = await text(path);
               assert(result.response.status === 200, `${path} returned HTTP ${result.response.status}.`);
             }
             const diagnostics = {
@@ -566,17 +744,28 @@ jobs:
               ownerNonOwner: await probe("GET /owner seeded non-owner session", "/owner", { headers: { cookie: nonOwnerCookie } }),
               overviewLoggedOut: await probe("GET /api/owner/overview no session", "/api/owner/overview"),
               overviewNonOwner: await probe("GET /api/owner/overview seeded non-owner session", "/api/owner/overview", { headers: { cookie: nonOwnerCookie } }),
+              overviewOwner: await probe("GET /api/owner/overview seeded owner session", "/api/owner/overview", { headers: ownerHeaders }),
+              serversLoggedOut: await probe("GET /api/owner/servers no session", "/api/owner/servers"),
+              serversOwner: await probe("GET /api/owner/servers seeded owner session", "/api/owner/servers", { headers: ownerHeaders }),
+              auditLogLoggedOut: await probe("GET /api/owner/audit-log no session", "/api/owner/audit-log"),
+              auditLogOwner: await probe("GET /api/owner/audit-log seeded owner session", "/api/owner/audit-log", { headers: ownerHeaders }),
               discordOverviewLoggedOut: await probe("GET /api/owner/discord/overview no session", "/api/owner/discord/overview"),
               discordOverviewNonOwner: await probe("GET /api/owner/discord/overview seeded non-owner session", "/api/owner/discord/overview", { headers: { cookie: nonOwnerCookie } }),
               discordOverviewOwner: await probe("GET /api/owner/discord/overview seeded owner session", "/api/owner/discord/overview", { headers: ownerHeaders }),
             };
             assert(diagnostics.root.status === 200, `GET / returned HTTP ${diagnostics.root.status}.`);
-            assert([302, 401, 403].includes(diagnostics.ownerLoggedOut.status), `/owner logged-out should redirect or deny safely, got ${diagnostics.ownerLoggedOut.status}.`);
+            assert(diagnostics.ownerLoggedOut.status === 302, `/owner logged-out should redirect to login, got ${diagnostics.ownerLoggedOut.status}.`);
+            assert((diagnostics.ownerLoggedOut.location ?? "").endsWith("/login?returnTo=%2Fowner") || diagnostics.ownerLoggedOut.location === "/login?returnTo=%2Fowner", `/owner logged-out redirect location was ${diagnostics.ownerLoggedOut.location}.`);
             if (diagnostics.ownerNonOwner.status === 200) {
               assert(!diagnostics.ownerNonOwner.body.includes("Discord Announcement System"), "/owner seeded non-owner returned protected Owner Console content.");
             }
             assert(diagnostics.overviewLoggedOut.status === 401, `Owner overview API logged-out should be 401, got ${diagnostics.overviewLoggedOut.status}.`);
             assert(diagnostics.overviewNonOwner.status === 403, `Owner overview API seeded non-owner should be 403, got ${diagnostics.overviewNonOwner.status}.`);
+            assert(diagnostics.overviewOwner.status === 200, `Owner overview API seeded owner should be 200, got ${diagnostics.overviewOwner.status}.`);
+            assert(diagnostics.serversLoggedOut.status === 401, `Owner servers API logged-out should be 401, got ${diagnostics.serversLoggedOut.status}.`);
+            assert(diagnostics.serversOwner.status === 200, `Owner servers API seeded owner should be 200, got ${diagnostics.serversOwner.status}.`);
+            assert(diagnostics.auditLogLoggedOut.status === 401, `Owner audit log API logged-out should be 401, got ${diagnostics.auditLogLoggedOut.status}.`);
+            assert(diagnostics.auditLogOwner.status === 200, `Owner audit log API seeded owner should be 200, got ${diagnostics.auditLogOwner.status}.`);
             assert(diagnostics.discordOverviewLoggedOut.status === 401, `Owner Discord overview API logged-out should be 401, got ${diagnostics.discordOverviewLoggedOut.status}.`);
             assert(diagnostics.discordOverviewNonOwner.status === 403, `Owner Discord overview API seeded non-owner should be 403, got ${diagnostics.discordOverviewNonOwner.status}.`);
             assert(diagnostics.discordOverviewOwner.status === 200, `Owner Discord overview API seeded owner should be 200, got ${diagnostics.discordOverviewOwner.status}.`);
@@ -634,15 +823,29 @@ jobs:
           esac
           npx wrangler d1 migrations apply DB --config wrangler.discord-announcements-preview.toml --remote
           npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "PRAGMA table_info(discord_announcement_posts);" > post-0056-table.json
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_discord_announcement_posts_%' ORDER BY name;" > post-0056-indexes.json
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "SELECT COUNT(*) AS row_count FROM discord_announcement_posts;" > post-0056-row-count.json
           node <<'NODE'
           const fs = require("node:fs");
-          const parsed = JSON.parse(fs.readFileSync("post-0056-table.json", "utf8"));
-          const rows = (Array.isArray(parsed) ? parsed : [parsed]).flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? []);
-          const names = new Set(rows.map((row) => row.name));
+          function rows(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            return (Array.isArray(parsed) ? parsed : [parsed]).flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? []);
+          }
+          const names = new Set(rows("post-0056-table.json").map((row) => row.name));
           for (const name of ["id", "server_id", "event_type", "channel_id", "message_id", "thread_id", "dedupe_key", "status", "failure_reason", "created_at", "updated_at"]) {
             if (!names.has(name)) throw new Error(`discord_announcement_posts missing ${name}.`);
           }
-          console.log("Preview D1 migration 0056 verified: discord_announcement_posts exists.");
+          const indexes = new Set(rows("post-0056-indexes.json").map((row) => row.name));
+          for (const name of [
+            "idx_discord_announcement_posts_server_event_created",
+            "idx_discord_announcement_posts_event_status_created",
+            "idx_discord_announcement_posts_status_updated",
+          ]) {
+            if (!indexes.has(name)) throw new Error(`discord_announcement_posts missing index ${name}.`);
+          }
+          const rowCount = Number(rows("post-0056-row-count.json")[0]?.row_count ?? NaN);
+          if (rowCount !== 0) throw new Error(`discord_announcement_posts row count should be 0, got ${rowCount}.`);
+          console.log("Preview D1 migration 0056 verified: discord_announcement_posts columns/indexes exist and row count is 0.");
           NODE
 
       - name: Verify Phase 2 owner health after migration 0056
@@ -684,14 +887,120 @@ jobs:
           });
           NODE
 
+          npx wrangler d1 execute DB --config wrangler.discord-announcements-preview.toml --remote --json --command "SELECT COUNT(*) AS row_count FROM discord_announcement_posts;" > post-0056-row-count-after-owner-health.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const parsed = JSON.parse(fs.readFileSync("post-0056-row-count-after-owner-health.json", "utf8"));
+          const rows = (Array.isArray(parsed) ? parsed : [parsed]).flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? []);
+          const rowCount = Number(rows[0]?.row_count ?? NaN);
+          if (rowCount !== 0) throw new Error(`discord_announcement_posts row count should remain 0 after owner health checks, got ${rowCount}.`);
+          console.log("Preview D1 announcement row count remained 0 after owner health checks.");
+          NODE
+
           {
             echo "## DZN Discord Server Announcements Preview Result"
             echo ""
             echo "- Stable preview URL: ${PREVIEW_BASE_URL}"
             echo "- Resolved preview URL: ${RESOLVED_PREVIEW_BASE_URL:-${PREVIEW_BASE_URL}}"
+            echo "- Candidate branch: ${CANDIDATE_BRANCH}"
+            echo "- Candidate commit SHA: ${CANDIDATE_COMMIT_SHA}"
+            echo "- Candidate tree SHA: ${CANDIDATE_TREE_SHA}"
             echo "- Phase 1 flag off: passed"
             echo "- Migration 0056 preview-only: applied and verified"
+            echo "- discord_announcement_posts row count: 0"
             echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- Discord messages sent: false"
             echo "- Private Discord test messages: not sent by this workflow"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sample preview route performance
+        if: ${{ inputs.mode == 'full-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const base = process.env.RESOLVED_PREVIEW_BASE_URL || process.env.PREVIEW_BASE_URL;
+          const { ownerToken, ownerDiscordId } = JSON.parse(fs.readFileSync("discord-announcements-preview-cookies.json", "utf8"));
+          const ownerHeaders = { cookie: `dzn_session=${ownerToken}` };
+          const targets = [
+            { label: "/servers", path: "/servers", expected: 200 },
+            { label: "/api/public/servers", path: "/api/public/servers", expected: 200 },
+            { label: "/api/public/home-stats", path: "/api/public/home-stats", expected: 200 },
+            { label: "/api/public/leaderboards", path: "/api/public/leaderboards", expected: 200 },
+            { label: "/api/owner/overview seeded owner", path: "/api/owner/overview", expected: 200, headers: ownerHeaders },
+          ];
+          const forbidden = [
+            "Worker exceeded resource limits",
+            "Error 1102",
+            "Minified React error #",
+            "Owner console data could not be loaded",
+            "Owner console error",
+            "Owner Console error",
+            "internal stack trace",
+            "route overlap",
+          ];
+          const secretLikePattern = /DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|CLOUDFLARE_API_TOKEN|Cloudflare token|webhooks\/|encrypted_token|dzn_session/i;
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const round = (value) => Math.round(value);
+          function sanitize(body) {
+            return String(body ?? "")
+              .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted-token-like-value]")
+              .replace(/DISCORD_[A-Z0-9_]+|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|CLOUDFLARE_[A-Z0-9_]+/g, "[redacted-secret-name]")
+              .slice(0, 500);
+          }
+          async function runTarget(target) {
+            const attempts = [];
+            for (let attempt = 1; attempt <= 10; attempt += 1) {
+              const start = Date.now();
+              const response = await fetch(`${base}${target.path}`, { headers: target.headers ?? {}, redirect: "manual" });
+              const body = await response.text().catch(() => "");
+              const ms = Date.now() - start;
+              const workerLimitMarker = body.includes("Worker exceeded resource limits") || body.includes("Error 1102");
+              const forbiddenMarker = forbidden.find((snippet) => body.includes(snippet));
+              const secretLikeMarker = secretLikePattern.test(body) || body.includes(ownerToken) || (ownerDiscordId && body.includes(ownerDiscordId));
+              attempts.push({ status: response.status, ms, workerLimitMarker, forbiddenMarker, secretLikeMarker, preview: response.status >= 400 ? sanitize(body) : "" });
+              await sleep(250);
+            }
+            const timings = attempts.map((item) => item.ms);
+            const statuses = attempts.map((item) => item.status);
+            return {
+              ...target,
+              statuses,
+              min: Math.min(...timings),
+              avg: timings.reduce((sum, item) => sum + item, 0) / timings.length,
+              max: Math.max(...timings),
+              http503: statuses.filter((status) => status === 503).length,
+              workerLimitMarkers: attempts.filter((item) => item.workerLimitMarker).length,
+              forbiddenMarkers: attempts.filter((item) => item.forbiddenMarker).length,
+              secretLikeMarkers: attempts.filter((item) => item.secretLikeMarker).length,
+              failures: attempts.filter((item) => item.status !== target.expected || item.workerLimitMarker || item.forbiddenMarker || item.secretLikeMarker),
+            };
+          }
+          void (async () => {
+            const results = [];
+            for (const target of targets) results.push(await runTarget(target));
+            const lines = [
+              "## DZN Discord Server Announcements Preview Performance Sampling",
+              "",
+              "| Route | Statuses | Min ms | Avg ms | Max ms | 503s | Worker-limit markers |",
+              "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+            ];
+            for (const result of results) {
+              lines.push(`| ${result.label} | ${result.statuses.join(",")} | ${round(result.min)} | ${round(result.avg)} | ${round(result.max)} | ${result.http503} | ${result.workerLimitMarkers} |`);
+              console.log(`${result.label}: statuses=${result.statuses.join(",")} min=${round(result.min)}ms avg=${round(result.avg)}ms max=${round(result.max)}ms 503=${result.http503} workerLimit=${result.workerLimitMarkers}`);
+              if (result.failures.length) {
+                console.log(`${result.label} first failure preview: ${result.failures[0].preview || "(empty)"}`);
+              }
+            }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+            const failing = results.filter((result) => result.failures.length || result.http503 > 0 || result.workerLimitMarkers > 0 || result.forbiddenMarkers > 0 || result.secretLikeMarkers > 0);
+            if (failing.length) {
+              throw new Error(`Preview performance sampling failed for ${failing.map((item) => item.label).join(", ")}.`);
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
