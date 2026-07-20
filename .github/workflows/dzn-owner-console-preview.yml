@@ -3,10 +3,6 @@ name: DZN Owner Console Preview
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: Branch to preview
-        default: feature/owner-console
-        required: true
       mode:
         description: Action to run
         required: true
@@ -18,14 +14,6 @@ on:
       confirm_preview_only:
         description: Must equal PREVIEW_ONLY
         required: true
-      preview_project_name:
-        description: Dedicated preview Pages project
-        required: true
-        default: dzn-network-owner-console-preview
-      preview_db_name:
-        description: Preview D1 database name
-        required: true
-        default: dzn_network_db_owner_console_preview
       preview_db_name_to_delete:
         description: Exact stale preview D1 database name for cleanup mode
         required: false
@@ -67,11 +55,13 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       DZN_PLATFORM_OWNER_DISCORD_IDS: "990000000000000101,990000000000000102"
       DZN_PLATFORM_CREATOR_DISCORD_ID: "990000000000000102"
-      INPUT_BRANCH: ${{ inputs.branch }}
+      CANDIDATE_REF: ${{ github.ref }}
+      CANDIDATE_BRANCH: ${{ github.ref_name }}
+      CANDIDATE_SHA: ${{ github.sha }}
       MODE: ${{ inputs.mode }}
       CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
-      PREVIEW_PROJECT_NAME: ${{ inputs.preview_project_name }}
-      PREVIEW_DB_NAME: ${{ inputs.preview_db_name }}
+      PREVIEW_PROJECT_NAME: dzn-network-owner-console-preview
+      PREVIEW_DB_NAME: dzn_network_db_owner_console_preview
       PREVIEW_DB_NAME_TO_DELETE: ${{ inputs.preview_db_name_to_delete }}
       CLEANUP_ACTION: ${{ inputs.cleanup_action }}
       REVIEWED_PREVIEW_DB_ID_MASK: ${{ inputs.reviewed_preview_db_id_mask }}
@@ -82,13 +72,13 @@ jobs:
       DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
       DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
       DZN_PULSE_ENABLED: "true"
-      PREVIEW_BASE_URL: https://${{ inputs.preview_project_name }}.pages.dev
+      PREVIEW_BASE_URL: https://dzn-network-owner-console-preview.pages.dev
 
     steps:
-      - name: Checkout requested branch
+      - name: Checkout dispatched commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ github.sha }}
 
       - name: Node setup
         uses: actions/setup-node@v4
@@ -105,11 +95,74 @@ jobs:
             exit 1
           fi
 
-          CANDIDATE_SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          if [ -z "${CANDIDATE_BRANCH:-}" ] || [ -z "${CANDIDATE_SHA:-}" ] || [ -z "${CANDIDATE_REF:-}" ]; then
+            echo "::error::Missing canonical GitHub workflow ref identity."
+            exit 1
+          fi
+          case "${CANDIDATE_REF}" in
+            refs/heads/feature/owner-console|refs/heads/feature/creator-only-event-governance) ;;
+            refs/heads/main|refs/heads/master|refs/heads/production)
+              echo "::error::Owner console preview must never run from main, master, or production."
+              exit 1
+              ;;
+            refs/tags/*)
+              echo "::error::Owner console preview does not accept tag refs."
+              exit 1
+              ;;
+            refs/pull/*)
+              echo "::error::Owner console preview does not accept pull-request merge refs."
+              exit 1
+              ;;
+            *)
+              echo "::error::Owner console preview may only run from feature/owner-console or feature/creator-only-event-governance."
+              exit 1
+              ;;
+          esac
+          case "${CANDIDATE_BRANCH}" in
+            feature/owner-console|feature/creator-only-event-governance) ;;
+            main|master|production)
+              echo "::error::Owner console preview must never run from main, master, or production."
+              exit 1
+              ;;
+            *)
+              echo "::error::Owner console preview may only run from feature/owner-console or feature/creator-only-event-governance."
+              exit 1
+              ;;
+          esac
+
+          CHECKED_OUT_HEAD="$(git rev-parse HEAD)"
+          if [ "${CHECKED_OUT_HEAD}" != "${CANDIDATE_SHA}" ]; then
+            echo "::error::Checked-out commit does not match github.sha."
+            exit 1
+          fi
+          CHECKED_OUT_TREE="$(git rev-parse "HEAD^{tree}")"
+          git fetch origin "${CANDIDATE_BRANCH}:refs/remotes/origin/${CANDIDATE_BRANCH}" --depth=1
+          REMOTE_FEATURE_HEAD="$(git rev-parse "origin/${CANDIDATE_BRANCH}")"
+          if [ "${REMOTE_FEATURE_HEAD}" != "${CANDIDATE_SHA}" ]; then
+            echo "::error::Selected workflow ref SHA is not the current remote branch head."
+            exit 1
+          fi
+
+          CANDIDATE_SHORT_SHA="${CANDIDATE_SHA:0:7}"
+          if ! [[ "${CANDIDATE_SHORT_SHA}" =~ ^[a-f0-9]{7}$ ]]; then
+            echo "::error::github.sha does not produce a valid short SHA."
+            exit 1
+          fi
+          if [ "${MODE}" = "full-preview" ] && [ "${CANDIDATE_BRANCH}" = "feature/creator-only-event-governance" ]; then
+            PREVIEW_DB_NAME="dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}"
+          else
+            PREVIEW_DB_NAME="dzn_network_db_owner_console_preview"
+          fi
+
           CREATOR_EVENT_NAME="Creator Governance Preview Cup ${CANDIDATE_SHORT_SHA}"
           {
             printf "OWNER_CONSOLE_CANDIDATE_SHORT_SHA=%s\n" "$CANDIDATE_SHORT_SHA"
+            printf "OWNER_CONSOLE_CANDIDATE_BRANCH=%s\n" "$CANDIDATE_BRANCH"
+            printf "OWNER_CONSOLE_CANDIDATE_SHA=%s\n" "$CANDIDATE_SHA"
+            printf "OWNER_CONSOLE_CANDIDATE_TREE_SHA=%s\n" "$CHECKED_OUT_TREE"
+            printf "OWNER_CONSOLE_REMOTE_BRANCH_HEAD=%s\n" "$REMOTE_FEATURE_HEAD"
             printf "OWNER_CONSOLE_CREATOR_EVENT_NAME=%s\n" "$CREATOR_EVENT_NAME"
+            printf "PREVIEW_DB_NAME=%s\n" "$PREVIEW_DB_NAME"
           } >> "$GITHUB_ENV"
 
           case "${MODE}" in
@@ -119,27 +172,6 @@ jobs:
               exit 1
               ;;
           esac
-
-          if [ "${GITHUB_REF_NAME:-}" = "feature/creator-only-event-governance" ] && [ "${INPUT_BRANCH}" != "feature/creator-only-event-governance" ]; then
-            echo "::error::Use workflow from feature/creator-only-event-governance requires branch=feature/creator-only-event-governance."
-            exit 1
-          fi
-          if [ "${INPUT_BRANCH}" = "feature/creator-only-event-governance" ] && [ "${GITHUB_REF_NAME:-}" != "feature/creator-only-event-governance" ]; then
-            echo "::error::branch=feature/creator-only-event-governance requires Use workflow from feature/creator-only-event-governance."
-            exit 1
-          fi
-          case "${INPUT_BRANCH}" in
-            feature/owner-console|feature/creator-only-event-governance) ;;
-            *)
-              echo "::error::Owner console preview may only run against feature/owner-console or feature/creator-only-event-governance."
-              exit 1
-              ;;
-          esac
-
-          if [ "${INPUT_BRANCH}" = "main" ]; then
-            echo "::error::Preview branch must never be main."
-            exit 1
-          fi
 
           if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
             echo "::error::Preview Pages project must not equal the production Pages project."
@@ -166,16 +198,16 @@ jobs:
               exit 1
               ;;
           esac
-          if [ "${MODE}" = "full-preview" ] && [ "${INPUT_BRANCH}" = "feature/creator-only-event-governance" ]; then
+          if [ "${MODE}" = "full-preview" ] && [ "${CANDIDATE_BRANCH}" = "feature/creator-only-event-governance" ]; then
             case "${PREVIEW_DB_NAME}" in
               dzn_network_db_owner_console_preview_creator_governance_*) ;;
               *)
-                echo "::error::feature/creator-only-event-governance requires preview_db_name beginning with dzn_network_db_owner_console_preview_creator_governance_."
+                echo "::error::feature/creator-only-event-governance requires derived preview DB name beginning with dzn_network_db_owner_console_preview_creator_governance_."
                 exit 1
                 ;;
             esac
             if [ "${PREVIEW_DB_NAME}" != "dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}" ]; then
-              echo "::error::feature/creator-only-event-governance requires preview_db_name=dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}."
+              echo "::error::feature/creator-only-event-governance derived preview DB name mismatch."
               exit 1
             fi
           fi
@@ -338,7 +370,11 @@ jobs:
             echo "## DZN Owner Console Preview Guard"
             echo ""
             echo "- Mode: ${MODE}"
-            echo "- Branch: ${INPUT_BRANCH}"
+            echo "- Workflow ref: ${CANDIDATE_REF}"
+            echo "- Workflow ref name: ${CANDIDATE_BRANCH}"
+            echo "- Checked-out SHA: ${CHECKED_OUT_HEAD}"
+            echo "- Checked-out tree: ${CHECKED_OUT_TREE}"
+            echo "- Remote branch HEAD: ${REMOTE_FEATURE_HEAD}"
             echo "- Preview D1 database name: ${PREVIEW_DB_NAME}"
             echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
             echo "- Cleanup mode: ${MODE}"
@@ -382,7 +418,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "Wrangler version: $(npx wrangler --version)"
-          echo "Selected branch: ${INPUT_BRANCH}"
+          echo "Selected workflow ref: ${CANDIDATE_REF}"
+          echo "Selected branch: ${CANDIDATE_BRANCH}"
+          echo "Selected commit: ${CANDIDATE_SHA}"
           echo "Preview D1 database name: ${PREVIEW_DB_NAME}"
           echo "Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
           echo "Cloudflare preview token present: yes"
@@ -471,9 +509,9 @@ jobs:
               ;;
           esac
 
-          git fetch origin "main:refs/remotes/origin/main" "${INPUT_BRANCH}:refs/remotes/origin/${INPUT_BRANCH}" --depth=1
+          git fetch origin "main:refs/remotes/origin/main" "${CANDIDATE_BRANCH}:refs/remotes/origin/${CANDIDATE_BRANCH}" --depth=1
           CHECKED_OUT_HEAD="$(git rev-parse HEAD)"
-          REMOTE_FEATURE_HEAD="$(git rev-parse "origin/${INPUT_BRANCH}")"
+          REMOTE_FEATURE_HEAD="$(git rev-parse "origin/${CANDIDATE_BRANCH}")"
           if [ "${CHECKED_OUT_HEAD}" != "${REMOTE_FEATURE_HEAD}" ]; then
             echo "::error::Checked-out cleanup branch is not the current remote feature branch head."
             exit 1
@@ -1616,7 +1654,7 @@ jobs:
           const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
           const token = process.env.OWNER_CONSOLE_CF_TOKEN;
           const projectName = process.env.PREVIEW_PROJECT_NAME;
-          const branch = process.env.INPUT_BRANCH;
+          const branch = process.env.CANDIDATE_BRANCH;
           const previewBaseUrl = process.env.PREVIEW_BASE_URL;
           const ownerPreviewDiscordClientId = process.env.OWNER_PREVIEW_DISCORD_CLIENT_ID || "1504270029795885178";
           const previewRedirectUri = process.env.OWNER_PREVIEW_DISCORD_REDIRECT_URI || `${previewBaseUrl}/api/auth/discord/callback`;
@@ -1785,7 +1823,7 @@ jobs:
           npm run build
           npx wrangler pages deploy out \
             --project-name "${PREVIEW_PROJECT_NAME}" \
-            --branch "${INPUT_BRANCH}" \
+            --branch "${CANDIDATE_BRANCH}" \
             --commit-dirty=true \
             | tee owner-console-pages-deploy.txt
 

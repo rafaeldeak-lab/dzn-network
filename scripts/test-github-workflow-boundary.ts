@@ -723,16 +723,53 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("name: DZN Owner Console Pr
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("\n  push:"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("\n  schedule:"), false);
+const ownerPreviewDispatchBlock = dznOwnerConsolePreviewWorkflow.slice(
+  indexOfOrFail(dznOwnerConsolePreviewWorkflow, "workflow_dispatch:"),
+  indexOfOrFail(dznOwnerConsolePreviewWorkflow, "\nconcurrency:"),
+);
+assert.equal(ownerPreviewDispatchBlock.includes("branch:"), false, "Owner console preview workflow must not expose a branch input.");
+assert.equal(ownerPreviewDispatchBlock.includes("Branch to preview"), false, "Owner console preview form must not display Branch to preview.");
+assert.equal(ownerPreviewDispatchBlock.includes("preview_project_name:"), false, "Owner console preview form must not ask for preview project name.");
+assert.equal(ownerPreviewDispatchBlock.includes("preview_db_name:"), false, "Owner console preview form must not ask for preview D1 database name.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("inputs.branch"), false);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("INPUT_BRANCH"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/owner-console"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/creator-only-event-governance"), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("Use workflow from feature/creator-only-event-governance requires branch=feature/creator-only-event-governance."), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("branch=feature/creator-only-event-governance requires Use workflow from feature/creator-only-event-governance."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("CANDIDATE_BRANCH: ${{ github.ref_name }}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("CANDIDATE_REF: ${{ github.ref }}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("CANDIDATE_SHA: ${{ github.sha }}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("ref: ${{ github.sha }}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Checked-out commit does not match github.sha."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Selected workflow ref SHA is not the current remote branch head."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("OWNER_CONSOLE_CANDIDATE_TREE_SHA"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("OWNER_CONSOLE_REMOTE_BRANCH_HEAD"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview does not accept tag refs."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview does not accept pull-request merge refs."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview must never run from main, master, or production."), true);
+function acceptsOwnerConsolePreviewRef(input: { refName: string; ref?: string; sha?: string }) {
+  const ref = input.ref ?? `refs/heads/${input.refName}`;
+  const sha = input.sha ?? "184c0fe214810e2343abd7780b9e3e4f24945863";
+  if (!input.refName || !sha) return false;
+  if (!["refs/heads/feature/owner-console", "refs/heads/feature/creator-only-event-governance"].includes(ref)) return false;
+  if (!["feature/owner-console", "feature/creator-only-event-governance"].includes(input.refName)) return false;
+  if (["main", "master", "production"].includes(input.refName)) return false;
+  return /^[a-f0-9]{40}$/.test(sha);
+}
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/creator-only-event-governance" }), true);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/owner-console" }), true);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "main", ref: "refs/heads/main" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "master", ref: "refs/heads/master" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "production", ref: "refs/heads/production" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/other" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "v1.0.0", ref: "refs/tags/v1.0.0" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "123/merge", ref: "refs/pull/123/merge" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "" }), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db_owner_console_preview_creator_governance_"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("PREVIEW_DB_NAME=%s"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("OWNER_CONSOLE_CREATOR_EVENT_NAME"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Creator Governance Preview Cup ${CANDIDATE_SHORT_SHA}"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_only must equal PREVIEW_ONLY"), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("Preview branch must never be main."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn-network-owner-console-preview"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db_owner_console_preview"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Preview Pages project must not equal the production Pages project."), true);
