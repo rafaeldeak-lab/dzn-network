@@ -167,11 +167,28 @@ for (const file of [
   "functions/api/owner/servers.ts",
   "functions/api/owner/servers/[serverId].ts",
   "functions/api/owner/audit-log.ts",
+  "functions/api/owner/events.ts",
 ]) {
   const source = readFileSync(file, "utf8");
   assert.match(source, /requirePlatformOwner/, `${file} must require platform-owner auth`);
   assert.match(source, /onRequestGet/, `${file} must expose a read-only GET`);
-  assert.match(source, /methodNotAllowed/, `${file} must reject write methods`);
+}
+
+const ownerEventsSource = readFileSync("functions/api/owner/events.ts", "utf8");
+assert.match(ownerEventsSource, /onRequestPost/);
+assert.match(ownerEventsSource, /requirePlatformCreatorEventAdmin/);
+const ownerEventsPost = ownerEventsSource.slice(ownerEventsSource.indexOf("export const onRequestPost"));
+assert.equal(ownerEventsPost.indexOf("requirePlatformCreatorEventAdmin") < ownerEventsPost.indexOf("readJson"), true, "Owner event create must authorize before request body parsing.");
+assert.doesNotMatch(ownerEventsSource, /DISCORD_BOT_TOKEN|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|encrypted_token|webhook/i);
+
+for (const file of [
+  "functions/owner/events.ts",
+  "functions/owner/events/create.ts",
+]) {
+  const source = readFileSync(file, "utf8");
+  assert.match(source, /requirePlatformOwner/, `${file} must require platform-owner page auth.`);
+  assert.match(source, /mode:\s*"page"/, `${file} must use page-mode redirects.`);
+  assert.match(source, /methodNotAllowed/, `${file} must reject write methods.`);
 }
 
 const ownerAuditRouteSource = readFileSync("functions/api/owner/audit-log.ts", "utf8");

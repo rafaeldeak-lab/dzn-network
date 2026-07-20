@@ -7,6 +7,7 @@ import {
   type ServerLifecycleTask,
 } from "../../lib/server-lifecycle";
 import { readDznFeatureFlags } from "./feature-flags";
+import { isPlatformCreatorEventGovernanceConfigured } from "./platform-creator";
 import type { Env } from "./types";
 
 const KNOWN_SERVERS = {
@@ -133,6 +134,7 @@ export type OwnerOverview = {
   };
   ownerAccess: {
     allowlistConfigured: boolean;
+    creatorEventGovernanceConfigured: boolean;
   };
   knownServers: {
     nuketown: KnownServerSummary | null;
@@ -218,6 +220,7 @@ export async function getOwnerOverview(env: Env): Promise<OwnerOverview> {
     },
     ownerAccess: {
       allowlistConfigured: String(env.DZN_PLATFORM_OWNER_DISCORD_IDS ?? "").trim().length > 0,
+      creatorEventGovernanceConfigured: isPlatformCreatorEventGovernanceConfigured(env),
     },
     knownServers: {
       nuketown: toKnownServerSummary(servers.find((server) => server.knownRole === "nuketown")),

@@ -1,6 +1,7 @@
 import { requireBadgeAdminUser } from "../../_lib/badge-evaluation";
 import { createAdminSeason, DznSeasonError, getAdminSeasonManagement } from "../../_lib/dzn-seasons";
 import { json, methodNotAllowed, readJson } from "../../_lib/http";
+import { PLATFORM_CREATOR_EVENT_ADMIN_CAPABILITY, requirePlatformCreatorEventAdmin } from "../../_lib/platform-creator";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
@@ -41,15 +42,15 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 };
 
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
-  const auth = await requireBadgeAdminUser(env, request);
-  if (!auth.ok) return json(auth.payload, { status: auth.status });
+  const auth = await requirePlatformCreatorEventAdmin(env, request);
+  if (!auth.ok) return auth.response;
 
   try {
     const body = await readJson<Record<string, unknown>>(request);
     const result = await createAdminSeason(env, body);
     return json({
       ok: true,
-      role: auth.role,
+      role: PLATFORM_CREATOR_EVENT_ADMIN_CAPABILITY,
       season: result.season,
       warnings: result.warnings,
     }, { status: 201 });

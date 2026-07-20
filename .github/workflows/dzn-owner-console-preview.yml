@@ -41,9 +41,8 @@ jobs:
       CLOUDFLARE_PULSE_PREVIEW_TOKEN: ${{ secrets.CLOUDFLARE_PULSE_PREVIEW_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
-      DZN_PLATFORM_OWNER_DISCORD_IDS: ${{ secrets.DZN_PLATFORM_OWNER_DISCORD_IDS || vars.DZN_PLATFORM_OWNER_DISCORD_IDS }}
-      DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID: ${{ vars.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID || vars.DZN_PULSE_PREVIEW_DISCORD_CLIENT_ID }}
-      DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET: ${{ secrets.DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET || secrets.DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET }}
+      DZN_PLATFORM_OWNER_DISCORD_IDS: "990000000000000101,990000000000000102"
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "990000000000000102"
       INPUT_BRANCH: ${{ inputs.branch }}
       MODE: ${{ inputs.mode }}
       CONFIRM_PREVIEW_ONLY: ${{ inputs.confirm_preview_only }}
@@ -52,6 +51,7 @@ jobs:
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
       PRODUCTION_D1_DATABASE_NAME: dzn_network_db
       DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+      DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
       DZN_PULSE_ENABLED: "true"
       PREVIEW_BASE_URL: https://${{ inputs.preview_project_name }}.pages.dev
 
@@ -81,10 +81,21 @@ jobs:
             exit 1
           fi
 
-          if [ "${INPUT_BRANCH}" != "feature/owner-console" ]; then
-            echo "::error::Owner console preview may only run against feature/owner-console."
+          if [ "${GITHUB_REF_NAME:-}" = "feature/creator-only-event-governance" ] && [ "${INPUT_BRANCH}" != "feature/creator-only-event-governance" ]; then
+            echo "::error::Use workflow from feature/creator-only-event-governance requires branch=feature/creator-only-event-governance."
             exit 1
           fi
+          if [ "${INPUT_BRANCH}" = "feature/creator-only-event-governance" ] && [ "${GITHUB_REF_NAME:-}" != "feature/creator-only-event-governance" ]; then
+            echo "::error::branch=feature/creator-only-event-governance requires Use workflow from feature/creator-only-event-governance."
+            exit 1
+          fi
+          case "${INPUT_BRANCH}" in
+            feature/owner-console|feature/creator-only-event-governance) ;;
+            *)
+              echo "::error::Owner console preview may only run against feature/owner-console or feature/creator-only-event-governance."
+              exit 1
+              ;;
+          esac
 
           if [ "${INPUT_BRANCH}" = "main" ]; then
             echo "::error::Preview branch must never be main."
@@ -116,9 +127,22 @@ jobs:
               exit 1
               ;;
           esac
+          if [ "${INPUT_BRANCH}" = "feature/creator-only-event-governance" ]; then
+            case "${PREVIEW_DB_NAME}" in
+              dzn_network_db_owner_console_preview_creator_governance_*) ;;
+              *)
+                echo "::error::feature/creator-only-event-governance requires preview_db_name beginning with dzn_network_db_owner_console_preview_creator_governance_."
+                exit 1
+                ;;
+            esac
+          fi
 
           if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
             echo "::error::DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false."
+            exit 1
+          fi
+          if [ "${DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED}" != "false" ]; then
+            echo "::error::DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED must remain false."
             exit 1
           fi
 
@@ -127,6 +151,11 @@ jobs:
             exit 1
           fi
           echo "::add-mask::${DZN_PLATFORM_OWNER_DISCORD_IDS}"
+          if [ -z "${DZN_PLATFORM_CREATOR_DISCORD_ID:-}" ]; then
+            echo "::error::Missing fake DZN_PLATFORM_CREATOR_DISCORD_ID for creator-event-governance preview."
+            exit 1
+          fi
+          echo "::add-mask::${DZN_PLATFORM_CREATOR_DISCORD_ID}"
 
           CF_TOKEN="${CLOUDFLARE_PULSE_PREVIEW_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
           if [ -z "${CF_TOKEN:-}" ]; then
@@ -156,17 +185,16 @@ jobs:
           echo "::add-mask::$OWNER_PREVIEW_SESSION_SECRET"
           printf "OWNER_PREVIEW_SESSION_SECRET=%s\n" "$OWNER_PREVIEW_SESSION_SECRET" >> "$GITHUB_ENV"
 
-          OWNER_PREVIEW_DISCORD_CLIENT_ID="${DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_ID:-1504270029795885178}"
+          OWNER_PREVIEW_DISCORD_CLIENT_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+          echo "::add-mask::$OWNER_PREVIEW_DISCORD_CLIENT_SECRET"
+          printf "OWNER_PREVIEW_DISCORD_CLIENT_SECRET=%s\n" "$OWNER_PREVIEW_DISCORD_CLIENT_SECRET" >> "$GITHUB_ENV"
+
+          OWNER_PREVIEW_DISCORD_CLIENT_ID="990000000000000199"
           OWNER_PREVIEW_DISCORD_REDIRECT_URI="${PREVIEW_BASE_URL}/api/auth/discord/callback"
           if ! [[ "${OWNER_PREVIEW_DISCORD_CLIENT_ID}" =~ ^[0-9]+$ ]]; then
             echo "::error::Owner console preview Discord client id must be numeric."
             exit 1
           fi
-          if [ -z "${DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET:-}" ]; then
-            echo "::error::Missing DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET or DZN_PULSE_PREVIEW_DISCORD_CLIENT_SECRET for owner console preview Discord OAuth."
-            exit 1
-          fi
-          echo "::add-mask::$DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET"
           {
             printf "OWNER_PREVIEW_DISCORD_CLIENT_ID=%s\n" "$OWNER_PREVIEW_DISCORD_CLIENT_ID"
             printf "OWNER_PREVIEW_DISCORD_REDIRECT_URI=%s\n" "$OWNER_PREVIEW_DISCORD_REDIRECT_URI"
@@ -182,7 +210,13 @@ jobs:
             console.error("Missing DZN_PLATFORM_OWNER_DISCORD_IDS for owner console preview.");
             process.exit(1);
           }
+          const creatorId = String(process.env.DZN_PLATFORM_CREATOR_DISCORD_ID ?? "");
+          if (!/^\d+$/.test(creatorId) || !ownerIds.includes(creatorId)) {
+            console.error("Fake creator id must be numeric and included in the fake owner allowlist for preview.");
+            process.exit(1);
+          }
           fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_PREVIEW_OWNER_ID=${ownerIds[0]}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_PREVIEW_CREATOR_ID=${creatorId}\n`);
 
           const source = fs.readFileSync("wrangler.toml", "utf8");
           const name = source.match(/database_name\s*=\s*"([^"]+)"/)?.[1] ?? "";
@@ -197,6 +231,20 @@ jobs:
           console.log(`Detected production D1 database id: ${id}`);
           NODE
 
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "SELECT COUNT(*) AS row_count FROM competitive_events WHERE name = 'Creator Governance Preview Cup';" > owner-console-creator-event-count.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const parsed = JSON.parse(fs.readFileSync("owner-console-creator-event-count.json", "utf8"));
+          const containers = Array.isArray(parsed) ? parsed : [parsed];
+          const rows = containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          const count = Number(rows[0]?.row_count ?? 0);
+          if (count !== 1) {
+            console.error(`Expected exactly one preview creator-governance event row, got ${count}.`);
+            process.exit(1);
+          }
+          console.log("Creator-governance preview D1 row count: 1");
+          NODE
+
           {
             echo "## DZN Owner Console Preview Guard"
             echo ""
@@ -206,10 +254,12 @@ jobs:
             echo "- Preview Pages project name: ${PREVIEW_PROJECT_NAME}"
             echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
             echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
+            echo "- DZN_PLATFORM_CREATOR_DISCORD_ID configured: true"
             echo "- Discord OAuth client id configured: true"
             echo "- Discord OAuth redirect URI: ${OWNER_PREVIEW_DISCORD_REDIRECT_URI}"
             echo "- DZN_PULSE_ENABLED: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install
@@ -222,6 +272,7 @@ jobs:
           npm run build
           npm run test
           npm run test:owner-console
+          npm run test:creator-event-governance
           npm run test:public-access-gating
           npm run test:server-lifecycle-resource-control
           npm run test:server-advertising-packages
@@ -443,8 +494,10 @@ jobs:
           const fs = require("node:fs");
           const crypto = require("node:crypto");
           const ownerDiscordId = process.env.OWNER_CONSOLE_PREVIEW_OWNER_ID;
+          const creatorDiscordId = process.env.OWNER_CONSOLE_PREVIEW_CREATOR_ID;
           const sessionSecret = process.env.OWNER_PREVIEW_SESSION_SECRET;
           const ownerToken = "owner-console-preview-owner-token";
+          const creatorToken = "owner-console-preview-creator-token";
           const nonOwnerToken = "owner-console-preview-non-owner-token";
           function hmac(value) {
             return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
@@ -458,14 +511,16 @@ jobs:
           INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at)
           VALUES
             ('owner-console-platform-owner', ${sql(ownerDiscordId)}, 'OwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-platform-creator', ${sql(creatorDiscordId)}, 'CreatorPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-non-owner-user', '999000000000000001', 'NonOwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-server-owner', '999000000000000002', 'ServerOwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = CURRENT_TIMESTAMP;
 
-          DELETE FROM sessions WHERE id IN ('owner-console-owner-session', 'owner-console-non-owner-session');
+          DELETE FROM sessions WHERE id IN ('owner-console-owner-session', 'owner-console-creator-session', 'owner-console-non-owner-session');
           INSERT INTO sessions (id, user_id, session_token_hash, expires_at, created_at)
           VALUES
             ('owner-console-owner-session', 'owner-console-platform-owner', ${sql(hmac(ownerToken))}, ${sql(expires)}, CURRENT_TIMESTAMP),
+            ('owner-console-creator-session', 'owner-console-platform-creator', ${sql(hmac(creatorToken))}, ${sql(expires)}, CURRENT_TIMESTAMP),
             ('owner-console-non-owner-session', 'owner-console-non-owner-user', ${sql(hmac(nonOwnerToken))}, ${sql(expires)}, CURRENT_TIMESTAMP);
 
           INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at)
@@ -603,6 +658,7 @@ jobs:
 
           fs.writeFileSync("owner-console-preview-seed.sql", statements);
           fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_OWNER_COOKIE=dzn_session=${ownerToken}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_CREATOR_COOKIE=dzn_session=${creatorToken}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_NON_OWNER_COOKIE=dzn_session=${nonOwnerToken}\n`);
           NODE
 
@@ -675,6 +731,7 @@ jobs:
                 ...envVars(config),
                 DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
                 DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
+                DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: { type: "plain_text", value: "false" },
                 DZN_APP_URL: { type: "plain_text", value: previewBaseUrl },
                 NEXT_PUBLIC_APP_URL: { type: "plain_text", value: previewBaseUrl },
                 DISCORD_CLIENT_ID: { type: "plain_text", value: ownerPreviewDiscordClientId },
@@ -735,6 +792,7 @@ jobs:
               "[vars]",
               'DZN_PULSE_ENABLED = "true"',
               'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+              'DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED = "false"',
               `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
               `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
               `DISCORD_CLIENT_ID = ${JSON.stringify(ownerPreviewDiscordClientId)}`,
@@ -761,8 +819,9 @@ jobs:
           set -euo pipefail
 
           printf "%s" "$DZN_PLATFORM_OWNER_DISCORD_IDS" | npx wrangler pages secret put DZN_PLATFORM_OWNER_DISCORD_IDS --project-name "${PREVIEW_PROJECT_NAME}"
+          printf "%s" "$DZN_PLATFORM_CREATOR_DISCORD_ID" | npx wrangler pages secret put DZN_PLATFORM_CREATOR_DISCORD_ID --project-name "${PREVIEW_PROJECT_NAME}"
           printf "%s" "$OWNER_PREVIEW_SESSION_SECRET" | npx wrangler pages secret put SESSION_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
-          printf "%s" "$DZN_OWNER_CONSOLE_PREVIEW_DISCORD_CLIENT_SECRET" | npx wrangler pages secret put DISCORD_CLIENT_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
+          printf "%s" "$OWNER_PREVIEW_DISCORD_CLIENT_SECRET" | npx wrangler pages secret put DISCORD_CLIENT_SECRET --project-name "${PREVIEW_PROJECT_NAME}"
           echo "Owner console preview auth secrets configured."
 
       - name: Deploy preview Pages project
@@ -787,6 +846,7 @@ jobs:
 
           DZN_PULSE_ENABLED=true \
           DZN_DISCORD_NOTIFICATIONS_ENABLED=false \
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false \
           DZN_APP_URL="${PREVIEW_BASE_URL}" \
           NEXT_PUBLIC_APP_URL="${PREVIEW_BASE_URL}" \
           DISCORD_CLIENT_ID="${OWNER_PREVIEW_DISCORD_CLIENT_ID}" \
@@ -821,8 +881,10 @@ jobs:
             : "";
           const verificationBase = deployedBase || base;
           const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE;
+          const creatorCookie = process.env.OWNER_CONSOLE_CREATOR_COOKIE;
           const nonOwnerCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE;
           const ownerDiscordId = process.env.OWNER_CONSOLE_PREVIEW_OWNER_ID;
+          const creatorDiscordId = process.env.OWNER_CONSOLE_PREVIEW_CREATOR_ID;
           const expectedDiscordClientId = process.env.OWNER_PREVIEW_DISCORD_CLIENT_ID;
           const expectedDiscordRedirectUri = process.env.OWNER_PREVIEW_DISCORD_REDIRECT_URI;
           const retryablePreviewStatuses = new Set([522, 523, 524, 525, 526, 530]);
@@ -841,7 +903,9 @@ jobs:
             "TOKEN_ENCRYPTION_KEY",
             "SESSION_SECRET",
             "DZN_PLATFORM_OWNER_DISCORD_IDS",
+            "DZN_PLATFORM_CREATOR_DISCORD_ID",
             ownerDiscordId,
+            creatorDiscordId,
           ].filter(Boolean);
           function assert(condition, message) {
             if (!condition) {
@@ -935,6 +999,27 @@ jobs:
             }
             return { response, body, parsed };
           }
+          async function postJson(path, cookie, expected, payload) {
+            const { response, body } = await expectStatus(path, expected, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                ...(cookie ? { cookie } : {}),
+              },
+              body: JSON.stringify(payload),
+              redirect: "manual",
+            });
+            for (const secret of forbiddenSecrets) {
+              assert(!body.includes(secret), `${path} leaked forbidden owner/secret value.`);
+            }
+            let parsed = null;
+            try {
+              parsed = body ? JSON.parse(body) : null;
+            } catch {
+              parsed = null;
+            }
+            return { response, body, parsed };
+          }
           void (async () => {
             await waitForPreviewReady();
             const discordStart = await fetchWithTimeout("/api/auth/discord/start?returnTo=%2Fowner", { redirect: "manual" });
@@ -956,11 +1041,13 @@ jobs:
 
             await expectStatus("/owner", 403, { headers: { cookie: nonOwnerCookie }, redirect: "manual" });
             await expectStatus("/owner", 200, { headers: { cookie: ownerCookie }, redirect: "manual" });
+            await expectStatus("/owner", 200, { headers: { cookie: creatorCookie }, redirect: "manual" });
 
             for (const path of ["/api/owner/overview", "/api/owner/servers", "/api/owner/servers/owner-console-nuketown", "/api/owner/audit-log"]) {
               await ownerJson(path, "", 401);
               await ownerJson(path, nonOwnerCookie, 403);
               await ownerJson(path, ownerCookie, 200);
+              await ownerJson(path, creatorCookie, 200);
             }
 
             const overview = await ownerJson("/api/owner/overview", ownerCookie, 200);
@@ -979,12 +1066,60 @@ jobs:
             assert(text.includes("Legacy offline"), "Owner servers should include legacy/offline owner copy.");
             assert(!text.includes("encryptedToken"), "Owner servers should not expose encrypted token blobs.");
 
+            const loggedOutOwnerEvents = await fetchWithTimeout("/owner/events", { redirect: "manual" });
+            assert([302, 401, 403].includes(loggedOutOwnerEvents.status), `/owner/events logged-out returned ${loggedOutOwnerEvents.status}.`);
+            await expectStatus("/owner/events", 403, { headers: { cookie: nonOwnerCookie }, redirect: "manual" });
+            await expectStatus("/owner/events", 200, { headers: { cookie: ownerCookie }, redirect: "manual" });
+            await expectStatus("/owner/events", 200, { headers: { cookie: creatorCookie }, redirect: "manual" });
+            await expectStatus("/owner/events/create", 403, { headers: { cookie: nonOwnerCookie }, redirect: "manual" });
+            await expectStatus("/owner/events/create", 200, { headers: { cookie: ownerCookie }, redirect: "manual" });
+            await expectStatus("/owner/events/create", 200, { headers: { cookie: creatorCookie }, redirect: "manual" });
+
+            await ownerJson("/api/owner/events", "", 401);
+            await ownerJson("/api/owner/events", nonOwnerCookie, 403);
+            const nonCreatorOwnerEvents = await ownerJson("/api/owner/events", ownerCookie, 200);
+            assert(nonCreatorOwnerEvents.parsed?.creatorEventAdmin === false, "Non-creator owner must not receive creator event admin capability.");
+            const creatorOwnerEvents = await ownerJson("/api/owner/events", creatorCookie, 200);
+            assert(creatorOwnerEvents.parsed?.creatorEventAdmin === true, "Configured creator should receive creator event admin capability.");
+            assert(creatorOwnerEvents.parsed?.creatorEventGovernanceConfigured === true, "Creator event governance should report configured without exposing ids.");
+
+            const createPayload = {
+              name: "Creator Governance Preview Cup",
+              description: "Preview-only official event created by the fake creator identity.",
+              event_type: "community_cup",
+              hosting_server_id: "owner-console-nuketown",
+              starts_at: "2026-08-01T18:00:00.000Z",
+              ends_at: "2026-08-01T20:00:00.000Z",
+              server_limit: 8,
+              team_limit: 8,
+              status: "registration_open",
+              visibility: "public",
+            };
+            await postJson("/api/owner/events", "", 401, createPayload);
+            await postJson("/api/owner/events", nonOwnerCookie, 403, createPayload);
+            await postJson("/api/owner/events", ownerCookie, 403, { ...createPayload, creator: true, role: "platform_creator_event_admin" });
+            await postJson("/api/events/create?role=platform_creator_event_admin", ownerCookie, 403, { ...createPayload, creator: true });
+            const created = await postJson("/api/owner/events", creatorCookie, 200, createPayload);
+            assert(created.parsed?.ok === true, "Creator event create API should succeed for the configured fake creator.");
+            assert(typeof created.parsed?.event_slug === "string" && created.parsed.event_slug.length > 0, "Creator event create response should include an event slug.");
+
             await expectStatus("/", 200);
+            await expectStatus("/events", 200);
+            const publicCreate = await expectStatus("/events/create", 200);
+            assert(publicCreate.body.includes("Official DZN events are created and published by the DZN platform creator."), "/events/create should show creator-managed public copy.");
+            assert(!publicCreate.body.includes("Create competitive event"), "/events/create must not expose the official event creation form.");
+            await expectStatus("/events/suggest", 200);
             await expectStatus("/servers", 200);
+            await expectStatus("/leaderboards", 200);
+            await expectStatus("/events/challenges", 200);
+            await expectStatus("/events/server-wars", 200);
+            await expectStatus("/events/tournaments", 200);
+            await expectStatus("/seasons", 200);
             await expectStatus("/dashboard", 200);
             await expectStatus("/dzn-pulse", 200);
             await expectStatus("/api/public/servers", 200);
             await expectStatus("/api/public/home-stats", 200);
+            await expectStatus("/api/public/leaderboards", 200);
             await expectStatus("/api/public/server-rail", 200);
             const pulseConfig = await ownerJson("/api/dzn-pulse/config", "", 200);
             assert(pulseConfig.parsed?.dznPulseEnabled === true || pulseConfig.parsed?.config?.dznPulseEnabled === true, "DZN Pulse should remain enabled in preview config.");
@@ -1012,8 +1147,10 @@ jobs:
             echo "- /owner allowlisted owner access: passed"
             echo "- Owner API auth protection: passed"
             echo "- Owner API secret redaction: passed"
+            echo "- Creator-only Event Control preview: passed"
             echo "- Public routes/dashboard/dzn-pulse: passed"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
+            echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
             echo "- Production D1 writes: none"
             echo "- Production Pages deploy: none"
           } >> "$GITHUB_STEP_SUMMARY"

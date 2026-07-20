@@ -9,6 +9,7 @@ import {
   normalizeServerCategoryFromRecord,
   type ServerCategory,
 } from "./server-categories";
+import { creatorEventAdminDeniedPayload, isPlatformCreatorEventAdmin } from "./platform-creator";
 import type { Env, SessionUser } from "./types";
 
 export const EVENT_STATUSES = ["live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
@@ -154,7 +155,7 @@ type EventListOptions = {
   limit?: number;
 };
 
-type CreateCompetitiveEventInput = {
+export type CreateCompetitiveEventInput = {
   name?: string | null;
   description?: string | null;
   event_type?: string | null;
@@ -303,8 +304,10 @@ export async function getEventDetailPayload(env: Env, viewer: SessionUser | null
 
 export async function createCompetitiveEvent(env: Env, viewer: SessionUser | null, input: CreateCompetitiveEventInput) {
   if (!viewer) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to create events." };
+  const creatorDenied = creatorEventAdminDeniedPayload(env, viewer);
+  if (creatorDenied) return creatorDenied;
   await ensureCompetitiveEventsSchema(env);
-  const server = await fetchOwnedServer(env, viewer, input.hosting_server_id ?? input.server_id);
+  const server = await fetchServerById(env, input.hosting_server_id ?? input.server_id);
   if (!server) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
   const category = normalizeServerCategoryFromRecord(server);
   if (!category) {
@@ -484,6 +487,10 @@ export async function createCategorySafeMatchmaking(env: Env, viewer: SessionUse
   preview?: boolean;
 }) {
   if (!viewer) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to use matchmaking." };
+  if (input.preview === false && cleanSlug(input.event_slug ?? "")) {
+    const creatorDenied = creatorEventAdminDeniedPayload(env, viewer);
+    if (creatorDenied) return creatorDenied;
+  }
   await ensureCompetitiveEventsSchema(env);
   const primary = await fetchOwnedServer(env, viewer, input.server_id);
   if (!primary) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Server not found." };
@@ -521,6 +528,10 @@ export async function createCategorySafeMatchmaking(env: Env, viewer: SessionUse
       right_server: publicServer(opponent),
       mmr_delta: Math.abs(Number(primary.event_mmr ?? 1000) - Number(opponent.event_mmr ?? 1000)),
     };
+  }
+  if (!isPlatformCreatorEventAdmin(viewer, env)) {
+    const creatorDenied = creatorEventAdminDeniedPayload(env, viewer);
+    if (creatorDenied) return creatorDenied;
   }
   const matchId = crypto.randomUUID();
   await requireDb(env)

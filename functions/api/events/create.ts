@@ -1,6 +1,6 @@
-import { getSessionUser } from "../../_lib/db";
 import { createCompetitiveEvent } from "../../_lib/events";
 import { json, methodNotAllowed, readJson } from "../../_lib/http";
+import { requirePlatformCreatorEventAdmin } from "../../_lib/platform-creator";
 import type { PagesFunction } from "../../_lib/types";
 
 type CreateEventBody = {
@@ -23,8 +23,9 @@ type CreateEventBody = {
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "POST") return methodNotAllowed();
-  const viewer = await getSessionUser(env, request);
+  const auth = await requirePlatformCreatorEventAdmin(env, request);
+  if (!auth.ok) return auth.response;
   const body = await readJson<CreateEventBody>(request);
-  const result = await createCompetitiveEvent(env, viewer, body);
+  const result = await createCompetitiveEvent(env, auth.user, body);
   return json(result, { status: result.status });
 };

@@ -92,10 +92,10 @@ assert.match(automationLib, /status = 'finalizing'/);
 
 const adminRefresh = readFileSync("functions/api/admin/server-wars/[eventId]/refresh-score.ts", "utf8");
 const adminFinalize = readFileSync("functions/api/admin/server-wars/[eventId]/finalize.ts", "utf8");
-assert.match(adminRefresh, /requireDznAdmin/);
-assert.match(adminFinalize, /requireDznAdmin/);
-assert.match(adminRefresh, /forbidden/);
-assert.match(adminFinalize, /forbidden/);
+assert.match(adminRefresh, /requirePlatformCreatorEventAdmin/);
+assert.match(adminFinalize, /requirePlatformCreatorEventAdmin/);
+assert.match(adminRefresh, /auth\.response/);
+assert.match(adminFinalize, /auth\.response/);
 
 const cronRefresh = readFileSync("functions/api/cron/server-wars/refresh.ts", "utf8");
 assert.match(cronRefresh, /requireCronSecret/);

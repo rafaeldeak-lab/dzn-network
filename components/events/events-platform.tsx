@@ -220,8 +220,8 @@ export function EventCreatePage() {
   return (
     <EventsShell>
       <HeaderLine
-        title="CREATE EVENT"
-        subtitle="Build a same-category tournament, challenge, or battle card for your verified DayZ community."
+        title="OFFICIAL EVENTS"
+        subtitle="Official DZN events are creator-managed. Use Event Control for creator-only official creation."
         action={<EventActionLink href="/events">Events Hub</EventActionLink>}
       />
       <EventTabs active="CTF Tournaments" />
@@ -407,7 +407,7 @@ export function EventsTournamentsPage() {
   const visibleEvents = useMemo(() => filterEventsForView(data.events, { status, type, category }), [category, data.events, status, type]);
   return (
     <EventsShell>
-      <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">Events Hub</EventActionLink><EventActionLink href="/events/create">Create Event</EventActionLink></div>} />
+      <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">Events Hub</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
       <EventTabs active={status === "active" || status === "live" ? "Active" : status === "completed" || status === "ended" ? "Completed" : status === "upcoming" ? "Upcoming" : "CTF Tournaments"} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
@@ -519,7 +519,7 @@ export function EventsChallengesPage() {
   const { data, loadState } = useEventsPayload("/api/events?type=kill_race&limit=24", fallback);
   return (
     <EventsShell>
-      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/create">Create Event</EventActionLink></div>} />
+      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
