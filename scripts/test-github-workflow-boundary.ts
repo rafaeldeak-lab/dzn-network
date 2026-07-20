@@ -769,6 +769,15 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("const retryablePreviewStat
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Waiting for owner console preview readiness"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview readiness attempt"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview did not become ready within 5 minutes."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("printUnexpectedResponseDiagnostic"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Unexpected owner console preview response"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("safeJsonDiagnostic"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("errorCode"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("requestId"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("bodyLength"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("messagePreview"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_session=[redacted-cookie]"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("[redacted-sql]"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npm run test:owner-console"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("npm run test:creator-event-governance"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/overview"), true);
@@ -782,6 +791,12 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("DELETE FROM competitive_ev
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Verify creator-governance preview event row"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("owner-console-creator-event-count.json"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Creator-governance preview D1 row verified."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("owner-console-creator-event-foreign-key-check.json"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("created_by_user_exists"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("activity_count"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("activity_type"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("host_last_event_at_set"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Host registration/activity/foreign keys: verified"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/auth/discord/start?returnTo=%2Fowner"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/auth/discord/callback"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Discord auth start did not redirect to Discord."), true);

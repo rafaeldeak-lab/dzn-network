@@ -1015,9 +1015,61 @@ jobs:
             console.error("Owner console preview did not become ready within 5 minutes.");
             process.exit(1);
           }
+          function sanitizePreviewDiagnostic(value) {
+            let text = String(value ?? "");
+            for (const secret of forbiddenSecrets) {
+              if (secret) text = text.split(secret).join("[redacted-secret]");
+            }
+            for (const secret of [ownerCookie, creatorCookie, nonOwnerCookie].filter(Boolean)) {
+              text = text.split(secret).join("[redacted-cookie]");
+            }
+            return text
+              .replace(/dzn_session=[^;\s"]+/gi, "dzn_session=[redacted-cookie]")
+              .replace(/\b(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|PRAGMA)\b[\s\S]{0,240}/gi, "[redacted-sql]")
+              .replace(/\b\d{16,24}\b/g, "[redacted-id]")
+              .replace(/\b[a-f0-9]{32}\b/gi, "[redacted-id]")
+              .replace(/[A-Za-z0-9_-]{48,}/g, "[redacted-token]")
+              .slice(0, 240);
+          }
+          function safeJsonDiagnostic(body) {
+            try {
+              const parsed = JSON.parse(body || "{}");
+              if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                return { jsonKeys: [] };
+              }
+              const keys = Object.keys(parsed)
+                .filter((key) => !/cookie|session|secret|token|authorization|discord|owner|channel|sql/i.test(key))
+                .slice(0, 20);
+              const diagnostic = { jsonKeys: keys };
+              for (const key of ["error", "errorCode", "requestId", "message"]) {
+                if (typeof parsed[key] === "string") {
+                  diagnostic[key] = sanitizePreviewDiagnostic(parsed[key]);
+                }
+              }
+              return diagnostic;
+            } catch {
+              return { jsonKeys: [] };
+            }
+          }
+          function printUnexpectedResponseDiagnostic(path, expected, response, body, init) {
+            const diagnostic = {
+              path,
+              method: String(init.method ?? "GET").toUpperCase(),
+              actualStatus: response.status,
+              expectedStatus: expected,
+              contentType: response.headers.get("content-type") ?? "",
+              ...safeJsonDiagnostic(body),
+              bodyLength: body.length,
+              messagePreview: sanitizePreviewDiagnostic(body),
+            };
+            console.error(`Unexpected owner console preview response: ${JSON.stringify(diagnostic)}`);
+          }
           async function expectStatus(path, expected, init = {}) {
             const response = await fetchWithTimeout(path, init);
             const body = await response.text();
+            if (response.status !== expected) {
+              printUnexpectedResponseDiagnostic(path, expected, response, body, init);
+            }
             assert(response.status === expected, `${path} returned HTTP ${response.status}, expected ${expected}.`);
             for (const snippet of forbiddenText) {
               assert(!body.includes(snippet), `${path} contains forbidden runtime text: ${snippet}`);
@@ -1215,49 +1267,94 @@ jobs:
           node <<'NODE'
           const fs = require("node:fs");
           const eventName = process.env.OWNER_CONSOLE_CREATOR_EVENT_NAME ?? "";
+          const shortSha = process.env.OWNER_CONSOLE_CANDIDATE_SHORT_SHA ?? "";
           if (!/^Creator Governance Preview Cup [a-f0-9]{7}$/.test(eventName)) {
             console.error("Creator-governance preview event name is missing or malformed.");
             process.exit(1);
           }
+          if (!/^[a-f0-9]{7}$/.test(shortSha)) {
+            console.error("Creator-governance preview short SHA is missing or malformed.");
+            process.exit(1);
+          }
           fs.writeFileSync("owner-console-creator-event-verify.sql", `
           SELECT
+            e.id,
             e.name,
+            e.slug,
             e.event_type,
+            e.category,
             e.status,
             e.visibility,
-            ces.server_id AS hosting_server_id
+            e.starts_at,
+            e.ends_at,
+            CASE WHEN e.created_by IS NOT NULL AND e.created_by != '' THEN 1 ELSE 0 END AS created_by_present,
+            CASE WHEN EXISTS (SELECT 1 FROM users WHERE users.id = e.created_by) THEN 1 ELSE 0 END AS created_by_user_exists,
+            ces.server_id AS hosting_server_id,
+            ces.category AS registration_category,
+            ces.approved,
+            ces.seed,
+            ls.competitive_enabled,
+            ls.server_category AS host_category,
+            CASE WHEN ls.last_event_at IS NOT NULL AND ls.last_event_at != '' THEN 1 ELSE 0 END AS host_last_event_at_set,
+            (SELECT COUNT(*) FROM competitive_event_activity activity WHERE activity.event_id = e.id) AS activity_count,
+            (SELECT activity.activity_type FROM competitive_event_activity activity WHERE activity.event_id = e.id ORDER BY activity.created_at DESC LIMIT 1) AS activity_type
           FROM competitive_events e
           LEFT JOIN competitive_event_servers ces ON ces.event_id = e.id
+          LEFT JOIN linked_servers ls ON ls.id = ces.server_id
           WHERE e.name = '${eventName.replaceAll("'", "''")}'
           ORDER BY e.created_at DESC;
           `);
           NODE
 
           npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --file owner-console-creator-event-verify.sql > owner-console-creator-event-count.json
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "PRAGMA foreign_key_check;" > owner-console-creator-event-foreign-key-check.json
 
           node <<'NODE'
           const fs = require("node:fs");
-          const parsed = JSON.parse(fs.readFileSync("owner-console-creator-event-count.json", "utf8"));
-          const containers = Array.isArray(parsed) ? parsed : [parsed];
-          const rows = containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          function rowsFromWranglerJson(path) {
+            const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          const rows = rowsFromWranglerJson("owner-console-creator-event-count.json");
           if (rows.length !== 1) {
             console.error(`Expected exactly one preview creator-governance event row, got ${rows.length}.`);
             process.exit(1);
           }
           const row = rows[0] ?? {};
           const expectedName = process.env.OWNER_CONSOLE_CREATOR_EVENT_NAME;
+          const shortSha = process.env.OWNER_CONSOLE_CANDIDATE_SHORT_SHA;
           const expected = {
             name: expectedName,
+            slug: `creator-governance-preview-cup-${shortSha}`,
             event_type: "community_cup",
+            category: "deathmatch",
             hosting_server_id: "owner-console-nuketown",
+            registration_category: "deathmatch",
             status: "registration_open",
             visibility: "public",
+            starts_at: "2026-08-01T18:00:00.000Z",
+            ends_at: "2026-08-01T20:00:00.000Z",
+            approved: 1,
+            seed: 1,
+            competitive_enabled: 1,
+            host_category: "deathmatch",
+            host_last_event_at_set: 1,
+            activity_count: 1,
+            activity_type: "event_created",
+            created_by_present: 1,
+            created_by_user_exists: 1,
           };
           for (const [key, value] of Object.entries(expected)) {
             if (row[key] !== value) {
               console.error(`Creator-governance preview event ${key} mismatch.`);
               process.exit(1);
             }
+          }
+          const fkRows = rowsFromWranglerJson("owner-console-creator-event-foreign-key-check.json");
+          if (fkRows.length > 0) {
+            console.error("Creator-governance preview event foreign_key_check returned rows.");
+            process.exit(1);
           }
           console.log("Creator-governance preview D1 row verified.");
           NODE
@@ -1267,4 +1364,5 @@ jobs:
             echo ""
             echo "- Preview event row count: 1"
             echo "- Event type/status/visibility/host: verified"
+            echo "- Host registration/activity/foreign keys: verified"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -103,6 +103,17 @@ async function main() {
     assert.equal(env.DB.prepareCount, 0, "Denied official match generation must not run schema helpers or writes.");
   }
 
+  await assertSuccessfulCreatorEventCreate();
+  await assertSafeCreatorEventFailure("event_insert");
+  await assertSafeCreatorEventFailure("registration_insert");
+  await assertSafeCreatorEventFailure("host_update");
+  await assertSafeCreatorEventFailure("activity_insert");
+  await assertSafeCreatorEventFailure("slug_lookup");
+  await assertSafeCreatorEventFailure("host_lookup");
+  await assertSafeCreatorEventFailure("schema_readiness");
+  await assertSafeCreatorEventFailure("entitlement_lookup");
+  await assertStructuredPreflightFailures();
+
   assertSourceGovernance();
 
   console.log("Creator-only event governance tests passed.");
@@ -143,6 +154,311 @@ class NoWriteD1 {
   exec() {
     throw new Error("Unexpected D1 exec in denied governance path");
   }
+}
+
+async function assertSuccessfulCreatorEventCreate() {
+  const env = memoryEnv();
+  const result = await createCompetitiveEvent(env, creator, validCreateBody());
+  assert.equal(result.status, 200, "Configured creator should be able to create a valid event.");
+  assert.equal(result.ok, true, "Successful creator event response should be ok.");
+  assert.equal(env.DB.events.length, 1, "Successful creator event create should insert one event.");
+  assert.equal(env.DB.registrations.length, 1, "Successful creator event create should insert one host registration.");
+  assert.equal(env.DB.activities.length, 1, "Successful creator event create should insert one activity row.");
+  assert.equal(env.DB.activities[0]?.activity_type, "event_created", "Successful creator event create should write event_created activity.");
+  assert.equal(env.DB.host.competitive_enabled, 1, "Successful creator event create should mark host competitive.");
+  assert.equal(env.DB.host.server_category, "deathmatch", "Successful creator event create should keep the host category valid.");
+  assert.equal(env.DB.externalCalls, 0, "Creator event create must not call Discord, queues, schedulers, brackets, scores, or awards.");
+}
+
+async function assertSafeCreatorEventFailure(stage: CreatorEventFailureStage) {
+  const env = memoryEnv({ failStage: stage });
+  const result = await createCompetitiveEvent(env, creator, validCreateBody()) as Record<string, unknown>;
+  assert.equal(result.status, 500, `${stage} should return a safe HTTP 500.`);
+  assert.equal(result.errorCode, "EVENT_CREATE_FAILED", `${stage} should return the safe error code.`);
+  assert.match(String(result.requestId), /^event-create-/, `${stage} should include a safe request id.`);
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes("injected"), false, `${stage} must not expose the raw injected exception.`);
+  assert.equal(serialized.includes("SELECT"), false, `${stage} must not expose SQL.`);
+  assertNoPartialEvent(env.DB, stage);
+}
+
+async function assertStructuredPreflightFailures() {
+  {
+    const env = memoryEnv({ missingSchemaTable: "competitive_event_activity" });
+    const result = await createCompetitiveEvent(env, creator, validCreateBody()) as Record<string, unknown>;
+    assert.equal(result.status, 500, "Missing schema should fail safely.");
+    assert.equal(result.errorCode, "EVENT_SCHEMA_NOT_READY", "Missing schema should return EVENT_SCHEMA_NOT_READY.");
+    assert.match(String(result.requestId), /^event-create-/);
+    assertNoPartialEvent(env.DB, "schema_readiness");
+  }
+  {
+    const env = memoryEnv({ hostMissing: true });
+    const result = await createCompetitiveEvent(env, creator, validCreateBody());
+    assert.equal(result.status, 404, "Missing host should be a structured 404.");
+    assert.equal(result.error, "SERVER_NOT_FOUND");
+    assertNoPartialEvent(env.DB, "host_lookup");
+  }
+  {
+    const env = memoryEnv({ hostCategory: null });
+    const result = await createCompetitiveEvent(env, creator, validCreateBody());
+    assert.equal(result.status, 409, "Missing host category should be a structured 409.");
+    assert.equal(result.error, "NO_CATEGORY");
+    assertNoPartialEvent(env.DB, "category_resolution");
+  }
+  {
+    const env = memoryEnv({ planKey: "starter", subscriptionStatus: "inactive" });
+    const result = await createCompetitiveEvent(env, creator, validCreateBody());
+    assert.equal(result.status, 403, "Plan-locked host should be a structured 403.");
+    assert.equal(result.error, "PLAN_LOCKED");
+    assertNoPartialEvent(env.DB, "entitlement_lookup");
+  }
+  {
+    const env = memoryEnv({ hostStatus: "archived" });
+    const result = await createCompetitiveEvent(env, creator, validCreateBody());
+    assert.equal(result.status, 409, "Archived host should be invalid for official event creation.");
+    assert.equal(result.error, "INVALID_HOST_STATE");
+    assertNoPartialEvent(env.DB, "host_lookup");
+  }
+}
+
+function assertNoPartialEvent(db: MemoryD1, label: string) {
+  assert.equal(db.events.length, 0, `${label} must not leave an event row.`);
+  assert.equal(db.registrations.length, 0, `${label} must not leave a host registration.`);
+  assert.equal(db.activities.length, 0, `${label} must not leave activity rows.`);
+  assert.equal(db.host.competitive_enabled, 0, `${label} must not leave host competitive_enabled changed.`);
+  assert.equal(db.host.last_event_at, "2026-01-01T00:00:00.000Z", `${label} must restore host last_event_at.`);
+  assert.equal(db.externalCalls, 0, `${label} must not call Discord, queues, schedulers, brackets, scores, or awards.`);
+}
+
+type CreatorEventFailureStage =
+  | "schema_readiness"
+  | "host_lookup"
+  | "entitlement_lookup"
+  | "slug_lookup"
+  | "event_insert"
+  | "registration_insert"
+  | "host_update"
+  | "activity_insert";
+
+type MemoryD1Options = {
+  failStage?: CreatorEventFailureStage;
+  missingSchemaTable?: string;
+  hostMissing?: boolean;
+  hostCategory?: string | null;
+  hostStatus?: string;
+  planKey?: string;
+  subscriptionStatus?: string;
+};
+
+function memoryEnv(options: MemoryD1Options = {}): Env & { DB: MemoryD1 } {
+  return {
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorDiscordId,
+    DB: new MemoryD1(options),
+  } as Env & { DB: MemoryD1 };
+}
+
+class InjectedStageError extends Error {
+  code: string;
+  constructor(stage: CreatorEventFailureStage) {
+    super(`injected ${stage} SELECT secret_token_123456789012345678901234567890`);
+    this.name = "InjectedStageError";
+    this.code = `INJECTED_${stage}`;
+  }
+}
+
+class MemoryD1 {
+  events: Array<Record<string, unknown>> = [];
+  registrations: Array<Record<string, unknown>> = [];
+  activities: Array<Record<string, unknown>> = [];
+  externalCalls = 0;
+  readonly options: MemoryD1Options;
+  host: Record<string, unknown>;
+
+  constructor(options: MemoryD1Options) {
+    this.options = options;
+    this.host = {
+      id: "server-a",
+      user_id: "server-owner-user",
+      guild_id: "guild-a",
+      public_slug: "server-a",
+      display_name: "NukeTown Test",
+      hostname: "NukeTown Test",
+      server_name: "NukeTown Test",
+      nitrado_service_name: "NukeTown Test",
+      server_type: options.hostCategory === null ? null : "DEATHMATCH",
+      server_mode: null,
+      server_category: options.hostCategory === undefined ? "deathmatch" : options.hostCategory,
+      competitive_enabled: 0,
+      verified_server: 1,
+      event_mmr: 1000,
+      season_points: 0,
+      event_wins: 0,
+      event_losses: 0,
+      event_draws: 0,
+      last_event_at: "2026-01-01T00:00:00.000Z",
+      current_players: 1,
+      max_players: 10,
+      plan_key: options.planKey ?? "pro",
+      subscription_status: options.subscriptionStatus ?? "active",
+      status: options.hostStatus ?? "live",
+      listing_visibility: "public",
+      updated_at: "2026-01-02T00:00:00.000Z",
+    };
+    if (options.failStage === "entitlement_lookup") {
+      Object.defineProperty(this.host, "subscription_status", {
+        get() {
+          throw new InjectedStageError("entitlement_lookup");
+        },
+      });
+    }
+  }
+
+  prepare(query: string) {
+    return new MemoryStatement(this, query);
+  }
+
+  batch() {
+    throw new Error("Unexpected D1 batch in creator governance test");
+  }
+
+  exec() {
+    throw new Error("Unexpected D1 exec in creator governance test");
+  }
+}
+
+class MemoryStatement {
+  private bindings: unknown[] = [];
+  constructor(private readonly db: MemoryD1, private readonly query: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all<T>() {
+    if (this.query.includes("PRAGMA table_info(")) {
+      if (this.db.options.failStage === "schema_readiness") throw new InjectedStageError("schema_readiness");
+      const table = this.query.match(/PRAGMA table_info\(([^)]+)\)/)?.[1] ?? "";
+      if (table === this.db.options.missingSchemaTable) return { results: [] as T[] };
+      return { results: schemaColumns(table).map((name) => ({ name })) as T[] };
+    }
+    if (this.query.includes("FROM linked_servers") && this.query.includes("LEFT JOIN server_subscriptions")) {
+      if (this.db.options.failStage === "host_lookup") throw new InjectedStageError("host_lookup");
+      return { results: (this.db.options.hostMissing ? [] : [this.db.host]) as T[] };
+    }
+    throw new Error(`Unexpected all query: ${this.query.slice(0, 120)}`);
+  }
+
+  async first<T>() {
+    if (this.query.includes("SELECT id FROM competitive_events WHERE slug")) {
+      if (this.db.options.failStage === "slug_lookup") throw new InjectedStageError("slug_lookup");
+      const slug = String(this.bindings[0] ?? "");
+      return (this.db.events.find((event) => event.slug === slug) ?? null) as T | null;
+    }
+    throw new Error(`Unexpected first query: ${this.query.slice(0, 120)}`);
+  }
+
+  async run() {
+    if (this.query.includes("INSERT INTO competitive_events")) {
+      if (this.db.options.failStage === "event_insert") throw new InjectedStageError("event_insert");
+      this.db.events.push({
+        id: this.bindings[0],
+        name: this.bindings[1],
+        slug: this.bindings[2],
+        category: this.bindings[4],
+        event_type: this.bindings[5],
+        status: this.bindings[6],
+        visibility: this.bindings[7],
+        starts_at: this.bindings[11],
+        ends_at: this.bindings[12],
+        created_by: this.bindings[13],
+      });
+      return { success: true };
+    }
+    if (this.query.includes("INSERT INTO competitive_event_servers")) {
+      if (this.db.options.failStage === "registration_insert") throw new InjectedStageError("registration_insert");
+      this.db.registrations.push({
+        id: this.bindings[0],
+        event_id: this.bindings[1],
+        server_id: this.bindings[2],
+        category: this.bindings[3],
+        approved: 1,
+        seed: 1,
+      });
+      return { success: true };
+    }
+    if (this.query.includes("UPDATE linked_servers") && this.query.includes("competitive_enabled = 1")) {
+      if (this.db.options.failStage === "host_update") throw new InjectedStageError("host_update");
+      this.db.host.competitive_enabled = 1;
+      this.db.host.server_category = this.db.host.server_category ?? this.bindings[0];
+      this.db.host.last_event_at = "2026-08-01T18:00:00.000Z";
+      this.db.host.updated_at = "2026-08-01T18:00:00.000Z";
+      return { success: true };
+    }
+    if (this.query.includes("INSERT INTO competitive_event_activity")) {
+      if (this.db.options.failStage === "activity_insert") throw new InjectedStageError("activity_insert");
+      this.db.activities.push({
+        id: this.bindings[0],
+        event_id: this.bindings[1],
+        server_id: this.bindings[2],
+        activity_type: this.bindings[3],
+        message: this.bindings[4],
+      });
+      return { success: true };
+    }
+    if (this.query.includes("DELETE FROM competitive_event_activity WHERE event_id = ?")) {
+      this.db.activities = this.db.activities.filter((row) => row.event_id !== this.bindings[0]);
+      return { success: true };
+    }
+    if (this.query.includes("DELETE FROM competitive_event_matches WHERE event_id = ?")) return { success: true };
+    if (this.query.includes("DELETE FROM competitive_event_servers WHERE event_id = ?")) {
+      this.db.registrations = this.db.registrations.filter((row) => row.event_id !== this.bindings[0]);
+      return { success: true };
+    }
+    if (this.query.includes("DELETE FROM competitive_events WHERE id = ?")) {
+      this.db.events = this.db.events.filter((row) => row.id !== this.bindings[0]);
+      return { success: true };
+    }
+    if (this.query.includes("UPDATE linked_servers") && this.query.includes("competitive_enabled = ?")) {
+      this.db.host.competitive_enabled = this.bindings[0];
+      this.db.host.server_category = this.bindings[1];
+      this.db.host.last_event_at = this.bindings[2];
+      this.db.host.updated_at = this.bindings[3];
+      return { success: true };
+    }
+    throw new Error(`Unexpected run query: ${this.query.slice(0, 120)}`);
+  }
+}
+
+function schemaColumns(table: string) {
+  const columns: Record<string, string[]> = {
+    competitive_events: [
+      "id",
+      "name",
+      "slug",
+      "description",
+      "category",
+      "event_type",
+      "status",
+      "visibility",
+      "premium_tier",
+      "server_limit",
+      "team_limit",
+      "starts_at",
+      "ends_at",
+      "created_by",
+      "rules",
+      "rewards",
+      "created_at",
+      "updated_at",
+    ],
+    competitive_event_servers: ["id", "event_id", "server_id", "category", "approved", "seed", "registered_at"],
+    competitive_event_matches: ["id", "event_id"],
+    competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
+    linked_servers: ["id", "server_category", "competitive_enabled", "last_event_at", "updated_at", "status"],
+    server_subscriptions: ["guild_id", "plan_key", "status"],
+  };
+  return columns[table] ?? [];
 }
 
 function source(path: string) {
@@ -187,9 +503,16 @@ function assertSourceGovernance() {
   assert.doesNotMatch(ownerEventsRoute, /DISCORD_BOT_TOKEN|fetch\s*\(|queue|scheduled|awardBadge|finalizeServerWarEvent/i);
 
   const eventsLib = source("functions/_lib/events.ts");
-  const createCompetitiveEventBody = eventsLib.slice(eventsLib.indexOf("export async function createCompetitiveEvent"));
-  assert.equal(createCompetitiveEventBody.indexOf("creatorEventAdminDeniedPayload(env, viewer)") < createCompetitiveEventBody.indexOf("await ensureCompetitiveEventsSchema(env);"), true, "Event creation must check creator capability before schema helpers.");
-  assertIncludes(createCompetitiveEventBody, "const server = await fetchServerById(env, input.hosting_server_id ?? input.server_id);");
+  const createStart = eventsLib.indexOf("export async function createCompetitiveEvent");
+  const createEnd = eventsLib.indexOf("export async function joinCompetitiveEvent");
+  const createCompetitiveEventBody = eventsLib.slice(createStart, createEnd);
+  assertIncludes(createCompetitiveEventBody, "creatorEventAdminDeniedPayload(env, viewer)");
+  assert.equal(createCompetitiveEventBody.includes("await ensureCompetitiveEventsSchema(env);"), false, "Official event creation must not run broad request-time schema mutation.");
+  assertIncludes(createCompetitiveEventBody, "validateCompetitiveEventCreationSchema(env, requestId)");
+  assertIncludes(createCompetitiveEventBody, "fetchEventCreationHost(env, input.hosting_server_id ?? input.server_id, requestId)");
+  assertIncludes(createCompetitiveEventBody, "compensateFailedEventCreate");
+  assertIncludes(eventsLib, "EVENT_SCHEMA_NOT_READY");
+  assertIncludes(eventsLib, "EVENT_CREATE_FAILED");
   assertIncludes(eventsLib, "input.preview === false && cleanSlug(input.event_slug ?? \"\")");
 
   for (const file of [
