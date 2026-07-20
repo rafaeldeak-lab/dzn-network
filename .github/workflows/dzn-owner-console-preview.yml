@@ -547,6 +547,23 @@ jobs:
             };
           }
 
+          function classifyCloudflareFailure(operationName, result) {
+            const error = firstCloudflareError(result?.parsed);
+            if (result?.status === 400 && String(error.code) === "8000024") {
+              return "PREVIEW_D1_API_REQUEST_INVALID";
+            }
+            if (operationName.startsWith("pages") && (result?.status === 401 || result?.status === 403)) {
+              return "PREVIEW_D1_PAGES_PERMISSION_MISSING";
+            }
+            if (operationName.startsWith("pages")) {
+              return "PREVIEW_D1_PAGES_INVENTORY_UNAVAILABLE";
+            }
+            if (operationName.startsWith("worker")) {
+              return "PREVIEW_D1_WORKER_BINDING_AUDIT_UNAVAILABLE";
+            }
+            return "PREVIEW_D1_BINDING_AUDIT_INCOMPLETE";
+          }
+
           function success(result) {
             return Boolean(result?.ok && result?.parsed?.success !== false);
           }
@@ -604,6 +621,10 @@ jobs:
             return [];
           }
 
+          function resultInfo(parsed) {
+            return parsed?.result_info ?? parsed?.result?.result_info ?? {};
+          }
+
           async function listPaginated(source, endpointCategory, basePath, keys) {
             const items = [];
             const perPage = 50;
@@ -614,12 +635,32 @@ jobs:
               if (!success(result)) return { ok: false, items, result };
               const pageItems = itemsFromResult(result.parsed, keys);
               items.push(...pageItems);
-              const info = result.parsed?.result_info ?? result.parsed?.result?.result_info ?? {};
+              const info = resultInfo(result.parsed);
               const totalPages = Number(info.total_pages ?? 0);
               if (totalPages > 0 && page >= totalPages) break;
               if (pageItems.length < perPage) break;
             }
             return { ok: true, items, result: lastResult };
+          }
+
+          async function listPagesProjects(source) {
+            const items = [];
+            const first = await cloudflare(source, "pages-project-list", "/pages/projects");
+            if (!success(first)) return { ok: false, items, result: first };
+            items.push(...itemsFromResult(first.parsed, ["projects"]));
+            const info = resultInfo(first.parsed);
+            const currentPage = Number(info.page ?? 1);
+            const totalPages = Number(info.total_pages ?? 1);
+            const returnedPerPage = Number(info.per_page ?? 0);
+            const safePerPage = returnedPerPage > 0 && returnedPerPage <= 20 ? returnedPerPage : 20;
+            if (totalPages > currentPage) {
+              for (let page = currentPage + 1; page <= totalPages && page <= 50; page += 1) {
+                const result = await cloudflare(source, "pages-project-list", `/pages/projects?page=${page}&per_page=${safePerPage}`);
+                if (!success(result)) return { ok: false, items, result };
+                items.push(...itemsFromResult(result.parsed, ["projects"]));
+              }
+            }
+            return { ok: true, items, result: first };
           }
 
           async function testTokenSource(source) {
@@ -645,7 +686,7 @@ jobs:
             capability.d1Read = success(d1);
             if (!capability.d1Read) capability.failures.push(["d1_database_list", d1]);
 
-            const pages = await cloudflare(source, "pages-project-list", "/pages/projects?per_page=50&page=1");
+            const pages = await cloudflare(source, "pages-project-list", "/pages/projects");
             capability.pagesList = success(pages);
             if (!capability.pagesList) {
               capability.failures.push(["pages_project_list", pages]);
@@ -694,14 +735,12 @@ jobs:
             }
             console.log("Cloudflare cleanup token capability matrix");
             console.log("token source | verify | D1 read | Pages list | Pages detail | Worker binding read | D1 delete eligible source");
+            const diagnosticCodes = new Set();
             for (const capability of capabilities) {
               console.log(`${capability.source.name} | ${capability.verify ? "yes" : "no"} | ${capability.d1Read ? "yes" : "no"} | ${capability.pagesList ? "yes" : "no"} | ${capability.pagesDetail ? "yes" : "no"} | ${capability.workerBindingRead ? "yes" : "no"} | ${capability.d1DeleteEligible ? "yes" : "no"}`);
               for (const [operation, result] of capability.failures) {
-                const diagnosticCode = operation.startsWith("pages")
-                  ? "PREVIEW_D1_PAGES_INVENTORY_UNAVAILABLE"
-                  : operation.startsWith("worker")
-                    ? "PREVIEW_D1_WORKER_BINDING_AUDIT_UNAVAILABLE"
-                    : "PREVIEW_D1_BINDING_AUDIT_INCOMPLETE";
+                const diagnosticCode = classifyCloudflareFailure(operation, result);
+                diagnosticCodes.add(diagnosticCode);
                 printCloudflareDiagnostic(diagnosticCode, operation, result, capability.source.name);
               }
             }
@@ -713,6 +752,12 @@ jobs:
               && capability.workerBindingRead
             ));
             if (!selected) {
+              if (diagnosticCodes.has("PREVIEW_D1_API_REQUEST_INVALID")) {
+                fail("PREVIEW_D1_API_REQUEST_INVALID: Cloudflare rejected a cleanup audit request as invalid. Fix the workflow request before changing token permissions.");
+              }
+              if (diagnosticCodes.has("PREVIEW_D1_PAGES_PERMISSION_MISSING")) {
+                fail("PREVIEW_D1_PAGES_PERMISSION_MISSING: corrected Pages read request returned 401/403 for all existing token sources.");
+              }
               fail("PREVIEW_D1_BINDING_AUDIT_INCOMPLETE: no existing Cloudflare token source has D1 read, Pages list/detail read, and Worker binding read. Configure CLOUDFLARE_PREVIEW_D1_CLEANUP_TOKEN with the missing read capabilities before rerunning.");
             }
             if (cleanupAction === "delete" && !selected.d1DeleteEligible) {
@@ -765,12 +810,12 @@ jobs:
           }
 
           async function auditPagesBindings(source, databasesById) {
-            const projectsResult = await listPaginated(source, "pages-project-list", "/pages/projects", ["projects"]);
+            const projectsResult = await listPagesProjects(source);
             const bindings = [];
             const projects = [];
             const incomplete = [];
             if (!projectsResult.ok) {
-              printCloudflareDiagnostic("PREVIEW_D1_PAGES_INVENTORY_UNAVAILABLE", "pages_project_list", projectsResult.result, source.name);
+              printCloudflareDiagnostic(classifyCloudflareFailure("pages_project_list", projectsResult.result), "pages_project_list", projectsResult.result, source.name);
               return { complete: false, projects, bindings, incomplete: ["pages_project_list"] };
             }
             for (const project of projectsResult.items) {
@@ -778,7 +823,7 @@ jobs:
               if (!projectName) continue;
               const detail = await cloudflare(source, "pages-project-detail", `/pages/projects/${encodeURIComponent(projectName)}`);
               if (!success(detail)) {
-                printCloudflareDiagnostic("PREVIEW_D1_PAGES_INVENTORY_UNAVAILABLE", `pages_project_detail:${projectName}`, detail, source.name);
+                printCloudflareDiagnostic(classifyCloudflareFailure("pages_project_detail", detail), `pages_project_detail:${projectName}`, detail, source.name);
                 incomplete.push(`pages_project_detail:${projectName}`);
                 continue;
               }
