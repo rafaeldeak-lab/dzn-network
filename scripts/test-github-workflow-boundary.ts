@@ -82,6 +82,12 @@ function hasWorkflowTrigger(source: string, trigger: string) {
   return new RegExp(`^  ${trigger}:`, "m").test(topLevelBlock(source, "on"));
 }
 
+function indexOfOrFail(source: string, snippet: string) {
+  const index = source.indexOf(snippet);
+  assert.notEqual(index, -1, `Expected source to include: ${snippet}`);
+  return index;
+}
+
 type AutoUpdateEventContext = {
   eventName: string;
   confirmProductionUpdates?: string;
@@ -722,6 +728,9 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/creator-only-event
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Use workflow from feature/creator-only-event-governance requires branch=feature/creator-only-event-governance."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("branch=feature/creator-only-event-governance requires Use workflow from feature/creator-only-event-governance."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db_owner_console_preview_creator_governance_"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("OWNER_CONSOLE_CREATOR_EVENT_NAME"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Creator Governance Preview Cup ${CANDIDATE_SHORT_SHA}"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_only must equal PREVIEW_ONLY"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Preview branch must never be main."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn-network-owner-console-preview"), true);
@@ -768,8 +777,11 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/audit-log"), tr
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/events"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/owner/events/create"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/events/suggest"), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("Creator Governance Preview Cup"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Reset creator-governance preview test event"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DELETE FROM competitive_events"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Verify creator-governance preview event row"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("owner-console-creator-event-count.json"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Creator-governance preview D1 row verified."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/auth/discord/start?returnTo=%2Fowner"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/auth/discord/callback"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Discord auth start did not redirect to Discord."), true);
@@ -793,6 +805,34 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn-adm-sync-worker"), fal
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn-auto-update-worker"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("db:migrate:remote"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db --remote"), false);
+
+const ownerPreviewValidateInputsStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Validate preview-only inputs");
+const ownerPreviewInstallStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Install");
+const ownerPreviewResolveD1Start = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Resolve or create preview D1 database");
+const ownerPreviewConfigWrite = indexOfOrFail(dznOwnerConsolePreviewWorkflow, 'fs.writeFileSync("wrangler.owner-console-preview.toml"');
+const ownerPreviewMigrateStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Apply preview D1 migrations");
+const ownerPreviewSeedStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Seed preview-only owner console data");
+const ownerPreviewResetEventStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Reset creator-governance preview test event");
+const ownerPreviewDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Deploy preview Pages project");
+const ownerPreviewVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify owner console preview");
+const ownerPreviewCreatorPost = indexOfOrFail(dznOwnerConsolePreviewWorkflow, 'const created = await postJson("/api/owner/events", creatorCookie, 200, createPayload);');
+const ownerPreviewRowVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify creator-governance preview event row");
+
+const ownerPreviewValidateBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewValidateInputsStart, ownerPreviewInstallStart);
+assert.equal(ownerPreviewValidateBlock.includes("wrangler.owner-console-preview.toml"), false, "Input validation must not require the generated preview Wrangler config.");
+assert.equal(ownerPreviewValidateBlock.includes("owner-console-creator-event-count.json"), false, "Input validation must not query the creator preview event row.");
+assert.equal(ownerPreviewConfigWrite > ownerPreviewResolveD1Start, true, "Preview Wrangler config must be generated in the D1 resolution step.");
+assert.equal(ownerPreviewMigrateStart > ownerPreviewConfigWrite, true, "Preview migrations must run after the preview Wrangler config is generated.");
+assert.equal(ownerPreviewSeedStart > ownerPreviewConfigWrite, true, "Preview seed must run after the preview Wrangler config is generated.");
+assert.equal(ownerPreviewResetEventStart > ownerPreviewSeedStart, true, "Creator-governance preview event reset must run after seed and migrations.");
+assert.equal(ownerPreviewDeployStart > ownerPreviewResetEventStart, true, "Preview deployment must run after the exact test-event reset.");
+assert.equal(ownerPreviewVerifyStart > ownerPreviewDeployStart, true, "Route/API verification must run after preview deployment.");
+assert.equal(ownerPreviewCreatorPost > ownerPreviewVerifyStart, true, "Creator POST must occur during route/API verification.");
+assert.equal(ownerPreviewRowVerifyStart > ownerPreviewCreatorPost, true, "D1 row verification must run only after the creator POST verification.");
+const ownerPreviewBeforeConfig = dznOwnerConsolePreviewWorkflow.slice(0, ownerPreviewConfigWrite);
+assert.equal(ownerPreviewBeforeConfig.includes("wrangler.owner-console-preview.toml"), false, "No command may reference wrangler.owner-console-preview.toml before it is created.");
+const ownerPreviewRowVerifyBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewRowVerifyStart);
+assert.equal(ownerPreviewRowVerifyBlock.includes("if: always()"), false, "Creator-governance row verification must not run after failed deployment/API verification.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("INSERT INTO server_build_stats (id,"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("https://dzn-network.pages.dev/api/auth/discord/callback"), false);
 assertInsertColumnsKnown(dznOwnerConsolePreviewWorkflow, "server_build_stats", [

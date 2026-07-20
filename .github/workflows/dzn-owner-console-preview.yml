@@ -76,6 +76,13 @@ jobs:
             exit 1
           fi
 
+          CANDIDATE_SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          CREATOR_EVENT_NAME="Creator Governance Preview Cup ${CANDIDATE_SHORT_SHA}"
+          {
+            printf "OWNER_CONSOLE_CANDIDATE_SHORT_SHA=%s\n" "$CANDIDATE_SHORT_SHA"
+            printf "OWNER_CONSOLE_CREATOR_EVENT_NAME=%s\n" "$CREATOR_EVENT_NAME"
+          } >> "$GITHUB_ENV"
+
           if [ "${MODE}" != "full-preview" ]; then
             echo "::error::Owner console preview only supports full-preview mode."
             exit 1
@@ -135,6 +142,10 @@ jobs:
                 exit 1
                 ;;
             esac
+            if [ "${PREVIEW_DB_NAME}" != "dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}" ]; then
+              echo "::error::feature/creator-only-event-governance requires preview_db_name=dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}."
+              exit 1
+            fi
           fi
 
           if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ]; then
@@ -231,20 +242,6 @@ jobs:
           console.log(`Detected production D1 database id: ${id}`);
           NODE
 
-          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --command "SELECT COUNT(*) AS row_count FROM competitive_events WHERE name = 'Creator Governance Preview Cup';" > owner-console-creator-event-count.json
-          node <<'NODE'
-          const fs = require("node:fs");
-          const parsed = JSON.parse(fs.readFileSync("owner-console-creator-event-count.json", "utf8"));
-          const containers = Array.isArray(parsed) ? parsed : [parsed];
-          const rows = containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
-          const count = Number(rows[0]?.row_count ?? 0);
-          if (count !== 1) {
-            console.error(`Expected exactly one preview creator-governance event row, got ${count}.`);
-            process.exit(1);
-          }
-          console.log("Creator-governance preview D1 row count: 1");
-          NODE
-
           {
             echo "## DZN Owner Console Preview Guard"
             echo ""
@@ -260,6 +257,7 @@ jobs:
             echo "- DZN_PULSE_ENABLED: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"
             echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
+            echo "- Creator governance preview event name is SHA-scoped: true"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install
@@ -665,6 +663,47 @@ jobs:
           npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --file owner-console-preview-seed.sql
           echo "Owner console preview seed completed."
 
+      - name: Reset creator-governance preview test event
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            dzn_network_db_owner_console_preview_creator_governance_*) ;;
+            *)
+              echo "::error::Refusing creator-governance reset for non-governance preview database name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing creator-governance reset because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const eventName = process.env.OWNER_CONSOLE_CREATOR_EVENT_NAME ?? "";
+          if (!/^Creator Governance Preview Cup [a-f0-9]{7}$/.test(eventName)) {
+            console.error("Creator-governance preview event name is missing or malformed.");
+            process.exit(1);
+          }
+          function sql(value) {
+            return `'${String(value).replaceAll("'", "''")}'`;
+          }
+          fs.writeFileSync("owner-console-creator-event-reset.sql", `
+          DELETE FROM competitive_event_activity
+          WHERE event_id IN (SELECT id FROM competitive_events WHERE name = ${sql(eventName)});
+          DELETE FROM competitive_event_matches
+          WHERE event_id IN (SELECT id FROM competitive_events WHERE name = ${sql(eventName)});
+          DELETE FROM competitive_event_servers
+          WHERE event_id IN (SELECT id FROM competitive_events WHERE name = ${sql(eventName)});
+          DELETE FROM competitive_events
+          WHERE name = ${sql(eventName)};
+          `);
+          NODE
+
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --file owner-console-creator-event-reset.sql
+          echo "Creator-governance preview test event reset completed."
+
       - name: Resolve or create preview Pages project
         run: |
           set -euo pipefail
@@ -883,6 +922,7 @@ jobs:
           const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE;
           const creatorCookie = process.env.OWNER_CONSOLE_CREATOR_COOKIE;
           const nonOwnerCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE;
+          const creatorEventName = process.env.OWNER_CONSOLE_CREATOR_EVENT_NAME;
           const ownerDiscordId = process.env.OWNER_CONSOLE_PREVIEW_OWNER_ID;
           const creatorDiscordId = process.env.OWNER_CONSOLE_PREVIEW_CREATOR_ID;
           const expectedDiscordClientId = process.env.OWNER_PREVIEW_DISCORD_CLIENT_ID;
@@ -913,6 +953,7 @@ jobs:
               process.exit(1);
             }
           }
+          assert(/^Creator Governance Preview Cup [a-f0-9]{7}$/.test(creatorEventName ?? ""), "Creator governance event name must be SHA-scoped.");
           function delay(ms) {
             return new Promise((resolve) => setTimeout(resolve, ms));
           }
@@ -1084,7 +1125,7 @@ jobs:
             assert(creatorOwnerEvents.parsed?.creatorEventGovernanceConfigured === true, "Creator event governance should report configured without exposing ids.");
 
             const createPayload = {
-              name: "Creator Governance Preview Cup",
+              name: creatorEventName,
               description: "Preview-only official event created by the fake creator identity.",
               event_type: "community_cup",
               hosting_server_id: "owner-console-nuketown",
@@ -1153,4 +1194,77 @@ jobs:
             echo "- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: false"
             echo "- Production D1 writes: none"
             echo "- Production Pages deploy: none"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify creator-governance preview event row
+        run: |
+          set -euo pipefail
+
+          case "${PREVIEW_DB_NAME}" in
+            dzn_network_db_owner_console_preview_creator_governance_*) ;;
+            *)
+              echo "::error::Refusing creator-governance row verification for non-governance preview database name."
+              exit 1
+              ;;
+          esac
+          if [ "${PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID}" ]; then
+            echo "::error::Refusing creator-governance row verification because preview D1 id equals production D1 id."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const eventName = process.env.OWNER_CONSOLE_CREATOR_EVENT_NAME ?? "";
+          if (!/^Creator Governance Preview Cup [a-f0-9]{7}$/.test(eventName)) {
+            console.error("Creator-governance preview event name is missing or malformed.");
+            process.exit(1);
+          }
+          fs.writeFileSync("owner-console-creator-event-verify.sql", `
+          SELECT
+            e.name,
+            e.event_type,
+            e.status,
+            e.visibility,
+            ces.server_id AS hosting_server_id
+          FROM competitive_events e
+          LEFT JOIN competitive_event_servers ces ON ces.event_id = e.id
+          WHERE e.name = '${eventName.replaceAll("'", "''")}'
+          ORDER BY e.created_at DESC;
+          `);
+          NODE
+
+          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --json --file owner-console-creator-event-verify.sql > owner-console-creator-event-count.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const parsed = JSON.parse(fs.readFileSync("owner-console-creator-event-count.json", "utf8"));
+          const containers = Array.isArray(parsed) ? parsed : [parsed];
+          const rows = containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          if (rows.length !== 1) {
+            console.error(`Expected exactly one preview creator-governance event row, got ${rows.length}.`);
+            process.exit(1);
+          }
+          const row = rows[0] ?? {};
+          const expectedName = process.env.OWNER_CONSOLE_CREATOR_EVENT_NAME;
+          const expected = {
+            name: expectedName,
+            event_type: "community_cup",
+            hosting_server_id: "owner-console-nuketown",
+            status: "registration_open",
+            visibility: "public",
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            if (row[key] !== value) {
+              console.error(`Creator-governance preview event ${key} mismatch.`);
+              process.exit(1);
+            }
+          }
+          console.log("Creator-governance preview D1 row verified.");
+          NODE
+
+          {
+            echo "## Creator Event Governance Preview Row"
+            echo ""
+            echo "- Preview event row count: 1"
+            echo "- Event type/status/visibility/host: verified"
           } >> "$GITHUB_STEP_SUMMARY"
