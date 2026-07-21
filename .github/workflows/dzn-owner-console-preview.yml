@@ -13,6 +13,7 @@ on:
           - cleanup-preview-d1
           - rebind-preview-d1
           - activate-rebound-discord-preview
+          - repair-rebound-discord-preview
       confirm_preview_only:
         description: Must equal PREVIEW_ONLY
         required: false
@@ -51,6 +52,18 @@ on:
         default: ""
       confirm_rebound_discord_preview_deploy:
         description: Activation confirmation
+        required: false
+        default: ""
+      repair_action:
+        description: Repair mode action
+        required: false
+        type: choice
+        default: dry-run
+        options:
+          - dry-run
+          - apply
+      confirm_rebound_discord_preview_repair:
+        description: Must equal APPROVE_REPAIR_REBOUND_DISCORD_PREVIEW for repair mode
         required: false
         default: ""
 
@@ -97,6 +110,12 @@ jobs:
       ACTIVATE_OLD_PREVIEW_DB_ID_MASK: 44ef61d8...ef59
       APPROVED_MAIN_RUNTIME_SHA: a159571079dda1d8f0102718732008033cdfb763
       CONFIRM_REBOUND_DISCORD_PREVIEW_DEPLOY: ${{ inputs.confirm_rebound_discord_preview_deploy }}
+      REPAIR_ACTION: ${{ inputs.repair_action }}
+      CONFIRM_REBOUND_DISCORD_PREVIEW_REPAIR: ${{ inputs.confirm_rebound_discord_preview_repair }}
+      REPAIR_PREVIEW_PROJECT_NAME: dzn-network-discord-announcements-preview
+      REPAIR_REPLACEMENT_PREVIEW_DB_NAME: dzn_network_db_discord_announcements_preview
+      REPAIR_OLD_PREVIEW_DB_NAME: dzn_network_db_discord_announcements_preview_alignment_ee8c812
+      REPAIR_OLD_PREVIEW_DB_ID_MASK: 44ef61d8...ef59
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
       PRODUCTION_D1_DATABASE_NAME: dzn_network_db
       D1_ACCOUNT_DATABASE_LIMIT: "10"
@@ -201,9 +220,9 @@ jobs:
           } >> "$GITHUB_ENV"
 
           case "${MODE}" in
-            full-preview|cleanup-preview-d1|rebind-preview-d1|activate-rebound-discord-preview) ;;
+            full-preview|cleanup-preview-d1|rebind-preview-d1|activate-rebound-discord-preview|repair-rebound-discord-preview) ;;
             *)
-              echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, or activate-rebound-discord-preview mode."
+              echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, activate-rebound-discord-preview, or repair-rebound-discord-preview mode."
               exit 1
               ;;
           esac
@@ -327,6 +346,35 @@ jobs:
             fi
             if [ "${ACTIVATE_REPLACEMENT_PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ] || [ "${ACTIVATE_OLD_PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
               echo "::error::Refusing activation deploy for production D1 database name."
+              exit 1
+            fi
+            if ! [[ "${APPROVED_MAIN_RUNTIME_SHA}" =~ ^[a-f0-9]{40}$ ]]; then
+              echo "::error::Approved main runtime SHA is malformed."
+              exit 1
+            fi
+          fi
+          if [ "${MODE}" = "repair-rebound-discord-preview" ]; then
+            if [ "${CANDIDATE_BRANCH}" != "feature/creator-only-event-governance" ]; then
+              echo "::error::repair-rebound-discord-preview mode may only run from feature/creator-only-event-governance."
+              exit 1
+            fi
+            case "${REPAIR_ACTION}" in
+              dry-run|apply) ;;
+              *)
+                echo "::error::repair_action must be dry-run or apply."
+                exit 1
+                ;;
+            esac
+            if [ "${CONFIRM_REBOUND_DISCORD_PREVIEW_REPAIR}" != "APPROVE_REPAIR_REBOUND_DISCORD_PREVIEW" ]; then
+              echo "::error::confirm_rebound_discord_preview_repair must equal APPROVE_REPAIR_REBOUND_DISCORD_PREVIEW for repair-rebound-discord-preview mode."
+              exit 1
+            fi
+            if [ "${REPAIR_PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+              echo "::error::Refusing repair for production Pages project."
+              exit 1
+            fi
+            if [ "${REPAIR_REPLACEMENT_PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ] || [ "${REPAIR_OLD_PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
+              echo "::error::Refusing repair for production D1 database name."
               exit 1
             fi
             if ! [[ "${APPROVED_MAIN_RUNTIME_SHA}" =~ ^[a-f0-9]{40}$ ]]; then
@@ -480,6 +528,15 @@ jobs:
               echo "- Activation runtime source: ${APPROVED_MAIN_RUNTIME_SHA}"
               echo "- Activation confirmation accepted: true"
               echo "- Preview deployment will be performed only by activation mode: yes"
+            fi
+            if [ "${MODE}" = "repair-rebound-discord-preview" ]; then
+              echo "- Repair action: ${REPAIR_ACTION}"
+              echo "- Repair preview Pages project: ${REPAIR_PREVIEW_PROJECT_NAME}"
+              echo "- Repair replacement database: ${REPAIR_REPLACEMENT_PREVIEW_DB_NAME}"
+              echo "- Repair old database: ${REPAIR_OLD_PREVIEW_DB_NAME}"
+              echo "- Repair runtime source: ${APPROVED_MAIN_RUNTIME_SHA}"
+              echo "- Repair confirmation accepted: true"
+              echo "- Repair dry-run mutates nothing: $([ "${REPAIR_ACTION}" = "dry-run" ] && echo yes || echo no)"
             fi
             echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
             echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
@@ -2535,9 +2592,7 @@ jobs:
 
       - name: Deploy rebound Discord preview runtime
         if: ${{ inputs.mode == 'activate-rebound-discord-preview' }}
-        working-directory: runtime-main
         env:
-          CLOUDFLARE_API_TOKEN: ${{ env.OWNER_CONSOLE_CF_TOKEN }}
           DZN_PULSE_ENABLED: "true"
           DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
           DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
@@ -2550,7 +2605,7 @@ jobs:
             echo "::error::Refusing to deploy production Pages project from activation mode."
             exit 1
           fi
-          if [ "$(git rev-parse HEAD)" != "${APPROVED_MAIN_RUNTIME_SHA}" ]; then
+          if [ "$(git -C runtime-main rev-parse HEAD)" != "${APPROVED_MAIN_RUNTIME_SHA}" ]; then
             echo "::error::Runtime checkout changed before activation deploy."
             exit 1
           fi
@@ -2558,8 +2613,37 @@ jobs:
             echo "::error::Discord flags must remain false for activation deployment."
             exit 1
           fi
+          if [ -z "${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}" ]; then
+            echo "::error::Missing Cloudflare API token for activation deployment."
+            exit 1
+          fi
+          export CLOUDFLARE_API_TOKEN="${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
 
-          npx wrangler pages deploy out \
+          DEPLOY_ROOT="${RUNNER_TEMP}/dzn-discord-preview-deploy"
+          case "${DEPLOY_ROOT}" in
+            "${RUNNER_TEMP}"/*) ;;
+            *)
+              echo "::error::Deployment root must stay inside RUNNER_TEMP."
+              exit 1
+              ;;
+          esac
+          rm -rf "${DEPLOY_ROOT}"
+          mkdir -p "${DEPLOY_ROOT}"
+          cp -R runtime-main/out "${DEPLOY_ROOT}/out"
+
+          if find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env | grep -q .; then
+            echo "::error::Production or local Wrangler configuration is deploy-visible."
+            find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env
+            exit 1
+          fi
+          if grep -R -E 'name[[:space:]]*=[[:space:]]*"dzn-network"|database_name[[:space:]]*=[[:space:]]*"dzn_network_db"|dzn_network_db' "${DEPLOY_ROOT}" >/tmp/dzn-preview-production-leak.txt 2>/dev/null; then
+            echo "::error::Deployment-visible output contains production project or D1 configuration markers."
+            cut -d: -f1 /tmp/dzn-preview-production-leak.txt | sort -u | sed 's#^#blocked file: #'
+            exit 1
+          fi
+
+          cd "${DEPLOY_ROOT}"
+          "${GITHUB_WORKSPACE}/runtime-main/node_modules/.bin/wrangler" pages deploy out \
             --project-name "${ACTIVATE_PREVIEW_PROJECT_NAME}" \
             --branch "${ACTIVATE_PREVIEW_PROJECT_BRANCH}" \
             --commit-hash "${APPROVED_MAIN_RUNTIME_SHA}" \
@@ -2577,18 +2661,17 @@ jobs:
             throw new Error("Wrangler did not report a distinct immutable preview URL for the activation deployment.");
           }
           const deploymentId = immutableUrl.match(/^https:\/\/([^.]+)\./)?.[1] ?? "unknown";
-          fs.writeFileSync("../rebound-discord-preview-deploy-env.txt", [
+          fs.appendFileSync(process.env.GITHUB_ENV, [
             `ACTIVATE_IMMUTABLE_PREVIEW_URL=${immutableUrl}`,
             `ACTIVATE_STABLE_PREVIEW_URL=${stableUrl}`,
             `ACTIVATE_DEPLOYMENT_ID=${deploymentId}`,
             "",
           ].join("\n"));
           console.log(`Rebound Discord preview deployment ID: ${deploymentId}`);
-          console.log(`Rebound Discord preview immutable URL: ${immutableUrl || stableUrl}`);
+          console.log(`Rebound Discord preview immutable URL: ${immutableUrl}`);
           console.log(`Rebound Discord preview stable URL: ${stableUrl}`);
           NODE
 
-          cat ../rebound-discord-preview-deploy-env.txt >> "$GITHUB_ENV"
           {
             echo ""
             echo "## Rebound Discord Preview Deployment"
@@ -2726,6 +2809,702 @@ jobs:
             await fetchPath(productionUrl, "/api/owner/overview", 401);
             console.log(`Activated rebound Discord preview verified: immutable=${immutableUrl} stable=${stableUrl}`);
             console.log(`Replacement DB ${replacementName} remains bound; old DB ${oldName} not used by project config.`);
+          })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+          NODE
+
+      - name: Audit and repair rebound Discord preview configuration
+        if: ${{ inputs.mode == 'repair-rebound-discord-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.OWNER_CONSOLE_CF_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.REPAIR_PREVIEW_PROJECT_NAME;
+          const replacementName = process.env.REPAIR_REPLACEMENT_PREVIEW_DB_NAME;
+          const oldName = process.env.REPAIR_OLD_PREVIEW_DB_NAME;
+          const oldExpectedMask = process.env.REPAIR_OLD_PREVIEW_DB_ID_MASK;
+          const productionProject = process.env.PRODUCTION_PAGES_PROJECT_NAME;
+          const productionName = process.env.DETECTED_PRODUCTION_D1_DATABASE_NAME || process.env.PRODUCTION_D1_DATABASE_NAME;
+          const productionId = process.env.DETECTED_PRODUCTION_D1_DATABASE_ID || "";
+          const repairAction = process.env.REPAIR_ACTION;
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+
+          if (!token || token.length <= 20) throw new Error("Missing Cloudflare preview token for repair mode.");
+
+          function maskId(id) {
+            return typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : "unavailable";
+          }
+
+          function sanitize(value) {
+            let text = String(value ?? "");
+            for (const sensitive of [accountId, productionId, token]) {
+              if (sensitive) text = text.split(sensitive).join("[redacted]");
+            }
+            return text
+              .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
+              .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "[redacted-id]")
+              .replace(/\b[0-9a-f]{32}\b/gi, "[redacted-id]")
+              .replace(/[A-Za-z0-9_-]{48,}/g, "[redacted-token]")
+              .replace(/(authorization|cookie|session|secret|token)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+              .slice(0, 1200);
+          }
+
+          function fail(message) {
+            console.error(sanitize(message));
+            process.exit(1);
+          }
+
+          function appendSummary(lines) {
+            if (summaryPath) fs.appendFileSync(summaryPath, `${lines.join("\n")}\n`);
+          }
+
+          function success(result) {
+            return Boolean(result?.ok && result?.parsed?.success !== false);
+          }
+
+          function databaseId(database) {
+            return String(database?.uuid ?? database?.id ?? database?.database_id ?? "");
+          }
+
+          async function cloudflare(endpointCategory, apiPath, init = {}, accountScoped = true) {
+            const base = accountScoped
+              ? `https://api.cloudflare.com/client/v4/accounts/${accountId}`
+              : "https://api.cloudflare.com/client/v4";
+            const response = await fetch(`${base}${apiPath}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ code: `http_${response.status}`, message: "non_json_response" }] };
+            }
+            return {
+              ok: response.ok,
+              status: response.status,
+              parsed,
+              endpointCategory,
+              contentType: response.headers.get("content-type") || "unknown",
+              bodyLength: text.length,
+            };
+          }
+
+          function cloudflareError(result) {
+            const first = Array.isArray(result?.parsed?.errors) ? result.parsed.errors[0] : null;
+            return `${result?.status ?? "unknown"} ${first?.code ?? "unknown"} ${sanitize(first?.message ?? "unknown")}`;
+          }
+
+          function itemsFromResult(parsed, keys) {
+            const result = parsed?.result;
+            if (Array.isArray(result)) return result;
+            for (const key of keys) {
+              if (Array.isArray(result?.[key])) return result[key];
+              if (Array.isArray(parsed?.[key])) return parsed[key];
+            }
+            return [];
+          }
+
+          function resultInfo(parsed) {
+            return parsed?.result_info ?? parsed?.result?.result_info ?? {};
+          }
+
+          async function listPaginated(endpointCategory, basePath, keys) {
+            const items = [];
+            const perPage = 50;
+            for (let page = 1; page <= 50; page += 1) {
+              const result = await cloudflare(endpointCategory, `${basePath}?per_page=${perPage}&page=${page}`);
+              if (!success(result)) fail(`${endpointCategory} failed: ${cloudflareError(result)}`);
+              const pageItems = itemsFromResult(result.parsed, keys);
+              items.push(...pageItems);
+              const info = resultInfo(result.parsed);
+              const totalPages = Number(info.total_pages ?? 0);
+              if (totalPages > 0 && page >= totalPages) break;
+              if (pageItems.length < perPage) break;
+            }
+            return items;
+          }
+
+          async function getProject(name) {
+            const result = await cloudflare("pages-project-detail", `/pages/projects/${encodeURIComponent(name)}`);
+            if (!success(result)) fail(`Could not read Pages project ${name}: ${cloudflareError(result)}`);
+            return result.parsed?.result;
+          }
+
+          function envValue(config, key) {
+            const value = config?.env_vars?.[key];
+            if (value && typeof value === "object") return String(value.value ?? "");
+            return String(value ?? "");
+          }
+
+          function collectD1Bindings(configValue, context) {
+            const bindings = [];
+            if (!configValue || typeof configValue !== "object") return bindings;
+            if (Array.isArray(configValue)) {
+              for (const value of configValue) {
+                const id = String(value?.id ?? value?.database_id ?? "");
+                const name = String(value?.database_name ?? value?.name ?? "");
+                const binding = String(value?.binding ?? value?.name ?? "unnamed");
+                if (id || name) bindings.push({ ...context, binding, id, name });
+              }
+              return bindings;
+            }
+            for (const [binding, value] of Object.entries(configValue)) {
+              if (typeof value === "string") {
+                bindings.push({ ...context, binding, id: value, name: "" });
+              } else if (value && typeof value === "object") {
+                bindings.push({
+                  ...context,
+                  binding,
+                  id: String(value.id ?? value.database_id ?? ""),
+                  name: String(value.database_name ?? value.name ?? ""),
+                });
+              }
+            }
+            return bindings.filter((binding) => binding.id || binding.name);
+          }
+
+          function projectD1Bindings(project, databasesById = new Map()) {
+            const bindings = [];
+            for (const environment of ["production", "preview"]) {
+              const config = project?.deployment_configs?.[environment] ?? {};
+              for (const binding of collectD1Bindings(config.d1_databases, {
+                source: "pages",
+                project: project?.name ?? "unknown",
+                environment,
+              })) {
+                bindings.push({ ...binding, resolvedName: binding.name || databasesById.get(binding.id) || "unknown" });
+              }
+            }
+            return bindings;
+          }
+
+          function bindingMatches(binding, name, id) {
+            return binding.id === id || binding.name === name || binding.resolvedName === name;
+          }
+
+          function classifyBinding(binding, ids) {
+            if (!binding?.id && !binding?.name) return "unknown";
+            if (bindingMatches(binding, replacementName, ids.replacementId)) return "replacement preview D1";
+            if (bindingMatches(binding, oldName, ids.oldId)) return "old stale preview D1";
+            if (bindingMatches(binding, productionName, ids.productionId)) return "real production D1";
+            return "unknown";
+          }
+
+          function latestDeployment(project) {
+            const deployment = project?.latest_deployment ?? project?.canonical_deployment ?? {};
+            const trigger = deployment.deployment_trigger?.metadata ?? deployment.source?.config ?? {};
+            return {
+              id: maskId(String(deployment.id ?? "")),
+              url: String(deployment.url ?? deployment.aliases?.[0] ?? "unknown"),
+              commit: String(trigger.commit_hash ?? trigger.commit ?? deployment.source?.config?.commit_hash ?? "unknown"),
+              branch: String(trigger.branch ?? deployment.source?.config?.branch ?? "unknown"),
+            };
+          }
+
+          function productionProjectSignature(project) {
+            return projectD1Bindings(project)
+              .filter((binding) => binding.binding === "DB")
+              .map((binding) => `${binding.environment}:${binding.id || binding.name}`)
+              .sort()
+              .join("|");
+          }
+
+          function withFalseDiscordFlags(config) {
+            const envVars = { ...(config?.env_vars ?? {}) };
+            envVars.DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED = { type: "plain_text", value: "false" };
+            envVars.DZN_DISCORD_NOTIFICATIONS_ENABLED = { type: "plain_text", value: "false" };
+            return { ...(config ?? {}), env_vars: envVars };
+          }
+
+          function patchD1Binding(config, replacementId) {
+            const currentD1 = config?.d1_databases && typeof config.d1_databases === "object" && !Array.isArray(config.d1_databases)
+              ? { ...config.d1_databases }
+              : {};
+            return {
+              ...withFalseDiscordFlags(config),
+              d1_databases: {
+                ...currentD1,
+                DB: { id: replacementId },
+              },
+            };
+          }
+
+          function verifyProjectSafe(project, replacementId) {
+            for (const environment of ["production", "preview"]) {
+              const config = project?.deployment_configs?.[environment] ?? {};
+              const db = config?.d1_databases?.DB;
+              const dbId = String(db?.id ?? db?.database_id ?? db ?? "");
+              if (dbId !== replacementId) fail(`${environment} config DB binding does not point to replacement after repair.`);
+              if (envValue(config, "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED") !== "false") fail(`${environment} server announcements flag is not false after repair.`);
+              if (envValue(config, "DZN_DISCORD_NOTIFICATIONS_ENABLED") !== "false") fail(`${environment} Discord notifications flag is not false after repair.`);
+            }
+          }
+
+          void (async () => {
+            if (projectName !== "dzn-network-discord-announcements-preview") fail("Repair preview project constant mismatch.");
+            if (projectName === productionProject) fail("Refusing to repair real production Pages project.");
+            if (replacementName === productionName || oldName === productionName) fail("Refusing to repair using production D1 name.");
+
+            const verify = await cloudflare("token-verify", "/user/tokens/verify", {}, false);
+            if (!success(verify)) fail(`Cloudflare token verification failed: ${cloudflareError(verify)}`);
+
+            const databases = await listPaginated("d1-database-list", "/d1/database", ["databases"]);
+            const databasesById = new Map(databases.map((database) => [databaseId(database), String(database?.name ?? "unnamed")]));
+            const oldDatabase = databases.find((database) => String(database?.name ?? "") === oldName);
+            const replacementDatabase = databases.find((database) => String(database?.name ?? "") === replacementName);
+            const productionDatabase = databases.find((database) => String(database?.name ?? "") === productionName);
+            if (!oldDatabase) fail("Old stale preview D1 was not found.");
+            if (!replacementDatabase) fail("Replacement preview D1 was not found.");
+            const oldId = databaseId(oldDatabase);
+            const replacementId = databaseId(replacementDatabase);
+            const resolvedProductionId = productionId || databaseId(productionDatabase);
+            const oldMask = maskId(oldId);
+            const replacementMask = maskId(replacementId);
+            if (oldMask !== oldExpectedMask) fail(`Old stale preview D1 masked ID changed; expected ${oldExpectedMask}, got ${oldMask}.`);
+            if (oldId === resolvedProductionId || replacementId === resolvedProductionId) fail("Production D1 ID detected in repair path.");
+
+            const project = await getProject(projectName);
+            const productionProjectRecord = await getProject(productionProject);
+            const productionSignature = productionProjectSignature(productionProjectRecord);
+            const ids = { oldId, replacementId, productionId: resolvedProductionId };
+            const bindings = projectD1Bindings(project, databasesById).filter((binding) => binding.binding === "DB");
+            const productionBinding = bindings.find((binding) => binding.environment === "production");
+            const previewBinding = bindings.find((binding) => binding.environment === "preview");
+            const productionClassification = classifyBinding(productionBinding, ids);
+            const previewClassification = classifyBinding(previewBinding, ids);
+            const quarantined = productionClassification === "real production D1" || previewClassification === "real production D1";
+            const latest = latestDeployment(project);
+
+            for (const environment of ["production", "preview"]) {
+              const config = project?.deployment_configs?.[environment] ?? {};
+              console.log(`${environment} config DB binding classification: ${environment === "production" ? productionClassification : previewClassification}`);
+              console.log(`${environment} config DB binding ID: ${maskId(String(config?.d1_databases?.DB?.id ?? config?.d1_databases?.DB?.database_id ?? config?.d1_databases?.DB ?? ""))}`);
+              console.log(`${environment} DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: ${envValue(config, "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED") || "unset"}`);
+              console.log(`${environment} DZN_DISCORD_NOTIFICATIONS_ENABLED: ${envValue(config, "DZN_DISCORD_NOTIFICATIONS_ENABLED") || "unset"}`);
+            }
+            console.log(`Repair action: ${repairAction}`);
+            console.log(`Latest deployment ID: ${latest.id}`);
+            console.log(`Latest immutable URL: ${sanitize(latest.url)}`);
+            console.log(`Latest deployment commit: ${sanitize(latest.commit)}`);
+            console.log(`Latest deployment branch: ${sanitize(latest.branch)}`);
+            console.log(`Preview project quarantined: ${quarantined ? "yes" : "no"}`);
+            console.log(`Route probes allowed before repair: no`);
+
+            appendSummary([
+              "## Rebound Discord Preview Repair",
+              "",
+              `- Repair action: ${repairAction}`,
+              `- Preview project: ${projectName}`,
+              `- Replacement preview D1: ${replacementName}`,
+              `- Replacement preview D1 ID: ${replacementMask}`,
+              `- Old stale preview D1: ${oldName}`,
+              `- Old stale preview D1 ID: ${oldMask}`,
+              `- Production config DB classification: ${productionClassification}`,
+              `- Preview config DB classification: ${previewClassification}`,
+              `- Preview quarantined: ${quarantined ? "yes" : "no"}`,
+              `- Latest deployment ID: ${latest.id}`,
+              `- Latest immutable URL: ${sanitize(latest.url)}`,
+              `- Latest deployment commit: ${sanitize(latest.commit)}`,
+              `- Latest deployment branch: ${sanitize(latest.branch)}`,
+              "- Dry-run patches Pages: no",
+              "- Dry-run deploys Pages: no",
+              "- Dry-run route probes: no",
+              "- Discord messages sent: false",
+            ]);
+
+            if (repairAction === "dry-run") {
+              console.log("Rebound Discord preview repair dry-run completed. No Pages binding changed and no route probes were made.");
+              return;
+            }
+
+            const productionBranch = String(project?.production_branch ?? "");
+            if (!productionBranch) fail("Discord preview Pages project production_branch is not configured.");
+            const patchPayload = {
+              deployment_configs: {
+                production: patchD1Binding(project.deployment_configs?.production ?? {}, replacementId),
+                preview: patchD1Binding(project.deployment_configs?.preview ?? {}, replacementId),
+              },
+            };
+            console.log(`Applying preview-only repair config patch: project=${projectName} replacement=${replacementMask}`);
+            const patch = await cloudflare("pages-project-patch", `/pages/projects/${encodeURIComponent(projectName)}`, {
+              method: "PATCH",
+              body: JSON.stringify(patchPayload),
+            });
+            if (!success(patch)) fail(`Preview repair config patch failed: ${cloudflareError(patch)}`);
+            const afterProject = await getProject(projectName);
+            verifyProjectSafe(afterProject, replacementId);
+
+            fs.appendFileSync(process.env.GITHUB_ENV, [
+              `REPAIR_REPLACEMENT_D1_DATABASE_ID=${replacementId}`,
+              `REPAIR_OLD_D1_DATABASE_ID=${oldId}`,
+              `REPAIR_PREVIEW_PROJECT_BRANCH=${productionBranch}`,
+              `REPAIR_PRODUCTION_PROJECT_SIGNATURE=${Buffer.from(productionSignature).toString("base64")}`,
+              `REPAIR_PREVIEW_STABLE_URL=https://${projectName}.pages.dev`,
+              "",
+            ].join("\n"));
+            appendSummary([
+              "",
+              "- Repair config patch result: success",
+              "- Both preview project environments use replacement D1 before deploy: yes",
+              "- Both Discord flags false before deploy: yes",
+            ]);
+          })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+          NODE
+
+      - name: Prepare pinned main runtime for rebound Discord preview repair
+        if: ${{ inputs.mode == 'repair-rebound-discord-preview' && inputs.repair_action == 'apply' }}
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main" --depth=1
+          CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "${CURRENT_MAIN_SHA}" != "${APPROVED_MAIN_RUNTIME_SHA}" ]; then
+            echo "::error::origin/main moved. Expected ${APPROVED_MAIN_RUNTIME_SHA}, got ${CURRENT_MAIN_SHA}."
+            exit 1
+          fi
+          if [ -e runtime-main ]; then
+            echo "::error::runtime-main checkout path already exists."
+            exit 1
+          fi
+          git worktree add --detach runtime-main "${APPROVED_MAIN_RUNTIME_SHA}"
+          RUNTIME_HEAD="$(git -C runtime-main rev-parse HEAD)"
+          RUNTIME_TREE="$(git -C runtime-main rev-parse "HEAD^{tree}")"
+          if [ "${RUNTIME_HEAD}" != "${APPROVED_MAIN_RUNTIME_SHA}" ]; then
+            echo "::error::Pinned repair runtime checkout does not match approved main SHA."
+            exit 1
+          fi
+          printf "REPAIR_RUNTIME_TREE_SHA=%s\n" "${RUNTIME_TREE}" >> "$GITHUB_ENV"
+          {
+            echo ""
+            echo "## Rebound Discord Preview Repair Runtime"
+            echo ""
+            echo "- Workflow source branch: ${CANDIDATE_BRANCH}"
+            echo "- Workflow source SHA: ${CANDIDATE_SHA}"
+            echo "- Runtime source SHA: ${RUNTIME_HEAD}"
+            echo "- Runtime source tree: ${RUNTIME_TREE}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build pinned main runtime for rebound Discord preview repair
+        if: ${{ inputs.mode == 'repair-rebound-discord-preview' && inputs.repair_action == 'apply' }}
+        working-directory: runtime-main
+        env:
+          DZN_PULSE_ENABLED: "true"
+          DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+          DZN_APP_URL: https://dzn-network-discord-announcements-preview.pages.dev
+          NEXT_PUBLIC_APP_URL: https://dzn-network-discord-announcements-preview.pages.dev
+        run: |
+          set -euo pipefail
+
+          npm ci
+          npm run test:github-workflows
+          npm run test:discord-server-announcements
+          npm run test:owner-console
+          npm run test
+          npm run lint
+          npm run build
+          git diff --check
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
+          const include = Array.isArray(routes.include) ? routes.include : [];
+          function isSplat(route) {
+            return typeof route === "string" && route.endsWith("/*");
+          }
+          function splatPrefix(route) {
+            return route.slice(0, -1);
+          }
+          for (const route of ["/api/*", "/owner", "/owner/*"]) {
+            if (!include.includes(route)) throw new Error(`out/_routes.json missing ${route}.`);
+          }
+          for (const splat of include.filter(isSplat)) {
+            const prefix = splatPrefix(splat);
+            const overlap = include.find((route) => route !== splat && route.startsWith(prefix));
+            if (overlap) throw new Error(`include route overlap: ${splat} covers ${overlap}.`);
+          }
+          console.log("Repair pinned main runtime build and Cloudflare route normalization verified.");
+          NODE
+
+      - name: Deploy repaired rebound Discord preview from isolated directory
+        if: ${{ inputs.mode == 'repair-rebound-discord-preview' && inputs.repair_action == 'apply' }}
+        env:
+          DZN_PULSE_ENABLED: "true"
+          DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+        run: |
+          set -euo pipefail
+
+          if [ "${REPAIR_PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Refusing to deploy production Pages project from repair mode."
+            exit 1
+          fi
+          if [ "$(git -C runtime-main rev-parse HEAD)" != "${APPROVED_MAIN_RUNTIME_SHA}" ]; then
+            echo "::error::Runtime checkout changed before repair deploy."
+            exit 1
+          fi
+          if [ "${DZN_DISCORD_NOTIFICATIONS_ENABLED}" != "false" ] || [ "${DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED}" != "false" ]; then
+            echo "::error::Discord flags must remain false for repair deployment."
+            exit 1
+          fi
+          if [ -z "${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}" ]; then
+            echo "::error::Missing Cloudflare API token for repair deployment."
+            exit 1
+          fi
+          export CLOUDFLARE_API_TOKEN="${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+
+          DEPLOY_ROOT="${RUNNER_TEMP}/dzn-discord-preview-deploy"
+          case "${DEPLOY_ROOT}" in
+            "${RUNNER_TEMP}"/*) ;;
+            *)
+              echo "::error::Repair deployment root must stay inside RUNNER_TEMP."
+              exit 1
+              ;;
+          esac
+          rm -rf "${DEPLOY_ROOT}"
+          mkdir -p "${DEPLOY_ROOT}"
+          cp -R runtime-main/out "${DEPLOY_ROOT}/out"
+
+          if find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env | grep -q .; then
+            echo "::error::Unapproved Wrangler or env configuration is deploy-visible."
+            find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env | sed 's#^#blocked config path: #'
+            exit 1
+          fi
+          if grep -R -E 'name[[:space:]]*=[[:space:]]*"dzn-network"|database_name[[:space:]]*=[[:space:]]*"dzn_network_db"|dzn_network_db' "${DEPLOY_ROOT}" >/tmp/dzn-repair-production-leak.txt 2>/dev/null; then
+            echo "::error::Deployment-visible configuration contains production project or D1 markers."
+            cut -d: -f1 /tmp/dzn-repair-production-leak.txt | sort -u | sed 's#^#blocked file: #'
+            exit 1
+          fi
+          echo "Deployment-visible configuration scan passed."
+
+          cd "${DEPLOY_ROOT}"
+          "${GITHUB_WORKSPACE}/runtime-main/node_modules/.bin/wrangler" pages deploy out \
+            --project-name "${REPAIR_PREVIEW_PROJECT_NAME}" \
+            --branch "${REPAIR_PREVIEW_PROJECT_BRANCH}" \
+            --commit-hash "${APPROVED_MAIN_RUNTIME_SHA}" \
+            --commit-message "Repair rebound Discord preview runtime ${APPROVED_MAIN_RUNTIME_SHA}" \
+            | tee repaired-rebound-discord-preview-deploy.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const projectName = process.env.REPAIR_PREVIEW_PROJECT_NAME;
+          const stableUrl = `https://${projectName}.pages.dev`;
+          const text = fs.readFileSync("repaired-rebound-discord-preview-deploy.txt", "utf8");
+          const urls = [...new Set((text.match(/https:\/\/[^\s"'<>]+?\.pages\.dev/g) ?? []).map((url) => url.replace(/[),.;]+$/, "")))];
+          const immutableUrl = urls.find((url) => url !== stableUrl) ?? "";
+          if (!immutableUrl) throw new Error("Wrangler did not report a distinct immutable preview URL for the repair deployment.");
+          const deploymentId = immutableUrl.match(/^https:\/\/([^.]+)\./)?.[1] ?? "unknown";
+          fs.appendFileSync(process.env.GITHUB_ENV, [
+            `REPAIR_IMMUTABLE_PREVIEW_URL=${immutableUrl}`,
+            `REPAIR_STABLE_PREVIEW_URL=${stableUrl}`,
+            `REPAIR_DEPLOYMENT_ID=${deploymentId}`,
+            "",
+          ].join("\n"));
+          console.log(`Repair preview deployment ID: ${deploymentId}`);
+          console.log(`Repair immutable preview URL: ${immutableUrl}`);
+          console.log(`Repair stable preview URL: ${stableUrl}`);
+          NODE
+
+      - name: Verify repaired rebound Discord preview
+        if: ${{ inputs.mode == 'repair-rebound-discord-preview' && inputs.repair_action == 'apply' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.OWNER_CONSOLE_CF_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.REPAIR_PREVIEW_PROJECT_NAME;
+          const replacementName = process.env.REPAIR_REPLACEMENT_PREVIEW_DB_NAME;
+          const oldName = process.env.REPAIR_OLD_PREVIEW_DB_NAME;
+          const productionProject = process.env.PRODUCTION_PAGES_PROJECT_NAME;
+          const productionName = process.env.DETECTED_PRODUCTION_D1_DATABASE_NAME || process.env.PRODUCTION_D1_DATABASE_NAME;
+          const productionId = process.env.DETECTED_PRODUCTION_D1_DATABASE_ID || "";
+          const replacementId = process.env.REPAIR_REPLACEMENT_D1_DATABASE_ID;
+          const oldId = process.env.REPAIR_OLD_D1_DATABASE_ID;
+          const expectedProductionSignature = Buffer.from(process.env.REPAIR_PRODUCTION_PROJECT_SIGNATURE || "", "base64").toString("utf8");
+          const immutableUrl = process.env.REPAIR_IMMUTABLE_PREVIEW_URL;
+          const stableUrl = process.env.REPAIR_STABLE_PREVIEW_URL || `https://${projectName}.pages.dev`;
+          const productionUrl = "https://dzn-network.pages.dev";
+          const forbiddenText = [
+            "Error 1102",
+            "Worker exceeded resource limits",
+            "Minified React error #",
+            "stack trace",
+            "TOKEN_ENCRYPTION_KEY",
+            "SESSION_SECRET",
+            "encrypted_token",
+          ];
+
+          function fail(message) {
+            console.error(String(message).replace(/[A-Za-z0-9_-]{48,}/g, "[redacted-token]"));
+            process.exit(1);
+          }
+          function assert(condition, message) {
+            if (!condition) fail(message);
+          }
+          function envValue(config, key) {
+            const value = config?.env_vars?.[key];
+            if (value && typeof value === "object") return String(value.value ?? "");
+            return String(value ?? "");
+          }
+          function collectD1Bindings(configValue, context) {
+            const bindings = [];
+            if (!configValue || typeof configValue !== "object") return bindings;
+            for (const [binding, value] of Object.entries(configValue)) {
+              if (typeof value === "string") bindings.push({ ...context, binding, id: value, name: "" });
+              else if (value && typeof value === "object") bindings.push({
+                ...context,
+                binding,
+                id: String(value.id ?? value.database_id ?? ""),
+                name: String(value.database_name ?? value.name ?? ""),
+              });
+            }
+            return bindings.filter((binding) => binding.id || binding.name);
+          }
+          function projectD1Bindings(project) {
+            const bindings = [];
+            for (const environment of ["production", "preview"]) {
+              const config = project?.deployment_configs?.[environment] ?? {};
+              bindings.push(...collectD1Bindings(config.d1_databases, {
+                project: project?.name ?? "unknown",
+                environment,
+              }));
+            }
+            return bindings;
+          }
+          function bindingMatches(binding, name, id) {
+            return binding.id === id || binding.name === name;
+          }
+          function productionProjectSignature(project) {
+            return projectD1Bindings(project)
+              .filter((binding) => binding.binding === "DB")
+              .map((binding) => `${binding.environment}:${binding.id || binding.name}`)
+              .sort()
+              .join("|");
+          }
+          function patchD1Binding(config, replacementId) {
+            const currentD1 = config?.d1_databases && typeof config.d1_databases === "object" && !Array.isArray(config.d1_databases)
+              ? { ...config.d1_databases }
+              : {};
+            const envVars = { ...(config?.env_vars ?? {}) };
+            envVars.DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED = { type: "plain_text", value: "false" };
+            envVars.DZN_DISCORD_NOTIFICATIONS_ENABLED = { type: "plain_text", value: "false" };
+            return { ...(config ?? {}), env_vars: envVars, d1_databases: { ...currentD1, DB: { id: replacementId } } };
+          }
+          async function cloudflare(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const parsed = await response.json().catch(() => null);
+            if (!response.ok || parsed?.success === false) throw new Error(`Cloudflare API failed: ${response.status}`);
+            return parsed.result;
+          }
+          async function getProject(name) {
+            return await cloudflare(`/pages/projects/${encodeURIComponent(name)}`);
+          }
+          async function repatchAndFail(reason) {
+            console.log(`PREVIEW_DEPLOY_CONFIGURATION_DRIFT: ${reason}`);
+            const current = await getProject(projectName);
+            await cloudflare(`/pages/projects/${encodeURIComponent(projectName)}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                deployment_configs: {
+                  production: patchD1Binding(current.deployment_configs?.production ?? {}, replacementId),
+                  preview: patchD1Binding(current.deployment_configs?.preview ?? {}, replacementId),
+                },
+              }),
+            });
+            const repaired = await getProject(projectName);
+            for (const environment of ["production", "preview"]) {
+              const config = repaired?.deployment_configs?.[environment] ?? {};
+              const db = config?.d1_databases?.DB;
+              const dbId = String(db?.id ?? db?.database_id ?? db ?? "");
+              assert(dbId === replacementId, `${environment} repatch did not restore replacement D1.`);
+              assert(envValue(config, "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED") === "false", `${environment} server announcements flag not false after drift repatch.`);
+              assert(envValue(config, "DZN_DISCORD_NOTIFICATIONS_ENABLED") === "false", `${environment} Discord notifications flag not false after drift repatch.`);
+            }
+            fail("PREVIEW_DEPLOY_CONFIGURATION_DRIFT repaired on preview project; route probes skipped.");
+          }
+          async function d1Query(sql) {
+            if (!/^\s*(SELECT|PRAGMA)\b/i.test(sql)) throw new Error("Refusing non-read-only verification query.");
+            const result = await cloudflare(`/d1/database/${encodeURIComponent(replacementId)}/query`, {
+              method: "POST",
+              body: JSON.stringify({ sql }),
+            });
+            const payload = Array.isArray(result) ? result : [result];
+            return payload.flatMap((item) => item?.results ?? []);
+          }
+          async function fetchPath(base, path, expectedStatus) {
+            const response = await fetch(`${base}${path}`, {
+              redirect: "manual",
+              headers: { "User-Agent": "dzn-rebound-discord-preview-repair" },
+            });
+            const text = await response.text().catch(() => "");
+            if (response.status !== expectedStatus) throw new Error(`${base}${path} expected ${expectedStatus}, got ${response.status}`);
+            for (const marker of forbiddenText) {
+              if (text.includes(marker)) throw new Error(`${base}${path} exposed forbidden marker ${marker}`);
+            }
+            return { response, text };
+          }
+          async function verifyBase(base) {
+            await fetchPath(base, "/", 200);
+            const owner = await fetchPath(base, "/owner", 302);
+            const location = owner.response.headers.get("location") || "";
+            assert(location.includes("/login"), `${base}/owner did not redirect to login.`);
+            await fetchPath(base, "/api/owner/overview", 401);
+            await fetchPath(base, "/api/owner/discord/overview", 401);
+            await fetchPath(base, "/api/public/servers", 200);
+            await fetchPath(base, "/api/public/home-stats", 200);
+            await fetchPath(base, "/api/public/leaderboards", 200);
+            await fetchPath(base, "/api/public/server-rail", 200);
+            const pulse = await fetchPath(base, "/api/dzn-pulse/config", 200);
+            const parsed = JSON.parse(pulse.text);
+            assert(parsed.discordNotificationsEnabled === false, `${base}/api/dzn-pulse/config did not report discordNotificationsEnabled=false.`);
+          }
+          void (async () => {
+            assert(projectName !== productionProject, "Repair verification project is production.");
+            const project = await getProject(projectName);
+            const projectBindings = projectD1Bindings(project).filter((binding) => binding.binding === "DB");
+            const oldProjectBindings = projectBindings.filter((binding) => bindingMatches(binding, oldName, oldId));
+            const replacementProjectBindings = projectBindings.filter((binding) => bindingMatches(binding, replacementName, replacementId));
+            for (const environment of ["production", "preview"]) {
+              const config = project?.deployment_configs?.[environment] ?? {};
+              const db = config?.d1_databases?.DB;
+              const dbId = String(db?.id ?? db?.database_id ?? db ?? "");
+              if (dbId !== replacementId) await repatchAndFail(`${environment} config DB binding drifted away from replacement.`);
+              if (dbId === productionId || dbId === productionName) await repatchAndFail(`${environment} config DB binding drifted to production D1.`);
+              if (envValue(config, "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED") !== "false") await repatchAndFail(`${environment} server announcements flag drifted.`);
+              if (envValue(config, "DZN_DISCORD_NOTIFICATIONS_ENABLED") !== "false") await repatchAndFail(`${environment} Discord notifications flag drifted.`);
+            }
+            if (oldProjectBindings.length !== 0) await repatchAndFail(`old D1 project-config bindings=${oldProjectBindings.length}`);
+            if (replacementProjectBindings.length !== 2) await repatchAndFail(`replacement D1 project-config bindings=${replacementProjectBindings.length}`);
+            const productionProjectRecord = await getProject(productionProject);
+            assert(productionProjectSignature(productionProjectRecord) === expectedProductionSignature, "Real production Pages project D1 binding signature changed.");
+
+            const rowCountRows = await d1Query("SELECT COUNT(*) AS row_count FROM discord_announcement_posts;");
+            const rowCount = Number(rowCountRows[0]?.row_count ?? NaN);
+            assert(rowCount === 0, `discord_announcement_posts row count should remain 0, got ${rowCount}.`);
+            await verifyBase(immutableUrl);
+            await verifyBase(stableUrl);
+            await fetchPath(productionUrl, "/", 200);
+            await fetchPath(productionUrl, "/owner", 302);
+            await fetchPath(productionUrl, "/api/owner/overview", 401);
+            console.log(`Repaired rebound Discord preview verified: immutable=${immutableUrl} stable=${stableUrl}`);
+            console.log(`Replacement DB ${replacementName} active; old DB ${oldName} project-config bindings=0.`);
+            console.log("Discord messages sent: false");
           })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
           NODE
 
