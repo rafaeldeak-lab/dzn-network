@@ -1,6 +1,6 @@
 import { getSessionUser } from "../../../../_lib/db";
 import { reportEventSuggestion } from "../../../../_lib/event-suggestions";
-import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
+import { json, methodNotAllowed, readBoundedJson } from "../../../../_lib/http";
 import { privateNoStoreHeaders } from "../../../../_lib/performance";
 import type { PagesFunction } from "../../../../_lib/types";
 
@@ -11,8 +11,9 @@ type ReportBody = {
 
 export const onRequestPost: PagesFunction = async ({ request, env, params }) => {
   const user = await getSessionUser(env, request).catch(() => null);
-  const body = await readJson<ReportBody>(request);
-  const result = await reportEventSuggestion(env, user, params.suggestionId, body);
+  const body = await readBoundedJson<ReportBody>(request, 2 * 1024);
+  if (!body.ok) return json({ ok: false, error: body.error, message: body.message }, { status: body.status, headers: privateNoStoreHeaders() });
+  const result = await reportEventSuggestion(env, user, String(params.suggestionId ?? ""), body.value);
   return json(result, { status: result.status, headers: privateNoStoreHeaders() });
 };
 

@@ -31,20 +31,23 @@
 - Added creator-only moderation and conversion APIs for suggestions.
 - Added site-wide delayed navigation progress feedback.
 - Added route-specific skeleton loading states for events, suggestions, servers, leaderboards, DZN Pulse, owner, and Event Control.
-- Added public suggestion board sections for Trending, New, Shortlisted, Accepted, and Converted into Events.
+- Added a public suggestion board with sort tabs, status filters, cursor pagination, load-more, and duplicate-card suppression.
 - Added Owner Event Control suggestion moderation summaries and creator-only action controls.
 
 ## Cache Rules
 
-Public cache helper rules:
+Public cache helper rules use manual cache metadata rather than relying on automatic stale handling:
 
-- cache only `GET` and `HEAD`;
+- cache only `GET`;
+- let `HEAD` read an existing GET entry or bypass without storing a bodyless response;
 - bypass when `Authorization` is present;
 - bypass when session cookies are present;
 - bypass if the response contains `Set-Cookie`;
 - bypass non-2xx or error responses with no-store headers;
 - allowlist cache-key query parameters per route;
-- add bounded `max-age` and `stale-while-revalidate`;
+- store explicit cache metadata for `cachedAt`, `freshUntil`, `staleUntil`, and cache version;
+- serve fresh entries as `HIT`, bounded stale entries as `STALE`, and refresh stale entries through `waitUntil`;
+- avoid `s-maxage` because the Cloudflare Cache API does not implement stale-while-revalidate automatically;
 - expose only safe cache status through `X-DZN-Cache`;
 - never include raw identities, cookies, tokens, or session values in keys or headers.
 
@@ -81,11 +84,15 @@ Suggestion indexes added in migration `0057` support:
 - moderation/public status by created time;
 - public status by hot score and created time;
 - public status by created time;
+- public status by net support and total vote activity;
 - submitted user by created time;
 - duplicate fingerprint lookup;
+- unique converted event references;
 - votes by suggestion and by user;
 - reports by suggestion/status;
 - moderation actions by suggestion/time.
+
+Public suggestion responses never include report counts, report reasons, reporter identities, suspicious-vote indicators, or moderation-only abuse signals. Reports can reduce hot score or trigger creator review, but they are not a positive popularity signal. The former "most discussed" sort is replaced by "most active", which ranks by public vote activity, approval tie-breaker, created time, and ID rather than reports.
 
 ## High-Traffic Request Rule
 

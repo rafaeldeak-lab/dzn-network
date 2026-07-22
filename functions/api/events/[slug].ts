@@ -1,6 +1,7 @@
 import { getSessionUser } from "../../_lib/db";
 import { getEventDetailPayload } from "../../_lib/events";
 import { json, methodNotAllowed } from "../../_lib/http";
+import { noStoreForErrorHeaders, privateNoStoreHeaders, publicCacheHeaders } from "../../_lib/performance";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -12,10 +13,13 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const payload = await getEventDetailPayload(env, viewer, slug, {
     full: url.searchParams.get("full")?.trim().toLowerCase() === "true",
   });
+  const status = Number((payload as { status?: number }).status ?? 200);
   return json(payload, {
-    headers: {
-      "cache-control": viewer ? "private, no-store" : "public, max-age=15, stale-while-revalidate=45",
-      vary: "Cookie",
-    },
+    status,
+    headers: viewer
+      ? privateNoStoreHeaders()
+      : status >= 400
+        ? noStoreForErrorHeaders()
+        : publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 }),
   });
 };

@@ -86,16 +86,35 @@ CREATE INDEX IF NOT EXISTS idx_event_suggestions_moderation_created
 ON event_suggestions(moderation_status, created_at, id);
 
 CREATE INDEX IF NOT EXISTS idx_event_suggestions_public_hot
-ON event_suggestions(public_status, hot_score, created_at, id);
+ON event_suggestions(public_status, hot_score DESC, created_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_event_suggestions_public_created
-ON event_suggestions(public_status, created_at, id);
+ON event_suggestions(public_status, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_event_suggestions_public_supported
+ON event_suggestions(public_status, upvote_count DESC, downvote_count ASC, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_event_suggestions_public_supported_score
+ON event_suggestions(public_status, (upvote_count - downvote_count) DESC, upvote_count DESC, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_event_suggestions_public_active
+ON event_suggestions(public_status, upvote_count DESC, downvote_count DESC, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_event_suggestions_public_active_total
+ON event_suggestions(public_status, (upvote_count + downvote_count) DESC, upvote_count DESC, created_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_event_suggestions_submitted_user_created
 ON event_suggestions(submitted_by_user_id, created_at, id);
 
-CREATE INDEX IF NOT EXISTS idx_event_suggestions_fingerprint
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_suggestions_fingerprint
 ON event_suggestions(content_fingerprint);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_suggestions_converted_event
+ON event_suggestions(converted_event_id)
+WHERE converted_event_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_event_suggestions_owner_review
+ON event_suggestions(moderation_status, public_status, updated_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_event_suggestion_votes_suggestion
 ON event_suggestion_votes(suggestion_id);

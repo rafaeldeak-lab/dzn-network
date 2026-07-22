@@ -70,6 +70,8 @@ After participating servers are known, the system may recommend compatible:
 
 Nothing publishes until the platform creator approves final rules and any global announcement.
 
+Community suggestion reports, abuse signals, reporter identities, and moderation-only counters remain private to owner/creator moderation. Future public discussion features must rank by public activity such as votes or comments, never by report volume.
+
 ## Server And Player Attribution
 
 Event data must separate:

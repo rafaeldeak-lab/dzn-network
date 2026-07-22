@@ -232,6 +232,42 @@ const EVENT_CREATION_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   server_subscriptions: ["guild_id", "plan_key", "status"],
 };
 
+const EVENT_PUBLIC_SELECT_COLUMNS = `
+  competitive_events.id,
+  competitive_events.name,
+  competitive_events.slug,
+  competitive_events.description,
+  competitive_events.category,
+  competitive_events.event_type,
+  competitive_events.status,
+  competitive_events.visibility,
+  competitive_events.premium_tier,
+  competitive_events.server_limit,
+  competitive_events.team_limit,
+  competitive_events.starts_at,
+  competitive_events.ends_at,
+  competitive_events.created_by,
+  competitive_events.banner_url,
+  competitive_events.rules,
+  competitive_events.rewards,
+  competitive_events.created_at,
+  competitive_events.updated_at
+`;
+
+const EVENT_READ_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
+  competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "starts_at", "ends_at", "created_at", "updated_at"],
+  competitive_event_servers: ["event_id", "server_id", "score", "wins", "losses", "draws"],
+  competitive_event_matches: ["event_id", "match_status"],
+  competitive_event_activity: ["event_id", "server_id", "activity_type", "message", "created_at"],
+  linked_servers: ["id", "public_slug", "server_category", "status"],
+};
+
+type EventReadinessResult =
+  | { ok: true; status?: 200 }
+  | { ok: false; status: 503; error: string; errorCode: string; message: string; missingCount: number };
+
+const publicEventSchemaReadiness = new WeakMap<object, Promise<EventReadinessResult>>();
+
 export async function ensureCompetitiveEventsSchema(env: Env) {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
@@ -252,9 +288,49 @@ export async function ensureCompetitiveEventsSchema(env: Env) {
   }
 }
 
+export async function validateCompetitiveEventsReadSchema(env: Env): Promise<EventReadinessResult> {
+  if (!env.DB) {
+    return { ok: false, status: 503, error: "D1_UNAVAILABLE", errorCode: "D1_UNAVAILABLE", message: "Event storage is unavailable.", missingCount: 1 };
+  }
+  const key = env.DB as unknown as object;
+  const existing = publicEventSchemaReadiness.get(key);
+  if (existing) return existing;
+  const promise = validateCompetitiveEventsReadSchemaNow(env);
+  publicEventSchemaReadiness.set(key, promise);
+  return promise;
+}
+
+async function validateCompetitiveEventsReadSchemaNow(env: Env): Promise<EventReadinessResult> {
+  const db = requireDb(env);
+  const missing: string[] = [];
+  for (const [table, columns] of Object.entries(EVENT_READ_REQUIRED_COLUMNS)) {
+    const info = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    const names = new Set((info.results ?? []).map((column) => column.name));
+    if (names.size === 0) {
+      missing.push(table);
+      continue;
+    }
+    for (const column of columns) {
+      if (!names.has(column)) missing.push(`${table}.${column}`);
+    }
+  }
+  if (missing.length) {
+    return {
+      ok: false,
+      status: 503,
+      error: "EVENT_SCHEMA_NOT_READY",
+      errorCode: "EVENT_SCHEMA_NOT_READY",
+      message: "Event storage is not ready.",
+      missingCount: missing.length,
+    };
+  }
+  return { ok: true };
+}
+
 export async function getEventsListPayload(env: Env, viewer: SessionUser | null, options: EventListOptions = {}) {
   if (!env.DB) return demoEventsListPayload(options, false);
-  await ensureCompetitiveEventsSchema(env);
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return eventListSchemaUnavailablePayload(schemaReady);
   const entitlement = await hasFullEventAccess(env, viewer);
   const full = options.full === true && entitlement;
   const limit = full ? sanitizeLimit(options.limit, 100, 100) : Math.min(sanitizeLimit(options.limit, 10, 24), 10);
@@ -281,7 +357,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
   }
   const result = await db
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
@@ -317,17 +393,18 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
 
 export async function getEventDetailPayload(env: Env, viewer: SessionUser | null, slug: string, options: { full?: boolean } = {}) {
   if (!env.DB) return demoEventDetailPayload(slug, false);
-  await ensureCompetitiveEventsSchema(env);
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return schemaReady;
   const entitlement = await hasFullEventAccess(env, viewer);
   const full = options.full === true && entitlement;
   const event = await requireDb(env)
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
        FROM competitive_events
-       WHERE slug = ? AND visibility != 'private'
+       WHERE slug = ? AND COALESCE(visibility, 'public') != 'private'
        LIMIT 1`,
     )
     .bind(cleanSlug(slug))
@@ -665,7 +742,8 @@ export async function getLiveEventFeedPayload(env: Env, limit = 25) {
       activity: demoActivity(),
     };
   }
-  await ensureCompetitiveEventsSchema(env);
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return schemaReady;
   const activity = await fetchEventActivity(env, null, sanitizeLimit(limit, 25, 50));
   return {
     ok: true,
@@ -677,7 +755,8 @@ export async function getLiveEventFeedPayload(env: Env, limit = 25) {
 
 export async function getServerEventsProfilePayload(env: Env, serverIdOrSlug: string, viewer: SessionUser | null) {
   if (!env.DB) return demoServerEventsProfile(serverIdOrSlug, false);
-  await ensureCompetitiveEventsSchema(env);
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return schemaReady;
   const server = await fetchServerByIdOrSlug(env, serverIdOrSlug);
   if (!server) return demoServerEventsProfile(serverIdOrSlug, false);
   const category = normalizeServerCategoryFromRecord(server);
@@ -1386,6 +1465,21 @@ function demoEventsListPayload(options: EventListOptions, entitlement: boolean) 
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
     summary: summarizeEvents(events),
     events,
+  };
+}
+
+function eventListSchemaUnavailablePayload(schemaReady: Extract<EventReadinessResult, { ok: false }>) {
+  return {
+    ...schemaReady,
+    generated_at: new Date().toISOString(),
+    source: "schema_unavailable",
+    teaserMode: true,
+    full: false,
+    categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
+    statusFilters: EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
+    summary: summarizeEvents([]),
+    events: [],
   };
 }
 
