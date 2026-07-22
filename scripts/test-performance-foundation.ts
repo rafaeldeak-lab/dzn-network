@@ -23,8 +23,13 @@ import {
   validateSuggestionInput,
   type SuggestionSortRow,
 } from "../functions/_lib/event-suggestions";
+import {
+  onRequestGet as onSuggestionsRequestGet,
+  onRequestHead as onSuggestionsRequestHead,
+  onRequestPost as onSuggestionsRequestPost,
+} from "../functions/api/events/suggestions/index";
 import { shouldStartNavigationProgress } from "../components/site/navigation-progress";
-import type { Env } from "../functions/_lib/types";
+import type { Env, PagesContext } from "../functions/_lib/types";
 
 function source(path: string) {
   return readFileSync(path, "utf8");
@@ -50,6 +55,7 @@ async function main() {
   assertCursorPagination();
   await assertServerSlugResolution();
   await assertCacheHelpers();
+  await assertSuggestionHeadRoute();
   await assertBoundedJson();
   assertModerationTransitions();
   assertSuggestionSchemaAndIndexes();
@@ -315,6 +321,71 @@ async function assertCacheHelpers() {
     });
     assert.equal(errorBypass.headers.get("x-dzn-cache"), "BYPASS", "non-2xx responses must not cache");
     assertIncludes(errorBypass.headers.get("cache-control") ?? "", "no-store", "non-2xx cache bypass must be no-store");
+  } finally {
+    (cacheGlobal as { caches: unknown }).caches = originalCaches;
+  }
+}
+
+async function assertSuggestionHeadRoute() {
+  assert.equal(typeof onSuggestionsRequestHead, "function", "suggestions route must export onRequestHead");
+  const fakeCache = new FakeCache();
+  const cacheGlobal = globalThis as typeof globalThis & { caches?: unknown };
+  const originalCaches = cacheGlobal.caches;
+  (cacheGlobal as { caches: unknown }).caches = { default: fakeCache };
+  const waits: Promise<unknown>[] = [];
+  const env = { DB: new SuggestionRouteDb() as unknown as D1Database } as Env;
+  const waitUntil = (promise: Promise<unknown>) => waits.push(promise);
+  const route = "https://example.test/api/events/suggestions?sort=newest&status=all_public&limit=3";
+  try {
+    const coldHead = await onSuggestionsRequestHead(makeSuggestionRouteContext(new Request(route, { method: "HEAD" }), env, waitUntil));
+    assert.equal(coldHead.status, 200, "cold HEAD should return 200");
+    assert.equal(await coldHead.text(), "", "cold HEAD response body should be empty");
+    assert.equal(coldHead.headers.get("x-dzn-cache"), "BYPASS", "cold HEAD should bypass instead of populating cache");
+    assertIncludes(coldHead.headers.get("cache-control") ?? "", "no-store", "cold HEAD bypass should be no-store");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 0, "cold HEAD must not call Cache.put");
+
+    const getAfterColdHead = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
+    assert.equal(getAfterColdHead.status, 200, "GET after cold HEAD should return 200");
+    assert.equal(getAfterColdHead.headers.get("x-dzn-cache"), "MISS", "GET after cold HEAD should miss and populate cache");
+    const getAfterColdHeadJson = JSON.parse(await getAfterColdHead.text());
+    assert.equal(getAfterColdHeadJson.ok, true, "GET after cold HEAD should return full JSON");
+    assert.equal((getAfterColdHeadJson.suggestions ?? []).length, 1, "GET after cold HEAD should return suggestion rows");
+    await Promise.all(waits.splice(0));
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 1, "first GET should store a valid body");
+
+    const cachedGet = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
+    assert.equal(cachedGet.headers.get("x-dzn-cache"), "HIT", "second GET should hit cached body");
+    assert.equal(JSON.parse(await cachedGet.text()).suggestions.length, 1, "cached GET should return full JSON body");
+
+    const cachedHead = await onSuggestionsRequestHead(makeSuggestionRouteContext(new Request(route, { method: "HEAD" }), env, waitUntil));
+    assert.equal(cachedHead.status, 200, "HEAD after cached GET should return 200");
+    assert.equal(cachedHead.headers.get("x-dzn-cache"), "HIT", "HEAD after cached GET should report HIT");
+    assert.equal(await cachedHead.text(), "", "HEAD after cached GET should return no body");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 1, "cached HEAD must not replace the cached body");
+
+    const getAfterCachedHead = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
+    assert.equal(getAfterCachedHead.status, 200, "GET after cached HEAD should still return 200");
+    assert.equal(getAfterCachedHead.headers.get("x-dzn-cache"), "HIT", "GET after cached HEAD should keep using the cached body");
+    assert.equal(JSON.parse(await getAfterCachedHead.text()).suggestions.length, 1, "GET after cached HEAD should not receive a bodyless poisoned cache entry");
+
+    const authHead = await onSuggestionsRequestHead(makeSuggestionRouteContext(new Request(route, { method: "HEAD", headers: { cookie: "dzn_session=test" } }), env, waitUntil));
+    assert.equal(authHead.status, 200, "authenticated HEAD should still resolve the public route safely");
+    assert.equal(authHead.headers.get("x-dzn-cache"), "BYPASS", "authenticated HEAD should bypass shared cache");
+    assertIncludes(authHead.headers.get("cache-control") ?? "", "private, no-store", "authenticated HEAD should be private no-store");
+    assert.equal(await authHead.text(), "", "authenticated HEAD should have no body");
+
+    const malformedHead = await onSuggestionsRequestHead(makeSuggestionRouteContext(new Request(`${route}&cursor=${"x".repeat(2100)}`, { method: "HEAD" }), env, waitUntil));
+    assert.equal(malformedHead.headers.get("x-dzn-cache"), "BYPASS", "malformed HEAD should bypass cache");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 1, "malformed HEAD must not populate cache");
+
+    const post = await onSuggestionsRequestPost(makeSuggestionRouteContext(new Request("https://example.test/api/events/suggestions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Preview", description: "Too short" }),
+    }), env, waitUntil));
+    assert.equal(post.status, 401, "anonymous POST should remain protected");
+    assertIncludes(post.headers.get("cache-control") ?? "", "private, no-store", "mutation responses must remain private no-store");
+    assert.equal(post.headers.get("x-dzn-cache"), "BYPASS", "mutation responses must bypass public cache");
   } finally {
     (cacheGlobal as { caches: unknown }).caches = originalCaches;
   }
@@ -643,6 +714,110 @@ class FakeCache {
   putsForVersion(version: string) {
     return this.putCalls.filter((url) => url.includes(`__dzn_cache_v=${encodeURIComponent(version)}`)).length;
   }
+}
+
+function makeSuggestionRouteContext(request: Request, env: Env, waitUntil: (promise: Promise<unknown>) => void): PagesContext {
+  return {
+    request,
+    env,
+    waitUntil,
+    params: {},
+    data: {},
+    next: async () => new Response(null, { status: 404 }),
+  };
+}
+
+class SuggestionRouteDb {
+  prepare(sql: string) {
+    return new SuggestionRouteStatement(sql);
+  }
+}
+
+class SuggestionRouteStatement {
+  private bindings: unknown[] = [];
+
+  constructor(private readonly sql: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all() {
+    if (/PRAGMA\s+table_info\(([^)]+)\)/i.test(this.sql)) {
+      const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1] ?? "";
+      return { results: (SUGGESTION_ROUTE_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
+    }
+    if (this.sql.includes("FROM event_suggestions")) {
+      const limit = Number(this.bindings[this.bindings.length - 1] ?? 20);
+      return { results: [suggestionRouteRow()].slice(0, limit) };
+    }
+    return { results: [] };
+  }
+
+  async first() {
+    const rows = await this.all();
+    return rows.results[0] ?? null;
+  }
+}
+
+const SUGGESTION_ROUTE_COLUMNS: Record<string, string[]> = {
+  event_suggestions: [
+    "id",
+    "submitted_by_user_id",
+    "title",
+    "description",
+    "normalized_title",
+    "content_fingerprint",
+    "competition_format",
+    "platform",
+    "moderation_status",
+    "public_status",
+    "converted_event_id",
+    "upvote_count",
+    "downvote_count",
+    "report_count",
+    "hot_score",
+    "created_at",
+    "updated_at",
+  ],
+  event_suggestion_votes: ["suggestion_id", "user_id", "vote_value", "created_at", "updated_at"],
+  event_suggestion_reports: ["id", "suggestion_id", "reporter_user_id", "reason", "status", "created_at"],
+  event_suggestion_moderation_actions: ["id", "suggestion_id", "actor_user_id", "action", "created_at"],
+  event_suggestion_servers: ["suggestion_id", "linked_server_id", "relationship_type", "created_at"],
+  linked_servers: ["id", "public_slug", "status"],
+};
+
+function suggestionRouteRow() {
+  return {
+    id: "phase2a-route-head-test",
+    title: "Route HEAD Test Suggestion",
+    description: "A route level suggestion row used to prove HEAD requests do not poison cached GET responses while preserving public projection privacy.",
+    competition_format: "community_challenge",
+    platform: "cross_platform",
+    map_name: "Chernarus",
+    open_to_any_server: 1,
+    suggested_server_id: null,
+    suggested_server_slug: null,
+    suggested_server_name: null,
+    suggested_date_start: null,
+    suggested_date_end: null,
+    structure_notes: "Route test only.",
+    moderation_status: "public_voting",
+    public_status: "public_voting",
+    creator_decision: "approved_for_voting",
+    creator_response: null,
+    converted_event_id: null,
+    converted_event_slug: null,
+    converted_event_status: null,
+    converted_event_visibility: null,
+    upvote_count: 2,
+    downvote_count: 0,
+    report_count: 0,
+    hot_score: 12,
+    created_at: "2026-07-23T10:00:00.000Z",
+    updated_at: "2026-07-23T10:00:00.000Z",
+  };
 }
 
 class SuggestionServerLookupDb {

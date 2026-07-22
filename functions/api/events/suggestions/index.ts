@@ -31,6 +31,10 @@ export const onRequestGet: PagesFunction = async (context) => {
   });
 };
 
+export const onRequestHead: PagesFunction = async (context) => {
+  return onRequestGet(context);
+};
+
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   const user = await getSessionUser(env, request).catch(() => null);
   const body = await readBoundedJson<EventSuggestionInput>(request, 12 * 1024);

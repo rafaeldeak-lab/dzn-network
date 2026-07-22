@@ -100,21 +100,26 @@ export async function withPublicGetEdgeCache(
   },
 ) {
   const { request } = context;
-  if (!["GET", "HEAD"].includes(request.method) || hasPrivateRequestSignal(request)) {
+  if (!["GET", "HEAD"].includes(request.method)) {
     const response = await options.buildResponse();
-    return withBypassNoStore(response);
+    return responseForRequestMethod(withBypassNoStore(response), request.method);
+  }
+  if (hasPrivateRequestSignal(request)) {
+    const response = await options.buildResponse();
+    return responseForRequestMethod(withPrivateBypassNoStore(response), request.method);
   }
 
   const cacheApi = getDefaultCache();
   if (!cacheApi) {
     const response = await options.buildResponse();
-    return isCacheablePublicResponse(response) ? withCacheStatus(response, "MISS") : withBypassNoStore(response);
+    const finalResponse = isCacheablePublicResponse(response) ? withCacheStatus(response, "MISS") : withBypassNoStore(response);
+    return responseForRequestMethod(finalResponse, request.method);
   }
 
   const canonicalKey = canonicalPublicCacheKey(request, options.allowedParams);
   if (!canonicalKey) {
     const response = await options.buildResponse();
-    return withBypassNoStore(response);
+    return responseForRequestMethod(withBypassNoStore(response), request.method);
   }
 
   const keyUrl = new URL(canonicalKey);
@@ -152,6 +157,15 @@ export async function withPublicGetEdgeCache(
   return finalResponse;
 }
 
+function responseForRequestMethod(response: Response, method: string) {
+  if (method !== "HEAD") return response;
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 export function withCacheStatus(response: Response, status: CacheStatus) {
   const headers = new Headers(response.headers);
   headers.set("x-dzn-cache", status);
@@ -177,6 +191,14 @@ function withBypassNoStore(response: Response) {
     status: response.status,
     statusText: response.statusText,
     headers,
+  });
+}
+
+function withPrivateBypassNoStore(response: Response) {
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: privateNoStoreHeaders(response.headers),
   });
 }
 

@@ -991,7 +991,30 @@ jobs:
           const githubToken = process.env.GITHUB_TOKEN;
           const previewBaseUrl = process.env.PREVIEW_BASE_URL;
 
-          function fail(message) {
+          function sanitizeFailureValue(value) {
+            return String(value ?? "")
+              .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "[uuid]")
+              .replace(/[A-Za-z0-9_\-]{64,}/g, "[redacted]")
+              .slice(0, 500);
+          }
+          function writeFailureSummary(category, message, details = {}) {
+            fs.mkdirSync(artifacts, { recursive: true });
+            const safeDetails = {};
+            for (const [key, value] of Object.entries(details)) {
+              safeDetails[key] = sanitizeFailureValue(value);
+            }
+            fs.writeFileSync(`${artifacts}/failure-summary.json`, JSON.stringify({
+              ok: false,
+              category,
+              message: sanitizeFailureValue(message),
+              details: safeDetails,
+              mode: "event-platform-performance-preview",
+              branch: process.env.CANDIDATE_BRANCH,
+              commit: process.env.CANDIDATE_SHA,
+            }, null, 2));
+          }
+          function fail(message, details = {}) {
+            writeFailureSummary(details.category || "PHASE2A_PREVIEW_VERIFICATION_FAILED", message, details);
             console.error(message);
             process.exit(1);
           }
@@ -1651,7 +1674,19 @@ jobs:
             });
             const text = options.method === "HEAD" ? "" : await response.text().catch(() => "");
             const durationMs = Date.now() - started;
-            if (response.status !== expectedStatus) fail(`${base}${path} expected ${expectedStatus}, got ${response.status}; content-type=${response.headers.get("content-type") || "unknown"}; body-length=${text.length}`);
+            const method = options.method || "GET";
+            const safeRoute = new URL(`${base}${path}`).pathname;
+            const contentType = response.headers.get("content-type") || "unknown";
+            const cacheStatus = response.headers.get("x-dzn-cache") || "missing";
+            if (response.status !== expectedStatus) {
+              if (method === "HEAD" && safeRoute === "/api/events/suggestions" && response.status === 405) {
+                fail(
+                  `PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING method=HEAD; route=/api/events/suggestions; status=${response.status}; content-type=${contentType}; body-length=${text.length}; cache=${cacheStatus}`,
+                  { category: "PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING", method, route: safeRoute, status: response.status, contentType, bodyLength: text.length, cacheStatus },
+                );
+              }
+              fail(`${base}${path} expected ${expectedStatus}, got ${response.status}; content-type=${contentType}; body-length=${text.length}`, { method, route: safeRoute, status: response.status, contentType, bodyLength: text.length, cacheStatus });
+            }
             for (const marker of ["TOKEN_ENCRYPTION_KEY", "SESSION_SECRET", "encrypted_token", "OAuth", "Cloudflare", "Error 1102", "Worker exceeded resource limits", "Minified React error #", "stack trace"]) {
               if (text.includes(marker)) fail(`${path} exposed forbidden marker ${marker}.`);
             }
@@ -1872,12 +1907,12 @@ jobs:
           NODE
 
       - name: Upload Phase 2A preview artifact
-        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        if: ${{ always() && inputs.mode == 'event-platform-performance-preview' }}
         uses: actions/upload-artifact@v4
         with:
           name: dzn-event-platform-performance-preview
           path: dzn-event-platform-performance-preview
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Validate branch
         if: ${{ inputs.mode == 'full-preview' }}
