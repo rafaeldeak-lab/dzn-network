@@ -18,6 +18,7 @@ type Suggestion = {
   suggestedServerName: string | null;
   status: string;
   creatorResponse: string | null;
+  convertedEventId: string | null;
   convertedEventSlug: string | null;
   upvotes: number;
   downvotes: number;
@@ -571,6 +572,10 @@ function SuggestionCard({
           <Link href={`/events/${suggestion.convertedEventSlug}`} className="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-100">
             Converted to Event
           </Link>
+        ) : suggestion.status === "converted_to_event" ? (
+          <span className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] px-3 py-2 text-[11px] font-black uppercase text-emerald-100">
+            Draft under creator review
+          </span>
         ) : null}
       </div>
       <p className="mt-3 text-sm leading-6 text-zinc-300">{suggestion.description}</p>

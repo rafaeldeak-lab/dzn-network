@@ -36,7 +36,7 @@ export function privateNoStoreHeaders(headers?: HeadersInit) {
 export function publicCacheHeaders(ttl: PublicCacheTtl, status: CacheStatus = "MISS", headers?: HeadersInit) {
   const next = secureHeaders(headers);
   const maxAge = boundedSeconds(ttl.maxAge);
-  next.set("cache-control", `public, max-age=${maxAge}, stale-while-revalidate=${boundedSeconds(ttl.staleWhileRevalidate)}`);
+  next.set("cache-control", `public, max-age=${maxAge}`);
   next.set("cdn-cache-control", `max-age=${maxAge}`);
   next.set("x-dzn-cache", status);
   if (!next.has("server-timing")) next.set("server-timing", `dzn-cache;desc="${status}"`);
@@ -108,7 +108,7 @@ export async function withPublicGetEdgeCache(
   const cacheApi = getDefaultCache();
   if (!cacheApi) {
     const response = await options.buildResponse();
-    return withCacheStatus(response, "MISS");
+    return isCacheablePublicResponse(response) ? withCacheStatus(response, "MISS") : withBypassNoStore(response);
   }
 
   const canonicalKey = canonicalPublicCacheKey(request, options.allowedParams);
@@ -127,11 +127,11 @@ export async function withPublicGetEdgeCache(
   const cached = await cacheApi.match(key).catch(() => undefined);
   if (cached) {
     const metadata = parseCacheMetadata(cached.headers.get(CACHE_META_HEADER), options.cacheVersion);
-    if (metadata && now <= metadata.freshUntil) return responseFromCached(cached, request.method, "HIT", 0);
+    if (metadata && now <= metadata.freshUntil) return responseFromCached(cached, request.method, "HIT", 0, metadata, now);
     if (metadata && now <= metadata.staleUntil) {
       const refresh = refreshPublicCache(cacheApi, key, cacheKey, options);
       context.waitUntil?.(refresh);
-      return responseFromCached(cached, request.method, "STALE", Math.max(0, Math.round((now - metadata.freshUntil) / 1000)));
+      return responseFromCached(cached, request.method, "STALE", Math.max(0, Math.round((now - metadata.freshUntil) / 1000)), metadata, now);
     }
     context.waitUntil?.(cacheApi.delete(key).catch(() => undefined));
   }
@@ -143,7 +143,8 @@ export async function withPublicGetEdgeCache(
 
   const response = await options.buildResponse();
   const cacheable = isCacheablePublicResponse(response);
-  const finalResponse = withCacheStatus(response, cacheable ? "MISS" : "BYPASS");
+  if (!cacheable) return withBypassNoStore(response);
+  const finalResponse = withCacheStatus(response, "MISS");
   if (cacheable) {
     const cacheResponse = makeCacheApiResponse(finalResponse, options.ttl, options.cacheVersion);
     context.waitUntil?.(cacheApi.put(key, cacheResponse).catch(() => undefined));
@@ -268,11 +269,19 @@ function makeCacheApiResponse(response: Response, ttl: PublicCacheTtl, version: 
   });
 }
 
-function responseFromCached(response: Response, method: string, status: CacheStatus, staleAgeSeconds: number) {
+function responseFromCached(response: Response, method: string, status: CacheStatus, staleAgeSeconds: number, metadata: CacheMetadata, now: number) {
   const headers = new Headers(response.headers);
   headers.delete(CACHE_META_HEADER);
   headers.set("x-dzn-cache", status);
   headers.set("server-timing", appendServerTiming(headers.get("server-timing"), `dzn-cache;desc="${status}"${staleAgeSeconds ? `;dur=${staleAgeSeconds}` : ""}`));
+  if (status === "HIT") {
+    const remainingFreshSeconds = Math.max(0, Math.floor((metadata.freshUntil - now) / 1000));
+    headers.set("cache-control", `public, max-age=${remainingFreshSeconds}`);
+    headers.set("cdn-cache-control", `max-age=${remainingFreshSeconds}`);
+  } else if (status === "STALE") {
+    headers.set("cache-control", "no-cache, max-age=0, must-revalidate");
+    headers.set("cdn-cache-control", "max-age=0");
+  }
   return new Response(method === "HEAD" ? null : response.clone().body, {
     status: response.status,
     statusText: response.statusText,

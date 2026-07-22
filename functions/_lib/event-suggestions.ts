@@ -83,6 +83,8 @@ type SuggestionRow = {
   published_at: string | null;
   moderated_at: string | null;
   converted_event_slug?: string | null;
+  converted_event_status?: string | null;
+  converted_event_visibility?: string | null;
 };
 
 type VoteRow = {
@@ -151,7 +153,60 @@ const SUGGESTION_SELECT_COLUMNS = `
   event_suggestions.updated_at,
   event_suggestions.published_at,
   event_suggestions.moderated_at,
-  competitive_events.slug AS converted_event_slug
+  competitive_events.slug AS converted_event_slug,
+  competitive_events.status AS converted_event_status,
+  competitive_events.visibility AS converted_event_visibility
+`;
+
+const PUBLIC_SUGGESTION_SELECT_COLUMNS = `
+  event_suggestions.id,
+  event_suggestions.submitted_by_user_id,
+  event_suggestions.title,
+  event_suggestions.description,
+  event_suggestions.normalized_title,
+  event_suggestions.content_fingerprint,
+  event_suggestions.competition_format,
+  event_suggestions.platform,
+  event_suggestions.map_name,
+  event_suggestions.suggested_server_id,
+  linked_servers.public_slug AS suggested_server_slug,
+  COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS suggested_server_name,
+  event_suggestions.open_to_any_server,
+  event_suggestions.suggested_date_start,
+  event_suggestions.suggested_date_end,
+  event_suggestions.structure_notes,
+  event_suggestions.moderation_status,
+  event_suggestions.public_status,
+  event_suggestions.creator_decision,
+  CASE
+    WHEN competitive_events.visibility = 'public' AND competitive_events.status != 'draft'
+    THEN event_suggestions.converted_event_id
+    ELSE NULL
+  END AS converted_event_id,
+  event_suggestions.creator_response,
+  event_suggestions.upvote_count,
+  event_suggestions.downvote_count,
+  event_suggestions.report_count,
+  event_suggestions.hot_score,
+  event_suggestions.created_at,
+  event_suggestions.updated_at,
+  event_suggestions.published_at,
+  event_suggestions.moderated_at,
+  CASE
+    WHEN competitive_events.visibility = 'public' AND competitive_events.status != 'draft'
+    THEN competitive_events.slug
+    ELSE NULL
+  END AS converted_event_slug,
+  CASE
+    WHEN competitive_events.visibility = 'public' AND competitive_events.status != 'draft'
+    THEN competitive_events.status
+    ELSE NULL
+  END AS converted_event_status,
+  CASE
+    WHEN competitive_events.visibility = 'public' AND competitive_events.status != 'draft'
+    THEN competitive_events.visibility
+    ELSE NULL
+  END AS converted_event_visibility
 `;
 
 const REQUIRED_SUGGESTION_TABLES: Record<string, readonly string[]> = {
@@ -266,7 +321,7 @@ export async function listPublicEventSuggestions(
   const orderBy = suggestionOrderBy(sort);
   const rows = await db
     .prepare(
-      `SELECT ${SUGGESTION_SELECT_COLUMNS}
+      `SELECT ${PUBLIC_SUGGESTION_SELECT_COLUMNS}
        FROM event_suggestions
        LEFT JOIN competitive_events ON competitive_events.id = event_suggestions.converted_event_id
        LEFT JOIN linked_servers ON linked_servers.id = event_suggestions.suggested_server_id
@@ -1133,6 +1188,10 @@ function toPublicSuggestion(row: SuggestionRow) {
   const upvotes = Number(row.upvote_count ?? 0);
   const downvotes = Number(row.downvote_count ?? 0);
   const total = upvotes + downvotes;
+  const publicConvertedEvent =
+    row.converted_event_visibility === "public" &&
+    row.converted_event_status !== "draft" &&
+    Boolean(row.converted_event_slug);
   return {
     id: row.id,
     title: row.title,
@@ -1145,8 +1204,8 @@ function toPublicSuggestion(row: SuggestionRow) {
     suggestedServerName: row.suggested_server_name ?? null,
     status: row.public_status,
     creatorResponse: row.creator_response,
-    convertedEventId: row.converted_event_id,
-    convertedEventSlug: row.converted_event_slug ?? null,
+    convertedEventId: publicConvertedEvent ? row.converted_event_id : null,
+    convertedEventSlug: publicConvertedEvent ? row.converted_event_slug ?? null : null,
     upvotes,
     downvotes,
     netScore: upvotes - downvotes,
@@ -1161,6 +1220,8 @@ function toPublicSuggestion(row: SuggestionRow) {
 function toOwnerSuggestion(row: SuggestionRow) {
   return {
     ...toPublicSuggestion(row),
+    convertedEventId: row.converted_event_id,
+    convertedEventSlug: row.converted_event_slug ?? null,
     description: row.description,
     moderationStatus: row.moderation_status,
     publicStatus: row.public_status,
@@ -1172,6 +1233,52 @@ function toOwnerSuggestion(row: SuggestionRow) {
     reportCount: Number(row.report_count ?? 0),
     moderatedAt: row.moderated_at,
   };
+}
+
+export function projectSuggestionForPublicTest(overrides: Record<string, unknown>) {
+  return toPublicSuggestion(testSuggestionRow(overrides));
+}
+
+export function projectSuggestionForOwnerTest(overrides: Record<string, unknown>) {
+  return toOwnerSuggestion(testSuggestionRow(overrides));
+}
+
+function testSuggestionRow(overrides: Record<string, unknown>): SuggestionRow {
+  return {
+    id: "suggestion-test",
+    submitted_by_user_id: "user-test",
+    title: "Preview tournament suggestion",
+    description: "A creator reviewed community event suggestion with enough context for a safe public card.",
+    normalized_title: "preview tournament suggestion",
+    content_fingerprint: "fingerprint-test",
+    competition_format: "server_vs_server",
+    platform: "playstation",
+    map_name: null,
+    suggested_server_id: null,
+    suggested_server_slug: null,
+    suggested_server_name: null,
+    open_to_any_server: 1,
+    suggested_date_start: null,
+    suggested_date_end: null,
+    structure_notes: null,
+    moderation_status: "converted_to_event",
+    public_status: "converted_to_event",
+    creator_decision: "converted_to_event",
+    converted_event_id: null,
+    creator_response: null,
+    upvote_count: 0,
+    downvote_count: 0,
+    report_count: 0,
+    hot_score: 0,
+    created_at: "2026-07-01T00:00:00.000Z",
+    updated_at: "2026-07-01T00:00:00.000Z",
+    published_at: null,
+    moderated_at: null,
+    converted_event_slug: null,
+    converted_event_status: null,
+    converted_event_visibility: null,
+    ...overrides,
+  } as SuggestionRow;
 }
 
 function unavailableSuggestionList(reason: string) {

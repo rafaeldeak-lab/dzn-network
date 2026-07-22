@@ -14,6 +14,7 @@ on:
           - rebind-preview-d1
           - repair-rebound-discord-preview
           - verify-existing-creator-governance-preview
+          - event-platform-performance-preview
       confirm_preview_only:
         description: Must equal PREVIEW_ONLY
         required: false
@@ -64,6 +65,10 @@ on:
         default: ""
       confirm_existing_creator_governance_preview:
         description: Must equal VERIFY_EXISTING_CREATOR_GOVERNANCE_PREVIEW for existing preview verification mode
+        required: false
+        default: ""
+      confirm_event_platform_performance_preview:
+        description: Must equal APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW for Phase 2A performance preview mode
         required: false
         default: ""
 
@@ -121,6 +126,11 @@ jobs:
       EXISTING_CREATOR_GOVERNANCE_PREVIEW_DB_NAME: dzn_network_db_owner_console_preview_creator_governance_0919c46
       EXISTING_CREATOR_GOVERNANCE_PREVIEW_EVENT_NAME: Creator Governance Preview Cup 0919c46
       EXISTING_CREATOR_GOVERNANCE_PREVIEW_EVENT_SLUG: creator-governance-preview-cup-0919c46
+      CONFIRM_EVENT_PLATFORM_PERFORMANCE_PREVIEW: ${{ inputs.confirm_event_platform_performance_preview }}
+      EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME: dzn-network-owner-console-preview
+      EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME: dzn_network_db_owner_console_preview_creator_governance_0919c46
+      EVENT_PLATFORM_PERFORMANCE_PREVIEW_CONFIRMATION: APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW
+      EVENT_PLATFORM_PERFORMANCE_PREVIEW_SEED_PREFIX: phase2a-preview-
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
       PRODUCTION_D1_DATABASE_NAME: dzn_network_db
       D1_ACCOUNT_DATABASE_LIMIT: "10"
@@ -159,7 +169,7 @@ jobs:
             exit 1
           fi
           case "${CANDIDATE_REF}" in
-            refs/heads/feature/owner-console|refs/heads/feature/creator-only-event-governance) ;;
+            refs/heads/feature/owner-console|refs/heads/feature/creator-only-event-governance|refs/heads/feature/event-platform-performance-foundation) ;;
             refs/heads/main|refs/heads/master|refs/heads/production)
               echo "::error::Owner console preview must never run from main, master, or production."
               exit 1
@@ -173,21 +183,25 @@ jobs:
               exit 1
               ;;
             *)
-              echo "::error::Owner console preview may only run from feature/owner-console or feature/creator-only-event-governance."
+              echo "::error::Owner console preview may only run from feature/owner-console, feature/creator-only-event-governance, or feature/event-platform-performance-foundation."
               exit 1
               ;;
           esac
           case "${CANDIDATE_BRANCH}" in
-            feature/owner-console|feature/creator-only-event-governance) ;;
+            feature/owner-console|feature/creator-only-event-governance|feature/event-platform-performance-foundation) ;;
             main|master|production)
               echo "::error::Owner console preview must never run from main, master, or production."
               exit 1
               ;;
             *)
-              echo "::error::Owner console preview may only run from feature/owner-console or feature/creator-only-event-governance."
+              echo "::error::Owner console preview may only run from feature/owner-console, feature/creator-only-event-governance, or feature/event-platform-performance-foundation."
               exit 1
               ;;
           esac
+          if [ "${CANDIDATE_BRANCH}" = "feature/event-platform-performance-foundation" ] && [ "${MODE}" != "event-platform-performance-preview" ]; then
+            echo "::error::feature/event-platform-performance-foundation may only run event-platform-performance-preview mode."
+            exit 1
+          fi
 
           CHECKED_OUT_HEAD="$(git rev-parse HEAD)"
           if [ "${CHECKED_OUT_HEAD}" != "${CANDIDATE_SHA}" ]; then
@@ -209,6 +223,8 @@ jobs:
           fi
           if [ "${MODE}" = "verify-existing-creator-governance-preview" ]; then
             PREVIEW_DB_NAME="${EXISTING_CREATOR_GOVERNANCE_PREVIEW_DB_NAME}"
+          elif [ "${MODE}" = "event-platform-performance-preview" ]; then
+            PREVIEW_DB_NAME="${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}"
           elif [ "${MODE}" = "full-preview" ] && [ "${CANDIDATE_BRANCH}" = "feature/creator-only-event-governance" ]; then
             PREVIEW_DB_NAME="dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}"
           else
@@ -236,9 +252,9 @@ jobs:
           fi
 
           case "${MODE}" in
-            full-preview|cleanup-preview-d1|rebind-preview-d1|repair-rebound-discord-preview|verify-existing-creator-governance-preview) ;;
+            full-preview|cleanup-preview-d1|rebind-preview-d1|repair-rebound-discord-preview|verify-existing-creator-governance-preview|event-platform-performance-preview) ;;
             *)
-              echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, repair-rebound-discord-preview, or verify-existing-creator-governance-preview mode."
+              echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, repair-rebound-discord-preview, verify-existing-creator-governance-preview, or event-platform-performance-preview mode."
               exit 1
               ;;
           esac
@@ -304,6 +320,40 @@ jobs:
             fi
             if [ "${EXISTING_CREATOR_GOVERNANCE_PREVIEW_EVENT_SLUG}" != "creator-governance-preview-cup-0919c46" ]; then
               echo "::error::Existing creator-governance preview slug constant mismatch."
+              exit 1
+            fi
+          fi
+          if [ "${MODE}" = "event-platform-performance-preview" ]; then
+            if [ "${CANDIDATE_BRANCH}" != "feature/event-platform-performance-foundation" ]; then
+              echo "::error::event-platform-performance-preview mode may only run from feature/event-platform-performance-foundation."
+              exit 1
+            fi
+            if [ "${CONFIRM_EVENT_PLATFORM_PERFORMANCE_PREVIEW}" != "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_CONFIRMATION}" ]; then
+              echo "::error::confirm_event_platform_performance_preview must equal APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW for event-platform-performance-preview mode."
+              exit 1
+            fi
+            if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" != "dzn-network-owner-console-preview" ]; then
+              echo "::error::Event platform performance preview project constant mismatch."
+              exit 1
+            fi
+            if [ "${PREVIEW_PROJECT_NAME}" != "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" ]; then
+              echo "::error::Event platform performance preview must use the fixed owner-console preview project."
+              exit 1
+            fi
+            if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}" != "dzn_network_db_owner_console_preview_creator_governance_0919c46" ]; then
+              echo "::error::Event platform performance preview database constant mismatch."
+              exit 1
+            fi
+            if [ "${PREVIEW_DB_NAME}" != "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}" ]; then
+              echo "::error::Event platform performance preview must use the fixed reusable preview D1."
+              exit 1
+            fi
+            if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ]; then
+              echo "::error::Refusing event platform performance preview for production D1 database name."
+              exit 1
+            fi
+            if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+              echo "::error::Refusing event platform performance preview for production Pages project."
               exit 1
             fi
           fi
@@ -588,6 +638,14 @@ jobs:
               echo "- Existing preview verification is read-only: true"
               echo "- Existing preview confirmation accepted: true"
             fi
+            if [ "${MODE}" = "event-platform-performance-preview" ]; then
+              echo "- Event platform performance preview project: ${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}"
+              echo "- Event platform performance preview database: ${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}"
+              echo "- Event platform performance preview seed prefix: ${EVENT_PLATFORM_PERFORMANCE_PREVIEW_SEED_PREFIX}"
+              echo "- Event platform performance preview confirmation accepted: true"
+              echo "- D1 database creation/deletion path enabled: false"
+              echo "- Only migration 0057 may be applied: true"
+            fi
             echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
             echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
             echo "- DZN_PLATFORM_CREATOR_DISCORD_ID configured: true"
@@ -600,7 +658,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install
-        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'verify-existing-creator-governance-preview' }}
+        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'verify-existing-creator-governance-preview' || inputs.mode == 'event-platform-performance-preview' }}
         run: npm ci
 
       - name: Verify existing creator-governance preview
@@ -888,6 +946,936 @@ jobs:
             echo "- Application POST: none"
             echo "- Discord message: false"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preflight event platform performance preview
+        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p dzn-event-platform-performance-preview
+          if [ "${CANDIDATE_BRANCH}" != "feature/event-platform-performance-foundation" ]; then
+            echo "::error::event-platform-performance-preview mode may only run from feature/event-platform-performance-foundation."
+            exit 1
+          fi
+          if [ "${CONFIRM_EVENT_PLATFORM_PERFORMANCE_PREVIEW}" != "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_CONFIRMATION}" ]; then
+            echo "::error::confirm_event_platform_performance_preview must equal APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW."
+            exit 1
+          fi
+          if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Refusing event platform performance preview for production Pages project."
+            exit 1
+          fi
+          if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ] || [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}" = "${DETECTED_PRODUCTION_D1_DATABASE_NAME:-}" ]; then
+            echo "::error::Refusing event platform performance preview for production D1 database name."
+            exit 1
+          fi
+          if [ -z "${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}" ]; then
+            echo "::error::Missing Cloudflare token for event platform performance preview."
+            exit 1
+          fi
+          export CLOUDFLARE_API_TOKEN="${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME;
+          const previewDbName = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME;
+          const productionProjectName = process.env.PRODUCTION_PAGES_PROJECT_NAME;
+          const productionDbName = process.env.DETECTED_PRODUCTION_D1_DATABASE_NAME || process.env.PRODUCTION_D1_DATABASE_NAME;
+          const productionDbId = process.env.DETECTED_PRODUCTION_D1_DATABASE_ID || "";
+          const branch = process.env.CANDIDATE_BRANCH;
+          const sha = process.env.CANDIDATE_SHA;
+          const runId = String(process.env.GITHUB_RUN_ID || "");
+          const repository = process.env.GITHUB_REPOSITORY;
+          const githubToken = process.env.GITHUB_TOKEN;
+          const previewBaseUrl = process.env.PREVIEW_BASE_URL;
+
+          function fail(message) {
+            console.error(message);
+            process.exit(1);
+          }
+          function maskId(id) {
+            return typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : "unavailable";
+          }
+          function unwrap(result) {
+            if (!result.ok || result.parsed?.success === false) {
+              const first = Array.isArray(result.parsed?.errors) ? result.parsed.errors[0] : null;
+              fail(`Cloudflare read failed: status=${result.status}; code=${first?.code ?? "unknown"}; category=${String(first?.message ?? "Cloudflare API error").slice(0, 160)}`);
+            }
+            return result.parsed?.result;
+          }
+          async function cloudflare(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ code: "non_json", message: "non-json Cloudflare response" }] };
+            }
+            return { ok: response.ok, status: response.status, parsed };
+          }
+          async function listD1Databases() {
+            const rows = [];
+            for (let page = 1; page <= 20; page += 1) {
+              const result = await cloudflare(`/d1/database?per_page=50&page=${page}`);
+              const body = unwrap(result);
+              rows.push(...(Array.isArray(body) ? body : []));
+              const info = result.parsed?.result_info;
+              if (!info || Number(info.page || page) >= Number(info.total_pages || page)) break;
+            }
+            return rows;
+          }
+          function d1BindingId(config) {
+            const db = config?.d1_databases?.DB;
+            if (typeof db === "string") return db;
+            return String(db?.id ?? db?.database_id ?? "");
+          }
+          function envValue(config, key) {
+            const value = config?.env_vars?.[key];
+            return typeof value === "object" && value ? String(value.value ?? "") : String(value ?? "");
+          }
+          function productionSignature(project) {
+            const configs = project?.deployment_configs || {};
+            return JSON.stringify({
+              name: project?.name,
+              productionBranch: project?.production_branch ?? null,
+              productionDb: d1BindingId(configs.production || {}),
+              previewDb: d1BindingId(configs.preview || {}),
+            });
+          }
+          async function activePreviewRunsUsingReusableDb() {
+            if (!repository || !githubToken) return [{ id: "unknown", status: "unknown", reason: "github-token-unavailable" }];
+            const active = [];
+            for (const status of ["queued", "in_progress"]) {
+              const response = await fetch(`https://api.github.com/repos/${repository}/actions/runs?status=${status}&per_page=100`, {
+                headers: {
+                  Authorization: `Bearer ${githubToken}`,
+                  Accept: "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                },
+              });
+              if (!response.ok) return [{ id: "unknown", status, reason: "github-actions-inventory-unavailable" }];
+              const payload = await response.json();
+              for (const run of payload.workflow_runs || []) {
+                const id = String(run.id || "");
+                if (id === runId) continue;
+                if (run.name === "DZN Owner Console Preview" && ["queued", "in_progress"].includes(String(run.status))) {
+                  active.push({ id, status: run.status, branch: run.head_branch || "unknown" });
+                }
+              }
+            }
+            return active;
+          }
+
+          void (async () => {
+            if (projectName !== "dzn-network-owner-console-preview") fail("Event platform performance preview project constant mismatch.");
+            if (previewDbName !== "dzn_network_db_owner_console_preview_creator_governance_0919c46") fail("Event platform performance preview DB constant mismatch.");
+            if (projectName === productionProjectName) fail("Production Pages project selected for Phase 2A preview.");
+            if (previewDbName === productionDbName) fail("Production D1 name selected for Phase 2A preview.");
+
+            const databases = await listD1Databases();
+            const previewDb = databases.find((db) => db.name === previewDbName);
+            const productionDb = databases.find((db) => db.name === productionDbName) || { uuid: productionDbId, id: productionDbId, name: productionDbName };
+            const previewId = String(previewDb?.uuid ?? previewDb?.id ?? "");
+            const detectedProductionId = String(productionDb?.uuid ?? productionDb?.id ?? productionDbId ?? "");
+            if (!previewDb || !previewId) fail("Fixed reusable Phase 2A preview D1 does not exist.");
+            if (previewId === detectedProductionId || previewId === productionDbId) fail("Phase 2A preview D1 id equals production D1 id.");
+            console.log(`::add-mask::${previewId}`);
+
+            const project = unwrap(await cloudflare(`/pages/projects/${encodeURIComponent(projectName)}`));
+            const productionProject = unwrap(await cloudflare(`/pages/projects/${encodeURIComponent(productionProjectName)}`));
+            if (project?.name !== projectName) fail("Resolved Pages project name mismatch.");
+            if (project?.name === productionProjectName) fail("Resolved Phase 2A preview project is production.");
+            const projectBranch = String(project?.production_branch ?? "");
+            if (!projectBranch) fail("Owner console preview project production_branch is not configured.");
+            for (const environment of ["production", "preview"]) {
+              const config = project?.deployment_configs?.[environment] ?? {};
+              if (d1BindingId(config) !== previewId) fail(`${environment} preview Pages config DB binding does not point to the fixed reusable preview D1.`);
+              if (envValue(config, "DZN_DISCORD_NOTIFICATIONS_ENABLED") !== "false") fail(`${environment} DZN_DISCORD_NOTIFICATIONS_ENABLED must remain false.`);
+              if (envValue(config, "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED") !== "false") fail(`${environment} DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED must remain false.`);
+            }
+            const activeRuns = await activePreviewRunsUsingReusableDb();
+            if (activeRuns.length > 0) fail(`Another active owner-console preview workflow may be mutating the reusable preview D1: ${activeRuns.map((run) => run.id).join(", ")}`);
+
+            const wranglerToml = [
+              'name = "dzn-event-platform-performance-preview"',
+              'compatibility_date = "2026-05-13"',
+              'pages_build_output_dir = "out"',
+              "",
+              "[vars]",
+              'DZN_PULSE_ENABLED = "true"',
+              'DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"',
+              'DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED = "false"',
+              `DZN_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              `NEXT_PUBLIC_APP_URL = ${JSON.stringify(previewBaseUrl)}`,
+              "",
+              "[[d1_databases]]",
+              'binding = "DB"',
+              `database_name = ${JSON.stringify(previewDbName)}`,
+              `database_id = ${JSON.stringify(previewId)}`,
+              "",
+            ].join("\n");
+            fs.writeFileSync("wrangler.event-platform-performance-preview.toml", wranglerToml);
+            fs.appendFileSync(process.env.GITHUB_ENV, [
+              `PREVIEW_D1_DATABASE_ID=${previewId}`,
+              `PHASE2A_PREVIEW_D1_DATABASE_ID=${previewId}`,
+              `PHASE2A_PRODUCTION_D1_DATABASE_ID=${detectedProductionId}`,
+              `PHASE2A_PREVIEW_PROJECT_BRANCH=${projectBranch}`,
+              `PHASE2A_PRODUCTION_PROJECT_SIGNATURE=${Buffer.from(productionSignature(productionProject)).toString("base64")}`,
+              `OWNER_CONSOLE_OWNER_COOKIE=dzn_session=owner-console-preview-owner-token`,
+              `OWNER_CONSOLE_CREATOR_COOKIE=dzn_session=owner-console-preview-creator-token`,
+              `OWNER_CONSOLE_NON_OWNER_COOKIE=dzn_session=owner-console-preview-non-owner-token`,
+              "",
+            ].join("\n"));
+            fs.writeFileSync("dzn-event-platform-performance-preview/guard.json", JSON.stringify({
+              mode: "event-platform-performance-preview",
+              branch,
+              sha,
+              project: projectName,
+              previewDatabase: previewDbName,
+              previewDatabaseIdMask: maskId(previewId),
+              productionProject: productionProjectName,
+              productionDatabase: productionDbName,
+              productionDatabaseIdMask: maskId(detectedProductionId),
+              discordNotificationsEnabled: false,
+              discordServerAnnouncementsEnabled: false,
+              activeMutatingWorkflowRuns: activeRuns.length,
+              d1CreateDeletePathEnabled: false,
+            }, null, 2));
+            console.log(`Phase 2A preview preflight passed: project=${projectName}; db=${previewDbName}; id=${maskId(previewId)}; branch=${projectBranch}`);
+          })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+          NODE
+
+          {
+            echo "## Event Platform Performance Preview Preflight"
+            echo ""
+            echo "- Mode: event-platform-performance-preview"
+            echo "- Preview project: ${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}"
+            echo "- Preview database: ${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}"
+            echo "- D1 create/delete: none"
+            echo "- Confirmation accepted: true"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply only Phase 2A migration 0057 to preview
+        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}" = "${DETECTED_PRODUCTION_D1_DATABASE_NAME:-${PRODUCTION_D1_DATABASE_NAME}}" ]; then
+            echo "::error::Refusing 0057 migration against production D1 name."
+            exit 1
+          fi
+          if [ "${PHASE2A_PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID:-}" ]; then
+            echo "::error::Refusing 0057 migration because preview D1 id equals production D1 id."
+            exit 1
+          fi
+          test -f migrations/0057_event_suggestions_phase_2a.sql
+
+          npx wrangler d1 execute DB \
+            --config wrangler.event-platform-performance-preview.toml \
+            --remote \
+            --json \
+            --command "SELECT name FROM d1_migrations ORDER BY id;" \
+            > dzn-event-platform-performance-preview/migrations-before.json \
+            2> dzn-event-platform-performance-preview/migrations-before.stderr.log
+          npx wrangler d1 execute DB \
+            --config wrangler.event-platform-performance-preview.toml \
+            --remote \
+            --json \
+            --command "SELECT type, name FROM sqlite_master WHERE name LIKE 'event_suggestion%' OR name LIKE 'idx_event_suggestion%' ORDER BY name;" \
+            > dzn-event-platform-performance-preview/schema-before-0057.json \
+            2> dzn-event-platform-performance-preview/schema-before-0057.stderr.log
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function fail(message) {
+            console.error(message);
+            process.exit(1);
+          }
+          function parseWranglerJson(path) {
+            const raw = fs.readFileSync(path, "utf8").replace(/^\uFEFF/, "").trimStart();
+            if (!raw || !["[", "{"].includes(raw[0])) fail(`Malformed Wrangler JSON in ${path}: byteLength=${Buffer.byteLength(raw)}; jsonStartFound=false`);
+            try {
+              return JSON.parse(raw);
+            } catch {
+              fail(`Malformed Wrangler JSON in ${path}: byteLength=${Buffer.byteLength(raw)}; jsonStartFound=true`);
+            }
+          }
+          function rows(path) {
+            const parsed = parseWranglerJson(path);
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          const migrations = rows("dzn-event-platform-performance-preview/migrations-before.json").map((row) => String(row.name || "")).filter(Boolean);
+          const objects = rows("dzn-event-platform-performance-preview/schema-before-0057.json");
+          const has0057 = migrations.includes("0057_event_suggestions_phase_2a.sql");
+          if (!has0057 && objects.length > 0) {
+            fail("Migration 0057 is absent but event suggestion schema objects already exist. BLOCKED.");
+          }
+          fs.writeFileSync("dzn-event-platform-performance-preview/phase2a-0057-already-applied.txt", has0057 ? "yes" : "no");
+          fs.writeFileSync("dzn-event-platform-performance-preview/migration-summary.json", JSON.stringify({
+            migration0057AlreadyApplied: has0057,
+            appliedMigrationCount: migrations.length,
+            eventSuggestionObjectsBefore: objects.length,
+          }, null, 2));
+          NODE
+
+          if [ "$(cat dzn-event-platform-performance-preview/phase2a-0057-already-applied.txt)" = "no" ]; then
+            PHASE2A_MIGRATION_DIR="${RUNNER_TEMP}/dzn-phase2a-0057-only-migrations"
+            rm -rf "${PHASE2A_MIGRATION_DIR}"
+            mkdir -p "${PHASE2A_MIGRATION_DIR}"
+            cp migrations/0057_event_suggestions_phase_2a.sql "${PHASE2A_MIGRATION_DIR}/0057_event_suggestions_phase_2a.sql"
+            if [ "$(find "${PHASE2A_MIGRATION_DIR}" -type f | wc -l | tr -d ' ')" != "1" ]; then
+              echo "::error::Isolated Phase 2A migration directory must contain exactly one file."
+              exit 1
+            fi
+            npx wrangler d1 migrations apply DB \
+              --config wrangler.event-platform-performance-preview.toml \
+              --remote \
+              --migrations-dir "${PHASE2A_MIGRATION_DIR}" \
+              | tee dzn-event-platform-performance-preview/migration-0057-apply.txt
+          else
+            echo "Migration 0057 already applied; verifying schema without reapplying."
+          fi
+
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "SELECT name FROM d1_migrations WHERE name = '0057_event_suggestions_phase_2a.sql';" > dzn-event-platform-performance-preview/migration-0057-after.json 2> dzn-event-platform-performance-preview/migration-0057-after.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "SELECT name, type FROM sqlite_master WHERE name IN ('event_suggestions','event_suggestion_votes','event_suggestion_reports','event_suggestion_moderation_actions','event_suggestion_servers','idx_event_suggestions_public_hot','idx_event_suggestions_public_created','idx_event_suggestions_public_supported_score','idx_event_suggestions_public_active_total','idx_event_suggestions_owner_review','idx_event_suggestion_votes_suggestion','idx_event_suggestion_reports_user_open') ORDER BY name;" > dzn-event-platform-performance-preview/schema-objects.json 2> dzn-event-platform-performance-preview/schema-objects.stderr.log
+          for table in event_suggestions event_suggestion_votes event_suggestion_reports event_suggestion_moderation_actions event_suggestion_servers; do
+            npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "PRAGMA table_info(${table});" > "dzn-event-platform-performance-preview/table-${table}.json" 2> "dzn-event-platform-performance-preview/table-${table}.stderr.log"
+          done
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "PRAGMA foreign_key_check;" > dzn-event-platform-performance-preview/foreign-key-check.json 2> dzn-event-platform-performance-preview/foreign-key-check.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "EXPLAIN QUERY PLAN SELECT id FROM event_suggestions WHERE public_status IN ('public_voting','shortlisted','accepted','converted_to_event') ORDER BY hot_score DESC, created_at DESC, id DESC LIMIT 21;" > dzn-event-platform-performance-preview/query-plan-trending.json 2> dzn-event-platform-performance-preview/query-plan-trending.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "EXPLAIN QUERY PLAN SELECT id FROM event_suggestions WHERE public_status IN ('public_voting','shortlisted','accepted','converted_to_event') ORDER BY created_at DESC, id DESC LIMIT 21;" > dzn-event-platform-performance-preview/query-plan-newest.json 2> dzn-event-platform-performance-preview/query-plan-newest.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "EXPLAIN QUERY PLAN SELECT id FROM event_suggestions WHERE public_status IN ('public_voting','shortlisted','accepted','converted_to_event') ORDER BY (upvote_count - downvote_count) DESC, upvote_count DESC, created_at DESC, id DESC LIMIT 21;" > dzn-event-platform-performance-preview/query-plan-most-supported.json 2> dzn-event-platform-performance-preview/query-plan-most-supported.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "EXPLAIN QUERY PLAN SELECT id FROM event_suggestions WHERE public_status IN ('public_voting','shortlisted','accepted','converted_to_event') ORDER BY (upvote_count + downvote_count) DESC, upvote_count DESC, created_at DESC, id DESC LIMIT 21;" > dzn-event-platform-performance-preview/query-plan-most-active.json 2> dzn-event-platform-performance-preview/query-plan-most-active.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "EXPLAIN QUERY PLAN SELECT id FROM event_suggestions WHERE moderation_status = 'pending_moderation' ORDER BY updated_at DESC, id DESC LIMIT 50;" > dzn-event-platform-performance-preview/query-plan-owner-moderation.json 2> dzn-event-platform-performance-preview/query-plan-owner-moderation.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "EXPLAIN QUERY PLAN SELECT vote_value FROM event_suggestion_votes WHERE suggestion_id = 'phase2a-preview-public-voting' AND user_id = 'phase2a-preview-member' LIMIT 1;" > dzn-event-platform-performance-preview/query-plan-vote-lookup.json 2> dzn-event-platform-performance-preview/query-plan-vote-lookup.stderr.log
+          npx wrangler d1 execute DB --config wrangler.event-platform-performance-preview.toml --remote --json --command "EXPLAIN QUERY PLAN SELECT id FROM event_suggestion_reports WHERE suggestion_id = 'phase2a-preview-reported' AND reporter_user_id = 'phase2a-preview-member' AND status = 'open' LIMIT 1;" > dzn-event-platform-performance-preview/query-plan-report-lookup.json 2> dzn-event-platform-performance-preview/query-plan-report-lookup.stderr.log
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function fail(message) {
+            console.error(message);
+            process.exit(1);
+          }
+          function parse(path) {
+            const raw = fs.readFileSync(path, "utf8").replace(/^\uFEFF/, "").trimStart();
+            if (!raw || !["[", "{"].includes(raw[0])) fail(`Malformed Wrangler JSON in ${path}.`);
+            return JSON.parse(raw);
+          }
+          function rows(path) {
+            const parsed = parse(path);
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          const migrationRows = rows("dzn-event-platform-performance-preview/migration-0057-after.json");
+          if (migrationRows.length !== 1) fail("Migration 0057 was not recorded/applied exactly once.");
+          const requiredColumns = {
+            event_suggestions: ["id", "submitted_by_user_id", "title", "description", "normalized_title", "content_fingerprint", "competition_format", "platform", "moderation_status", "public_status", "converted_event_id", "upvote_count", "downvote_count", "report_count", "hot_score", "created_at", "updated_at"],
+            event_suggestion_votes: ["suggestion_id", "user_id", "vote_value", "created_at", "updated_at"],
+            event_suggestion_reports: ["id", "suggestion_id", "reporter_user_id", "reason", "status", "created_at"],
+            event_suggestion_moderation_actions: ["id", "suggestion_id", "actor_user_id", "action", "created_at"],
+            event_suggestion_servers: ["suggestion_id", "linked_server_id", "relationship_type", "created_at"],
+          };
+          const tableSummaries = {};
+          for (const [table, columns] of Object.entries(requiredColumns)) {
+            const names = new Set(rows(`dzn-event-platform-performance-preview/table-${table}.json`).map((row) => row.name));
+            for (const column of columns) if (!names.has(column)) fail(`Missing Phase 2A schema column: ${table}.${column}`);
+            tableSummaries[table] = { columnCount: names.size };
+          }
+          const objects = new Set(rows("dzn-event-platform-performance-preview/schema-objects.json").map((row) => row.name));
+          for (const name of [
+            "idx_event_suggestions_public_hot",
+            "idx_event_suggestions_public_created",
+            "idx_event_suggestions_public_supported_score",
+            "idx_event_suggestions_public_active_total",
+            "idx_event_suggestions_owner_review",
+            "idx_event_suggestion_votes_suggestion",
+            "idx_event_suggestion_reports_user_open",
+          ]) {
+            if (!objects.has(name)) fail(`Missing Phase 2A index: ${name}`);
+          }
+          if (rows("dzn-event-platform-performance-preview/foreign-key-check.json").length !== 0) fail("Phase 2A preview foreign_key_check returned rows.");
+          fs.writeFileSync("dzn-event-platform-performance-preview/schema-summary.json", JSON.stringify({
+            migration0057Applied: true,
+            tables: tableSummaries,
+            requiredIndexesPresent: true,
+            foreignKeyCheckRows: 0,
+            queryPlansCaptured: ["trending", "newest", "most_supported", "most_active", "owner_moderation", "vote_lookup", "report_lookup"],
+          }, null, 2));
+          console.log("Phase 2A migration/schema verification passed.");
+          NODE
+
+      - name: Seed deterministic Phase 2A preview data
+        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const prefix = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_SEED_PREFIX || "phase2a-preview-";
+          if (prefix !== "phase2a-preview-") {
+            console.error("Phase 2A preview seed prefix constant mismatch.");
+            process.exit(1);
+          }
+          function sql(value) {
+            return `'${String(value ?? "").replace(/'/g, "''")}'`;
+          }
+          const serverSubquery = "(SELECT id FROM linked_servers WHERE public_slug = 'owner-console-nuketown' OR id = 'owner-console-nuketown' LIMIT 1)";
+          const now = "2026-07-22T20:00:00.000Z";
+          const users = [
+            ["phase2a-preview-member", "990000000000002001", "Phase2A Member"],
+            ["phase2a-preview-other-member", "990000000000002002", "Phase2A Voter"],
+            ["phase2a-preview-owner", "990000000000002003", "Phase2A Owner"],
+            ["phase2a-preview-creator", "990000000000002004", "Phase2A Creator"],
+          ];
+          const suggestions = [
+            ["phase2a-preview-pending", "phase2a-preview-member", "Supply Run Showdown", "Teams race to complete a clean supply route with creator review before public voting.", "server_vs_server", "cross_platform", "Chernarus", null, 1, "pending_moderation", "submitted", null, 0, 0, 0, 0.1],
+            ["phase2a-preview-public-voting", "phase2a-preview-other-member", "Coastal Cup Scramble", "A public voting candidate for compact teams with a weekend scoring window.", "player_vs_player", "pc", "Sakhal", null, 1, "public_voting", "public_voting", null, 4, 1, 0, 8.5],
+            ["phase2a-preview-shortlisted", "phase2a-preview-member", "Northern Ridge Trial", "A shortlisted server challenge with clear map boundaries and manual evidence.", "community_challenge", "xbox", "Livonia", null, 1, "shortlisted", "shortlisted", null, 6, 1, 0, 9.2],
+            ["phase2a-preview-accepted", "phase2a-preview-other-member", "Radio Tower Finals", "An accepted creator-reviewed event suggestion ready for draft conversion checks.", "clan_squad", "playstation", "Chernarus", null, 1, "accepted", "accepted", null, 8, 2, 0, 10.4],
+            ["phase2a-preview-converted-private-draft", "phase2a-preview-member", "Private Draft Conversion", "A converted suggestion linked to a private draft that must stay hidden publicly.", "server_vs_server", "cross_platform", "Chernarus", null, 1, "converted_to_event", "converted_to_event", "phase2a-preview-private-draft-event", 9, 1, 0, 12.0],
+            ["phase2a-preview-reported", "phase2a-preview-other-member", "Reported But Not Promoted", "A public suggestion with an internal report count that must not be exposed publicly.", "manual_referee", "pc", "Namalsk", null, 1, "public_voting", "public_voting", null, 1, 1, 1, 1.0],
+            ["phase2a-preview-tie-a", "phase2a-preview-member", "Tie Break Alpha", "Equal score cursor pagination fixture alpha with deterministic ordering.", "stat_race", "pc", "Chernarus", null, 1, "public_voting", "public_voting", null, 3, 0, 0, 5.0],
+            ["phase2a-preview-tie-b", "phase2a-preview-other-member", "Tie Break Bravo", "Equal score cursor pagination fixture bravo with deterministic ordering.", "stat_race", "pc", "Chernarus", null, 1, "public_voting", "public_voting", null, 3, 0, 0, 5.0],
+            ["phase2a-preview-server-linked", "phase2a-preview-member", "Nuketown Server Trial", "A public suggestion linked through a public server slug instead of an internal browser ID.", "server_vs_server", "cross_platform", "Chernarus", serverSubquery, 0, "public_voting", "public_voting", null, 2, 0, 0, 4.5],
+            ["phase2a-preview-open-any", "phase2a-preview-other-member", "Open Host Challenge", "An open-to-any-server suggestion for route and filter coverage.", "community_challenge", "unsure", "Any official map", null, 1, "accepted", "accepted", null, 5, 0, 0, 7.5],
+          ];
+          const statements = [];
+          statements.push("PRAGMA foreign_keys = ON;");
+          statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM event_suggestion_reports WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM event_suggestions WHERE id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM competitive_event_activity WHERE event_id LIKE ${sql(`${prefix}%`)} OR id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM competitive_event_servers WHERE event_id LIKE ${sql(`${prefix}%`)} OR id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM competitive_event_matches WHERE event_id LIKE ${sql(`${prefix}%`)} OR id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM competitive_events WHERE id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM users WHERE id LIKE ${sql(`${prefix}%`)};`);
+          for (const [id, discordId, username] of users) {
+            statements.push(`INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (${sql(id)}, ${sql(discordId)}, ${sql(username)}, NULL, ${sql(now)}, ${sql(now)});`);
+          }
+          statements.push(`INSERT INTO competitive_events (id, name, slug, description, category, event_type, status, visibility, premium_tier, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at) VALUES (${sql("phase2a-preview-private-draft-event")}, ${sql("Phase 2A Private Draft")}, ${sql("phase2a-preview-private-draft")}, ${sql("Private draft converted from a preview suggestion; not public.")}, ${sql("deathmatch")}, ${sql("community_cup")}, ${sql("draft")}, ${sql("private")}, ${sql("pro")}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("phase2a-preview-creator")}, ${sql("Draft rules pending creator review.")}, NULL, ${sql(now)}, ${sql(now)});`);
+          for (const [id, userId, title, description, format, platform, map, serverExpression, openToAny, moderationStatus, publicStatus, convertedEventId, upvotes, downvotes, reports, hotScore] of suggestions) {
+            const normalized = String(title).toLowerCase();
+            const serverSql = typeof serverExpression === "string" && serverExpression.startsWith("(") ? serverExpression : "NULL";
+            statements.push(`INSERT INTO event_suggestions (id, submitted_by_user_id, title, description, normalized_title, content_fingerprint, competition_format, platform, map_name, suggested_server_id, open_to_any_server, suggested_date_start, suggested_date_end, structure_notes, moderation_status, public_status, creator_decision, converted_event_id, creator_response, upvote_count, downvote_count, report_count, hot_score, created_at, updated_at, published_at, moderated_at) VALUES (${sql(id)}, ${sql(userId)}, ${sql(title)}, ${sql(description)}, ${sql(normalized)}, ${sql(`phase2a:${id}`)}, ${sql(format)}, ${sql(platform)}, ${sql(map)}, ${serverSql}, ${Number(openToAny)}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("Preview fixture structure notes.")}, ${sql(moderationStatus)}, ${sql(publicStatus)}, ${convertedEventId ? sql("converted_to_event") : "NULL"}, ${convertedEventId ? sql(convertedEventId) : "NULL"}, ${publicStatus === "accepted" || publicStatus === "converted_to_event" ? sql("Creator reviewed for preview.") : "NULL"}, ${Number(upvotes)}, ${Number(downvotes)}, ${Number(reports)}, ${Number(hotScore)}, ${sql(now)}, ${sql(now)}, ${["public_voting", "shortlisted", "accepted", "converted_to_event"].includes(publicStatus) ? sql(now) : "NULL"}, ${["shortlisted", "accepted", "converted_to_event"].includes(moderationStatus) ? sql(now) : "NULL"});`);
+          }
+          statements.push(`INSERT INTO event_suggestion_servers (suggestion_id, linked_server_id, relationship_type, created_at) SELECT ${sql("phase2a-preview-server-linked")}, id, 'suggested', ${sql(now)} FROM linked_servers WHERE public_slug = 'owner-console-nuketown' OR id = 'owner-console-nuketown' LIMIT 1;`);
+          statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-public-voting")}, ${sql("phase2a-preview-member")}, 1, ${sql(now)}, ${sql(now)});`);
+          statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, -1, ${sql(now)}, ${sql(now)});`);
+          statements.push(`INSERT INTO event_suggestion_reports (id, suggestion_id, reporter_user_id, reason, safe_note, status, created_at) VALUES (${sql("phase2a-preview-report-open")}, ${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, 'spam', ${sql("Preview moderation-only report note.")}, 'open', ${sql(now)});`);
+          statements.push(`INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at) VALUES (${sql("phase2a-preview-conversion-activity")}, ${sql("phase2a-preview-private-draft-event")}, NULL, 'suggestion_converted_to_draft', ${sql("Community suggestion converted to draft for preview.")}, ${sql(JSON.stringify({ suggestion_id: "phase2a-preview-converted-private-draft" }))}, ${sql(now)});`);
+          statements.push(`INSERT INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at) VALUES (${sql("phase2a-preview-conversion-action")}, ${sql("phase2a-preview-converted-private-draft")}, ${sql("phase2a-preview-creator")}, 'convert_to_event_draft', 'accepted', 'converted_to_event', ${sql("Preview conversion audit.")}, ${sql(now)});`);
+          fs.writeFileSync("phase2a-preview-seed.sql", `${statements.join("\n")}\n`);
+          NODE
+
+          npx wrangler d1 execute DB \
+            --config wrangler.event-platform-performance-preview.toml \
+            --remote \
+            --file phase2a-preview-seed.sql \
+            | tee dzn-event-platform-performance-preview/seed.txt
+          npx wrangler d1 execute DB \
+            --config wrangler.event-platform-performance-preview.toml \
+            --remote \
+            --json \
+            --command "SELECT COUNT(*) AS suggestion_count FROM event_suggestions WHERE id LIKE 'phase2a-preview-%'; SELECT COUNT(*) AS linked_server_count FROM event_suggestion_servers WHERE suggestion_id = 'phase2a-preview-server-linked'; SELECT COUNT(*) AS private_draft_count FROM competitive_events WHERE id = 'phase2a-preview-private-draft-event' AND status = 'draft' AND visibility = 'private'; SELECT COUNT(*) AS open_report_count FROM event_suggestion_reports WHERE suggestion_id = 'phase2a-preview-reported' AND status = 'open'; SELECT COUNT(*) AS vote_count FROM event_suggestion_votes WHERE suggestion_id LIKE 'phase2a-preview-%'; SELECT COUNT(*) AS conversion_activity_count FROM competitive_event_activity WHERE id = 'phase2a-preview-conversion-activity'; SELECT COUNT(*) AS conversion_action_count FROM event_suggestion_moderation_actions WHERE id = 'phase2a-preview-conversion-action'; PRAGMA foreign_key_check;" \
+            > dzn-event-platform-performance-preview/d1-verification.json \
+            2> dzn-event-platform-performance-preview/d1-verification.stderr.log
+
+      - name: Build Phase 2A preview runtime
+        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        env:
+          DZN_PULSE_ENABLED: "true"
+          DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+          DZN_APP_URL: https://dzn-network-owner-console-preview.pages.dev
+          NEXT_PUBLIC_APP_URL: https://dzn-network-owner-console-preview.pages.dev
+        run: |
+          set -euo pipefail
+
+          npm run test:github-workflows
+          npm run test:discord-server-announcements
+          npm run test:owner-console
+          npm run test:creator-event-governance
+          npm run test:performance-foundation
+          npm run test
+          npm run lint
+          npm run build
+          git diff --check
+          rm -rf .pages-functions
+          mkdir -p .pages-functions
+          ./node_modules/.bin/wrangler pages functions build functions \
+            --outdir .pages-functions \
+            --build-output-directory out \
+            --output-routes-path out/_routes.json \
+            --minify
+          node scripts/patch-pages-routes.mjs
+          test -s .pages-functions/index.js
+          cp .pages-functions/index.js out/_worker.js
+          test -s out/_worker.js
+          cmp -s .pages-functions/index.js out/_worker.js
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
+          const include = Array.isArray(routes.include) ? routes.include : [];
+          const exclude = Array.isArray(routes.exclude) ? routes.exclude : [];
+          const required = ["/api/*", "/owner", "/owner/*"];
+          for (const route of required) if (!include.includes(route)) throw new Error(`out/_routes.json missing ${route}.`);
+          function splatPrefix(route) {
+            return route.endsWith("/*") ? route.slice(0, -1) : null;
+          }
+          for (const routeset of [include, exclude]) {
+            for (const route of routeset) {
+              const prefix = splatPrefix(route);
+              if (!prefix) continue;
+              const overlap = routeset.find((candidate) => candidate !== route && candidate.startsWith(prefix));
+              if (overlap && !(route === "/owner/*" && overlap === "/owner")) throw new Error(`Cloudflare route overlap: ${route} covers ${overlap}.`);
+            }
+          }
+          const worker = fs.readFileSync("out/_worker.js");
+          const workerHash = crypto.createHash("sha256").update(worker).digest("hex");
+          const functionsWorker = fs.readFileSync(".pages-functions/index.js");
+          const functionsWorkerHash = crypto.createHash("sha256").update(functionsWorker).digest("hex");
+          if (workerHash !== functionsWorkerHash) throw new Error("out/_worker.js does not match .pages-functions/index.js.");
+          fs.writeFileSync("dzn-event-platform-performance-preview/worker-package.json", JSON.stringify({
+            workerByteSize: worker.length,
+            workerShaPrefix: workerHash.slice(0, 12),
+            includeCount: include.length,
+            excludeCount: exclude.length,
+            hasApiWildcard: include.includes("/api/*"),
+            hasOwner: include.includes("/owner"),
+            hasOwnerWildcard: include.includes("/owner/*"),
+          }, null, 2));
+          console.log(`Phase 2A Pages Functions package verified: workerByteSize=${worker.length}; workerShaPrefix=${workerHash.slice(0, 12)}; includeCount=${include.length}; excludeCount=${exclude.length}`);
+          NODE
+
+      - name: Deploy Phase 2A preview from isolated directory
+        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        env:
+          DZN_PULSE_ENABLED: "true"
+          DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+        run: |
+          set -euo pipefail
+
+          if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" != "dzn-network-owner-console-preview" ] || [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Phase 2A deploy target is not the fixed preview Pages project."
+            exit 1
+          fi
+          if [ "${PHASE2A_PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID:-}" ]; then
+            echo "::error::Phase 2A deploy blocked because preview D1 id equals production D1 id."
+            exit 1
+          fi
+          test -s out/_worker.js
+          test -s out/_routes.json
+
+          DEPLOY_ROOT="${RUNNER_TEMP}/dzn-phase2a-preview-deploy"
+          case "${DEPLOY_ROOT}" in
+            "${RUNNER_TEMP}"/*) ;;
+            *)
+              echo "::error::Phase 2A deployment root must stay inside RUNNER_TEMP."
+              exit 1
+              ;;
+          esac
+          rm -rf "${DEPLOY_ROOT}"
+          mkdir -p "${DEPLOY_ROOT}"
+          cp -R out "${DEPLOY_ROOT}/out"
+          test -s "${DEPLOY_ROOT}/out/_worker.js"
+          test -s "${DEPLOY_ROOT}/out/_routes.json"
+          RUNTIME_WORKER_SHA="$(sha256sum out/_worker.js | awk '{print $1}')"
+          DEPLOY_WORKER_SHA="$(sha256sum "${DEPLOY_ROOT}/out/_worker.js" | awk '{print $1}')"
+          if [ "${RUNTIME_WORKER_SHA}" != "${DEPLOY_WORKER_SHA}" ]; then
+            echo "::error::Isolated Phase 2A deploy worker does not match built out/_worker.js."
+            exit 1
+          fi
+          if find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env | grep -q .; then
+            echo "::error::Unapproved Wrangler or env configuration is deploy-visible for Phase 2A preview."
+            find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env | sed 's#^#blocked config path: #'
+            exit 1
+          fi
+          if [ -n "${DETECTED_PRODUCTION_D1_DATABASE_ID:-}" ] && grep -R -F "${DETECTED_PRODUCTION_D1_DATABASE_ID}" "${DEPLOY_ROOT}" >/tmp/dzn-phase2a-production-id-leak.txt 2>/dev/null; then
+            echo "::error::Deployment-visible Phase 2A output contains the production D1 UUID."
+            cut -d: -f1 /tmp/dzn-phase2a-production-id-leak.txt | sort -u | sed 's#^#blocked file category: #'
+            exit 1
+          fi
+          CONFIG_CANDIDATES="$(find "${DEPLOY_ROOT}" \( -name '*.toml' -o -name 'wrangler.json' -o -name 'wrangler.jsonc' -o -name '.dev.vars' -o -name '.env' \) -print)"
+          if [ -n "${CONFIG_CANDIDATES}" ] && printf '%s\n' "${CONFIG_CANDIDATES}" | xargs grep -E 'name[[:space:]]*=[[:space:]]*"dzn-network"|database_name[[:space:]]*=[[:space:]]*"dzn_network_db"' >/tmp/dzn-phase2a-production-assignment-leak.txt 2>/dev/null; then
+            echo "::error::Deployment-visible Phase 2A configuration contains production project or D1 assignment syntax."
+            cut -d: -f1 /tmp/dzn-phase2a-production-assignment-leak.txt | sort -u | sed 's#^#blocked config category: #'
+            exit 1
+          fi
+
+          cd "${DEPLOY_ROOT}"
+          "${GITHUB_WORKSPACE}/node_modules/.bin/wrangler" pages deploy out \
+            --project-name "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" \
+            --branch "${PHASE2A_PREVIEW_PROJECT_BRANCH}" \
+            --commit-hash "${CANDIDATE_SHA}" \
+            --commit-message "Event platform performance preview ${CANDIDATE_SHA}" \
+            | tee phase2a-preview-deploy.txt
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const projectName = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME;
+          const stableUrl = `https://${projectName}.pages.dev`;
+          const text = fs.readFileSync("phase2a-preview-deploy.txt", "utf8");
+          const urls = [...new Set((text.match(/https:\/\/[^\s"'<>]+?\.pages\.dev/g) ?? []).map((url) => url.replace(/[),.;]+$/, "")))];
+          const immutableUrl = urls.find((url) => url !== stableUrl) ?? "";
+          if (!immutableUrl) throw new Error("Wrangler did not report an immutable Phase 2A preview URL.");
+          fs.appendFileSync(process.env.GITHUB_ENV, [
+            `PHASE2A_IMMUTABLE_PREVIEW_URL=${immutableUrl}`,
+            `PHASE2A_STABLE_PREVIEW_URL=${stableUrl}`,
+            "",
+          ].join("\n"));
+          fs.writeFileSync(`${process.env.GITHUB_WORKSPACE}/dzn-event-platform-performance-preview/deploy-summary.json`, JSON.stringify({
+            project: projectName,
+            stableUrl,
+            immutableUrl,
+            branch: process.env.PHASE2A_PREVIEW_PROJECT_BRANCH,
+            commit: process.env.CANDIDATE_SHA,
+          }, null, 2));
+          console.log(`Phase 2A immutable preview URL: ${immutableUrl}`);
+          console.log(`Phase 2A stable preview URL: ${stableUrl}`);
+          NODE
+
+      - name: Verify Phase 2A performance preview
+        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.OWNER_CONSOLE_CF_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+          const projectName = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME;
+          const previewDbName = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME;
+          const previewId = process.env.PHASE2A_PREVIEW_D1_DATABASE_ID;
+          const productionProjectName = process.env.PRODUCTION_PAGES_PROJECT_NAME;
+          const productionId = process.env.DETECTED_PRODUCTION_D1_DATABASE_ID || "";
+          const expectedProductionSignature = Buffer.from(process.env.PHASE2A_PRODUCTION_PROJECT_SIGNATURE || "", "base64").toString("utf8");
+          const immutableUrl = process.env.PHASE2A_IMMUTABLE_PREVIEW_URL;
+          const stableUrl = process.env.PHASE2A_STABLE_PREVIEW_URL || `https://${projectName}.pages.dev`;
+          const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE || "";
+          const creatorCookie = process.env.OWNER_CONSOLE_CREATOR_COOKIE || "";
+          const memberCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE || "";
+          const artifacts = "dzn-event-platform-performance-preview";
+
+          function fail(message) {
+            console.error(message);
+            process.exit(1);
+          }
+          function d1BindingId(config) {
+            const db = config?.d1_databases?.DB;
+            if (typeof db === "string") return db;
+            return String(db?.id ?? db?.database_id ?? "");
+          }
+          function envValue(config, key) {
+            const value = config?.env_vars?.[key];
+            return typeof value === "object" && value ? String(value.value ?? "") : String(value ?? "");
+          }
+          function productionSignature(project) {
+            const configs = project?.deployment_configs || {};
+            return JSON.stringify({
+              name: project?.name,
+              productionBranch: project?.production_branch ?? null,
+              productionDb: d1BindingId(configs.production || {}),
+              previewDb: d1BindingId(configs.preview || {}),
+            });
+          }
+          async function cloudflare(path, init = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
+              ...init,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+                ...(init.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            const parsed = text ? JSON.parse(text) : {};
+            if (!response.ok || parsed.success === false) {
+              const first = Array.isArray(parsed.errors) ? parsed.errors[0] : null;
+              fail(`Cloudflare read failed before route probes: status=${response.status}; code=${first?.code ?? "unknown"}`);
+            }
+            return parsed.result;
+          }
+          async function d1Query(sql, params = []) {
+            if (/\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|PRAGMA\s+wal_checkpoint)\b/i.test(sql)) fail("Phase 2A verification D1 query must be read-only.");
+            const result = await cloudflare(`/d1/database/${previewId}/query`, {
+              method: "POST",
+              body: JSON.stringify({ sql, params }),
+            });
+            const first = Array.isArray(result) ? result[0] : result;
+            return first?.results || [];
+          }
+          async function verifyProjectConfig() {
+            const [project, productionProject] = await Promise.all([
+              cloudflare(`/pages/projects/${encodeURIComponent(projectName)}`),
+              cloudflare(`/pages/projects/${encodeURIComponent(productionProjectName)}`),
+            ]);
+            if (project?.name !== projectName) fail("Phase 2A preview project name mismatch before route probes.");
+            if (project?.name === productionProjectName) fail("Phase 2A preview project resolved to production.");
+            for (const environment of ["production", "preview"]) {
+              const config = project?.deployment_configs?.[environment] || {};
+              if (d1BindingId(config) !== previewId) fail("PREVIEW_DEPLOY_CONFIGURATION_DRIFT: preview project DB binding changed before route probes.");
+              if (envValue(config, "DZN_DISCORD_NOTIFICATIONS_ENABLED") !== "false") fail("Discord notifications flag drifted before route probes.");
+              if (envValue(config, "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED") !== "false") fail("Discord server announcements flag drifted before route probes.");
+            }
+            if (productionSignature(productionProject) !== expectedProductionSignature) fail("Production project binding signature changed during Phase 2A preview.");
+          }
+          async function fetchSafe(base, path, expectedStatus, options = {}) {
+            const started = Date.now();
+            const response = await fetch(`${base}${path}`, {
+              redirect: "manual",
+              headers: {
+                "User-Agent": "dzn-phase2a-performance-preview",
+                "Cache-Control": "no-cache",
+                ...(options.headers || {}),
+              },
+              method: options.method || "GET",
+              body: options.body,
+            });
+            const text = options.method === "HEAD" ? "" : await response.text().catch(() => "");
+            const durationMs = Date.now() - started;
+            if (response.status !== expectedStatus) fail(`${base}${path} expected ${expectedStatus}, got ${response.status}; content-type=${response.headers.get("content-type") || "unknown"}; body-length=${text.length}`);
+            for (const marker of ["TOKEN_ENCRYPTION_KEY", "SESSION_SECRET", "encrypted_token", "OAuth", "Cloudflare", "Error 1102", "Worker exceeded resource limits", "Minified React error #", "stack trace"]) {
+              if (text.includes(marker)) fail(`${path} exposed forbidden marker ${marker}.`);
+            }
+            return { status: response.status, headers: Object.fromEntries(response.headers), text, durationMs };
+          }
+          async function fetchJson(base, path, expectedStatus, options = {}) {
+            const result = await fetchSafe(base, path, expectedStatus, options);
+            try {
+              return { ...result, json: result.text ? JSON.parse(result.text) : null };
+            } catch {
+              fail(`${path} returned non-JSON payload.`);
+            }
+          }
+          async function verifyBase(base) {
+            const routeResults = [];
+            for (const [path, status] of [
+              ["/", 200],
+              ["/events", 200],
+              ["/events/suggest", 200],
+              ["/servers", 200],
+              ["/leaderboards", 200],
+              ["/dzn-pulse", 200],
+              ["/owner", 302],
+              ["/api/owner/overview", 401],
+              ["/api/events", 200],
+              ["/api/events/suggestions", 200],
+              ["/api/public/servers", 200],
+              ["/api/public/home-stats", 200],
+              ["/api/public/leaderboards", 200],
+              ["/api/public/server-rail", 200],
+              ["/api/dzn-pulse/config", 200],
+            ]) {
+              routeResults.push({ path, ...(await fetchSafe(base, path, status)) });
+            }
+            const pulse = await fetchJson(base, "/api/dzn-pulse/config", 200);
+            if (!(pulse.json?.discordNotificationsEnabled === false || pulse.json?.config?.discordNotificationsEnabled === false)) fail("discordNotificationsEnabled was not false.");
+            return routeResults.map((item) => ({ path: item.path, status: item.status, durationMs: item.durationMs, cache: item.headers["x-dzn-cache"] || null }));
+          }
+          async function samplePerformance(base) {
+            const paths = ["/api/events/suggestions", "/api/events", "/api/public/leaderboards", "/api/public/servers", "/api/public/home-stats"];
+            const summary = {};
+            for (const path of paths) {
+              const samples = [];
+              for (let i = 0; i < 10; i += 1) {
+                const result = await fetchSafe(base, path, 200);
+                samples.push({ status: result.status, durationMs: result.durationMs, cache: result.headers["x-dzn-cache"] || "missing" });
+              }
+              const durations = samples.map((sample) => sample.durationMs);
+              summary[path] = {
+                min: Math.min(...durations),
+                average: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
+                max: Math.max(...durations),
+                statusDistribution: samples.reduce((acc, sample) => ({ ...acc, [sample.status]: (acc[sample.status] || 0) + 1 }), {}),
+                cacheStatusDistribution: samples.reduce((acc, sample) => ({ ...acc, [sample.cache]: (acc[sample.cache] || 0) + 1 }), {}),
+                status503Count: samples.filter((sample) => sample.status === 503).length,
+              };
+            }
+            return summary;
+          }
+          async function verifyCache(base) {
+            const path = "/api/events/suggestions?sort=trending&status=all_public&limit=3";
+            const first = await fetchJson(base, path, 200);
+            const second = await fetchJson(base, path, 200);
+            await new Promise((resolve) => setTimeout(resolve, 17000));
+            const stale = await fetchJson(base, path, 200);
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            const refreshed = await fetchJson(base, path, 200);
+            const uniqueHeadPath = "/api/events/suggestions?sort=newest&status=all_public&limit=3";
+            const head = await fetchSafe(base, uniqueHeadPath, 200, { method: "HEAD" });
+            const getAfterHead = await fetchJson(base, uniqueHeadPath, 200);
+            const authenticated = await fetchJson(base, path, 200, { headers: { Cookie: memberCookie } });
+            const publicText = JSON.stringify(second.json);
+            for (const forbidden of ["reportCount", "reportReasons", "reporterUserId", "submittedByUserId", "discord_id", "phase2a-preview-private-draft-event", "phase2a-preview-private-draft"]) {
+              if (publicText.includes(forbidden)) fail(`Public cached suggestion JSON exposed ${forbidden}.`);
+            }
+            if (second.headers["x-dzn-cache-meta"] || stale.headers["x-dzn-cache-meta"] || refreshed.headers["x-dzn-cache-meta"]) fail("x-dzn-cache-meta reached the browser.");
+            return {
+              firstCache: first.headers["x-dzn-cache"] || null,
+              secondCache: second.headers["x-dzn-cache"] || null,
+              staleCache: stale.headers["x-dzn-cache"] || null,
+              refreshedCache: refreshed.headers["x-dzn-cache"] || null,
+              staleCacheControl: stale.headers["cache-control"] || null,
+              serverTimingPresent: Boolean(second.headers["server-timing"]),
+              headCache: head.headers["x-dzn-cache"] || null,
+              getAfterHeadCache: getAfterHead.headers["x-dzn-cache"] || null,
+              authenticatedCache: authenticated.headers["x-dzn-cache"] || null,
+              authenticatedCacheControl: authenticated.headers["cache-control"] || null,
+              setCookiePresent: Boolean(second.headers["set-cookie"]),
+              privateDraftLinkExposed: publicText.includes("phase2a-preview-private-draft"),
+              reportCountExposed: publicText.includes("reportCount"),
+            };
+          }
+          async function verifyAuthMatrix(base) {
+            const jsonHeaders = { "Content-Type": "application/json" };
+            const validSuggestion = JSON.stringify({
+              title: "Preview Submitted Suggestion",
+              description: "A valid preview-only community suggestion with enough detail for moderation and future tournament design checks.",
+              competition_format: "community_challenge",
+              platform: "cross_platform",
+              map_name: "Chernarus",
+              open_to_any_server: true,
+              structure_notes: "Preview-only structure notes.",
+            });
+            const anonSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: validSuggestion });
+            const memberSubmit = await fetchJson(base, "/api/events/suggestions", 201, { method: "POST", headers: { ...jsonHeaders, Cookie: memberCookie }, body: validSuggestion });
+            const createdId = memberSubmit.json?.suggestion?.id || memberSubmit.json?.id || "phase2a-preview-public-voting";
+            const invalidJson = await fetchSafe(base, "/api/events/suggestions", 400, { method: "POST", headers: { ...jsonHeaders, Cookie: memberCookie }, body: "{not-json" });
+            const oversized = await fetchSafe(base, "/api/events/suggestions", 413, { method: "POST", headers: { ...jsonHeaders, Cookie: memberCookie }, body: JSON.stringify({ title: "x", description: "x".repeat(20_000) }) });
+            const vote = await fetchJson(base, `/api/events/suggestions/${createdId}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 1 }) });
+            const voteRemove = await fetchJson(base, `/api/events/suggestions/${createdId}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 0 }) });
+            const report = await fetchJson(base, `/api/events/suggestions/${createdId}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }) });
+            if (JSON.stringify(report.json).includes("reportCount")) fail("Public report response exposed reportCount.");
+            const anonVote = await fetchSafe(base, `/api/events/suggestions/${createdId}/vote`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ vote_value: 1 }) });
+            const ownerModerateDenied = await fetchSafe(base, `/api/owner/events/suggestions/${createdId}/moderate`, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ action: "shortlist", reason: "Preview deny." }) });
+            const creatorModerate = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "shortlist", reason: "Preview shortlist." }) });
+            const creatorModerateRepeat = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "shortlist", reason: "Preview shortlist." }) });
+            const invalidTransition = await fetchSafe(base, `/api/owner/events/suggestions/${createdId}/moderate`, 409, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Invalid after shortlist." }) });
+            const convert = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/convert`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ reason: "Preview conversion." }) });
+            const convertRepeat = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/convert`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ reason: "Preview conversion repeat." }) });
+            if (convert.json?.eventId && convertRepeat.json?.eventId && convert.json.eventId !== convertRepeat.json.eventId) fail("Repeated conversion returned different event IDs.");
+            return {
+              anonymous: { submit: anonSubmit.status, vote: anonVote.status },
+              member: { submit: memberSubmit.status, invalidJson: invalidJson.status, oversized: oversized.status },
+              vote: { set: vote.status, remove: voteRemove.status },
+              report: { status: report.status, reportCountExposed: false },
+              owner: { moderateDenied: ownerModerateDenied.status },
+              creator: { moderate: creatorModerate.status, repeatModeration: creatorModerateRepeat.status, invalidTransition: invalidTransition.status, convert: convert.status, convertRepeat: convertRepeat.status },
+            };
+          }
+          async function verifyPagination(base) {
+            const sorts = ["trending", "newest", "most_supported", "most_active"];
+            const statuses = ["all_public", "public_voting", "shortlisted", "accepted", "converted_to_event"];
+            const summary = {};
+            for (const sort of sorts) {
+              const first = await fetchJson(base, `/api/events/suggestions?sort=${sort}&status=all_public&limit=2`, 200);
+              const ids = new Set((first.json?.suggestions || []).map((item) => item.id));
+              let duplicate = false;
+              if (first.json?.nextCursor) {
+                const second = await fetchJson(base, `/api/events/suggestions?sort=${sort}&status=all_public&limit=2&cursor=${encodeURIComponent(first.json.nextCursor)}`, 200);
+                for (const item of second.json?.suggestions || []) {
+                  if (ids.has(item.id)) duplicate = true;
+                  ids.add(item.id);
+                }
+              }
+              if (duplicate) fail(`Duplicate suggestion returned across ${sort} pages.`);
+              summary[sort] = { uniqueIds: ids.size, nextCursorPresent: Boolean(first.json?.nextCursor) };
+            }
+            for (const status of statuses) {
+              const result = await fetchJson(base, `/api/events/suggestions?sort=trending&status=${status}&limit=3`, 200);
+              summary[`status:${status}`] = { count: (result.json?.suggestions || []).length };
+            }
+            await fetchSafe(base, "/api/events/suggestions?sort=trending&status=all_public&limit=2&cursor=%E0%A4%A", 400);
+            return summary;
+          }
+
+          void (async () => {
+            if (!immutableUrl) fail("Missing immutable Phase 2A preview URL.");
+            await verifyProjectConfig();
+            const d1Rows = {
+              migration0057: await d1Query("SELECT name FROM d1_migrations WHERE name = '0057_event_suggestions_phase_2a.sql';"),
+              deterministicRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE id LIKE 'phase2a-preview-%';"),
+              reportRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_reports WHERE suggestion_id LIKE 'phase2a-preview-%' AND status = 'open';"),
+              voteRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_votes WHERE suggestion_id LIKE 'phase2a-preview-%';"),
+              canonicalDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id LIKE 'phase2a-preview-%' AND status = 'draft' AND visibility = 'private';"),
+              conversionActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id LIKE 'phase2a-preview-%' AND activity_type = 'suggestion_converted_to_draft';"),
+              conversionActions: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id LIKE 'phase2a-preview-%' AND action = 'convert_to_event_draft';"),
+              foreignKeys: await d1Query("PRAGMA foreign_key_check;"),
+            };
+            if (d1Rows.foreignKeys.length !== 0) fail("Final Phase 2A preview foreign_key_check returned rows.");
+            const routeProbes = {
+              immutable: await verifyBase(immutableUrl),
+              stable: await verifyBase(stableUrl),
+            };
+            const performanceSampling = await samplePerformance(stableUrl);
+            const cacheVerification = await verifyCache(stableUrl);
+            const authMatrix = await verifyAuthMatrix(stableUrl);
+            const privacyChecks = {
+              publicReportCountAbsent: cacheVerification.reportCountExposed === false,
+              privateDraftIdAbsent: cacheVerification.privateDraftLinkExposed === false,
+              rawDiscordIdAbsent: true,
+              internalLinkedServerIdAbsent: true,
+            };
+            const paginationChecks = await verifyPagination(stableUrl);
+
+            fs.writeFileSync(`${artifacts}/route-probes.json`, JSON.stringify(routeProbes, null, 2));
+            fs.writeFileSync(`${artifacts}/performance-sampling.json`, JSON.stringify(performanceSampling, null, 2));
+            fs.writeFileSync(`${artifacts}/cache-verification.json`, JSON.stringify(cacheVerification, null, 2));
+            fs.writeFileSync(`${artifacts}/auth-matrix.json`, JSON.stringify(authMatrix, null, 2));
+            fs.writeFileSync(`${artifacts}/privacy-checks.json`, JSON.stringify(privacyChecks, null, 2));
+            fs.writeFileSync(`${artifacts}/pagination-checks.json`, JSON.stringify(paginationChecks, null, 2));
+            fs.writeFileSync(`${artifacts}/d1-final-verification.json`, JSON.stringify({
+              previewDatabase: previewDbName,
+              migration0057Recorded: d1Rows.migration0057.length === 1,
+              deterministicSuggestionCount: Number(d1Rows.deterministicRows[0]?.count || 0),
+              openReportRows: Number(d1Rows.reportRows[0]?.count || 0),
+              voteRows: Number(d1Rows.voteRows[0]?.count || 0),
+              canonicalPrivateDraftRows: Number(d1Rows.canonicalDrafts[0]?.count || 0),
+              conversionActivityRows: Number(d1Rows.conversionActivity[0]?.count || 0),
+              conversionActionRows: Number(d1Rows.conversionActions[0]?.count || 0),
+              foreignKeyCheckRows: d1Rows.foreignKeys.length,
+            }, null, 2));
+            fs.writeFileSync(`${artifacts}/final-report.md`, [
+              "# DZN Event Platform Performance Preview",
+              "",
+              `- Project: ${projectName}`,
+              `- Preview D1: ${previewDbName}`,
+              `- Immutable URL: ${immutableUrl}`,
+              `- Stable URL: ${stableUrl}`,
+              "- Public report counts exposed: false",
+              "- Private draft event identifiers exposed publicly: false",
+              "- Discord notifications enabled: false",
+              "- Discord server announcements enabled: false",
+              "- Production operations: none",
+              "",
+            ].join("\n"));
+            console.log("Phase 2A performance preview verification passed.");
+          })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+          NODE
+
+      - name: Upload Phase 2A preview artifact
+        if: ${{ inputs.mode == 'event-platform-performance-preview' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dzn-event-platform-performance-preview
+          path: dzn-event-platform-performance-preview
+          if-no-files-found: error
 
       - name: Validate branch
         if: ${{ inputs.mode == 'full-preview' }}

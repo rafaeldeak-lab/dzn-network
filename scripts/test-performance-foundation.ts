@@ -17,6 +17,8 @@ import {
   normalizeSuggestionTextCompact,
   paginateSuggestionRowsForTest,
   parsePublicSuggestionCursor,
+  projectSuggestionForOwnerTest,
+  projectSuggestionForPublicTest,
   validateModerationTransition,
   validateSuggestionInput,
   type SuggestionSortRow,
@@ -192,6 +194,7 @@ async function assertCacheHelpers() {
   const publicHeaders = publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 }, "MISS");
   assertIncludes(publicHeaders.get("cache-control") ?? "", "public, max-age=15");
   assertNotIncludes(publicHeaders.get("cache-control") ?? "", "s-maxage", "public cache headers must not claim s-maxage SWR");
+  assertNotIncludes(publicHeaders.get("cache-control") ?? "", "stale-while-revalidate", "browser cache policy must not expose internal stale retention");
   assert.equal(publicHeaders.get("x-dzn-cache"), "MISS");
   const privateHeaders = privateNoStoreHeaders();
   assertIncludes(privateHeaders.get("cache-control") ?? "", "private, no-store");
@@ -233,6 +236,10 @@ async function assertCacheHelpers() {
       buildResponse,
     });
     assert.equal(hit.headers.get("x-dzn-cache"), "HIT", "second GET should hit");
+    assert.equal(hit.headers.has("x-dzn-cache-meta"), false, "internal cache metadata must not be exposed publicly");
+    assert.match(hit.headers.get("cache-control") ?? "", /^public, max-age=\d+$/, "HIT should expose only remaining fresh browser lifetime");
+    const hitMaxAge = Number((hit.headers.get("cache-control") ?? "").match(/max-age=(\d+)/)?.[1] ?? 99);
+    assert.equal(hitMaxAge <= 1, true, "HIT browser max-age must not exceed configured fresh TTL");
 
     const originalNow = Date.now;
     Date.now = () => originalNow() + 2_000;
@@ -243,7 +250,34 @@ async function assertCacheHelpers() {
       buildResponse,
     });
     assert.equal(stale.headers.get("x-dzn-cache"), "STALE", "stale window should return stale response");
+    assert.equal(stale.headers.get("cache-control"), "no-cache, max-age=0, must-revalidate", "STALE response should force browser revalidation");
+    assert.equal(stale.headers.has("x-dzn-cache-meta"), false, "STALE must not expose internal cache metadata");
     await Promise.all(waits.splice(0));
+    const refreshed = await withPublicGetEdgeCache({ request, waitUntil: (promise) => waits.push(promise) }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort"],
+      cacheVersion: "test-v1",
+      buildResponse,
+    });
+    assert.equal(refreshed.headers.get("x-dzn-cache"), "HIT", "background refresh should update stale cache back to HIT");
+
+    Date.now = () => originalNow() + 4_000;
+    builds = 0;
+    const staleA = withPublicGetEdgeCache({ request, waitUntil: (promise) => waits.push(promise) }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort"],
+      cacheVersion: "test-v1",
+      buildResponse,
+    });
+    const staleB = withPublicGetEdgeCache({ request, waitUntil: (promise) => waits.push(promise) }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort"],
+      cacheVersion: "test-v1",
+      buildResponse,
+    });
+    await Promise.all([staleA, staleB]);
+    await Promise.all(waits.splice(0));
+    assert.equal(builds, 1, "concurrent stale requests should not start repeated refreshes in one isolate");
     Date.now = originalNow;
 
     const head = await withPublicGetEdgeCache({ request: new Request(request.url, { method: "HEAD" }), waitUntil: (promise) => waits.push(promise) }, {
@@ -272,6 +306,15 @@ async function assertCacheHelpers() {
       buildResponse: async () => new Response("{}", { headers: { "set-cookie": "x=y" } }),
     });
     assert.equal(cookieBypass.headers.get("x-dzn-cache"), "BYPASS", "Set-Cookie responses must not cache");
+    assertIncludes(cookieBypass.headers.get("cache-control") ?? "", "no-store", "Set-Cookie cache bypass must be no-store");
+    const errorBypass = await withPublicGetEdgeCache({ request }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort"],
+      cacheVersion: "error-v1",
+      buildResponse: async () => new Response("nope", { status: 503 }),
+    });
+    assert.equal(errorBypass.headers.get("x-dzn-cache"), "BYPASS", "non-2xx responses must not cache");
+    assertIncludes(errorBypass.headers.get("cache-control") ?? "", "no-store", "non-2xx cache bypass must be no-store");
   } finally {
     (cacheGlobal as { caches: unknown }).caches = originalCaches;
   }
@@ -362,6 +405,32 @@ function assertSuggestionApis() {
   assert.doesNotMatch(helper, /DISCORD_BOT_TOKEN|discord\.com\/api|allowed_mentions|fetch\s*\(|runScheduled|dispatchDiscord|nitrado\.net/i, "suggestion helper must not send Discord or call automation/upstream systems");
   const publicProjection = helper.slice(helper.indexOf("function toPublicSuggestion"), helper.indexOf("function toOwnerSuggestion"));
   assertNotIncludes(publicProjection, "reportCount", "public suggestion projection must not expose report count");
+  assertIncludes(helper, "PUBLIC_SUGGESTION_SELECT_COLUMNS", "public suggestion list should use a public-safe converted-event projection");
+  assertIncludes(helper, "competitive_events.visibility = 'public' AND competitive_events.status != 'draft'", "private draft event links must be hidden from public projection");
+  const privateDraftPublic = projectSuggestionForPublicTest({
+    converted_event_id: "event-private-draft",
+    converted_event_slug: "private-draft-slug",
+    converted_event_status: "draft",
+    converted_event_visibility: "private",
+  });
+  assert.equal(privateDraftPublic.convertedEventId, null, "converted private draft must not expose public event id");
+  assert.equal(privateDraftPublic.convertedEventSlug, null, "converted private draft must not expose public event slug");
+  const privateDraftOwner = projectSuggestionForOwnerTest({
+    converted_event_id: "event-private-draft",
+    converted_event_slug: "private-draft-slug",
+    converted_event_status: "draft",
+    converted_event_visibility: "private",
+  });
+  assert.equal(privateDraftOwner.convertedEventId, "event-private-draft", "owner projection should retain canonical private draft id");
+  assert.equal(privateDraftOwner.convertedEventSlug, "private-draft-slug", "owner projection should retain canonical private draft slug");
+  const publishedPublic = projectSuggestionForPublicTest({
+    converted_event_id: "event-public",
+    converted_event_slug: "public-event-slug",
+    converted_event_status: "registration_open",
+    converted_event_visibility: "public",
+  });
+  assert.equal(publishedPublic.convertedEventId, "event-public", "published public event id may be exposed");
+  assert.equal(publishedPublic.convertedEventSlug, "public-event-slug", "published public event link may be exposed");
 
   const publicRoute = source("functions/api/events/suggestions/index.ts");
   assertIncludes(publicRoute, "withPublicGetEdgeCache");
@@ -403,6 +472,7 @@ function assertSuggestionApis() {
   assertIncludes(publicPage, "suggested_server_slug");
   assertIncludes(publicPage, "Submit report");
   assertIncludes(publicPage, "pendingVotes");
+  assertIncludes(publicPage, "Draft under creator review");
   assertNotIncludes(publicPage, "reportCount", "public board must not expose report counts");
   assertNotIncludes(publicPage, "Most Discussed");
   assertNotIncludes(publicPage, "linked server ID");
