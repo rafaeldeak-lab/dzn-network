@@ -32,6 +32,37 @@ type OwnerEventsPayload = {
   warnings: string[];
 };
 
+type OwnerSuggestion = {
+  id: string;
+  title: string;
+  description: string;
+  competitionFormat: string;
+  platform: string;
+  mapName: string | null;
+  suggestedServerScope: string;
+  moderationStatus: string;
+  publicStatus: string;
+  creatorDecision: string | null;
+  creatorResponse: string | null;
+  convertedEventSlug: string | null;
+  upvotes: number;
+  downvotes: number;
+  netScore: number;
+  reportCount: number;
+  submittedAt: string;
+  submittedBy: string;
+};
+
+type OwnerSuggestionsPayload = {
+  ok: boolean;
+  status?: number;
+  creatorEventAdmin: boolean;
+  suggestions: OwnerSuggestion[];
+  generatedAt?: string;
+  error?: string;
+  message?: string;
+};
+
 type LoadState = "loading" | "ready" | "unauthorized" | "forbidden" | "error";
 
 const EVENT_TYPES = [
@@ -143,20 +174,23 @@ function Header({ payload }: { payload: OwnerEventsPayload }) {
 
 function EventInventoryPanel({ payload }: { payload: OwnerEventsPayload }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-black text-white">Official event inventory</h2>
-          <p className="mt-1 text-sm text-zinc-400">Read-only list of existing official competitive events.</p>
+    <div className="grid gap-4">
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black text-white">Official event inventory</h2>
+            <p className="mt-1 text-sm text-zinc-400">Read-only list of existing official competitive events.</p>
+          </div>
+          {payload.creatorEventAdmin ? (
+            <Link href="/owner/events/create" className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
+              Create official event
+            </Link>
+          ) : null}
         </div>
-        {payload.creatorEventAdmin ? (
-          <Link href="/owner/events/create" className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
-            Create official event
-          </Link>
-        ) : null}
-      </div>
-      <EventList events={payload.events} />
-    </section>
+        <EventList events={payload.events} />
+      </section>
+      <OwnerSuggestionModerationPanel creatorEventAdmin={payload.creatorEventAdmin} />
+    </div>
   );
 }
 
@@ -318,6 +352,179 @@ function EventList({ events }: { events: OwnerEvent[] }) {
         </Link>
       ))}
     </div>
+  );
+}
+
+function OwnerSuggestionModerationPanel({ creatorEventAdmin }: { creatorEventAdmin: boolean }) {
+  const [payload, setPayload] = useState<OwnerSuggestionsPayload | null>(null);
+  const [status, setStatus] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<{ tone: "error" | "success" | "info"; text: string } | null>(null);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/owner/events/suggestions?status=${encodeURIComponent(status)}&limit=40`, {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+    })
+      .then(async (response) => {
+        if (!active) return;
+        const result = await response.json() as OwnerSuggestionsPayload;
+        if (!response.ok || !result.ok) {
+          throw new Error(result.message ?? result.error ?? "Suggestion moderation could not be loaded.");
+        }
+        setPayload(result);
+        setMessage(null);
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        setMessage({ tone: "error", text: loadError instanceof Error ? loadError.message : "Suggestion moderation could not be loaded." });
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [status]);
+
+  function changeStatus(value: string) {
+    if (value === status) return;
+    setLoading(true);
+    setStatus(value);
+  }
+
+  async function runModeration(suggestion: OwnerSuggestion, action: string) {
+    const reason = reasons[suggestion.id] ?? "";
+    setMessage({ tone: "info", text: action === "convert" ? "Saving draft" : "Updating moderation state" });
+    const path = action === "convert"
+      ? `/api/owner/events/suggestions/${encodeURIComponent(suggestion.id)}/convert`
+      : `/api/owner/events/suggestions/${encodeURIComponent(suggestion.id)}/moderate`;
+    const body = action === "convert"
+      ? { reason }
+      : { action, reason, creator_response: reason };
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json() as { ok?: boolean; message?: string; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.message ?? result.error ?? "Suggestion action failed.");
+      setMessage({ tone: "success", text: result.message ?? "Suggestion updated." });
+      const refresh = await fetch(`/api/owner/events/suggestions?status=${encodeURIComponent(status)}&limit=40`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      if (refresh.ok) setPayload(await refresh.json() as OwnerSuggestionsPayload);
+    } catch (actionError) {
+      setMessage({ tone: "error", text: actionError instanceof Error ? actionError.message : "Suggestion action failed." });
+    }
+  }
+
+  const suggestions = payload?.suggestions ?? [];
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-black text-white">Suggestions overview</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Community ideas are moderated here. Only the configured platform creator can change status or convert an accepted idea into a private draft.
+          </p>
+        </div>
+        <select value={status} onChange={(event) => changeStatus(event.target.value)} className={inputClass()}>
+          <option value="all">All suggestions</option>
+          <option value="pending_moderation">Pending moderation</option>
+          <option value="public_voting">Public voting</option>
+          <option value="shortlisted">Shortlisted</option>
+          <option value="accepted">Accepted</option>
+          <option value="revision_requested">Revision requested</option>
+          <option value="rejected">Rejected</option>
+          <option value="archived">Archived</option>
+        </select>
+      </div>
+      {!creatorEventAdmin ? (
+        <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/[0.04] p-3 text-sm text-amber-50">
+          This session can view safe suggestion summaries only. Creator capability is required for moderation and draft conversion.
+        </p>
+      ) : null}
+      {message ? <MessagePanel message={message} /> : null}
+      {loading ? <LoadingBlock /> : null}
+      {!loading && !suggestions.length ? <p className="mt-4 rounded-lg border border-white/10 bg-black/25 p-4 text-sm text-zinc-400">No suggestions match this filter.</p> : null}
+      <div className="mt-4 grid gap-3">
+        {suggestions.map((suggestion) => (
+          <article key={suggestion.id} className="rounded-lg border border-white/10 bg-black/25 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase text-zinc-500">
+                  <span>{suggestion.publicStatus}</span>
+                  <span>/</span>
+                  <span>{suggestion.moderationStatus}</span>
+                  <span>/</span>
+                  <span>{suggestion.submittedBy}</span>
+                </div>
+                <h3 className="mt-2 text-base font-black text-white">{suggestion.title}</h3>
+              </div>
+              <div className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase text-zinc-300">
+                Net {suggestion.netScore} / Reports {suggestion.reportCount}
+              </div>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">{suggestion.description}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase text-zinc-500">
+              <span>{suggestion.competitionFormat}</span>
+              <span>{suggestion.platform}</span>
+              {suggestion.mapName ? <span>{suggestion.mapName}</span> : null}
+              <span>{suggestion.suggestedServerScope}</span>
+            </div>
+            {suggestion.convertedEventSlug ? (
+              <Link href={`/events/${suggestion.convertedEventSlug}`} className="mt-3 inline-flex rounded-lg border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-100">
+                View converted draft
+              </Link>
+            ) : null}
+            {creatorEventAdmin ? (
+              <div className="mt-3 grid gap-3">
+                <textarea
+                  value={reasons[suggestion.id] ?? ""}
+                  onChange={(event) => setReasons((current) => ({ ...current, [suggestion.id]: event.target.value }))}
+                  maxLength={500}
+                  className={`${inputClass()} min-h-20 resize-y`}
+                  placeholder="Creator reason or public response"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton label="Approve voting" onClick={() => runModeration(suggestion, "approve_public_voting")} />
+                  <ActionButton label="Shortlist" onClick={() => runModeration(suggestion, "shortlist")} />
+                  <ActionButton label="Accept" onClick={() => runModeration(suggestion, "accept")} />
+                  <ActionButton label="Revision" onClick={() => runModeration(suggestion, "request_revision")} />
+                  <ActionButton label="Reject" onClick={() => runModeration(suggestion, "reject")} />
+                  <ActionButton label="Archive" onClick={() => runModeration(suggestion, "archive")} />
+                  <ActionButton label="Restore" onClick={() => runModeration(suggestion, "restore")} />
+                  <ActionButton label="Convert to draft" onClick={() => runModeration(suggestion, "convert")} accent />
+                </div>
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ActionButton({ label, onClick, accent = false }: { label: string; onClick: () => void; accent?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border px-3 py-2 text-[11px] font-black uppercase ${
+        accent ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-50" : "border-white/10 bg-white/[0.04] text-zinc-300 hover:text-white"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

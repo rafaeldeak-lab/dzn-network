@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 import { BetaTicker } from "@/components/site/beta-ticker";
+import { NavigationProgress } from "@/components/site/navigation-progress";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,6 +32,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-[#02030a] text-zinc-100">
+        <Suspense fallback={null}>
+          <NavigationProgress />
+        </Suspense>
         {children}
         <BetaTicker />
       </body>

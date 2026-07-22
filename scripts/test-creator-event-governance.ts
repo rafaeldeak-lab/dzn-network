@@ -470,7 +470,7 @@ function assertIncludes(file: string, snippet: string, label = snippet) {
 }
 
 function assertSourceGovernance() {
-  assert.equal(existsSync("app/events/suggest/page.tsx"), true, "Public suggestion placeholder route should exist.");
+  assert.equal(existsSync("app/events/suggest/page.tsx"), true, "Public suggestion route should exist.");
   assert.equal(existsSync("app/owner/events/page.tsx"), true, "Owner Event Control route should exist.");
   assert.equal(existsSync("app/owner/events/create/page.tsx"), true, "Creator create route should exist.");
   assert.equal(existsSync("functions/api/owner/events.ts"), true, "Owner events API should exist.");
@@ -538,7 +538,7 @@ function assertSourceGovernance() {
   const publicCreatePage = source("app/events/create/page.tsx");
   assert.doesNotMatch(publicCreatePage, /EventCreatePage|<form|api\/events\/create|Tournament Channel ID/i, "Public /events/create must not expose the official creation form.");
   assertIncludes(publicCreatePage, "Official DZN events are created and published by the DZN platform creator");
-  assertIncludes(source("app/events/suggest/page.tsx"), "Community competition suggestions are coming soon");
+  assertIncludes(source("app/events/suggest/page.tsx"), "EventSuggestionsPage");
 
   const ownerConsole = source("components/owner/owner-console.tsx");
   assertIncludes(ownerConsole, "\"Event Control\"");

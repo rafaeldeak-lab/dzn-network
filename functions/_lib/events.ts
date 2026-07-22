@@ -12,7 +12,7 @@ import {
 import { creatorEventAdminDeniedPayload, isPlatformCreatorEventAdmin } from "./platform-creator";
 import type { Env, SessionUser } from "./types";
 
-export const EVENT_STATUSES = ["live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
+export const EVENT_STATUSES = ["draft", "live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
 export const EVENT_TYPES = [
   "capture_the_flag",
   "community_cup",
@@ -1029,7 +1029,7 @@ function serverHasEventEntitlement(server: Pick<ServerRow, "plan_key" | "subscri
   return isActiveSubscription(server.subscription_status) && FULL_EVENT_PLANS.includes(normalizePlanKey(server.plan_key));
 }
 
-async function insertEventActivity(env: Env, eventId: string | null, serverId: string | null, activityType: string, message: string, metadata: Record<string, unknown>) {
+export async function insertEventActivity(env: Env, eventId: string | null, serverId: string | null, activityType: string, message: string, metadata: Record<string, unknown>) {
   await requireDb(env)
     .prepare(
       `INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
