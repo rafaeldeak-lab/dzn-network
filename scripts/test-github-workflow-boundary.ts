@@ -787,6 +787,7 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_PULSE_ENABLED: \"true\
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("cleanup-preview-d1"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("rebind-preview-d1"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("repair-rebound-discord-preview"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("verify-existing-creator-governance-preview"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("ACTIVATION_MODE_DEPRECATED_USE_REPAIR_MODE"), true);
 assert.equal(ownerPreviewDispatchBlock.includes("- activate-rebound-discord-preview"), false, "Obsolete activation mode must not be available in the workflow-dispatch form.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("preview_db_name_to_delete:"), true);
@@ -798,14 +799,17 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_d1_rebind:
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_rebound_discord_preview_deploy:"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("repair_action:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_rebound_discord_preview_repair:"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_existing_creator_governance_preview:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_STALE_PREVIEW_D1_CLEANUP"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_PREVIEW_D1_REBIND"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_REBOUND_DISCORD_PREVIEW_DEPLOY"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_REPAIR_REBOUND_DISCORD_PREVIEW"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("VERIFY_EXISTING_CREATOR_GOVERNANCE_PREVIEW"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_db_cleanup must equal APPROVE_STALE_PREVIEW_D1_CLEANUP"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_d1_rebind must equal APPROVE_PREVIEW_D1_REBIND"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_rebound_discord_preview_deploy must equal APPROVE_REBOUND_DISCORD_PREVIEW_DEPLOY"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_rebound_discord_preview_repair must equal APPROVE_REPAIR_REBOUND_DISCORD_PREVIEW"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_existing_creator_governance_preview must equal VERIFY_EXISTING_CREATOR_GOVERNANCE_PREVIEW"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("repair_action must be dry-run or apply"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("rebind_action must be dry-run or apply"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("REBOUND_PREVIEW_PROJECT_NAME"), false);
@@ -822,6 +826,10 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("REPAIR_PREVIEW_PROJECT_NAM
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("REPAIR_REPLACEMENT_PREVIEW_DB_NAME: dzn_network_db_discord_announcements_preview"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("REPAIR_OLD_PREVIEW_DB_NAME: dzn_network_db_discord_announcements_preview_alignment_ee8c812"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("REPAIR_OLD_PREVIEW_DB_ID_MASK: 44ef61d8...ef59"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("EXISTING_CREATOR_GOVERNANCE_PREVIEW_PROJECT_NAME: dzn-network-owner-console-preview"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("EXISTING_CREATOR_GOVERNANCE_PREVIEW_DB_NAME: dzn_network_db_owner_console_preview_creator_governance_0919c46"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("EXISTING_CREATOR_GOVERNANCE_PREVIEW_EVENT_NAME: Creator Governance Preview Cup 0919c46"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("EXISTING_CREATOR_GOVERNANCE_PREVIEW_EVENT_SLUG: creator-governance-preview-cup-0919c46"), true);
 assert.equal(ownerPreviewDispatchBlock.includes("rebind_project"), false, "Owner console preview form must not ask for a rebind project.");
 assert.equal(ownerPreviewDispatchBlock.includes("old_database"), false, "Owner console preview form must not ask for an old rebind database.");
 assert.equal(ownerPreviewDispatchBlock.includes("replacement_database"), false, "Owner console preview form must not ask for a replacement rebind database.");
@@ -989,6 +997,8 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db --remote"),
 
 const ownerPreviewValidateInputsStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Validate preview-only inputs");
 const ownerPreviewInstallStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Install");
+const ownerPreviewVerifyExistingStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify existing creator-governance preview");
+const ownerPreviewValidateBranchStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Validate branch");
 const ownerPreviewCleanupStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Guarded preview D1 cleanup");
 const ownerPreviewRebindStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Guarded Discord preview D1 rebind");
 const ownerPreviewActivationStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Prepare pinned main runtime for Discord preview activation");
@@ -1002,8 +1012,13 @@ const ownerPreviewRepairBuildStart = indexOfOrFail(dznOwnerConsolePreviewWorkflo
 const ownerPreviewRepairDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Deploy repaired rebound Discord preview from isolated directory");
 const ownerPreviewRepairVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify repaired rebound Discord preview");
 const ownerPreviewResolveD1Start = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Resolve or create preview D1 database");
-const ownerPreviewConfigWrite = indexOfOrFail(dznOwnerConsolePreviewWorkflow, 'fs.writeFileSync("wrangler.owner-console-preview.toml"');
 const ownerPreviewMigrateStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Apply preview D1 migrations");
+const ownerPreviewConfigWrite =
+  ownerPreviewResolveD1Start +
+  indexOfOrFail(
+    dznOwnerConsolePreviewWorkflow.slice(ownerPreviewResolveD1Start, ownerPreviewMigrateStart),
+    'fs.writeFileSync("wrangler.owner-console-preview.toml"',
+  );
 const ownerPreviewSeedStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Seed preview-only owner console data");
 const ownerPreviewResetEventStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Reset creator-governance preview test event");
 const ownerPreviewDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Deploy preview Pages project");
@@ -1015,9 +1030,48 @@ const ownerPreviewValidateBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPrev
 assert.equal(ownerPreviewValidateBlock.includes("wrangler.owner-console-preview.toml"), false, "Input validation must not require the generated preview Wrangler config.");
 assert.equal(ownerPreviewValidateBlock.includes("owner-console-creator-event-count.json"), false, "Input validation must not query the creator preview event row.");
 assert.equal(ownerPreviewValidateBlock.includes("rebind-preview-d1"), true, "Input validation must allow the guarded rebind mode.");
+assert.equal(ownerPreviewValidateBlock.includes("verify-existing-creator-governance-preview"), true, "Input validation must allow the existing-preview verification mode.");
+assert.equal(ownerPreviewValidateBlock.includes('PREVIEW_DB_NAME="${EXISTING_CREATOR_GOVERNANCE_PREVIEW_DB_NAME}"'), true, "Existing-preview mode must use the fixed reviewed database name.");
+assert.equal(ownerPreviewValidateBlock.includes('CREATOR_EVENT_NAME="${EXISTING_CREATOR_GOVERNANCE_PREVIEW_EVENT_NAME}"'), true, "Existing-preview mode must use the fixed reviewed event name.");
+assert.equal(ownerPreviewValidateBlock.includes("verify-existing-creator-governance-preview mode may only run from feature/creator-only-event-governance."), true, "Existing-preview verification must be tied to the reviewed feature branch.");
+assert.equal(ownerPreviewValidateBlock.includes("VERIFY_EXISTING_CREATOR_GOVERNANCE_PREVIEW"), true, "Existing-preview verification must require exact confirmation.");
+assert.equal(ownerPreviewValidateBlock.includes("EXISTING_CREATOR_GOVERNANCE_PREVIEW_DB_NAME"), true, "Existing-preview verification must use the fixed reviewed DB env constant.");
 assert.equal(ownerPreviewValidateBlock.includes("rebind-preview-d1 mode may only run from feature/creator-only-event-governance."), true, "Rebind mode must be tied to the reviewed feature branch.");
 assert.equal(ownerPreviewValidateBlock.includes("Refusing rebind for production Pages project."), true, "Rebind mode must reject the real production Pages project.");
 assert.equal(ownerPreviewValidateBlock.includes("Refusing rebind for production D1 database name."), true, "Rebind mode must reject production D1 names.");
+const ownerPreviewVerifyExistingBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewVerifyExistingStart, ownerPreviewValidateBranchStart);
+assert.equal(ownerPreviewVerifyExistingBlock.includes("verify-existing-creator-governance-preview"), true, "Existing-preview step must be explicitly mode-gated.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("EXISTING_CREATOR_GOVERNANCE_PREVIEW_DB_NAME"), true, "Existing-preview step must use the fixed reviewed preview D1 env constant.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("CANDIDATE_SHORT_SHA"), false, "Existing-preview step must not derive a new SHA-scoped database.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("Creator Governance Preview Cup 0919c46"), true, "Existing-preview step must verify the fixed reviewed event.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("creator-governance-preview-cup-0919c46"), false, "Existing-preview step must use the slug env constant instead of user-entered literals.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("PREVIEW_D1_DATABASE_ID=${previewId}"), true, "Existing-preview step must resolve the exact preview D1 id.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("Existing creator-governance preview D1 matches production by name or id."), true, "Existing-preview step must reject production D1 by name or id.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("deployment_configs"), true, "Existing-preview step must read Pages project deployment configs.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED"), true, "Existing-preview step must verify server announcement flag remains false.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED"), true, "Existing-preview step must verify Discord notifications flag remains false.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("--command \"${VERIFY_SQL}\""), true, "Existing-preview row query must use --command, not --file.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("> owner-console-creator-event-count.json"), true, "Existing-preview row query must separate stdout JSON.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("2> owner-console-creator-event-count.stderr.log"), true, "Existing-preview row query must separate stderr progress output.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("parseWranglerJsonFile"), true, "Existing-preview step must defensively parse Wrangler JSON.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("byteLength="), true, "Malformed Wrangler output diagnostic must report byte length.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("jsonStartFound="), true, "Malformed Wrangler output diagnostic must report JSON start detection.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("firstSafeLine="), true, "Malformed Wrangler output diagnostic must report only a sanitized first line.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("PRAGMA foreign_key_check;"), true, "Existing-preview step must run foreign_key_check read-only.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("/owner"), true, "Existing-preview step must verify protected owner route.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("/api/owner/overview"), true, "Existing-preview step must verify protected owner APIs.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("/api/public/servers"), true, "Existing-preview step must verify public APIs remain available.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("discordNotificationsEnabled"), true, "Existing-preview step must verify public Discord notifications remain false.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("method: \"POST\""), false, "Existing-preview mode must not POST event creation.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("/api/owner/events"), false, "Existing-preview mode must not call event mutation APIs.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("npx wrangler d1 create"), false, "Existing-preview mode must not create D1 databases.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("method: \"DELETE\""), false, "Existing-preview mode must not delete D1 databases.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("npx wrangler d1 migrations apply"), false, "Existing-preview mode must not run migrations.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("owner-console-preview-seed.sql"), false, "Existing-preview mode must not seed data.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("wrangler pages deploy"), false, "Existing-preview mode must not deploy Pages.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("method: \"PATCH\""), false, "Existing-preview mode must not patch Pages.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("wrangler pages secret put"), false, "Existing-preview mode must not update secrets.");
+assert.equal(ownerPreviewVerifyExistingBlock.includes("discord.com/api"), false, "Existing-preview mode must not call Discord.");
 const ownerPreviewCleanupBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewCleanupStart, ownerPreviewRebindStart);
 assert.equal(ownerPreviewCleanupBlock.includes("cleanup-preview-d1"), true, "Cleanup step must be explicitly cleanup-mode gated.");
 assert.equal(ownerPreviewCleanupBlock.includes("npx wrangler d1 migrations apply"), false, "Cleanup mode must not run migrations.");
@@ -1284,10 +1338,19 @@ assert.equal(ownerPreviewDeployStart > ownerPreviewResetEventStart, true, "Previ
 assert.equal(ownerPreviewVerifyStart > ownerPreviewDeployStart, true, "Route/API verification must run after preview deployment.");
 assert.equal(ownerPreviewCreatorPost > ownerPreviewVerifyStart, true, "Creator POST must occur during route/API verification.");
 assert.equal(ownerPreviewRowVerifyStart > ownerPreviewCreatorPost, true, "D1 row verification must run only after the creator POST verification.");
-const ownerPreviewBeforeConfig = dznOwnerConsolePreviewWorkflow.slice(0, ownerPreviewConfigWrite);
-assert.equal(ownerPreviewBeforeConfig.includes("wrangler.owner-console-preview.toml"), false, "No command may reference wrangler.owner-console-preview.toml before it is created.");
+const ownerPreviewBeforeFullPreviewConfig = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewResolveD1Start, ownerPreviewConfigWrite);
+assert.equal(ownerPreviewBeforeFullPreviewConfig.includes("wrangler.owner-console-preview.toml"), false, "Full-preview D1 commands may not reference wrangler.owner-console-preview.toml before it is created.");
 const ownerPreviewRowVerifyBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewRowVerifyStart);
 assert.equal(ownerPreviewRowVerifyBlock.includes("if: always()"), false, "Creator-governance row verification must not run after failed deployment/API verification.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("--command \"${VERIFY_SQL}\""), true, "Creator-governance row verification must use --command.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("--file owner-console-creator-event-verify.sql"), false, "Creator-governance row verification must not use --file for JSON output.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("> owner-console-creator-event-count.json"), true, "Creator-governance row verification must separate stdout JSON.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("2> owner-console-creator-event-count.stderr.log"), true, "Creator-governance row verification must redirect stderr separately.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("parseWranglerJsonFile"), true, "Creator-governance row verification must defensively parse Wrangler JSON.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("replace(/^\\uFEFF/, \"\")"), true, "Creator-governance parser must strip UTF-8 BOM.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("jsonStartFound=false"), true, "Creator-governance parser must reject output without a JSON start.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("byteLength="), true, "Creator-governance malformed JSON diagnostic must include byte length.");
+assert.equal(ownerPreviewRowVerifyBlock.includes("firstSafeLine="), true, "Creator-governance malformed JSON diagnostic must include only a safe first line.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("INSERT INTO server_build_stats (id,"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("https://dzn-network.pages.dev/api/auth/discord/callback"), false);
 assertInsertColumnsKnown(dznOwnerConsolePreviewWorkflow, "server_build_stats", [
