@@ -12,7 +12,6 @@ on:
           - full-preview
           - cleanup-preview-d1
           - rebind-preview-d1
-          - activate-rebound-discord-preview
           - repair-rebound-discord-preview
       confirm_preview_only:
         description: Must equal PREVIEW_ONLY
@@ -48,10 +47,6 @@ on:
           - apply
       confirm_preview_d1_rebind:
         description: Must equal APPROVE_PREVIEW_D1_REBIND for rebind mode
-        required: false
-        default: ""
-      confirm_rebound_discord_preview_deploy:
-        description: Activation confirmation
         required: false
         default: ""
       repair_action:
@@ -109,7 +104,7 @@ jobs:
       ACTIVATE_OLD_PREVIEW_DB_NAME: dzn_network_db_discord_announcements_preview_alignment_ee8c812
       ACTIVATE_OLD_PREVIEW_DB_ID_MASK: 44ef61d8...ef59
       APPROVED_MAIN_RUNTIME_SHA: a159571079dda1d8f0102718732008033cdfb763
-      CONFIRM_REBOUND_DISCORD_PREVIEW_DEPLOY: ${{ inputs.confirm_rebound_discord_preview_deploy }}
+      CONFIRM_REBOUND_DISCORD_PREVIEW_DEPLOY: ""
       REPAIR_ACTION: ${{ inputs.repair_action }}
       CONFIRM_REBOUND_DISCORD_PREVIEW_REPAIR: ${{ inputs.confirm_rebound_discord_preview_repair }}
       REPAIR_PREVIEW_PROJECT_NAME: dzn-network-discord-announcements-preview
@@ -219,10 +214,15 @@ jobs:
             printf "PREVIEW_DB_NAME=%s\n" "$PREVIEW_DB_NAME"
           } >> "$GITHUB_ENV"
 
+          if [ "${MODE}" = "activate-rebound-discord-preview" ]; then
+            echo "::error::ACTIVATION_MODE_DEPRECATED_USE_REPAIR_MODE"
+            exit 1
+          fi
+
           case "${MODE}" in
-            full-preview|cleanup-preview-d1|rebind-preview-d1|activate-rebound-discord-preview|repair-rebound-discord-preview) ;;
+            full-preview|cleanup-preview-d1|rebind-preview-d1|repair-rebound-discord-preview) ;;
             *)
-              echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, activate-rebound-discord-preview, or repair-rebound-discord-preview mode."
+              echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, or repair-rebound-discord-preview mode."
               exit 1
               ;;
           esac
@@ -2567,12 +2567,28 @@ jobs:
           npm run test
           npm run lint
           npm run build
+          rm -rf .pages-functions
+          mkdir -p .pages-functions
+          ./node_modules/.bin/wrangler pages functions build functions \
+            --outdir .pages-functions \
+            --build-output-directory out \
+            --output-routes-path out/_routes.json \
+            --minify
+          node scripts/patch-pages-routes.mjs
+          test -s .pages-functions/index.js
+          cp .pages-functions/index.js out/_worker.js
+          test -s out/_worker.js
+          cmp -s .pages-functions/index.js out/_worker.js
           git diff --check
 
           node <<'NODE'
           const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const workerPath = "out/_worker.js";
+          const functionsWorkerPath = ".pages-functions/index.js";
           const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
           const include = Array.isArray(routes.include) ? routes.include : [];
+          const exclude = Array.isArray(routes.exclude) ? routes.exclude : [];
           function isSplat(route) {
             return typeof route === "string" && route.endsWith("/*");
           }
@@ -3211,27 +3227,93 @@ jobs:
           npm run test
           npm run lint
           npm run build
+          rm -rf .pages-functions
+          mkdir -p .pages-functions
+          ./node_modules/.bin/wrangler pages functions build functions \
+            --outdir .pages-functions \
+            --build-output-directory out \
+            --output-routes-path out/_routes.json \
+            --minify
+          node scripts/patch-pages-routes.mjs
+          test -s .pages-functions/index.js
+          cp .pages-functions/index.js out/_worker.js
+          test -s out/_worker.js
+          cmp -s .pages-functions/index.js out/_worker.js
           git diff --check
 
           node <<'NODE'
           const fs = require("node:fs");
-          const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
-          const include = Array.isArray(routes.include) ? routes.include : [];
+          const crypto = require("node:crypto");
+          const workerPath = "out/_worker.js";
+          const functionsWorkerPath = ".pages-functions/index.js";
+          const routesPath = "out/_routes.json";
+          const routes = JSON.parse(fs.readFileSync(routesPath, "utf8"));
+          const requiredIncludes = ["/api/*", "/owner", "/owner/*"];
+          function uniqueRoutes(values) {
+            return [...new Set((Array.isArray(values) ? values : []).filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+          }
           function isSplat(route) {
             return typeof route === "string" && route.endsWith("/*");
           }
           function splatPrefix(route) {
             return route.slice(0, -1);
           }
-          for (const route of ["/api/*", "/owner", "/owner/*"]) {
+          function normalizeRoutes(values) {
+            const source = uniqueRoutes(values);
+            const splats = source.filter(isSplat);
+            const removed = [];
+            const normalized = source.filter((route) => {
+              for (const splat of splats) {
+                if (route === splat) continue;
+                if (route.startsWith(splatPrefix(splat))) {
+                  removed.push({ route, coveredBy: splat });
+                  return false;
+                }
+              }
+              return true;
+            }).sort();
+            return { routes: normalized, removed };
+          }
+          function assertNoSplatOverlap(values, label) {
+            const routes = uniqueRoutes(values);
+            for (const splat of routes.filter(isSplat)) {
+              const prefix = splatPrefix(splat);
+              const overlap = routes.find((route) => route !== splat && route.startsWith(prefix));
+              if (overlap) throw new Error(`${label} route overlap: ${splat} covers ${overlap}.`);
+            }
+          }
+          const includeResult = normalizeRoutes([...(routes.include ?? []), ...requiredIncludes]);
+          const excludeResult = normalizeRoutes(routes.exclude ?? []);
+          const finalRoutes = {
+            version: routes.version ?? 1,
+            include: includeResult.routes,
+            exclude: excludeResult.routes,
+          };
+          assertNoSplatOverlap(finalRoutes.include, "include");
+          assertNoSplatOverlap(finalRoutes.exclude, "exclude");
+          fs.writeFileSync(routesPath, `${JSON.stringify(finalRoutes, null, 2)}\n`);
+          const include = finalRoutes.include;
+          const exclude = finalRoutes.exclude;
+          for (const route of requiredIncludes) {
             if (!include.includes(route)) throw new Error(`out/_routes.json missing ${route}.`);
           }
-          for (const splat of include.filter(isSplat)) {
-            const prefix = splatPrefix(splat);
-            const overlap = include.find((route) => route !== splat && route.startsWith(prefix));
-            if (overlap) throw new Error(`include route overlap: ${splat} covers ${overlap}.`);
-          }
-          console.log("Repair pinned main runtime build and Cloudflare route normalization verified.");
+          if (!fs.statSync(functionsWorkerPath).size) throw new Error(".pages-functions/index.js is empty.");
+          const workerBytes = fs.readFileSync(workerPath);
+          const functionsWorkerBytes = fs.readFileSync(functionsWorkerPath);
+          const workerHash = crypto.createHash("sha256").update(workerBytes).digest("hex");
+          const functionsWorkerHash = crypto.createHash("sha256").update(functionsWorkerBytes).digest("hex");
+          if (workerHash !== functionsWorkerHash) throw new Error("out/_worker.js does not match .pages-functions/index.js.");
+          console.log("Repair pinned main runtime package summary:", JSON.stringify({
+            workerByteSize: workerBytes.length,
+            workerShaPrefix: workerHash.slice(0, 12),
+            includeCount: include.length,
+            excludeCount: exclude.length,
+            hasApiWildcard: include.includes("/api/*"),
+            hasOwner: include.includes("/owner"),
+            hasOwnerWildcard: include.includes("/owner/*"),
+            removedOverlappedIncludeRoutes: includeResult.removed.length,
+            removedOverlappedExcludeRoutes: excludeResult.removed.length,
+          }));
           NODE
 
       - name: Deploy repaired rebound Discord preview from isolated directory
@@ -3260,6 +3342,14 @@ jobs:
             exit 1
           fi
           export CLOUDFLARE_API_TOKEN="${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+          if [ ! -s runtime-main/out/_worker.js ]; then
+            echo "::error::Compiled Pages Functions worker is missing from runtime-main/out."
+            exit 1
+          fi
+          if [ ! -s runtime-main/out/_routes.json ]; then
+            echo "::error::Cloudflare Pages routes are missing from runtime-main/out."
+            exit 1
+          fi
 
           DEPLOY_ROOT="${RUNNER_TEMP}/dzn-discord-preview-deploy"
           case "${DEPLOY_ROOT}" in
@@ -3272,17 +3362,36 @@ jobs:
           rm -rf "${DEPLOY_ROOT}"
           mkdir -p "${DEPLOY_ROOT}"
           cp -R runtime-main/out "${DEPLOY_ROOT}/out"
+          test -s "${DEPLOY_ROOT}/out/_worker.js"
+          test -s "${DEPLOY_ROOT}/out/_routes.json"
+          RUNTIME_WORKER_SHA="$(sha256sum runtime-main/out/_worker.js | awk '{print $1}')"
+          DEPLOY_WORKER_SHA="$(sha256sum "${DEPLOY_ROOT}/out/_worker.js" | awk '{print $1}')"
+          if [ "${RUNTIME_WORKER_SHA}" != "${DEPLOY_WORKER_SHA}" ]; then
+            echo "::error::Isolated deploy worker does not match runtime-main/out/_worker.js."
+            exit 1
+          fi
 
           if find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env | grep -q .; then
             echo "::error::Unapproved Wrangler or env configuration is deploy-visible."
             find "${DEPLOY_ROOT}" -name wrangler.toml -o -name wrangler.json -o -name wrangler.jsonc -o -name .dev.vars -o -name .env | sed 's#^#blocked config path: #'
             exit 1
           fi
-          if grep -R -E 'name[[:space:]]*=[[:space:]]*"dzn-network"|database_name[[:space:]]*=[[:space:]]*"dzn_network_db"|dzn_network_db' "${DEPLOY_ROOT}" >/tmp/dzn-repair-production-leak.txt 2>/dev/null; then
-            echo "::error::Deployment-visible configuration contains production project or D1 markers."
-            cut -d: -f1 /tmp/dzn-repair-production-leak.txt | sort -u | sed 's#^#blocked file: #'
+          if [ "${REPAIR_PREVIEW_PROJECT_NAME}" != "dzn-network-discord-announcements-preview" ] || [ "${REPAIR_PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+            echo "::error::Repair deploy target is not the fixed preview Pages project."
             exit 1
           fi
+          if [ -n "${DETECTED_PRODUCTION_D1_DATABASE_ID:-}" ] && grep -R -F "${DETECTED_PRODUCTION_D1_DATABASE_ID}" "${DEPLOY_ROOT}" >/tmp/dzn-repair-production-id-leak.txt 2>/dev/null; then
+            echo "::error::Deployment-visible output contains the production D1 ID."
+            cut -d: -f1 /tmp/dzn-repair-production-id-leak.txt | sort -u | sed 's#^#blocked file category: #'
+            exit 1
+          fi
+          CONFIG_CANDIDATES="$(find "${DEPLOY_ROOT}" \( -name '*.toml' -o -name 'wrangler.json' -o -name 'wrangler.jsonc' -o -name '.dev.vars' -o -name '.env' \) -print)"
+          if [ -n "${CONFIG_CANDIDATES}" ] && printf '%s\n' "${CONFIG_CANDIDATES}" | xargs grep -E 'name[[:space:]]*=[[:space:]]*"dzn-network"|database_name[[:space:]]*=[[:space:]]*"dzn_network_db"' >/tmp/dzn-repair-production-assignment-leak.txt 2>/dev/null; then
+            echo "::error::Deployment-visible configuration contains production project or D1 assignment syntax."
+            cut -d: -f1 /tmp/dzn-repair-production-assignment-leak.txt | sort -u | sed 's#^#blocked config category: #'
+            exit 1
+          fi
+          echo "Deployment-visible worker and route package verified: workerShaPrefix=${DEPLOY_WORKER_SHA:0:12}"
           echo "Deployment-visible configuration scan passed."
 
           cd "${DEPLOY_ROOT}"
@@ -3447,32 +3556,86 @@ jobs:
             const payload = Array.isArray(result) ? result : [result];
             return payload.flatMap((item) => item?.results ?? []);
           }
-          async function fetchPath(base, path, expectedStatus) {
+          async function fetchSafe(base, path) {
             const response = await fetch(`${base}${path}`, {
               redirect: "manual",
-              headers: { "User-Agent": "dzn-rebound-discord-preview-repair" },
+              headers: {
+                "User-Agent": "dzn-rebound-discord-preview-repair",
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache",
+              },
             });
             const text = await response.text().catch(() => "");
-            if (response.status !== expectedStatus) throw new Error(`${base}${path} expected ${expectedStatus}, got ${response.status}`);
             for (const marker of forbiddenText) {
               if (text.includes(marker)) throw new Error(`${base}${path} exposed forbidden marker ${marker}`);
             }
-            return { response, text };
+            return {
+              response,
+              text,
+              status: response.status,
+              contentType: response.headers.get("content-type") || "unknown",
+              bodyLength: text.length,
+            };
+          }
+          async function fetchPath(base, path, expectedStatus) {
+            const result = await fetchSafe(base, path);
+            if (result.status !== expectedStatus) {
+              throw new Error(`${base}${path} expected ${expectedStatus}, got ${result.status}; content-type=${result.contentType}; body-length=${result.bodyLength}`);
+            }
+            return result;
+          }
+          function statusSummary(result) {
+            return `status=${result.status} content-type=${result.contentType} body-length=${result.bodyLength}`;
+          }
+          function wait(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+          }
+          async function expectOwnerApi401(base, path) {
+            const result = await fetchSafe(base, path);
+            if (result.status === 404) {
+              throw new Error(`PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING: ${base}${path} returned 404; ${statusSummary(result)}`);
+            }
+            if (result.status === 500 || result.status === 503) {
+              throw new Error(`PREVIEW_OWNER_API_RUNTIME_ERROR: ${base}${path} returned ${result.status}; ${statusSummary(result)}`);
+            }
+            if (result.status !== 401) {
+              throw new Error(`${base}${path} expected 401, got ${result.status}; ${statusSummary(result)}`);
+            }
+            return result;
           }
           async function verifyBase(base) {
-            await fetchPath(base, "/", 200);
-            const owner = await fetchPath(base, "/owner", 302);
-            const location = owner.response.headers.get("location") || "";
-            assert(location.includes("/login"), `${base}/owner did not redirect to login.`);
-            await fetchPath(base, "/api/owner/overview", 401);
-            await fetchPath(base, "/api/owner/discord/overview", 401);
-            await fetchPath(base, "/api/public/servers", 200);
-            await fetchPath(base, "/api/public/home-stats", 200);
-            await fetchPath(base, "/api/public/leaderboards", 200);
-            await fetchPath(base, "/api/public/server-rail", 200);
-            const pulse = await fetchPath(base, "/api/dzn-pulse/config", 200);
-            const parsed = JSON.parse(pulse.text);
-            assert(parsed.discordNotificationsEnabled === false, `${base}/api/dzn-pulse/config did not report discordNotificationsEnabled=false.`);
+            let lastError = "";
+            for (let attempt = 1; attempt <= 12; attempt += 1) {
+              try {
+                await fetchPath(base, "/", 200);
+                const owner = await fetchSafe(base, "/owner");
+                if (owner.status === 200) {
+                  const ownerApi = await fetchSafe(base, "/api/owner/overview");
+                  throw new Error(`PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING: ${base}/owner returned 200 instead of 302; owner_api_${statusSummary(ownerApi)}`);
+                }
+                if (owner.status !== 302) {
+                  throw new Error(`${base}/owner expected 302, got ${owner.status}; ${statusSummary(owner)}`);
+                }
+                const location = owner.response.headers.get("location") || "";
+                assert(location.includes("/login"), `${base}/owner did not redirect to login.`);
+                await expectOwnerApi401(base, "/api/owner/overview");
+                await expectOwnerApi401(base, "/api/owner/discord/overview");
+                await fetchPath(base, "/api/public/servers", 200);
+                await fetchPath(base, "/api/public/home-stats", 200);
+                await fetchPath(base, "/api/public/leaderboards", 200);
+                await fetchPath(base, "/api/public/server-rail", 200);
+                const pulse = await fetchPath(base, "/api/dzn-pulse/config", 200);
+                const parsed = JSON.parse(pulse.text);
+                assert(parsed.discordNotificationsEnabled === false, `${base}/api/dzn-pulse/config did not report discordNotificationsEnabled=false.`);
+                if (attempt > 1) console.log(`${base} preview route verification passed on attempt ${attempt}.`);
+                return;
+              } catch (error) {
+                lastError = error instanceof Error ? error.message : String(error);
+                console.log(`Preview route verification attempt ${attempt}/12 failed for ${base}: ${lastError}`);
+                if (attempt < 12) await wait(5000);
+              }
+            }
+            fail(`Preview route verification failed after 12 attempts for ${base}: ${lastError}`);
           }
           void (async () => {
             assert(projectName !== productionProject, "Repair verification project is production.");

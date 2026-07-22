@@ -786,15 +786,16 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_DISCORD_SERVER_ANNOUNC
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("DZN_PULSE_ENABLED: \"true\""), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("cleanup-preview-d1"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("rebind-preview-d1"), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("activate-rebound-discord-preview"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("repair-rebound-discord-preview"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("ACTIVATION_MODE_DEPRECATED_USE_REPAIR_MODE"), true);
+assert.equal(ownerPreviewDispatchBlock.includes("- activate-rebound-discord-preview"), false, "Obsolete activation mode must not be available in the workflow-dispatch form.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("preview_db_name_to_delete:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("cleanup_action:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("reviewed_preview_db_id_mask:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_db_cleanup:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("rebind_action:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_d1_rebind:"), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_rebound_discord_preview_deploy:"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_rebound_discord_preview_deploy:"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("repair_action:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_rebound_discord_preview_repair:"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_STALE_PREVIEW_D1_CLEANUP"), true);
@@ -826,6 +827,7 @@ assert.equal(ownerPreviewDispatchBlock.includes("old_database"), false, "Owner c
 assert.equal(ownerPreviewDispatchBlock.includes("replacement_database"), false, "Owner console preview form must not ask for a replacement rebind database.");
 assert.equal(ownerPreviewDispatchBlock.includes("activation_project"), false, "Owner console preview form must not ask for an activation project.");
 assert.equal(ownerPreviewDispatchBlock.includes("activation_database"), false, "Owner console preview form must not ask for activation database names.");
+assert.equal(ownerPreviewDispatchBlock.includes("Activation confirmation"), false, "Owner console preview form must not ask for obsolete activation confirmation.");
 assert.equal(ownerPreviewDispatchBlock.includes("runtime_commit"), false, "Owner console preview form must not ask for a runtime commit.");
 assert.equal(ownerPreviewDispatchBlock.includes("repair_project"), false, "Owner console preview form must not ask for a repair project.");
 assert.equal(ownerPreviewDispatchBlock.includes("repair_database"), false, "Owner console preview form must not ask for repair database names.");
@@ -1197,11 +1199,47 @@ assert.equal(ownerPreviewRepairBlock.includes("npm run test:owner-console"), tru
 assert.equal(ownerPreviewRepairBlock.includes("npm run test"), true, "Repair pinned runtime build must run the full test suite.");
 assert.equal(ownerPreviewRepairBlock.includes("npm run lint"), true, "Repair pinned runtime build must run lint.");
 assert.equal(ownerPreviewRepairBlock.includes("npm run build"), true, "Repair pinned runtime build must build.");
+assert.equal(ownerPreviewRepairBlock.includes("./node_modules/.bin/wrangler pages functions build functions"), true, "Repair build must compile Pages Functions after Next build.");
+assert.equal(
+  ownerPreviewRepairBlock.indexOf("npm run build") < ownerPreviewRepairBlock.indexOf("./node_modules/.bin/wrangler pages functions build functions"),
+  true,
+  "Repair Functions build must happen after npm run build.",
+);
+assert.equal(
+  ownerPreviewRepairBlock.indexOf("./node_modules/.bin/wrangler pages functions build functions") < ownerPreviewRepairBlock.indexOf("node scripts/patch-pages-routes.mjs"),
+  true,
+  "Repair route patch must run after the Functions build regenerates routes.",
+);
+assert.equal(ownerPreviewRepairBlock.includes("--outdir .pages-functions"), true, "Repair Functions build must emit .pages-functions.");
+assert.equal(ownerPreviewRepairBlock.includes("--build-output-directory out"), true, "Repair Functions build must use the Next output directory.");
+assert.equal(ownerPreviewRepairBlock.includes("--output-routes-path out/_routes.json"), true, "Repair Functions build must write Pages routes.");
+assert.equal(ownerPreviewRepairBlock.includes("test -s .pages-functions/index.js"), true, "Repair build must require the compiled Functions worker.");
+assert.equal(ownerPreviewRepairBlock.includes("cp .pages-functions/index.js out/_worker.js"), true, "Repair build must copy the Functions worker into Pages output.");
+assert.equal(ownerPreviewRepairBlock.includes("test -s out/_worker.js"), true, "Repair build must require out/_worker.js.");
+assert.equal(ownerPreviewRepairBlock.includes("cmp -s .pages-functions/index.js out/_worker.js"), true, "Repair build must byte-compare copied worker.");
+assert.equal(ownerPreviewRepairBlock.includes("workerByteSize"), true, "Repair build must print safe worker byte size.");
+assert.equal(ownerPreviewRepairBlock.includes("workerShaPrefix"), true, "Repair build must print a safe worker hash prefix.");
+assert.equal(ownerPreviewRepairBlock.includes("hasApiWildcard"), true, "Repair package summary must include required route booleans.");
+assert.equal(ownerPreviewRepairBlock.includes("normalizeRoutes([...(routes.include ?? []), ...requiredIncludes])"), true, "Repair build must normalize required routes after patching.");
+assert.equal(ownerPreviewRepairBlock.includes("fs.writeFileSync(routesPath"), true, "Repair build must write the final normalized _routes.json.");
+assert.equal(ownerPreviewRepairBlock.includes("removedOverlappedIncludeRoutes"), true, "Repair package summary must report removed overlapping include routes.");
+assert.equal(ownerPreviewRepairBlock.includes("removedOverlappedExcludeRoutes"), true, "Repair package summary must report removed overlapping exclude routes.");
 assert.equal(ownerPreviewRepairBlock.includes("git diff --check"), true, "Repair pinned runtime build must run whitespace checks.");
 assert.equal(ownerPreviewRepairBlock.includes('DEPLOY_ROOT="${RUNNER_TEMP}/dzn-discord-preview-deploy"'), true, "Repair deploy must use a clean RUNNER_TEMP directory.");
 assert.equal(ownerPreviewRepairBlock.includes("cp -R runtime-main/out \"${DEPLOY_ROOT}/out\""), true, "Repair deploy must copy only built output into the deployment directory.");
+assert.equal(ownerPreviewRepairBlock.includes("test -s \"${DEPLOY_ROOT}/out/_worker.js\""), true, "Repair deploy output must contain _worker.js.");
+assert.equal(ownerPreviewRepairBlock.includes("test -s \"${DEPLOY_ROOT}/out/_routes.json\""), true, "Repair deploy output must contain _routes.json.");
+assert.equal(ownerPreviewRepairBlock.includes("RUNTIME_WORKER_SHA=\"$(sha256sum runtime-main/out/_worker.js"), true, "Repair deploy must hash the runtime worker.");
+assert.equal(ownerPreviewRepairBlock.includes("DEPLOY_WORKER_SHA=\"$(sha256sum \"${DEPLOY_ROOT}/out/_worker.js\""), true, "Repair deploy must hash the isolated deploy worker.");
+assert.equal(ownerPreviewRepairBlock.includes("Isolated deploy worker does not match runtime-main/out/_worker.js."), true, "Repair deploy must reject worker hash mismatch.");
 assert.equal(ownerPreviewRepairBlock.includes("Unapproved Wrangler or env configuration is deploy-visible."), true, "Repair deploy must reject deploy-visible Wrangler or env files.");
-assert.equal(ownerPreviewRepairBlock.includes("Deployment-visible configuration contains production project or D1 markers."), true, "Repair deploy must scan for production config leaks.");
+assert.equal(ownerPreviewRepairBlock.includes("Deployment-visible output contains the production D1 ID."), true, "Repair deploy must block the exact production D1 ID anywhere in deployed output.");
+assert.equal(ownerPreviewRepairBlock.includes("Deployment-visible configuration contains production project or D1 assignment syntax."), true, "Repair deploy must scan configuration-like files for production assignments.");
+assert.equal(ownerPreviewRepairBlock.includes("Repair deploy target is not the fixed preview Pages project."), true, "Repair deploy must verify the fixed preview project target.");
+assert.equal(ownerPreviewRepairBlock.includes("CONFIG_CANDIDATES="), true, "Repair deploy must limit assignment-syntax scans to configuration-like candidates.");
+assert.equal(ownerPreviewRepairBlock.includes("xargs grep -E 'name[[:space:]]*=[[:space:]]*\"dzn-network\"|database_name[[:space:]]*=[[:space:]]*\"dzn_network_db\"'"), true, "Repair deploy must restrict generic production-name scans to assignment syntax.");
+assert.equal(ownerPreviewRepairBlock.includes("grep -R -E 'name[[:space:]]*=[[:space:]]*\"dzn-network\"|database_name[[:space:]]*=[[:space:]]*\"dzn_network_db\"' \"${DEPLOY_ROOT}\""), false, "Repair deploy must not scan all compiled output for generic production names.");
+assert.equal(ownerPreviewRepairBlock.includes("grep -R -E 'name[[:space:]]*=[[:space:]]*\"dzn-network\"|database_name[[:space:]]*=[[:space:]]*\"dzn_network_db\"|dzn_network_db'"), false, "Repair deploy must not reject generic public production URLs or names in compiled code.");
 assert.equal(ownerPreviewRepairBlock.includes('"${GITHUB_WORKSPACE}/runtime-main/node_modules/.bin/wrangler" pages deploy out'), true, "Repair deploy must invoke Wrangler from the pinned runtime binary in the isolated directory.");
 assert.equal(ownerPreviewRepairBlock.includes("--project-name \"${REPAIR_PREVIEW_PROJECT_NAME}\""), true, "Repair deploy must target only the fixed preview project.");
 assert.equal(ownerPreviewRepairBlock.includes("--commit-hash \"${APPROVED_MAIN_RUNTIME_SHA}\""), true, "Repair deploy metadata must use the pinned main commit.");
@@ -1211,6 +1249,14 @@ assert.equal(ownerPreviewRepairBlock.includes("route probes skipped"), true, "Re
 assert.equal(ownerPreviewRepairBlock.indexOf("for (const environment of [\"production\", \"preview\"])") < ownerPreviewRepairBlock.indexOf("await verifyBase(immutableUrl);"), true, "Repair route probes must run only after binding safety checks.");
 assert.equal(ownerPreviewRepairBlock.includes("await verifyBase(immutableUrl);"), true, "Repair verification must check the immutable preview URL.");
 assert.equal(ownerPreviewRepairBlock.includes("await verifyBase(stableUrl);"), true, "Repair verification must check the stable preview URL.");
+assert.equal(ownerPreviewRepairBlock.includes("PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING"), true, "Repair verification must diagnose missing Pages Functions worker.");
+assert.equal(ownerPreviewRepairBlock.includes("/owner returned 200 instead of 302"), true, "Repair verification must classify static /owner as missing Functions worker.");
+assert.equal(ownerPreviewRepairBlock.includes("returned 404; ${statusSummary(result)}"), true, "Repair verification must classify owner API 404 as missing Functions worker.");
+assert.equal(ownerPreviewRepairBlock.includes("PREVIEW_OWNER_API_RUNTIME_ERROR"), true, "Repair verification must report owner API 500/503 separately.");
+assert.equal(ownerPreviewRepairBlock.includes("Cache-Control\": \"no-cache\""), true, "Repair route probes must bypass cache.");
+assert.equal(ownerPreviewRepairBlock.includes("for (let attempt = 1; attempt <= 12; attempt += 1)"), true, "Repair route verification must retry bounded deployment propagation.");
+assert.equal(ownerPreviewRepairBlock.includes("await wait(5000)"), true, "Repair route verification must wait between propagation retries.");
+assert.equal(ownerPreviewRepairBlock.includes("body-length="), true, "Repair diagnostics must include safe body length rather than raw body.");
 assert.equal(ownerPreviewRepairBlock.includes("discordNotificationsEnabled === false"), true, "Repair verification must require disabled public Discord notifications.");
 assert.equal(ownerPreviewRepairBlock.includes("SELECT COUNT(*) AS row_count FROM discord_announcement_posts;"), true, "Repair verification must check announcement row count.");
 assert.equal(ownerPreviewRepairBlock.includes("dzn_network_db_discord_announcements_preview_alignment_ee8c812"), false, "Repair steps must use fixed env constants instead of user-entered old database literals.");
