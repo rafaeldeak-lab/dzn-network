@@ -1099,8 +1099,10 @@ assert.equal(ownerPreviewPhase2ABlock.includes("dzn-network-discord-announcement
 assert.equal(ownerPreviewPhase2ABlock.includes("npx wrangler d1 create"), false, "Phase 2A preview mode must not create D1 databases.");
 assert.equal(ownerPreviewPhase2ABlock.includes("method: \"DELETE\""), false, "Phase 2A preview mode must not delete D1 databases.");
 assert.equal(ownerPreviewPhase2ABlock.includes("wrangler pages secret put"), false, "Phase 2A preview mode must not update Pages secrets.");
-assert.equal(ownerPreviewPhase2ABlock.includes("npx wrangler d1 migrations apply DB"), true, "Phase 2A preview mode must apply migration 0057 when absent.");
-assert.equal(ownerPreviewPhase2ABlock.includes("--migrations-dir \"${PHASE2A_MIGRATION_DIR}\""), true, "Phase 2A preview migrations must use an isolated migration directory.");
+assert.equal(ownerPreviewPhase2ABlock.includes("./node_modules/.bin/wrangler d1 migrations apply DB"), true, "Phase 2A preview mode must apply migration 0057 when absent.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_MIGRATION_ROOT=\"${RUNNER_TEMP}/dzn-phase2a-0057-only\""), true, "Phase 2A preview migrations must use an isolated temporary migration root.");
+assert.equal(ownerPreviewPhase2ABlock.includes("--cwd \"${PHASE2A_MIGRATION_ROOT}\""), true, "Phase 2A preview migrations must run Wrangler from the isolated migration root.");
+assert.equal(ownerPreviewPhase2ABlock.includes("--migrations-dir"), false, "Phase 2A preview must not use unsupported Wrangler migration-dir flags.");
 assert.equal(ownerPreviewPhase2ABlock.includes("0057_event_suggestions_phase_2a.sql"), true, "Phase 2A preview must reference migration 0057.");
 assert.equal(ownerPreviewPhase2ABlock.includes("0058_"), false, "Phase 2A preview must not run a follow-up migration.");
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-"), true, "Phase 2A preview seed rows must be namespaced.");

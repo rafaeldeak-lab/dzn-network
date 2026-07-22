@@ -1230,18 +1230,20 @@ jobs:
           NODE
 
           if [ "$(cat dzn-event-platform-performance-preview/phase2a-0057-already-applied.txt)" = "no" ]; then
-            PHASE2A_MIGRATION_DIR="${RUNNER_TEMP}/dzn-phase2a-0057-only-migrations"
-            rm -rf "${PHASE2A_MIGRATION_DIR}"
+            PHASE2A_MIGRATION_ROOT="${RUNNER_TEMP}/dzn-phase2a-0057-only"
+            PHASE2A_MIGRATION_DIR="${PHASE2A_MIGRATION_ROOT}/migrations"
+            rm -rf "${PHASE2A_MIGRATION_ROOT}"
             mkdir -p "${PHASE2A_MIGRATION_DIR}"
             cp migrations/0057_event_suggestions_phase_2a.sql "${PHASE2A_MIGRATION_DIR}/0057_event_suggestions_phase_2a.sql"
+            cp wrangler.event-platform-performance-preview.toml "${PHASE2A_MIGRATION_ROOT}/wrangler.toml"
             if [ "$(find "${PHASE2A_MIGRATION_DIR}" -type f | wc -l | tr -d ' ')" != "1" ]; then
               echo "::error::Isolated Phase 2A migration directory must contain exactly one file."
               exit 1
             fi
-            npx wrangler d1 migrations apply DB \
-              --config wrangler.event-platform-performance-preview.toml \
+            ./node_modules/.bin/wrangler d1 migrations apply DB \
+              --cwd "${PHASE2A_MIGRATION_ROOT}" \
+              --config "${PHASE2A_MIGRATION_ROOT}/wrangler.toml" \
               --remote \
-              --migrations-dir "${PHASE2A_MIGRATION_DIR}" \
               | tee dzn-event-platform-performance-preview/migration-0057-apply.txt
           else
             echo "Migration 0057 already applied; verifying schema without reapplying."
