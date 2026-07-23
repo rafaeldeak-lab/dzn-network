@@ -534,13 +534,15 @@ jobs:
             exit 1
           fi
 
-          OWNER_PREVIEW_SESSION_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
-          echo "::add-mask::$OWNER_PREVIEW_SESSION_SECRET"
-          printf "OWNER_PREVIEW_SESSION_SECRET=%s\n" "$OWNER_PREVIEW_SESSION_SECRET" >> "$GITHUB_ENV"
+          if [ "${MODE}" = "full-preview" ]; then
+            OWNER_PREVIEW_SESSION_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+            echo "::add-mask::$OWNER_PREVIEW_SESSION_SECRET"
+            printf "OWNER_PREVIEW_SESSION_SECRET=%s\n" "$OWNER_PREVIEW_SESSION_SECRET" >> "$GITHUB_ENV"
 
-          OWNER_PREVIEW_DISCORD_CLIENT_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
-          echo "::add-mask::$OWNER_PREVIEW_DISCORD_CLIENT_SECRET"
-          printf "OWNER_PREVIEW_DISCORD_CLIENT_SECRET=%s\n" "$OWNER_PREVIEW_DISCORD_CLIENT_SECRET" >> "$GITHUB_ENV"
+            OWNER_PREVIEW_DISCORD_CLIENT_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+            echo "::add-mask::$OWNER_PREVIEW_DISCORD_CLIENT_SECRET"
+            printf "OWNER_PREVIEW_DISCORD_CLIENT_SECRET=%s\n" "$OWNER_PREVIEW_DISCORD_CLIENT_SECRET" >> "$GITHUB_ENV"
+          fi
 
           OWNER_PREVIEW_DISCORD_CLIENT_ID="990000000000000199"
           OWNER_PREVIEW_DISCORD_REDIRECT_URI="${PREVIEW_BASE_URL}/api/auth/discord/callback"
@@ -973,6 +975,12 @@ jobs:
             echo "::error::Missing Cloudflare token for event platform performance preview."
             exit 1
           fi
+          echo "::add-mask::owner-console-preview-owner-token"
+          echo "::add-mask::owner-console-preview-creator-token"
+          echo "::add-mask::owner-console-preview-non-owner-token"
+          echo "::add-mask::dzn_session=owner-console-preview-owner-token"
+          echo "::add-mask::dzn_session=owner-console-preview-creator-token"
+          echo "::add-mask::dzn_session=owner-console-preview-non-owner-token"
           export CLOUDFLARE_API_TOKEN="${OWNER_CONSOLE_CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
 
           node <<'NODE'
@@ -1157,7 +1165,8 @@ jobs:
               `OWNER_CONSOLE_OWNER_COOKIE=dzn_session=owner-console-preview-owner-token`,
               `OWNER_CONSOLE_CREATOR_COOKIE=dzn_session=owner-console-preview-creator-token`,
               `OWNER_CONSOLE_NON_OWNER_COOKIE=dzn_session=owner-console-preview-non-owner-token`,
-              `PHASE2A_API_MEMBER_COOKIE=dzn_session=owner-console-preview-phase2a-api-member-token`,
+              `PHASE2A_API_MEMBER_USER_ID=owner-console-non-owner-user`,
+              `PHASE2A_API_MEMBER_COOKIE=dzn_session=owner-console-preview-non-owner-token`,
               "",
             ].join("\n"));
             fs.writeFileSync("dzn-event-platform-performance-preview/guard.json", JSON.stringify({
@@ -1348,23 +1357,23 @@ jobs:
 
           node <<'NODE'
           const fs = require("node:fs");
-          const crypto = require("node:crypto");
           const prefix = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_SEED_PREFIX || "phase2a-preview-";
           if (prefix !== "phase2a-preview-") {
             console.error("Phase 2A preview seed prefix constant mismatch.");
             process.exit(1);
           }
-          const apiMemberId = "phase2a-preview-api-member";
-          const apiMemberToken = "owner-console-preview-phase2a-api-member-token";
+          const apiMemberId = "owner-console-non-owner-user";
+          const obsoleteApiSessionId = "phase2a-preview-api-member-session";
           const conversionTargetId = "phase2a-preview-conversion-target";
           const conversionTargetEventId = "suggestion-draft-phase2a-preview-conversion-target";
-          const sessionSecret = process.env.OWNER_PREVIEW_SESSION_SECRET || "dev-session-secret";
-          function hmac(value) {
-            return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
-          }
           function sql(value) {
             return `'${String(value ?? "").replace(/'/g, "''")}'`;
           }
+          const ownerIds = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean);
+          const creatorId = String(process.env.DZN_PLATFORM_CREATOR_DISCORD_ID || "").trim();
           const serverSubquery = "(SELECT id FROM linked_servers WHERE public_slug = 'owner-console-nuketown' OR id = 'owner-console-nuketown' LIMIT 1)";
           const now = "2026-07-22T20:00:00.000Z";
           const users = [
@@ -1372,7 +1381,6 @@ jobs:
             ["phase2a-preview-other-member", "990000000000002002", "Phase2A Voter"],
             ["phase2a-preview-owner", "990000000000002003", "Phase2A Owner"],
             ["phase2a-preview-creator", "990000000000002004", "Phase2A Creator"],
-            [apiMemberId, "990000000000002005", "Phase2A API Verifier"],
           ];
           const suggestions = [
             ["phase2a-preview-pending", "phase2a-preview-member", "Supply Run Showdown", "Teams race to complete a clean supply route with creator review before public voting.", "server_vs_server", "cross_platform", "Chernarus", null, 1, "pending_moderation", "submitted", null, 0, 0, 0, 0.1],
@@ -1387,14 +1395,33 @@ jobs:
             ["phase2a-preview-open-any", "phase2a-preview-other-member", "Open Host Challenge", "An open-to-any-server suggestion for route and filter coverage.", "community_challenge", "unsure", "Any official map", null, 1, "accepted", "accepted", null, 5, 0, 0, 7.5],
             [conversionTargetId, "phase2a-preview-other-member", "Verifier Conversion Target", "A deterministic shortlisted suggestion reserved for the preview verifier conversion sequence and concurrency checks.", "community_challenge", "pc", "Chernarus", null, 1, "shortlisted", "shortlisted", null, 0, 0, 0, 6.25],
           ];
+          const ownerPlaceholders = ownerIds.length > 0 ? ownerIds.map(() => "?").join(", ") : "NULL";
+          const ownerValues = ownerIds.map(sql).join(", ");
+          fs.writeFileSync("phase2a-session-verification.sql", `
+          SELECT
+            (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-owner-session' AND user_id = 'owner-console-platform-owner' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS ownerSessionValid,
+            (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-creator-session' AND user_id = 'owner-console-platform-creator' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS creatorSessionValid,
+            (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-non-owner-session' AND user_id = 'owner-console-non-owner-user' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS apiVerifierSessionValid,
+            (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user') AS apiVerifierUserPresent,
+            (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user' AND discord_id IN (${ownerValues || "NULL"})) AS apiVerifierOwnerMatches,
+            (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user' AND discord_id = ${sql(creatorId)}) AS apiVerifierCreatorMatches,
+            (SELECT COUNT(*) FROM event_suggestions WHERE submitted_by_user_id = 'owner-console-non-owner-user' AND converted_event_id IS NOT NULL) AS unexpectedConvertedVerifierRows;
+          `.trim());
+          fs.writeFileSync("dzn-event-platform-performance-preview/seed-summary.json", JSON.stringify({
+            knownGoodExistingMemberSessionChecked: true,
+            obsoleteInvalidPhase2aSessionRemoved: true,
+            apiVerifierSuggestionRowsReset: true,
+            noSessionHashCreated: true,
+            noPagesSecretChanged: true,
+          }, null, 2));
           const statements = [];
           statements.push("PRAGMA foreign_keys = ON;");
-          statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
-          statements.push(`DELETE FROM event_suggestion_reports WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
-          statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
-          statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
+          statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL);`);
+          statements.push(`DELETE FROM event_suggestion_reports WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL);`);
+          statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL);`);
+          statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL);`);
           statements.push(`DELETE FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL;`);
-          statements.push(`DELETE FROM sessions WHERE id = ${sql("phase2a-preview-api-member-session")} OR user_id = ${sql(apiMemberId)};`);
+          statements.push(`DELETE FROM sessions WHERE id = ${sql(obsoleteApiSessionId)};`);
           statements.push(`DELETE FROM competitive_event_activity WHERE event_id = ${sql(conversionTargetEventId)};`);
           statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id = ${sql(conversionTargetId)};`);
           statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id = ${sql(conversionTargetId)};`);
@@ -1405,7 +1432,6 @@ jobs:
           for (const [id, discordId, username] of users) {
             statements.push(`INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (${sql(id)}, ${sql(discordId)}, ${sql(username)}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = excluded.updated_at;`);
           }
-          statements.push(`INSERT INTO sessions (id, user_id, session_token_hash, expires_at, created_at) VALUES (${sql("phase2a-preview-api-member-session")}, ${sql(apiMemberId)}, ${sql(hmac(apiMemberToken))}, ${sql("2099-01-01T00:00:00.000Z")}, ${sql(now)});`);
           statements.push(`INSERT INTO competitive_events (id, name, slug, description, category, event_type, status, visibility, premium_tier, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at) VALUES (${sql("phase2a-preview-private-draft-event")}, ${sql("Phase 2A Private Draft")}, ${sql("phase2a-preview-private-draft")}, ${sql("Private draft converted from a preview suggestion; not public.")}, ${sql("deathmatch")}, ${sql("community_cup")}, ${sql("draft")}, ${sql("private")}, ${sql("pro")}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("phase2a-preview-creator")}, ${sql("Draft rules pending creator review.")}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, status = excluded.status, visibility = excluded.visibility, updated_at = excluded.updated_at;`);
           for (const [id, userId, title, description, format, platform, map, serverExpression, openToAny, moderationStatus, publicStatus, convertedEventId, upvotes, downvotes, reports, hotScore] of suggestions) {
             const normalized = String(title).toLowerCase();
@@ -1419,6 +1445,63 @@ jobs:
           statements.push(`INSERT OR IGNORE INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at) VALUES (${sql("phase2a-preview-conversion-activity")}, ${sql("phase2a-preview-private-draft-event")}, NULL, 'suggestion_converted_to_draft', ${sql("Community suggestion converted to draft for preview.")}, ${sql(JSON.stringify({ suggestion_id: "phase2a-preview-converted-private-draft" }))}, ${sql(now)});`);
           statements.push(`INSERT OR IGNORE INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at) VALUES (${sql("phase2a-preview-conversion-action")}, ${sql("phase2a-preview-converted-private-draft")}, ${sql("phase2a-preview-creator")}, 'convert_to_event_draft', 'accepted', 'converted_to_event', ${sql("Preview conversion audit.")}, ${sql(now)});`);
           fs.writeFileSync("phase2a-preview-seed.sql", `${statements.join("\n")}\n`);
+          NODE
+
+          VERIFY_SESSION_SQL="$(cat phase2a-session-verification.sql)"
+          npx wrangler d1 execute DB \
+            --config wrangler.event-platform-performance-preview.toml \
+            --remote \
+            --json \
+            --command "${VERIFY_SESSION_SQL}" \
+            > dzn-event-platform-performance-preview/session-verification-raw.json \
+            2> dzn-event-platform-performance-preview/session-verification.stderr.log
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          function fail(category, message) {
+            fs.writeFileSync("dzn-event-platform-performance-preview/failure-summary.json", JSON.stringify({
+              ok: false,
+              category,
+              message,
+              stage: "sessionVerification",
+              branch: process.env.CANDIDATE_BRANCH,
+              commit: process.env.CANDIDATE_SHA,
+              mode: "event-platform-performance-preview",
+            }, null, 2));
+            console.error(message);
+            process.exit(1);
+          }
+          function parse(path) {
+            const raw = fs.readFileSync(path, "utf8").replace(/^\uFEFF/, "").trimStart();
+            if (!raw || !["[", "{"].includes(raw[0])) fail("PHASE2A_VERIFIED_MEMBER_SESSION_UNAVAILABLE", `Malformed Wrangler JSON in ${path}.`);
+            return JSON.parse(raw);
+          }
+          function rows(path) {
+            const parsed = parse(path);
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          const row = rows("dzn-event-platform-performance-preview/session-verification-raw.json")[0] || {};
+          const summary = {
+            ownerSessionPresent: Number(row.ownerSessionValid || 0) === 1,
+            creatorSessionPresent: Number(row.creatorSessionValid || 0) === 1,
+            apiVerifierSessionPresent: Number(row.apiVerifierSessionValid || 0) === 1,
+            apiVerifierUserPresent: Number(row.apiVerifierUserPresent || 0) === 1,
+            apiVerifierSessionUnexpired: Number(row.apiVerifierSessionValid || 0) === 1,
+            apiVerifierIsPlatformOwner: Number(row.apiVerifierOwnerMatches || 0) > 0,
+            apiVerifierIsPlatformCreator: Number(row.apiVerifierCreatorMatches || 0) > 0,
+            expectedUserMappingsValid: Number(row.ownerSessionValid || 0) === 1 && Number(row.creatorSessionValid || 0) === 1 && Number(row.apiVerifierSessionValid || 0) === 1,
+            noSecretRotationPerformed: true,
+            obsoleteInvalidPhase2aSessionRemoved: true,
+          };
+          fs.writeFileSync("dzn-event-platform-performance-preview/session-verification.json", JSON.stringify(summary, null, 2));
+          if (Number(row.unexpectedConvertedVerifierRows || 0) !== 0) {
+            fail("PHASE2A_API_VERIFIER_UNEXPECTED_CONVERTED_ROW", "Existing API verifier suggestion has a converted event; refusing broad cleanup.");
+          }
+          if (!summary.ownerSessionPresent || !summary.creatorSessionPresent || !summary.apiVerifierSessionPresent || !summary.apiVerifierUserPresent || summary.apiVerifierIsPlatformOwner || summary.apiVerifierIsPlatformCreator) {
+            fail("PHASE2A_VERIFIED_MEMBER_SESSION_UNAVAILABLE", "Known-good Phase 2A preview member session is unavailable or role-unsafe.");
+          }
+          console.log("Phase 2A known-good preview session verification passed.");
           NODE
 
           npx wrangler d1 execute DB \
@@ -1611,11 +1694,16 @@ jobs:
           const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE || "";
           const creatorCookie = process.env.OWNER_CONSOLE_CREATOR_COOKIE || "";
           const memberCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE || "";
+          const apiMemberUserId = process.env.PHASE2A_API_MEMBER_USER_ID || "owner-console-non-owner-user";
           const apiMemberCookie = process.env.PHASE2A_API_MEMBER_COOKIE || "";
           const artifacts = "dzn-event-platform-performance-preview";
+          try {
+            fs.rmSync(`${artifacts}/failure-summary.json`, { force: true });
+          } catch {}
           let activeStage = "verification";
           const progress = {
             projectConfig: "not_run",
+            sessionVerification: "not_run",
             d1InitialVerification: "not_run",
             routeProbes: "not_run",
             performanceSampling: "not_run",
@@ -1661,6 +1749,8 @@ jobs:
               contentType: details.contentType ? sanitizeFailureValue(details.contentType) : undefined,
               bodyLength: details.bodyLength ?? undefined,
               cacheStatus: details.cacheStatus ? sanitizeFailureValue(details.cacheStatus) : undefined,
+              sessionRowPresent: typeof details.sessionRowPresent === "boolean" ? details.sessionRowPresent : undefined,
+              sessionUserMappingValid: typeof details.sessionUserMappingValid === "boolean" ? details.sessionUserMappingValid : undefined,
               branch: process.env.CANDIDATE_BRANCH,
               commit: process.env.CANDIDATE_SHA,
               mode: "event-platform-performance-preview",
@@ -1732,6 +1822,54 @@ jobs:
             }
             if (productionSignature(productionProject) !== expectedProductionSignature) fail("Production project binding signature changed during Phase 2A preview.");
           }
+          async function verifyRoleSessions(base) {
+            const ownerIds = String(process.env.DZN_PLATFORM_OWNER_DISCORD_IDS || "")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean);
+            const creatorId = String(process.env.DZN_PLATFORM_CREATOR_DISCORD_ID || "").trim();
+            const ownerPlaceholders = ownerIds.length > 0 ? ownerIds.map(() => "?").join(", ") : "NULL";
+            const row = (await d1Query(`
+              SELECT
+                (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-owner-session' AND user_id = 'owner-console-platform-owner' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS ownerSessionValid,
+                (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-creator-session' AND user_id = 'owner-console-platform-creator' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS creatorSessionValid,
+                (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-non-owner-session' AND user_id = 'owner-console-non-owner-user' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS apiVerifierSessionValid,
+                (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user') AS apiVerifierUserPresent,
+                (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user' AND discord_id IN (${ownerPlaceholders})) AS apiVerifierOwnerMatches,
+                (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user' AND discord_id = ?) AS apiVerifierCreatorMatches;
+            `, [...ownerIds, creatorId]))[0] || {};
+            const summary = {
+              requiredSessionIdsPresent: {
+                owner: Number(row.ownerSessionValid || 0) === 1,
+                creator: Number(row.creatorSessionValid || 0) === 1,
+                member: Number(row.apiVerifierSessionValid || 0) === 1,
+              },
+              expectedUserMappingsValid: Number(row.ownerSessionValid || 0) === 1 && Number(row.creatorSessionValid || 0) === 1 && Number(row.apiVerifierSessionValid || 0) === 1,
+              expiryValid: Number(row.ownerSessionValid || 0) === 1 && Number(row.creatorSessionValid || 0) === 1 && Number(row.apiVerifierSessionValid || 0) === 1,
+              apiVerifierSessionPresent: Number(row.apiVerifierSessionValid || 0) === 1,
+              apiVerifierUserPresent: Number(row.apiVerifierUserPresent || 0) === 1,
+              apiVerifierSessionUnexpired: Number(row.apiVerifierSessionValid || 0) === 1,
+              apiVerifierIsPlatformOwner: Number(row.apiVerifierOwnerMatches || 0) > 0,
+              apiVerifierIsPlatformCreator: Number(row.apiVerifierCreatorMatches || 0) > 0,
+              ownerCookieOwnerGet: "not_run",
+              creatorCookieOwnerGet: "not_run",
+              memberCookieOwnerGetDenied: "not_run",
+              noSecretRotationPerformed: true,
+              noSessionHashCreated: true,
+            };
+            if (!summary.expectedUserMappingsValid || !summary.apiVerifierUserPresent || summary.apiVerifierIsPlatformOwner || summary.apiVerifierIsPlatformCreator) {
+              writeJsonArtifact("session-verification.json", summary, "sessionVerification");
+              fail("Preview role session mapping is invalid.", { category: "PHASE2A_PREVIEW_ROLE_SESSION_INVALID", stage: "sessionVerification" });
+            }
+            const ownerOverview = await fetchSafe(base, "/api/owner/overview", 200, { headers: { Cookie: ownerCookie }, category: "PHASE2A_PREVIEW_ROLE_SESSION_INVALID", stage: "sessionVerification" });
+            const creatorOverview = await fetchSafe(base, "/api/owner/overview", 200, { headers: { Cookie: creatorCookie }, category: "PHASE2A_PREVIEW_ROLE_SESSION_INVALID", stage: "sessionVerification" });
+            const memberOverview = await fetchSafe(base, "/api/owner/overview", 403, { headers: { Cookie: memberCookie }, category: "PHASE2A_PREVIEW_ROLE_SESSION_INVALID", stage: "sessionVerification" });
+            summary.ownerCookieOwnerGet = ownerOverview.status;
+            summary.creatorCookieOwnerGet = creatorOverview.status;
+            summary.memberCookieOwnerGetDenied = memberOverview.status;
+            writeJsonArtifact("session-verification.json", summary, "sessionVerification");
+            return summary;
+          }
           async function fetchSafe(base, path, expectedStatus, options = {}) {
             const started = Date.now();
             const response = await fetch(`${base}${path}`, {
@@ -1766,6 +1904,7 @@ jobs:
                 contentType,
                 bodyLength: text.length,
                 cacheStatus,
+                ...(options.failureDetails || {}),
               });
             }
             for (const marker of ["TOKEN_ENCRYPTION_KEY", "SESSION_SECRET", "encrypted_token", "OAuth", "Cloudflare", "Error 1102", "Worker exceeded resource limits", "Minified React error #", "stack trace"]) {
@@ -1860,8 +1999,7 @@ jobs:
               reportCountExposed: publicText.includes("reportCount"),
             };
           }
-          async function verifyAuthMatrix(base) {
-            const jsonHeaders = { "Content-Type": "application/json" };
+          function buildVerifierSuggestionPayload() {
             const verifierDescription = "This preview-only community challenge proposes a fair multi-server event where authenticated players represent approved connected servers, complete clearly documented objectives, and earn results only from verified activity. The platform creator reviews every rule, schedule, eligibility requirement, evidence standard, dispute process, and final outcome before publication. Nothing is announced automatically, no paid feature changes competitive scoring, and all participating servers receive equal treatment throughout the test competition.";
             const wordCount = verifierDescription.split(/\s+/).filter(Boolean).length;
             if (wordCount < 40 || wordCount > 250) {
@@ -1880,6 +2018,36 @@ jobs:
               open_to_any_server: true,
               structure_notes: "Preview-only structure notes.",
             });
+            return { validSuggestion, wordCount };
+          }
+          async function verifyApiMemberSubmission(base, sessionSummary) {
+            const jsonHeaders = { "Content-Type": "application/json" };
+            const { validSuggestion, wordCount } = buildVerifierSuggestionPayload();
+            const anonSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: validSuggestion, category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const memberSubmit = await fetchJson(base, "/api/events/suggestions", 200, {
+              method: "POST",
+              headers: { ...jsonHeaders, Cookie: apiMemberCookie },
+              body: validSuggestion,
+              category: "PHASE2A_VERIFIED_MEMBER_SESSION_REJECTED",
+              stage: "authMatrix",
+              failureDetails: {
+                sessionRowPresent: Boolean(sessionSummary?.apiVerifierSessionPresent),
+                sessionUserMappingValid: Boolean(sessionSummary?.expectedUserMappingsValid),
+              },
+            });
+            const submitted = memberSubmit.json?.suggestion;
+            const createdId = typeof submitted?.id === "string" && submitted.id.trim() ? submitted.id : null;
+            if (memberSubmit.json?.ok !== true || !createdId || submitted.moderationStatus !== "pending_moderation" || submitted.publicStatus !== "submitted") {
+              fail("PHASE2A_MEMBER_SUBMISSION_RESPONSE_INVALID", {
+                category: "PHASE2A_MEMBER_SUBMISSION_RESPONSE_INVALID",
+                stage: "authMatrix",
+              });
+            }
+            return { validSuggestion, wordCount, anonSubmit, memberSubmit, submitted, createdId };
+          }
+          async function verifyAuthMatrix(base, submission) {
+            const jsonHeaders = { "Content-Type": "application/json" };
+            const { validSuggestion, wordCount, anonSubmit, memberSubmit, submitted, createdId } = submission;
             const conversionTargetId = "phase2a-preview-conversion-target";
             const conversionTargetEventId = "suggestion-draft-phase2a-preview-conversion-target";
             const readCount = async (sql, params = []) => Number((await d1Query(sql, params))[0]?.count || 0);
@@ -1917,16 +2085,6 @@ jobs:
               }
             };
 
-            const anonSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: validSuggestion, category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
-            const memberSubmit = await fetchJson(base, "/api/events/suggestions", 200, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: validSuggestion, category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
-            const submitted = memberSubmit.json?.suggestion;
-            const createdId = typeof submitted?.id === "string" && submitted.id.trim() ? submitted.id : null;
-            if (memberSubmit.json?.ok !== true || !createdId || submitted.moderationStatus !== "pending_moderation" || submitted.publicStatus !== "submitted") {
-              fail("PHASE2A_MEMBER_SUBMISSION_RESPONSE_INVALID", {
-                category: "PHASE2A_MEMBER_SUBMISSION_RESPONSE_INVALID",
-                stage: "authMatrix",
-              });
-            }
             const suggestionPath = `/api/events/suggestions/${encodeURIComponent(createdId)}`;
             const ownerPath = `/api/owner/events/suggestions/${encodeURIComponent(createdId)}`;
             const invalidJson = await fetchSafe(base, "/api/events/suggestions", 400, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
@@ -2063,6 +2221,8 @@ jobs:
             };
             if (initialD1Rows.migration0057.length !== 1 || initialD1Rows.foreignKeys.length !== 0) fail("Initial Phase 2A preview D1 verification failed.", { category: "PHASE2A_D1_FINAL_VERIFICATION_FAILED", stage: "d1InitialVerification" });
             updateProgress("d1InitialVerification", "passed");
+            updateProgress("sessionVerification", "running");
+            const sessionVerification = await verifyRoleSessions(stableUrl);
             updateProgress("routeProbes", "running");
             const routeProbes = {
               immutable: await verifyBase(immutableUrl),
@@ -2076,7 +2236,8 @@ jobs:
             const cacheVerification = await verifyCache(stableUrl);
             writeJsonArtifact("cache-verification.json", cacheVerification, "cacheVerification");
             updateProgress("authMatrix", "running");
-            const authMatrix = await verifyAuthMatrix(stableUrl);
+            const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);
+            const authMatrix = await verifyAuthMatrix(stableUrl, apiMemberSubmission);
             writeJsonArtifact("auth-matrix.json", authMatrix, "authMatrix");
             updateProgress("privacyChecks", "running");
             const privacyChecks = {
@@ -2095,8 +2256,8 @@ jobs:
             const d1Rows = {
               migration0057: await d1Query("SELECT name FROM d1_migrations WHERE name = '0057_event_suggestions_phase_2a.sql';"),
               deterministicRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE id LIKE 'phase2a-preview-%';"),
-              apiVerifierRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = 'phase2a-preview-api-member';"),
-              apiVerifierConvertedRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = 'phase2a-preview-api-member' AND converted_event_id IS NOT NULL;"),
+              apiVerifierRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = ?;", [apiMemberUserId]),
+              apiVerifierConvertedRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = ? AND converted_event_id IS NOT NULL;", [apiMemberUserId]),
               reportRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_reports WHERE suggestion_id LIKE 'phase2a-preview-%' AND status = 'open';"),
               voteRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_votes WHERE suggestion_id LIKE 'phase2a-preview-%';"),
               canonicalDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id LIKE 'phase2a-preview-%' AND status = 'draft' AND visibility = 'private';"),

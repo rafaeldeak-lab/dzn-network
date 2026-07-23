@@ -1087,7 +1087,7 @@ assert.equal(ownerPreviewVerifyExistingBlock.includes("method: \"PATCH\""), fals
 assert.equal(ownerPreviewVerifyExistingBlock.includes("wrangler pages secret put"), false, "Existing-preview mode must not update secrets.");
 assert.equal(ownerPreviewVerifyExistingBlock.includes("discord.com/api"), false, "Existing-preview mode must not call Discord.");
 const ownerPreviewPhase2ABlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewPhase2APreflightStart, ownerPreviewValidateBranchStart);
-const ownerPreviewPhase2AAuthMatrixStart = ownerPreviewPhase2ABlock.indexOf("async function verifyAuthMatrix(base)");
+const ownerPreviewPhase2AAuthMatrixStart = ownerPreviewPhase2ABlock.indexOf("function buildVerifierSuggestionPayload()");
 const ownerPreviewPhase2APaginationStart = ownerPreviewPhase2ABlock.indexOf("async function verifyPagination(base)");
 assert.notEqual(ownerPreviewPhase2AAuthMatrixStart, -1, "Phase 2A verifier must define an auth matrix check.");
 assert.notEqual(ownerPreviewPhase2APaginationStart, -1, "Phase 2A verifier must define a pagination check after the auth matrix.");
@@ -1101,6 +1101,7 @@ assert.equal(ownerPreviewValidateBlock.includes("event-platform-performance-prev
 assert.equal(ownerPreviewValidateBlock.includes("APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW"), true, "Phase 2A preview mode must require exact confirmation.");
 assert.equal(ownerPreviewValidateBlock.includes('PREVIEW_DB_NAME="${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}"'), true, "Phase 2A preview must use the fixed reusable preview DB.");
 assert.equal(ownerPreviewValidateBlock.includes("Event platform performance preview must use the fixed reusable preview D1."), true, "Phase 2A preview DB must not come from user input.");
+assert.equal(ownerPreviewValidateBlock.includes('if [ "${MODE}" = "full-preview" ]; then'), true, "Owner preview session/Discord secrets must only be generated for full-preview.");
 assert.equal(ownerPreviewPhase2ABlock.includes("event-platform-performance-preview"), true, "Phase 2A preview steps must be explicitly mode-gated.");
 assert.equal(ownerPreviewPhase2ABlock.includes("dzn-network-owner-console-preview"), true, "Phase 2A preview must use the fixed owner-console preview project.");
 assert.equal(ownerPreviewPhase2ABlock.includes("dzn_network_db_owner_console_preview_creator_governance_0919c46"), true, "Phase 2A preview must use the fixed reusable preview D1.");
@@ -1108,6 +1109,8 @@ assert.equal(ownerPreviewPhase2ABlock.includes("dzn-network-discord-announcement
 assert.equal(ownerPreviewPhase2ABlock.includes("npx wrangler d1 create"), false, "Phase 2A preview mode must not create D1 databases.");
 assert.equal(ownerPreviewPhase2ABlock.includes("method: \"DELETE\""), false, "Phase 2A preview mode must not delete D1 databases.");
 assert.equal(ownerPreviewPhase2ABlock.includes("wrangler pages secret put"), false, "Phase 2A preview mode must not update Pages secrets.");
+assert.equal(ownerPreviewPhase2ABlock.includes("OWNER_PREVIEW_SESSION_SECRET"), false, "Phase 2A preview mode must not generate or use a workflow-only SESSION_SECRET.");
+assert.equal(ownerPreviewPhase2ABlock.includes("OWNER_PREVIEW_DISCORD_CLIENT_SECRET"), false, "Phase 2A preview mode must not rotate preview Discord client secret.");
 assert.equal(ownerPreviewPhase2ABlock.includes("./node_modules/.bin/wrangler d1 migrations apply DB"), true, "Phase 2A preview mode must apply migration 0057 when absent.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_MIGRATION_ROOT=\"${RUNNER_TEMP}/dzn-phase2a-0057-only\""), true, "Phase 2A preview migrations must use an isolated temporary migration root.");
 assert.equal(ownerPreviewPhase2ABlock.includes("--cwd \"${PHASE2A_MIGRATION_ROOT}\""), true, "Phase 2A preview migrations must run Wrangler from the isolated migration root.");
@@ -1116,10 +1119,22 @@ assert.equal(ownerPreviewPhase2ABlock.includes("0057_event_suggestions_phase_2a.
 assert.equal(ownerPreviewPhase2ABlock.includes("0058_"), false, "Phase 2A preview must not run a follow-up migration.");
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-"), true, "Phase 2A preview seed rows must be namespaced.");
 assert.equal(ownerPreviewPhase2ABlock.includes("DELETE FROM event_suggestions WHERE id LIKE"), false, "Phase 2A preview seed must not broadly delete deterministic suggestion fixtures.");
-assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-api-member"), true, "Phase 2A preview must create a dedicated API verifier identity.");
-assert.equal(ownerPreviewPhase2ABlock.includes("owner-console-preview-phase2a-api-member-token"), true, "Phase 2A preview must create a dedicated API verifier session token.");
-assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE"), true, "Phase 2A preview must expose only the dedicated verifier cookie internally.");
+assert.equal(ownerPreviewPhase2ABlock.includes("owner-console-preview-phase2a-api-member-token"), false, "Phase 2A preview must not create or use a new invalid API verifier token.");
+assert.equal(ownerPreviewPhase2ABlock.includes("INSERT INTO sessions (id, user_id, session_token_hash"), false, "Phase 2A preview must not create a new API verifier session hash.");
+assert.equal(ownerPreviewPhase2ABlock.includes("crypto.createHmac"), false, "Phase 2A preview must not calculate a new session HMAC.");
+assert.equal(ownerPreviewPhase2ABlock.includes("dev-session-secret"), false, "Phase 2A preview must not fall back to dev-session-secret.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_USER_ID=owner-console-non-owner-user"), true, "Phase 2A preview must use the existing non-owner member as the API verifier principal.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE=dzn_session=owner-console-preview-non-owner-token"), true, "Phase 2A preview must reuse OWNER_CONSOLE_NON_OWNER_COOKIE for the API verifier.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE"), true, "Phase 2A preview must expose the reused verifier cookie internally.");
 assert.equal(ownerPreviewPhase2ABlock.includes("submitted_by_user_id = ${sql(apiMemberId)}"), true, "Phase 2A preview must clean API-generated verifier rows by dedicated user.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_VERIFIER_UNEXPECTED_CONVERTED_ROW"), true, "Phase 2A preview must block broad cleanup if the verifier user has a converted suggestion.");
+assert.equal(ownerPreviewPhase2ABlock.includes("DELETE FROM sessions WHERE id = ${sql(obsoleteApiSessionId)};"), true, "Phase 2A preview may only delete the obsolete invalid verifier session.");
+assert.equal(ownerPreviewPhase2ABlock.includes("owner-console-non-owner-session');"), false, "Phase 2A preview must never delete the canonical non-owner preview session.");
+assert.equal(ownerPreviewPhase2ABlock.includes("SELECT session_token_hash"), false, "Phase 2A preview must not select or print session hashes.");
+assert.equal(ownerPreviewPhase2ABlock.includes("session-verification.json"), true, "Phase 2A preview must write sanitized session verification.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_VERIFIED_MEMBER_SESSION_UNAVAILABLE"), true, "Phase 2A preview must fail clearly when the reused member session is unavailable.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_VERIFIED_MEMBER_SESSION_REJECTED"), true, "Phase 2A verifier must classify a rejected reused member session.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_PREVIEW_ROLE_SESSION_INVALID"), true, "Phase 2A verifier must validate owner/creator/member role sessions before the auth matrix.");
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-conversion-target"), true, "Phase 2A preview must seed a separate deterministic conversion target.");
 assert.equal(ownerPreviewPhase2ABlock.includes("suggestion-draft-phase2a-preview-conversion-target"), true, "Phase 2A preview must use the deterministic conversion target event ID.");
 assert.equal(ownerPreviewPhase2ABlock.includes("Creator Governance Preview Cup 0919c46"), false, "Phase 2A seed must not delete the verified creator-governance preview event.");
@@ -1140,6 +1155,16 @@ assert.equal(
   true,
   "Phase 2A route probes must run only after post-deploy binding verification.",
 );
+assert.equal(
+  ownerPreviewPhase2ABlock.indexOf("phase2a-session-verification.sql") < ownerPreviewPhase2ABlock.indexOf("- name: Build Phase 2A preview runtime"),
+  true,
+  "Phase 2A preview must check known-good session mappings before build/deploy.",
+);
+assert.equal(
+  ownerPreviewPhase2ABlock.indexOf("const sessionVerification = await verifyRoleSessions(stableUrl);") < ownerPreviewPhase2ABlock.indexOf("const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);"),
+  true,
+  "Phase 2A verifier must validate role sessions before the auth matrix submission.",
+);
 assert.equal(ownerPreviewPhase2ABlock.includes("/api/events/suggestions"), true, "Phase 2A preview must verify public suggestions routes.");
 assert.equal(ownerPreviewPhase2ABlock.includes("reportCount"), true, "Phase 2A preview must check report-count privacy.");
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-private-draft-event"), true, "Phase 2A preview must check private draft privacy.");
@@ -1154,6 +1179,7 @@ assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_CONCURRENT_CONVERSION_FA
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_D1_FINAL_VERIFICATION_FAILED"), true, "Phase 2A verifier must classify final D1 verification failures.");
 assert.equal(ownerPreviewPhase2ABlock.includes("failure-summary.json"), true, "Phase 2A preview verification failures must create a sanitized failure summary.");
 assert.equal(ownerPreviewPhase2ABlock.includes("verification-progress.json"), true, "Phase 2A preview must persist staged verification progress.");
+assert.equal(ownerPreviewPhase2ABlock.includes('fs.rmSync(`${artifacts}/failure-summary.json`, { force: true })'), true, "Successful Phase 2A verification must remove stale failure summaries before artifact upload.");
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("route-probes.json"'), true, "Phase 2A route probe report must be written immediately after route probes pass.");
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("performance-sampling.json"'), true, "Phase 2A performance report must be written immediately after sampling passes.");
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("cache-verification.json"'), true, "Phase 2A cache report must be written immediately after cache checks pass.");
@@ -1163,6 +1189,7 @@ assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('fetchJson(base, "/api/
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('fetchJson(base, "/api/events/suggestions", 201'), false, "Phase 2A verifier must not expect 201 for suggestion creation.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('|| "phase2a-preview-public-voting"'), false, "Phase 2A verifier must not fall back to a seeded suggestion ID.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("const createdId = typeof submitted?.id === \"string\""), true, "Phase 2A verifier must require the returned suggestion ID.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("verifyApiMemberSubmission(base, sessionSummary)"), true, "Phase 2A verifier must authenticate the reused member once and pass the returned suggestion into the matrix.");
 assert.equal(
   ownerPreviewPhase2AAuthMatrixBlock.indexOf("approve_public_voting") < ownerPreviewPhase2AAuthMatrixBlock.indexOf("`${suggestionPath}/vote`"),
   true,
