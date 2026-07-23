@@ -182,11 +182,7 @@ type EventCreateStage =
   | "category_resolution"
   | "entitlement_lookup"
   | "slug_lookup"
-  | "event_insert"
-  | "registration_insert"
-  | "host_update"
-  | "activity_insert"
-  | "compensation_cleanup";
+  | "transactional_create";
 
 type EventCreateFailure = {
   ok: false;
@@ -195,13 +191,6 @@ type EventCreateFailure = {
   errorCode: string;
   message: string;
   requestId?: string;
-};
-
-type EventCreateHostState = {
-  competitive_enabled: number | null;
-  server_category: string | null;
-  last_event_at: string | null;
-  updated_at: string | null;
 };
 
 const EVENT_CREATION_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
@@ -495,85 +484,68 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
   }
   const eventId = crypto.randomUUID();
   const registrationId = crypto.randomUUID();
-  const originalHostState: EventCreateHostState = {
-    competitive_enabled: Number(server.competitive_enabled ?? 0) === 1 ? 1 : 0,
-    server_category: server.server_category ?? null,
-    last_event_at: server.last_event_at ?? null,
-    updated_at: server.updated_at ?? null,
-  };
-  let hostUpdated = false;
-  let writeStage: EventCreateStage = "event_insert";
+  const activityId = crypto.randomUUID();
+  const activityMessage = `${serverDisplayName(server)} created ${name}.`;
+  const activityMetadata = JSON.stringify({
+    category,
+    event_type: eventType,
+    visibility,
+    strict_same_category: true,
+    tournament_channel_configured: Boolean(sanitizeDiscordSnowflake(input.tournament_channel_id)),
+  });
 
   try {
-    writeStage = "event_insert";
-    await db
-      .prepare(
-        `INSERT INTO competitive_events (
-          id, name, slug, description, category, event_type, status, visibility, premium_tier,
-          server_limit, team_limit, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      )
-      .bind(
-        eventId,
-        name,
-        slug,
-        description || null,
-        category,
-        eventType,
-        status,
-        visibility,
-        "pro",
-        serverLimit,
-        teamLimit,
-        startsAt,
-        endsAt,
-        viewer.id,
-        rules || "Same-category only. DZN dedupe and server-scope rules apply.",
-        rewards || null,
-      )
-      .run();
-
-    writeStage = "registration_insert";
-    await db
-      .prepare(
-        `INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, seed, registered_at)
-         VALUES (?, ?, ?, ?, 1, 1, CURRENT_TIMESTAMP)`,
-      )
-      .bind(registrationId, eventId, server.id, category)
-      .run();
-
-    writeStage = "host_update";
-    await db
-      .prepare(
-        `UPDATE linked_servers
-         SET competitive_enabled = 1,
-             server_category = COALESCE(server_category, ?),
-             last_event_at = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-      )
-      .bind(category, server.id)
-      .run();
-    hostUpdated = true;
-
-    writeStage = "activity_insert";
-    await insertEventActivity(env, eventId, server.id, "event_created", `${serverDisplayName(server)} created ${name}.`, {
-      category,
-      event_type: eventType,
-      visibility,
-      strict_same_category: true,
-      tournament_channel_configured: Boolean(sanitizeDiscordSnowflake(input.tournament_channel_id)),
-    });
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO competitive_events (
+            id, name, slug, description, category, event_type, status, visibility, premium_tier,
+            server_limit, team_limit, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        )
+        .bind(
+          eventId,
+          name,
+          slug,
+          description || null,
+          category,
+          eventType,
+          status,
+          visibility,
+          "pro",
+          serverLimit,
+          teamLimit,
+          startsAt,
+          endsAt,
+          viewer.id,
+          rules || "Same-category only. DZN dedupe and server-scope rules apply.",
+          rewards || null,
+        ),
+      db
+        .prepare(
+          `INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, seed, registered_at)
+           VALUES (?, ?, ?, ?, 1, 1, CURRENT_TIMESTAMP)`,
+        )
+        .bind(registrationId, eventId, server.id, category),
+      db
+        .prepare(
+          `UPDATE linked_servers
+           SET competitive_enabled = 1,
+               server_category = COALESCE(server_category, ?),
+               last_event_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+        )
+        .bind(category, server.id),
+      db
+        .prepare(
+          `INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
+           VALUES (?, ?, ?, CASE WHEN changes() = 1 THEN 'event_created' ELSE NULL END, ?, ?, CURRENT_TIMESTAMP)`,
+        )
+        .bind(activityId, eventId, server.id, activityMessage, activityMetadata),
+    ]);
   } catch (error) {
-    await compensateFailedEventCreate(env, {
-      eventId,
-      serverId: server.id,
-      originalHostState,
-      hostUpdated,
-      requestId,
-      failedStage: writeStage,
-    });
-    return eventCreateFailed(writeStage, requestId, error);
+    return eventCreateFailed("transactional_create", requestId, error);
   }
 
   return {
@@ -1115,56 +1087,7 @@ export async function insertEventActivity(env: Env, eventId: string | null, serv
        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(crypto.randomUUID(), eventId, serverId, activityType, message, JSON.stringify(metadata))
-    .run();
-}
-
-async function compensateFailedEventCreate(env: Env, options: {
-  eventId: string;
-  serverId: string;
-  originalHostState: EventCreateHostState;
-  hostUpdated: boolean;
-  requestId: string;
-  failedStage: EventCreateStage;
-}) {
-  const db = requireDb(env);
-  const cleanupStatements: Array<{ sql: string; bindings: unknown[] }> = [
-    { sql: "DELETE FROM competitive_event_activity WHERE event_id = ?", bindings: [options.eventId] },
-    { sql: "DELETE FROM competitive_event_matches WHERE event_id = ?", bindings: [options.eventId] },
-    { sql: "DELETE FROM competitive_event_servers WHERE event_id = ?", bindings: [options.eventId] },
-    { sql: "DELETE FROM competitive_events WHERE id = ?", bindings: [options.eventId] },
-  ];
-
-  for (const statement of cleanupStatements) {
-    try {
-      await db.prepare(statement.sql).bind(...statement.bindings).run();
-    } catch (error) {
-      logEventCreateFailure("compensation_cleanup", options.requestId, error, { failedStage: options.failedStage });
-    }
-  }
-
-  if (options.hostUpdated) {
-    try {
-      await db
-        .prepare(
-          `UPDATE linked_servers
-           SET competitive_enabled = ?,
-               server_category = ?,
-               last_event_at = ?,
-               updated_at = ?
-           WHERE id = ?`,
-        )
-        .bind(
-          Number(options.originalHostState.competitive_enabled ?? 0) === 1 ? 1 : 0,
-          options.originalHostState.server_category,
-          options.originalHostState.last_event_at,
-          options.originalHostState.updated_at,
-          options.serverId,
-        )
-        .run();
-    } catch (error) {
-      logEventCreateFailure("compensation_cleanup", options.requestId, error, { failedStage: options.failedStage, hostRestoreFailed: true });
-    }
-  }
+      .run();
 }
 
 function eventCreateFailed(stage: EventCreateStage, requestId: string, error: unknown): EventCreateFailure {

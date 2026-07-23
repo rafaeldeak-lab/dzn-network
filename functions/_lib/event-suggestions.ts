@@ -554,8 +554,9 @@ export async function moderateEventSuggestion(
   if (requiresReason(action) && reason.length < 6) {
     return { ok: false, status: 400, error: "REASON_REQUIRED", message: "A safe moderation reason is required." };
   }
-  const creatorResponse = sanitizePlainText(input.creator_response, 600);
-  if (creatorResponse && CREATOR_PUBLIC_RESPONSE_ACTIONS.has(action)) {
+  const isPublicResponseAction = CREATOR_PUBLIC_RESPONSE_ACTIONS.has(action);
+  const creatorResponse = isPublicResponseAction ? sanitizePlainText(input.creator_response, 600) : "";
+  if (creatorResponse) {
     const moderation = moderateSuggestionContent(creatorResponse);
     if (!moderation.ok) return { ok: false, status: 422, error: "CREATOR_RESPONSE_UNSAFE", message: "Creator response must be public-safe." };
   }
@@ -565,6 +566,9 @@ export async function moderateEventSuggestion(
   const transition = validateModerationTransition(existing.moderation_status, existing.public_status, action);
   if (!transition.ok) return transition;
   if (transition.idempotent) {
+    if (!isPublicResponseAction) {
+      await db.prepare("UPDATE event_suggestions SET creator_response = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND creator_response IS NOT NULL").bind(suggestionId).run();
+    }
     const current = await loadOwnerSuggestion(env, suggestionId);
     return { ok: true, status: 200, idempotent: true, suggestion: current };
   }
@@ -576,7 +580,10 @@ export async function moderateEventSuggestion(
          SET moderation_status = ?,
              public_status = ?,
              creator_decision = ?,
-             creator_response = CASE WHEN ? != '' THEN ? ELSE creator_response END,
+             creator_response = CASE
+               WHEN ? = 1 THEN CASE WHEN ? != '' THEN ? ELSE creator_response END
+               ELSE NULL
+             END,
              published_at = CASE WHEN ? = 'public_voting' AND published_at IS NULL THEN CURRENT_TIMESTAMP ELSE published_at END,
              moderated_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
@@ -584,7 +591,18 @@ export async function moderateEventSuggestion(
            AND moderation_status = ?
            AND public_status = ?`,
       )
-      .bind(target.moderation_status, target.public_status, target.creator_decision, creatorResponse, creatorResponse, target.public_status, suggestionId, existing.moderation_status, existing.public_status),
+      .bind(
+        target.moderation_status,
+        target.public_status,
+        target.creator_decision,
+        isPublicResponseAction ? 1 : 0,
+        creatorResponse,
+        creatorResponse,
+        target.public_status,
+        suggestionId,
+        existing.moderation_status,
+        existing.public_status,
+      ),
     db
       .prepare(
         `INSERT INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at)

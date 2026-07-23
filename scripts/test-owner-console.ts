@@ -14,6 +14,10 @@ import {
   buildOwnerDiscordPreviewEmbed,
   sanitizeOwnerDiscordChannelMappingInput,
 } from "../functions/_lib/owner-discord-control";
+import { hmacSha256 } from "../functions/_lib/crypto";
+import { onRequestGet as onOwnerDraftEventGet } from "../functions/api/owner/events/[slug]";
+import { onRequestGet as onOwnerEventReviewPageGet } from "../functions/owner/events/review";
+import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
 const ownerEnv = { DZN_PLATFORM_OWNER_DISCORD_IDS: "111111111111111111, 222222222222222222 , not-an-id" };
 
@@ -393,4 +397,172 @@ assert.match(routesPatch, /"\/owner"/, "Cloudflare Pages routes must include the
 assert.match(routesPatch, /"\/owner\/\*"/, "Cloudflare Pages routes must include nested owner routes.");
 assert.match(routesPatch, /"\/api\/\*"/, "Cloudflare Pages routes must preserve API function routing.");
 
-console.log("Owner console read-only access and data contract checks passed.");
+void assertOwnerPrivateDraftReviewRoutes()
+  .then(() => {
+    console.log("Owner console read-only access and data contract checks passed.");
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+
+async function assertOwnerPrivateDraftReviewRoutes() {
+  const publicEventDetailSource = readFileSync("functions/_lib/events.ts", "utf8");
+  assert.match(publicEventDetailSource, /WHERE slug = \? AND COALESCE\(visibility,\s*'public'\)\s*!=\s*'private'/, "Public event detail API must keep excluding private events.");
+
+  const ownerDraftApiSource = readFileSync("functions/api/owner/events/[slug].ts", "utf8");
+  assert.match(ownerDraftApiSource, /requirePlatformCreatorEventAdmin/, "Private draft API must require creator event admin.");
+  assert.match(ownerDraftApiSource, /privateNoStoreHeaders/, "Private draft API must use private no-store headers.");
+  assert.doesNotMatch(ownerDraftApiSource, /SELECT\s+\*/i, "Private draft API must not use SELECT *.");
+
+  const ownerDraftHelperSource = readFileSync("functions/_lib/owner-events.ts", "utf8");
+  assert.match(ownerDraftHelperSource, /getOwnerEventDraftReviewPayload/);
+  assert.match(ownerDraftHelperSource, /competitive_events\.slug = \?/);
+  assert.doesNotMatch(ownerDraftHelperSource, /SELECT\s+\*/i);
+
+  const ownerReviewFunctionSource = readFileSync("functions/owner/events/review.ts", "utf8");
+  assert.match(ownerReviewFunctionSource, /requirePlatformCreatorEventAdmin\(env,\s*request,\s*\{\s*mode:\s*"page"\s*\}\)/);
+
+  const ownerReviewPageSource = readFileSync("app/owner/events/review/page.tsx", "utf8");
+  assert.match(ownerReviewPageSource, /OwnerEventDraftReviewPage/);
+
+  const ownerReviewComponentSource = readFileSync("components/owner/owner-event-draft-review-page.tsx", "utf8");
+  for (const label of ["Draft", "Private", "Creator review required", "Not publicly published"]) {
+    assert.match(ownerReviewComponentSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.doesNotMatch(ownerReviewComponentSource, /<button|onClick=|api\/owner\/events\/[^"']*publish|discord-posting|sendDiscord|createBracket|refresh-score|awardBadge/i, "Draft review page must not add publication, Discord, bracket, score or reward controls.");
+
+  const ownerEventsUiSource = readFileSync("components/owner/owner-events-page.tsx", "utf8");
+  assert.match(ownerEventsUiSource, /\/owner\/events\/review\?slug=/, "Owner UI must route private drafts to the creator review route.");
+  assert.match(ownerEventsUiSource, /Review converted draft/);
+  assert.doesNotMatch(ownerEventsUiSource, /`\/events\/\$\{suggestion\.convertedEventSlug\}`/, "Converted private draft links must not point to public event routes.");
+
+  const secret = "owner-console-test-session-secret";
+  const creatorToken = "creator-private-draft-token";
+  const ownerToken = "owner-private-draft-token";
+  const creatorHash = await hmacSha256(creatorToken, secret);
+  const ownerHash = await hmacSha256(ownerToken, secret);
+  const creatorUser: SessionUser = {
+    id: "creator-user",
+    discord_id: "999999999999999999",
+    username: "Creator",
+    avatar: null,
+  };
+  const ownerUser: SessionUser = {
+    id: "owner-user",
+    discord_id: "111111111111111111",
+    username: "Owner",
+    avatar: null,
+  };
+  const db = new OwnerDraftReviewDb(
+    new Map([
+      [creatorHash, creatorUser],
+      [ownerHash, ownerUser],
+    ]),
+  );
+  const env = {
+    DB: db as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: ownerUser.discord_id,
+  } as Env;
+
+  const anonymousPage = await onOwnerEventReviewPageGet(makeOwnerDraftReviewContext(env, "https://example.com/owner/events/review?slug=private-draft"));
+  assert.equal(anonymousPage.status, 302, "Anonymous owner draft review page requests must redirect to login.");
+  assert.match(anonymousPage.headers.get("location") ?? "", /^\/login\?returnTo=/);
+
+  const ownerPage = await onOwnerEventReviewPageGet(makeOwnerDraftReviewContext(env, "https://example.com/owner/events/review?slug=private-draft", `dzn_session=${ownerToken}`));
+  assert.equal(ownerPage.status, 403, "Non-creator owners must not reach private draft review pages.");
+
+  const creatorPage = await onOwnerEventReviewPageGet(makeOwnerDraftReviewContext(env, "https://example.com/owner/events/review?slug=private-draft", `dzn_session=${creatorToken}`));
+  assert.equal(creatorPage.status, 200, "Configured creator should reach the private draft review page.");
+  assert.equal(await creatorPage.text(), "draft review page");
+
+  const anonymousApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/private-draft", undefined, "private-draft"));
+  assert.equal(anonymousApi.status, 401, "Anonymous owner draft API requests must return 401.");
+
+  const ownerApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/private-draft", `dzn_session=${ownerToken}`, "private-draft"));
+  assert.equal(ownerApi.status, 403, "Non-creator owner draft API requests must return 403.");
+
+  const creatorApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/private-draft", `dzn_session=${creatorToken}`, "private-draft"));
+  assert.equal(creatorApi.status, 200, "Configured creator should read private draft event details.");
+  assert.match(creatorApi.headers.get("cache-control") ?? "", /private,\s*no-store/);
+  assert.equal(creatorApi.headers.get("x-dzn-cache"), "BYPASS");
+  const creatorPayload = await creatorApi.json() as { ok: boolean; event?: { id: string; slug: string; status: string; visibility: string; registeredServers: number } };
+  assert.equal(creatorPayload.ok, true);
+  assert.equal(creatorPayload.event?.id, "private-draft-event");
+  assert.equal(creatorPayload.event?.slug, "private-draft");
+  assert.equal(creatorPayload.event?.status, "draft");
+  assert.equal(creatorPayload.event?.visibility, "private");
+  assert.equal(creatorPayload.event?.registeredServers, 0);
+
+  const missingApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/missing", `dzn_session=${creatorToken}`, "missing"));
+  assert.equal(missingApi.status, 404, "Missing private draft lookup should return 404 to the authorized creator.");
+}
+
+function makeOwnerDraftReviewContext(env: Env, url: string, cookie?: string, slug = ""): PagesContext {
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  return {
+    request: new Request(url, { headers }),
+    env,
+    params: { slug },
+    waitUntil: () => undefined,
+    next: async () => new Response("draft review page", { status: 200 }),
+    data: {},
+  };
+}
+
+class OwnerDraftReviewDb {
+  constructor(private readonly sessionUsersByHash: Map<string, SessionUser>) {}
+
+  prepare(sql: string) {
+    return new OwnerDraftReviewStatement(this, sql);
+  }
+
+  sessionUser(tokenHash: string) {
+    return this.sessionUsersByHash.get(tokenHash) ?? null;
+  }
+
+  eventBySlug(slug: string) {
+    if (slug !== "private-draft") return null;
+    return {
+      id: "private-draft-event",
+      name: "Private Draft Event",
+      slug: "private-draft",
+      description: "Creator-only draft review event.",
+      status: "draft",
+      visibility: "private",
+      category: "deathmatch",
+      event_type: "community_cup",
+      starts_at: null,
+      ends_at: null,
+      rules: "Rules are still under creator review.",
+      rewards: "Rewards are not published.",
+      created_at: "2026-07-23T00:00:00.000Z",
+      updated_at: "2026-07-23T00:00:00.000Z",
+      registered_servers: 0,
+    };
+  }
+}
+
+class OwnerDraftReviewStatement {
+  private values: unknown[] = [];
+
+  constructor(private readonly db: OwnerDraftReviewDb, private readonly sql: string) {}
+
+  bind(...values: unknown[]) {
+    this.values = values;
+    return this;
+  }
+
+  async first<T>() {
+    if (/FROM sessions\s+JOIN users/i.test(this.sql)) {
+      return this.db.sessionUser(String(this.values[0] ?? "")) as T | null;
+    }
+    if (/FROM competitive_events/i.test(this.sql) && /competitive_events\.slug = \?/i.test(this.sql)) {
+      return this.db.eventBySlug(String(this.values[0] ?? "")) as T | null;
+    }
+    return null;
+  }
+}

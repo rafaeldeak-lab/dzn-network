@@ -2092,8 +2092,12 @@ jobs:
             const anonModerate = await fetchSafe(base, `${ownerPath}/moderate`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ action: "approve_public_voting", reason: "Anonymous deny." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             const anonConvert = await fetchSafe(base, `${ownerPath}/convert`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ reason: "Anonymous deny." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             const ownerModerateDenied = await fetchSafe(base, `${ownerPath}/moderate`, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview deny." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
-            const approve = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview approve public voting." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
-            requireSuggestionState(approve, "public_voting", "public_voting", "Creator approve_public_voting");
+            const approvedPublicResponse = "Creator approved this public voting preview after review.";
+            const approve = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview approve public voting.", creator_response: approvedPublicResponse }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            const approvedSuggestion = requireSuggestionState(approve, "public_voting", "public_voting", "Creator approve_public_voting");
+            if (approvedSuggestion.creatorResponse !== approvedPublicResponse) {
+              fail("Public moderation response was not persisted for approve_public_voting.", { category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            }
             const approveActionCount = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'approve_public_voting';", [createdId]);
             const approveRepeat = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview repeat approve public voting." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
             requireSuggestionState(approveRepeat, "public_voting", "public_voting", "Repeat approve_public_voting");
@@ -2103,6 +2107,26 @@ jobs:
             const approveActionCountAfterRepeat = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'approve_public_voting';", [createdId]);
             if (approveActionCountAfterRepeat !== approveActionCount) {
               fail("Repeat approve_public_voting created another moderation action.", { category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            }
+            const internalArchiveReason = "Internal archive note for preview privacy check.";
+            const archivePrivacy = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "archive", reason: internalArchiveReason, creator_response: internalArchiveReason }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            const archivedSuggestion = requireSuggestionState(archivePrivacy, "archived", "archived", "Private archive action");
+            if (archivedSuggestion.creatorResponse !== null) {
+              fail("Archive exposed an internal moderation reason as creatorResponse.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
+            const archiveAuditRows = await d1Query("SELECT safe_reason AS safeReason FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'archive' ORDER BY created_at DESC, id DESC LIMIT 1;", [createdId]);
+            if (archiveAuditRows[0]?.safeReason !== internalArchiveReason) {
+              fail("Archive internal reason was not retained in the private audit row only.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
+            const restorePrivacy = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "restore", reason: "Internal restore note for preview privacy check.", creator_response: "Do not show this restore note publicly." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            const restoredSuggestion = requireSuggestionState(restorePrivacy, "pending_moderation", "submitted", "Private restore action");
+            if (restoredSuggestion.creatorResponse !== null) {
+              fail("Restore exposed a stale or internal creatorResponse.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
+            const approveAfterRestore = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview reapprove after restore." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            const reapprovedSuggestion = requireSuggestionState(approveAfterRestore, "public_voting", "public_voting", "Approve after restore without public response");
+            if (reapprovedSuggestion.creatorResponse !== null) {
+              fail("Approve after restore without a new public response exposed stale text.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             }
             const anonVote = await fetchSafe(base, `${suggestionPath}/vote`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ vote_value: 1 }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             const anonReport = await fetchSafe(base, `${suggestionPath}/report`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ reason: "spam" }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
@@ -2165,6 +2189,46 @@ jobs:
             if (!ownerConverted || ownerConverted.convertedEventId !== eventId || ownerConverted.convertedEventSlug !== eventSlug) {
               fail("Owner projection did not retain canonical converted event details.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             }
+            const publicDraftDetail = await fetchSafe(base, `/api/events/${encodeURIComponent(eventSlug)}`, 404, {
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            const reviewPath = `/owner/events/review?slug=${encodeURIComponent(eventSlug)}`;
+            const ownerDraftApiPath = `/api/owner/events/${encodeURIComponent(eventSlug)}`;
+            const reviewPageAnonymous = await fetchSafe(base, reviewPath, 302, {
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            const reviewPageOwner = await fetchSafe(base, reviewPath, 403, {
+              headers: { Cookie: ownerCookie },
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            const reviewPageCreator = await fetchSafe(base, reviewPath, 200, {
+              headers: { Cookie: creatorCookie },
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            const draftApiAnonymous = await fetchSafe(base, ownerDraftApiPath, 401, {
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            const draftApiOwner = await fetchSafe(base, ownerDraftApiPath, 403, {
+              headers: { Cookie: ownerCookie },
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            const draftApiCreator = await fetchJson(base, ownerDraftApiPath, 200, {
+              headers: { Cookie: creatorCookie },
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            if (draftApiCreator.json?.event?.id !== eventId || draftApiCreator.json?.event?.slug !== eventSlug || draftApiCreator.json?.event?.status !== "draft" || draftApiCreator.json?.event?.visibility !== "private") {
+              fail("Creator owner draft API did not return the canonical private draft.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
+            if (!/private,\s*no-store/i.test(String(draftApiCreator.headers["cache-control"] || ""))) {
+              fail("Creator owner draft API was not private/no-store.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
             return {
               anonymous: { submit: anonSubmit.status, vote: anonVote.status, report: anonReport.status, moderate: anonModerate.status, convert: anonConvert.status },
               member: { submit: memberSubmit.status, invalidJson: invalidJson.status, oversized: oversized.status, selfVoteDenied: selfVote.status, selfReportDenied: selfReport.status, submittedState: `${submitted.moderationStatus}/${submitted.publicStatus}`, descriptionWordCount: wordCount },
@@ -2180,7 +2244,32 @@ jobs:
                 concurrentConversion: { statuses: [convertA.status, convertB.status], oneCanonicalEvent: true },
                 repeatedConversion: { status: convertRepeat.status, idempotent: convertRepeat.json?.idempotent === true },
               },
-              conversion: { eventId, eventSlug, rows: conversionRows, publicProjectionPrivateDraftHidden: true, ownerProjectionRetainsDraft: true },
+              moderationPrivacy: {
+                publicResponsePersisted: true,
+                privateArchiveClearedCreatorResponse: true,
+                privateArchiveAuditReasonRetained: true,
+                restoreClearedCreatorResponse: true,
+                approveAfterRestoreBlankResponse: true,
+              },
+              conversion: {
+                eventId,
+                eventSlug,
+                rows: conversionRows,
+                publicProjectionPrivateDraftHidden: true,
+                ownerProjectionRetainsDraft: true,
+                publicEventDetailStatus: publicDraftDetail.status,
+                ownerReviewPage: {
+                  anonymous: reviewPageAnonymous.status,
+                  nonCreatorOwner: reviewPageOwner.status,
+                  creator: reviewPageCreator.status,
+                },
+                ownerDraftApi: {
+                  anonymous: draftApiAnonymous.status,
+                  nonCreatorOwner: draftApiOwner.status,
+                  creator: draftApiCreator.status,
+                  privateNoStore: true,
+                },
+              },
             };
           }
           async function verifyPagination(base) {
@@ -2247,6 +2336,10 @@ jobs:
               internalLinkedServerIdAbsent: true,
               convertedPrivateDraftPublicIdAbsent: authMatrix.conversion.publicProjectionPrivateDraftHidden,
               ownerProjectionRetainsPrivateDraft: authMatrix.conversion.ownerProjectionRetainsDraft,
+              internalModerationReasonNotPublic: authMatrix.moderationPrivacy.privateArchiveClearedCreatorResponse && authMatrix.moderationPrivacy.restoreClearedCreatorResponse && authMatrix.moderationPrivacy.approveAfterRestoreBlankResponse,
+              privateDraftPublicEventDetailExcluded: authMatrix.conversion.publicEventDetailStatus === 404,
+              privateDraftReviewCreatorOnly: authMatrix.conversion.ownerReviewPage.anonymous === 302 && authMatrix.conversion.ownerReviewPage.nonCreatorOwner === 403 && authMatrix.conversion.ownerReviewPage.creator === 200,
+              privateDraftApiCreatorOnly: authMatrix.conversion.ownerDraftApi.anonymous === 401 && authMatrix.conversion.ownerDraftApi.nonCreatorOwner === 403 && authMatrix.conversion.ownerDraftApi.creator === 200 && authMatrix.conversion.ownerDraftApi.privateNoStore === true,
             };
             writeJsonArtifact("privacy-checks.json", privacyChecks, "privacyChecks");
             updateProgress("pagination", "running");

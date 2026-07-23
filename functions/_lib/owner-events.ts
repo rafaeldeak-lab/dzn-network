@@ -1,4 +1,4 @@
-import { getLinkedServersForUserSummary } from "./db";
+import { getLinkedServersForUserSummary, requireDb } from "./db";
 import { isPlatformCreatorEventAdmin, isPlatformCreatorEventGovernanceConfigured } from "./platform-creator";
 import type { Env, SessionUser } from "./types";
 
@@ -34,6 +34,37 @@ export type OwnerEventLinkedServer = {
   status: string | null;
 };
 
+export type OwnerEventDraftReviewPayload =
+  | {
+      ok: true;
+      event: OwnerEventDraftReview;
+      generatedAt: string;
+    }
+  | {
+      ok: false;
+      status: 404 | 503;
+      error: string;
+      message: string;
+    };
+
+export type OwnerEventDraftReview = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  status: string;
+  visibility: string;
+  category: string | null;
+  eventType: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  rules: string | null;
+  rewards: string | null;
+  registeredServers: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 type OwnerEventRow = {
   id: string;
   name: string;
@@ -47,6 +78,12 @@ type OwnerEventRow = {
   created_at: string | null;
   updated_at: string | null;
   registered_servers: number | null;
+};
+
+type OwnerEventDraftRow = OwnerEventRow & {
+  description: string | null;
+  rules: string | null;
+  rewards: string | null;
 };
 
 export async function getOwnerEventControlPayload(env: Env, user: SessionUser): Promise<OwnerEventControlPayload> {
@@ -115,4 +152,70 @@ async function readCreatorLinkedServers(env: Env, userId: string): Promise<Owner
     category: typeof server.server_category === "string" ? server.server_category : null,
     status: typeof server.status === "string" ? server.status : null,
   })).filter((server) => server.id.length > 0);
+}
+
+export async function getOwnerEventDraftReviewPayload(env: Env, slugValue: unknown): Promise<OwnerEventDraftReviewPayload> {
+  if (!env.DB) {
+    return { ok: false, status: 503, error: "D1_UNAVAILABLE", message: "Event storage is unavailable." };
+  }
+  const slug = sanitizeEventSlug(slugValue);
+  if (!slug) {
+    return { ok: false, status: 404, error: "EVENT_NOT_FOUND", message: "Event not found." };
+  }
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT competitive_events.id,
+              competitive_events.name,
+              competitive_events.slug,
+              competitive_events.description,
+              competitive_events.status,
+              competitive_events.visibility,
+              competitive_events.category,
+              competitive_events.event_type,
+              competitive_events.starts_at,
+              competitive_events.ends_at,
+              competitive_events.rules,
+              competitive_events.rewards,
+              competitive_events.created_at,
+              competitive_events.updated_at,
+              (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers
+       FROM competitive_events
+       WHERE competitive_events.slug = ?
+       LIMIT 1`,
+    )
+    .bind(slug)
+    .first<OwnerEventDraftRow>();
+  if (!row) {
+    return { ok: false, status: 404, error: "EVENT_NOT_FOUND", message: "Event not found." };
+  }
+  return {
+    ok: true,
+    event: {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      description: row.description,
+      status: row.status ?? "unknown",
+      visibility: row.visibility ?? "public",
+      category: row.category,
+      eventType: row.event_type,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
+      rules: row.rules,
+      rewards: row.rewards,
+      registeredServers: Number(row.registered_servers ?? 0),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    },
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function sanitizeEventSlug(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
 }

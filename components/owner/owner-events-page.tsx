@@ -187,7 +187,7 @@ function EventInventoryPanel({ payload }: { payload: OwnerEventsPayload }) {
             </Link>
           ) : null}
         </div>
-        <EventList events={payload.events} />
+        <EventList events={payload.events} creatorEventAdmin={payload.creatorEventAdmin} />
       </section>
       <OwnerSuggestionModerationPanel creatorEventAdmin={payload.creatorEventAdmin} />
     </div>
@@ -338,21 +338,40 @@ function CreateOfficialEventPanel({ payload }: { payload: OwnerEventsPayload }) 
   );
 }
 
-function EventList({ events }: { events: OwnerEvent[] }) {
+function EventList({ events, creatorEventAdmin }: { events: OwnerEvent[]; creatorEventAdmin: boolean }) {
   if (!events.length) return <p className="mt-4 rounded-lg border border-white/10 bg-black/25 p-4 text-sm text-zinc-400">No stored official events found.</p>;
   return (
     <div className="mt-4 grid gap-2">
-      {events.map((event) => (
-        <Link key={event.id} href={`/events/${event.slug}`} className="rounded-lg border border-white/10 bg-black/25 p-3 hover:border-cyan-300/30">
+      {events.map((event) => {
+        const privateReview = isPrivateDraftEvent(event);
+        const href = privateReview ? `/owner/events/review?slug=${encodeURIComponent(event.slug)}` : `/events/${event.slug}`;
+        const content = (
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-base font-black text-white">{event.name}</h3>
-            <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase text-zinc-300">{event.status}</span>
+            <div>
+              <h3 className="text-base font-black text-white">{event.name}</h3>
+              <p className="mt-1 text-xs text-zinc-500">{event.eventType ?? "event"} / {event.category ?? "uncategorized"} / {event.registeredServers} registered</p>
+            </div>
+            <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-black uppercase text-zinc-300">
+              {privateReview && creatorEventAdmin ? "Review draft" : event.status}
+            </span>
           </div>
-          <p className="mt-1 text-xs text-zinc-500">{event.eventType ?? "event"} / {event.category ?? "uncategorized"} / {event.registeredServers} registered</p>
-        </Link>
-      ))}
+        );
+        return privateReview && !creatorEventAdmin ? (
+          <article key={event.id} className="rounded-lg border border-white/10 bg-black/25 p-3">
+            {content}
+          </article>
+        ) : (
+          <Link key={event.id} href={href} className="rounded-lg border border-white/10 bg-black/25 p-3 hover:border-cyan-300/30">
+            {content}
+          </Link>
+        );
+      })}
     </div>
   );
+}
+
+function isPrivateDraftEvent(event: OwnerEvent) {
+  return event.status === "draft" || event.visibility === "private";
 }
 
 function OwnerSuggestionModerationPanel({ creatorEventAdmin }: { creatorEventAdmin: boolean }) {
@@ -360,7 +379,8 @@ function OwnerSuggestionModerationPanel({ creatorEventAdmin }: { creatorEventAdm
   const [status, setStatus] = useState("all");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ tone: "error" | "success" | "info"; text: string } | null>(null);
-  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [internalReasons, setInternalReasons] = useState<Record<string, string>>({});
+  const [publicResponses, setPublicResponses] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -397,14 +417,17 @@ function OwnerSuggestionModerationPanel({ creatorEventAdmin }: { creatorEventAdm
   }
 
   async function runModeration(suggestion: OwnerSuggestion, action: string) {
-    const reason = reasons[suggestion.id] ?? "";
+    const reason = internalReasons[suggestion.id] ?? "";
+    const creatorResponse = publicResponses[suggestion.id] ?? "";
     setMessage({ tone: "info", text: action === "convert" ? "Saving draft" : "Updating moderation state" });
     const path = action === "convert"
       ? `/api/owner/events/suggestions/${encodeURIComponent(suggestion.id)}/convert`
       : `/api/owner/events/suggestions/${encodeURIComponent(suggestion.id)}/moderate`;
     const body = action === "convert"
       ? { reason }
-      : { action, reason, creator_response: reason };
+      : publicResponseAction(action)
+        ? { action, reason, creator_response: creatorResponse }
+        : { action, reason };
     try {
       const response = await fetch(path, {
         method: "POST",
@@ -481,20 +504,36 @@ function OwnerSuggestionModerationPanel({ creatorEventAdmin }: { creatorEventAdm
               {suggestion.mapName ? <span>{suggestion.mapName}</span> : null}
               <span>{suggestion.suggestedServerScope}</span>
             </div>
-            {suggestion.convertedEventSlug ? (
-              <Link href={`/events/${suggestion.convertedEventSlug}`} className="mt-3 inline-flex rounded-lg border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-100">
-                View converted draft
+            {creatorEventAdmin && suggestion.convertedEventSlug ? (
+              <Link href={`/owner/events/review?slug=${encodeURIComponent(suggestion.convertedEventSlug)}`} className="mt-3 inline-flex rounded-lg border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-[11px] font-black uppercase text-emerald-100">
+                Review converted draft
               </Link>
             ) : null}
             {creatorEventAdmin ? (
               <div className="mt-3 grid gap-3">
-                <textarea
-                  value={reasons[suggestion.id] ?? ""}
-                  onChange={(event) => setReasons((current) => ({ ...current, [suggestion.id]: event.target.value }))}
-                  maxLength={500}
-                  className={`${inputClass()} min-h-20 resize-y`}
-                  placeholder="Creator reason or public response"
-                />
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Field label="Internal reason">
+                    <textarea
+                      value={internalReasons[suggestion.id] ?? ""}
+                      onChange={(event) => setInternalReasons((current) => ({ ...current, [suggestion.id]: event.target.value }))}
+                      maxLength={500}
+                      className={`${inputClass()} min-h-20 resize-y`}
+                      placeholder="Creator/moderation-only reason"
+                    />
+                  </Field>
+                  <Field label="Public response">
+                    <textarea
+                      value={publicResponses[suggestion.id] ?? ""}
+                      onChange={(event) => setPublicResponses((current) => ({ ...current, [suggestion.id]: event.target.value }))}
+                      maxLength={600}
+                      className={`${inputClass()} min-h-20 resize-y`}
+                      placeholder="Shown to community members only for public actions"
+                    />
+                  </Field>
+                </div>
+                <p className="text-xs leading-5 text-zinc-500">
+                  Public response is shown to community members for approve, revision, shortlist and accept actions. Internal reason remains creator/moderation-only for reject, archive, restore and conversion.
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <ActionButton label="Approve voting" onClick={() => runModeration(suggestion, "approve_public_voting")} />
                   <ActionButton label="Shortlist" onClick={() => runModeration(suggestion, "shortlist")} />
@@ -512,6 +551,10 @@ function OwnerSuggestionModerationPanel({ creatorEventAdmin }: { creatorEventAdm
       </div>
     </section>
   );
+}
+
+function publicResponseAction(action: string) {
+  return action === "approve_public_voting" || action === "request_revision" || action === "shortlist" || action === "accept";
 }
 
 function ActionButton({ label, onClick, accent = false }: { label: string; onClick: () => void; accent?: boolean }) {

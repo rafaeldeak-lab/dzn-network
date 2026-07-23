@@ -161,12 +161,13 @@ async function assertSuccessfulCreatorEventCreate() {
   const result = await createCompetitiveEvent(env, creator, validCreateBody());
   assert.equal(result.status, 200, "Configured creator should be able to create a valid event.");
   assert.equal(result.ok, true, "Successful creator event response should be ok.");
-  assert.equal(env.DB.events.length, 1, "Successful creator event create should insert one event.");
+  assert.equal(env.DB.createdEvents().length, 1, "Successful creator event create should insert one event.");
   assert.equal(env.DB.registrations.length, 1, "Successful creator event create should insert one host registration.");
   assert.equal(env.DB.activities.length, 1, "Successful creator event create should insert one activity row.");
   assert.equal(env.DB.activities[0]?.activity_type, "event_created", "Successful creator event create should write event_created activity.");
   assert.equal(env.DB.host.competitive_enabled, 1, "Successful creator event create should mark host competitive.");
   assert.equal(env.DB.host.server_category, "deathmatch", "Successful creator event create should keep the host category valid.");
+  assert.equal(env.DB.existingEvents().length, 1, "Successful creator event create must not touch existing events.");
   assert.equal(env.DB.externalCalls, 0, "Creator event create must not call Discord, queues, schedulers, brackets, scores, or awards.");
 }
 
@@ -222,11 +223,13 @@ async function assertStructuredPreflightFailures() {
 }
 
 function assertNoPartialEvent(db: MemoryD1, label: string) {
-  assert.equal(db.events.length, 0, `${label} must not leave an event row.`);
+  assert.equal(db.createdEvents().length, 0, `${label} must not leave an event row.`);
   assert.equal(db.registrations.length, 0, `${label} must not leave a host registration.`);
   assert.equal(db.activities.length, 0, `${label} must not leave activity rows.`);
   assert.equal(db.host.competitive_enabled, 0, `${label} must not leave host competitive_enabled changed.`);
   assert.equal(db.host.last_event_at, "2026-01-01T00:00:00.000Z", `${label} must restore host last_event_at.`);
+  assert.equal(db.existingEvents().length, 1, `${label} must not touch existing events.`);
+  assert.equal(db.deleteStatements, 0, `${label} must not issue compensating DELETE statements.`);
   assert.equal(db.externalCalls, 0, `${label} must not call Discord, queues, schedulers, brackets, scores, or awards.`);
 }
 
@@ -267,10 +270,11 @@ class InjectedStageError extends Error {
 }
 
 class MemoryD1 {
-  events: Array<Record<string, unknown>> = [];
+  events: Array<Record<string, unknown>> = [{ id: "existing-event-id", slug: "existing-event", preexisting: true }];
   registrations: Array<Record<string, unknown>> = [];
   activities: Array<Record<string, unknown>> = [];
   externalCalls = 0;
+  deleteStatements = 0;
   readonly options: MemoryD1Options;
   host: Record<string, unknown>;
 
@@ -317,18 +321,41 @@ class MemoryD1 {
     return new MemoryStatement(this, query);
   }
 
-  batch() {
-    throw new Error("Unexpected D1 batch in creator governance test");
+  async batch(statements: MemoryStatement[]) {
+    const eventSnapshot = this.events.map((row) => ({ ...row }));
+    const registrationSnapshot = this.registrations.map((row) => ({ ...row }));
+    const activitySnapshot = this.activities.map((row) => ({ ...row }));
+    const hostSnapshot = { ...this.host };
+    try {
+      for (const statement of statements) {
+        await statement.run();
+      }
+      return statements.map(() => ({ success: true }));
+    } catch (error) {
+      this.events = eventSnapshot;
+      this.registrations = registrationSnapshot;
+      this.activities = activitySnapshot;
+      this.host = hostSnapshot;
+      throw error;
+    }
   }
 
   exec() {
     throw new Error("Unexpected D1 exec in creator governance test");
   }
+
+  createdEvents() {
+    return this.events.filter((row) => row.preexisting !== true);
+  }
+
+  existingEvents() {
+    return this.events.filter((row) => row.preexisting === true);
+  }
 }
 
 class MemoryStatement {
   private bindings: unknown[] = [];
-  constructor(private readonly db: MemoryD1, private readonly query: string) {}
+  constructor(private readonly db: MemoryD1, readonly query: string) {}
 
   bind(...bindings: unknown[]) {
     this.bindings = bindings;
@@ -401,30 +428,14 @@ class MemoryStatement {
         id: this.bindings[0],
         event_id: this.bindings[1],
         server_id: this.bindings[2],
-        activity_type: this.bindings[3],
-        message: this.bindings[4],
+        activity_type: "event_created",
+        message: this.bindings[3],
       });
       return { success: true };
     }
-    if (this.query.includes("DELETE FROM competitive_event_activity WHERE event_id = ?")) {
-      this.db.activities = this.db.activities.filter((row) => row.event_id !== this.bindings[0]);
-      return { success: true };
-    }
-    if (this.query.includes("DELETE FROM competitive_event_matches WHERE event_id = ?")) return { success: true };
-    if (this.query.includes("DELETE FROM competitive_event_servers WHERE event_id = ?")) {
-      this.db.registrations = this.db.registrations.filter((row) => row.event_id !== this.bindings[0]);
-      return { success: true };
-    }
-    if (this.query.includes("DELETE FROM competitive_events WHERE id = ?")) {
-      this.db.events = this.db.events.filter((row) => row.id !== this.bindings[0]);
-      return { success: true };
-    }
-    if (this.query.includes("UPDATE linked_servers") && this.query.includes("competitive_enabled = ?")) {
-      this.db.host.competitive_enabled = this.bindings[0];
-      this.db.host.server_category = this.bindings[1];
-      this.db.host.last_event_at = this.bindings[2];
-      this.db.host.updated_at = this.bindings[3];
-      return { success: true };
+    if (this.query.includes("DELETE FROM")) {
+      this.db.deleteStatements += 1;
+      throw new Error(`Unexpected destructive cleanup query: ${this.query.slice(0, 120)}`);
     }
     throw new Error(`Unexpected run query: ${this.query.slice(0, 120)}`);
   }
@@ -510,7 +521,11 @@ function assertSourceGovernance() {
   assert.equal(createCompetitiveEventBody.includes("await ensureCompetitiveEventsSchema(env);"), false, "Official event creation must not run broad request-time schema mutation.");
   assertIncludes(createCompetitiveEventBody, "validateCompetitiveEventCreationSchema(env, requestId)");
   assertIncludes(createCompetitiveEventBody, "fetchEventCreationHost(env, input.hosting_server_id ?? input.server_id, requestId)");
-  assertIncludes(createCompetitiveEventBody, "compensateFailedEventCreate");
+  assertIncludes(createCompetitiveEventBody, "await db.batch([");
+  assertIncludes(createCompetitiveEventBody, "transactional_create");
+  assertIncludes(createCompetitiveEventBody, "CASE WHEN changes() = 1 THEN 'event_created' ELSE NULL END", "Activity insert must fail the batch if the host update affects zero rows.");
+  assert.doesNotMatch(createCompetitiveEventBody, /compensateFailedEventCreate|compensation_cleanup|DELETE\s+FROM\s+competitive_events|DELETE\s+FROM\s+competitive_event_/i, "Official event creation must not use destructive compensation cleanup.");
+  assert.doesNotMatch(eventsLib, /function\s+compensateFailedEventCreate|EventCreateHostState/i, "Compensating event-create cleanup helpers must be removed.");
   assertIncludes(eventsLib, "EVENT_SCHEMA_NOT_READY");
   assertIncludes(eventsLib, "EVENT_CREATE_FAILED");
   assertIncludes(eventsLib, "input.preview === false && cleanSlug(input.event_slug ?? \"\")");

@@ -13,6 +13,7 @@ import {
   computeSuggestionHotScore,
   encodePublicSuggestionCursor,
   moderateSuggestionContent,
+  moderateEventSuggestion,
   normalizeSuggestionText,
   normalizeSuggestionTextCompact,
   paginateSuggestionRowsForTest,
@@ -58,6 +59,7 @@ async function main() {
   await assertSuggestionHeadRoute();
   await assertBoundedJson();
   assertModerationTransitions();
+  await assertModerationResponsePrivacy();
   assertSuggestionSchemaAndIndexes();
   assertSuggestionApis();
   assertLoadingUx();
@@ -422,6 +424,65 @@ function assertModerationTransitions() {
   assert.equal(terminal.ok, false, "converted suggestions must be terminal");
 }
 
+async function assertModerationResponsePrivacy() {
+  const creator = { id: "creator-user", discord_id: "111111111111111111", username: "Creator", avatar: null };
+  const envFor = (row: Partial<ReturnType<typeof moderationRow>> = {}) => ({
+    DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+    DB: new ModerationPrivacyDb({ ...moderationRow(), ...row }) as unknown as D1Database,
+  }) as Env & { DB: ModerationPrivacyDb };
+
+  {
+    const env = envFor({ creator_response: "Old public response" });
+    const result = await moderateEventSuggestion(env, creator, "suggestion-review", {
+      action: "reject",
+      reason: "Internal rejection note",
+      creator_response: "This internal rejection should never be public",
+    });
+    assert.equal(result.status, 200, "reject with internal reason should succeed");
+    assert.equal(env.DB.row.creator_response, null, "reject must clear public creatorResponse");
+    assert.equal(env.DB.actions[0]?.safe_reason, "Internal rejection note", "reject reason should remain in private audit row");
+  }
+
+  {
+    const env = envFor({ moderation_status: "accepted", public_status: "accepted", creator_response: "Accepted public response" });
+    await moderateEventSuggestion(env, creator, "suggestion-review", { action: "archive", reason: "Internal archive note" });
+    assert.equal(env.DB.row.creator_response, null, "archive must clear public creatorResponse");
+    assert.equal(env.DB.actions[0]?.safe_reason, "Internal archive note", "archive reason should be audit-only");
+  }
+
+  {
+    const env = envFor({ moderation_status: "archived", public_status: "archived", creator_response: "Stale public response" });
+    await moderateEventSuggestion(env, creator, "suggestion-review", { action: "restore", reason: "Internal restore note" });
+    assert.equal(env.DB.row.creator_response, null, "restore must clear stale public creatorResponse");
+    const approve = await moderateEventSuggestion(env, creator, "suggestion-review", { action: "approve_public_voting", reason: "", creator_response: "" });
+    assert.equal(approve.status, 200, "approve after restore should succeed");
+    assert.equal(env.DB.row.creator_response, null, "approve after restore without new public response must expose nothing");
+  }
+
+  {
+    const env = envFor();
+    const result = await moderateEventSuggestion(env, creator, "suggestion-review", {
+      action: "request_revision",
+      reason: "Creator wants a clearer plan",
+      creator_response: "Please add a clearer schedule and eligibility outline before this returns to public voting.",
+    });
+    assert.equal(result.status, 200, "request revision with a safe public response should succeed");
+    assert.equal(env.DB.row.creator_response, "Please add a clearer schedule and eligibility outline before this returns to public voting.");
+    assert.equal(env.DB.actions[0]?.safe_reason, "Creator wants a clearer plan", "internal reason remains in private audit row");
+  }
+
+  {
+    const env = envFor();
+    const result = await moderateEventSuggestion(env, creator, "suggestion-review", {
+      action: "request_revision",
+      reason: "Creator wants safer wording",
+      creator_response: "join discord.gg/example now",
+    });
+    assert.equal(result.status, 422, "unsafe public creator response should be rejected");
+    assert.equal(env.DB.actions.length, 0, "unsafe public response must not create an audit row");
+  }
+}
+
 function assertSuggestionSchemaAndIndexes() {
   const migration = source("migrations/0057_event_suggestions_phase_2a.sql");
   for (const table of [
@@ -472,6 +533,8 @@ function assertSuggestionApis() {
   assertIncludes(helper, "deterministicSuggestionEventId");
   assertIncludes(helper, "refreshSuggestionCountersStatement");
   assertIncludes(helper, "INSERT OR IGNORE INTO event_suggestion_reports");
+  assertIncludes(helper, "creator_response = CASE", "moderation update must branch public/private creator responses");
+  assertIncludes(helper, "ELSE NULL", "private moderation actions must clear creator_response");
   assertNotIncludes(helper, "SELECT * FROM event_suggestions WHERE id = ? LIMIT 1", "public/list paths should avoid broad suggestion reads");
   assert.doesNotMatch(helper, /DISCORD_BOT_TOKEN|discord\.com\/api|allowed_mentions|fetch\s*\(|runScheduled|dispatchDiscord|nitrado\.net/i, "suggestion helper must not send Discord or call automation/upstream systems");
   const publicProjection = helper.slice(helper.indexOf("function toPublicSuggestion"), helper.indexOf("function toOwnerSuggestion"));
@@ -553,6 +616,11 @@ function assertSuggestionApis() {
   assertIncludes(ownerPage, "Suggestions overview");
   assertIncludes(ownerPage, "/api/owner/events/suggestions");
   assertIncludes(ownerPage, "Convert to draft");
+  assertIncludes(ownerPage, "/owner/events/review?slug=");
+  assertIncludes(ownerPage, "Review converted draft");
+  assertNotIncludes(ownerPage, "`/events/${suggestion.convertedEventSlug}`", "converted draft links must not point to the public event route");
+  assertIncludes(ownerPage, "Internal reason");
+  assertIncludes(ownerPage, "Public response");
   assertIncludes(ownerPage, "creatorEventAdmin");
   assertIncludes(ownerPage, "Reports {suggestion.reportCount}", "owner moderation may see report counts");
   assertNotIncludes(ownerPage, "DZN_PLATFORM_CREATOR_DISCORD_ID", "owner UI must not expose creator ID config");
@@ -829,6 +897,119 @@ class SuggestionServerLookupDb {
         first: async () => this.row,
       }),
     };
+  }
+}
+
+function moderationRow() {
+  return {
+    id: "suggestion-review",
+    submitted_by_user_id: "member-user",
+    title: "Moderation privacy suggestion",
+    description: "A moderation test suggestion with a public-safe body.",
+    normalized_title: "moderation privacy suggestion",
+    content_fingerprint: "moderation-privacy-fingerprint",
+    competition_format: "server_vs_server",
+    platform: "playstation",
+    map_name: null,
+    suggested_server_id: null,
+    suggested_server_slug: null,
+    suggested_server_name: null,
+    open_to_any_server: 1,
+    suggested_date_start: null,
+    suggested_date_end: null,
+    structure_notes: null,
+    moderation_status: "pending_moderation",
+    public_status: "submitted",
+    creator_decision: null as string | null,
+    converted_event_id: null,
+    creator_response: null as string | null,
+    upvote_count: 0,
+    downvote_count: 0,
+    report_count: 0,
+    hot_score: 0,
+    created_at: "2026-07-23T10:00:00.000Z",
+    updated_at: "2026-07-23T10:00:00.000Z",
+    published_at: null as string | null,
+    moderated_at: null as string | null,
+    converted_event_slug: null,
+    converted_event_status: null,
+    converted_event_visibility: null,
+  };
+}
+
+class ModerationPrivacyDb {
+  actions: Array<Record<string, unknown>> = [];
+
+  constructor(public row: ReturnType<typeof moderationRow>) {}
+
+  prepare(sql: string) {
+    return new ModerationPrivacyStatement(this, sql);
+  }
+
+  async batch(statements: ModerationPrivacyStatement[]) {
+    for (const statement of statements) await statement.run();
+    return statements.map(() => ({ success: true }));
+  }
+}
+
+class ModerationPrivacyStatement {
+  private bindings: unknown[] = [];
+
+  constructor(private readonly db: ModerationPrivacyDb, private readonly sql: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all() {
+    if (/PRAGMA\s+table_info\(([^)]+)\)/i.test(this.sql)) {
+      const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1] ?? "";
+      return { results: (SUGGESTION_ROUTE_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
+    }
+    return { results: [] };
+  }
+
+  async first() {
+    if (this.sql.includes("FROM event_suggestions") && this.bindings[0] === this.db.row.id) {
+      return this.db.row;
+    }
+    return null;
+  }
+
+  async run() {
+    if (this.sql.includes("UPDATE event_suggestions SET creator_response = NULL")) {
+      this.db.row.creator_response = null;
+      this.db.row.updated_at = "2026-07-23T10:01:00.000Z";
+      return { success: true };
+    }
+    if (this.sql.includes("UPDATE event_suggestions") && this.sql.includes("moderation_status = ?")) {
+      const publicResponseFlag = Number(this.bindings[3] ?? 0);
+      const publicResponse = String(this.bindings[4] ?? "");
+      this.db.row = {
+        ...this.db.row,
+        moderation_status: String(this.bindings[0] ?? ""),
+        public_status: String(this.bindings[1] ?? ""),
+        creator_decision: String(this.bindings[2] ?? ""),
+        creator_response: publicResponseFlag === 1 ? (publicResponse ? publicResponse : this.db.row.creator_response) : null,
+        updated_at: "2026-07-23T10:01:00.000Z",
+        moderated_at: "2026-07-23T10:01:00.000Z",
+      };
+      return { success: true };
+    }
+    if (this.sql.includes("INSERT INTO event_suggestion_moderation_actions")) {
+      this.db.actions.push({
+        id: this.bindings[0],
+        suggestion_id: this.bindings[1],
+        actor_user_id: this.bindings[2],
+        action: this.bindings[3],
+        previous_status: this.bindings[4],
+        new_status: this.bindings[5],
+        safe_reason: this.bindings[6],
+      });
+      return { success: true };
+    }
+    throw new Error(`Unexpected moderation privacy query: ${this.sql.slice(0, 120)}`);
   }
 }
 
