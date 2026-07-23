@@ -1172,12 +1172,16 @@ assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Internal archive note 
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Archive exposed an internal moderation reason as creatorResponse."), true, "Phase 2A verifier must fail if private actions expose creatorResponse.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Approve after restore without a new public response exposed stale text."), true, "Phase 2A verifier must prove restored suggestions do not leak stale public responses.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("`/api/events/${encodeURIComponent(eventSlug)}`"), true, "Phase 2A verifier must prove public event detail excludes private converted drafts.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("phase2a-unknown-event-"), true, "Phase 2A verifier must prove unknown event slugs return 404 instead of demo fallback.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("knownPublicEventSlug"), true, "Phase 2A verifier must prove a known public event still returns 200.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("`/owner/events/review?slug=${encodeURIComponent(eventSlug)}`"), true, "Phase 2A verifier must check the fixed owner private draft review page.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("`/api/owner/events/${encodeURIComponent(eventSlug)}`"), true, "Phase 2A verifier must check the creator-only private draft detail API.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Creator owner draft API did not return the canonical private draft."), true, "Phase 2A verifier must require canonical private draft details for the creator.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Creator owner draft API was not private/no-store."), true, "Phase 2A verifier must require private no-store owner draft responses.");
 assert.equal(ownerPreviewPhase2ABlock.includes("privateDraftReviewCreatorOnly"), true, "Phase 2A privacy artifact must record creator-only draft review page checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes("privateDraftApiCreatorOnly"), true, "Phase 2A privacy artifact must record creator-only draft API checks.");
+assert.equal(ownerPreviewPhase2ABlock.includes("unknownPublicEventDetailExcluded"), true, "Phase 2A privacy artifact must record unknown event slug 404 checks.");
+assert.equal(ownerPreviewPhase2ABlock.includes("knownPublicEventDetailAvailable"), true, "Phase 2A privacy artifact must record known public event availability checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes("internalModerationReasonNotPublic"), true, "Phase 2A privacy artifact must record moderation reason privacy.");
 assert.equal(ownerPreviewPhase2ABlock.includes("x-dzn-cache-meta"), true, "Phase 2A preview must verify internal cache metadata is not public.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING"), true, "Phase 2A preview must classify missing suggestions HEAD handlers clearly.");

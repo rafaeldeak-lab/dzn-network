@@ -2193,6 +2193,15 @@ jobs:
               category: "PHASE2A_AUTH_MATRIX_FAILED",
               stage: "authMatrix",
             });
+            const unknownPublicEventDetail = await fetchSafe(base, `/api/events/${encodeURIComponent(`phase2a-unknown-event-${Date.now().toString(36)}`)}`, 404, {
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
+            const knownPublicEventSlug = process.env.EXISTING_CREATOR_GOVERNANCE_PREVIEW_EVENT_SLUG || "creator-governance-preview-cup-0919c46";
+            const knownPublicEventDetail = await fetchSafe(base, `/api/events/${encodeURIComponent(knownPublicEventSlug)}`, 200, {
+              category: "PHASE2A_AUTH_MATRIX_FAILED",
+              stage: "authMatrix",
+            });
             const reviewPath = `/owner/events/review?slug=${encodeURIComponent(eventSlug)}`;
             const ownerDraftApiPath = `/api/owner/events/${encodeURIComponent(eventSlug)}`;
             const reviewPageAnonymous = await fetchSafe(base, reviewPath, 302, {
@@ -2258,6 +2267,8 @@ jobs:
                 publicProjectionPrivateDraftHidden: true,
                 ownerProjectionRetainsDraft: true,
                 publicEventDetailStatus: publicDraftDetail.status,
+                unknownPublicEventDetailStatus: unknownPublicEventDetail.status,
+                knownPublicEventDetailStatus: knownPublicEventDetail.status,
                 ownerReviewPage: {
                   anonymous: reviewPageAnonymous.status,
                   nonCreatorOwner: reviewPageOwner.status,
@@ -2338,6 +2349,8 @@ jobs:
               ownerProjectionRetainsPrivateDraft: authMatrix.conversion.ownerProjectionRetainsDraft,
               internalModerationReasonNotPublic: authMatrix.moderationPrivacy.privateArchiveClearedCreatorResponse && authMatrix.moderationPrivacy.restoreClearedCreatorResponse && authMatrix.moderationPrivacy.approveAfterRestoreBlankResponse,
               privateDraftPublicEventDetailExcluded: authMatrix.conversion.publicEventDetailStatus === 404,
+              unknownPublicEventDetailExcluded: authMatrix.conversion.unknownPublicEventDetailStatus === 404,
+              knownPublicEventDetailAvailable: authMatrix.conversion.knownPublicEventDetailStatus === 200,
               privateDraftReviewCreatorOnly: authMatrix.conversion.ownerReviewPage.anonymous === 302 && authMatrix.conversion.ownerReviewPage.nonCreatorOwner === 403 && authMatrix.conversion.ownerReviewPage.creator === 200,
               privateDraftApiCreatorOnly: authMatrix.conversion.ownerDraftApi.anonymous === 401 && authMatrix.conversion.ownerDraftApi.nonCreatorOwner === 403 && authMatrix.conversion.ownerDraftApi.creator === 200 && authMatrix.conversion.ownerDraftApi.privateNoStore === true,
             };

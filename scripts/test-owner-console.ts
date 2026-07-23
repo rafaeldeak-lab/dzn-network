@@ -15,6 +15,7 @@ import {
   sanitizeOwnerDiscordChannelMappingInput,
 } from "../functions/_lib/owner-discord-control";
 import { hmacSha256 } from "../functions/_lib/crypto";
+import { onRequest as onPublicEventDetailRequest } from "../functions/api/events/[slug]";
 import { onRequestGet as onOwnerDraftEventGet } from "../functions/api/owner/events/[slug]";
 import { onRequestGet as onOwnerEventReviewPageGet } from "../functions/owner/events/review";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -408,7 +409,10 @@ void assertOwnerPrivateDraftReviewRoutes()
 
 async function assertOwnerPrivateDraftReviewRoutes() {
   const publicEventDetailSource = readFileSync("functions/_lib/events.ts", "utf8");
-  assert.match(publicEventDetailSource, /WHERE slug = \? AND COALESCE\(visibility,\s*'public'\)\s*!=\s*'private'/, "Public event detail API must keep excluding private events.");
+  assert.match(publicEventDetailSource, /WHERE slug = \?/);
+  assert.match(publicEventDetailSource, /visibility === "private" \|\| status === "draft"/, "Public event detail API must hide private or draft stored events before demo fallback.");
+  assert.match(publicEventDetailSource, /function eventNotFoundPayload\(\)/);
+  assert.doesNotMatch(publicEventDetailSource, /demoEvents\(\)\[0\]/, "Unknown event slugs must not fall back to the first demo event.");
 
   const ownerDraftApiSource = readFileSync("functions/api/owner/events/[slug].ts", "utf8");
   assert.match(ownerDraftApiSource, /requirePlatformCreatorEventAdmin/, "Private draft API must require creator event admin.");
@@ -498,6 +502,57 @@ async function assertOwnerPrivateDraftReviewRoutes() {
 
   const missingApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/missing", `dzn_session=${creatorToken}`, "missing"));
   assert.equal(missingApi.status, 404, "Missing private draft lookup should return 404 to the authorized creator.");
+
+  const publicEvent = await publicEventDetail(env, "public-live");
+  assert.equal(publicEvent.status, 200, "Stored public events should remain publicly readable.");
+  assert.match(publicEvent.headers.get("cache-control") ?? "", /public,\s*max-age=15/, "Public event 200 responses should retain public cache headers.");
+  const publicPayload = await publicEvent.json() as { ok: boolean; event?: { id: string; slug: string; visibility: string; status: string } };
+  assert.equal(publicPayload.ok, true);
+  assert.equal(publicPayload.event?.id, "public-live-event");
+  assert.equal(publicPayload.event?.slug, "public-live");
+
+  const privateEvent = await publicEventDetail(env, "private-live");
+  const privateBody = await privateEvent.text();
+  assert.equal(privateEvent.status, 404, "Stored private events must return a generic public 404.");
+  assert.match(privateEvent.headers.get("cache-control") ?? "", /no-store/, "Public private-event 404 must be no-store.");
+  assert.doesNotMatch(privateBody, /private-live-event|private|draft|Secret rules|Hidden reward|creator-user/i, "Private event fields must not enter public JSON.");
+
+  const privateDraftEvent = await publicEventDetail(env, "private-draft");
+  assert.equal(privateDraftEvent.status, 404, "Stored draft/private events must return 404 publicly.");
+
+  const publicDraftEvent = await publicEventDetail(env, "public-draft");
+  assert.equal(publicDraftEvent.status, 404, "Stored draft/public events must return 404 publicly.");
+
+  const missingEvent = await publicEventDetail(env, "missing-event");
+  const missingBody = await missingEvent.text();
+  assert.equal(missingEvent.status, 404, "Missing arbitrary event slugs must return 404.");
+  assert.equal(privateBody, missingBody, "Private and missing public event details must have the same safe error shape.");
+  const missingPayload = JSON.parse(missingBody) as { ok: boolean; errorCode?: string; message?: string; source?: string; status?: number };
+  assert.deepEqual(missingPayload, {
+    ok: false,
+    status: 404,
+    error: "EVENT_NOT_FOUND",
+    errorCode: "EVENT_NOT_FOUND",
+    message: "Event not found.",
+    source: "not_found",
+  });
+
+  const creatorPublicPrivate = await publicEventDetail(env, "private-draft", `dzn_session=${creatorToken}`);
+  assert.equal(creatorPublicPrivate.status, 404, "Configured creators must still use owner-only review APIs for private drafts.");
+  assert.match(creatorPublicPrivate.headers.get("cache-control") ?? "", /private,\s*no-store/);
+
+  const knownDemo = await publicEventDetail(env, "weekly-warriors");
+  assert.equal(knownDemo.status, 200, "Known exact demo event slugs may still use the display fallback.");
+  const knownDemoPayload = await knownDemo.json() as { source: string; event?: { slug: string } };
+  assert.equal(knownDemoPayload.source, "display_fallback");
+  assert.equal(knownDemoPayload.event?.slug, "weekly-warriors");
+
+  const unknownDemo = await publicEventDetail(env, "not-a-demo-event");
+  assert.equal(unknownDemo.status, 404, "Unknown slugs must never receive demoEvents()[0].");
+  assert.doesNotMatch(await unknownDemo.text(), /dzn-season-1|weekly-warriors|pandora-showdown|spring-clash|legends-cup|summer-wars/);
+
+  const privateKnownDemoSlug = await publicEventDetail(env, "dzn-season-1");
+  assert.equal(privateKnownDemoSlug.status, 404, "A private stored event using a known demo slug must not fall through to demo content.");
 }
 
 function makeOwnerDraftReviewContext(env: Env, url: string, cookie?: string, slug = ""): PagesContext {
@@ -513,6 +568,19 @@ function makeOwnerDraftReviewContext(env: Env, url: string, cookie?: string, slu
   };
 }
 
+function publicEventDetail(env: Env, slug: string, cookie?: string) {
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  return onPublicEventDetailRequest({
+    request: new Request(`https://example.com/api/events/${encodeURIComponent(slug)}`, { headers }),
+    env,
+    params: { slug },
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  });
+}
+
 class OwnerDraftReviewDb {
   constructor(private readonly sessionUsersByHash: Map<string, SessionUser>) {}
 
@@ -525,23 +593,51 @@ class OwnerDraftReviewDb {
   }
 
   eventBySlug(slug: string) {
-    if (slug !== "private-draft") return null;
+    const events = new Map<string, Record<string, unknown>>([
+      ["public-live", this.eventRow("public-live-event", "Public Live Event", "public-live", "upcoming", "public")],
+      ["private-live", this.eventRow("private-live-event", "Private Live Event", "private-live", "upcoming", "private", "Secret rules", "Hidden reward")],
+      ["private-draft", this.eventRow("private-draft-event", "Private Draft Event", "private-draft", "draft", "private", "Rules are still under creator review.", "Rewards are not published.")],
+      ["public-draft", this.eventRow("public-draft-event", "Public Draft Event", "public-draft", "draft", "public", "Draft rules", "Draft rewards")],
+      ["dzn-season-1", this.eventRow("private-demo-slug-event", "Private Demo Slug Event", "dzn-season-1", "upcoming", "private", "Private demo slug rules", "Private demo slug rewards")],
+    ]);
+    return events.get(slug) ?? null;
+  }
+
+  tableColumns(table: string) {
+    const columns: Record<string, string[]> = {
+      competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "starts_at", "ends_at", "created_at", "updated_at"],
+      competitive_event_servers: ["event_id", "server_id", "score", "wins", "losses", "draws"],
+      competitive_event_matches: ["event_id", "match_status"],
+      competitive_event_activity: ["event_id", "server_id", "activity_type", "message", "created_at"],
+      linked_servers: ["id", "public_slug", "server_category", "status"],
+    };
+    return (columns[table] ?? []).map((name) => ({ name }));
+  }
+
+  private eventRow(id: string, name: string, slug: string, status: string, visibility: string, rules = "Public rules", rewards = "Public rewards") {
     return {
-      id: "private-draft-event",
-      name: "Private Draft Event",
-      slug: "private-draft",
-      description: "Creator-only draft review event.",
-      status: "draft",
-      visibility: "private",
+      id,
+      name,
+      slug,
+      description: `${name} description.`,
+      status,
+      visibility,
       category: "deathmatch",
       event_type: "community_cup",
+      premium_tier: "free",
+      server_limit: 12,
+      team_limit: 12,
       starts_at: null,
       ends_at: null,
-      rules: "Rules are still under creator review.",
-      rewards: "Rewards are not published.",
+      created_by: "creator-user",
+      banner_url: null,
+      rules,
+      rewards,
       created_at: "2026-07-23T00:00:00.000Z",
       updated_at: "2026-07-23T00:00:00.000Z",
       registered_servers: 0,
+      total_score: 0,
+      match_count: 0,
     };
   }
 }
@@ -560,9 +656,26 @@ class OwnerDraftReviewStatement {
     if (/FROM sessions\s+JOIN users/i.test(this.sql)) {
       return this.db.sessionUser(String(this.values[0] ?? "")) as T | null;
     }
+    if (/FROM server_subscriptions/i.test(this.sql)) {
+      return null;
+    }
     if (/FROM competitive_events/i.test(this.sql) && /competitive_events\.slug = \?/i.test(this.sql)) {
       return this.db.eventBySlug(String(this.values[0] ?? "")) as T | null;
     }
+    if (/FROM competitive_events/i.test(this.sql) && /WHERE slug = \?/i.test(this.sql)) {
+      return this.db.eventBySlug(String(this.values[0] ?? "")) as T | null;
+    }
     return null;
+  }
+
+  async all<T>() {
+    const pragmaMatch = this.sql.match(/PRAGMA table_info\(([^)]+)\)/i);
+    if (pragmaMatch) {
+      return { results: this.db.tableColumns(pragmaMatch[1]) as T[] };
+    }
+    if (/FROM competitive_event_servers/i.test(this.sql) || /FROM competitive_event_matches/i.test(this.sql) || /FROM competitive_event_activity/i.test(this.sql)) {
+      return { results: [] as T[] };
+    }
+    return { results: [] as T[] };
   }
 }

@@ -381,7 +381,9 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
 }
 
 export async function getEventDetailPayload(env: Env, viewer: SessionUser | null, slug: string, options: { full?: boolean } = {}) {
-  if (!env.DB) return demoEventDetailPayload(slug, false);
+  const normalizedSlug = cleanSlug(slug);
+  if (!normalizedSlug) return eventNotFoundPayload();
+  if (!env.DB) return demoEventDetailPayload(normalizedSlug, false) ?? eventNotFoundPayload();
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
   if (!schemaReady.ok) return schemaReady;
   const entitlement = await hasFullEventAccess(env, viewer);
@@ -393,12 +395,17 @@ export async function getEventDetailPayload(env: Env, viewer: SessionUser | null
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
        FROM competitive_events
-       WHERE slug = ? AND COALESCE(visibility, 'public') != 'private'
+       WHERE slug = ?
        LIMIT 1`,
     )
-    .bind(cleanSlug(slug))
+    .bind(normalizedSlug)
     .first<EventRow>();
-  if (!event) return demoEventDetailPayload(slug, entitlement);
+  if (event) {
+    const visibility = String(event.visibility ?? "public").trim().toLowerCase();
+    const status = String(event.status ?? "draft").trim().toLowerCase();
+    if (visibility === "private" || status === "draft") return eventNotFoundPayload();
+  }
+  if (!event) return demoEventDetailPayload(normalizedSlug, entitlement) ?? eventNotFoundPayload();
   const [servers, matches, activity] = await Promise.all([
     fetchEventServers(env, event.id, full ? 100 : 10),
     fetchEventMatches(env, event.id),
@@ -1102,6 +1109,17 @@ function eventCreateFailed(stage: EventCreateStage, requestId: string, error: un
   };
 }
 
+function eventNotFoundPayload() {
+  return {
+    ok: false,
+    status: 404,
+    error: "EVENT_NOT_FOUND",
+    errorCode: "EVENT_NOT_FOUND",
+    message: "Event not found.",
+    source: "not_found",
+  };
+}
+
 function logEventCreateFailure(stage: EventCreateStage, requestId: string, error: unknown, extra: Record<string, unknown> = {}) {
   const category = typeof error === "string" ? error : error instanceof Error ? error.name : "unknown_error";
   const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code ?? "unknown") : "unknown";
@@ -1421,7 +1439,8 @@ function filterDemoEvents(options: EventListOptions, limit: number) {
 }
 
 function demoEventDetailPayload(slug: string, entitlement: boolean) {
-  const event = demoEvents().find((item) => item.slug === cleanSlug(slug)) ?? demoEvents()[0];
+  const event = demoEvents().find((item) => item.slug === cleanSlug(slug));
+  if (!event) return null;
   const leaderboard = demoServers(event.category).slice(0, entitlement ? 16 : 10);
   return {
     ok: true,
