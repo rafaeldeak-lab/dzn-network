@@ -1087,6 +1087,15 @@ assert.equal(ownerPreviewVerifyExistingBlock.includes("method: \"PATCH\""), fals
 assert.equal(ownerPreviewVerifyExistingBlock.includes("wrangler pages secret put"), false, "Existing-preview mode must not update secrets.");
 assert.equal(ownerPreviewVerifyExistingBlock.includes("discord.com/api"), false, "Existing-preview mode must not call Discord.");
 const ownerPreviewPhase2ABlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewPhase2APreflightStart, ownerPreviewValidateBranchStart);
+const ownerPreviewPhase2AAuthMatrixStart = ownerPreviewPhase2ABlock.indexOf("async function verifyAuthMatrix(base)");
+const ownerPreviewPhase2APaginationStart = ownerPreviewPhase2ABlock.indexOf("async function verifyPagination(base)");
+assert.notEqual(ownerPreviewPhase2AAuthMatrixStart, -1, "Phase 2A verifier must define an auth matrix check.");
+assert.notEqual(ownerPreviewPhase2APaginationStart, -1, "Phase 2A verifier must define a pagination check after the auth matrix.");
+const ownerPreviewPhase2AAuthMatrixBlock = ownerPreviewPhase2ABlock.slice(ownerPreviewPhase2AAuthMatrixStart, ownerPreviewPhase2APaginationStart);
+const verifierDescriptionMatch = ownerPreviewPhase2AAuthMatrixBlock.match(/const verifierDescription = "([^"]+)";/);
+assert.notEqual(verifierDescriptionMatch, null, "Phase 2A verifier must use a deterministic valid suggestion description.");
+const verifierDescriptionWordCount = verifierDescriptionMatch![1].split(/\s+/).filter(Boolean).length;
+assert.equal(verifierDescriptionWordCount >= 40 && verifierDescriptionWordCount <= 250, true, "Phase 2A verifier suggestion description must satisfy the API word-count contract.");
 assert.equal(ownerPreviewValidateBlock.includes("event-platform-performance-preview"), true, "Input validation must allow the Phase 2A performance preview mode.");
 assert.equal(ownerPreviewValidateBlock.includes("event-platform-performance-preview mode may only run from feature/event-platform-performance-foundation."), true, "Phase 2A preview mode must be tied to the reviewed feature branch.");
 assert.equal(ownerPreviewValidateBlock.includes("APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW"), true, "Phase 2A preview mode must require exact confirmation.");
@@ -1106,7 +1115,13 @@ assert.equal(ownerPreviewPhase2ABlock.includes("--migrations-dir"), false, "Phas
 assert.equal(ownerPreviewPhase2ABlock.includes("0057_event_suggestions_phase_2a.sql"), true, "Phase 2A preview must reference migration 0057.");
 assert.equal(ownerPreviewPhase2ABlock.includes("0058_"), false, "Phase 2A preview must not run a follow-up migration.");
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-"), true, "Phase 2A preview seed rows must be namespaced.");
-assert.equal(ownerPreviewPhase2ABlock.includes("DELETE FROM event_suggestions WHERE id LIKE"), true, "Phase 2A preview seed cleanup must be prefix-scoped.");
+assert.equal(ownerPreviewPhase2ABlock.includes("DELETE FROM event_suggestions WHERE id LIKE"), false, "Phase 2A preview seed must not broadly delete deterministic suggestion fixtures.");
+assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-api-member"), true, "Phase 2A preview must create a dedicated API verifier identity.");
+assert.equal(ownerPreviewPhase2ABlock.includes("owner-console-preview-phase2a-api-member-token"), true, "Phase 2A preview must create a dedicated API verifier session token.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE"), true, "Phase 2A preview must expose only the dedicated verifier cookie internally.");
+assert.equal(ownerPreviewPhase2ABlock.includes("submitted_by_user_id = ${sql(apiMemberId)}"), true, "Phase 2A preview must clean API-generated verifier rows by dedicated user.");
+assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-conversion-target"), true, "Phase 2A preview must seed a separate deterministic conversion target.");
+assert.equal(ownerPreviewPhase2ABlock.includes("suggestion-draft-phase2a-preview-conversion-target"), true, "Phase 2A preview must use the deterministic conversion target event ID.");
 assert.equal(ownerPreviewPhase2ABlock.includes("Creator Governance Preview Cup 0919c46"), false, "Phase 2A seed must not delete the verified creator-governance preview event.");
 assert.equal(ownerPreviewPhase2ABlock.includes("npm run test:performance-foundation"), true, "Phase 2A preview build must run performance foundation tests.");
 assert.equal(ownerPreviewPhase2ABlock.includes("./node_modules/.bin/wrangler pages functions build functions"), true, "Phase 2A preview build must compile Pages Functions.");
@@ -1130,8 +1145,47 @@ assert.equal(ownerPreviewPhase2ABlock.includes("reportCount"), true, "Phase 2A p
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-private-draft-event"), true, "Phase 2A preview must check private draft privacy.");
 assert.equal(ownerPreviewPhase2ABlock.includes("x-dzn-cache-meta"), true, "Phase 2A preview must verify internal cache metadata is not public.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING"), true, "Phase 2A preview must classify missing suggestions HEAD handlers clearly.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_VERIFIER_PAYLOAD_INVALID_DESCRIPTION_LENGTH"), true, "Phase 2A verifier must validate its own suggestion payload length.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_MEMBER_SUBMISSION_RESPONSE_INVALID"), true, "Phase 2A verifier must fail clearly when member submission response is malformed.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_AUTH_MATRIX_FAILED"), true, "Phase 2A verifier must classify auth matrix failures.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_MODERATION_STATE_MACHINE_FAILED"), true, "Phase 2A verifier must classify moderation state-machine failures.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED"), true, "Phase 2A verifier must classify vote rate-limit failures.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_CONCURRENT_CONVERSION_FAILED"), true, "Phase 2A verifier must classify concurrent conversion failures.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_D1_FINAL_VERIFICATION_FAILED"), true, "Phase 2A verifier must classify final D1 verification failures.");
 assert.equal(ownerPreviewPhase2ABlock.includes("failure-summary.json"), true, "Phase 2A preview verification failures must create a sanitized failure summary.");
+assert.equal(ownerPreviewPhase2ABlock.includes("verification-progress.json"), true, "Phase 2A preview must persist staged verification progress.");
+assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("route-probes.json"'), true, "Phase 2A route probe report must be written immediately after route probes pass.");
+assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("performance-sampling.json"'), true, "Phase 2A performance report must be written immediately after sampling passes.");
+assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("cache-verification.json"'), true, "Phase 2A cache report must be written immediately after cache checks pass.");
+assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("auth-matrix.json"'), true, "Phase 2A auth report must be written immediately after auth checks pass.");
 assert.equal(ownerPreviewPhase2ABlock.includes("Cache API") || ownerPreviewPhase2ABlock.includes("cache"), true, "Phase 2A preview must include cache verification.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('fetchJson(base, "/api/events/suggestions", 200'), true, "Successful Phase 2A member submission must expect the actual 200 API contract.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('fetchJson(base, "/api/events/suggestions", 201'), false, "Phase 2A verifier must not expect 201 for suggestion creation.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('|| "phase2a-preview-public-voting"'), false, "Phase 2A verifier must not fall back to a seeded suggestion ID.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("const createdId = typeof submitted?.id === \"string\""), true, "Phase 2A verifier must require the returned suggestion ID.");
+assert.equal(
+  ownerPreviewPhase2AAuthMatrixBlock.indexOf("approve_public_voting") < ownerPreviewPhase2AAuthMatrixBlock.indexOf("`${suggestionPath}/vote`"),
+  true,
+  "Phase 2A verifier must approve a pending suggestion before voting.",
+);
+assert.equal(
+  ownerPreviewPhase2AAuthMatrixBlock.indexOf("approve_public_voting") < ownerPreviewPhase2AAuthMatrixBlock.indexOf("`${suggestionPath}/report`"),
+  true,
+  "Phase 2A verifier must approve a pending suggestion before reporting.",
+);
+assert.equal(
+  ownerPreviewPhase2AAuthMatrixBlock.indexOf("approve_public_voting") < ownerPreviewPhase2AAuthMatrixBlock.indexOf('action: "shortlist"'),
+  true,
+  "Phase 2A verifier must not shortlist directly from pending moderation.",
+);
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("SELF_VOTE_DENIED"), true, "Phase 2A verifier must test self-vote denial.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("SELF_REPORT_DENIED"), true, "Phase 2A verifier must test self-report denial.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("VOTE_RATE_LIMITED"), true, "Phase 2A verifier must test immediate vote-switch rate limiting.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("setTimeout(resolve, 1700)"), true, "Phase 2A verifier must delay before the successful vote removal check.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("approveActionCountAfterRepeat !== approveActionCount"), true, "Phase 2A verifier must assert repeat moderation does not add another audit row.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("API-submitted verifier suggestion was converted unexpectedly."), true, "Phase 2A verifier must ensure the API-created suggestion is not converted.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Promise.all(["), true, "Phase 2A verifier must issue concurrent conversion requests.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("one canonical event"), true, "Phase 2A verifier must require one canonical conversion event.");
 assert.equal(ownerPreviewPhase2ABlock.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED") && ownerPreviewPhase2ABlock.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED"), true, "Phase 2A preview must keep both Discord flags false.");
 assert.equal(ownerPreviewPhase2ABlock.includes("discord.com/api"), false, "Phase 2A preview mode must not call Discord.");
 assert.equal(ownerPreviewPhase2ABlock.includes("nitrado.net"), false, "Phase 2A preview mode must not call Nitrado.");

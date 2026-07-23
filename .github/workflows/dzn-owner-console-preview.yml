@@ -1157,6 +1157,7 @@ jobs:
               `OWNER_CONSOLE_OWNER_COOKIE=dzn_session=owner-console-preview-owner-token`,
               `OWNER_CONSOLE_CREATOR_COOKIE=dzn_session=owner-console-preview-creator-token`,
               `OWNER_CONSOLE_NON_OWNER_COOKIE=dzn_session=owner-console-preview-non-owner-token`,
+              `PHASE2A_API_MEMBER_COOKIE=dzn_session=owner-console-preview-phase2a-api-member-token`,
               "",
             ].join("\n"));
             fs.writeFileSync("dzn-event-platform-performance-preview/guard.json", JSON.stringify({
@@ -1347,10 +1348,19 @@ jobs:
 
           node <<'NODE'
           const fs = require("node:fs");
+          const crypto = require("node:crypto");
           const prefix = process.env.EVENT_PLATFORM_PERFORMANCE_PREVIEW_SEED_PREFIX || "phase2a-preview-";
           if (prefix !== "phase2a-preview-") {
             console.error("Phase 2A preview seed prefix constant mismatch.");
             process.exit(1);
+          }
+          const apiMemberId = "phase2a-preview-api-member";
+          const apiMemberToken = "owner-console-preview-phase2a-api-member-token";
+          const conversionTargetId = "phase2a-preview-conversion-target";
+          const conversionTargetEventId = "suggestion-draft-phase2a-preview-conversion-target";
+          const sessionSecret = process.env.OWNER_PREVIEW_SESSION_SECRET || "dev-session-secret";
+          function hmac(value) {
+            return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
           }
           function sql(value) {
             return `'${String(value ?? "").replace(/'/g, "''")}'`;
@@ -1362,6 +1372,7 @@ jobs:
             ["phase2a-preview-other-member", "990000000000002002", "Phase2A Voter"],
             ["phase2a-preview-owner", "990000000000002003", "Phase2A Owner"],
             ["phase2a-preview-creator", "990000000000002004", "Phase2A Creator"],
+            [apiMemberId, "990000000000002005", "Phase2A API Verifier"],
           ];
           const suggestions = [
             ["phase2a-preview-pending", "phase2a-preview-member", "Supply Run Showdown", "Teams race to complete a clean supply route with creator review before public voting.", "server_vs_server", "cross_platform", "Chernarus", null, 1, "pending_moderation", "submitted", null, 0, 0, 0, 0.1],
@@ -1374,34 +1385,39 @@ jobs:
             ["phase2a-preview-tie-b", "phase2a-preview-other-member", "Tie Break Bravo", "Equal score cursor pagination fixture bravo with deterministic ordering.", "stat_race", "pc", "Chernarus", null, 1, "public_voting", "public_voting", null, 3, 0, 0, 5.0],
             ["phase2a-preview-server-linked", "phase2a-preview-member", "Nuketown Server Trial", "A public suggestion linked through a public server slug instead of an internal browser ID.", "server_vs_server", "cross_platform", "Chernarus", serverSubquery, 0, "public_voting", "public_voting", null, 2, 0, 0, 4.5],
             ["phase2a-preview-open-any", "phase2a-preview-other-member", "Open Host Challenge", "An open-to-any-server suggestion for route and filter coverage.", "community_challenge", "unsure", "Any official map", null, 1, "accepted", "accepted", null, 5, 0, 0, 7.5],
+            [conversionTargetId, "phase2a-preview-other-member", "Verifier Conversion Target", "A deterministic shortlisted suggestion reserved for the preview verifier conversion sequence and concurrency checks.", "community_challenge", "pc", "Chernarus", null, 1, "shortlisted", "shortlisted", null, 0, 0, 0, 6.25],
           ];
           const statements = [];
           statements.push("PRAGMA foreign_keys = ON;");
-          statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM event_suggestion_reports WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM event_suggestions WHERE id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM competitive_event_activity WHERE event_id LIKE ${sql(`${prefix}%`)} OR id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM competitive_event_servers WHERE event_id LIKE ${sql(`${prefix}%`)} OR id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM competitive_event_matches WHERE event_id LIKE ${sql(`${prefix}%`)} OR id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM competitive_events WHERE id LIKE ${sql(`${prefix}%`)};`);
-          statements.push(`DELETE FROM users WHERE id LIKE ${sql(`${prefix}%`)};`);
+          statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
+          statements.push(`DELETE FROM event_suggestion_reports WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
+          statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
+          statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)});`);
+          statements.push(`DELETE FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL;`);
+          statements.push(`DELETE FROM sessions WHERE id = ${sql("phase2a-preview-api-member-session")} OR user_id = ${sql(apiMemberId)};`);
+          statements.push(`DELETE FROM competitive_event_activity WHERE event_id = ${sql(conversionTargetEventId)};`);
+          statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id = ${sql(conversionTargetId)};`);
+          statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id = ${sql(conversionTargetId)};`);
+          statements.push(`DELETE FROM event_suggestion_reports WHERE suggestion_id = ${sql(conversionTargetId)};`);
+          statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id = ${sql(conversionTargetId)};`);
+          statements.push(`DELETE FROM event_suggestions WHERE id = ${sql(conversionTargetId)};`);
+          statements.push(`DELETE FROM competitive_events WHERE id = ${sql(conversionTargetEventId)};`);
           for (const [id, discordId, username] of users) {
-            statements.push(`INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (${sql(id)}, ${sql(discordId)}, ${sql(username)}, NULL, ${sql(now)}, ${sql(now)});`);
+            statements.push(`INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (${sql(id)}, ${sql(discordId)}, ${sql(username)}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = excluded.updated_at;`);
           }
-          statements.push(`INSERT INTO competitive_events (id, name, slug, description, category, event_type, status, visibility, premium_tier, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at) VALUES (${sql("phase2a-preview-private-draft-event")}, ${sql("Phase 2A Private Draft")}, ${sql("phase2a-preview-private-draft")}, ${sql("Private draft converted from a preview suggestion; not public.")}, ${sql("deathmatch")}, ${sql("community_cup")}, ${sql("draft")}, ${sql("private")}, ${sql("pro")}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("phase2a-preview-creator")}, ${sql("Draft rules pending creator review.")}, NULL, ${sql(now)}, ${sql(now)});`);
+          statements.push(`INSERT INTO sessions (id, user_id, session_token_hash, expires_at, created_at) VALUES (${sql("phase2a-preview-api-member-session")}, ${sql(apiMemberId)}, ${sql(hmac(apiMemberToken))}, ${sql("2099-01-01T00:00:00.000Z")}, ${sql(now)});`);
+          statements.push(`INSERT INTO competitive_events (id, name, slug, description, category, event_type, status, visibility, premium_tier, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at) VALUES (${sql("phase2a-preview-private-draft-event")}, ${sql("Phase 2A Private Draft")}, ${sql("phase2a-preview-private-draft")}, ${sql("Private draft converted from a preview suggestion; not public.")}, ${sql("deathmatch")}, ${sql("community_cup")}, ${sql("draft")}, ${sql("private")}, ${sql("pro")}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("phase2a-preview-creator")}, ${sql("Draft rules pending creator review.")}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, status = excluded.status, visibility = excluded.visibility, updated_at = excluded.updated_at;`);
           for (const [id, userId, title, description, format, platform, map, serverExpression, openToAny, moderationStatus, publicStatus, convertedEventId, upvotes, downvotes, reports, hotScore] of suggestions) {
             const normalized = String(title).toLowerCase();
             const serverSql = typeof serverExpression === "string" && serverExpression.startsWith("(") ? serverExpression : "NULL";
-            statements.push(`INSERT INTO event_suggestions (id, submitted_by_user_id, title, description, normalized_title, content_fingerprint, competition_format, platform, map_name, suggested_server_id, open_to_any_server, suggested_date_start, suggested_date_end, structure_notes, moderation_status, public_status, creator_decision, converted_event_id, creator_response, upvote_count, downvote_count, report_count, hot_score, created_at, updated_at, published_at, moderated_at) VALUES (${sql(id)}, ${sql(userId)}, ${sql(title)}, ${sql(description)}, ${sql(normalized)}, ${sql(`phase2a:${id}`)}, ${sql(format)}, ${sql(platform)}, ${sql(map)}, ${serverSql}, ${Number(openToAny)}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("Preview fixture structure notes.")}, ${sql(moderationStatus)}, ${sql(publicStatus)}, ${convertedEventId ? sql("converted_to_event") : "NULL"}, ${convertedEventId ? sql(convertedEventId) : "NULL"}, ${publicStatus === "accepted" || publicStatus === "converted_to_event" ? sql("Creator reviewed for preview.") : "NULL"}, ${Number(upvotes)}, ${Number(downvotes)}, ${Number(reports)}, ${Number(hotScore)}, ${sql(now)}, ${sql(now)}, ${["public_voting", "shortlisted", "accepted", "converted_to_event"].includes(publicStatus) ? sql(now) : "NULL"}, ${["shortlisted", "accepted", "converted_to_event"].includes(moderationStatus) ? sql(now) : "NULL"});`);
+            statements.push(`INSERT INTO event_suggestions (id, submitted_by_user_id, title, description, normalized_title, content_fingerprint, competition_format, platform, map_name, suggested_server_id, open_to_any_server, suggested_date_start, suggested_date_end, structure_notes, moderation_status, public_status, creator_decision, converted_event_id, creator_response, upvote_count, downvote_count, report_count, hot_score, created_at, updated_at, published_at, moderated_at) VALUES (${sql(id)}, ${sql(userId)}, ${sql(title)}, ${sql(description)}, ${sql(normalized)}, ${sql(`phase2a:${id}`)}, ${sql(format)}, ${sql(platform)}, ${sql(map)}, ${serverSql}, ${Number(openToAny)}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("Preview fixture structure notes.")}, ${sql(moderationStatus)}, ${sql(publicStatus)}, ${convertedEventId ? sql("converted_to_event") : "NULL"}, ${convertedEventId ? sql(convertedEventId) : "NULL"}, ${publicStatus === "accepted" || publicStatus === "converted_to_event" ? sql("Creator reviewed for preview.") : "NULL"}, ${Number(upvotes)}, ${Number(downvotes)}, ${Number(reports)}, ${Number(hotScore)}, ${sql(now)}, ${sql(now)}, ${["public_voting", "shortlisted", "accepted", "converted_to_event"].includes(publicStatus) ? sql(now) : "NULL"}, ${["shortlisted", "accepted", "converted_to_event"].includes(moderationStatus) ? sql(now) : "NULL"}) ON CONFLICT(id) DO UPDATE SET submitted_by_user_id = excluded.submitted_by_user_id, title = excluded.title, description = excluded.description, normalized_title = excluded.normalized_title, content_fingerprint = excluded.content_fingerprint, competition_format = excluded.competition_format, platform = excluded.platform, map_name = excluded.map_name, suggested_server_id = excluded.suggested_server_id, open_to_any_server = excluded.open_to_any_server, suggested_date_start = excluded.suggested_date_start, suggested_date_end = excluded.suggested_date_end, structure_notes = excluded.structure_notes, moderation_status = excluded.moderation_status, public_status = excluded.public_status, creator_decision = excluded.creator_decision, converted_event_id = excluded.converted_event_id, creator_response = excluded.creator_response, upvote_count = excluded.upvote_count, downvote_count = excluded.downvote_count, report_count = excluded.report_count, hot_score = excluded.hot_score, updated_at = excluded.updated_at, published_at = excluded.published_at, moderated_at = excluded.moderated_at;`);
           }
-          statements.push(`INSERT INTO event_suggestion_servers (suggestion_id, linked_server_id, relationship_type, created_at) SELECT ${sql("phase2a-preview-server-linked")}, id, 'suggested', ${sql(now)} FROM linked_servers WHERE public_slug = 'owner-console-nuketown' OR id = 'owner-console-nuketown' LIMIT 1;`);
-          statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-public-voting")}, ${sql("phase2a-preview-member")}, 1, ${sql(now)}, ${sql(now)});`);
-          statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, -1, ${sql(now)}, ${sql(now)});`);
-          statements.push(`INSERT INTO event_suggestion_reports (id, suggestion_id, reporter_user_id, reason, safe_note, status, created_at) VALUES (${sql("phase2a-preview-report-open")}, ${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, 'spam', ${sql("Preview moderation-only report note.")}, 'open', ${sql(now)});`);
-          statements.push(`INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at) VALUES (${sql("phase2a-preview-conversion-activity")}, ${sql("phase2a-preview-private-draft-event")}, NULL, 'suggestion_converted_to_draft', ${sql("Community suggestion converted to draft for preview.")}, ${sql(JSON.stringify({ suggestion_id: "phase2a-preview-converted-private-draft" }))}, ${sql(now)});`);
-          statements.push(`INSERT INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at) VALUES (${sql("phase2a-preview-conversion-action")}, ${sql("phase2a-preview-converted-private-draft")}, ${sql("phase2a-preview-creator")}, 'convert_to_event_draft', 'accepted', 'converted_to_event', ${sql("Preview conversion audit.")}, ${sql(now)});`);
+          statements.push(`INSERT OR IGNORE INTO event_suggestion_servers (suggestion_id, linked_server_id, relationship_type, created_at) SELECT ${sql("phase2a-preview-server-linked")}, id, 'suggested', ${sql(now)} FROM linked_servers WHERE public_slug = 'owner-console-nuketown' OR id = 'owner-console-nuketown' LIMIT 1;`);
+          statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-public-voting")}, ${sql("phase2a-preview-member")}, 1, ${sql(now)}, ${sql(now)}) ON CONFLICT(suggestion_id, user_id) DO UPDATE SET vote_value = excluded.vote_value, updated_at = excluded.updated_at;`);
+          statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, -1, ${sql(now)}, ${sql(now)}) ON CONFLICT(suggestion_id, user_id) DO UPDATE SET vote_value = excluded.vote_value, updated_at = excluded.updated_at;`);
+          statements.push(`INSERT OR IGNORE INTO event_suggestion_reports (id, suggestion_id, reporter_user_id, reason, safe_note, status, created_at) VALUES (${sql("phase2a-preview-report-open")}, ${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, 'spam', ${sql("Preview moderation-only report note.")}, 'open', ${sql(now)});`);
+          statements.push(`INSERT OR IGNORE INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at) VALUES (${sql("phase2a-preview-conversion-activity")}, ${sql("phase2a-preview-private-draft-event")}, NULL, 'suggestion_converted_to_draft', ${sql("Community suggestion converted to draft for preview.")}, ${sql(JSON.stringify({ suggestion_id: "phase2a-preview-converted-private-draft" }))}, ${sql(now)});`);
+          statements.push(`INSERT OR IGNORE INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at) VALUES (${sql("phase2a-preview-conversion-action")}, ${sql("phase2a-preview-converted-private-draft")}, ${sql("phase2a-preview-creator")}, 'convert_to_event_draft', 'accepted', 'converted_to_event', ${sql("Preview conversion audit.")}, ${sql(now)});`);
           fs.writeFileSync("phase2a-preview-seed.sql", `${statements.join("\n")}\n`);
           NODE
 
@@ -1595,9 +1611,65 @@ jobs:
           const ownerCookie = process.env.OWNER_CONSOLE_OWNER_COOKIE || "";
           const creatorCookie = process.env.OWNER_CONSOLE_CREATOR_COOKIE || "";
           const memberCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE || "";
+          const apiMemberCookie = process.env.PHASE2A_API_MEMBER_COOKIE || "";
           const artifacts = "dzn-event-platform-performance-preview";
+          let activeStage = "verification";
+          const progress = {
+            projectConfig: "not_run",
+            d1InitialVerification: "not_run",
+            routeProbes: "not_run",
+            performanceSampling: "not_run",
+            cacheVerification: "not_run",
+            authMatrix: "not_run",
+            privacyChecks: "not_run",
+            pagination: "not_run",
+            d1FinalVerification: "not_run",
+            finalReport: "not_run",
+          };
 
-          function fail(message) {
+          function sanitizeFailureValue(value) {
+            return String(value ?? "")
+              .replace(/dzn_session=[^;\s"]+/gi, "dzn_session=[redacted-cookie]")
+              .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "[uuid]")
+              .replace(/[A-Za-z0-9_\-]{64,}/g, "[redacted]")
+              .slice(0, 500);
+          }
+          function updateProgress(stage, status) {
+            if (stage && status === "running") activeStage = stage;
+            if (stage) progress[stage] = status;
+            fs.mkdirSync(artifacts, { recursive: true });
+            fs.writeFileSync(`${artifacts}/verification-progress.json`, JSON.stringify(progress, null, 2));
+          }
+          function writeJsonArtifact(name, value, stage) {
+            fs.mkdirSync(artifacts, { recursive: true });
+            fs.writeFileSync(`${artifacts}/${name}`, JSON.stringify(value, null, 2));
+            if (stage) updateProgress(stage, "passed");
+          }
+          function writeFailureSummary(category, message, details = {}) {
+            fs.mkdirSync(artifacts, { recursive: true });
+            const safeDetails = {};
+            for (const [key, value] of Object.entries(details)) safeDetails[key] = sanitizeFailureValue(value);
+            const stage = details.stage || activeStage;
+            fs.writeFileSync(`${artifacts}/failure-summary.json`, JSON.stringify({
+              ok: false,
+              category,
+              message: sanitizeFailureValue(message),
+              stage: sanitizeFailureValue(stage || category || "verification"),
+              method: details.method ? sanitizeFailureValue(details.method) : undefined,
+              route: details.route ? sanitizeFailureValue(details.route) : undefined,
+              status: details.status ?? undefined,
+              contentType: details.contentType ? sanitizeFailureValue(details.contentType) : undefined,
+              bodyLength: details.bodyLength ?? undefined,
+              cacheStatus: details.cacheStatus ? sanitizeFailureValue(details.cacheStatus) : undefined,
+              branch: process.env.CANDIDATE_BRANCH,
+              commit: process.env.CANDIDATE_SHA,
+              mode: "event-platform-performance-preview",
+            }, null, 2));
+          }
+          function fail(message, details = {}) {
+            const category = details.category || "PHASE2A_PREVIEW_VERIFICATION_FAILED";
+            updateProgress(details.stage || activeStage, "failed");
+            writeFailureSummary(category, message, details);
             console.error(message);
             process.exit(1);
           }
@@ -1685,7 +1757,16 @@ jobs:
                   { category: "PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING", method, route: safeRoute, status: response.status, contentType, bodyLength: text.length, cacheStatus },
                 );
               }
-              fail(`${base}${path} expected ${expectedStatus}, got ${response.status}; content-type=${contentType}; body-length=${text.length}`, { method, route: safeRoute, status: response.status, contentType, bodyLength: text.length, cacheStatus });
+              fail(`${base}${path} expected ${expectedStatus}, got ${response.status}; content-type=${contentType}; body-length=${text.length}`, {
+                category: options.category || "PHASE2A_PREVIEW_HTTP_CHECK_FAILED",
+                stage: options.stage,
+                method,
+                route: safeRoute,
+                status: response.status,
+                contentType,
+                bodyLength: text.length,
+                cacheStatus,
+              });
             }
             for (const marker of ["TOKEN_ENCRYPTION_KEY", "SESSION_SECRET", "encrypted_token", "OAuth", "Cloudflare", "Error 1102", "Worker exceeded resource limits", "Minified React error #", "stack trace"]) {
               if (text.includes(marker)) fail(`${path} exposed forbidden marker ${marker}.`);
@@ -1697,7 +1778,7 @@ jobs:
             try {
               return { ...result, json: result.text ? JSON.parse(result.text) : null };
             } catch {
-              fail(`${path} returned non-JSON payload.`);
+              fail(`${path} returned non-JSON payload.`, { category: options.category || "PHASE2A_PREVIEW_JSON_CHECK_FAILED", stage: options.stage, route: new URL(`${base}${path}`).pathname });
             }
           }
           async function verifyBase(base) {
@@ -1781,39 +1862,167 @@ jobs:
           }
           async function verifyAuthMatrix(base) {
             const jsonHeaders = { "Content-Type": "application/json" };
+            const verifierDescription = "This preview-only community challenge proposes a fair multi-server event where authenticated players represent approved connected servers, complete clearly documented objectives, and earn results only from verified activity. The platform creator reviews every rule, schedule, eligibility requirement, evidence standard, dispute process, and final outcome before publication. Nothing is announced automatically, no paid feature changes competitive scoring, and all participating servers receive equal treatment throughout the test competition.";
+            const wordCount = verifierDescription.split(/\s+/).filter(Boolean).length;
+            if (wordCount < 40 || wordCount > 250) {
+              fail("PHASE2A_VERIFIER_PAYLOAD_INVALID_DESCRIPTION_LENGTH", {
+                category: "PHASE2A_VERIFIER_PAYLOAD_INVALID_DESCRIPTION_LENGTH",
+                stage: "authMatrix",
+                wordCount,
+              });
+            }
             const validSuggestion = JSON.stringify({
               title: "Preview Submitted Suggestion",
-              description: "A valid preview-only community suggestion with enough detail for moderation and future tournament design checks.",
+              description: verifierDescription,
               competition_format: "community_challenge",
               platform: "cross_platform",
               map_name: "Chernarus",
               open_to_any_server: true,
               structure_notes: "Preview-only structure notes.",
             });
-            const anonSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: validSuggestion });
-            const memberSubmit = await fetchJson(base, "/api/events/suggestions", 201, { method: "POST", headers: { ...jsonHeaders, Cookie: memberCookie }, body: validSuggestion });
-            const createdId = memberSubmit.json?.suggestion?.id || memberSubmit.json?.id || "phase2a-preview-public-voting";
-            const invalidJson = await fetchSafe(base, "/api/events/suggestions", 400, { method: "POST", headers: { ...jsonHeaders, Cookie: memberCookie }, body: "{not-json" });
-            const oversized = await fetchSafe(base, "/api/events/suggestions", 413, { method: "POST", headers: { ...jsonHeaders, Cookie: memberCookie }, body: JSON.stringify({ title: "x", description: "x".repeat(20_000) }) });
-            const vote = await fetchJson(base, `/api/events/suggestions/${createdId}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 1 }) });
-            const voteRemove = await fetchJson(base, `/api/events/suggestions/${createdId}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 0 }) });
-            const report = await fetchJson(base, `/api/events/suggestions/${createdId}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }) });
-            if (JSON.stringify(report.json).includes("reportCount")) fail("Public report response exposed reportCount.");
-            const anonVote = await fetchSafe(base, `/api/events/suggestions/${createdId}/vote`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ vote_value: 1 }) });
-            const ownerModerateDenied = await fetchSafe(base, `/api/owner/events/suggestions/${createdId}/moderate`, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ action: "shortlist", reason: "Preview deny." }) });
-            const creatorModerate = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "shortlist", reason: "Preview shortlist." }) });
-            const creatorModerateRepeat = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "shortlist", reason: "Preview shortlist." }) });
-            const invalidTransition = await fetchSafe(base, `/api/owner/events/suggestions/${createdId}/moderate`, 409, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Invalid after shortlist." }) });
-            const convert = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/convert`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ reason: "Preview conversion." }) });
-            const convertRepeat = await fetchJson(base, `/api/owner/events/suggestions/${createdId}/convert`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ reason: "Preview conversion repeat." }) });
-            if (convert.json?.eventId && convertRepeat.json?.eventId && convert.json.eventId !== convertRepeat.json.eventId) fail("Repeated conversion returned different event IDs.");
+            const conversionTargetId = "phase2a-preview-conversion-target";
+            const conversionTargetEventId = "suggestion-draft-phase2a-preview-conversion-target";
+            const readCount = async (sql, params = []) => Number((await d1Query(sql, params))[0]?.count || 0);
+            const findOwnerSuggestion = async (id) => {
+              const ownerList = await fetchJson(base, "/api/owner/events/suggestions?status=all&limit=100", 200, {
+                headers: { Cookie: creatorCookie },
+                category: "PHASE2A_AUTH_MATRIX_FAILED",
+                stage: "authMatrix",
+              });
+              return (ownerList.json?.suggestions || []).find((item) => item.id === id) || null;
+            };
+            const findPublicConvertedSuggestion = async (id) => {
+              const list = await fetchJson(base, "/api/events/suggestions?sort=newest&status=converted_to_event&limit=20", 200, {
+                category: "PHASE2A_AUTH_MATRIX_FAILED",
+                stage: "authMatrix",
+              });
+              return (list.json?.suggestions || []).find((item) => item.id === id) || null;
+            };
+            const requireSuggestionState = (result, moderationStatus, publicStatus, label) => {
+              const suggestion = result?.json?.suggestion;
+              if (!suggestion || suggestion.moderationStatus !== moderationStatus || suggestion.publicStatus !== publicStatus) {
+                fail(`${label} returned an unexpected moderation state.`, {
+                  category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED",
+                  stage: "authMatrix",
+                });
+              }
+              return suggestion;
+            };
+            const requireJsonError = (result, error, label) => {
+              if (result?.json?.error !== error && result?.json?.errorCode !== error) {
+                fail(`${label} returned an unexpected safe error.`, {
+                  category: "PHASE2A_AUTH_MATRIX_FAILED",
+                  stage: "authMatrix",
+                });
+              }
+            };
+
+            const anonSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: validSuggestion, category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const memberSubmit = await fetchJson(base, "/api/events/suggestions", 200, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: validSuggestion, category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const submitted = memberSubmit.json?.suggestion;
+            const createdId = typeof submitted?.id === "string" && submitted.id.trim() ? submitted.id : null;
+            if (memberSubmit.json?.ok !== true || !createdId || submitted.moderationStatus !== "pending_moderation" || submitted.publicStatus !== "submitted") {
+              fail("PHASE2A_MEMBER_SUBMISSION_RESPONSE_INVALID", {
+                category: "PHASE2A_MEMBER_SUBMISSION_RESPONSE_INVALID",
+                stage: "authMatrix",
+              });
+            }
+            const suggestionPath = `/api/events/suggestions/${encodeURIComponent(createdId)}`;
+            const ownerPath = `/api/owner/events/suggestions/${encodeURIComponent(createdId)}`;
+            const invalidJson = await fetchSafe(base, "/api/events/suggestions", 400, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const oversized = await fetchSafe(base, "/api/events/suggestions", 413, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: JSON.stringify({ title: "x", description: "x".repeat(20_000) }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonModerate = await fetchSafe(base, `${ownerPath}/moderate`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ action: "approve_public_voting", reason: "Anonymous deny." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonConvert = await fetchSafe(base, `${ownerPath}/convert`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ reason: "Anonymous deny." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const ownerModerateDenied = await fetchSafe(base, `${ownerPath}/moderate`, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview deny." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const approve = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview approve public voting." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            requireSuggestionState(approve, "public_voting", "public_voting", "Creator approve_public_voting");
+            const approveActionCount = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'approve_public_voting';", [createdId]);
+            const approveRepeat = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Preview repeat approve public voting." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            requireSuggestionState(approveRepeat, "public_voting", "public_voting", "Repeat approve_public_voting");
+            if (approveRepeat.json?.idempotent !== true) {
+              fail("Repeat approve_public_voting was not idempotent.", { category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            }
+            const approveActionCountAfterRepeat = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'approve_public_voting';", [createdId]);
+            if (approveActionCountAfterRepeat !== approveActionCount) {
+              fail("Repeat approve_public_voting created another moderation action.", { category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            }
+            const anonVote = await fetchSafe(base, `${suggestionPath}/vote`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ vote_value: 1 }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonReport = await fetchSafe(base, `${suggestionPath}/report`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ reason: "spam" }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const selfVote = await fetchJson(base, `${suggestionPath}/vote`, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: JSON.stringify({ vote_value: 1 }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            requireJsonError(selfVote, "SELF_VOTE_DENIED", "Self-vote");
+            const selfReport = await fetchJson(base, `${suggestionPath}/report`, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: JSON.stringify({ reason: "spam" }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            requireJsonError(selfReport, "SELF_REPORT_DENIED", "Self-report");
+            const vote = await fetchJson(base, `${suggestionPath}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 1 }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const voteRemoveLimited = await fetchJson(base, `${suggestionPath}/vote`, 429, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 0 }), category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED", stage: "authMatrix" });
+            requireJsonError(voteRemoveLimited, "VOTE_RATE_LIMITED", "Immediate vote removal");
+            await new Promise((resolve) => setTimeout(resolve, 1700));
+            const voteRemove = await fetchJson(base, `${suggestionPath}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 0 }), category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED", stage: "authMatrix" });
+            if (voteRemove.json?.userVote !== 0) fail("Delayed vote removal did not return canonical userVote=0.", { category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED", stage: "authMatrix" });
+            const report = await fetchJson(base, `${suggestionPath}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const reportRepeat = await fetchJson(base, `${suggestionPath}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            if (JSON.stringify(report.json).includes("reportCount") || JSON.stringify(reportRepeat.json).includes("reportCount")) fail("Public report response exposed reportCount.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            if (reportRepeat.json?.idempotent !== true) fail("Repeat report was not idempotent.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const shortlist = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "shortlist", reason: "Preview shortlist." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            requireSuggestionState(shortlist, "shortlisted", "shortlisted", "Creator shortlist");
+            const invalidTransition = await fetchJson(base, `${ownerPath}/moderate`, 409, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "approve_public_voting", reason: "Invalid after shortlist." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            requireJsonError(invalidTransition, "INVALID_MODERATION_TRANSITION", "Invalid transition");
+            const accept = await fetchJson(base, `${ownerPath}/moderate`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ action: "accept", reason: "Preview accept." }), category: "PHASE2A_MODERATION_STATE_MACHINE_FAILED", stage: "authMatrix" });
+            requireSuggestionState(accept, "accepted", "accepted", "Creator accept");
+            const apiCreatedConvertedRows = await readCount("SELECT COUNT(*) AS count FROM event_suggestions WHERE id = ? AND converted_event_id IS NOT NULL;", [createdId]);
+            if (apiCreatedConvertedRows !== 0) fail("API-submitted verifier suggestion was converted unexpectedly.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+
+            const conversionPath = `/api/owner/events/suggestions/${conversionTargetId}/convert`;
+            const ownerConvertDenied = await fetchSafe(base, conversionPath, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "Preview conversion deny." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const [convertA, convertB] = await Promise.all([
+              fetchJson(base, conversionPath, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ reason: "Preview concurrent conversion A." }), category: "PHASE2A_CONCURRENT_CONVERSION_FAILED", stage: "authMatrix" }),
+              fetchJson(base, conversionPath, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ reason: "Preview concurrent conversion B." }), category: "PHASE2A_CONCURRENT_CONVERSION_FAILED", stage: "authMatrix" }),
+            ]);
+            const eventId = convertA.json?.eventId;
+            const eventSlug = convertA.json?.eventSlug;
+            if (!eventId || !eventSlug || convertB.json?.eventId !== eventId || convertB.json?.eventSlug !== eventSlug) {
+              fail("Concurrent conversion did not return one canonical event.", { category: "PHASE2A_CONCURRENT_CONVERSION_FAILED", stage: "authMatrix" });
+            }
+            const convertRepeat = await fetchJson(base, conversionPath, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: creatorCookie }, body: JSON.stringify({ reason: "Preview conversion repeat." }), category: "PHASE2A_CONCURRENT_CONVERSION_FAILED", stage: "authMatrix" });
+            if (convertRepeat.json?.idempotent !== true || convertRepeat.json?.eventId !== eventId || convertRepeat.json?.eventSlug !== eventSlug) {
+              fail("Repeated conversion did not return the canonical event.", { category: "PHASE2A_CONCURRENT_CONVERSION_FAILED", stage: "authMatrix" });
+            }
+            if (eventId !== conversionTargetEventId) {
+              fail("Conversion returned an unexpected deterministic event identity.", { category: "PHASE2A_CONCURRENT_CONVERSION_FAILED", stage: "authMatrix" });
+            }
+            const conversionRows = {
+              canonicalEvent: await readCount("SELECT COUNT(*) AS count FROM competitive_events WHERE id = ? AND status = 'draft' AND visibility = 'private';", [eventId]),
+              conversionActivity: await readCount("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = ? AND activity_type = 'suggestion_converted_to_draft';", [eventId]),
+              conversionAction: await readCount("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'convert_to_event_draft';", [conversionTargetId]),
+              orphanEvent: await readCount("SELECT COUNT(*) AS count FROM competitive_events WHERE id = ? AND NOT EXISTS (SELECT 1 FROM event_suggestions WHERE converted_event_id = competitive_events.id);", [eventId]),
+            };
+            const convertedSuggestionRows = await d1Query("SELECT converted_event_id AS convertedEventId FROM event_suggestions WHERE id = ? LIMIT 1;", [conversionTargetId]);
+            if (conversionRows.canonicalEvent !== 1 || conversionRows.conversionActivity !== 1 || conversionRows.conversionAction !== 1 || conversionRows.orphanEvent !== 0 || convertedSuggestionRows[0]?.convertedEventId !== eventId) {
+              fail("Read-only D1 conversion verification failed.", { category: "PHASE2A_CONCURRENT_CONVERSION_FAILED", stage: "authMatrix" });
+            }
+            const publicConverted = await findPublicConvertedSuggestion(conversionTargetId);
+            if (!publicConverted || publicConverted.status !== "converted_to_event" || publicConverted.convertedEventId !== null || publicConverted.convertedEventSlug !== null || JSON.stringify(publicConverted).includes(eventId) || JSON.stringify(publicConverted).includes(eventSlug)) {
+              fail("Public converted suggestion projection exposed a private draft.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
+            const ownerConverted = await findOwnerSuggestion(conversionTargetId);
+            if (!ownerConverted || ownerConverted.convertedEventId !== eventId || ownerConverted.convertedEventSlug !== eventSlug) {
+              fail("Owner projection did not retain canonical converted event details.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
             return {
-              anonymous: { submit: anonSubmit.status, vote: anonVote.status },
-              member: { submit: memberSubmit.status, invalidJson: invalidJson.status, oversized: oversized.status },
-              vote: { set: vote.status, remove: voteRemove.status },
-              report: { status: report.status, reportCountExposed: false },
-              owner: { moderateDenied: ownerModerateDenied.status },
-              creator: { moderate: creatorModerate.status, repeatModeration: creatorModerateRepeat.status, invalidTransition: invalidTransition.status, convert: convert.status, convertRepeat: convertRepeat.status },
+              anonymous: { submit: anonSubmit.status, vote: anonVote.status, report: anonReport.status, moderate: anonModerate.status, convert: anonConvert.status },
+              member: { submit: memberSubmit.status, invalidJson: invalidJson.status, oversized: oversized.status, selfVoteDenied: selfVote.status, selfReportDenied: selfReport.status, submittedState: `${submitted.moderationStatus}/${submitted.publicStatus}`, descriptionWordCount: wordCount },
+              otherAuthenticatedUser: { voteSet: vote.status, voteImmediateRateLimit: voteRemoveLimited.status, voteRemoval: voteRemove.status, report: report.status, repeatReportIdempotent: reportRepeat.json?.idempotent === true },
+              nonCreatorOwner: { moderationDenied: ownerModerateDenied.status, conversionDenied: ownerConvertDenied.status },
+              creator: {
+                approvePublicVoting: approve.status,
+                repeatApprovalIdempotent: approveRepeat.json?.idempotent === true,
+                approveActionCountAfterRepeat,
+                shortlist: shortlist.status,
+                invalidTransition: invalidTransition.status,
+                accept: accept.status,
+                concurrentConversion: { statuses: [convertA.status, convertB.status], oneCanonicalEvent: true },
+                repeatedConversion: { status: convertRepeat.status, idempotent: convertRepeat.json?.idempotent === true },
+              },
+              conversion: { eventId, eventSlug, rows: conversionRows, publicProjectionPrivateDraftHidden: true, ownerProjectionRetainsDraft: true },
             };
           }
           async function verifyPagination(base) {
@@ -1844,50 +2053,93 @@ jobs:
 
           void (async () => {
             if (!immutableUrl) fail("Missing immutable Phase 2A preview URL.");
+            updateProgress("projectConfig", "running");
             await verifyProjectConfig();
-            const d1Rows = {
+            updateProgress("projectConfig", "passed");
+            updateProgress("d1InitialVerification", "running");
+            const initialD1Rows = {
               migration0057: await d1Query("SELECT name FROM d1_migrations WHERE name = '0057_event_suggestions_phase_2a.sql';"),
-              deterministicRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE id LIKE 'phase2a-preview-%';"),
-              reportRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_reports WHERE suggestion_id LIKE 'phase2a-preview-%' AND status = 'open';"),
-              voteRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_votes WHERE suggestion_id LIKE 'phase2a-preview-%';"),
-              canonicalDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id LIKE 'phase2a-preview-%' AND status = 'draft' AND visibility = 'private';"),
-              conversionActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id LIKE 'phase2a-preview-%' AND activity_type = 'suggestion_converted_to_draft';"),
-              conversionActions: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id LIKE 'phase2a-preview-%' AND action = 'convert_to_event_draft';"),
               foreignKeys: await d1Query("PRAGMA foreign_key_check;"),
             };
-            if (d1Rows.foreignKeys.length !== 0) fail("Final Phase 2A preview foreign_key_check returned rows.");
+            if (initialD1Rows.migration0057.length !== 1 || initialD1Rows.foreignKeys.length !== 0) fail("Initial Phase 2A preview D1 verification failed.", { category: "PHASE2A_D1_FINAL_VERIFICATION_FAILED", stage: "d1InitialVerification" });
+            updateProgress("d1InitialVerification", "passed");
+            updateProgress("routeProbes", "running");
             const routeProbes = {
               immutable: await verifyBase(immutableUrl),
               stable: await verifyBase(stableUrl),
             };
+            writeJsonArtifact("route-probes.json", routeProbes, "routeProbes");
+            updateProgress("performanceSampling", "running");
             const performanceSampling = await samplePerformance(stableUrl);
+            writeJsonArtifact("performance-sampling.json", performanceSampling, "performanceSampling");
+            updateProgress("cacheVerification", "running");
             const cacheVerification = await verifyCache(stableUrl);
+            writeJsonArtifact("cache-verification.json", cacheVerification, "cacheVerification");
+            updateProgress("authMatrix", "running");
             const authMatrix = await verifyAuthMatrix(stableUrl);
+            writeJsonArtifact("auth-matrix.json", authMatrix, "authMatrix");
+            updateProgress("privacyChecks", "running");
             const privacyChecks = {
               publicReportCountAbsent: cacheVerification.reportCountExposed === false,
               privateDraftIdAbsent: cacheVerification.privateDraftLinkExposed === false,
               rawDiscordIdAbsent: true,
               internalLinkedServerIdAbsent: true,
+              convertedPrivateDraftPublicIdAbsent: authMatrix.conversion.publicProjectionPrivateDraftHidden,
+              ownerProjectionRetainsPrivateDraft: authMatrix.conversion.ownerProjectionRetainsDraft,
             };
+            writeJsonArtifact("privacy-checks.json", privacyChecks, "privacyChecks");
+            updateProgress("pagination", "running");
             const paginationChecks = await verifyPagination(stableUrl);
-
-            fs.writeFileSync(`${artifacts}/route-probes.json`, JSON.stringify(routeProbes, null, 2));
-            fs.writeFileSync(`${artifacts}/performance-sampling.json`, JSON.stringify(performanceSampling, null, 2));
-            fs.writeFileSync(`${artifacts}/cache-verification.json`, JSON.stringify(cacheVerification, null, 2));
-            fs.writeFileSync(`${artifacts}/auth-matrix.json`, JSON.stringify(authMatrix, null, 2));
-            fs.writeFileSync(`${artifacts}/privacy-checks.json`, JSON.stringify(privacyChecks, null, 2));
-            fs.writeFileSync(`${artifacts}/pagination-checks.json`, JSON.stringify(paginationChecks, null, 2));
-            fs.writeFileSync(`${artifacts}/d1-final-verification.json`, JSON.stringify({
+            writeJsonArtifact("pagination-checks.json", paginationChecks, "pagination");
+            updateProgress("d1FinalVerification", "running");
+            const d1Rows = {
+              migration0057: await d1Query("SELECT name FROM d1_migrations WHERE name = '0057_event_suggestions_phase_2a.sql';"),
+              deterministicRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE id LIKE 'phase2a-preview-%';"),
+              apiVerifierRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = 'phase2a-preview-api-member';"),
+              apiVerifierConvertedRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = 'phase2a-preview-api-member' AND converted_event_id IS NOT NULL;"),
+              reportRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_reports WHERE suggestion_id LIKE 'phase2a-preview-%' AND status = 'open';"),
+              voteRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_votes WHERE suggestion_id LIKE 'phase2a-preview-%';"),
+              canonicalDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id LIKE 'phase2a-preview-%' AND status = 'draft' AND visibility = 'private';"),
+              conversionTargetDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id = 'suggestion-draft-phase2a-preview-conversion-target' AND status = 'draft' AND visibility = 'private';"),
+              conversionActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id LIKE 'phase2a-preview-%' OR event_id = 'suggestion-draft-phase2a-preview-conversion-target';"),
+              conversionTargetActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = 'suggestion-draft-phase2a-preview-conversion-target' AND activity_type = 'suggestion_converted_to_draft';"),
+              conversionActions: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id LIKE 'phase2a-preview-%' AND action = 'convert_to_event_draft';"),
+              conversionTargetActions: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = 'phase2a-preview-conversion-target' AND action = 'convert_to_event_draft';"),
+              conversionTargetPointer: await d1Query("SELECT converted_event_id AS convertedEventId FROM event_suggestions WHERE id = 'phase2a-preview-conversion-target' LIMIT 1;"),
+              orphanConversionEvents: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id = 'suggestion-draft-phase2a-preview-conversion-target' AND NOT EXISTS (SELECT 1 FROM event_suggestions WHERE converted_event_id = competitive_events.id);"),
+              foreignKeys: await d1Query("PRAGMA foreign_key_check;"),
+            };
+            if (
+              d1Rows.migration0057.length !== 1 ||
+              d1Rows.foreignKeys.length !== 0 ||
+              Number(d1Rows.apiVerifierConvertedRows[0]?.count || 0) !== 0 ||
+              Number(d1Rows.conversionTargetDrafts[0]?.count || 0) !== 1 ||
+              Number(d1Rows.conversionTargetActivity[0]?.count || 0) !== 1 ||
+              Number(d1Rows.conversionTargetActions[0]?.count || 0) !== 1 ||
+              d1Rows.conversionTargetPointer[0]?.convertedEventId !== "suggestion-draft-phase2a-preview-conversion-target" ||
+              Number(d1Rows.orphanConversionEvents[0]?.count || 0) !== 0
+            ) {
+              fail("Final Phase 2A preview D1 verification failed.", { category: "PHASE2A_D1_FINAL_VERIFICATION_FAILED", stage: "d1FinalVerification" });
+            }
+            writeJsonArtifact("d1-final-verification.json", {
               previewDatabase: previewDbName,
               migration0057Recorded: d1Rows.migration0057.length === 1,
               deterministicSuggestionCount: Number(d1Rows.deterministicRows[0]?.count || 0),
+              apiVerifierSuggestionRows: Number(d1Rows.apiVerifierRows[0]?.count || 0),
+              apiVerifierConvertedRows: Number(d1Rows.apiVerifierConvertedRows[0]?.count || 0),
               openReportRows: Number(d1Rows.reportRows[0]?.count || 0),
               voteRows: Number(d1Rows.voteRows[0]?.count || 0),
               canonicalPrivateDraftRows: Number(d1Rows.canonicalDrafts[0]?.count || 0),
+              conversionTargetPrivateDraftRows: Number(d1Rows.conversionTargetDrafts[0]?.count || 0),
               conversionActivityRows: Number(d1Rows.conversionActivity[0]?.count || 0),
+              conversionTargetActivityRows: Number(d1Rows.conversionTargetActivity[0]?.count || 0),
               conversionActionRows: Number(d1Rows.conversionActions[0]?.count || 0),
+              conversionTargetActionRows: Number(d1Rows.conversionTargetActions[0]?.count || 0),
+              conversionTargetEventId: d1Rows.conversionTargetPointer[0]?.convertedEventId || null,
+              orphanConversionEvents: Number(d1Rows.orphanConversionEvents[0]?.count || 0),
               foreignKeyCheckRows: d1Rows.foreignKeys.length,
-            }, null, 2));
+            }, "d1FinalVerification");
+            updateProgress("finalReport", "running");
             fs.writeFileSync(`${artifacts}/final-report.md`, [
               "# DZN Event Platform Performance Preview",
               "",
@@ -1902,6 +2154,7 @@ jobs:
               "- Production operations: none",
               "",
             ].join("\n"));
+            updateProgress("finalReport", "passed");
             console.log("Phase 2A performance preview verification passed.");
           })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
           NODE
