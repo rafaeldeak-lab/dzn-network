@@ -20,10 +20,18 @@ import {
   parsePublicSuggestionCursor,
   projectSuggestionForOwnerTest,
   projectSuggestionForPublicTest,
+  resetEventSuggestionSchemaReadinessForTests,
   validateModerationTransition,
+  validateEventSuggestionSchema,
   validateSuggestionInput,
   type SuggestionSortRow,
 } from "../functions/_lib/event-suggestions";
+import {
+  getLiveEventFeedPayload,
+  getServerEventsProfilePayload,
+  resetCompetitiveEventsReadSchemaReadinessForTests,
+  validateCompetitiveEventsReadSchema,
+} from "../functions/_lib/events";
 import {
   onRequestGet as onSuggestionsRequestGet,
   onRequestHead as onSuggestionsRequestHead,
@@ -63,6 +71,8 @@ async function main() {
   await assertBoundedJson();
   assertModerationTransitions();
   await assertModerationResponsePrivacy();
+  await assertPublicEventProjectionPrivacy();
+  await assertSchemaReadinessRecovery();
   assertSuggestionSchemaAndIndexes();
   assertSuggestionApis();
   assertLoadingUx();
@@ -735,6 +745,149 @@ async function assertModerationResponsePrivacy() {
   }
 }
 
+async function assertPublicEventProjectionPrivacy() {
+  const db = new PublicEventProjectionDb();
+  const env = { DB: db as unknown as D1Database } as Env;
+  resetCompetitiveEventsReadSchemaReadinessForTests(env);
+
+  const feed = await getLiveEventFeedPayload(env, 20) as { ok: boolean; activity: Array<Record<string, unknown>> };
+  assert.equal(feed.ok, true, "public live feed should return a safe response");
+  const feedText = JSON.stringify(feed);
+  assert.equal(feedText.includes("Public Live Cup"), true, "public live activity should appear");
+  assert.equal(feedText.includes("Public Upcoming Cup"), true, "public upcoming activity should appear");
+  assert.equal(feedText.includes("Unlisted Cup"), true, "unlisted non-draft activity should follow the existing public visibility contract");
+  for (const privateValue of [
+    "Private Live Cup",
+    "public-draft-event",
+    "Public Draft Cup",
+    "unlisted-draft-event",
+    "Unlisted Draft Cup",
+    "private-conversion-event",
+    "private-conversion-slug",
+    "Private Conversion Target",
+    "Community suggestion converted to draft",
+    "private-suggestion-id",
+    "orphan-activity",
+  ]) {
+    assert.equal(feedText.includes(privateValue), false, `public live feed must not expose ${privateValue}`);
+  }
+  assert.equal(db.activityRows.some((row) => row.id === "private-conversion-activity"), true, "private conversion activity must remain present internally");
+  assert.equal(db.events.some((event) => event.id === "private-conversion-event" && event.status === "draft" && event.visibility === "private"), true, "private draft event must remain present internally");
+
+  const profile = await getServerEventsProfilePayload(env, "public-server", null) as Record<string, unknown>;
+  assert.equal(profile.ok, true, "public server event profile should return a safe response");
+  const profileText = JSON.stringify(profile);
+  assert.equal(profileText.includes("public-live-event"), true, "public non-draft server registration should appear");
+  assert.equal(profileText.includes("public-match"), true, "public non-draft server match should appear");
+  for (const privateValue of [
+    "private-live-event",
+    "Private Live Cup",
+    "public-draft-event",
+    "Public Draft Cup",
+    "private-match",
+    "draft-match",
+  ]) {
+    assert.equal(profileText.includes(privateValue), false, `public server profile must not expose ${privateValue}`);
+  }
+}
+
+async function assertSchemaReadinessRecovery() {
+  {
+    const db = new RecoverableSchemaDb({ availableTables: new Set() });
+    const env = { DB: db as unknown as D1Database } as Env;
+    resetEventSuggestionSchemaReadinessForTests(env);
+    const first = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(first.ok, false, "missing suggestion schema should fail safely");
+    assert.equal(db.probeCount("event_suggestions"), 1, "first suggestion readiness should probe once");
+    db.availableTables = new Set(Object.keys(SUGGESTION_ROUTE_COLUMNS));
+    const second = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(second.ok, true, "same warm Env should retry after failed suggestion readiness");
+    assert.equal(db.probeCount("event_suggestions"), 2, "failed suggestion readiness must not remain cached");
+    const third = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(third.ok, true, "successful suggestion readiness should stay cached");
+    assert.equal(db.probeCount("event_suggestions"), 2, "successful suggestion readiness should not re-query PRAGMA");
+  }
+
+  {
+    const db = new RecoverableSchemaDb({ availableTables: new Set(), delayMs: 10 });
+    const env = { DB: db as unknown as D1Database } as Env;
+    resetEventSuggestionSchemaReadinessForTests(env);
+    const [first, second] = await Promise.all([
+      validateEventSuggestionSchema(env, { conversion: false }),
+      validateEventSuggestionSchema(env, { conversion: false }),
+    ]);
+    assert.equal(first.ok, false);
+    assert.equal(second.ok, false);
+    assert.equal(db.probeCount("event_suggestions"), 1, "concurrent failed suggestion readiness calls should share one in-flight probe");
+    db.availableTables = new Set(Object.keys(SUGGESTION_ROUTE_COLUMNS));
+    const retry = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(retry.ok, true, "next suggestion readiness call should retry after failed shared probe settles");
+    assert.equal(db.probeCount("event_suggestions"), 2);
+  }
+
+  {
+    const db = new RecoverableSchemaDb({ availableTables: new Set(Object.keys(SUGGESTION_ROUTE_COLUMNS)), throwOnPragma: true });
+    const env = { DB: db as unknown as D1Database } as Env;
+    resetEventSuggestionSchemaReadinessForTests(env);
+    const thrown = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(thrown.ok, false, "thrown suggestion readiness errors should become safe failures");
+    db.throwOnPragma = false;
+    const retry = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(retry.ok, true, "thrown suggestion readiness errors must not stay pinned");
+  }
+
+  {
+    const suggestionTables = new Set(Object.keys(SUGGESTION_ROUTE_COLUMNS).filter((table) => !["competitive_events", "competitive_event_activity"].includes(table)));
+    const db = new RecoverableSchemaDb({ availableTables: suggestionTables });
+    const env = { DB: db as unknown as D1Database } as Env;
+    resetEventSuggestionSchemaReadinessForTests(env);
+    const suggestionsOnly = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(suggestionsOnly.ok, true, "suggestions readiness key should succeed independently");
+    const fullMissing = await validateEventSuggestionSchema(env);
+    assert.equal(fullMissing.ok, false, "full readiness key should fail while conversion tables are missing");
+    const suggestionProbeCount = db.probeCount("event_suggestions");
+    db.availableTables = new Set([...suggestionTables, "competitive_events", "competitive_event_activity"]);
+    const fullReady = await validateEventSuggestionSchema(env);
+    assert.equal(fullReady.ok, true, "full readiness key should retry without erasing suggestions key");
+    const suggestionsStillCached = await validateEventSuggestionSchema(env, { conversion: false });
+    assert.equal(suggestionsStillCached.ok, true);
+    assert.equal(db.probeCount("event_suggestions"), suggestionProbeCount + 1, "successful suggestions key should remain cached while failed full key retries");
+  }
+
+  {
+    const db = new RecoverableSchemaDb({ availableTables: new Set() });
+    const env = { DB: db as unknown as D1Database } as Env;
+    resetCompetitiveEventsReadSchemaReadinessForTests(env);
+    const first = await validateCompetitiveEventsReadSchema(env);
+    assert.equal(first.ok, false, "missing public event schema should fail safely");
+    assert.equal(db.probeCount("competitive_events"), 1);
+    db.availableTables = new Set(Object.keys(EVENT_READ_TEST_COLUMNS));
+    const second = await validateCompetitiveEventsReadSchema(env);
+    assert.equal(second.ok, true, "same warm Env should retry public event readiness after schema appears");
+    assert.equal(db.probeCount("competitive_events"), 2);
+    const third = await validateCompetitiveEventsReadSchema(env);
+    assert.equal(third.ok, true, "successful public event readiness should stay cached");
+    assert.equal(db.probeCount("competitive_events"), 2);
+  }
+
+  {
+    const db = new RecoverableSchemaDb({ availableTables: new Set(), delayMs: 10 });
+    const env = { DB: db as unknown as D1Database } as Env;
+    resetCompetitiveEventsReadSchemaReadinessForTests(env);
+    const [first, second] = await Promise.all([
+      validateCompetitiveEventsReadSchema(env),
+      validateCompetitiveEventsReadSchema(env),
+    ]);
+    assert.equal(first.ok, false);
+    assert.equal(second.ok, false);
+    assert.equal(db.probeCount("competitive_events"), 1, "concurrent public event readiness calls should share one in-flight probe");
+    db.availableTables = new Set(Object.keys(EVENT_READ_TEST_COLUMNS));
+    const retry = await validateCompetitiveEventsReadSchema(env);
+    assert.equal(retry.ok, true, "public event readiness should retry after failed shared probe settles");
+    assert.equal(db.probeCount("competitive_events"), 2);
+  }
+}
+
 function assertSuggestionSchemaAndIndexes() {
   const migration = source("migrations/0057_event_suggestions_phase_2a.sql");
   for (const table of [
@@ -956,6 +1109,19 @@ function assertPublicApiSafety() {
   assertNotIncludes(detailBlock, "ensureCompetitiveEventsSchema", "public event detail must not run DDL schema repair");
   assertNotIncludes(listBlock, "competitive_events.*", "hot public event list should use explicit columns");
   assertNotIncludes(detailBlock, "competitive_events.*", "hot public event detail should use explicit columns");
+  const liveFeedBlock = eventHelper.slice(eventHelper.indexOf("export async function getLiveEventFeedPayload"), eventHelper.indexOf("export async function getServerEventsProfilePayload"));
+  assertIncludes(liveFeedBlock, "fetchPublicEventActivity", "public live feed must use a public-safe activity helper");
+  assertNotIncludes(liveFeedBlock, "fetchEventActivity(env, null", "public live feed must not read internal activity without event visibility filtering");
+  assertIncludes(eventHelper, "JOIN competitive_events ON competitive_events.id = competitive_event_activity.event_id", "public activity must inner join events before projection");
+  assertIncludes(eventHelper, "lower(COALESCE(competitive_events.visibility, 'public')) != 'private'");
+  assertIncludes(eventHelper, "lower(COALESCE(competitive_events.status, 'draft')) != 'draft'");
+  assertIncludes(eventHelper, "publicEventSchemaReadiness.get(key) === promise", "failed public-event readiness must use identity-safe eviction");
+  assertNotIncludes(eventHelper.slice(eventHelper.indexOf("async function fetchServerRegisteredEvents"), eventHelper.indexOf("async function fetchCompatibleEvents")), "competitive_events.*", "public server registered events should use explicit event columns");
+  assertNotIncludes(eventHelper.slice(eventHelper.indexOf("async function fetchCompatibleEvents"), eventHelper.indexOf("async function fetchServerMatches")), "competitive_events.*", "public compatible events should use explicit event columns");
+
+  const suggestionHelper = source("functions/_lib/event-suggestions.ts");
+  assertIncludes(suggestionHelper, "current?.get(key) === promise", "failed suggestion readiness must use identity-safe eviction");
+  assertIncludes(suggestionHelper, "if (current.size === 0) schemaReadiness.delete(dbObject)", "empty suggestion readiness maps should be removed after failure eviction");
 
   const pulseConfig = source("functions/api/dzn-pulse/config.ts");
   assertIncludes(pulseConfig, "hasPrivateRequestSignal");
@@ -1214,6 +1380,289 @@ class SuggestionMutationAuthStatement {
   }
 }
 
+class PublicEventProjectionDb {
+  readonly server = {
+    id: "public-server",
+    user_id: "member-user",
+    guild_id: "guild-public",
+    public_slug: "public-server",
+    display_name: "Public Server",
+    hostname: null,
+    server_name: "Public Server",
+    nitrado_service_name: null,
+    server_type: "modded",
+    server_mode: "pvp",
+    server_category: "modded",
+    competitive_enabled: 1,
+    verified_server: 1,
+    event_mmr: 1200,
+    season_points: 30,
+    event_wins: 2,
+    event_losses: 1,
+    event_draws: 0,
+    last_event_at: "2026-07-23T10:00:00.000Z",
+    current_players: 12,
+    max_players: 60,
+    plan_key: "pro",
+    subscription_status: "active",
+    status: "live",
+    listing_visibility: "public",
+    updated_at: "2026-07-23T10:00:00.000Z",
+  };
+  readonly events = [
+    publicProjectionEvent("public-live-event", "Public Live Cup", "public-live-cup", "live", "public"),
+    publicProjectionEvent("public-upcoming-event", "Public Upcoming Cup", "public-upcoming-cup", "upcoming", "public"),
+    publicProjectionEvent("unlisted-event", "Unlisted Cup", "unlisted-cup", "upcoming", "unlisted"),
+    publicProjectionEvent("private-live-event", "Private Live Cup", "private-live-cup", "live", "private"),
+    publicProjectionEvent("public-draft-event", "Public Draft Cup", "public-draft-cup", "draft", "public"),
+    publicProjectionEvent("unlisted-draft-event", "Unlisted Draft Cup", "unlisted-draft-cup", "draft", "unlisted"),
+    publicProjectionEvent("private-conversion-event", "Private Conversion Target", "private-conversion-slug", "draft", "private"),
+  ];
+  readonly activityRows = [
+    projectionActivity("public-live-activity", "public-live-event", "Public live activity message.", "event_created", { public: true }),
+    projectionActivity("public-upcoming-activity", "public-upcoming-event", "Public upcoming activity message.", "event_created", { public: true }),
+    projectionActivity("unlisted-activity", "unlisted-event", "Unlisted activity message.", "event_created", { public: true }),
+    projectionActivity("private-live-activity", "private-live-event", "Private Live Cup hidden activity.", "event_created", { hidden: true }),
+    projectionActivity("public-draft-activity", "public-draft-event", "Public Draft Cup hidden activity.", "event_created", { hidden: true }),
+    projectionActivity("unlisted-draft-activity", "unlisted-draft-event", "Unlisted Draft Cup hidden activity.", "event_created", { hidden: true }),
+    projectionActivity("private-conversion-activity", "private-conversion-event", "Community suggestion converted to draft: Private Conversion Target.", "suggestion_converted_to_draft", { suggestion_id: "private-suggestion-id" }),
+    projectionActivity("orphan-activity", "missing-event", "Orphan hidden activity.", "event_created", { hidden: true }),
+  ];
+  readonly registrations = [
+    { id: "reg-public-live", event_id: "public-live-event", server_id: "public-server", category: "modded", approved: 1, score: 20, wins: 2, losses: 0, draws: 0, seed: 1, registered_at: "2026-07-23T10:00:00.000Z" },
+    { id: "reg-private-live", event_id: "private-live-event", server_id: "public-server", category: "modded", approved: 1, score: 8, wins: 1, losses: 0, draws: 0, seed: 2, registered_at: "2026-07-23T10:00:00.000Z" },
+    { id: "reg-public-draft", event_id: "public-draft-event", server_id: "public-server", category: "modded", approved: 1, score: 4, wins: 0, losses: 0, draws: 0, seed: 3, registered_at: "2026-07-23T10:00:00.000Z" },
+  ];
+  readonly matches = [
+    projectionMatch("public-match", "public-live-event", "public-server", "opponent-server"),
+    projectionMatch("private-match", "private-live-event", "public-server", "opponent-server"),
+    projectionMatch("draft-match", "public-draft-event", "public-server", "opponent-server"),
+  ];
+
+  prepare(sql: string) {
+    return new PublicEventProjectionStatement(this, sql);
+  }
+
+  eventById(eventId: string | null) {
+    return this.events.find((event) => event.id === eventId) ?? null;
+  }
+
+  isPublicEvent(event: { visibility: string | null; status: string | null } | null) {
+    return Boolean(event)
+      && String(event!.visibility ?? "public").toLowerCase() !== "private"
+      && String(event!.status ?? "draft").toLowerCase() !== "draft";
+  }
+
+  withCounts(event: ReturnType<typeof publicProjectionEvent>) {
+    return {
+      ...event,
+      registered_servers: this.registrations.filter((registration) => registration.event_id === event.id).length,
+      total_score: this.registrations.filter((registration) => registration.event_id === event.id).reduce((total, registration) => total + Number(registration.score ?? 0), 0),
+      match_count: this.matches.filter((match) => match.event_id === event.id).length,
+    };
+  }
+}
+
+class PublicEventProjectionStatement {
+  private bindings: unknown[] = [];
+
+  constructor(private readonly db: PublicEventProjectionDb, private readonly sql: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all() {
+    if (/PRAGMA\s+table_info\(([^)]+)\)/i.test(this.sql)) {
+      const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1] ?? "";
+      return { results: (EVENT_READ_TEST_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
+    }
+    if (/FROM\s+competitive_event_activity/i.test(this.sql) && /JOIN\s+competitive_events/i.test(this.sql)) {
+      const limit = Number(this.bindings[0] ?? 25);
+      const rows = this.db.activityRows
+        .map((activity) => ({ activity, event: this.db.eventById(activity.event_id) }))
+        .filter(({ event }) => this.db.isPublicEvent(event))
+        .slice(0, limit)
+        .map(({ activity, event }) => ({
+          ...activity,
+          event_name: event?.name ?? null,
+          event_slug: event?.slug ?? null,
+          server_name: this.db.server.display_name,
+          public_slug: this.db.server.public_slug,
+        }));
+      return { results: rows };
+    }
+    if (/FROM\s+competitive_event_servers/i.test(this.sql) && /JOIN\s+competitive_events/i.test(this.sql)) {
+      const serverId = String(this.bindings[0] ?? "");
+      const statuses = new Set(this.bindings.slice(1).map(String));
+      const rows = this.db.registrations
+        .filter((registration) => registration.server_id === serverId)
+        .map((registration) => ({ registration, event: this.db.eventById(registration.event_id) }))
+        .filter(({ event }) => this.db.isPublicEvent(event) && statuses.has(String(event?.status ?? "")))
+        .map(({ registration, event }) => ({ ...this.db.withCounts(event!), total_score: registration.score }));
+      return { results: rows };
+    }
+    if (/FROM\s+competitive_events/i.test(this.sql) && /WHERE\s+category\s*=\s*\?/i.test(this.sql)) {
+      const category = String(this.bindings[0] ?? "");
+      const rows = this.db.events
+        .filter((event) => event.category === category && this.db.isPublicEvent(event) && ["registration_open", "upcoming", "standby"].includes(event.status))
+        .map((event) => this.db.withCounts(event));
+      return { results: rows };
+    }
+    if (/FROM\s+competitive_event_matches/i.test(this.sql) && /JOIN\s+competitive_events/i.test(this.sql)) {
+      const serverId = String(this.bindings[0] ?? "");
+      const rows = this.db.matches
+        .filter((match) => match.left_server_id === serverId || match.right_server_id === serverId)
+        .filter((match) => this.db.isPublicEvent(this.db.eventById(match.event_id)))
+        .map((match) => ({
+          ...match,
+          left_server_name: match.left_server_id === "public-server" ? "Public Server" : "Opponent Server",
+          left_slug: match.left_server_id,
+          right_server_name: match.right_server_id === "public-server" ? "Public Server" : "Opponent Server",
+          right_slug: match.right_server_id,
+          winner_name: null,
+        }));
+      return { results: rows };
+    }
+    return { results: [] };
+  }
+
+  async first() {
+    if (/FROM\s+linked_servers/i.test(this.sql) && /WHERE\s+linked_servers\.id\s*=\s*\?/i.test(this.sql)) {
+      const value = String(this.bindings[0] ?? "");
+      return value === this.db.server.id || value === this.db.server.public_slug ? this.db.server : null;
+    }
+    const rows = await this.all();
+    return rows.results[0] ?? null;
+  }
+}
+
+class RecoverableSchemaDb {
+  availableTables: Set<string>;
+  throwOnPragma: boolean;
+  private readonly counts = new Map<string, number>();
+  private readonly delayMs: number;
+
+  constructor(options: { availableTables: Set<string>; throwOnPragma?: boolean; delayMs?: number }) {
+    this.availableTables = options.availableTables;
+    this.throwOnPragma = options.throwOnPragma ?? false;
+    this.delayMs = options.delayMs ?? 0;
+  }
+
+  prepare(sql: string) {
+    return new RecoverableSchemaStatement(this, sql);
+  }
+
+  async tableInfo(table: string) {
+    this.counts.set(table, this.probeCount(table) + 1);
+    if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    if (this.throwOnPragma) throw new Error("injected pragma failure");
+    const columns = this.availableTables.has(table)
+      ? Array.from(new Set([...(SUGGESTION_ROUTE_COLUMNS[table] ?? []), ...(EVENT_READ_TEST_COLUMNS[table] ?? [])]))
+      : [];
+    return columns.map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 }));
+  }
+
+  probeCount(table: string) {
+    return this.counts.get(table) ?? 0;
+  }
+}
+
+class RecoverableSchemaStatement {
+  constructor(private readonly db: RecoverableSchemaDb, private readonly sql: string) {}
+
+  bind() {
+    return this;
+  }
+
+  async all() {
+    const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1];
+    if (table) return { results: await this.db.tableInfo(table) };
+    return { results: [] };
+  }
+
+  async first() {
+    const rows = await this.all();
+    return rows.results[0] ?? null;
+  }
+}
+
+function publicProjectionEvent(id: string, name: string, slug: string, status: string, visibility: string) {
+  return {
+    id,
+    name,
+    slug,
+    description: `${name} description`,
+    category: "modded",
+    event_type: "community_cup",
+    status,
+    visibility,
+    premium_tier: "free",
+    server_limit: 16,
+    team_limit: 16,
+    starts_at: "2026-08-01T10:00:00.000Z",
+    ends_at: "2026-08-02T10:00:00.000Z",
+    created_by: "creator-user",
+    banner_url: null,
+    rules: `${name} public rules`,
+    rewards: `${name} public rewards`,
+    created_at: "2026-07-23T10:00:00.000Z",
+    updated_at: "2026-07-23T10:00:00.000Z",
+    registered_servers: 0,
+    total_score: 0,
+    match_count: 0,
+  };
+}
+
+function projectionActivity(id: string, eventId: string, message: string, activityType: string, metadata: Record<string, unknown>) {
+  return {
+    id,
+    event_id: eventId,
+    server_id: "public-server",
+    activity_type: activityType,
+    message,
+    metadata: JSON.stringify(metadata),
+    created_at: "2026-07-23T10:00:00.000Z",
+    event_name: null,
+    event_slug: null,
+    server_name: null,
+    public_slug: null,
+  };
+}
+
+function projectionMatch(id: string, eventId: string, leftServerId: string, rightServerId: string) {
+  return {
+    id,
+    event_id: eventId,
+    left_server_id: leftServerId,
+    right_server_id: rightServerId,
+    category: "modded",
+    match_status: "completed",
+    winner_server_id: null,
+    round_number: 1,
+    left_score: 5,
+    right_score: 3,
+    starts_at: "2026-07-23T10:00:00.000Z",
+    ends_at: "2026-07-23T11:00:00.000Z",
+    created_at: "2026-07-23T10:00:00.000Z",
+    updated_at: "2026-07-23T11:00:00.000Z",
+    left_server_name: null,
+    left_slug: null,
+    right_server_name: null,
+    right_slug: null,
+    winner_name: null,
+  };
+}
+
+const EVENT_READ_TEST_COLUMNS: Record<string, string[]> = {
+  competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "starts_at", "ends_at", "created_at", "updated_at"],
+  competitive_event_servers: ["event_id", "server_id", "score", "wins", "losses", "draws"],
+  competitive_event_matches: ["event_id", "match_status"],
+  competitive_event_activity: ["event_id", "server_id", "activity_type", "message", "created_at"],
+  linked_servers: ["id", "public_slug", "server_category", "status"],
+};
+
 const SUGGESTION_ROUTE_COLUMNS: Record<string, string[]> = {
   event_suggestions: [
     "id",
@@ -1238,6 +1687,8 @@ const SUGGESTION_ROUTE_COLUMNS: Record<string, string[]> = {
   event_suggestion_reports: ["id", "suggestion_id", "reporter_user_id", "reason", "status", "created_at"],
   event_suggestion_moderation_actions: ["id", "suggestion_id", "actor_user_id", "action", "created_at"],
   event_suggestion_servers: ["suggestion_id", "linked_server_id", "relationship_type", "created_at"],
+  competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "created_by"],
+  competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
   linked_servers: ["id", "public_slug", "status"],
 };
 

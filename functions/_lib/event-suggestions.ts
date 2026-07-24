@@ -747,7 +747,14 @@ export async function validateEventSuggestionSchema(env: Env, options: { convers
     errorCode: "EVENT_SUGGESTIONS_SCHEMA_NOT_READY",
     message: "Event suggestion storage is not ready.",
     missingCount: safeMissingCount(error),
-  }));
+  })).then((result) => {
+    const current = schemaReadiness.get(dbObject);
+    if (!result.ok && current?.get(key) === promise) {
+      current.delete(key);
+      if (current.size === 0) schemaReadiness.delete(dbObject);
+    }
+    return result;
+  });
   cache.set(key, promise);
   return promise;
 }

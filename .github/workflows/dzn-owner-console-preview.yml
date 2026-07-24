@@ -1491,6 +1491,7 @@ jobs:
           statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-public-voting")}, ${sql("phase2a-preview-member")}, 1, ${sql(now)}, ${sql(now)}) ON CONFLICT(suggestion_id, user_id) DO UPDATE SET vote_value = excluded.vote_value, updated_at = excluded.updated_at;`);
           statements.push(`INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at) VALUES (${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, -1, ${sql(now)}, ${sql(now)}) ON CONFLICT(suggestion_id, user_id) DO UPDATE SET vote_value = excluded.vote_value, updated_at = excluded.updated_at;`);
           statements.push(`INSERT OR IGNORE INTO event_suggestion_reports (id, suggestion_id, reporter_user_id, reason, safe_note, status, created_at) VALUES (${sql("phase2a-preview-report-open")}, ${sql("phase2a-preview-reported")}, ${sql("phase2a-preview-member")}, 'spam', ${sql("Preview moderation-only report note.")}, 'open', ${sql(now)});`);
+          statements.push(`INSERT OR IGNORE INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at) VALUES (${sql("phase2a-preview-public-live-activity")}, ${sql("phase2a-preview-public-live-event")}, NULL, 'event_created', ${sql("Phase 2A public live fixture activity.")}, ${sql(JSON.stringify({ fixture: "phase2a-public-live" }))}, ${sql(now)});`);
           statements.push(`INSERT OR IGNORE INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at) VALUES (${sql("phase2a-preview-conversion-activity")}, ${sql("phase2a-preview-private-draft-event")}, NULL, 'suggestion_converted_to_draft', ${sql("Community suggestion converted to draft for preview.")}, ${sql(JSON.stringify({ suggestion_id: "phase2a-preview-converted-private-draft" }))}, ${sql(now)});`);
           statements.push(`INSERT OR IGNORE INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at) VALUES (${sql("phase2a-preview-conversion-action")}, ${sql("phase2a-preview-converted-private-draft")}, ${sql("phase2a-preview-creator")}, 'convert_to_event_draft', 'accepted', 'converted_to_event', ${sql("Preview conversion audit.")}, ${sql(now)});`);
           fs.writeFileSync("phase2a-preview-seed.sql", `${statements.join("\n")}\n`);
@@ -2738,6 +2739,70 @@ jobs:
             writeJsonArtifact("protected-row-invariants.json", final);
             return final;
           }
+          async function verifyPublicEventProjectionPrivacy(base, authMatrix) {
+            const eventId = authMatrix?.conversion?.eventId;
+            const eventSlug = authMatrix?.conversion?.eventSlug;
+            if (eventId !== conversionTargetEventId || !eventSlug) {
+              fail("Public event projection privacy check received the wrong conversion identity.", {
+                category: "PHASE2A_PUBLIC_EVENT_PROJECTION_FAILED",
+                stage: "privacyChecks",
+              });
+            }
+            const privateActivityRows = await d1Query(
+              "SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = ? AND activity_type = 'suggestion_converted_to_draft';",
+              [eventId],
+            );
+            const hiddenActivityRows = await d1Query(
+              "SELECT COUNT(*) AS count FROM competitive_event_activity JOIN competitive_events ON competitive_events.id = competitive_event_activity.event_id WHERE lower(COALESCE(competitive_events.visibility, 'public')) = 'private' OR lower(COALESCE(competitive_events.status, 'draft')) = 'draft';",
+            );
+            const liveFeed = await fetchJson(base, "/api/events/live-feed?limit=50", 200, {
+              category: "PHASE2A_PUBLIC_EVENT_PROJECTION_FAILED",
+              stage: "privacyChecks",
+            });
+            const feedText = JSON.stringify(liveFeed.json || {});
+            const forbiddenMarkers = [
+              eventId,
+              eventSlug,
+              conversionTargetId,
+              "Verifier Conversion Target",
+              "suggestion_converted_to_draft",
+              "Community suggestion converted to draft",
+              "phase2a-preview-private-draft-event",
+              "phase2a-preview-private-draft",
+              "phase2a-preview-converted-private-draft",
+              "Private Draft Conversion",
+              "phase2a-preview-public-draft-event",
+              "phase2a-preview-public-draft",
+              "Phase 2A Public Draft Fixture",
+              "phase2a-preview-unlisted-draft-event",
+              "phase2a-preview-unlisted-draft",
+              "Phase 2A Unlisted Draft Fixture",
+            ].filter(Boolean);
+            const leakedMarkers = forbiddenMarkers.filter((marker) => feedText.includes(marker));
+            const publicActivityAppears = feedText.includes("phase2a-preview-public-live-event") && feedText.includes("Phase 2A public live fixture activity.");
+            const cacheControl = String(liveFeed.headers["cache-control"] || "");
+            const publicCacheSafe = /public,\s*max-age=\d+/i.test(cacheControl) && !/no-store/i.test(cacheControl);
+            const summary = {
+              publicLiveFeedStatus: liveFeed.status,
+              privateConversionActivityRetainedInternally: Number(privateActivityRows[0]?.count || 0) === 1,
+              privateOrDraftActivityRowsExistInternally: Number(hiddenActivityRows[0]?.count || 0) > 0,
+              publicNonDraftActivityAppears: publicActivityAppears,
+              privateDraftConversionActivityAbsent: leakedMarkers.length === 0,
+              leakedMarkerCount: leakedMarkers.length,
+              publicCacheSafe,
+              cacheStatus: liveFeed.headers["x-dzn-cache"] || "missing",
+            };
+            if (!summary.privateConversionActivityRetainedInternally || !summary.privateOrDraftActivityRowsExistInternally || !summary.publicNonDraftActivityAppears || !summary.privateDraftConversionActivityAbsent || !summary.publicCacheSafe) {
+              fail("Public event live feed exposed private/draft activity or lost safe public cache headers.", {
+                category: "PHASE2A_PUBLIC_EVENT_PROJECTION_FAILED",
+                stage: "privacyChecks",
+                route: "/api/events/live-feed",
+                status: liveFeed.status,
+                cacheStatus: summary.cacheStatus,
+              });
+            }
+            return summary;
+          }
           async function verifyPagination(base) {
             const sorts = ["trending", "newest", "most_supported", "most_active"];
             const statuses = ["all_public", "public_voting", "shortlisted", "accepted", "converted_to_event"];
@@ -2796,6 +2861,7 @@ jobs:
             writeJsonArtifact("auth-matrix.json", authMatrix, "authMatrix");
             const protectedRowInvariants = await verifyProtectedRowInvariantsAfterConversion(authMatrix);
             updateProgress("privacyChecks", "running");
+            const publicEventProjection = await verifyPublicEventProjectionPrivacy(stableUrl, authMatrix);
             const privacyChecks = {
               publicReportCountAbsent: cacheVerification.reportCountExposed === false,
               privateDraftIdAbsent: cacheVerification.privateDraftLinkExposed === false,
@@ -2847,6 +2913,9 @@ jobs:
                 protectedRowInvariants.competitiveEventCountDidNotDecreaseAfterConversion === true &&
                 protectedRowInvariants.runScopedSuggestionCountAfterConversion === 1 &&
                 protectedRowInvariants.runScopedEventCountAfterConversion === 1,
+              privateDraftConversionActivityExcludedFromPublicFeed: publicEventProjection.privateDraftConversionActivityAbsent,
+              privateConversionActivityRetainedInternally: publicEventProjection.privateConversionActivityRetainedInternally,
+              publicNonDraftActivityAppears: publicEventProjection.publicNonDraftActivityAppears,
             };
             writeJsonArtifact("privacy-checks.json", privacyChecks, "privacyChecks");
             updateProgress("pagination", "running");
@@ -2910,6 +2979,8 @@ jobs:
               `- Stable URL: ${stableUrl}`,
               "- Public report counts exposed: false",
               "- Private draft event identifiers exposed publicly: false",
+              `- Private/draft conversion activity excluded from public live feed: ${privacyChecks.privateDraftConversionActivityExcludedFromPublicFeed ? "passed" : "failed"}`,
+              `- Public non-draft event activity still visible: ${privacyChecks.publicNonDraftActivityAppears ? "passed" : "failed"}`,
               `- Suggestion mutation auth precedence: ${privacyChecks.suggestionMutationAuthPrecedence ? "passed" : "failed"}`,
               `- Duplicate allowed cache parameters bypass shared cache: ${privacyChecks.duplicateAllowedCacheParametersBypass ? "passed" : "failed"}`,
               `- Protected preview session/event row invariants: ${privacyChecks.protectedRowsPreserved ? "passed" : "failed"}`,

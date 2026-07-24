@@ -1212,6 +1212,11 @@ assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-private-draft-ev
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-public-draft-event"), true, "Phase 2A preview must seed a public draft fixture for public-list exclusion checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-unlisted-draft-event"), true, "Phase 2A preview must seed an unlisted draft fixture for public-list exclusion checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-public-live-event"), true, "Phase 2A preview must seed a public non-draft fixture for event cache checks.");
+assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-public-live-activity"), true, "Phase 2A preview must seed a public non-draft activity fixture for live-feed checks.");
+assert.equal(ownerPreviewPhase2ABlock.includes("verifyPublicEventProjectionPrivacy"), true, "Phase 2A verifier must check public event projection privacy after conversion.");
+assert.equal(ownerPreviewPhase2ABlock.includes("/api/events/live-feed?limit=50"), true, "Phase 2A verifier must probe the public live feed.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_PUBLIC_EVENT_PROJECTION_FAILED"), true, "Phase 2A verifier must classify public event projection failures.");
+assert.equal(ownerPreviewPhase2ABlock.includes("privateDraftConversionActivityExcludedFromPublicFeed"), true, "Phase 2A privacy artifact must record public live-feed private draft exclusion.");
 assert.equal(ownerPreviewPhase2ABlock.includes("verifyEventCacheIsolationAndDrafts"), true, "Phase 2A verifier must include event API cache isolation and draft-list checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes('"/api/events?full=true&limit=20"'), true, "Phase 2A verifier must check anonymous full=true event lists are not public-cacheable.");
 assert.equal(ownerPreviewPhase2ABlock.includes('Cookie: creatorCookie'), true, "Phase 2A verifier must check authenticated event responses bypass shared cache.");

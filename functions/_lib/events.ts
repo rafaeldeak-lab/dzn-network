@@ -258,6 +258,8 @@ type EventReadinessResult =
   | { ok: false; status: 503; error: string; errorCode: string; message: string; missingCount: number };
 
 const publicEventSchemaReadiness = new WeakMap<object, Promise<EventReadinessResult>>();
+const PUBLIC_EVENT_SQL_PREDICATE =
+  "lower(COALESCE(competitive_events.visibility, 'public')) != 'private' AND lower(COALESCE(competitive_events.status, 'draft')) != 'draft'";
 
 export async function ensureCompetitiveEventsSchema(env: Env) {
   const db = requireDb(env);
@@ -286,9 +288,27 @@ export async function validateCompetitiveEventsReadSchema(env: Env): Promise<Eve
   const key = env.DB as unknown as object;
   const existing = publicEventSchemaReadiness.get(key);
   if (existing) return existing;
-  const promise = validateCompetitiveEventsReadSchemaNow(env);
+  const promise = validateCompetitiveEventsReadSchemaNow(env)
+    .catch((error) => ({
+      ok: false as const,
+      status: 503 as const,
+      error: "EVENT_SCHEMA_NOT_READY",
+      errorCode: "EVENT_SCHEMA_NOT_READY",
+      message: "Event storage is not ready.",
+      missingCount: safeMissingCount(error),
+    }))
+    .then((result) => {
+      if (!result.ok && publicEventSchemaReadiness.get(key) === promise) {
+        publicEventSchemaReadiness.delete(key);
+      }
+      return result;
+    });
   publicEventSchemaReadiness.set(key, promise);
   return promise;
+}
+
+export function resetCompetitiveEventsReadSchemaReadinessForTests(env?: Env) {
+  if (env?.DB) publicEventSchemaReadiness.delete(env.DB as unknown as object);
 }
 
 async function validateCompetitiveEventsReadSchemaNow(env: Env): Promise<EventReadinessResult> {
@@ -730,7 +750,7 @@ export async function getLiveEventFeedPayload(env: Env, limit = 25) {
   }
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
   if (!schemaReady.ok) return schemaReady;
-  const activity = await fetchEventActivity(env, null, sanitizeLimit(limit, 25, 50));
+  const activity = await fetchPublicEventActivity(env, sanitizeLimit(limit, 25, 50));
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -842,6 +862,32 @@ async function fetchEventActivity(env: Env, eventId: string | null, limit = 25) 
   return (result.results ?? []).map(toActivity);
 }
 
+async function fetchPublicEventActivity(env: Env, limit = 25) {
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT competitive_event_activity.id,
+              competitive_event_activity.event_id,
+              competitive_event_activity.server_id,
+              competitive_event_activity.activity_type,
+              competitive_event_activity.message,
+              competitive_event_activity.metadata,
+              competitive_event_activity.created_at,
+              competitive_events.name AS event_name,
+              competitive_events.slug AS event_slug,
+              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+              linked_servers.public_slug
+       FROM competitive_event_activity
+       JOIN competitive_events ON competitive_events.id = competitive_event_activity.event_id
+       LEFT JOIN linked_servers ON linked_servers.id = competitive_event_activity.server_id
+       WHERE ${PUBLIC_EVENT_SQL_PREDICATE}
+       ORDER BY datetime(competitive_event_activity.created_at) DESC
+       LIMIT ?`,
+    )
+    .bind(sanitizeLimit(limit, 25, 50))
+    .all<ActivityRow>();
+  return (result.results ?? []).map(toActivity);
+}
+
 async function fetchOwnedServer(env: Env, viewer: SessionUser, serverId: string | null | undefined) {
   const cleanId = cleanIdentifier(serverId);
   if (!cleanId) return null;
@@ -939,7 +985,7 @@ async function fetchServerRegisteredEvents(env: Env, serverId: string, statuses:
   const placeholders = statuses.map(() => "?").join(", ");
   const result = await requireDb(env)
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               competitive_event_servers.score AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
@@ -947,6 +993,7 @@ async function fetchServerRegisteredEvents(env: Env, serverId: string, statuses:
        JOIN competitive_events ON competitive_events.id = competitive_event_servers.event_id
        WHERE competitive_event_servers.server_id = ?
          AND competitive_events.status IN (${placeholders})
+         AND ${PUBLIC_EVENT_SQL_PREDICATE}
        ORDER BY datetime(COALESCE(competitive_events.starts_at, competitive_events.created_at)) DESC
        LIMIT 20`,
     )
@@ -958,14 +1005,14 @@ async function fetchServerRegisteredEvents(env: Env, serverId: string, statuses:
 async function fetchCompatibleEvents(env: Env, category: ServerCategory) {
   const result = await requireDb(env)
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
        FROM competitive_events
        WHERE category = ?
          AND status IN ('registration_open', 'upcoming', 'standby')
-         AND visibility != 'private'
+         AND ${PUBLIC_EVENT_SQL_PREDICATE}
        ORDER BY datetime(COALESCE(starts_at, created_at)) ASC
        LIMIT 10`,
     )
@@ -984,10 +1031,12 @@ async function fetchServerMatches(env: Env, serverId: string) {
               right_server.public_slug AS right_slug,
               COALESCE(NULLIF(winner.display_name, ''), NULLIF(winner.hostname, ''), winner.server_name, winner.nitrado_service_name) AS winner_name
        FROM competitive_event_matches
+       JOIN competitive_events ON competitive_events.id = competitive_event_matches.event_id
        JOIN linked_servers AS left_server ON left_server.id = competitive_event_matches.left_server_id
        JOIN linked_servers AS right_server ON right_server.id = competitive_event_matches.right_server_id
        LEFT JOIN linked_servers AS winner ON winner.id = competitive_event_matches.winner_server_id
-       WHERE competitive_event_matches.left_server_id = ? OR competitive_event_matches.right_server_id = ?
+       WHERE (competitive_event_matches.left_server_id = ? OR competitive_event_matches.right_server_id = ?)
+         AND ${PUBLIC_EVENT_SQL_PREDICATE}
        ORDER BY datetime(competitive_event_matches.created_at) DESC
        LIMIT 12`,
     )
@@ -1334,6 +1383,14 @@ export function eventStatusLabel(value: unknown) {
 function sanitizeLimit(value: unknown, fallback: number, max: number) {
   const parsed = Math.trunc(Number(value));
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+}
+
+function safeMissingCount(error: unknown) {
+  if (typeof error === "object" && error && "missingCount" in error) {
+    const count = Number((error as { missingCount?: unknown }).missingCount);
+    if (Number.isFinite(count) && count >= 0) return count;
+  }
+  return 1;
 }
 
 function cleanSlug(value: unknown) {
