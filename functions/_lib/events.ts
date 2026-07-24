@@ -127,6 +127,7 @@ type ServerRow = {
   id: string;
   user_id: string | null;
   guild_id: string | null;
+  merged_into_server_id?: string | null;
   public_slug: string | null;
   display_name: string | null;
   hostname: string | null;
@@ -219,7 +220,7 @@ const EVENT_CREATION_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   competitive_event_servers: ["id", "event_id", "server_id", "category", "approved", "seed", "registered_at"],
   competitive_event_matches: ["id", "event_id"],
   competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
-  linked_servers: ["id", "server_category", "competitive_enabled", "last_event_at", "updated_at", "status"],
+  linked_servers: ["id", "user_id", "guild_id", "server_category", "competitive_enabled", "last_event_at", "updated_at", "status", "listing_visibility", "merged_into_server_id"],
   server_subscriptions: ["guild_id", "plan_key", "status"],
 };
 
@@ -243,6 +244,52 @@ const EVENT_PUBLIC_SELECT_COLUMNS = `
   competitive_events.rewards,
   competitive_events.created_at,
   competitive_events.updated_at
+`;
+
+const EVENT_CREATE_HOST_SELECT_COLUMNS = `
+  linked_servers.id,
+  linked_servers.user_id,
+  linked_servers.guild_id,
+  linked_servers.public_slug,
+  linked_servers.display_name,
+  linked_servers.hostname,
+  linked_servers.server_name,
+  linked_servers.nitrado_service_name,
+  linked_servers.server_type,
+  linked_servers.server_mode,
+  linked_servers.server_category,
+  linked_servers.competitive_enabled,
+  linked_servers.verified_server,
+  linked_servers.event_mmr,
+  linked_servers.season_points,
+  linked_servers.event_wins,
+  linked_servers.event_losses,
+  linked_servers.event_draws,
+  linked_servers.last_event_at,
+  linked_servers.current_players,
+  linked_servers.max_players,
+  linked_servers.status,
+  linked_servers.listing_visibility,
+  linked_servers.merged_into_server_id,
+  linked_servers.updated_at,
+  server_subscriptions.plan_key,
+  server_subscriptions.status AS subscription_status
+`;
+
+const EVENT_CREATE_HOST_TRANSACTION_PREDICATE = `
+  linked_servers.id = ?
+  AND linked_servers.user_id = ?
+  AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'archived')
+  AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+  AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+  AND EXISTS (
+    SELECT 1
+    FROM server_subscriptions
+    WHERE server_subscriptions.guild_id = linked_servers.guild_id
+      AND lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing')
+      AND lower(COALESCE(server_subscriptions.plan_key, 'free')) IN ('pro', 'premium', 'network', 'partner')
+    LIMIT 1
+  )
 `;
 
 const EVENT_READ_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
@@ -470,7 +517,7 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
   const schemaReady = await validateCompetitiveEventCreationSchema(env, requestId);
   if (!schemaReady.ok) return schemaReady;
 
-  const hostLookup = await fetchEventCreationHost(env, input.hosting_server_id ?? input.server_id, requestId);
+  const hostLookup = await fetchEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id, requestId);
   if (!hostLookup.ok) return hostLookup;
   const server = hostLookup.server;
 
@@ -535,7 +582,11 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
           `INSERT INTO competitive_events (
             id, name, slug, description, category, event_type, status, visibility, premium_tier,
             server_limit, team_limit, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          )
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          FROM linked_servers
+          WHERE ${EVENT_CREATE_HOST_TRANSACTION_PREDICATE}
+          LIMIT 1`,
         )
         .bind(
           eventId,
@@ -554,13 +605,18 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
           viewer.id,
           rules || "Same-category only. DZN dedupe and server-scope rules apply.",
           rewards || null,
+          server.id,
+          viewer.id,
         ),
       db
         .prepare(
           `INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, seed, registered_at)
-           VALUES (?, ?, ?, ?, 1, 1, CURRENT_TIMESTAMP)`,
+           SELECT ?, competitive_events.id, ?, ?, 1, 1, CURRENT_TIMESTAMP
+           FROM competitive_events
+           WHERE competitive_events.id = ?
+           LIMIT 1`,
         )
-        .bind(registrationId, eventId, server.id, category),
+        .bind(registrationId, server.id, category, eventId),
       db
         .prepare(
           `UPDATE linked_servers
@@ -568,9 +624,9 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
                server_category = COALESCE(server_category, ?),
                last_event_at = CURRENT_TIMESTAMP,
                updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
+           WHERE ${EVENT_CREATE_HOST_TRANSACTION_PREDICATE}`,
         )
-        .bind(category, server.id),
+        .bind(category, server.id, viewer.id),
       db
         .prepare(
           `INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
@@ -579,8 +635,15 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
         .bind(activityId, eventId, server.id, activityMessage, activityMetadata),
     ]);
   } catch (error) {
+    if (isHostAuthorizationChangedError(error)) return hostAuthorizationChangedPayload();
     return eventCreateFailed("transactional_create", requestId, error);
   }
+
+  const created = await db
+    .prepare("SELECT id FROM competitive_events WHERE id = ? LIMIT 1")
+    .bind(eventId)
+    .first<{ id: string }>();
+  if (!created?.id) return hostAuthorizationChangedPayload();
 
   return {
     ok: true,
@@ -900,6 +963,8 @@ async function fetchOwnedServer(env: Env, viewer: SessionUser, serverId: string 
        WHERE linked_servers.id = ?
          AND linked_servers.user_id = ?
          AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,
     )
     .bind(cleanId, viewer.id)
@@ -1093,23 +1158,23 @@ async function validateCompetitiveEventCreationSchema(env: Env, requestId: strin
   }
 }
 
-async function fetchEventCreationHost(env: Env, serverId: string | null | undefined, requestId: string) {
+async function fetchEventCreationHost(env: Env, viewer: SessionUser, serverId: string | null | undefined, requestId: string) {
   const cleanId = cleanIdentifier(serverId);
   if (!cleanId) return { ok: false as const, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
 
   try {
     const result = await requireDb(env)
       .prepare(
-        `SELECT linked_servers.*,
-                server_subscriptions.plan_key,
-                server_subscriptions.status AS subscription_status
+        `SELECT ${EVENT_CREATE_HOST_SELECT_COLUMNS}
          FROM linked_servers
          LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
          WHERE linked_servers.id = ?
+           AND linked_servers.user_id = ?
            AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
-         LIMIT 2`,
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+          LIMIT 2`,
       )
-      .bind(cleanId)
+      .bind(cleanId, viewer.id)
       .all<ServerRow>();
     const rows = result.results ?? [];
     if (rows.length === 0) return { ok: false as const, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
@@ -1163,6 +1228,20 @@ function eventCreateFailed(stage: EventCreateStage, requestId: string, error: un
     message: "Official event creation failed before completion.",
     requestId,
   };
+}
+
+function hostAuthorizationChangedPayload() {
+  return {
+    ok: false as const,
+    status: 409,
+    error: "HOST_AUTHORIZATION_CHANGED",
+    message: "Hosting server authorization changed. Refresh and try again.",
+  };
+}
+
+function isHostAuthorizationChangedError(error: unknown) {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error ?? "");
+  return /competitive_event_activity\.activity_type|activity_type/i.test(text) && /not\s+null|constraint|host_authorization_changed/i.test(text);
 }
 
 function eventNotFoundPayload() {

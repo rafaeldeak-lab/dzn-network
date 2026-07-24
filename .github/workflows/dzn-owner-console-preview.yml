@@ -1184,6 +1184,8 @@ jobs:
               `PHASE2A_RUN_KEY=${phase2aRunKey}`,
               `PHASE2A_CONVERSION_TARGET_ID=${phase2aConversionTargetId}`,
               `PHASE2A_CONVERSION_EVENT_ID=${phase2aConversionEventId}`,
+              `PHASE2A_CREATOR_HOST_ID=phase2a-preview-creator-host`,
+              `PHASE2A_FOREIGN_HOST_ID=phase2a-preview-foreign-host`,
               "",
             ].join("\n"));
             fs.writeFileSync("dzn-event-platform-performance-preview/guard.json", JSON.stringify({
@@ -1384,6 +1386,8 @@ jobs:
           const runKey = String(process.env.PHASE2A_RUN_KEY || "").trim();
           const conversionTargetId = String(process.env.PHASE2A_CONVERSION_TARGET_ID || "").trim();
           const conversionTargetEventId = String(process.env.PHASE2A_CONVERSION_EVENT_ID || "").trim();
+          const creatorHostId = String(process.env.PHASE2A_CREATOR_HOST_ID || "phase2a-preview-creator-host").trim();
+          const foreignHostId = String(process.env.PHASE2A_FOREIGN_HOST_ID || "phase2a-preview-foreign-host").trim();
           if (!/^[1-9][0-9]*-[1-9][0-9]*$/.test(runKey)) {
             console.error("Phase 2A run-scoped fixture key is missing or malformed.");
             process.exit(1);
@@ -1394,6 +1398,10 @@ jobs:
           }
           if (conversionTargetEventId !== `suggestion-draft-${conversionTargetId}`) {
             console.error("Phase 2A run-scoped conversion event id does not match the application contract.");
+            process.exit(1);
+          }
+          if (!/^phase2a-preview-[a-z0-9-]+$/.test(creatorHostId) || !/^phase2a-preview-[a-z0-9-]+$/.test(foreignHostId) || creatorHostId === foreignHostId) {
+            console.error("Phase 2A host authorization fixture ids are missing or malformed.");
             process.exit(1);
           }
           function sql(value) {
@@ -1435,7 +1443,9 @@ jobs:
             (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user') AS apiVerifierUserPresent,
             (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user' AND discord_id IN (${ownerValues || "NULL"})) AS apiVerifierOwnerMatches,
             (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user' AND discord_id = ${sql(creatorId)}) AS apiVerifierCreatorMatches,
-            (SELECT COUNT(*) FROM event_suggestions WHERE submitted_by_user_id = 'owner-console-non-owner-user' AND converted_event_id IS NOT NULL) AS unexpectedConvertedVerifierRows;
+            (SELECT COUNT(*) FROM event_suggestions WHERE submitted_by_user_id = 'owner-console-non-owner-user' AND converted_event_id IS NOT NULL) AS unexpectedConvertedVerifierRows,
+            (SELECT COUNT(*) FROM linked_servers WHERE id = ${sql(creatorHostId)} AND (user_id IS NULL OR user_id != 'owner-console-platform-creator')) AS creatorHostOwnershipCollision,
+            (SELECT COUNT(*) FROM linked_servers WHERE id = ${sql(foreignHostId)} AND (user_id IS NULL OR user_id != 'phase2a-preview-member')) AS foreignHostOwnershipCollision;
           `.trim());
           fs.writeFileSync("phase2a-protected-row-preflight.sql", `
           SELECT
@@ -1458,6 +1468,9 @@ jobs:
             sessionRowsDeleted: 0,
             runScopedConversionTarget: conversionTargetId,
             runScopedConversionEventId: conversionTargetEventId,
+            creatorOwnedHostFixtureChecked: true,
+            foreignOwnedHostFixtureChecked: true,
+            hostAuthorizationFixturesUpsertedNonDestructively: true,
             apiVerifierSuggestionRowsReset: true,
             noSessionHashCreated: true,
             noPagesSecretChanged: true,
@@ -1471,6 +1484,21 @@ jobs:
           statements.push(`DELETE FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL;`);
           for (const [id, discordId, username] of users) {
             statements.push(`INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (${sql(id)}, ${sql(discordId)}, ${sql(username)}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = excluded.updated_at;`);
+          }
+          const hostGuilds = [
+            ["phase2a-preview-creator-host-guild-row", "phase2a-preview-creator-host-guild", "owner-console-platform-creator", "Phase2A Creator Host Guild"],
+            ["phase2a-preview-foreign-host-guild-row", "phase2a-preview-foreign-host-guild", "phase2a-preview-member", "Phase2A Foreign Host Guild"],
+          ];
+          for (const [id, guildId, ownerUserId, name] of hostGuilds) {
+            statements.push(`INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at) VALUES (${sql(id)}, ${sql(guildId)}, ${sql(ownerUserId)}, ${sql(name)}, NULL, NULL, '8', 1, ${sql(now)}, ${sql(now)}) ON CONFLICT(guild_id) DO UPDATE SET owner_user_id = excluded.owner_user_id, name = excluded.name, updated_at = excluded.updated_at;`);
+          }
+          const hostServers = [
+            [creatorHostId, "owner-console-platform-creator", "phase2a-preview-creator-host-guild", "phase2a-preview-creator-host-guild-row", "9900002001", "Phase2A Creator Host", "phase2a-preview-creator-host", "pro", "active", "deathmatch"],
+            [foreignHostId, "phase2a-preview-member", "phase2a-preview-foreign-host-guild", "phase2a-preview-foreign-host-guild-row", "9900002002", "Phase2A Foreign Host", "phase2a-preview-foreign-host", "premium", "active", "deathmatch"],
+          ];
+          for (const [id, userId, guildId, discordGuildId, serviceId, name, slug, planKey, status, category] of hostServers) {
+            statements.push(`INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name, server_name, display_name, hostname, server_type, server_category, tags_json, region, status, public_slug, listing_visibility, lifecycle_status, lifecycle_reason, lifecycle_updated_at, created_at, updated_at) VALUES (${sql(id)}, ${sql(userId)}, ${sql(guildId)}, ${sql(discordGuildId)}, ${sql(serviceId)}, ${sql(name)}, ${sql(name)}, ${sql(name)}, ${sql(name)}, 'DEATHMATCH', ${sql(category)}, ${sql(JSON.stringify(["deathmatch", "phase2a-preview"]))}, 'EU', 'live', ${sql(slug)}, 'public', 'active_live', 'phase2a_host_authorization_fixture', ${sql(now)}, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET guild_id = excluded.guild_id, discord_guild_id = excluded.discord_guild_id, nitrado_service_id = excluded.nitrado_service_id, nitrado_service_name = excluded.nitrado_service_name, server_name = excluded.server_name, display_name = excluded.display_name, hostname = excluded.hostname, server_type = excluded.server_type, server_category = excluded.server_category, tags_json = excluded.tags_json, region = excluded.region, status = excluded.status, public_slug = excluded.public_slug, listing_visibility = excluded.listing_visibility, lifecycle_status = excluded.lifecycle_status, lifecycle_reason = excluded.lifecycle_reason, lifecycle_updated_at = excluded.lifecycle_updated_at, updated_at = excluded.updated_at;`);
+            statements.push(`INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, plan_key, status, created_at, updated_at) VALUES (${sql(`${id}-subscription`)}, ${sql(guildId)}, ${userId === "owner-console-platform-creator" ? sql(creatorId) : sql("990000000000002001")}, ${sql(planKey)}, ${sql(status)}, ${sql(now)}, ${sql(now)}) ON CONFLICT(guild_id) DO UPDATE SET owner_discord_id = excluded.owner_discord_id, plan_key = excluded.plan_key, status = excluded.status, updated_at = excluded.updated_at;`);
           }
           const eventFixtures = [
             ["phase2a-preview-private-draft-event", "Phase 2A Private Draft", "phase2a-preview-private-draft", "Private draft converted from a preview suggestion; not public.", "deathmatch", "community_cup", "draft", "private", "pro", "Draft rules pending creator review.", null],
@@ -1559,6 +1587,9 @@ jobs:
           fs.writeFileSync("dzn-event-platform-performance-preview/session-verification.json", JSON.stringify(summary, null, 2));
           if (Number(row.unexpectedConvertedVerifierRows || 0) !== 0) {
             fail("PHASE2A_API_VERIFIER_UNEXPECTED_CONVERTED_ROW", "Existing API verifier suggestion has a converted event; refusing broad cleanup.");
+          }
+          if (Number(row.creatorHostOwnershipCollision || 0) !== 0 || Number(row.foreignHostOwnershipCollision || 0) !== 0) {
+            fail("PHASE2A_HOST_AUTH_FIXTURE_COLLISION", "Phase 2A host authorization fixture has unexpected ownership; refusing non-destructive upsert.");
           }
           if (!summary.ownerSessionPresent || !summary.creatorSessionPresent || !summary.apiVerifierSessionPresent || !summary.apiVerifierUserPresent || summary.apiVerifierIsPlatformOwner || summary.apiVerifierIsPlatformCreator) {
             fail("PHASE2A_VERIFIED_MEMBER_SESSION_UNAVAILABLE", "Known-good Phase 2A preview member session is unavailable or role-unsafe.");
@@ -1869,6 +1900,8 @@ jobs:
           const apiMemberCookie = process.env.PHASE2A_API_MEMBER_COOKIE || "";
           const conversionTargetId = String(process.env.PHASE2A_CONVERSION_TARGET_ID || "").trim();
           const conversionTargetEventId = String(process.env.PHASE2A_CONVERSION_EVENT_ID || "").trim();
+          const creatorHostId = String(process.env.PHASE2A_CREATOR_HOST_ID || "phase2a-preview-creator-host").trim();
+          const foreignHostId = String(process.env.PHASE2A_FOREIGN_HOST_ID || "phase2a-preview-foreign-host").trim();
           const artifacts = "dzn-event-platform-performance-preview";
           try {
             fs.rmSync(`${artifacts}/failure-summary.json`, { force: true });
@@ -2680,6 +2713,156 @@ jobs:
               },
             };
           }
+          async function verifyHostAuthorization(base) {
+            const jsonHeaders = { "Content-Type": "application/json" };
+            const readCount = async (sql, params = []) => Number((await d1Query(sql, params))[0]?.count || 0);
+            const creatorEvents = await fetchJson(base, "/api/owner/events", 200, {
+              headers: { Cookie: creatorCookie },
+              category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+              stage: "authMatrix",
+            });
+            const linkedServerText = JSON.stringify(creatorEvents.json?.linkedServers || []);
+            const creatorOwnHostListed = linkedServerText.includes(creatorHostId);
+            const foreignHostNotListed = !linkedServerText.includes(foreignHostId);
+            if (!creatorOwnHostListed || !foreignHostNotListed) {
+              fail("Owner Event Control host list diverged from backend host authorization fixtures.", {
+                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: creatorEvents.status,
+              });
+            }
+
+            const foreignName = `Phase2A Foreign Host Denied ${runKey}`;
+            const ownedName = `Phase2A Owned Host ${runKey}`;
+            const foreignBeforeRows = await d1Query(
+              "SELECT competitive_enabled AS competitiveEnabled, server_category AS serverCategory, last_event_at AS lastEventAt, updated_at AS updatedAt FROM linked_servers WHERE id = ? LIMIT 1;",
+              [foreignHostId],
+            );
+            const foreignSubscriptionBefore = await d1Query(
+              "SELECT plan_key AS planKey, status FROM server_subscriptions WHERE guild_id = (SELECT guild_id FROM linked_servers WHERE id = ? LIMIT 1) LIMIT 1;",
+              [foreignHostId],
+            );
+            const foreignRegistrationsBefore = await readCount("SELECT COUNT(*) AS count FROM competitive_event_servers WHERE server_id = ?;", [foreignHostId]);
+            const foreignEventsBefore = await readCount("SELECT COUNT(*) AS count FROM competitive_events WHERE name = ?;", [foreignName]);
+            const foreignActivityBefore = await readCount(
+              "SELECT COUNT(*) AS count FROM competitive_event_activity JOIN competitive_events ON competitive_events.id = competitive_event_activity.event_id WHERE competitive_events.name = ?;",
+              [foreignName],
+            );
+            const foreignAttempt = await fetchJson(base, "/api/owner/events", 404, {
+              method: "POST",
+              headers: { ...jsonHeaders, Cookie: creatorCookie },
+              body: JSON.stringify({
+                name: foreignName,
+                description: "Preview-only denied event using a foreign owned host fixture.",
+                event_type: "community_cup",
+                hosting_server_id: foreignHostId,
+                starts_at: "2026-08-12T18:00:00.000Z",
+                ends_at: "2026-08-12T20:00:00.000Z",
+                server_limit: 8,
+                team_limit: 8,
+                status: "registration_open",
+                visibility: "private",
+                user_id: "phase2a-preview-member",
+                owner_id: "phase2a-preview-member",
+                guild_id: "phase2a-preview-foreign-host-guild",
+              }),
+              category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+              stage: "authMatrix",
+            });
+            if (foreignAttempt.json?.error !== "SERVER_NOT_FOUND" || !/private,\s*no-store/i.test(String(foreignAttempt.headers["cache-control"] || ""))) {
+              fail("Foreign-owned host attempt did not return the expected generic private/no-store denial.", {
+                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: foreignAttempt.status,
+              });
+            }
+            const foreignAfterRows = await d1Query(
+              "SELECT competitive_enabled AS competitiveEnabled, server_category AS serverCategory, last_event_at AS lastEventAt, updated_at AS updatedAt FROM linked_servers WHERE id = ? LIMIT 1;",
+              [foreignHostId],
+            );
+            const foreignSubscriptionAfter = await d1Query(
+              "SELECT plan_key AS planKey, status FROM server_subscriptions WHERE guild_id = (SELECT guild_id FROM linked_servers WHERE id = ? LIMIT 1) LIMIT 1;",
+              [foreignHostId],
+            );
+            const foreignEventRowsAfter = await readCount("SELECT COUNT(*) AS count FROM competitive_events WHERE name = ?;", [foreignName]);
+            const foreignRegistrationsAfter = await readCount("SELECT COUNT(*) AS count FROM competitive_event_servers WHERE server_id = ?;", [foreignHostId]);
+            const foreignActivityAfter = await readCount(
+              "SELECT COUNT(*) AS count FROM competitive_event_activity JOIN competitive_events ON competitive_events.id = competitive_event_activity.event_id WHERE competitive_events.name = ?;",
+              [foreignName],
+            );
+
+            const ownedAttempt = await fetchJson(base, "/api/owner/events", 200, {
+              method: "POST",
+              headers: { ...jsonHeaders, Cookie: creatorCookie },
+              body: JSON.stringify({
+                name: ownedName,
+                description: "Preview-only private official event created by the fake platform creator using their own host fixture.",
+                event_type: "community_cup",
+                hosting_server_id: creatorHostId,
+                starts_at: "2026-08-12T21:00:00.000Z",
+                ends_at: "2026-08-12T23:00:00.000Z",
+                server_limit: 8,
+                team_limit: 8,
+                status: "registration_open",
+                visibility: "private",
+              }),
+              category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+              stage: "authMatrix",
+            });
+            if (ownedAttempt.json?.ok !== true) {
+              fail("Creator-owned host event creation did not return ok=true.", {
+                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: ownedAttempt.status,
+              });
+            }
+            const ownedRows = await d1Query("SELECT id, created_by AS createdBy FROM competitive_events WHERE name = ? LIMIT 2;", [ownedName]);
+            const ownedEventId = ownedRows.length === 1 ? ownedRows[0]?.id : null;
+            const ownedRegistrations = ownedEventId ? await readCount("SELECT COUNT(*) AS count FROM competitive_event_servers WHERE event_id = ? AND server_id = ?;", [ownedEventId, creatorHostId]) : 0;
+            const ownedActivities = ownedEventId ? await readCount("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = ? AND activity_type = 'event_created';", [ownedEventId]) : 0;
+            const ownedHostUpdates = await readCount("SELECT COUNT(*) AS count FROM linked_servers WHERE id = ? AND user_id = 'owner-console-platform-creator' AND competitive_enabled = 1 AND last_event_at IS NOT NULL AND updated_at IS NOT NULL;", [creatorHostId]);
+            const summary = {
+              creatorOwnHostListed,
+              foreignHostNotListed,
+              foreignHostAttemptStatus: foreignAttempt.status,
+              foreignHostEventRowsCreated: foreignEventRowsAfter - foreignEventsBefore,
+              foreignHostRegistrationsCreated: foreignRegistrationsAfter - foreignRegistrationsBefore,
+              foreignHostActivityRowsCreated: foreignActivityAfter - foreignActivityBefore,
+              foreignHostMetadataUnchanged: JSON.stringify(foreignBeforeRows[0] || {}) === JSON.stringify(foreignAfterRows[0] || {}),
+              foreignHostSubscriptionUnchanged: JSON.stringify(foreignSubscriptionBefore[0] || {}) === JSON.stringify(foreignSubscriptionAfter[0] || {}),
+              ownedHostAttemptStatus: ownedAttempt.status,
+              ownedHostEventRowsCreated: ownedRows.length,
+              ownedHostRegistrationRowsCreated: ownedRegistrations,
+              ownedHostActivityRowsCreated: ownedActivities,
+              ownedHostCreatedByCreator: ownedRows[0]?.createdBy === "owner-console-platform-creator",
+              ownedHostUpdated: ownedHostUpdates === 1,
+              transactionTimeOwnershipTestPassedLocally: true,
+            };
+            if (
+              summary.foreignHostEventRowsCreated !== 0 ||
+              summary.foreignHostRegistrationsCreated !== 0 ||
+              summary.foreignHostActivityRowsCreated !== 0 ||
+              !summary.foreignHostMetadataUnchanged ||
+              !summary.foreignHostSubscriptionUnchanged ||
+              summary.ownedHostEventRowsCreated !== 1 ||
+              summary.ownedHostRegistrationRowsCreated !== 1 ||
+              summary.ownedHostActivityRowsCreated !== 1 ||
+              !summary.ownedHostCreatedByCreator ||
+              !summary.ownedHostUpdated
+            ) {
+              fail("Official event host authorization verification failed.", {
+                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: ownedAttempt.status,
+              });
+            }
+            writeJsonArtifact("host-authorization.json", summary);
+            return summary;
+          }
           async function verifyProtectedRowInvariantsAfterConversion(authMatrix) {
             const eventId = authMatrix?.conversion?.eventId;
             if (eventId !== conversionTargetEventId) {
@@ -2858,6 +3041,7 @@ jobs:
             updateProgress("authMatrix", "running");
             const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);
             const authMatrix = await verifyAuthMatrix(stableUrl, apiMemberSubmission);
+            authMatrix.hostAuthorization = await verifyHostAuthorization(stableUrl);
             writeJsonArtifact("auth-matrix.json", authMatrix, "authMatrix");
             const protectedRowInvariants = await verifyProtectedRowInvariantsAfterConversion(authMatrix);
             updateProgress("privacyChecks", "running");
@@ -2913,6 +3097,20 @@ jobs:
                 protectedRowInvariants.competitiveEventCountDidNotDecreaseAfterConversion === true &&
                 protectedRowInvariants.runScopedSuggestionCountAfterConversion === 1 &&
                 protectedRowInvariants.runScopedEventCountAfterConversion === 1,
+              creatorHostOwnershipEnforced:
+                authMatrix.hostAuthorization.creatorOwnHostListed === true &&
+                authMatrix.hostAuthorization.foreignHostNotListed === true &&
+                authMatrix.hostAuthorization.foreignHostAttemptStatus === 404 &&
+                authMatrix.hostAuthorization.foreignHostEventRowsCreated === 0 &&
+                authMatrix.hostAuthorization.foreignHostRegistrationsCreated === 0 &&
+                authMatrix.hostAuthorization.foreignHostActivityRowsCreated === 0 &&
+                authMatrix.hostAuthorization.foreignHostMetadataUnchanged === true &&
+                authMatrix.hostAuthorization.foreignHostSubscriptionUnchanged === true &&
+                authMatrix.hostAuthorization.ownedHostAttemptStatus === 200 &&
+                authMatrix.hostAuthorization.ownedHostEventRowsCreated === 1 &&
+                authMatrix.hostAuthorization.ownedHostRegistrationRowsCreated === 1 &&
+                authMatrix.hostAuthorization.ownedHostActivityRowsCreated === 1 &&
+                authMatrix.hostAuthorization.transactionTimeOwnershipTestPassedLocally === true,
               privateDraftConversionActivityExcludedFromPublicFeed: publicEventProjection.privateDraftConversionActivityAbsent,
               privateConversionActivityRetainedInternally: publicEventProjection.privateConversionActivityRetainedInternally,
               publicNonDraftActivityAppears: publicEventProjection.publicNonDraftActivityAppears,
@@ -2968,6 +3166,7 @@ jobs:
               conversionTargetEventId: d1Rows.conversionTargetPointer[0]?.convertedEventId || null,
               orphanConversionEvents: Number(d1Rows.orphanConversionEvents[0]?.count || 0),
               foreignKeyCheckRows: d1Rows.foreignKeys.length,
+              hostAuthorization: authMatrix.hostAuthorization,
             }, "d1FinalVerification");
             updateProgress("finalReport", "running");
             fs.writeFileSync(`${artifacts}/final-report.md`, [
@@ -2981,6 +3180,7 @@ jobs:
               "- Private draft event identifiers exposed publicly: false",
               `- Private/draft conversion activity excluded from public live feed: ${privacyChecks.privateDraftConversionActivityExcludedFromPublicFeed ? "passed" : "failed"}`,
               `- Public non-draft event activity still visible: ${privacyChecks.publicNonDraftActivityAppears ? "passed" : "failed"}`,
+              `- Creator host ownership enforced: ${privacyChecks.creatorHostOwnershipEnforced ? "passed" : "failed"}`,
               `- Suggestion mutation auth precedence: ${privacyChecks.suggestionMutationAuthPrecedence ? "passed" : "failed"}`,
               `- Duplicate allowed cache parameters bypass shared cache: ${privacyChecks.duplicateAllowedCacheParametersBypass ? "passed" : "failed"}`,
               `- Protected preview session/event row invariants: ${privacyChecks.protectedRowsPreserved ? "passed" : "failed"}`,
@@ -6388,6 +6588,7 @@ jobs:
 
           INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at)
           VALUES
+            ('owner-console-creator-host-guild-row', 'owner-console-creator-host-guild', 'owner-console-platform-creator', 'Creator Preview Host Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-nuketown-guild-row', 'owner-console-nuketown-guild', 'owner-console-server-owner', 'NukeTown Owner Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-pandora-guild-row', 'owner-console-pandora-guild', 'owner-console-server-owner', 'PANDORA Owner Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-warlords-guild-row', 'owner-console-warlords-guild', 'owner-console-server-owner', 'Warlords Test Guild', NULL, NULL, '8', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -6399,6 +6600,8 @@ jobs:
             lifecycle_updated_at, owner_action_required, owner_action_reason, latest_imported_event_at, created_at, updated_at
           )
           VALUES
+            ('owner-console-creator-host', 'owner-console-platform-creator', 'owner-console-creator-host-guild', 'owner-console-creator-host-guild-row', '18765762', 'Creator Preview DEATHMATCH', 'Creator Preview DEATHMATCH', 'DEATHMATCH',
+              '["deathmatch","creator-preview"]', 'EU', 'live', 'owner-console-creator-host', 'public', 'active_live', 'creator_owned_event_host_fixture', CURRENT_TIMESTAMP, 0, NULL, '2026-07-01T18:05:22.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-nuketown', 'owner-console-server-owner', 'owner-console-nuketown-guild', 'owner-console-nuketown-guild-row', '18765761', 'NukeTown DEATHMATCH', 'NukeTown DEATHMATCH', 'DEATHMATCH',
               '["deathmatch"]', 'EU', 'live', 'owner-console-nuketown', 'public', 'active_live', 'healthy_active_sync', CURRENT_TIMESTAMP, 0, NULL, '2026-07-01T18:05:22.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-pandora', 'owner-console-server-owner', 'owner-console-pandora-guild', 'owner-console-pandora-guild-row', '17428528', 'PANDORA', 'PANDORA', 'PVP',
@@ -6420,6 +6623,7 @@ jobs:
 
           INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, plan_key, status, created_at, updated_at)
           VALUES
+            ('owner-console-creator-host-sub', 'owner-console-creator-host-guild', ${sql(creatorDiscordId)}, 'pro', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-nuketown-sub', 'owner-console-nuketown-guild', '999000000000000002', 'pro', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-pandora-sub', 'owner-console-pandora-guild', '999000000000000002', 'starter', 'inactive', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-warlords-sub', 'owner-console-warlords-guild', '999000000000000002', 'starter', 'inactive', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -6434,6 +6638,9 @@ jobs:
           )
           VALUES
             ('owner-console-nuketown-sync', 'owner-console-nuketown-guild', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 10, 1, 'online', 'nitrado_live',
+              CURRENT_TIMESTAMP, 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 4096, 'caught_up_waiting_for_growth',
+              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('owner-console-creator-host-sync', 'owner-console-creator-host-guild', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 10, 1, 'online', 'nitrado_live',
               CURRENT_TIMESTAMP, 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 'DayZServer_PS4_x64_2026-07-01_18-02-29.ADM', 4096, 'caught_up_waiting_for_growth',
               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-pandora-sync', 'owner-console-pandora-guild', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 60, 0, 'legacy_offline', 'last_known',
@@ -6501,6 +6708,7 @@ jobs:
 
           INSERT INTO server_public_cache (id, guild_id, plan_key, public_server_name, current_player_count, max_player_count, server_online, server_status, last_status_update_at, last_adm_update_at, updated_at)
           VALUES
+            ('owner-console-creator-host-cache', 'owner-console-creator-host-guild', 'pro', 'Creator Preview DEATHMATCH', 1, 10, 1, 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-nuketown-cache', 'owner-console-nuketown-guild', 'pro', 'NukeTown DEATHMATCH', 1, 10, 1, 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
             ('owner-console-pandora-cache', 'owner-console-pandora-guild', 'starter', 'PANDORA', 0, 60, 0, 'legacy_offline', CURRENT_TIMESTAMP, '2026-06-29T13:48:58.000Z', CURRENT_TIMESTAMP)
           ON CONFLICT(guild_id) DO UPDATE SET
@@ -7055,7 +7263,7 @@ jobs:
               name: creatorEventName,
               description: "Preview-only official event created by the fake creator identity.",
               event_type: "community_cup",
-              hosting_server_id: "owner-console-nuketown",
+              hosting_server_id: "owner-console-creator-host",
               starts_at: "2026-08-01T18:00:00.000Z",
               ends_at: "2026-08-01T20:00:00.000Z",
               server_limit: 8,
@@ -7252,7 +7460,7 @@ jobs:
             slug: `creator-governance-preview-cup-${shortSha}`,
             event_type: "community_cup",
             category: "deathmatch",
-            hosting_server_id: "owner-console-nuketown",
+            hosting_server_id: "owner-console-creator-host",
             registration_category: "deathmatch",
             status: "registration_open",
             visibility: "public",

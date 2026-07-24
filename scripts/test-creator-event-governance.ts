@@ -113,6 +113,8 @@ async function main() {
   await assertSafeCreatorEventFailure("schema_readiness");
   await assertSafeCreatorEventFailure("entitlement_lookup");
   await assertStructuredPreflightFailures();
+  await assertHostOwnershipAuthorization();
+  await assertTransactionTimeHostAuthorization();
 
   assertSourceGovernance();
 
@@ -222,6 +224,67 @@ async function assertStructuredPreflightFailures() {
   }
 }
 
+async function assertHostOwnershipAuthorization() {
+  {
+    const env = memoryEnv();
+    const result = await createCompetitiveEvent(env, creator, { ...validCreateBody(), hosting_server_id: "server-b" });
+    assert.equal(result.status, 404, "Foreign-owned eligible host should be indistinguishable from a missing host.");
+    assert.equal(result.error, "SERVER_NOT_FOUND");
+    assertNoPartialEvent(env.DB, "foreign_host_lookup");
+    assertForeignHostUnchanged(env.DB, "foreign_host_lookup");
+  }
+
+  for (const forged of [
+    { user_id: "other-owner-user" },
+    { owner_id: "other-owner-user" },
+    { discord_id: "999999999999999999" },
+    { guild_id: "guild-b" },
+    { headers: { "x-dzn-user-id": "other-owner-user", "x-dzn-discord-id": "999999999999999999" } },
+    { query: { user_id: "other-owner-user" } },
+    { username: "other-owner-user", display_name: "Foreign Owner" },
+  ]) {
+    const env = memoryEnv();
+    const result = await createCompetitiveEvent(env, creator, {
+      ...validCreateBody(),
+      hosting_server_id: "server-b",
+      ...forged,
+    } as unknown as CreateCompetitiveEventInput);
+    assert.equal(result.status, 404, "Forged ownership fields must not authorize a foreign host.");
+    assert.equal(result.error, "SERVER_NOT_FOUND");
+    assertNoPartialEvent(env.DB, "forged_foreign_host");
+    assertForeignHostUnchanged(env.DB, "forged_foreign_host");
+  }
+
+  for (const [label, options, expectedStatus, expectedError] of [
+    ["free plan", { planKey: "free" }, 403, "PLAN_LOCKED"],
+    ["inactive subscription", { subscriptionStatus: "inactive" }, 403, "PLAN_LOCKED"],
+    ["archived server", { hostStatus: "archived" }, 409, "INVALID_HOST_STATE"],
+    ["hidden server", { hostVisibility: "hidden" }, 409, "INVALID_HOST_STATE"],
+    ["merged server", { hostStatus: "merged" }, 404, "SERVER_NOT_FOUND"],
+    ["merged target server", { hostMergedInto: "canonical-server" }, 404, "SERVER_NOT_FOUND"],
+    ["deleted server", { hostStatus: "deleted" }, 404, "SERVER_NOT_FOUND"],
+    ["ambiguous duplicate subscriptions", { duplicateHostSubscription: true }, 409, "INVALID_HOST_STATE"],
+  ] as const) {
+    const env = memoryEnv(options);
+    const result = await createCompetitiveEvent(env, creator, validCreateBody());
+    assert.equal(result.status, expectedStatus, `${label} should be rejected safely.`);
+    assert.equal(result.error, expectedError, `${label} should return the expected safe error.`);
+    assertNoPartialEvent(env.DB, label);
+  }
+}
+
+async function assertTransactionTimeHostAuthorization() {
+  const env = memoryEnv({ raceHostOwnershipChange: true });
+  const result = await createCompetitiveEvent(env, creator, validCreateBody());
+  assert.equal(result.status, 409, "Transaction-time host ownership change should fail closed.");
+  assert.equal(result.error, "HOST_AUTHORIZATION_CHANGED");
+  assertNoPartialEvent(env.DB, "transaction_time_host_ownership");
+  assert.equal(env.DB.host.user_id, "other-owner-user", "The simulated external owner change should not be reverted by create rollback.");
+  assert.equal(env.DB.host.competitive_enabled, 0, "Race-denied host must not be made competitive.");
+  assert.equal(env.DB.host.last_event_at, "2026-01-01T00:00:00.000Z", "Race-denied host last_event_at must remain unchanged.");
+  assert.equal(env.DB.host.updated_at, "2026-01-02T00:00:00.000Z", "Race-denied host updated_at must remain unchanged.");
+}
+
 function assertNoPartialEvent(db: MemoryD1, label: string) {
   assert.equal(db.createdEvents().length, 0, `${label} must not leave an event row.`);
   assert.equal(db.registrations.length, 0, `${label} must not leave a host registration.`);
@@ -231,6 +294,15 @@ function assertNoPartialEvent(db: MemoryD1, label: string) {
   assert.equal(db.existingEvents().length, 1, `${label} must not touch existing events.`);
   assert.equal(db.deleteStatements, 0, `${label} must not issue compensating DELETE statements.`);
   assert.equal(db.externalCalls, 0, `${label} must not call Discord, queues, schedulers, brackets, scores, or awards.`);
+}
+
+function assertForeignHostUnchanged(db: MemoryD1, label: string) {
+  assert.equal(db.foreignHost.competitive_enabled, 0, `${label} must not make the foreign host competitive.`);
+  assert.equal(db.foreignHost.server_category, "deathmatch", `${label} must not change the foreign host category.`);
+  assert.equal(db.foreignHost.last_event_at, "2026-01-01T00:00:00.000Z", `${label} must not change the foreign host last_event_at.`);
+  assert.equal(db.foreignHost.updated_at, "2026-01-02T00:00:00.000Z", `${label} must not change the foreign host updated_at.`);
+  assert.equal(db.foreignHost.plan_key, "premium", `${label} must not change the foreign host subscription plan.`);
+  assert.equal(db.foreignHost.subscription_status, "active", `${label} must not change the foreign host subscription status.`);
 }
 
 type CreatorEventFailureStage =
@@ -249,8 +321,12 @@ type MemoryD1Options = {
   hostMissing?: boolean;
   hostCategory?: string | null;
   hostStatus?: string;
+  hostVisibility?: string;
+  hostMergedInto?: string | null;
   planKey?: string;
   subscriptionStatus?: string;
+  duplicateHostSubscription?: boolean;
+  raceHostOwnershipChange?: boolean;
 };
 
 function memoryEnv(options: MemoryD1Options = {}): Env & { DB: MemoryD1 } {
@@ -269,29 +345,84 @@ class InjectedStageError extends Error {
   }
 }
 
+class HostAuthorizationChangedError extends Error {
+  constructor() {
+    super("NOT NULL constraint failed: competitive_event_activity.activity_type");
+    this.name = "HostAuthorizationChangedError";
+  }
+}
+
 class MemoryD1 {
   events: Array<Record<string, unknown>> = [{ id: "existing-event-id", slug: "existing-event", preexisting: true }];
   registrations: Array<Record<string, unknown>> = [];
   activities: Array<Record<string, unknown>> = [];
   externalCalls = 0;
   deleteStatements = 0;
+  lastChanges = 0;
+  raceApplied = false;
   readonly options: MemoryD1Options;
   host: Record<string, unknown>;
+  foreignHost: Record<string, unknown>;
 
   constructor(options: MemoryD1Options) {
     this.options = options;
-    this.host = {
+    this.host = this.buildHost({
       id: "server-a",
-      user_id: "server-owner-user",
-      guild_id: "guild-a",
-      public_slug: "server-a",
-      display_name: "NukeTown Test",
-      hostname: "NukeTown Test",
-      server_name: "NukeTown Test",
-      nitrado_service_name: "NukeTown Test",
-      server_type: options.hostCategory === null ? null : "DEATHMATCH",
+      userId: "creator-user",
+      guildId: "guild-a",
+      name: "Creator Host",
+      category: options.hostCategory === undefined ? "deathmatch" : options.hostCategory,
+      status: options.hostStatus ?? "live",
+      visibility: options.hostVisibility ?? "public",
+      mergedInto: options.hostMergedInto,
+      planKey: options.planKey ?? "pro",
+      subscriptionStatus: options.subscriptionStatus ?? "active",
+    });
+    this.foreignHost = this.buildHost({
+      id: "server-b",
+      userId: "other-owner-user",
+      guildId: "guild-b",
+      name: "Foreign Eligible Host",
+      category: "deathmatch",
+      status: "live",
+      visibility: "public",
+      mergedInto: null,
+      planKey: "premium",
+      subscriptionStatus: "active",
+    });
+    if (options.failStage === "entitlement_lookup") {
+      Object.defineProperty(this.host, "subscription_status", {
+        get() {
+          throw new InjectedStageError("entitlement_lookup");
+        },
+      });
+    }
+  }
+
+  private buildHost(options: {
+    id: string;
+    userId: string;
+    guildId: string;
+    name: string;
+    category: string | null;
+    status: string;
+    visibility: string;
+    mergedInto?: string | null;
+    planKey: string;
+    subscriptionStatus: string;
+  }) {
+    return {
+      id: options.id,
+      user_id: options.userId,
+      guild_id: options.guildId,
+      public_slug: options.id,
+      display_name: options.name,
+      hostname: options.name,
+      server_name: options.name,
+      nitrado_service_name: options.name,
+      server_type: options.category === null ? null : "DEATHMATCH",
       server_mode: null,
-      server_category: options.hostCategory === undefined ? "deathmatch" : options.hostCategory,
+      server_category: options.category,
       competitive_enabled: 0,
       verified_server: 1,
       event_mmr: 1000,
@@ -302,19 +433,13 @@ class MemoryD1 {
       last_event_at: "2026-01-01T00:00:00.000Z",
       current_players: 1,
       max_players: 10,
-      plan_key: options.planKey ?? "pro",
-      subscription_status: options.subscriptionStatus ?? "active",
-      status: options.hostStatus ?? "live",
-      listing_visibility: "public",
+      plan_key: options.planKey,
+      subscription_status: options.subscriptionStatus,
+      status: options.status,
+      listing_visibility: options.visibility,
+      merged_into_server_id: options.mergedInto ?? null,
       updated_at: "2026-01-02T00:00:00.000Z",
     };
-    if (options.failStage === "entitlement_lookup") {
-      Object.defineProperty(this.host, "subscription_status", {
-        get() {
-          throw new InjectedStageError("entitlement_lookup");
-        },
-      });
-    }
   }
 
   prepare(query: string) {
@@ -322,10 +447,16 @@ class MemoryD1 {
   }
 
   async batch(statements: MemoryStatement[]) {
+    if (this.options.raceHostOwnershipChange && !this.raceApplied) {
+      this.host.user_id = "other-owner-user";
+      this.raceApplied = true;
+    }
     const eventSnapshot = this.events.map((row) => ({ ...row }));
     const registrationSnapshot = this.registrations.map((row) => ({ ...row }));
     const activitySnapshot = this.activities.map((row) => ({ ...row }));
     const hostSnapshot = { ...this.host };
+    const foreignHostSnapshot = { ...this.foreignHost };
+    const lastChangesSnapshot = this.lastChanges;
     try {
       for (const statement of statements) {
         await statement.run();
@@ -336,6 +467,8 @@ class MemoryD1 {
       this.registrations = registrationSnapshot;
       this.activities = activitySnapshot;
       this.host = hostSnapshot;
+      this.foreignHost = foreignHostSnapshot;
+      this.lastChanges = lastChangesSnapshot;
       throw error;
     }
   }
@@ -350,6 +483,35 @@ class MemoryD1 {
 
   existingEvents() {
     return this.events.filter((row) => row.preexisting === true);
+  }
+
+  findHost(id: string) {
+    return [this.host, this.foreignHost].find((host) => host.id === id) ?? null;
+  }
+
+  lookupHostForCreate(id: string, userId: string) {
+    const host = this.findHost(id);
+    if (!host || host.user_id !== userId) return [];
+    const status = String(host.status ?? "pending").toLowerCase();
+    const mergedInto = String(host.merged_into_server_id ?? "");
+    if (["deleted", "merged"].includes(status) || mergedInto) return [];
+    const rows = [{ ...host }];
+    return this.options.duplicateHostSubscription ? [...rows, { ...host }] : rows;
+  }
+
+  transactionHostAuthorized(id: string, userId: string) {
+    const host = this.findHost(id);
+    if (!host || host.user_id !== userId) return false;
+    const status = String(host.status ?? "pending").toLowerCase();
+    const visibility = String(host.listing_visibility ?? "public").toLowerCase();
+    const mergedInto = String(host.merged_into_server_id ?? "");
+    const plan = String(host.plan_key ?? "free").toLowerCase();
+    const subscriptionStatus = String(host.subscription_status ?? "").toLowerCase();
+    return !["deleted", "merged", "archived"].includes(status)
+      && !mergedInto
+      && visibility !== "hidden"
+      && ["active", "trialing"].includes(subscriptionStatus)
+      && ["pro", "premium", "network", "partner"].includes(plan);
   }
 }
 
@@ -371,7 +533,8 @@ class MemoryStatement {
     }
     if (this.query.includes("FROM linked_servers") && this.query.includes("LEFT JOIN server_subscriptions")) {
       if (this.db.options.failStage === "host_lookup") throw new InjectedStageError("host_lookup");
-      return { results: (this.db.options.hostMissing ? [] : [this.db.host]) as T[] };
+      if (this.db.options.hostMissing) return { results: [] as T[] };
+      return { results: this.db.lookupHostForCreate(String(this.bindings[0] ?? ""), String(this.bindings[1] ?? "")) as T[] };
     }
     throw new Error(`Unexpected all query: ${this.query.slice(0, 120)}`);
   }
@@ -382,12 +545,20 @@ class MemoryStatement {
       const slug = String(this.bindings[0] ?? "");
       return (this.db.events.find((event) => event.slug === slug) ?? null) as T | null;
     }
+    if (this.query.includes("SELECT id FROM competitive_events WHERE id")) {
+      const id = String(this.bindings[0] ?? "");
+      return (this.db.events.find((event) => event.id === id) ?? null) as T | null;
+    }
     throw new Error(`Unexpected first query: ${this.query.slice(0, 120)}`);
   }
 
   async run() {
     if (this.query.includes("INSERT INTO competitive_events")) {
       if (this.db.options.failStage === "event_insert") throw new InjectedStageError("event_insert");
+      if (!this.db.transactionHostAuthorized(String(this.bindings[16] ?? ""), String(this.bindings[17] ?? ""))) {
+        this.db.lastChanges = 0;
+        return { success: true };
+      }
       this.db.events.push({
         id: this.bindings[0],
         name: this.bindings[1],
@@ -400,30 +571,46 @@ class MemoryStatement {
         ends_at: this.bindings[12],
         created_by: this.bindings[13],
       });
+      this.db.lastChanges = 1;
       return { success: true };
     }
     if (this.query.includes("INSERT INTO competitive_event_servers")) {
       if (this.db.options.failStage === "registration_insert") throw new InjectedStageError("registration_insert");
+      const eventId = String(this.bindings[3] ?? "");
+      if (!this.db.events.some((event) => event.id === eventId)) {
+        this.db.lastChanges = 0;
+        return { success: true };
+      }
       this.db.registrations.push({
         id: this.bindings[0],
-        event_id: this.bindings[1],
-        server_id: this.bindings[2],
-        category: this.bindings[3],
+        event_id: eventId,
+        server_id: this.bindings[1],
+        category: this.bindings[2],
         approved: 1,
         seed: 1,
       });
+      this.db.lastChanges = 1;
       return { success: true };
     }
     if (this.query.includes("UPDATE linked_servers") && this.query.includes("competitive_enabled = 1")) {
       if (this.db.options.failStage === "host_update") throw new InjectedStageError("host_update");
-      this.db.host.competitive_enabled = 1;
-      this.db.host.server_category = this.db.host.server_category ?? this.bindings[0];
-      this.db.host.last_event_at = "2026-08-01T18:00:00.000Z";
-      this.db.host.updated_at = "2026-08-01T18:00:00.000Z";
+      const hostId = String(this.bindings[1] ?? "");
+      const userId = String(this.bindings[2] ?? "");
+      const host = this.db.findHost(hostId);
+      if (!host || !this.db.transactionHostAuthorized(hostId, userId)) {
+        this.db.lastChanges = 0;
+        return { success: true };
+      }
+      host.competitive_enabled = 1;
+      host.server_category = host.server_category ?? this.bindings[0];
+      host.last_event_at = "2026-08-01T18:00:00.000Z";
+      host.updated_at = "2026-08-01T18:00:00.000Z";
+      this.db.lastChanges = 1;
       return { success: true };
     }
     if (this.query.includes("INSERT INTO competitive_event_activity")) {
       if (this.db.options.failStage === "activity_insert") throw new InjectedStageError("activity_insert");
+      if (this.db.lastChanges !== 1) throw new HostAuthorizationChangedError();
       this.db.activities.push({
         id: this.bindings[0],
         event_id: this.bindings[1],
@@ -466,7 +653,7 @@ function schemaColumns(table: string) {
     competitive_event_servers: ["id", "event_id", "server_id", "category", "approved", "seed", "registered_at"],
     competitive_event_matches: ["id", "event_id"],
     competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
-    linked_servers: ["id", "server_category", "competitive_enabled", "last_event_at", "updated_at", "status"],
+    linked_servers: ["id", "user_id", "guild_id", "server_category", "competitive_enabled", "last_event_at", "updated_at", "status", "listing_visibility", "merged_into_server_id"],
     server_subscriptions: ["guild_id", "plan_key", "status"],
   };
   return columns[table] ?? [];
@@ -520,10 +707,14 @@ function assertSourceGovernance() {
   assertIncludes(createCompetitiveEventBody, "creatorEventAdminDeniedPayload(env, viewer)");
   assert.equal(createCompetitiveEventBody.includes("await ensureCompetitiveEventsSchema(env);"), false, "Official event creation must not run broad request-time schema mutation.");
   assertIncludes(createCompetitiveEventBody, "validateCompetitiveEventCreationSchema(env, requestId)");
-  assertIncludes(createCompetitiveEventBody, "fetchEventCreationHost(env, input.hosting_server_id ?? input.server_id, requestId)");
+  assertIncludes(createCompetitiveEventBody, "fetchEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id, requestId)");
   assertIncludes(createCompetitiveEventBody, "await db.batch([");
   assertIncludes(createCompetitiveEventBody, "transactional_create");
+  assertIncludes(eventsLib, "HOST_AUTHORIZATION_CHANGED", "Official event creation must report transaction-time host authorization changes safely.");
   assertIncludes(createCompetitiveEventBody, "CASE WHEN changes() = 1 THEN 'event_created' ELSE NULL END", "Activity insert must fail the batch if the host update affects zero rows.");
+  assertIncludes(eventsLib, "linked_servers.user_id = ?", "Official host lookup and mutation must bind the host to the authenticated creator.");
+  assertIncludes(eventsLib, "EVENT_CREATE_HOST_TRANSACTION_PREDICATE", "Official event creation must repeat host ownership inside the transaction.");
+  assertIncludes(eventsLib, "server_subscriptions.plan_key", "Transaction-time host guard must include the eligible subscription predicate.");
   assert.doesNotMatch(createCompetitiveEventBody, /compensateFailedEventCreate|compensation_cleanup|DELETE\s+FROM\s+competitive_events|DELETE\s+FROM\s+competitive_event_/i, "Official event creation must not use destructive compensation cleanup.");
   assert.doesNotMatch(eventsLib, /function\s+compensateFailedEventCreate|EventCreateHostState/i, "Compensating event-create cleanup helpers must be removed.");
   assertIncludes(eventsLib, "EVENT_SCHEMA_NOT_READY");

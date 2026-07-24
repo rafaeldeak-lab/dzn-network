@@ -1056,10 +1056,15 @@ const ownerPreviewSeedBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewS
 assert.equal(ownerPreviewSeedBlock.includes("ON CONFLICT(id) DO UPDATE SET"), true, "Full-preview session fixtures must use a fixture-scoped upsert.");
 assert.equal(ownerPreviewSeedBlock.includes("session_token_hash = excluded.session_token_hash"), true, "Full-preview session upsert must preserve authentication behaviour without deleting sessions.");
 assert.equal(ownerPreviewSeedBlock.includes("DELETE FROM sessions"), false, "Full-preview seed must not delete session rows.");
+assert.equal(ownerPreviewSeedBlock.includes("'owner-console-creator-host', 'owner-console-platform-creator'"), true, "Full-preview must seed a creator-owned official event host fixture.");
+assert.equal(ownerPreviewSeedBlock.includes("'owner-console-creator-host-sub', 'owner-console-creator-host-guild'"), true, "Full-preview creator-owned host must have an eligible subscription fixture.");
 const ownerPreviewEventFixtureCheckBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewEventFixtureCheckStart, ownerPreviewDeployStart);
 assert.equal(ownerPreviewEventFixtureCheckBlock.includes("SELECT COUNT(*) AS existing_event_count"), true, "Full-preview creator event fixture check must be read-only.");
 assert.equal(ownerPreviewEventFixtureCheckBlock.includes("DELETE FROM competitive_events"), false, "Full-preview creator event fixture check must not delete event rows.");
 assert.equal(ownerPreviewEventFixtureCheckBlock.includes("owner-console-creator-event-preflight.json"), true, "Full-preview creator event fixture check must persist a safe preflight result.");
+const ownerPreviewVerifyBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewVerifyStart, ownerPreviewRowVerifyStart);
+assert.equal(ownerPreviewVerifyBlock.includes('hosting_server_id: "owner-console-creator-host"'), true, "Full-preview creator event POST must use the creator-owned host fixture.");
+assert.equal(ownerPreviewVerifyBlock.includes('hosting_server_id: "owner-console-nuketown"'), false, "Full-preview creator event POST must not use another owner server as host.");
 
 const ownerPreviewValidateBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewValidateInputsStart, ownerPreviewInstallStart);
 assert.equal(ownerPreviewValidateBlock.includes("wrangler.owner-console-preview.toml"), false, "Input validation must not require the generated preview Wrangler config.");
@@ -1150,6 +1155,12 @@ assert.equal(ownerPreviewPhase2ABlock.includes("dev-session-secret"), false, "Ph
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_USER_ID=owner-console-non-owner-user"), true, "Phase 2A preview must use the existing non-owner member as the API verifier principal.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE=dzn_session=owner-console-preview-non-owner-token"), true, "Phase 2A preview must reuse OWNER_CONSOLE_NON_OWNER_COOKIE for the API verifier.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE"), true, "Phase 2A preview must expose the reused verifier cookie internally.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_CREATOR_HOST_ID=phase2a-preview-creator-host"), true, "Phase 2A preview must define a creator-owned host authorization fixture.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_FOREIGN_HOST_ID=phase2a-preview-foreign-host"), true, "Phase 2A preview must define a foreign-owned host authorization fixture.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_HOST_AUTH_FIXTURE_COLLISION"), true, "Phase 2A preview must block unexpected host fixture ownership before upsert.");
+assert.equal(ownerPreviewPhase2ABlock.includes("hostAuthorizationFixturesUpsertedNonDestructively"), true, "Phase 2A seed summary must record non-destructive host fixture upserts.");
+assert.equal(ownerPreviewPhase2ABlock.includes("ON CONFLICT(id) DO UPDATE SET guild_id = excluded.guild_id"), true, "Phase 2A linked-server fixture upserts must not update user_id on conflict.");
+assert.equal(ownerPreviewPhase2ABlock.includes("user_id = excluded.user_id"), false, "Phase 2A linked-server fixture upserts must not overwrite server ownership.");
 assert.equal(ownerPreviewPhase2ABlock.includes("submitted_by_user_id = ${sql(apiMemberId)}"), true, "Phase 2A preview must clean API-generated verifier rows by dedicated user.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_VERIFIER_UNEXPECTED_CONVERTED_ROW"), true, "Phase 2A preview must block broad cleanup if the verifier user has a converted suggestion.");
 assert.equal(ownerPreviewPhase2ABlock.includes("DELETE FROM sessions WHERE id = ${sql(obsoleteApiSessionId)};"), false, "Phase 2A preview must not delete even obsolete preview session rows.");
@@ -1302,6 +1313,14 @@ assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedMalformed
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedOversizedReport"), true, "Phase 2A verifier must keep authenticated oversized reports at 413.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Authentication-precedence vote/report probes created mutation rows."), true, "Phase 2A verifier must prove auth-precedence vote/report probes create no rows.");
 assert.equal(ownerPreviewPhase2ABlock.includes("suggestionMutationAuthPrecedence"), true, "Phase 2A privacy artifact must record suggestion mutation auth precedence.");
+assert.equal(ownerPreviewPhase2ABlock.includes("async function verifyHostAuthorization(base)"), true, "Phase 2A verifier must include official event host authorization checks.");
+assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("host-authorization.json"'), true, "Phase 2A verifier must persist sanitized host authorization evidence.");
+assert.equal(ownerPreviewPhase2ABlock.includes("Foreign-owned host attempt did not return the expected generic private/no-store denial."), true, "Phase 2A verifier must prove foreign host denial is generic and private.");
+assert.equal(ownerPreviewPhase2ABlock.includes("foreignHostEventRowsCreated"), true, "Phase 2A host artifact must record that foreign host attempts create no events.");
+assert.equal(ownerPreviewPhase2ABlock.includes("foreignHostMetadataUnchanged"), true, "Phase 2A host artifact must record that foreign host metadata is unchanged.");
+assert.equal(ownerPreviewPhase2ABlock.includes("ownedHostRegistrationRowsCreated"), true, "Phase 2A host artifact must record creator-owned host registration creation.");
+assert.equal(ownerPreviewPhase2ABlock.includes("transactionTimeOwnershipTestPassedLocally"), true, "Phase 2A host artifact must record the local transaction race test result.");
+assert.equal(ownerPreviewPhase2ABlock.includes("creatorHostOwnershipEnforced"), true, "Phase 2A privacy artifact must record creator host ownership enforcement.");
 assert.equal(
   ownerPreviewPhase2AAuthMatrixBlock.indexOf("approve_public_voting") < ownerPreviewPhase2AAuthMatrixBlock.indexOf("`${suggestionPath}/vote`"),
   true,
