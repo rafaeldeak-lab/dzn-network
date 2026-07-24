@@ -13,6 +13,7 @@ import { creatorEventAdminDeniedPayload, isPlatformCreatorEventAdmin } from "./p
 import type { Env, SessionUser } from "./types";
 
 export const EVENT_STATUSES = ["draft", "live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
+export const PUBLIC_EVENT_STATUSES = ["live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
 export const EVENT_TYPES = [
   "capture_the_flag",
   "community_cup",
@@ -24,6 +25,7 @@ export const EVENT_TYPES = [
 ] as const;
 
 export type CompetitiveEventStatus = typeof EVENT_STATUSES[number];
+export type PublicCompetitiveEventStatus = typeof PUBLIC_EVENT_STATUSES[number];
 export type CompetitiveEventType = typeof EVENT_TYPES[number];
 
 const EVENT_TYPE_LABELS: Record<CompetitiveEventType, string> = {
@@ -317,6 +319,8 @@ async function validateCompetitiveEventsReadSchemaNow(env: Env): Promise<EventRe
 }
 
 export async function getEventsListPayload(env: Env, viewer: SessionUser | null, options: EventListOptions = {}) {
+  const publicStatusFilter = resolvePublicEventStatusFilter(options.status);
+  if (!publicStatusFilter.ok) return invalidPublicEventStatusPayload();
   if (!env.DB) return demoEventsListPayload(options, false);
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
   if (!schemaReady.ok) return eventListSchemaUnavailablePayload(schemaReady);
@@ -324,16 +328,19 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
   const full = options.full === true && entitlement;
   const limit = full ? sanitizeLimit(options.limit, 100, 100) : Math.min(sanitizeLimit(options.limit, 10, 24), 10);
   const db = requireDb(env);
-  const conditions = ["COALESCE(visibility, 'public') != 'private'"];
+  const conditions = [
+    "lower(COALESCE(visibility, 'public')) != 'private'",
+    "lower(COALESCE(status, 'draft')) != 'draft'",
+  ];
   const bindings: unknown[] = [];
-  const statusFilter = resolveEventStatusFilter(options.status);
+  const statusFilter = publicStatusFilter.statuses;
   const category = normalizeServerCategory(options.category);
   const type = normalizeEventType(options.type);
   if (statusFilter.length === 1) {
-    conditions.push("status = ?");
+    conditions.push("lower(COALESCE(status, 'draft')) = ?");
     bindings.push(statusFilter[0]);
   } else if (statusFilter.length > 1) {
-    conditions.push(`status IN (${statusFilter.map(() => "?").join(", ")})`);
+    conditions.push(`lower(COALESCE(status, 'draft')) IN (${statusFilter.map(() => "?").join(", ")})`);
     bindings.push(...statusFilter);
   }
   if (category) {
@@ -373,7 +380,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     teaserMode: !full,
     full,
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
-    statusFilters: EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
     summary: summarizeEvents(visibleEvents),
     events: visibleEvents,
@@ -1295,6 +1302,18 @@ export function resolveEventStatusFilter(value: unknown): CompetitiveEventStatus
   return normalized ? [normalized] : [];
 }
 
+export function resolvePublicEventStatusFilter(value: unknown): { ok: true; statuses: PublicCompetitiveEventStatus[] } | { ok: false } {
+  const text = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!text || text === "all") return { ok: true, statuses: [] };
+  if (text === "active") return { ok: true, statuses: ["live"] };
+  if (text === "completed") return { ok: true, statuses: ["ended"] };
+  if (text === "upcoming") return { ok: true, statuses: ["upcoming", "registration_open", "standby"] };
+  if ((PUBLIC_EVENT_STATUSES as readonly string[]).includes(text)) {
+    return { ok: true, statuses: [text as PublicCompetitiveEventStatus] };
+  }
+  return { ok: false };
+}
+
 export function normalizeEventType(value: unknown): CompetitiveEventType | null {
   const text = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (text === "ctf") return "capture_the_flag";
@@ -1402,10 +1421,29 @@ function demoEventsListPayload(options: EventListOptions, entitlement: boolean) 
     teaserMode: !full,
     full,
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
-    statusFilters: EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
     summary: summarizeEvents(events),
     events,
+  };
+}
+
+function invalidPublicEventStatusPayload() {
+  return {
+    ok: false,
+    status: 400,
+    error: "INVALID_PUBLIC_EVENT_STATUS",
+    errorCode: "INVALID_PUBLIC_EVENT_STATUS",
+    message: "That event status is not available publicly.",
+    source: "invalid_filter",
+    generated_at: new Date().toISOString(),
+    teaserMode: true,
+    full: false,
+    categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
+    summary: summarizeEvents([]),
+    events: [],
   };
 }
 
@@ -1417,7 +1455,7 @@ function eventListSchemaUnavailablePayload(schemaReady: Extract<EventReadinessRe
     teaserMode: true,
     full: false,
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
-    statusFilters: EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
     summary: summarizeEvents([]),
     events: [],
@@ -1425,12 +1463,15 @@ function eventListSchemaUnavailablePayload(schemaReady: Extract<EventReadinessRe
 }
 
 function filterDemoEvents(options: EventListOptions, limit: number) {
-  const statusFilter = resolveEventStatusFilter(options.status);
+  const statusFilterResult = resolvePublicEventStatusFilter(options.status);
+  if (!statusFilterResult.ok) return [];
+  const statusFilter = statusFilterResult.statuses;
   const category = normalizeServerCategory(options.category);
   const type = normalizeEventType(options.type);
   return demoEvents()
     .filter((event) => {
-      const statusOk = statusFilter.length === 0 || statusFilter.includes(event.status);
+      const publicStatus = (PUBLIC_EVENT_STATUSES as readonly string[]).includes(event.status) ? event.status as PublicCompetitiveEventStatus : null;
+      const statusOk = Boolean(publicStatus) && (statusFilter.length === 0 || statusFilter.includes(publicStatus as PublicCompetitiveEventStatus));
       const categoryOk = !category || event.category === category;
       const typeOk = !type || event.event_type === type;
       return statusOk && categoryOk && typeOk;

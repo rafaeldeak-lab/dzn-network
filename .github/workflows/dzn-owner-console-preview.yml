@@ -1432,7 +1432,16 @@ jobs:
           for (const [id, discordId, username] of users) {
             statements.push(`INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (${sql(id)}, ${sql(discordId)}, ${sql(username)}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = excluded.updated_at;`);
           }
-          statements.push(`INSERT INTO competitive_events (id, name, slug, description, category, event_type, status, visibility, premium_tier, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at) VALUES (${sql("phase2a-preview-private-draft-event")}, ${sql("Phase 2A Private Draft")}, ${sql("phase2a-preview-private-draft")}, ${sql("Private draft converted from a preview suggestion; not public.")}, ${sql("deathmatch")}, ${sql("community_cup")}, ${sql("draft")}, ${sql("private")}, ${sql("pro")}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("phase2a-preview-creator")}, ${sql("Draft rules pending creator review.")}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, status = excluded.status, visibility = excluded.visibility, updated_at = excluded.updated_at;`);
+          const eventFixtures = [
+            ["phase2a-preview-private-draft-event", "Phase 2A Private Draft", "phase2a-preview-private-draft", "Private draft converted from a preview suggestion; not public.", "deathmatch", "community_cup", "draft", "private", "pro", "Draft rules pending creator review.", null],
+            ["phase2a-preview-public-draft-event", "Phase 2A Public Draft Fixture", "phase2a-preview-public-draft", "Public visibility draft fixture that must never appear in public event lists.", "deathmatch", "community_cup", "draft", "public", "pro", "Draft rules are private until creator publication.", "Draft rewards are private until creator publication."],
+            ["phase2a-preview-unlisted-draft-event", "Phase 2A Unlisted Draft Fixture", "phase2a-preview-unlisted-draft", "Unlisted draft fixture that must never appear in public event lists.", "deathmatch", "community_cup", "draft", "unlisted", "pro", "Unlisted draft rules are private until creator publication.", "Unlisted draft rewards are private until creator publication."],
+            ["phase2a-preview-public-live-event", "Phase 2A Public Live Fixture", "phase2a-preview-public-live", "A public non-draft fixture for cache and public listing verification.", "deathmatch", "community_cup", "live", "public", "pro", "Public fixture rules.", "Public fixture rewards."],
+            ["phase2a-preview-unlisted-live-event", "Phase 2A Unlisted Live Fixture", "phase2a-preview-unlisted-live", "An unlisted non-draft fixture that remains eligible for public list behaviour under the current contract.", "deathmatch", "community_cup", "upcoming", "unlisted", "pro", "Unlisted fixture rules.", "Unlisted fixture rewards."],
+          ];
+          for (const [id, name, slug, description, category, eventType, status, visibility, tier, rules, rewards] of eventFixtures) {
+            statements.push(`INSERT INTO competitive_events (id, name, slug, description, category, event_type, status, visibility, premium_tier, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at) VALUES (${sql(id)}, ${sql(name)}, ${sql(slug)}, ${sql(description)}, ${sql(category)}, ${sql(eventType)}, ${sql(status)}, ${sql(visibility)}, ${sql(tier)}, ${sql("2026-08-10T18:00:00.000Z")}, ${sql("2026-08-10T21:00:00.000Z")}, ${sql("phase2a-preview-creator")}, ${sql(rules)}, ${rewards ? sql(rewards) : "NULL"}, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET name = excluded.name, slug = excluded.slug, description = excluded.description, category = excluded.category, event_type = excluded.event_type, status = excluded.status, visibility = excluded.visibility, premium_tier = excluded.premium_tier, starts_at = excluded.starts_at, ends_at = excluded.ends_at, rules = excluded.rules, rewards = excluded.rewards, updated_at = excluded.updated_at;`);
+          }
           for (const [id, userId, title, description, format, platform, map, serverExpression, openToAny, moderationStatus, publicStatus, convertedEventId, upvotes, downvotes, reports, hotScore] of suggestions) {
             const normalized = String(title).toLowerCase();
             const serverSql = typeof serverExpression === "string" && serverExpression.startsWith("(") ? serverExpression : "NULL";
@@ -1966,6 +1975,133 @@ jobs:
             }
             return summary;
           }
+          function headerHasToken(headers, name, token) {
+            const value = String(headers?.[name.toLowerCase()] || headers?.[name] || "");
+            return value
+              .split(",")
+              .map((part) => part.trim().toLowerCase())
+              .includes(String(token).toLowerCase());
+          }
+          function isPrivateNoStore(headers) {
+            const cacheControl = String(headers?.["cache-control"] || "").toLowerCase();
+            return cacheControl.includes("private") && cacheControl.includes("no-store");
+          }
+          function isNoStoreBypass(headers) {
+            const cacheControl = String(headers?.["cache-control"] || "").toLowerCase();
+            return cacheControl.includes("no-store") && headers?.["x-dzn-cache"] === "BYPASS";
+          }
+          function isPublicBoundedCache(headers) {
+            const cacheControl = String(headers?.["cache-control"] || "").toLowerCase();
+            return cacheControl.includes("public") && /max-age=\d+/.test(cacheControl) && !cacheControl.includes("no-store");
+          }
+          function requireNoDraftEvents(payload, label) {
+            const text = JSON.stringify(payload || {});
+            for (const marker of ["phase2a-preview-public-draft", "phase2a-preview-unlisted-draft", "phase2a-preview-private-draft", "phase2a-preview-public-draft-event", "phase2a-preview-unlisted-draft-event", "phase2a-preview-private-draft-event"]) {
+              if (text.includes(marker)) {
+                fail(`${label} exposed draft/private event marker ${marker}.`, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+              }
+            }
+          }
+          function requireEventBySlug(payload, slug, expected, label) {
+            const events = Array.isArray(payload?.events) ? payload.events : [];
+            const present = events.some((event) => event?.slug === slug || event?.id === slug);
+            if (present !== expected) {
+              fail(`${label} ${expected ? "did not include" : "included"} ${slug}.`, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+          }
+          async function verifyEventCacheIsolationAndDrafts(base) {
+            const defaultEvents = await fetchJson(base, "/api/events?limit=20", 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPublicBoundedCache(defaultEvents.headers) || !headerHasToken(defaultEvents.headers, "vary", "Cookie")) {
+              fail("Anonymous public event list was not public-cacheable with Vary: Cookie.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            if (defaultEvents.json?.full === true || defaultEvents.json?.teaserMode !== true) {
+              fail("Anonymous default event list exposed full entitlement mode.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            requireNoDraftEvents(defaultEvents.json, "Anonymous public event list");
+            requireEventBySlug(defaultEvents.json, "phase2a-preview-public-live", true, "Anonymous public event list");
+            requireEventBySlug(defaultEvents.json, "phase2a-preview-unlisted-live", true, "Anonymous public event list");
+            const statusFilterValues = (defaultEvents.json?.statusFilters || []).map((item) => item?.value);
+            if (statusFilterValues.includes("draft")) {
+              fail("Public event status filters exposed draft.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+
+            const allEvents = await fetchJson(base, "/api/events?status=all&limit=20", 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            requireNoDraftEvents(allEvents.json, "Public event status=all list");
+            const filteredEvents = await fetchJson(base, "/api/events?category=deathmatch&type=community_cup&limit=20", 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            requireNoDraftEvents(filteredEvents.json, "Public event category/type list");
+
+            const draftStatus = await fetchJson(base, "/api/events?status=draft&limit=20", 400, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if ((draftStatus.json?.errorCode || draftStatus.json?.error) !== "INVALID_PUBLIC_EVENT_STATUS" || (draftStatus.json?.events || []).length !== 0 || !isNoStoreBypass(draftStatus.headers)) {
+              fail("status=draft did not return the safe public event status error.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+
+            const anonFull = await fetchJson(base, "/api/events?full=true&limit=20", 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPrivateNoStore(anonFull.headers) || anonFull.headers["x-dzn-cache"] !== "BYPASS" || !headerHasToken(anonFull.headers, "vary", "Cookie")) {
+              fail("Anonymous full=true event list was not private/no-store BYPASS with Vary: Cookie.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            requireNoDraftEvents(anonFull.json, "Anonymous full=true event list");
+
+            const creatorFull = await fetchJson(base, "/api/events?full=true&limit=20", 200, { headers: { Cookie: creatorCookie }, category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPrivateNoStore(creatorFull.headers) || creatorFull.headers["x-dzn-cache"] !== "BYPASS") {
+              fail("Authenticated full=true event list was not private/no-store BYPASS.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            requireNoDraftEvents(creatorFull.json, "Authenticated full=true public event list");
+
+            const invalidSession = await fetchJson(base, "/api/events?limit=20", 200, { headers: { Cookie: "dzn_session=phase2a-invalid-session-token" }, category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPrivateNoStore(invalidSession.headers) || invalidSession.headers["x-dzn-cache"] !== "BYPASS") {
+              fail("Invalid session-cookie event list received public cache headers.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            requireNoDraftEvents(invalidSession.json, "Invalid session-cookie event list");
+
+            const detail = await fetchJson(base, "/api/events/phase2a-preview-public-live", 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPublicBoundedCache(detail.headers) || !headerHasToken(detail.headers, "vary", "Cookie")) {
+              fail("Anonymous public event detail was not public-cacheable with Vary: Cookie.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            const detailFull = await fetchJson(base, "/api/events/phase2a-preview-public-live?full=true", 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPrivateNoStore(detailFull.headers) || detailFull.headers["x-dzn-cache"] !== "BYPASS") {
+              fail("Anonymous full=true public event detail was not private/no-store BYPASS.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            const detailCreator = await fetchJson(base, "/api/events/phase2a-preview-public-live", 200, { headers: { Cookie: creatorCookie }, category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPrivateNoStore(detailCreator.headers) || detailCreator.headers["x-dzn-cache"] !== "BYPASS") {
+              fail("Authenticated public event detail was not private/no-store BYPASS.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+            const detailInvalidSession = await fetchJson(base, "/api/events/phase2a-preview-public-live", 200, { headers: { Cookie: "dzn_session=phase2a-invalid-session-token" }, category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (!isPrivateNoStore(detailInvalidSession.headers) || detailInvalidSession.headers["x-dzn-cache"] !== "BYPASS") {
+              fail("Invalid session-cookie event detail received public cache headers.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+
+            const publicDraftDetail = await fetchSafe(base, "/api/events/phase2a-preview-public-draft", 404, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            const unlistedDraftDetail = await fetchSafe(base, "/api/events/phase2a-preview-unlisted-draft", 404, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            const privateDraftDetail = await fetchSafe(base, "/api/events/phase2a-preview-private-draft", 404, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            const creatorPublicDraftDetail = await fetchSafe(base, "/api/events/phase2a-preview-public-draft", 404, { headers: { Cookie: creatorCookie }, category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            const creatorOwnerDraft = await fetchJson(base, "/api/owner/events/phase2a-preview-private-draft", 200, { headers: { Cookie: creatorCookie }, category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (creatorOwnerDraft.json?.event?.slug !== "phase2a-preview-private-draft" || creatorOwnerDraft.json?.event?.status !== "draft" || creatorOwnerDraft.json?.event?.visibility !== "private") {
+              fail("Creator owner API did not retain private draft access.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            }
+
+            return {
+              publicListVaryCookie: headerHasToken(defaultEvents.headers, "vary", "Cookie"),
+              publicListCacheControl: defaultEvents.headers["cache-control"] || null,
+              publicListCacheStatus: defaultEvents.headers["x-dzn-cache"] || null,
+              statusFiltersOmitDraft: !statusFilterValues.includes("draft"),
+              publicDraftAbsent: !JSON.stringify(defaultEvents.json).includes("phase2a-preview-public-draft"),
+              unlistedDraftAbsent: !JSON.stringify(allEvents.json).includes("phase2a-preview-unlisted-draft"),
+              privateDraftAbsent: !JSON.stringify(allEvents.json).includes("phase2a-preview-private-draft"),
+              statusDraftRejected: draftStatus.status,
+              anonymousFullNoStore: isPrivateNoStore(anonFull.headers) && anonFull.headers["x-dzn-cache"] === "BYPASS",
+              authenticatedFullNoStore: isPrivateNoStore(creatorFull.headers) && creatorFull.headers["x-dzn-cache"] === "BYPASS",
+              invalidSessionNoStore: isPrivateNoStore(invalidSession.headers) && invalidSession.headers["x-dzn-cache"] === "BYPASS",
+              publicDetailVaryCookie: headerHasToken(detail.headers, "vary", "Cookie"),
+              publicDetailFullNoStore: isPrivateNoStore(detailFull.headers) && detailFull.headers["x-dzn-cache"] === "BYPASS",
+              authenticatedDetailNoStore: isPrivateNoStore(detailCreator.headers) && detailCreator.headers["x-dzn-cache"] === "BYPASS",
+              invalidSessionDetailNoStore: isPrivateNoStore(detailInvalidSession.headers) && detailInvalidSession.headers["x-dzn-cache"] === "BYPASS",
+              publicDraftDetailStatus: publicDraftDetail.status,
+              unlistedDraftDetailStatus: unlistedDraftDetail.status,
+              privateDraftDetailStatus: privateDraftDetail.status,
+              creatorPublicDraftPublicDetailStatus: creatorPublicDraftDetail.status,
+              creatorOwnerDraftApiStatus: creatorOwnerDraft.status,
+            };
+          }
           async function verifyCache(base) {
             const path = "/api/events/suggestions?sort=trending&status=all_public&limit=3";
             const first = await fetchJson(base, path, 200);
@@ -1978,6 +2114,7 @@ jobs:
             const head = await fetchSafe(base, uniqueHeadPath, 200, { method: "HEAD" });
             const getAfterHead = await fetchJson(base, uniqueHeadPath, 200);
             const authenticated = await fetchJson(base, path, 200, { headers: { Cookie: memberCookie } });
+            const eventApi = await verifyEventCacheIsolationAndDrafts(base);
             const publicText = JSON.stringify(second.json);
             for (const forbidden of ["reportCount", "reportReasons", "reporterUserId", "submittedByUserId", "discord_id", "phase2a-preview-private-draft-event", "phase2a-preview-private-draft"]) {
               if (publicText.includes(forbidden)) fail(`Public cached suggestion JSON exposed ${forbidden}.`);
@@ -1997,6 +2134,7 @@ jobs:
               setCookiePresent: Boolean(second.headers["set-cookie"]),
               privateDraftLinkExposed: publicText.includes("phase2a-preview-private-draft"),
               reportCountExposed: publicText.includes("reportCount"),
+              eventApi,
             };
           }
           function buildVerifierSuggestionPayload() {
@@ -2353,6 +2491,14 @@ jobs:
               knownPublicEventDetailAvailable: authMatrix.conversion.knownPublicEventDetailStatus === 200,
               privateDraftReviewCreatorOnly: authMatrix.conversion.ownerReviewPage.anonymous === 302 && authMatrix.conversion.ownerReviewPage.nonCreatorOwner === 403 && authMatrix.conversion.ownerReviewPage.creator === 200,
               privateDraftApiCreatorOnly: authMatrix.conversion.ownerDraftApi.anonymous === 401 && authMatrix.conversion.ownerDraftApi.nonCreatorOwner === 403 && authMatrix.conversion.ownerDraftApi.creator === 200 && authMatrix.conversion.ownerDraftApi.privateNoStore === true,
+              eventListSessionCacheIsolated: cacheVerification.eventApi.anonymousFullNoStore && cacheVerification.eventApi.authenticatedFullNoStore && cacheVerification.eventApi.invalidSessionNoStore,
+              eventDetailSessionCacheIsolated: cacheVerification.eventApi.publicDetailFullNoStore && cacheVerification.eventApi.authenticatedDetailNoStore && cacheVerification.eventApi.invalidSessionDetailNoStore,
+              publicEventListVaryCookie: cacheVerification.eventApi.publicListVaryCookie,
+              publicEventDetailVaryCookie: cacheVerification.eventApi.publicDetailVaryCookie,
+              publicEventDraftsExcluded: cacheVerification.eventApi.publicDraftAbsent && cacheVerification.eventApi.unlistedDraftAbsent && cacheVerification.eventApi.privateDraftAbsent,
+              publicStatusFiltersOmitDraft: cacheVerification.eventApi.statusFiltersOmitDraft,
+              publicStatusDraftRejected: cacheVerification.eventApi.statusDraftRejected === 400,
+              creatorDraftOwnerApiOnly: cacheVerification.eventApi.creatorOwnerDraftApiStatus === 200 && cacheVerification.eventApi.creatorPublicDraftPublicDetailStatus === 404,
             };
             writeJsonArtifact("privacy-checks.json", privacyChecks, "privacyChecks");
             updateProgress("pagination", "running");

@@ -669,14 +669,30 @@ function assertLoadingUx() {
 function assertPublicApiSafety() {
   const eventsApi = source("functions/api/events.ts");
   assertIncludes(eventsApi, "hasPrivateRequestSignal");
+  assertIncludes(eventsApi, "fullRequested");
+  assertIncludes(eventsApi, "withVaryToken(undefined, \"Cookie\")");
   assertIncludes(eventsApi, "privateNoStoreHeaders()");
   assertIncludes(eventsApi, "noStoreForErrorHeaders()");
-  assertIncludes(eventsApi, "publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 })");
+  assertIncludes(eventsApi, "viewer || privateRequest || fullRequested");
+  assertIncludes(eventsApi, "publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 }, \"MISS\", publicHeaders)");
+
+  const eventDetailApi = source("functions/api/events/[slug].ts");
+  assertIncludes(eventDetailApi, "hasPrivateRequestSignal");
+  assertIncludes(eventDetailApi, "fullRequested");
+  assertIncludes(eventDetailApi, "withVaryToken(undefined, \"Cookie\")");
+  assertIncludes(eventDetailApi, "viewer || privateRequest || fullRequested");
+  assertIncludes(eventDetailApi, "publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 }, \"MISS\", publicHeaders)");
 
   const eventHelper = source("functions/_lib/events.ts");
   const listBlock = eventHelper.slice(eventHelper.indexOf("export async function getEventsListPayload"), eventHelper.indexOf("export async function getEventDetailPayload"));
   const detailBlock = eventHelper.slice(eventHelper.indexOf("export async function getEventDetailPayload"), eventHelper.indexOf("export async function createCompetitiveEvent"));
   assertIncludes(listBlock, "validateCompetitiveEventsReadSchema");
+  assertIncludes(listBlock, "resolvePublicEventStatusFilter");
+  assertIncludes(listBlock, "lower(COALESCE(visibility, 'public')) != 'private'");
+  assertIncludes(listBlock, "lower(COALESCE(status, 'draft')) != 'draft'");
+  assertIncludes(eventHelper, "INVALID_PUBLIC_EVENT_STATUS");
+  assertIncludes(eventHelper, "PUBLIC_EVENT_STATUSES.map");
+  assertNotIncludes(eventHelper, "statusFilters: EVENT_STATUSES.map", "public status filters must not advertise draft");
   assertIncludes(detailBlock, "validateCompetitiveEventsReadSchema");
   assertNotIncludes(listBlock, "ensureCompetitiveEventsSchema", "public event list must not run DDL schema repair");
   assertNotIncludes(detailBlock, "ensureCompetitiveEventsSchema", "public event detail must not run DDL schema repair");

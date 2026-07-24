@@ -43,6 +43,22 @@ export function publicCacheHeaders(ttl: PublicCacheTtl, status: CacheStatus = "M
   return next;
 }
 
+export function withVaryToken(headers: HeadersInit | undefined, token: string) {
+  const next = new Headers(headers);
+  const normalizedToken = token.trim();
+  if (!normalizedToken) return next;
+  const existing = next.get("vary");
+  const values = (existing ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!values.some((value) => value.toLowerCase() === normalizedToken.toLowerCase())) {
+    values.push(normalizedToken);
+  }
+  next.set("vary", values.join(", "));
+  return next;
+}
+
 export function noStoreForErrorHeaders(headers?: HeadersInit) {
   const next = secureHeaders(headers);
   next.set("cache-control", "no-store, no-cache, must-revalidate");

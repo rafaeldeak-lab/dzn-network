@@ -15,6 +15,8 @@ import {
   sanitizeOwnerDiscordChannelMappingInput,
 } from "../functions/_lib/owner-discord-control";
 import { hmacSha256 } from "../functions/_lib/crypto";
+import { getOwnerEventControlPayload } from "../functions/_lib/owner-events";
+import { onRequest as onPublicEventsListRequest } from "../functions/api/events";
 import { onRequest as onPublicEventDetailRequest } from "../functions/api/events/[slug]";
 import { onRequestGet as onOwnerDraftEventGet } from "../functions/api/owner/events/[slug]";
 import { onRequestGet as onOwnerEventReviewPageGet } from "../functions/owner/events/review";
@@ -503,13 +505,89 @@ async function assertOwnerPrivateDraftReviewRoutes() {
   const missingApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/missing", `dzn_session=${creatorToken}`, "missing"));
   assert.equal(missingApi.status, 404, "Missing private draft lookup should return 404 to the authorized creator.");
 
+  const publicList = await publicEventsList(env);
+  assert.equal(publicList.status, 200, "Anonymous public event list should remain readable.");
+  assert.match(publicList.headers.get("cache-control") ?? "", /public,\s*max-age=15/, "Default anonymous event list should retain bounded public caching.");
+  assert.match(publicList.headers.get("vary") ?? "", /\bCookie\b/i, "Default anonymous event list must vary by Cookie.");
+  const publicListPayload = await publicList.json() as { full: boolean; events: Array<{ id: string; slug: string; status: string; visibility: string }>; statusFilters: Array<{ value: string }> };
+  assert.equal(publicListPayload.full, false);
+  assert.equal(publicListPayload.events.some((event) => event.status === "draft"), false, "Default public event list must not include drafts.");
+  assert.equal(publicListPayload.events.some((event) => event.id === "public-draft-event" || event.id === "unlisted-draft-event" || event.id === "private-draft-event"), false);
+  assert.equal(publicListPayload.events.some((event) => event.id === "public-live-event"), true);
+  assert.equal(publicListPayload.events.some((event) => event.id === "unlisted-live-event"), true, "Unlisted non-draft events may remain direct public list entries under the current contract.");
+  assert.equal(publicListPayload.statusFilters.some((filter) => filter.value === "draft"), false, "Public status filters must not advertise Draft.");
+
+  const publicAllList = await publicEventsList(env, "?status=all");
+  assert.equal(publicAllList.status, 200);
+  assert.equal(((await publicAllList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "status=all must not include drafts.");
+
+  const publicFullList = await publicEventsList(env, "?full=true");
+  assert.equal(publicFullList.status, 200);
+  assert.match(publicFullList.headers.get("cache-control") ?? "", /private,\s*no-store/, "Anonymous full=true event list must be private/no-store.");
+  assert.equal(publicFullList.headers.get("x-dzn-cache"), "BYPASS");
+  assert.match(publicFullList.headers.get("vary") ?? "", /\bCookie\b/i);
+  assert.equal(((await publicFullList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "full=true public event list must not include drafts.");
+
+  const creatorPublicList = await publicEventsList(env, "", `dzn_session=${creatorToken}`);
+  assert.equal(creatorPublicList.status, 200);
+  assert.match(creatorPublicList.headers.get("cache-control") ?? "", /private,\s*no-store/, "Authenticated public event list must be private/no-store.");
+  assert.equal(((await creatorPublicList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "Creators must not see drafts through the public event list.");
+
+  const invalidCookieList = await publicEventsList(env, "", "dzn_session=expired-or-invalid");
+  assert.equal(invalidCookieList.status, 200);
+  assert.match(invalidCookieList.headers.get("cache-control") ?? "", /private,\s*no-store/, "Invalid session-cookie requests must not receive public cache headers.");
+  assert.equal(invalidCookieList.headers.get("x-dzn-cache"), "BYPASS");
+
+  const categoryFilteredList = await publicEventsList(env, "?category=deathmatch&type=community_cup");
+  assert.equal(categoryFilteredList.status, 200);
+  assert.equal(((await categoryFilteredList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "Category/type filters must not reveal drafts.");
+
+  const draftList = await publicEventsList(env, "?status=draft");
+  assert.equal(draftList.status, 400, "status=draft must use the explicit invalid public status contract.");
+  assert.equal(draftList.headers.get("x-dzn-cache"), "BYPASS");
+  assert.match(draftList.headers.get("cache-control") ?? "", /no-store/);
+  const draftListPayload = await draftList.json() as { ok: boolean; errorCode: string; events: unknown[] };
+  assert.equal(draftListPayload.ok, false);
+  assert.equal(draftListPayload.errorCode, "INVALID_PUBLIC_EVENT_STATUS");
+  assert.deepEqual(draftListPayload.events, []);
+
+  const unknownStatusList = await publicEventsList(env, "?status=not-real");
+  assert.equal(unknownStatusList.status, 400, "Unknown public statuses must not fall back to a broad event list.");
+
+  const ownerInventory = await getOwnerEventControlPayload(env, creatorUser);
+  assert.equal(ownerInventory.events.some((event) => event.status === "draft" && event.id === "private-draft-event"), true, "Owner event inventory must still include drafts.");
+
   const publicEvent = await publicEventDetail(env, "public-live");
   assert.equal(publicEvent.status, 200, "Stored public events should remain publicly readable.");
   assert.match(publicEvent.headers.get("cache-control") ?? "", /public,\s*max-age=15/, "Public event 200 responses should retain public cache headers.");
+  assert.match(publicEvent.headers.get("vary") ?? "", /\bCookie\b/i, "Public event detail must vary by Cookie.");
   const publicPayload = await publicEvent.json() as { ok: boolean; event?: { id: string; slug: string; visibility: string; status: string } };
   assert.equal(publicPayload.ok, true);
   assert.equal(publicPayload.event?.id, "public-live-event");
   assert.equal(publicPayload.event?.slug, "public-live");
+  assert.equal(JSON.stringify(publicPayload).includes("\"full\":true"), false, "Default public event detail must not claim full entitlement access.");
+
+  const publicFullDetail = await publicEventDetail(env, "public-live", undefined, "?full=true");
+  assert.equal(publicFullDetail.status, 200);
+  assert.match(publicFullDetail.headers.get("cache-control") ?? "", /private,\s*no-store/, "Anonymous full=true event detail must be private/no-store.");
+  assert.equal(publicFullDetail.headers.get("x-dzn-cache"), "BYPASS");
+
+  const creatorPublicDetail = await publicEventDetail(env, "public-live", `dzn_session=${creatorToken}`);
+  assert.equal(creatorPublicDetail.status, 200);
+  assert.match(creatorPublicDetail.headers.get("cache-control") ?? "", /private,\s*no-store/, "Authenticated public event detail must be private/no-store.");
+
+  const invalidCookieDetail = await publicEventDetail(env, "public-live", "dzn_session=expired-or-invalid");
+  assert.equal(invalidCookieDetail.status, 200);
+  assert.match(invalidCookieDetail.headers.get("cache-control") ?? "", /private,\s*no-store/, "Invalid session-cookie detail requests must bypass public caches.");
+
+  const simulatedSharedCache = new Map<string, string>();
+  if (/public/i.test(publicFullDetail.headers.get("cache-control") ?? "")) {
+    simulatedSharedCache.set("/api/events/public-live?full=true", await publicFullDetail.clone().text());
+  }
+  const authenticatedAfterAnonFull = await publicEventDetail(env, "public-live", `dzn_session=${creatorToken}`, "?full=true");
+  assert.equal(authenticatedAfterAnonFull.status, 200);
+  assert.equal(simulatedSharedCache.has("/api/events/public-live?full=true"), false, "Anonymous full=true responses must be impossible to reuse from a shared public cache.");
+  assert.match(authenticatedAfterAnonFull.headers.get("cache-control") ?? "", /private,\s*no-store/);
 
   const privateEvent = await publicEventDetail(env, "private-live");
   const privateBody = await privateEvent.text();
@@ -568,11 +646,24 @@ function makeOwnerDraftReviewContext(env: Env, url: string, cookie?: string, slu
   };
 }
 
-function publicEventDetail(env: Env, slug: string, cookie?: string) {
+function publicEventsList(env: Env, search = "", cookie?: string) {
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  return onPublicEventsListRequest({
+    request: new Request(`https://example.com/api/events${search}`, { headers }),
+    env,
+    params: {},
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  });
+}
+
+function publicEventDetail(env: Env, slug: string, cookie?: string, search = "") {
   const headers = new Headers();
   if (cookie) headers.set("cookie", cookie);
   return onPublicEventDetailRequest({
-    request: new Request(`https://example.com/api/events/${encodeURIComponent(slug)}`, { headers }),
+    request: new Request(`https://example.com/api/events/${encodeURIComponent(slug)}${search}`, { headers }),
     env,
     params: { slug },
     waitUntil: () => undefined,
@@ -598,9 +689,19 @@ class OwnerDraftReviewDb {
       ["private-live", this.eventRow("private-live-event", "Private Live Event", "private-live", "upcoming", "private", "Secret rules", "Hidden reward")],
       ["private-draft", this.eventRow("private-draft-event", "Private Draft Event", "private-draft", "draft", "private", "Rules are still under creator review.", "Rewards are not published.")],
       ["public-draft", this.eventRow("public-draft-event", "Public Draft Event", "public-draft", "draft", "public", "Draft rules", "Draft rewards")],
+      ["unlisted-draft", this.eventRow("unlisted-draft-event", "Unlisted Draft Event", "unlisted-draft", "draft", "unlisted", "Unlisted draft rules", "Unlisted draft rewards")],
+      ["unlisted-live", this.eventRow("unlisted-live-event", "Unlisted Live Event", "unlisted-live", "upcoming", "unlisted")],
       ["dzn-season-1", this.eventRow("private-demo-slug-event", "Private Demo Slug Event", "dzn-season-1", "upcoming", "private", "Private demo slug rules", "Private demo slug rewards")],
     ]);
     return events.get(slug) ?? null;
+  }
+
+  publicEventRows() {
+    return ["public-live", "unlisted-live"].map((slug) => this.eventBySlug(slug));
+  }
+
+  ownerEventRows() {
+    return ["public-live", "unlisted-live", "private-live", "private-draft", "public-draft", "unlisted-draft"].map((slug) => this.eventBySlug(slug));
   }
 
   tableColumns(table: string) {
@@ -672,6 +773,12 @@ class OwnerDraftReviewStatement {
     const pragmaMatch = this.sql.match(/PRAGMA table_info\(([^)]+)\)/i);
     if (pragmaMatch) {
       return { results: this.db.tableColumns(pragmaMatch[1]) as T[] };
+    }
+    if (/FROM competitive_events/i.test(this.sql) && /ORDER BY CASE status/i.test(this.sql)) {
+      return { results: this.db.publicEventRows() as T[] };
+    }
+    if (/FROM competitive_events/i.test(this.sql) && /ORDER BY datetime\(COALESCE\(competitive_events\.updated_at/i.test(this.sql)) {
+      return { results: this.db.ownerEventRows() as T[] };
     }
     if (/FROM competitive_event_servers/i.test(this.sql) || /FROM competitive_event_matches/i.test(this.sql) || /FROM competitive_event_activity/i.test(this.sql)) {
       return { results: [] as T[] };
