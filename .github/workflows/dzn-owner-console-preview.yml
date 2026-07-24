@@ -995,6 +995,7 @@ jobs:
           const branch = process.env.CANDIDATE_BRANCH;
           const sha = process.env.CANDIDATE_SHA;
           const runId = String(process.env.GITHUB_RUN_ID || "");
+          const runAttempt = String(process.env.GITHUB_RUN_ATTEMPT || "");
           const repository = process.env.GITHUB_REPOSITORY;
           const githubToken = process.env.GITHUB_TOKEN;
           const previewBaseUrl = process.env.PREVIEW_BASE_URL;
@@ -1136,6 +1137,19 @@ jobs:
             }
             const activeRuns = await activePreviewRunsUsingReusableDb();
             if (activeRuns.length > 0) fail(`Another active owner-console preview workflow may be mutating the reusable preview D1: ${activeRuns.map((run) => run.id).join(", ")}`);
+            if (!/^[1-9][0-9]*$/.test(runId) || !/^[1-9][0-9]*$/.test(runAttempt)) {
+              fail("Phase 2A run-scoped fixture key requires positive decimal GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT.", {
+                category: "PHASE2A_RUN_SCOPED_FIXTURE_COLLISION",
+              });
+            }
+            const phase2aRunKey = `${runId}-${runAttempt}`;
+            const phase2aConversionTargetId = `phase2a-preview-conversion-${phase2aRunKey}`;
+            const phase2aConversionEventId = `suggestion-draft-${phase2aConversionTargetId}`;
+            if (!/^[A-Za-z0-9-]+$/.test(phase2aConversionTargetId) || phase2aConversionTargetId.length >= 72 || phase2aConversionEventId.length >= 110) {
+              fail("Phase 2A run-scoped conversion fixture identity is malformed.", {
+                category: "PHASE2A_RUN_SCOPED_FIXTURE_COLLISION",
+              });
+            }
 
             const wranglerToml = [
               'name = "dzn-event-platform-performance-preview"',
@@ -1167,6 +1181,9 @@ jobs:
               `OWNER_CONSOLE_NON_OWNER_COOKIE=dzn_session=owner-console-preview-non-owner-token`,
               `PHASE2A_API_MEMBER_USER_ID=owner-console-non-owner-user`,
               `PHASE2A_API_MEMBER_COOKIE=dzn_session=owner-console-preview-non-owner-token`,
+              `PHASE2A_RUN_KEY=${phase2aRunKey}`,
+              `PHASE2A_CONVERSION_TARGET_ID=${phase2aConversionTargetId}`,
+              `PHASE2A_CONVERSION_EVENT_ID=${phase2aConversionEventId}`,
               "",
             ].join("\n"));
             fs.writeFileSync("dzn-event-platform-performance-preview/guard.json", JSON.stringify({
@@ -1183,6 +1200,7 @@ jobs:
               discordServerAnnouncementsEnabled: false,
               activeMutatingWorkflowRuns: activeRuns.length,
               d1CreateDeletePathEnabled: false,
+              runScopedConversionTarget: phase2aConversionTargetId,
             }, null, 2));
             console.log(`Phase 2A preview preflight passed: project=${projectName}; db=${previewDbName}; id=${maskId(previewId)}; branch=${projectBranch}`);
           })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
@@ -1363,9 +1381,21 @@ jobs:
             process.exit(1);
           }
           const apiMemberId = "owner-console-non-owner-user";
-          const obsoleteApiSessionId = "phase2a-preview-api-member-session";
-          const conversionTargetId = "phase2a-preview-conversion-target";
-          const conversionTargetEventId = "suggestion-draft-phase2a-preview-conversion-target";
+          const runKey = String(process.env.PHASE2A_RUN_KEY || "").trim();
+          const conversionTargetId = String(process.env.PHASE2A_CONVERSION_TARGET_ID || "").trim();
+          const conversionTargetEventId = String(process.env.PHASE2A_CONVERSION_EVENT_ID || "").trim();
+          if (!/^[1-9][0-9]*-[1-9][0-9]*$/.test(runKey)) {
+            console.error("Phase 2A run-scoped fixture key is missing or malformed.");
+            process.exit(1);
+          }
+          if (!/^[A-Za-z0-9-]+$/.test(conversionTargetId) || conversionTargetId.length >= 72) {
+            console.error("Phase 2A run-scoped conversion target id is missing or malformed.");
+            process.exit(1);
+          }
+          if (conversionTargetEventId !== `suggestion-draft-${conversionTargetId}`) {
+            console.error("Phase 2A run-scoped conversion event id does not match the application contract.");
+            process.exit(1);
+          }
           function sql(value) {
             return `'${String(value ?? "").replace(/'/g, "''")}'`;
           }
@@ -1393,7 +1423,7 @@ jobs:
             ["phase2a-preview-tie-b", "phase2a-preview-other-member", "Tie Break Bravo", "Equal score cursor pagination fixture bravo with deterministic ordering.", "stat_race", "pc", "Chernarus", null, 1, "public_voting", "public_voting", null, 3, 0, 0, 5.0],
             ["phase2a-preview-server-linked", "phase2a-preview-member", "Nuketown Server Trial", "A public suggestion linked through a public server slug instead of an internal browser ID.", "server_vs_server", "cross_platform", "Chernarus", serverSubquery, 0, "public_voting", "public_voting", null, 2, 0, 0, 4.5],
             ["phase2a-preview-open-any", "phase2a-preview-other-member", "Open Host Challenge", "An open-to-any-server suggestion for route and filter coverage.", "community_challenge", "unsure", "Any official map", null, 1, "accepted", "accepted", null, 5, 0, 0, 7.5],
-            [conversionTargetId, "phase2a-preview-other-member", "Verifier Conversion Target", "A deterministic shortlisted suggestion reserved for the preview verifier conversion sequence and concurrency checks.", "community_challenge", "pc", "Chernarus", null, 1, "shortlisted", "shortlisted", null, 0, 0, 0, 6.25],
+            [conversionTargetId, "phase2a-preview-other-member", `Verifier Conversion Target ${runKey}`, "A deterministic run-scoped shortlisted suggestion reserved for the preview verifier conversion sequence and concurrency checks.", "community_challenge", "pc", "Chernarus", null, 1, "shortlisted", "shortlisted", null, 0, 0, 0, 6.25],
           ];
           const ownerPlaceholders = ownerIds.length > 0 ? ownerIds.map(() => "?").join(", ") : "NULL";
           const ownerValues = ownerIds.map(sql).join(", ");
@@ -1407,9 +1437,27 @@ jobs:
             (SELECT COUNT(*) FROM users WHERE id = 'owner-console-non-owner-user' AND discord_id = ${sql(creatorId)}) AS apiVerifierCreatorMatches,
             (SELECT COUNT(*) FROM event_suggestions WHERE submitted_by_user_id = 'owner-console-non-owner-user' AND converted_event_id IS NOT NULL) AS unexpectedConvertedVerifierRows;
           `.trim());
+          fs.writeFileSync("phase2a-protected-row-preflight.sql", `
+          SELECT
+            (SELECT COUNT(*) FROM sessions) AS sessionCountBefore,
+            (SELECT COUNT(*) FROM competitive_events) AS competitiveEventCountBefore,
+            (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-owner-session' AND user_id = 'owner-console-platform-owner' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS ownerSessionValid,
+            (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-creator-session' AND user_id = 'owner-console-platform-creator' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS creatorSessionValid,
+            (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-non-owner-session' AND user_id = 'owner-console-non-owner-user' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS apiVerifierSessionValid,
+            (SELECT COUNT(*) FROM event_suggestions WHERE id = ${sql(conversionTargetId)}) AS runScopedSuggestionCountBefore,
+            (SELECT COUNT(*) FROM competitive_events WHERE id = ${sql(conversionTargetEventId)}) AS runScopedEventCountBefore,
+            (SELECT COUNT(*) FROM competitive_event_activity WHERE event_id = ${sql(conversionTargetEventId)}) AS runScopedActivityCountBefore,
+            (SELECT COUNT(*) FROM event_suggestion_moderation_actions WHERE suggestion_id = ${sql(conversionTargetId)}) AS runScopedActionCountBefore;
+          `.trim());
           fs.writeFileSync("dzn-event-platform-performance-preview/seed-summary.json", JSON.stringify({
             knownGoodExistingMemberSessionChecked: true,
-            obsoleteInvalidPhase2aSessionRemoved: true,
+            canonicalSessionsVerifiedReadOnly: true,
+            obsoletePreviewSessionLeftUntouched: true,
+            sessionRowsInserted: 0,
+            sessionRowsUpdated: 0,
+            sessionRowsDeleted: 0,
+            runScopedConversionTarget: conversionTargetId,
+            runScopedConversionEventId: conversionTargetEventId,
             apiVerifierSuggestionRowsReset: true,
             noSessionHashCreated: true,
             noPagesSecretChanged: true,
@@ -1421,14 +1469,6 @@ jobs:
           statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL);`);
           statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id IN (SELECT id FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL);`);
           statements.push(`DELETE FROM event_suggestions WHERE submitted_by_user_id = ${sql(apiMemberId)} AND converted_event_id IS NULL;`);
-          statements.push(`DELETE FROM sessions WHERE id = ${sql(obsoleteApiSessionId)};`);
-          statements.push(`DELETE FROM competitive_event_activity WHERE event_id = ${sql(conversionTargetEventId)};`);
-          statements.push(`DELETE FROM event_suggestion_moderation_actions WHERE suggestion_id = ${sql(conversionTargetId)};`);
-          statements.push(`DELETE FROM event_suggestion_votes WHERE suggestion_id = ${sql(conversionTargetId)};`);
-          statements.push(`DELETE FROM event_suggestion_reports WHERE suggestion_id = ${sql(conversionTargetId)};`);
-          statements.push(`DELETE FROM event_suggestion_servers WHERE suggestion_id = ${sql(conversionTargetId)};`);
-          statements.push(`DELETE FROM event_suggestions WHERE id = ${sql(conversionTargetId)};`);
-          statements.push(`DELETE FROM competitive_events WHERE id = ${sql(conversionTargetEventId)};`);
           for (const [id, discordId, username] of users) {
             statements.push(`INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at) VALUES (${sql(id)}, ${sql(discordId)}, ${sql(username)}, NULL, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = excluded.updated_at;`);
           }
@@ -1464,6 +1504,14 @@ jobs:
             --command "${VERIFY_SESSION_SQL}" \
             > dzn-event-platform-performance-preview/session-verification-raw.json \
             2> dzn-event-platform-performance-preview/session-verification.stderr.log
+          PROTECTED_ROW_PREFLIGHT_SQL="$(cat phase2a-protected-row-preflight.sql)"
+          npx wrangler d1 execute DB \
+            --config wrangler.event-platform-performance-preview.toml \
+            --remote \
+            --json \
+            --command "${PROTECTED_ROW_PREFLIGHT_SQL}" \
+            > dzn-event-platform-performance-preview/protected-row-invariants-before.json \
+            2> dzn-event-platform-performance-preview/protected-row-invariants-before.stderr.log
 
           node <<'NODE'
           const fs = require("node:fs");
@@ -1491,6 +1539,7 @@ jobs:
             return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
           }
           const row = rows("dzn-event-platform-performance-preview/session-verification-raw.json")[0] || {};
+          const protectedRow = rows("dzn-event-platform-performance-preview/protected-row-invariants-before.json")[0] || {};
           const summary = {
             ownerSessionPresent: Number(row.ownerSessionValid || 0) === 1,
             creatorSessionPresent: Number(row.creatorSessionValid || 0) === 1,
@@ -1501,7 +1550,10 @@ jobs:
             apiVerifierIsPlatformCreator: Number(row.apiVerifierCreatorMatches || 0) > 0,
             expectedUserMappingsValid: Number(row.ownerSessionValid || 0) === 1 && Number(row.creatorSessionValid || 0) === 1 && Number(row.apiVerifierSessionValid || 0) === 1,
             noSecretRotationPerformed: true,
-            obsoleteInvalidPhase2aSessionRemoved: true,
+            obsoletePreviewSessionLeftUntouched: true,
+            sessionRowsInserted: 0,
+            sessionRowsUpdated: 0,
+            sessionRowsDeleted: 0,
           };
           fs.writeFileSync("dzn-event-platform-performance-preview/session-verification.json", JSON.stringify(summary, null, 2));
           if (Number(row.unexpectedConvertedVerifierRows || 0) !== 0) {
@@ -1510,7 +1562,64 @@ jobs:
           if (!summary.ownerSessionPresent || !summary.creatorSessionPresent || !summary.apiVerifierSessionPresent || !summary.apiVerifierUserPresent || summary.apiVerifierIsPlatformOwner || summary.apiVerifierIsPlatformCreator) {
             fail("PHASE2A_VERIFIED_MEMBER_SESSION_UNAVAILABLE", "Known-good Phase 2A preview member session is unavailable or role-unsafe.");
           }
+          const collisionCounts = {
+            runScopedSuggestionCountBefore: Number(protectedRow.runScopedSuggestionCountBefore || 0),
+            runScopedEventCountBefore: Number(protectedRow.runScopedEventCountBefore || 0),
+            runScopedActivityCountBefore: Number(protectedRow.runScopedActivityCountBefore || 0),
+            runScopedActionCountBefore: Number(protectedRow.runScopedActionCountBefore || 0),
+          };
+          if (Object.values(collisionCounts).some((count) => count !== 0)) {
+            fail("PHASE2A_RUN_SCOPED_FIXTURE_COLLISION", `Run-scoped Phase 2A conversion fixture already exists: ${JSON.stringify(collisionCounts)}`);
+          }
+          fs.writeFileSync("dzn-event-platform-performance-preview/protected-row-invariants.json", JSON.stringify({
+            sessionCountBefore: Number(protectedRow.sessionCountBefore || 0),
+            sessionCountAfterSeed: null,
+            sessionCountUnchanged: null,
+            requiredSessionMappingsValid: summary.expectedUserMappingsValid,
+            competitiveEventCountBefore: Number(protectedRow.competitiveEventCountBefore || 0),
+            competitiveEventCountAfterSeed: null,
+            competitiveEventCountDidNotDecrease: null,
+            runScopedSuggestionCountBefore: collisionCounts.runScopedSuggestionCountBefore,
+            runScopedEventCountBefore: collisionCounts.runScopedEventCountBefore,
+            runScopedActivityCountBefore: collisionCounts.runScopedActivityCountBefore,
+            runScopedActionCountBefore: collisionCounts.runScopedActionCountBefore,
+            runScopedSuggestionCountAfterSeed: null,
+            runScopedEventCountAfterSeed: null,
+            protectedSessionDeleteStatements: 0,
+            protectedEventDeleteStatements: 0,
+          }, null, 2));
           console.log("Phase 2A known-good preview session verification passed.");
+          NODE
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const sqlText = fs.readFileSync("phase2a-preview-seed.sql", "utf8");
+          const checks = [
+            { pattern: /\bDELETE\s+FROM\s+sessions\b/i, category: "PHASE2A_PROTECTED_SESSION_MUTATION_BLOCKED", table: "sessions", type: "DELETE" },
+            { pattern: /\bDELETE\s+FROM\s+competitive_events\b/i, category: "PHASE2A_PROTECTED_EVENT_MUTATION_BLOCKED", table: "competitive_events", type: "DELETE" },
+            { pattern: /\bTRUNCATE\b/i, category: "PHASE2A_DESTRUCTIVE_SEED_SQL_BLOCKED", table: "unknown", type: "TRUNCATE" },
+            { pattern: /\bDROP\s+TABLE\b/i, category: "PHASE2A_DESTRUCTIVE_SEED_SQL_BLOCKED", table: "unknown", type: "DROP_TABLE" },
+            { pattern: /\bDROP\s+INDEX\b/i, category: "PHASE2A_DESTRUCTIVE_SEED_SQL_BLOCKED", table: "unknown", type: "DROP_INDEX" },
+            { pattern: /\bALTER\s+TABLE\s+sessions\b/i, category: "PHASE2A_PROTECTED_SESSION_MUTATION_BLOCKED", table: "sessions", type: "ALTER_TABLE" },
+            { pattern: /\bALTER\s+TABLE\s+competitive_events\b/i, category: "PHASE2A_PROTECTED_EVENT_MUTATION_BLOCKED", table: "competitive_events", type: "ALTER_TABLE" },
+          ];
+          for (const check of checks) {
+            if (!check.pattern.test(sqlText)) continue;
+            fs.writeFileSync("dzn-event-platform-performance-preview/failure-summary.json", JSON.stringify({
+              ok: false,
+              category: check.category,
+              message: "Protected or destructive Phase 2A seed SQL was blocked before remote execution.",
+              stage: "seedSqlSafetyScan",
+              protectedTable: check.table,
+              statementType: check.type,
+              mode: "event-platform-performance-preview",
+              branch: process.env.CANDIDATE_BRANCH,
+              commit: process.env.CANDIDATE_SHA,
+            }, null, 2));
+            console.error(`${check.category}: protected table=${check.table}; statement=${check.type}; seed SQL not printed.`);
+            process.exit(1);
+          }
+          console.log("Phase 2A generated seed SQL safety scan passed.");
           NODE
 
           npx wrangler d1 execute DB \
@@ -1518,6 +1627,58 @@ jobs:
             --remote \
             --file phase2a-preview-seed.sql \
             | tee dzn-event-platform-performance-preview/seed.txt
+          npx wrangler d1 execute DB \
+            --config wrangler.event-platform-performance-preview.toml \
+            --remote \
+            --json \
+            --command "SELECT (SELECT COUNT(*) FROM sessions) AS sessionCountAfterSeed, (SELECT COUNT(*) FROM competitive_events) AS competitiveEventCountAfterSeed, (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-owner-session' AND user_id = 'owner-console-platform-owner' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS ownerSessionValid, (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-creator-session' AND user_id = 'owner-console-platform-creator' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS creatorSessionValid, (SELECT COUNT(*) FROM sessions WHERE id = 'owner-console-non-owner-session' AND user_id = 'owner-console-non-owner-user' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now')) AS apiVerifierSessionValid, (SELECT COUNT(*) FROM event_suggestions WHERE id = '${PHASE2A_CONVERSION_TARGET_ID}') AS runScopedSuggestionCountAfterSeed, (SELECT COUNT(*) FROM competitive_events WHERE id = '${PHASE2A_CONVERSION_EVENT_ID}') AS runScopedEventCountAfterSeed;" \
+            > dzn-event-platform-performance-preview/protected-row-invariants-after-seed.json \
+            2> dzn-event-platform-performance-preview/protected-row-invariants-after-seed.stderr.log
+          node <<'NODE'
+          const fs = require("node:fs");
+          function fail(category, message) {
+            fs.writeFileSync("dzn-event-platform-performance-preview/failure-summary.json", JSON.stringify({
+              ok: false,
+              category,
+              message,
+              stage: "protectedRowInvariantsAfterSeed",
+              branch: process.env.CANDIDATE_BRANCH,
+              commit: process.env.CANDIDATE_SHA,
+              mode: "event-platform-performance-preview",
+            }, null, 2));
+            console.error(message);
+            process.exit(1);
+          }
+          function parse(path) {
+            const raw = fs.readFileSync(path, "utf8").replace(/^\uFEFF/, "").trimStart();
+            if (!raw || !["[", "{"].includes(raw[0])) fail("PHASE2A_D1_FINAL_VERIFICATION_FAILED", `Malformed Wrangler JSON in ${path}.`);
+            return JSON.parse(raw);
+          }
+          function rows(path) {
+            const parsed = parse(path);
+            const containers = Array.isArray(parsed) ? parsed : [parsed];
+            return containers.flatMap((item) => item?.results ?? item?.result?.[0]?.results ?? item?.result?.results ?? []);
+          }
+          const invariantPath = "dzn-event-platform-performance-preview/protected-row-invariants.json";
+          const invariants = JSON.parse(fs.readFileSync(invariantPath, "utf8"));
+          const after = rows("dzn-event-platform-performance-preview/protected-row-invariants-after-seed.json")[0] || {};
+          invariants.sessionCountAfterSeed = Number(after.sessionCountAfterSeed || 0);
+          invariants.sessionCountUnchanged = invariants.sessionCountAfterSeed === Number(invariants.sessionCountBefore || 0);
+          invariants.requiredSessionMappingsValid =
+            invariants.requiredSessionMappingsValid &&
+            Number(after.ownerSessionValid || 0) === 1 &&
+            Number(after.creatorSessionValid || 0) === 1 &&
+            Number(after.apiVerifierSessionValid || 0) === 1;
+          invariants.competitiveEventCountAfterSeed = Number(after.competitiveEventCountAfterSeed || 0);
+          invariants.competitiveEventCountDidNotDecrease = invariants.competitiveEventCountAfterSeed >= Number(invariants.competitiveEventCountBefore || 0);
+          invariants.runScopedSuggestionCountAfterSeed = Number(after.runScopedSuggestionCountAfterSeed || 0);
+          invariants.runScopedEventCountAfterSeed = Number(after.runScopedEventCountAfterSeed || 0);
+          if (!invariants.sessionCountUnchanged || !invariants.requiredSessionMappingsValid || !invariants.competitiveEventCountDidNotDecrease || invariants.runScopedSuggestionCountAfterSeed !== 1 || invariants.runScopedEventCountAfterSeed !== 0) {
+            fail("PHASE2A_D1_FINAL_VERIFICATION_FAILED", "Protected row invariants failed after Phase 2A seed.");
+          }
+          fs.writeFileSync(invariantPath, JSON.stringify(invariants, null, 2));
+          console.log("Phase 2A protected row invariants after seed passed.");
+          NODE
           npx wrangler d1 execute DB \
             --config wrangler.event-platform-performance-preview.toml \
             --remote \
@@ -1705,6 +1866,8 @@ jobs:
           const memberCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE || "";
           const apiMemberUserId = process.env.PHASE2A_API_MEMBER_USER_ID || "owner-console-non-owner-user";
           const apiMemberCookie = process.env.PHASE2A_API_MEMBER_COOKIE || "";
+          const conversionTargetId = String(process.env.PHASE2A_CONVERSION_TARGET_ID || "").trim();
+          const conversionTargetEventId = String(process.env.PHASE2A_CONVERSION_EVENT_ID || "").trim();
           const artifacts = "dzn-event-platform-performance-preview";
           try {
             fs.rmSync(`${artifacts}/failure-summary.json`, { force: true });
@@ -1771,6 +1934,12 @@ jobs:
             writeFailureSummary(category, message, details);
             console.error(message);
             process.exit(1);
+          }
+          if (!/^[A-Za-z0-9-]+$/.test(conversionTargetId) || conversionTargetId.length >= 72 || conversionTargetEventId !== `suggestion-draft-${conversionTargetId}`) {
+            fail("Phase 2A run-scoped conversion fixture environment is missing or malformed.", {
+              category: "PHASE2A_RUN_SCOPED_FIXTURE_COLLISION",
+              stage: "verification",
+            });
           }
           function d1BindingId(config) {
             const db = config?.d1_databases?.DB;
@@ -2245,8 +2414,6 @@ jobs:
           async function verifyAuthMatrix(base, submission) {
             const jsonHeaders = { "Content-Type": "application/json" };
             const { validSuggestion, wordCount, anonSubmit, memberSubmit, submitted, createdId } = submission;
-            const conversionTargetId = "phase2a-preview-conversion-target";
-            const conversionTargetEventId = "suggestion-draft-phase2a-preview-conversion-target";
             const readCount = async (sql, params = []) => Number((await d1Query(sql, params))[0]?.count || 0);
             const findOwnerSuggestion = async (id) => {
               const ownerList = await fetchJson(base, "/api/owner/events/suggestions?status=all&limit=100", 200, {
@@ -2512,6 +2679,65 @@ jobs:
               },
             };
           }
+          async function verifyProtectedRowInvariantsAfterConversion(authMatrix) {
+            const eventId = authMatrix?.conversion?.eventId;
+            if (eventId !== conversionTargetEventId) {
+              fail("Protected row invariant verification received the wrong run-scoped event id.", {
+                category: "PHASE2A_D1_FINAL_VERIFICATION_FAILED",
+                stage: "d1FinalVerification",
+              });
+            }
+            const invariantPath = `${artifacts}/protected-row-invariants.json`;
+            let invariants = {};
+            try {
+              invariants = JSON.parse(fs.readFileSync(invariantPath, "utf8"));
+            } catch {
+              fail("Missing protected row invariants artifact from seed stage.", {
+                category: "PHASE2A_D1_FINAL_VERIFICATION_FAILED",
+                stage: "d1FinalVerification",
+              });
+            }
+            const readCount = async (sql, params = []) => Number((await d1Query(sql, params))[0]?.count || 0);
+            const eventRows = await d1Query("SELECT status, visibility FROM competitive_events WHERE id = ? LIMIT 1;", [conversionTargetEventId]);
+            const final = {
+              ...invariants,
+              sessionCountAfterVerification: await readCount("SELECT COUNT(*) AS count FROM sessions;"),
+              requiredSessionMappingsRemainValid:
+                (await readCount("SELECT COUNT(*) AS count FROM sessions WHERE id = 'owner-console-owner-session' AND user_id = 'owner-console-platform-owner' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now');")) === 1 &&
+                (await readCount("SELECT COUNT(*) AS count FROM sessions WHERE id = 'owner-console-creator-session' AND user_id = 'owner-console-platform-creator' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now');")) === 1 &&
+                (await readCount("SELECT COUNT(*) AS count FROM sessions WHERE id = 'owner-console-non-owner-session' AND user_id = 'owner-console-non-owner-user' AND COALESCE(session_token_hash, '') <> '' AND datetime(expires_at) > datetime('now');")) === 1,
+              competitiveEventCountAfterConversion: await readCount("SELECT COUNT(*) AS count FROM competitive_events;"),
+              runScopedSuggestionCountAfterConversion: await readCount("SELECT COUNT(*) AS count FROM event_suggestions WHERE id = ?;", [conversionTargetId]),
+              runScopedEventCountAfterConversion: await readCount("SELECT COUNT(*) AS count FROM competitive_events WHERE id = ?;", [conversionTargetEventId]),
+              runScopedEventStatus: eventRows[0]?.status || null,
+              runScopedEventVisibility: eventRows[0]?.visibility || null,
+              runScopedConversionActivityCount: await readCount("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = ? AND activity_type = 'suggestion_converted_to_draft';", [conversionTargetEventId]),
+              runScopedConversionActionCount: await readCount("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'convert_to_event_draft';", [conversionTargetId]),
+              runScopedOrphanEventCount: await readCount("SELECT COUNT(*) AS count FROM competitive_events WHERE id = ? AND NOT EXISTS (SELECT 1 FROM event_suggestions WHERE converted_event_id = competitive_events.id);", [conversionTargetEventId]),
+              maintenanceNote: "Reusable preview D1 may accumulate small run-scoped fixtures; future retention should use a separately reviewed replacement or rotation process and must not introduce automatic protected-row deletion.",
+            };
+            final.sessionCountUnchangedAfterVerification = final.sessionCountAfterVerification === Number(final.sessionCountBefore || 0);
+            final.competitiveEventCountDidNotDecreaseAfterConversion = final.competitiveEventCountAfterConversion >= Number(final.competitiveEventCountBefore || 0);
+            if (
+              !final.sessionCountUnchangedAfterVerification ||
+              !final.requiredSessionMappingsRemainValid ||
+              !final.competitiveEventCountDidNotDecreaseAfterConversion ||
+              final.runScopedSuggestionCountAfterConversion !== 1 ||
+              final.runScopedEventCountAfterConversion !== 1 ||
+              final.runScopedEventStatus !== "draft" ||
+              final.runScopedEventVisibility !== "private" ||
+              final.runScopedConversionActivityCount !== 1 ||
+              final.runScopedConversionActionCount !== 1 ||
+              final.runScopedOrphanEventCount !== 0
+            ) {
+              fail("Protected row invariants failed after conversion verification.", {
+                category: "PHASE2A_D1_FINAL_VERIFICATION_FAILED",
+                stage: "d1FinalVerification",
+              });
+            }
+            writeJsonArtifact("protected-row-invariants.json", final);
+            return final;
+          }
           async function verifyPagination(base) {
             const sorts = ["trending", "newest", "most_supported", "most_active"];
             const statuses = ["all_public", "public_voting", "shortlisted", "accepted", "converted_to_event"];
@@ -2568,6 +2794,7 @@ jobs:
             const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);
             const authMatrix = await verifyAuthMatrix(stableUrl, apiMemberSubmission);
             writeJsonArtifact("auth-matrix.json", authMatrix, "authMatrix");
+            const protectedRowInvariants = await verifyProtectedRowInvariantsAfterConversion(authMatrix);
             updateProgress("privacyChecks", "running");
             const privacyChecks = {
               publicReportCountAbsent: cacheVerification.reportCountExposed === false,
@@ -2615,6 +2842,11 @@ jobs:
                 cacheVerification.duplicateParameters.getAfterHeadCache === "BYPASS" &&
                 cacheVerification.duplicateParameters.normalSecondCache === "HIT" &&
                 cacheVerification.duplicateParameters.metadataExposed === false,
+              protectedRowsPreserved:
+                protectedRowInvariants.sessionCountUnchangedAfterVerification === true &&
+                protectedRowInvariants.competitiveEventCountDidNotDecreaseAfterConversion === true &&
+                protectedRowInvariants.runScopedSuggestionCountAfterConversion === 1 &&
+                protectedRowInvariants.runScopedEventCountAfterConversion === 1,
             };
             writeJsonArtifact("privacy-checks.json", privacyChecks, "privacyChecks");
             updateProgress("pagination", "running");
@@ -2629,13 +2861,13 @@ jobs:
               reportRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_reports WHERE suggestion_id LIKE 'phase2a-preview-%' AND status = 'open';"),
               voteRows: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_votes WHERE suggestion_id LIKE 'phase2a-preview-%';"),
               canonicalDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id LIKE 'phase2a-preview-%' AND status = 'draft' AND visibility = 'private';"),
-              conversionTargetDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id = 'suggestion-draft-phase2a-preview-conversion-target' AND status = 'draft' AND visibility = 'private';"),
-              conversionActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id LIKE 'phase2a-preview-%' OR event_id = 'suggestion-draft-phase2a-preview-conversion-target';"),
-              conversionTargetActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = 'suggestion-draft-phase2a-preview-conversion-target' AND activity_type = 'suggestion_converted_to_draft';"),
+              conversionTargetDrafts: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id = ? AND status = 'draft' AND visibility = 'private';", [conversionTargetEventId]),
+              conversionActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id LIKE 'phase2a-preview-%' OR event_id = ?;", [conversionTargetEventId]),
+              conversionTargetActivity: await d1Query("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = ? AND activity_type = 'suggestion_converted_to_draft';", [conversionTargetEventId]),
               conversionActions: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id LIKE 'phase2a-preview-%' AND action = 'convert_to_event_draft';"),
-              conversionTargetActions: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = 'phase2a-preview-conversion-target' AND action = 'convert_to_event_draft';"),
-              conversionTargetPointer: await d1Query("SELECT converted_event_id AS convertedEventId FROM event_suggestions WHERE id = 'phase2a-preview-conversion-target' LIMIT 1;"),
-              orphanConversionEvents: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id = 'suggestion-draft-phase2a-preview-conversion-target' AND NOT EXISTS (SELECT 1 FROM event_suggestions WHERE converted_event_id = competitive_events.id);"),
+              conversionTargetActions: await d1Query("SELECT COUNT(*) AS count FROM event_suggestion_moderation_actions WHERE suggestion_id = ? AND action = 'convert_to_event_draft';", [conversionTargetId]),
+              conversionTargetPointer: await d1Query("SELECT converted_event_id AS convertedEventId FROM event_suggestions WHERE id = ? LIMIT 1;", [conversionTargetId]),
+              orphanConversionEvents: await d1Query("SELECT COUNT(*) AS count FROM competitive_events WHERE id = ? AND NOT EXISTS (SELECT 1 FROM event_suggestions WHERE converted_event_id = competitive_events.id);", [conversionTargetEventId]),
               foreignKeys: await d1Query("PRAGMA foreign_key_check;"),
             };
             if (
@@ -2645,7 +2877,7 @@ jobs:
               Number(d1Rows.conversionTargetDrafts[0]?.count || 0) !== 1 ||
               Number(d1Rows.conversionTargetActivity[0]?.count || 0) !== 1 ||
               Number(d1Rows.conversionTargetActions[0]?.count || 0) !== 1 ||
-              d1Rows.conversionTargetPointer[0]?.convertedEventId !== "suggestion-draft-phase2a-preview-conversion-target" ||
+              d1Rows.conversionTargetPointer[0]?.convertedEventId !== conversionTargetEventId ||
               Number(d1Rows.orphanConversionEvents[0]?.count || 0) !== 0
             ) {
               fail("Final Phase 2A preview D1 verification failed.", { category: "PHASE2A_D1_FINAL_VERIFICATION_FAILED", stage: "d1FinalVerification" });
@@ -2680,6 +2912,8 @@ jobs:
               "- Private draft event identifiers exposed publicly: false",
               `- Suggestion mutation auth precedence: ${privacyChecks.suggestionMutationAuthPrecedence ? "passed" : "failed"}`,
               `- Duplicate allowed cache parameters bypass shared cache: ${privacyChecks.duplicateAllowedCacheParametersBypass ? "passed" : "failed"}`,
+              `- Protected preview session/event row invariants: ${privacyChecks.protectedRowsPreserved ? "passed" : "failed"}`,
+              "- Run-scoped conversion fixtures may accumulate and require separately reviewed retention or rotation; no automatic protected-row deletion is allowed.",
               "- Discord notifications enabled: false",
               "- Discord server announcements enabled: false",
               "- Production operations: none",
@@ -6071,12 +6305,15 @@ jobs:
             ('owner-console-server-owner', '999000000000000002', 'ServerOwnerPreview', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           ON CONFLICT(id) DO UPDATE SET discord_id = excluded.discord_id, username = excluded.username, updated_at = CURRENT_TIMESTAMP;
 
-          DELETE FROM sessions WHERE id IN ('owner-console-owner-session', 'owner-console-creator-session', 'owner-console-non-owner-session');
           INSERT INTO sessions (id, user_id, session_token_hash, expires_at, created_at)
           VALUES
             ('owner-console-owner-session', 'owner-console-platform-owner', ${sql(hmac(ownerToken))}, ${sql(expires)}, CURRENT_TIMESTAMP),
             ('owner-console-creator-session', 'owner-console-platform-creator', ${sql(hmac(creatorToken))}, ${sql(expires)}, CURRENT_TIMESTAMP),
-            ('owner-console-non-owner-session', 'owner-console-non-owner-user', ${sql(hmac(nonOwnerToken))}, ${sql(expires)}, CURRENT_TIMESTAMP);
+            ('owner-console-non-owner-session', 'owner-console-non-owner-user', ${sql(hmac(nonOwnerToken))}, ${sql(expires)}, CURRENT_TIMESTAMP)
+          ON CONFLICT(id) DO UPDATE SET
+            user_id = excluded.user_id,
+            session_token_hash = excluded.session_token_hash,
+            expires_at = excluded.expires_at;
 
           INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at)
           VALUES
@@ -6220,7 +6457,7 @@ jobs:
           npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --file owner-console-preview-seed.sql
           echo "Owner console preview seed completed."
 
-      - name: Reset creator-governance preview test event
+      - name: Check creator-governance preview test event fixture
         if: ${{ inputs.mode == 'full-preview' }}
         run: |
           set -euo pipefail
@@ -6228,12 +6465,12 @@ jobs:
           case "${PREVIEW_DB_NAME}" in
             dzn_network_db_owner_console_preview_creator_governance_*) ;;
             *)
-              echo "::error::Refusing creator-governance reset for non-governance preview database name."
+              echo "::error::Refusing creator-governance fixture check for non-governance preview database name."
               exit 1
               ;;
           esac
           if [ "${PREVIEW_D1_DATABASE_ID}" = "${DETECTED_PRODUCTION_D1_DATABASE_ID}" ]; then
-            echo "::error::Refusing creator-governance reset because preview D1 id equals production D1 id."
+            echo "::error::Refusing creator-governance fixture check because preview D1 id equals production D1 id."
             exit 1
           fi
 
@@ -6247,20 +6484,22 @@ jobs:
           function sql(value) {
             return `'${String(value).replaceAll("'", "''")}'`;
           }
-          fs.writeFileSync("owner-console-creator-event-reset.sql", `
-          DELETE FROM competitive_event_activity
-          WHERE event_id IN (SELECT id FROM competitive_events WHERE name = ${sql(eventName)});
-          DELETE FROM competitive_event_matches
-          WHERE event_id IN (SELECT id FROM competitive_events WHERE name = ${sql(eventName)});
-          DELETE FROM competitive_event_servers
-          WHERE event_id IN (SELECT id FROM competitive_events WHERE name = ${sql(eventName)});
-          DELETE FROM competitive_events
+          fs.writeFileSync("owner-console-creator-event-preflight.sql", `
+          SELECT COUNT(*) AS existing_event_count
+          FROM competitive_events
           WHERE name = ${sql(eventName)};
           `);
           NODE
 
-          npx wrangler d1 execute DB --config wrangler.owner-console-preview.toml --remote --file owner-console-creator-event-reset.sql
-          echo "Creator-governance preview test event reset completed."
+          CHECK_SQL="$(cat owner-console-creator-event-preflight.sql)"
+          npx wrangler d1 execute DB \
+            --config wrangler.owner-console-preview.toml \
+            --remote \
+            --json \
+            --command "${CHECK_SQL}" \
+            > owner-console-creator-event-preflight.json \
+            2> owner-console-creator-event-preflight.stderr.log
+          echo "Creator-governance preview event fixture check completed without row deletion."
 
       - name: Resolve or create preview Pages project
         if: ${{ inputs.mode == 'full-preview' }}
@@ -6757,8 +6996,13 @@ jobs:
             await postJson("/api/owner/events", nonOwnerCookie, 403, createPayload);
             await postJson("/api/owner/events", ownerCookie, 403, { ...createPayload, creator: true, role: "platform_creator_event_admin" });
             await postJson("/api/events/create?role=platform_creator_event_admin", ownerCookie, 403, { ...createPayload, creator: true });
-            const created = await postJson("/api/owner/events", creatorCookie, 200, createPayload);
-            assert(created.parsed?.ok === true, "Creator event create API should succeed for the configured fake creator.");
+            const existingCreatorEvent = Array.isArray(creatorOwnerEvents.parsed?.events)
+              ? creatorOwnerEvents.parsed.events.find((event) => event?.name === creatorEventName)
+              : null;
+            const created = existingCreatorEvent
+              ? { parsed: { ok: true, event_slug: existingCreatorEvent.slug } }
+              : await postJson("/api/owner/events", creatorCookie, 200, createPayload);
+            assert(created.parsed?.ok === true, "Creator event create API should succeed for the configured fake creator or reuse the preserved preview fixture.");
             assert(typeof created.parsed?.event_slug === "string" && created.parsed.event_slug.length > 0, "Creator event create response should include an event slug.");
 
             await expectStatus("/", 200);

@@ -966,8 +966,10 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/audit-log"), tr
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/api/owner/events"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/owner/events/create"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("/events/suggest"), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("Reset creator-governance preview test event"), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("DELETE FROM competitive_events"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Check creator-governance preview test event fixture"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Creator-governance preview event fixture check completed without row deletion."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DELETE FROM sessions"), false);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("DELETE FROM competitive_events"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Verify creator-governance preview event row"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("owner-console-creator-event-count.json"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Creator-governance preview D1 row verified."), true);
@@ -1034,11 +1036,30 @@ const ownerPreviewConfigWrite =
     'fs.writeFileSync("wrangler.owner-console-preview.toml"',
   );
 const ownerPreviewSeedStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Seed preview-only owner console data");
-const ownerPreviewResetEventStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Reset creator-governance preview test event");
+const ownerPreviewEventFixtureCheckStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Check creator-governance preview test event fixture");
 const ownerPreviewDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Deploy preview Pages project");
 const ownerPreviewVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify owner console preview");
-const ownerPreviewCreatorPost = indexOfOrFail(dznOwnerConsolePreviewWorkflow, 'const created = await postJson("/api/owner/events", creatorCookie, 200, createPayload);');
+const ownerPreviewCreatorPost = indexOfOrFail(dznOwnerConsolePreviewWorkflow, 'await postJson("/api/owner/events", creatorCookie, 200, createPayload);');
 const ownerPreviewRowVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify creator-governance preview event row");
+
+for (const [pattern, label] of [
+  [/DELETE\s+FROM\s+sessions/i, "session row delete"],
+  [/DELETE\s+FROM\s+competitive_events/i, "competitive event row delete"],
+  [/TRUNCATE\s+(?:TABLE\s+)?sessions/i, "session truncate"],
+  [/TRUNCATE\s+(?:TABLE\s+)?competitive_events/i, "competitive event truncate"],
+  [/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?sessions/i, "session table drop"],
+  [/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?competitive_events/i, "competitive event table drop"],
+] as const) {
+  assert.equal(pattern.test(dznOwnerConsolePreviewWorkflow), false, `Owner-console preview workflow must not contain a row-level protected ${label}.`);
+}
+const ownerPreviewSeedBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewSeedStart, ownerPreviewEventFixtureCheckStart);
+assert.equal(ownerPreviewSeedBlock.includes("ON CONFLICT(id) DO UPDATE SET"), true, "Full-preview session fixtures must use a fixture-scoped upsert.");
+assert.equal(ownerPreviewSeedBlock.includes("session_token_hash = excluded.session_token_hash"), true, "Full-preview session upsert must preserve authentication behaviour without deleting sessions.");
+assert.equal(ownerPreviewSeedBlock.includes("DELETE FROM sessions"), false, "Full-preview seed must not delete session rows.");
+const ownerPreviewEventFixtureCheckBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewEventFixtureCheckStart, ownerPreviewDeployStart);
+assert.equal(ownerPreviewEventFixtureCheckBlock.includes("SELECT COUNT(*) AS existing_event_count"), true, "Full-preview creator event fixture check must be read-only.");
+assert.equal(ownerPreviewEventFixtureCheckBlock.includes("DELETE FROM competitive_events"), false, "Full-preview creator event fixture check must not delete event rows.");
+assert.equal(ownerPreviewEventFixtureCheckBlock.includes("owner-console-creator-event-preflight.json"), true, "Full-preview creator event fixture check must persist a safe preflight result.");
 
 const ownerPreviewValidateBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewValidateInputsStart, ownerPreviewInstallStart);
 assert.equal(ownerPreviewValidateBlock.includes("wrangler.owner-console-preview.toml"), false, "Input validation must not require the generated preview Wrangler config.");
@@ -1131,15 +1152,32 @@ assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE=dzn_se
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_MEMBER_COOKIE"), true, "Phase 2A preview must expose the reused verifier cookie internally.");
 assert.equal(ownerPreviewPhase2ABlock.includes("submitted_by_user_id = ${sql(apiMemberId)}"), true, "Phase 2A preview must clean API-generated verifier rows by dedicated user.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_API_VERIFIER_UNEXPECTED_CONVERTED_ROW"), true, "Phase 2A preview must block broad cleanup if the verifier user has a converted suggestion.");
-assert.equal(ownerPreviewPhase2ABlock.includes("DELETE FROM sessions WHERE id = ${sql(obsoleteApiSessionId)};"), true, "Phase 2A preview may only delete the obsolete invalid verifier session.");
+assert.equal(ownerPreviewPhase2ABlock.includes("DELETE FROM sessions WHERE id = ${sql(obsoleteApiSessionId)};"), false, "Phase 2A preview must not delete even obsolete preview session rows.");
+assert.equal(ownerPreviewPhase2ABlock.includes("obsoletePreviewSessionLeftUntouched"), true, "Phase 2A seed summary must record obsolete preview sessions are left untouched.");
+assert.equal(ownerPreviewPhase2ABlock.includes("sessionRowsDeleted: 0"), true, "Phase 2A seed summary must record zero session row deletes.");
 assert.equal(ownerPreviewPhase2ABlock.includes("owner-console-non-owner-session');"), false, "Phase 2A preview must never delete the canonical non-owner preview session.");
 assert.equal(ownerPreviewPhase2ABlock.includes("SELECT session_token_hash"), false, "Phase 2A preview must not select or print session hashes.");
 assert.equal(ownerPreviewPhase2ABlock.includes("session-verification.json"), true, "Phase 2A preview must write sanitized session verification.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_VERIFIED_MEMBER_SESSION_UNAVAILABLE"), true, "Phase 2A preview must fail clearly when the reused member session is unavailable.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_VERIFIED_MEMBER_SESSION_REJECTED"), true, "Phase 2A verifier must classify a rejected reused member session.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_PREVIEW_ROLE_SESSION_INVALID"), true, "Phase 2A verifier must validate owner/creator/member role sessions before the auth matrix.");
-assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-conversion-target"), true, "Phase 2A preview must seed a separate deterministic conversion target.");
-assert.equal(ownerPreviewPhase2ABlock.includes("suggestion-draft-phase2a-preview-conversion-target"), true, "Phase 2A preview must use the deterministic conversion target event ID.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_RUN_KEY"), true, "Phase 2A preview must derive a run-scoped conversion fixture key.");
+assert.equal(ownerPreviewPhase2ABlock.includes("GITHUB_RUN_ID"), true, "Phase 2A preview run-scoped fixture must include GITHUB_RUN_ID.");
+assert.equal(ownerPreviewPhase2ABlock.includes("GITHUB_RUN_ATTEMPT"), true, "Phase 2A preview run-scoped fixture must include GITHUB_RUN_ATTEMPT.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_CONVERSION_TARGET_ID"), true, "Phase 2A preview must export the run-scoped conversion target id.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_CONVERSION_EVENT_ID"), true, "Phase 2A preview must export the run-scoped conversion event id.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_RUN_SCOPED_FIXTURE_COLLISION"), true, "Phase 2A preview must block run-scoped fixture collisions instead of resetting rows.");
+assert.equal(ownerPreviewPhase2ABlock.includes("phase2a-preview-conversion-target"), false, "Phase 2A preview must not use the old fixed conversion target.");
+assert.equal(ownerPreviewPhase2ABlock.includes("suggestion-draft-phase2a-preview-conversion-target"), false, "Phase 2A preview must not use the old fixed conversion event id.");
+assert.equal(ownerPreviewPhase2ABlock.includes("protected-row-invariants.json"), true, "Phase 2A preview must record protected row invariants.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_PROTECTED_SESSION_MUTATION_BLOCKED"), true, "Phase 2A preview must scan generated seed SQL for protected session mutations.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_PROTECTED_EVENT_MUTATION_BLOCKED"), true, "Phase 2A preview must scan generated seed SQL for protected event mutations.");
+assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_DESTRUCTIVE_SEED_SQL_BLOCKED"), true, "Phase 2A preview must scan generated seed SQL for destructive statements.");
+assert.equal(
+  ownerPreviewPhase2ABlock.indexOf("Phase 2A generated seed SQL safety scan passed.") < ownerPreviewPhase2ABlock.indexOf("--file phase2a-preview-seed.sql"),
+  true,
+  "Phase 2A generated seed SQL safety scan must run before remote seed execution.",
+);
 assert.equal(ownerPreviewPhase2ABlock.includes("Creator Governance Preview Cup 0919c46"), false, "Phase 2A seed must not delete the verified creator-governance preview event.");
 assert.equal(ownerPreviewPhase2ABlock.includes("npm run test:performance-foundation"), true, "Phase 2A preview build must run performance foundation tests.");
 assert.equal(ownerPreviewPhase2ABlock.includes("./node_modules/.bin/wrangler pages functions build functions"), true, "Phase 2A preview build must compile Pages Functions.");
@@ -1210,6 +1248,7 @@ assert.equal(ownerPreviewPhase2ABlock.includes("creatorDraftOwnerApiOnly"), true
 assert.equal(ownerPreviewPhase2ABlock.includes("unknownPublicEventDetailExcluded"), true, "Phase 2A privacy artifact must record unknown event slug 404 checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes("knownPublicEventDetailAvailable"), true, "Phase 2A privacy artifact must record known public event availability checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes("internalModerationReasonNotPublic"), true, "Phase 2A privacy artifact must record moderation reason privacy.");
+assert.equal(ownerPreviewPhase2ABlock.includes("protectedRowsPreserved"), true, "Phase 2A privacy artifact must record protected session/event row preservation.");
 assert.equal(ownerPreviewPhase2ABlock.includes("x-dzn-cache-meta"), true, "Phase 2A preview must verify internal cache metadata is not public.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING"), true, "Phase 2A preview must classify missing suggestions HEAD handlers clearly.");
 assert.equal(ownerPreviewPhase2ABlock.includes("PHASE2A_VERIFIER_PAYLOAD_INVALID_DESCRIPTION_LENGTH"), true, "Phase 2A verifier must validate its own suggestion payload length.");
@@ -1555,8 +1594,8 @@ assert.equal(ownerPreviewCapacityCheck < ownerPreviewCreateCall, true, "Capacity
 assert.equal(ownerPreviewConfigWrite > ownerPreviewResolveD1Start, true, "Preview Wrangler config must be generated in the D1 resolution step.");
 assert.equal(ownerPreviewMigrateStart > ownerPreviewConfigWrite, true, "Preview migrations must run after the preview Wrangler config is generated.");
 assert.equal(ownerPreviewSeedStart > ownerPreviewConfigWrite, true, "Preview seed must run after the preview Wrangler config is generated.");
-assert.equal(ownerPreviewResetEventStart > ownerPreviewSeedStart, true, "Creator-governance preview event reset must run after seed and migrations.");
-assert.equal(ownerPreviewDeployStart > ownerPreviewResetEventStart, true, "Preview deployment must run after the exact test-event reset.");
+assert.equal(ownerPreviewEventFixtureCheckStart > ownerPreviewSeedStart, true, "Creator-governance preview event fixture check must run after seed and migrations.");
+assert.equal(ownerPreviewDeployStart > ownerPreviewEventFixtureCheckStart, true, "Preview deployment must run after the exact test-event fixture check.");
 assert.equal(ownerPreviewVerifyStart > ownerPreviewDeployStart, true, "Route/API verification must run after preview deployment.");
 assert.equal(ownerPreviewCreatorPost > ownerPreviewVerifyStart, true, "Creator POST must occur during route/API verification.");
 assert.equal(ownerPreviewRowVerifyStart > ownerPreviewCreatorPost, true, "D1 row verification must run only after the creator POST verification.");
