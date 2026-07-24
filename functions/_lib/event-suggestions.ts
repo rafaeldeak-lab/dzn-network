@@ -24,6 +24,22 @@ export type EventSuggestionInput = {
   additional_notes?: string | null;
 };
 
+export type SuggestionMutationKind = "submit" | "vote" | "report";
+
+export function unauthorizedSuggestionMutationPayload(kind: SuggestionMutationKind) {
+  const message = kind === "submit"
+    ? "Log in with Discord to submit a suggestion."
+    : kind === "vote"
+      ? "Log in with Discord to vote."
+      : "Log in with Discord to report a suggestion.";
+  return {
+    ok: false as const,
+    status: 401,
+    error: "UNAUTHORIZED",
+    message,
+  };
+}
+
 export type EventSuggestionModerationAction =
   | "approve_public_voting"
   | "request_revision"
@@ -347,7 +363,7 @@ export async function listPublicEventSuggestions(
 }
 
 export async function createEventSuggestion(env: Env, user: SessionUser | null, input: EventSuggestionInput) {
-  if (!user) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to submit a suggestion." };
+  if (!user) return unauthorizedSuggestionMutationPayload("submit");
   if (!env.DB) return { ok: false, status: 503, error: "SUGGESTIONS_UNAVAILABLE", message: "Suggestion storage is unavailable." };
   const schema = await validateEventSuggestionSchema(env, { conversion: false });
   if (!schema.ok) return schema;
@@ -423,7 +439,7 @@ export async function createEventSuggestion(env: Env, user: SessionUser | null, 
 }
 
 export async function voteOnEventSuggestion(env: Env, user: SessionUser | null, suggestionId: string, voteValue: unknown) {
-  if (!user) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to vote." };
+  if (!user) return unauthorizedSuggestionMutationPayload("vote");
   if (!env.DB) return { ok: false, status: 503, error: "SUGGESTIONS_UNAVAILABLE", message: "Suggestion storage is unavailable." };
   const schema = await validateEventSuggestionSchema(env, { conversion: false });
   if (!schema.ok) return schema;
@@ -465,7 +481,7 @@ export async function voteOnEventSuggestion(env: Env, user: SessionUser | null, 
 }
 
 export async function reportEventSuggestion(env: Env, user: SessionUser | null, suggestionId: string, input: { reason?: string | null; note?: string | null }) {
-  if (!user) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to report a suggestion." };
+  if (!user) return unauthorizedSuggestionMutationPayload("report");
   if (!env.DB) return { ok: false, status: 503, error: "SUGGESTIONS_UNAVAILABLE", message: "Suggestion storage is unavailable." };
   const schema = await validateEventSuggestionSchema(env, { conversion: false });
   if (!schema.ok) return schema;

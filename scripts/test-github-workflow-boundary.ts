@@ -1087,10 +1087,13 @@ assert.equal(ownerPreviewVerifyExistingBlock.includes("method: \"PATCH\""), fals
 assert.equal(ownerPreviewVerifyExistingBlock.includes("wrangler pages secret put"), false, "Existing-preview mode must not update secrets.");
 assert.equal(ownerPreviewVerifyExistingBlock.includes("discord.com/api"), false, "Existing-preview mode must not call Discord.");
 const ownerPreviewPhase2ABlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewPhase2APreflightStart, ownerPreviewValidateBranchStart);
+const ownerPreviewPhase2ACacheStart = ownerPreviewPhase2ABlock.indexOf("async function verifyCache(base)");
 const ownerPreviewPhase2AAuthMatrixStart = ownerPreviewPhase2ABlock.indexOf("function buildVerifierSuggestionPayload()");
 const ownerPreviewPhase2APaginationStart = ownerPreviewPhase2ABlock.indexOf("async function verifyPagination(base)");
+assert.notEqual(ownerPreviewPhase2ACacheStart, -1, "Phase 2A verifier must define a cache verification check.");
 assert.notEqual(ownerPreviewPhase2AAuthMatrixStart, -1, "Phase 2A verifier must define an auth matrix check.");
 assert.notEqual(ownerPreviewPhase2APaginationStart, -1, "Phase 2A verifier must define a pagination check after the auth matrix.");
+const ownerPreviewPhase2ACacheBlock = ownerPreviewPhase2ABlock.slice(ownerPreviewPhase2ACacheStart, ownerPreviewPhase2AAuthMatrixStart);
 const ownerPreviewPhase2AAuthMatrixBlock = ownerPreviewPhase2ABlock.slice(ownerPreviewPhase2AAuthMatrixStart, ownerPreviewPhase2APaginationStart);
 const verifierDescriptionMatch = ownerPreviewPhase2AAuthMatrixBlock.match(/const verifierDescription = "([^"]+)";/);
 assert.notEqual(verifierDescriptionMatch, null, "Phase 2A verifier must use a deterministic valid suggestion description.");
@@ -1224,11 +1227,37 @@ assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("performance-s
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("cache-verification.json"'), true, "Phase 2A cache report must be written immediately after cache checks pass.");
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("auth-matrix.json"'), true, "Phase 2A auth report must be written immediately after auth checks pass.");
 assert.equal(ownerPreviewPhase2ABlock.includes("Cache API") || ownerPreviewPhase2ABlock.includes("cache"), true, "Phase 2A preview must include cache verification.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("requireDuplicateBypass"), true, "Phase 2A verifier must include duplicate allowed-parameter cache bypass checks.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("sort=trending&sort=newest"), true, "Phase 2A verifier must check trending/newest duplicate sort bypass.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("sort=newest&sort=trending"), true, "Phase 2A verifier must check newest/trending duplicate sort bypass.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("Duplicate sort trending/newest"), true, "Phase 2A verifier must label duplicate sort checks safely.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("Duplicate sort newest/trending"), true, "Phase 2A verifier must check reversed duplicate sort first-value semantics.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("Repeated duplicate sort request"), true, "Phase 2A verifier must prove duplicate requests never become HIT.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes('method: "HEAD"'), true, "Phase 2A verifier must check duplicate-parameter HEAD requests.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("HEAD with duplicate allowed parameters did not bypass safely."), true, "Phase 2A verifier must fail if duplicate HEAD can poison GET cache.");
+assert.equal(ownerPreviewPhase2ACacheBlock.includes("normalSecondCache"), true, "Phase 2A verifier must prove normal single-sort HIT behaviour remains after duplicate bypasses.");
+assert.equal(ownerPreviewPhase2ABlock.includes("duplicateAllowedCacheParametersBypass"), true, "Phase 2A privacy artifact must record duplicate allowed-parameter cache isolation.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('fetchJson(base, "/api/events/suggestions", 200'), true, "Successful Phase 2A member submission must expect the actual 200 API contract.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('fetchJson(base, "/api/events/suggestions", 201'), false, "Phase 2A verifier must not expect 201 for suggestion creation.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes('|| "phase2a-preview-public-voting"'), false, "Phase 2A verifier must not fall back to a seeded suggestion ID.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("const createdId = typeof submitted?.id === \"string\""), true, "Phase 2A verifier must require the returned suggestion ID.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("verifyApiMemberSubmission(base, sessionSummary)"), true, "Phase 2A verifier must authenticate the reused member once and pass the returned suggestion into the matrix.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("anonMalformedSubmit"), true, "Phase 2A verifier must check anonymous malformed suggestion submissions return 401.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("anonOversizedSubmit"), true, "Phase 2A verifier must check anonymous oversized suggestion submissions return 401.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("invalidCookieMalformedSubmit"), true, "Phase 2A verifier must check invalid-cookie malformed suggestion submissions return 401.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedMalformedSubmit"), true, "Phase 2A verifier must keep authenticated malformed suggestion submissions at 400.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedOversizedSubmit"), true, "Phase 2A verifier must keep authenticated oversized suggestion submissions at 413.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authPrecedenceRowsAfter !== apiVerifierRowsBeforePrecedence"), true, "Phase 2A verifier must prove auth-precedence submit probes create no rows.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("anonMalformedVote"), true, "Phase 2A verifier must check anonymous malformed votes return 401.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("anonOversizedVote"), true, "Phase 2A verifier must check anonymous oversized votes return 401.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedMalformedVote"), true, "Phase 2A verifier must keep authenticated malformed votes at 400.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedOversizedVote"), true, "Phase 2A verifier must keep authenticated oversized votes at 413.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("anonMalformedReport"), true, "Phase 2A verifier must check anonymous malformed reports return 401.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("anonOversizedReport"), true, "Phase 2A verifier must check anonymous oversized reports return 401.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedMalformedReport"), true, "Phase 2A verifier must keep authenticated malformed reports at 400.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedOversizedReport"), true, "Phase 2A verifier must keep authenticated oversized reports at 413.");
+assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Authentication-precedence vote/report probes created mutation rows."), true, "Phase 2A verifier must prove auth-precedence vote/report probes create no rows.");
+assert.equal(ownerPreviewPhase2ABlock.includes("suggestionMutationAuthPrecedence"), true, "Phase 2A privacy artifact must record suggestion mutation auth precedence.");
 assert.equal(
   ownerPreviewPhase2AAuthMatrixBlock.indexOf("approve_public_voting") < ownerPreviewPhase2AAuthMatrixBlock.indexOf("`${suggestionPath}/vote`"),
   true,

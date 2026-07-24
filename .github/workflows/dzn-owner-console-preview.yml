@@ -2114,6 +2114,36 @@ jobs:
             const head = await fetchSafe(base, uniqueHeadPath, 200, { method: "HEAD" });
             const getAfterHead = await fetchJson(base, uniqueHeadPath, 200);
             const authenticated = await fetchJson(base, path, 200, { headers: { Cookie: memberCookie } });
+            const requireDuplicateBypass = async (duplicatePath, expectedSort, label) => {
+              const result = await fetchJson(base, duplicatePath, 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+              if (result.headers["x-dzn-cache"] !== "BYPASS" || !String(result.headers["cache-control"] || "").toLowerCase().includes("no-store")) {
+                fail(`${label} did not bypass shared cache.`, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification", route: "/api/events/suggestions", cacheStatus: result.headers["x-dzn-cache"] || "missing" });
+              }
+              if (result.headers["x-dzn-cache-meta"]) {
+                fail(`${label} exposed internal cache metadata.`, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification", route: "/api/events/suggestions", cacheStatus: result.headers["x-dzn-cache"] || "missing" });
+              }
+              if (result.json?.sort !== expectedSort) {
+                fail(`${label} did not preserve first-value sort semantics.`, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification", route: "/api/events/suggestions", cacheStatus: result.headers["x-dzn-cache"] || "missing" });
+              }
+              return result;
+            };
+            const duplicateA = await requireDuplicateBypass("/api/events/suggestions?sort=trending&sort=newest&status=all_public&limit=3", "trending", "Duplicate sort trending/newest");
+            const duplicateB = await requireDuplicateBypass("/api/events/suggestions?sort=newest&sort=trending&status=all_public&limit=3", "newest", "Duplicate sort newest/trending");
+            const duplicateRepeat = await requireDuplicateBypass("/api/events/suggestions?sort=trending&sort=newest&status=all_public&limit=3", "trending", "Repeated duplicate sort request");
+            const duplicateHead = await fetchSafe(base, "/api/events/suggestions?sort=trending&sort=newest&status=all_public&limit=3", 200, { method: "HEAD", category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (duplicateHead.headers["x-dzn-cache"] !== "BYPASS" || !String(duplicateHead.headers["cache-control"] || "").toLowerCase().includes("no-store") || duplicateHead.text.length !== 0 || duplicateHead.headers["x-dzn-cache-meta"]) {
+              fail("HEAD with duplicate allowed parameters did not bypass safely.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification", method: "HEAD", route: "/api/events/suggestions", status: duplicateHead.status, cacheStatus: duplicateHead.headers["x-dzn-cache"] || "missing", bodyLength: duplicateHead.text.length });
+            }
+            const getAfterDuplicateHead = await requireDuplicateBypass("/api/events/suggestions?sort=trending&sort=newest&status=all_public&limit=3", "trending", "GET after duplicate HEAD");
+            const normalAfterDuplicatePath = "/api/events/suggestions?sort=most_active&status=all_public&limit=7";
+            const normalAfterDuplicateFirst = await fetchJson(base, normalAfterDuplicatePath, 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (normalAfterDuplicateFirst.headers["x-dzn-cache"] === "BYPASS" || normalAfterDuplicateFirst.json?.sort !== "most_active") {
+              fail("Normal single-sort request after duplicate probes was not cacheable or returned the wrong sort.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification", route: "/api/events/suggestions", cacheStatus: normalAfterDuplicateFirst.headers["x-dzn-cache"] || "missing" });
+            }
+            const normalAfterDuplicateSecond = await fetchJson(base, normalAfterDuplicatePath, 200, { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification" });
+            if (normalAfterDuplicateSecond.headers["x-dzn-cache"] !== "HIT" || normalAfterDuplicateSecond.json?.sort !== "most_active") {
+              fail("Normal single-sort request after duplicate probes did not return a valid HIT.", { category: "PHASE2A_CACHE_VERIFICATION_FAILED", stage: "cacheVerification", route: "/api/events/suggestions", cacheStatus: normalAfterDuplicateSecond.headers["x-dzn-cache"] || "missing" });
+            }
             const eventApi = await verifyEventCacheIsolationAndDrafts(base);
             const publicText = JSON.stringify(second.json);
             for (const forbidden of ["reportCount", "reportReasons", "reporterUserId", "submittedByUserId", "discord_id", "phase2a-preview-private-draft-event", "phase2a-preview-private-draft"]) {
@@ -2134,6 +2164,17 @@ jobs:
               setCookiePresent: Boolean(second.headers["set-cookie"]),
               privateDraftLinkExposed: publicText.includes("phase2a-preview-private-draft"),
               reportCountExposed: publicText.includes("reportCount"),
+              duplicateParameters: {
+                trendingNewest: { status: duplicateA.status, cache: duplicateA.headers["x-dzn-cache"] || null, sort: duplicateA.json?.sort || null },
+                newestTrending: { status: duplicateB.status, cache: duplicateB.headers["x-dzn-cache"] || null, sort: duplicateB.json?.sort || null },
+                repeatCache: duplicateRepeat.headers["x-dzn-cache"] || null,
+                headCache: duplicateHead.headers["x-dzn-cache"] || null,
+                headBodyLength: duplicateHead.text.length,
+                getAfterHeadCache: getAfterDuplicateHead.headers["x-dzn-cache"] || null,
+                normalFirstCache: normalAfterDuplicateFirst.headers["x-dzn-cache"] || null,
+                normalSecondCache: normalAfterDuplicateSecond.headers["x-dzn-cache"] || null,
+                metadataExposed: Boolean(duplicateA.headers["x-dzn-cache-meta"] || duplicateB.headers["x-dzn-cache-meta"] || duplicateRepeat.headers["x-dzn-cache-meta"] || duplicateHead.headers["x-dzn-cache-meta"]),
+              },
               eventApi,
             };
           }
@@ -2161,7 +2202,25 @@ jobs:
           async function verifyApiMemberSubmission(base, sessionSummary) {
             const jsonHeaders = { "Content-Type": "application/json" };
             const { validSuggestion, wordCount } = buildVerifierSuggestionPayload();
+            const apiVerifierRowsBeforePrecedence = Number((await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = ?;", [apiMemberUserId]))[0]?.count || 0);
             const anonSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: validSuggestion, category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonMalformedSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonOversizedSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ title: "Preview Oversized", description: "x".repeat(20_000) }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const invalidCookieMalformedSubmit = await fetchSafe(base, "/api/events/suggestions", 401, { method: "POST", headers: { ...jsonHeaders, Cookie: "dzn_session=phase2a-invalid-session-token" }, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const authenticatedMalformedSubmit = await fetchSafe(base, "/api/events/suggestions", 400, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const authenticatedOversizedSubmit = await fetchSafe(base, "/api/events/suggestions", 413, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: JSON.stringify({ title: "Preview Oversized", description: "x".repeat(20_000) }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const authPrecedenceRowsAfter = Number((await d1Query("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = ?;", [apiMemberUserId]))[0]?.count || 0);
+            if (authPrecedenceRowsAfter !== apiVerifierRowsBeforePrecedence) {
+              fail("Authentication-precedence probes created a suggestion row.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
+            const submissionAuthPrecedence = {
+              anonymousMalformed: anonMalformedSubmit.status,
+              anonymousOversized: anonOversizedSubmit.status,
+              invalidCookieMalformed: invalidCookieMalformedSubmit.status,
+              authenticatedMalformed: authenticatedMalformedSubmit.status,
+              authenticatedOversized: authenticatedOversizedSubmit.status,
+              rowsCreated: authPrecedenceRowsAfter - apiVerifierRowsBeforePrecedence,
+            };
             const memberSubmit = await fetchJson(base, "/api/events/suggestions", 200, {
               method: "POST",
               headers: { ...jsonHeaders, Cookie: apiMemberCookie },
@@ -2181,7 +2240,7 @@ jobs:
                 stage: "authMatrix",
               });
             }
-            return { validSuggestion, wordCount, anonSubmit, memberSubmit, submitted, createdId };
+            return { validSuggestion, wordCount, anonSubmit, submissionAuthPrecedence, memberSubmit, submitted, createdId };
           }
           async function verifyAuthMatrix(base, submission) {
             const jsonHeaders = { "Content-Type": "application/json" };
@@ -2265,6 +2324,21 @@ jobs:
             const reapprovedSuggestion = requireSuggestionState(approveAfterRestore, "public_voting", "public_voting", "Approve after restore without public response");
             if (reapprovedSuggestion.creatorResponse !== null) {
               fail("Approve after restore without a new public response exposed stale text.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            }
+            const voteRowsBeforeAuthPrecedence = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_votes WHERE suggestion_id = ?;", [createdId]);
+            const reportRowsBeforeAuthPrecedence = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_reports WHERE suggestion_id = ?;", [createdId]);
+            const anonMalformedVote = await fetchSafe(base, `${suggestionPath}/vote`, 401, { method: "POST", headers: jsonHeaders, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonOversizedVote = await fetchSafe(base, `${suggestionPath}/vote`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ vote_value: "1".repeat(5000) }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const authenticatedMalformedVote = await fetchSafe(base, `${suggestionPath}/vote`, 400, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const authenticatedOversizedVote = await fetchSafe(base, `${suggestionPath}/vote`, 413, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: JSON.stringify({ vote_value: "1".repeat(5000) }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonMalformedReport = await fetchSafe(base, `${suggestionPath}/report`, 401, { method: "POST", headers: jsonHeaders, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const anonOversizedReport = await fetchSafe(base, `${suggestionPath}/report`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ reason: "spam", note: "x".repeat(5000) }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const authenticatedMalformedReport = await fetchSafe(base, `${suggestionPath}/report`, 400, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: "{not-json", category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const authenticatedOversizedReport = await fetchSafe(base, `${suggestionPath}/report`, 413, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: JSON.stringify({ reason: "spam", note: "x".repeat(5000) }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const voteRowsAfterAuthPrecedence = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_votes WHERE suggestion_id = ?;", [createdId]);
+            const reportRowsAfterAuthPrecedence = await readCount("SELECT COUNT(*) AS count FROM event_suggestion_reports WHERE suggestion_id = ?;", [createdId]);
+            if (voteRowsAfterAuthPrecedence !== voteRowsBeforeAuthPrecedence || reportRowsAfterAuthPrecedence !== reportRowsBeforeAuthPrecedence) {
+              fail("Authentication-precedence vote/report probes created mutation rows.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             }
             const anonVote = await fetchSafe(base, `${suggestionPath}/vote`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ vote_value: 1 }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             const anonReport = await fetchSafe(base, `${suggestionPath}/report`, 401, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ reason: "spam" }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
@@ -2378,7 +2452,24 @@ jobs:
             }
             return {
               anonymous: { submit: anonSubmit.status, vote: anonVote.status, report: anonReport.status, moderate: anonModerate.status, convert: anonConvert.status },
-              member: { submit: memberSubmit.status, invalidJson: invalidJson.status, oversized: oversized.status, selfVoteDenied: selfVote.status, selfReportDenied: selfReport.status, submittedState: `${submitted.moderationStatus}/${submitted.publicStatus}`, descriptionWordCount: wordCount },
+              member: { submit: memberSubmit.status, invalidJson: invalidJson.status, oversized: oversized.status, selfVoteDenied: selfVote.status, selfReportDenied: selfReport.status, submittedState: `${submitted.moderationStatus}/${submitted.publicStatus}`, descriptionWordCount: wordCount, submissionAuthPrecedence: submission.submissionAuthPrecedence },
+              authPrecedence: {
+                submit: submission.submissionAuthPrecedence,
+                vote: {
+                  anonymousMalformed: anonMalformedVote.status,
+                  anonymousOversized: anonOversizedVote.status,
+                  authenticatedMalformed: authenticatedMalformedVote.status,
+                  authenticatedOversized: authenticatedOversizedVote.status,
+                  rowsCreated: voteRowsAfterAuthPrecedence - voteRowsBeforeAuthPrecedence,
+                },
+                report: {
+                  anonymousMalformed: anonMalformedReport.status,
+                  anonymousOversized: anonOversizedReport.status,
+                  authenticatedMalformed: authenticatedMalformedReport.status,
+                  authenticatedOversized: authenticatedOversizedReport.status,
+                  rowsCreated: reportRowsAfterAuthPrecedence - reportRowsBeforeAuthPrecedence,
+                },
+              },
               otherAuthenticatedUser: { voteSet: vote.status, voteImmediateRateLimit: voteRemoveLimited.status, voteRemoval: voteRemove.status, report: report.status, repeatReportIdempotent: reportRepeat.json?.idempotent === true },
               nonCreatorOwner: { moderationDenied: ownerModerateDenied.status, conversionDenied: ownerConvertDenied.status },
               creator: {
@@ -2499,6 +2590,31 @@ jobs:
               publicStatusFiltersOmitDraft: cacheVerification.eventApi.statusFiltersOmitDraft,
               publicStatusDraftRejected: cacheVerification.eventApi.statusDraftRejected === 400,
               creatorDraftOwnerApiOnly: cacheVerification.eventApi.creatorOwnerDraftApiStatus === 200 && cacheVerification.eventApi.creatorPublicDraftPublicDetailStatus === 404,
+              suggestionMutationAuthPrecedence:
+                authMatrix.authPrecedence.submit.rowsCreated === 0 &&
+                authMatrix.authPrecedence.submit.anonymousMalformed === 401 &&
+                authMatrix.authPrecedence.submit.anonymousOversized === 401 &&
+                authMatrix.authPrecedence.submit.invalidCookieMalformed === 401 &&
+                authMatrix.authPrecedence.submit.authenticatedMalformed === 400 &&
+                authMatrix.authPrecedence.submit.authenticatedOversized === 413 &&
+                authMatrix.authPrecedence.vote.rowsCreated === 0 &&
+                authMatrix.authPrecedence.vote.anonymousMalformed === 401 &&
+                authMatrix.authPrecedence.vote.anonymousOversized === 401 &&
+                authMatrix.authPrecedence.vote.authenticatedMalformed === 400 &&
+                authMatrix.authPrecedence.vote.authenticatedOversized === 413 &&
+                authMatrix.authPrecedence.report.rowsCreated === 0 &&
+                authMatrix.authPrecedence.report.anonymousMalformed === 401 &&
+                authMatrix.authPrecedence.report.anonymousOversized === 401 &&
+                authMatrix.authPrecedence.report.authenticatedMalformed === 400 &&
+                authMatrix.authPrecedence.report.authenticatedOversized === 413,
+              duplicateAllowedCacheParametersBypass:
+                cacheVerification.duplicateParameters.trendingNewest.cache === "BYPASS" &&
+                cacheVerification.duplicateParameters.newestTrending.cache === "BYPASS" &&
+                cacheVerification.duplicateParameters.repeatCache === "BYPASS" &&
+                cacheVerification.duplicateParameters.headCache === "BYPASS" &&
+                cacheVerification.duplicateParameters.getAfterHeadCache === "BYPASS" &&
+                cacheVerification.duplicateParameters.normalSecondCache === "HIT" &&
+                cacheVerification.duplicateParameters.metadataExposed === false,
             };
             writeJsonArtifact("privacy-checks.json", privacyChecks, "privacyChecks");
             updateProgress("pagination", "running");
@@ -2562,6 +2678,8 @@ jobs:
               `- Stable URL: ${stableUrl}`,
               "- Public report counts exposed: false",
               "- Private draft event identifiers exposed publicly: false",
+              `- Suggestion mutation auth precedence: ${privacyChecks.suggestionMutationAuthPrecedence ? "passed" : "failed"}`,
+              `- Duplicate allowed cache parameters bypass shared cache: ${privacyChecks.duplicateAllowedCacheParametersBypass ? "passed" : "failed"}`,
               "- Discord notifications enabled: false",
               "- Discord server announcements enabled: false",
               "- Production operations: none",

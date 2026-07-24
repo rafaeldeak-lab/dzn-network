@@ -29,6 +29,8 @@ import {
   onRequestHead as onSuggestionsRequestHead,
   onRequestPost as onSuggestionsRequestPost,
 } from "../functions/api/events/suggestions/index";
+import { onRequestPost as onSuggestionReportPost } from "../functions/api/events/suggestions/[suggestionId]/report";
+import { onRequestPost as onSuggestionVotePost } from "../functions/api/events/suggestions/[suggestionId]/vote";
 import { shouldStartNavigationProgress } from "../components/site/navigation-progress";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
@@ -57,6 +59,7 @@ async function main() {
   await assertServerSlugResolution();
   await assertCacheHelpers();
   await assertSuggestionHeadRoute();
+  await assertSuggestionMutationAuthPrecedence();
   await assertBoundedJson();
   assertModerationTransitions();
   await assertModerationResponsePrivacy();
@@ -214,6 +217,19 @@ async function assertCacheHelpers() {
   assertIncludes(cacheKey ?? "", "limit=20");
   assertNotIncludes(cacheKey ?? "", "token=secret", "cache key must ignore non-allowlisted parameters");
   assert.equal(canonicalPublicCacheKey(new Request(`https://example.test/api/events/suggestions?sort=${"x".repeat(300)}`), ["sort"]), null, "oversized cache params should bypass shared cache");
+  const orderedParams = canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?sort=trending&status=all_public"), ["sort", "status"]);
+  const reversedParams = canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?status=all_public&sort=trending"), ["sort", "status"]);
+  assert.equal(orderedParams, reversedParams, "different allowed parameter-name order should produce the same cache key");
+  assert.equal(canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?sort=trending&sort=newest"), ["sort"]), null, "reversed repeated sort values should bypass shared cache");
+  assert.equal(canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?sort=newest&sort=trending"), ["sort"]), null, "repeated sort values in the other order should bypass shared cache");
+  assert.equal(canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?sort=trending&sort=trending"), ["sort"]), null, "repeated identical sort values should bypass shared cache");
+  assert.equal(canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?status=all_public&status=accepted"), ["status"]), null, "repeated status values should bypass shared cache");
+  assert.equal(canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?limit=3&limit=20"), ["limit"]), null, "repeated limit values should bypass shared cache");
+  assert.equal(canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?cursor=a&cursor=b"), ["cursor"]), null, "repeated cursor values should bypass shared cache");
+  assert.equal(canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?sort=&sort="), ["sort"]), null, "empty repeated allowed values should bypass shared cache");
+  const keyWithoutUnknown = canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?sort=trending"), ["sort"]);
+  const keyWithRepeatedUnknown = canonicalPublicCacheKey(new Request("https://example.test/api/events/suggestions?sort=trending&ignored=a&ignored=b"), ["sort"]);
+  assert.equal(keyWithRepeatedUnknown, keyWithoutUnknown, "repeated ignored parameters should not alter the public cache key");
 
   const fakeCache = new FakeCache();
   const cacheGlobal = globalThis as typeof globalThis & { caches?: unknown };
@@ -323,6 +339,63 @@ async function assertCacheHelpers() {
     });
     assert.equal(errorBypass.headers.get("x-dzn-cache"), "BYPASS", "non-2xx responses must not cache");
     assertIncludes(errorBypass.headers.get("cache-control") ?? "", "no-store", "non-2xx cache bypass must be no-store");
+
+    const runDuplicateSort = async (url: string, method = "GET") => withPublicGetEdgeCache({ request: new Request(url, { method }), waitUntil: (promise) => waits.push(promise) }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort", "status", "limit", "cursor"],
+      cacheVersion: "duplicate-v1",
+      buildResponse: async () => new Response(JSON.stringify({ ok: true, sort: new URL(url).searchParams.get("sort") }), {
+        headers: { "content-type": "application/json" },
+      }),
+    });
+    const matchCallsBeforeDuplicate = fakeCache.matchCalls.length;
+    const putCallsBeforeDuplicate = fakeCache.putCalls.length;
+    const duplicateA = await runDuplicateSort("https://example.test/api/events/suggestions?sort=trending&sort=newest&status=all_public");
+    const duplicateB = await runDuplicateSort("https://example.test/api/events/suggestions?sort=newest&sort=trending&status=all_public");
+    assert.equal(duplicateA.headers.get("x-dzn-cache"), "BYPASS", "duplicate allowed parameters should bypass shared cache");
+    assert.equal(duplicateB.headers.get("x-dzn-cache"), "BYPASS", "reversed duplicate allowed parameters should bypass shared cache");
+    assertIncludes(duplicateA.headers.get("cache-control") ?? "", "no-store", "duplicate allowed parameter bypass must be no-store");
+    assertIncludes(duplicateB.headers.get("cache-control") ?? "", "no-store", "reversed duplicate allowed parameter bypass must be no-store");
+    assert.equal(duplicateA.headers.has("x-dzn-cache-meta"), false, "duplicate bypass must not expose internal cache metadata");
+    assert.equal(duplicateB.headers.has("x-dzn-cache-meta"), false, "reversed duplicate bypass must not expose internal cache metadata");
+    assert.equal(JSON.parse(await duplicateA.text()).sort, "trending", "duplicate request should keep first-value route semantics");
+    assert.equal(JSON.parse(await duplicateB.text()).sort, "newest", "reversed duplicate request should keep its own first-value route semantics");
+    assert.equal(fakeCache.matchCalls.length, matchCallsBeforeDuplicate, "duplicate allowed parameters must not call Cache.match");
+    assert.equal(fakeCache.putCalls.length, putCallsBeforeDuplicate, "duplicate allowed parameters must not call Cache.put");
+    const duplicateHead = await runDuplicateSort("https://example.test/api/events/suggestions?sort=trending&sort=newest&status=all_public", "HEAD");
+    assert.equal(duplicateHead.headers.get("x-dzn-cache"), "BYPASS", "HEAD with duplicate allowed parameters should bypass shared cache");
+    assert.equal(await duplicateHead.text(), "", "HEAD with duplicate allowed parameters should return no body");
+    assert.equal(fakeCache.matchCalls.length, matchCallsBeforeDuplicate, "duplicate HEAD must not call Cache.match");
+    assert.equal(fakeCache.putCalls.length, putCallsBeforeDuplicate, "duplicate HEAD must not call Cache.put");
+
+    const normalAfterDuplicateRequest = new Request("https://example.test/api/events/suggestions?sort=trending&status=all_public");
+    const normalAfterDuplicateMiss = await withPublicGetEdgeCache({ request: normalAfterDuplicateRequest, waitUntil: (promise) => waits.push(promise) }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort", "status", "limit", "cursor"],
+      cacheVersion: "duplicate-v1",
+      buildResponse: async () => new Response(JSON.stringify({ ok: true, sort: "trending" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    });
+    assert.equal(normalAfterDuplicateMiss.headers.get("x-dzn-cache"), "MISS", "normal single-sort request after duplicate bypass remains cacheable");
+    await Promise.all(waits.splice(0));
+    const normalAfterDuplicateHit = await withPublicGetEdgeCache({ request: normalAfterDuplicateRequest, waitUntil: (promise) => waits.push(promise) }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort", "status", "limit", "cursor"],
+      cacheVersion: "duplicate-v1",
+      buildResponse: async () => new Response(JSON.stringify({ ok: true, sort: "trending" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    });
+    assert.equal(normalAfterDuplicateHit.headers.get("x-dzn-cache"), "HIT", "normal single-sort request should hit after duplicate bypasses");
+    const authenticatedDuplicate = await withPublicGetEdgeCache({ request: new Request("https://example.test/api/events/suggestions?sort=trending&sort=newest", { headers: { cookie: "dzn_session=test" } }) }, {
+      ttl: { maxAge: 1, staleWhileRevalidate: 5 },
+      allowedParams: ["sort"],
+      cacheVersion: "duplicate-private-v1",
+      buildResponse,
+    });
+    assert.equal(authenticatedDuplicate.headers.get("x-dzn-cache"), "BYPASS", "authenticated duplicate-parameter requests remain private bypass");
+    assertIncludes(authenticatedDuplicate.headers.get("cache-control") ?? "", "private, no-store", "authenticated duplicate-parameter requests must be private no-store");
   } finally {
     (cacheGlobal as { caches: unknown }).caches = originalCaches;
   }
@@ -391,6 +464,185 @@ async function assertSuggestionHeadRoute() {
   } finally {
     (cacheGlobal as { caches: unknown }).caches = originalCaches;
   }
+}
+
+async function assertSuggestionMutationAuthPrecedence() {
+  const submitUrl = "https://example.test/api/events/suggestions";
+  const voteUrl = "https://example.test/api/events/suggestions/auth-target/vote";
+  const reportUrl = "https://example.test/api/events/suggestions/auth-target/report";
+  const validSuggestion = validSuggestionMutationBody();
+  const waits: Promise<unknown>[] = [];
+  const waitUntil = (promise: Promise<unknown>) => waits.push(promise);
+
+  const assertUnauthorizedResponse = async (response: Response, label: string) => {
+    assert.equal(response.status, 401, `${label} should return 401 before body parsing`);
+    assertIncludes(response.headers.get("cache-control") ?? "", "private, no-store", `${label} 401 must be private no-store`);
+    assert.equal(response.headers.get("x-dzn-cache"), "BYPASS", `${label} 401 must bypass public cache`);
+    assertIncludes(response.headers.get("vary") ?? "", "Cookie", `${label} 401 must vary on Cookie`);
+    const text = await response.text();
+    assertNotIncludes(text, "session", `${label} 401 body must not expose session details`);
+  };
+
+  const anonymousSubmitDb = new SuggestionMutationAuthDb(false);
+  const anonymousSubmit = new Request(submitUrl, { method: "POST", headers: { "content-type": "application/json" }, body: validSuggestion });
+  await assertUnauthorizedResponse(await onSuggestionsRequestPost(makeSuggestionRouteContext(anonymousSubmit, mutationAuthEnv(anonymousSubmitDb), waitUntil)), "anonymous valid submit");
+  assert.equal(anonymousSubmit.bodyUsed, false, "anonymous valid submit must not consume the request body");
+  assert.equal(anonymousSubmitDb.schemaQueries, 0, "anonymous submit must not query suggestion mutation schema");
+  assert.equal(anonymousSubmitDb.suggestionRowsCreated, 0, "anonymous submit must not create suggestion rows");
+
+  const anonymousMalformedSubmit = new Request(submitUrl, { method: "POST", headers: { "content-type": "application/json" }, body: "{not-json" });
+  await assertUnauthorizedResponse(await onSuggestionsRequestPost(makeSuggestionRouteContext(anonymousMalformedSubmit, mutationAuthEnv(new SuggestionMutationAuthDb(false)), waitUntil)), "anonymous malformed submit");
+  assert.equal(anonymousMalformedSubmit.bodyUsed, false, "anonymous malformed submit must not consume the request body");
+
+  const anonymousOversizedSubmit = new Request(submitUrl, { method: "POST", headers: { "content-type": "application/json" }, body: oversizedJsonBody(13 * 1024) });
+  await assertUnauthorizedResponse(await onSuggestionsRequestPost(makeSuggestionRouteContext(anonymousOversizedSubmit, mutationAuthEnv(new SuggestionMutationAuthDb(false)), waitUntil)), "anonymous oversized submit");
+  assert.equal(anonymousOversizedSubmit.bodyUsed, false, "anonymous oversized submit must not consume the request body");
+
+  const invalidCookieSubmitDb = new SuggestionMutationAuthDb(false);
+  const invalidCookieSubmit = new Request(submitUrl, { method: "POST", headers: { "content-type": "application/json", cookie: "dzn_session=expired" }, body: "{not-json" });
+  await assertUnauthorizedResponse(await onSuggestionsRequestPost(makeSuggestionRouteContext(invalidCookieSubmit, mutationAuthEnv(invalidCookieSubmitDb), waitUntil)), "invalid-cookie malformed submit");
+  assert.equal(invalidCookieSubmit.bodyUsed, false, "invalid-cookie malformed submit must not consume the request body");
+  assert.equal(invalidCookieSubmitDb.sessionQueries, 1, "invalid-cookie submit should only query the session");
+  assert.equal(invalidCookieSubmitDb.schemaQueries, 0, "invalid-cookie submit must not query suggestion mutation schema");
+
+  const trapSubmit = unreadableJsonRequest(submitUrl);
+  await assertUnauthorizedResponse(await onSuggestionsRequestPost(makeSuggestionRouteContext(trapSubmit, mutationAuthEnv(new SuggestionMutationAuthDb(false)), waitUntil)), "anonymous unreadable submit");
+  assert.equal(trapSubmit.bodyUsed, false, "anonymous unreadable submit must not consume the throwing body stream");
+
+  const authenticatedMalformedSubmit = await onSuggestionsRequestPost(makeSuggestionRouteContext(new Request(submitUrl, {
+    method: "POST",
+    headers: authenticatedJsonHeaders(),
+    body: "{not-json",
+  }), mutationAuthEnv(new SuggestionMutationAuthDb(true)), waitUntil));
+  assert.equal(authenticatedMalformedSubmit.status, 400, "authenticated malformed submit should retain 400");
+  const authenticatedOversizedSubmit = await onSuggestionsRequestPost(makeSuggestionRouteContext(new Request(submitUrl, {
+    method: "POST",
+    headers: authenticatedJsonHeaders(),
+    body: oversizedJsonBody(13 * 1024),
+  }), mutationAuthEnv(new SuggestionMutationAuthDb(true)), waitUntil));
+  assert.equal(authenticatedOversizedSubmit.status, 413, "authenticated oversized submit should retain 413");
+  const authenticatedValidSubmitDb = new SuggestionMutationAuthDb(true);
+  const authenticatedValidSubmit = await onSuggestionsRequestPost(makeSuggestionRouteContext(new Request(submitUrl, {
+    method: "POST",
+    headers: authenticatedJsonHeaders(),
+    body: validSuggestion,
+  }), mutationAuthEnv(authenticatedValidSubmitDb), waitUntil));
+  assert.equal(authenticatedValidSubmit.status, 200, "authenticated valid submit should retain the normal creation result");
+  assert.equal(authenticatedValidSubmitDb.suggestionRowsCreated, 1, "authenticated valid submit should create exactly one suggestion row");
+
+  await assertSuggestionMutationRouteAuthPrecedence({
+    label: "vote",
+    url: voteUrl,
+    handler: onSuggestionVotePost,
+    params: { suggestionId: "auth-target" },
+    validBody: JSON.stringify({ vote_value: 1 }),
+    oversizedBody: oversizedJsonBody(2 * 1024),
+    createdRows: (db) => db.voteRowsCreated,
+  });
+  await assertSuggestionMutationRouteAuthPrecedence({
+    label: "report",
+    url: reportUrl,
+    handler: onSuggestionReportPost,
+    params: { suggestionId: "auth-target" },
+    validBody: JSON.stringify({ reason: "spam", note: "Preview-only report." }),
+    oversizedBody: oversizedJsonBody(3 * 1024),
+    createdRows: (db) => db.reportRowsCreated,
+  });
+  await Promise.all(waits.splice(0));
+}
+
+async function assertSuggestionMutationRouteAuthPrecedence(options: {
+  label: "vote" | "report";
+  url: string;
+  handler: (context: PagesContext) => Response | Promise<Response>;
+  params: Record<string, string>;
+  validBody: string;
+  oversizedBody: string;
+  createdRows: (db: SuggestionMutationAuthDb) => number;
+}) {
+  const waits: Promise<unknown>[] = [];
+  const waitUntil = (promise: Promise<unknown>) => waits.push(promise);
+  const assertUnauthorized = async (request: Request, db: SuggestionMutationAuthDb, label: string) => {
+    const response = await options.handler(makeSuggestionRouteContext(request, mutationAuthEnv(db), waitUntil, options.params));
+    assert.equal(response.status, 401, `${label} should return 401 before body parsing`);
+    assertIncludes(response.headers.get("cache-control") ?? "", "private, no-store", `${label} 401 must be private no-store`);
+    assert.equal(response.headers.get("x-dzn-cache"), "BYPASS", `${label} 401 must bypass public cache`);
+    assertIncludes(response.headers.get("vary") ?? "", "Cookie", `${label} 401 must vary on Cookie`);
+    assertNotIncludes(await response.text(), "session", `${label} 401 body must not expose session details`);
+    assert.equal(request.bodyUsed, false, `${label} must not consume the request body`);
+    assert.equal(db.schemaQueries, 0, `${label} must not query suggestion mutation schema before auth`);
+    assert.equal(options.createdRows(db), 0, `${label} must not write mutation rows before auth`);
+  };
+
+  await assertUnauthorized(new Request(options.url, { method: "POST", headers: { "content-type": "application/json" }, body: options.validBody }), new SuggestionMutationAuthDb(false), `anonymous valid ${options.label}`);
+  await assertUnauthorized(new Request(options.url, { method: "POST", headers: { "content-type": "application/json" }, body: "{not-json" }), new SuggestionMutationAuthDb(false), `anonymous malformed ${options.label}`);
+  await assertUnauthorized(new Request(options.url, { method: "POST", headers: { "content-type": "application/json" }, body: options.oversizedBody }), new SuggestionMutationAuthDb(false), `anonymous oversized ${options.label}`);
+  await assertUnauthorized(new Request(options.url, { method: "POST", headers: { "content-type": "application/json", cookie: "dzn_session=expired" }, body: "{not-json" }), new SuggestionMutationAuthDb(false), `invalid-cookie malformed ${options.label}`);
+  await assertUnauthorized(unreadableJsonRequest(options.url), new SuggestionMutationAuthDb(false), `anonymous unreadable ${options.label}`);
+
+  const malformed = await options.handler(makeSuggestionRouteContext(new Request(options.url, {
+    method: "POST",
+    headers: authenticatedJsonHeaders(),
+    body: "{not-json",
+  }), mutationAuthEnv(new SuggestionMutationAuthDb(true)), waitUntil, options.params));
+  assert.equal(malformed.status, 400, `authenticated malformed ${options.label} should retain 400`);
+  const oversized = await options.handler(makeSuggestionRouteContext(new Request(options.url, {
+    method: "POST",
+    headers: authenticatedJsonHeaders(),
+    body: options.oversizedBody,
+  }), mutationAuthEnv(new SuggestionMutationAuthDb(true)), waitUntil, options.params));
+  assert.equal(oversized.status, 413, `authenticated oversized ${options.label} should retain 413`);
+  const validDb = new SuggestionMutationAuthDb(true);
+  const valid = await options.handler(makeSuggestionRouteContext(new Request(options.url, {
+    method: "POST",
+    headers: authenticatedJsonHeaders(),
+    body: options.validBody,
+  }), mutationAuthEnv(validDb), waitUntil, options.params));
+  assert.equal(valid.status, 200, `authenticated valid ${options.label} should retain normal behaviour`);
+  assert.equal(options.createdRows(validDb), 1, `authenticated valid ${options.label} should write exactly one mutation row`);
+  await Promise.all(waits.splice(0));
+}
+
+function validSuggestionMutationBody() {
+  return JSON.stringify({
+    title: "Auth Precedence Preview Cup",
+    description: [
+      "This preview-only community challenge proposes a fair multi-server event where authenticated players represent approved connected servers, complete clearly documented objectives, and earn results only from verified activity.",
+      "The platform creator reviews every rule, schedule, eligibility requirement, evidence standard, dispute process, and final outcome before publication.",
+      "Nothing is announced automatically, no paid feature changes competitive scoring, and all participating servers receive equal treatment throughout the test competition.",
+    ].join(" "),
+    competition_format: "community_challenge",
+    platform: "cross_platform",
+    map_name: "Chernarus",
+    open_to_any_server: true,
+    structure_notes: "Preview-only structure notes.",
+  });
+}
+
+function oversizedJsonBody(size: number) {
+  return JSON.stringify({ value: "x".repeat(size) });
+}
+
+function authenticatedJsonHeaders() {
+  return { "content-type": "application/json", cookie: "dzn_session=valid" };
+}
+
+function mutationAuthEnv(db: SuggestionMutationAuthDb): Env {
+  return { DB: db as unknown as D1Database, SESSION_SECRET: "test-session-secret" } as Env;
+}
+
+function unreadableJsonRequest(url: string) {
+  const body = new ReadableStream<Uint8Array>({
+    pull() {
+      throw new Error("request body was read before authentication");
+    },
+  });
+  return new Request(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
 }
 
 async function assertBoundedJson() {
@@ -569,17 +821,23 @@ function assertSuggestionApis() {
   const publicRoute = source("functions/api/events/suggestions/index.ts");
   assertIncludes(publicRoute, "withPublicGetEdgeCache");
   assertIncludes(publicRoute, "allowedParams: [\"sort\", \"status\", \"limit\", \"cursor\"]");
+  assertIncludes(publicRoute, "unauthorizedSuggestionMutationPayload(\"submit\")");
   assertIncludes(publicRoute, "readBoundedJson<EventSuggestionInput>(request, 12 * 1024)");
   assertIncludes(publicRoute, "privateNoStoreHeaders()");
+  assertOrder(publicRoute.slice(publicRoute.indexOf("export const onRequestPost")), "if (!user)", "readBoundedJson<EventSuggestionInput>", "suggestion submission route must authenticate before reading the body");
   assert.doesNotMatch(publicRoute, /DISCORD_BOT_TOKEN|NITRADO|scheduler|cron/i);
 
   const voteRoute = source("functions/api/events/suggestions/[suggestionId]/vote.ts");
+  assertIncludes(voteRoute, "unauthorizedSuggestionMutationPayload(\"vote\")");
   assertIncludes(voteRoute, "readBoundedJson<VoteBody>(request, 1024)");
   assertIncludes(voteRoute, "privateNoStoreHeaders()");
+  assertOrder(voteRoute.slice(voteRoute.indexOf("export const onRequestPost")), "if (!user)", "readBoundedJson<VoteBody>", "suggestion vote route must authenticate before reading the body");
 
   const reportRoute = source("functions/api/events/suggestions/[suggestionId]/report.ts");
+  assertIncludes(reportRoute, "unauthorizedSuggestionMutationPayload(\"report\")");
   assertIncludes(reportRoute, "readBoundedJson<ReportBody>(request, 2 * 1024)");
   assertIncludes(reportRoute, "privateNoStoreHeaders()");
+  assertOrder(reportRoute.slice(reportRoute.indexOf("export const onRequestPost")), "if (!user)", "readBoundedJson<ReportBody>", "suggestion report route must authenticate before reading the body");
   assertNotIncludes(reportRoute, "reportCount", "public report route must not return report count");
 
   const ownerList = source("functions/api/owner/events/suggestions.ts");
@@ -780,9 +1038,11 @@ function assertRoutePatchNormalization() {
 
 class FakeCache {
   private entries = new Map<string, Response>();
+  matchCalls: string[] = [];
   putCalls: string[] = [];
 
   async match(request: Request) {
+    this.matchCalls.push(request.url);
     return this.entries.get(request.url)?.clone();
   }
 
@@ -800,12 +1060,17 @@ class FakeCache {
   }
 }
 
-function makeSuggestionRouteContext(request: Request, env: Env, waitUntil: (promise: Promise<unknown>) => void): PagesContext {
+function makeSuggestionRouteContext(
+  request: Request,
+  env: Env,
+  waitUntil: (promise: Promise<unknown>) => void,
+  params: Record<string, string> = {},
+): PagesContext {
   return {
     request,
     env,
     waitUntil,
-    params: {},
+    params,
     data: {},
     next: async () => new Response(null, { status: 404 }),
   };
@@ -842,6 +1107,110 @@ class SuggestionRouteStatement {
   async first() {
     const rows = await this.all();
     return rows.results[0] ?? null;
+  }
+}
+
+class SuggestionMutationAuthDb {
+  sessionQueries = 0;
+  schemaQueries = 0;
+  suggestionRowsCreated = 0;
+  voteRowsCreated = 0;
+  reportRowsCreated = 0;
+
+  constructor(private readonly authenticated: boolean) {}
+
+  prepare(sql: string) {
+    return new SuggestionMutationAuthStatement(this, sql);
+  }
+
+  async batch(statements: SuggestionMutationAuthStatement[]) {
+    for (const statement of statements) await statement.run();
+    return statements.map(() => ({ success: true }));
+  }
+
+  sessionUser() {
+    this.sessionQueries += 1;
+    return this.authenticated
+      ? { id: "auth-user", discord_id: "990000000000009999", username: "Auth Test User", avatar: null }
+      : null;
+  }
+}
+
+class SuggestionMutationAuthStatement {
+  private bindings: unknown[] = [];
+
+  constructor(private readonly db: SuggestionMutationAuthDb, private readonly sql: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all() {
+    if (/PRAGMA\s+table_info\(([^)]+)\)/i.test(this.sql)) {
+      this.db.schemaQueries += 1;
+      const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1] ?? "";
+      return { results: (SUGGESTION_ROUTE_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
+    }
+    if (/SELECT\s+normalized_title\s+FROM\s+event_suggestions/i.test(this.sql)) {
+      return { results: [] };
+    }
+    return { results: [] };
+  }
+
+  async first() {
+    if (this.sql.includes("FROM sessions") && this.sql.includes("JOIN users")) {
+      return this.db.sessionUser();
+    }
+    if (/SELECT\s+id\s+FROM\s+event_suggestions\s+WHERE\s+content_fingerprint/i.test(this.sql)) {
+      return null;
+    }
+    if (/SELECT\s+created_at\s+FROM\s+event_suggestions\s+WHERE\s+submitted_by_user_id/i.test(this.sql)) {
+      return null;
+    }
+    if (/SELECT\s+COUNT\(\*\)\s+AS\s+count\s+FROM\s+event_suggestions\s+WHERE\s+submitted_by_user_id/i.test(this.sql)) {
+      return { count: 0 };
+    }
+    if (/SELECT\s+id,\s+submitted_by_user_id,\s+public_status/i.test(this.sql)) {
+      return {
+        id: "auth-target",
+        submitted_by_user_id: "submitter-user",
+        public_status: "public_voting",
+        created_at: "2026-07-23T10:00:00.000Z",
+      };
+    }
+    if (/SELECT\s+vote_value,\s+updated_at\s+FROM\s+event_suggestion_votes/i.test(this.sql)) {
+      return null;
+    }
+    if (/SELECT\s+id\s+FROM\s+event_suggestion_reports/i.test(this.sql)) {
+      return null;
+    }
+    if (/SELECT\s+upvote_count,\s+downvote_count,\s+report_count,\s+hot_score\s+FROM\s+event_suggestions/i.test(this.sql)) {
+      return { upvote_count: this.db.voteRowsCreated, downvote_count: 0, report_count: this.db.reportRowsCreated, hot_score: this.db.voteRowsCreated - this.db.reportRowsCreated };
+    }
+    return null;
+  }
+
+  async run() {
+    if (/INSERT\s+INTO\s+event_suggestions/i.test(this.sql)) {
+      this.db.suggestionRowsCreated += 1;
+      return { success: true };
+    }
+    if (/INSERT\s+INTO\s+event_suggestion_votes/i.test(this.sql)) {
+      this.db.voteRowsCreated += 1;
+      return { success: true };
+    }
+    if (/INSERT\s+OR\s+IGNORE\s+INTO\s+event_suggestion_reports/i.test(this.sql)) {
+      this.db.reportRowsCreated += 1;
+      return { success: true };
+    }
+    if (/UPDATE\s+event_suggestions/i.test(this.sql)) {
+      return { success: true };
+    }
+    if (/DELETE\s+FROM\s+event_suggestion_votes/i.test(this.sql)) {
+      return { success: true };
+    }
+    throw new Error(`Unexpected suggestion mutation auth query: ${this.sql.slice(0, 120)}`);
   }
 }
 

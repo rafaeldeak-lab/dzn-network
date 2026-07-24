@@ -80,20 +80,18 @@ export function canonicalPublicCacheKey(request: Request, allowedParams: readonl
   const canonical = new URL(url.origin + url.pathname);
   const allowed = new Set(allowedParams);
   let acceptedValues = 0;
-  let invalidAllowedValue = false;
-  [...url.searchParams.keys()].sort().forEach((key) => {
-    if (!allowed.has(key)) return;
-    for (const value of url.searchParams.getAll(key).sort()) {
-      if (value.length > 180 || acceptedValues >= 12) {
-        invalidAllowedValue = true;
-        continue;
-      }
-      canonical.searchParams.append(key, value);
-      acceptedValues += 1;
-    }
-  });
+  const presentAllowedKeys = [...new Set([...url.searchParams.keys()].filter((key) => allowed.has(key)))].sort();
+  for (const key of presentAllowedKeys) {
+    const values = url.searchParams.getAll(key);
+    if (values.length > 1) return null;
+    if (values.length !== 1) continue;
+    const [value] = values;
+    if (value.length > 180 || acceptedValues >= 12) return null;
+    canonical.searchParams.append(key, value);
+    acceptedValues += 1;
+  }
   const key = canonical.toString();
-  return !invalidAllowedValue && key.length <= 2048 ? key : null;
+  return key.length <= 2048 ? key : null;
 }
 
 const CACHE_META_HEADER = "x-dzn-cache-meta";
