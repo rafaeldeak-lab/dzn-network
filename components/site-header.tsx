@@ -63,7 +63,7 @@ export function SiteHeader({
         <Link href="/" className="dzn-header-logo" aria-label="DZN Network home">
           <span className="dzn-header-logo-frame">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/media/dzn-logo.png" alt="DZN Network" />
+            <img src="/media/dzn-logo.png" alt="DZN Network" width={56} height={56} decoding="async" />
           </span>
         </Link>
 

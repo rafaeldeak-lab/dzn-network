@@ -1,11 +1,11 @@
-import { requireDznAdmin } from "../../../../_lib/admin";
 import { finalizeServerWarEvent } from "../../../../_lib/server-war-finalize";
 import { json, methodNotAllowed } from "../../../../_lib/http";
+import { requirePlatformCreatorEventAdmin } from "../../../../_lib/platform-creator";
 import type { PagesFunction } from "../../../../_lib/types";
 
 export const onRequestPost: PagesFunction = async ({ request, env, params }) => {
-  const admin = await requireDznAdmin(env, request);
-  if (!admin) return json({ ok: false, error: "forbidden" }, { status: 403 });
+  const auth = await requirePlatformCreatorEventAdmin(env, request);
+  if (!auth.ok) return auth.response;
   const eventId = sanitizeParam(params.eventId);
   if (!eventId) return json({ ok: false, error: "invalid_event_id" }, { status: 400 });
   try {

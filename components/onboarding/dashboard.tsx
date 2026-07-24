@@ -3321,8 +3321,8 @@ function ServerDashboard({
                 {tags.length > 6 ? <TagPill>+{tags.length - 6}</TagPill> : null}
               </div>
               {normalizedServerCategory ? (
-                <Link href="/events/create" className="mt-4 inline-flex items-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/16 px-3 py-2 text-[10px] font-black uppercase text-violet-50 transition hover:bg-violet-500/26">
-                  Create Event <ArrowRight className="h-3.5 w-3.5" />
+                <Link href="/events/suggest" className="mt-4 inline-flex items-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/16 px-3 py-2 text-[10px] font-black uppercase text-violet-50 transition hover:bg-violet-500/26">
+                  Suggest Competition <ArrowRight className="h-3.5 w-3.5" />
                 </Link>
               ) : null}
             </div>

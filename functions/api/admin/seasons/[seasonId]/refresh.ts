@@ -1,6 +1,6 @@
-import { requireBadgeAdminUser } from "../../../../_lib/badge-evaluation";
 import { DznSeasonError, refreshSeasonScores, SEASON_REFRESH_DEFAULT_LIMIT, SEASON_REFRESH_MAX_LIMIT } from "../../../../_lib/dzn-seasons";
 import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
+import { requirePlatformCreatorEventAdmin } from "../../../../_lib/platform-creator";
 import type { PagesFunction } from "../../../../_lib/types";
 
 type SeasonRefreshBody = {
@@ -8,8 +8,8 @@ type SeasonRefreshBody = {
 };
 
 export const onRequestPost: PagesFunction = async ({ request, env, params }) => {
-  const auth = await requireBadgeAdminUser(env, request);
-  if (!auth.ok) return json(auth.payload, { status: auth.status });
+  const auth = await requirePlatformCreatorEventAdmin(env, request);
+  if (!auth.ok) return auth.response;
 
   try {
     const body = await readJson<SeasonRefreshBody>(request);

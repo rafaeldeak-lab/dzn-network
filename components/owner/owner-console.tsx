@@ -91,7 +91,7 @@ type OwnerOverview = {
     discordNotificationsEnabled: boolean;
     freeProAdvertisingStatus: "live";
   };
-  ownerAccess: { allowlistConfigured: boolean };
+  ownerAccess: { allowlistConfigured: boolean; creatorEventGovernanceConfigured: boolean };
   knownServers: {
     nuketown: KnownServerSummary | null;
     pandora: KnownServerSummary | null;
@@ -338,6 +338,7 @@ const NAV_ITEMS = [
   "Lifecycle",
   "Resource Control",
   "Discord Control",
+  "Event Control",
   "Audit Log",
   "Settings / Access",
 ] as const;
@@ -508,6 +509,7 @@ export function OwnerConsole() {
       {activeView === "Lifecycle" ? <LifecyclePanel lifecycleCounts={lifecycleCounts} /> : null}
       {activeView === "Resource Control" ? <ResourceControlPanel servers={servers} /> : null}
       {activeView === "Discord Control" && discordControl ? <DiscordControlPanel data={discordControl} /> : null}
+      {activeView === "Event Control" && overview ? <EventControlPanel overview={overview} /> : null}
       {activeView === "Audit Log" ? <AuditLogPanel auditLog={auditLog} /> : null}
       {activeView === "Settings / Access" && overview ? <SettingsPanel overview={overview} /> : null}
     </OwnerShell>
@@ -1465,6 +1467,46 @@ function DiscordEmbedPreview({ preview }: { preview: DiscordPreviewEmbed | null 
   );
 }
 
+function EventControlPanel({ overview }: { overview: OwnerOverview }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
+      <PanelHeader eyebrow="Event Control" title="Creator-governed official events" description="Official event creation and mutation require the creator-only event capability. Public viewing and authorized participation remain separate." />
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="grid gap-3 md:grid-cols-2">
+          <StatusCard title="Creator event governance configured" value={overview.ownerAccess.creatorEventGovernanceConfigured ? "Configured" : "Not configured"} tone={overview.ownerAccess.creatorEventGovernanceConfigured ? "good" : "warn"} />
+          <StatusCard title="Official event mutations" value="Creator-only" tone="good" />
+        </div>
+        <p className="mt-5 max-w-3xl text-sm leading-6 text-zinc-400">
+          Non-creator owner sessions can inspect this control surface, but mutation controls are only returned after the server confirms the creator event capability.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Link href="/owner/events" className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
+            Open Event Control
+          </Link>
+          <Link href="/owner/events/create" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-xs font-black uppercase text-zinc-300 hover:text-white">
+            Creator Create Page
+          </Link>
+        </div>
+      </section>
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <h2 className="text-lg font-black text-white">Phase 1 boundaries</h2>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {[
+            "No public official event creation",
+            "No public suggestions database writes",
+            "No voting or moderation queue",
+            "No event Discord messages",
+            "No event lifecycle automation",
+            "No scoring engine changes",
+          ].map((item) => (
+            <div key={item} className="rounded border border-white/10 bg-black/25 px-3 py-2 text-xs font-bold text-zinc-300">{item}</div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AuditLogPanel({ auditLog }: { auditLog: AuditLog | null }) {
   const actions = ["mark legacy_offline", "archive_hidden", "run final sync", "pause sync", "reactivate sync", "hide from public listing", "show as legacy profile"];
   const items = auditLog?.items ?? [];
@@ -1523,10 +1565,11 @@ function SettingsPanel({ overview }: { overview: OwnerOverview }) {
       <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
         <div className="grid gap-3 md:grid-cols-2">
           <StatusCard title="DZN_PLATFORM_OWNER_DISCORD_IDS" value={overview.ownerAccess.allowlistConfigured ? "Configured" : "Not configured"} tone={overview.ownerAccess.allowlistConfigured ? "good" : "warn"} />
+          <StatusCard title="Creator event governance" value={overview.ownerAccess.creatorEventGovernanceConfigured ? "Configured" : "Not configured"} tone={overview.ownerAccess.creatorEventGovernanceConfigured ? "good" : "warn"} />
           <StatusCard title="Authentication basis" value="Discord ID allowlist" tone="good" />
         </div>
         <p className="mt-5 text-sm leading-6 text-zinc-400">
-          The allowlist values are never returned to this page. Display names, usernames, emails and Discord server nicknames are not used for platform-owner access.
+          The allowlist and creator values are never returned to this page. Display names, usernames, emails and Discord server nicknames are not used for platform-owner or creator event access.
         </p>
       </section>
     </div>

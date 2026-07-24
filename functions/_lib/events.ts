@@ -9,9 +9,11 @@ import {
   normalizeServerCategoryFromRecord,
   type ServerCategory,
 } from "./server-categories";
+import { creatorEventAdminDeniedPayload, isPlatformCreatorEventAdmin } from "./platform-creator";
 import type { Env, SessionUser } from "./types";
 
-export const EVENT_STATUSES = ["live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
+export const EVENT_STATUSES = ["draft", "live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
+export const PUBLIC_EVENT_STATUSES = ["live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
 export const EVENT_TYPES = [
   "capture_the_flag",
   "community_cup",
@@ -23,6 +25,7 @@ export const EVENT_TYPES = [
 ] as const;
 
 export type CompetitiveEventStatus = typeof EVENT_STATUSES[number];
+export type PublicCompetitiveEventStatus = typeof PUBLIC_EVENT_STATUSES[number];
 export type CompetitiveEventType = typeof EVENT_TYPES[number];
 
 const EVENT_TYPE_LABELS: Record<CompetitiveEventType, string> = {
@@ -144,6 +147,9 @@ type ServerRow = {
   max_players: number | null;
   plan_key: string | null;
   subscription_status: string | null;
+  status?: string | null;
+  listing_visibility?: string | null;
+  updated_at?: string | null;
 };
 
 type EventListOptions = {
@@ -154,7 +160,7 @@ type EventListOptions = {
   limit?: number;
 };
 
-type CreateCompetitiveEventInput = {
+export type CreateCompetitiveEventInput = {
   name?: string | null;
   description?: string | null;
   event_type?: string | null;
@@ -171,6 +177,89 @@ type CreateCompetitiveEventInput = {
   rewards?: string | null;
   visibility?: string | null;
 };
+
+type EventCreateStage =
+  | "schema_readiness"
+  | "host_lookup"
+  | "category_resolution"
+  | "entitlement_lookup"
+  | "slug_lookup"
+  | "transactional_create";
+
+type EventCreateFailure = {
+  ok: false;
+  status: number;
+  error: string;
+  errorCode: string;
+  message: string;
+  requestId?: string;
+};
+
+const EVENT_CREATION_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
+  competitive_events: [
+    "id",
+    "name",
+    "slug",
+    "description",
+    "category",
+    "event_type",
+    "status",
+    "visibility",
+    "premium_tier",
+    "server_limit",
+    "team_limit",
+    "starts_at",
+    "ends_at",
+    "created_by",
+    "rules",
+    "rewards",
+    "created_at",
+    "updated_at",
+  ],
+  competitive_event_servers: ["id", "event_id", "server_id", "category", "approved", "seed", "registered_at"],
+  competitive_event_matches: ["id", "event_id"],
+  competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
+  linked_servers: ["id", "server_category", "competitive_enabled", "last_event_at", "updated_at", "status"],
+  server_subscriptions: ["guild_id", "plan_key", "status"],
+};
+
+const EVENT_PUBLIC_SELECT_COLUMNS = `
+  competitive_events.id,
+  competitive_events.name,
+  competitive_events.slug,
+  competitive_events.description,
+  competitive_events.category,
+  competitive_events.event_type,
+  competitive_events.status,
+  competitive_events.visibility,
+  competitive_events.premium_tier,
+  competitive_events.server_limit,
+  competitive_events.team_limit,
+  competitive_events.starts_at,
+  competitive_events.ends_at,
+  competitive_events.created_by,
+  competitive_events.banner_url,
+  competitive_events.rules,
+  competitive_events.rewards,
+  competitive_events.created_at,
+  competitive_events.updated_at
+`;
+
+const EVENT_READ_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
+  competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "starts_at", "ends_at", "created_at", "updated_at"],
+  competitive_event_servers: ["event_id", "server_id", "score", "wins", "losses", "draws"],
+  competitive_event_matches: ["event_id", "match_status"],
+  competitive_event_activity: ["event_id", "server_id", "activity_type", "message", "created_at"],
+  linked_servers: ["id", "public_slug", "server_category", "status"],
+};
+
+type EventReadinessResult =
+  | { ok: true; status?: 200 }
+  | { ok: false; status: 503; error: string; errorCode: string; message: string; missingCount: number };
+
+const publicEventSchemaReadiness = new WeakMap<object, Promise<EventReadinessResult>>();
+const PUBLIC_EVENT_SQL_PREDICATE =
+  "lower(COALESCE(competitive_events.visibility, 'public')) != 'private' AND lower(COALESCE(competitive_events.status, 'draft')) != 'draft'";
 
 export async function ensureCompetitiveEventsSchema(env: Env) {
   const db = requireDb(env);
@@ -192,23 +281,86 @@ export async function ensureCompetitiveEventsSchema(env: Env) {
   }
 }
 
+export async function validateCompetitiveEventsReadSchema(env: Env): Promise<EventReadinessResult> {
+  if (!env.DB) {
+    return { ok: false, status: 503, error: "D1_UNAVAILABLE", errorCode: "D1_UNAVAILABLE", message: "Event storage is unavailable.", missingCount: 1 };
+  }
+  const key = env.DB as unknown as object;
+  const existing = publicEventSchemaReadiness.get(key);
+  if (existing) return existing;
+  const promise = validateCompetitiveEventsReadSchemaNow(env)
+    .catch((error) => ({
+      ok: false as const,
+      status: 503 as const,
+      error: "EVENT_SCHEMA_NOT_READY",
+      errorCode: "EVENT_SCHEMA_NOT_READY",
+      message: "Event storage is not ready.",
+      missingCount: safeMissingCount(error),
+    }))
+    .then((result) => {
+      if (!result.ok && publicEventSchemaReadiness.get(key) === promise) {
+        publicEventSchemaReadiness.delete(key);
+      }
+      return result;
+    });
+  publicEventSchemaReadiness.set(key, promise);
+  return promise;
+}
+
+export function resetCompetitiveEventsReadSchemaReadinessForTests(env?: Env) {
+  if (env?.DB) publicEventSchemaReadiness.delete(env.DB as unknown as object);
+}
+
+async function validateCompetitiveEventsReadSchemaNow(env: Env): Promise<EventReadinessResult> {
+  const db = requireDb(env);
+  const missing: string[] = [];
+  for (const [table, columns] of Object.entries(EVENT_READ_REQUIRED_COLUMNS)) {
+    const info = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    const names = new Set((info.results ?? []).map((column) => column.name));
+    if (names.size === 0) {
+      missing.push(table);
+      continue;
+    }
+    for (const column of columns) {
+      if (!names.has(column)) missing.push(`${table}.${column}`);
+    }
+  }
+  if (missing.length) {
+    return {
+      ok: false,
+      status: 503,
+      error: "EVENT_SCHEMA_NOT_READY",
+      errorCode: "EVENT_SCHEMA_NOT_READY",
+      message: "Event storage is not ready.",
+      missingCount: missing.length,
+    };
+  }
+  return { ok: true };
+}
+
 export async function getEventsListPayload(env: Env, viewer: SessionUser | null, options: EventListOptions = {}) {
+  const publicStatusFilter = resolvePublicEventStatusFilter(options.status);
+  if (!publicStatusFilter.ok) return invalidPublicEventStatusPayload();
   if (!env.DB) return demoEventsListPayload(options, false);
-  await ensureCompetitiveEventsSchema(env);
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return eventListSchemaUnavailablePayload(schemaReady);
   const entitlement = await hasFullEventAccess(env, viewer);
   const full = options.full === true && entitlement;
   const limit = full ? sanitizeLimit(options.limit, 100, 100) : Math.min(sanitizeLimit(options.limit, 10, 24), 10);
   const db = requireDb(env);
-  const conditions = ["COALESCE(visibility, 'public') != 'private'"];
+  const conditions = [
+    "lower(COALESCE(visibility, 'public')) != 'private'",
+    "lower(COALESCE(status, 'draft')) != 'draft'",
+  ];
   const bindings: unknown[] = [];
-  const statusFilter = resolveEventStatusFilter(options.status);
+  const statusFilter = publicStatusFilter.statuses;
   const category = normalizeServerCategory(options.category);
   const type = normalizeEventType(options.type);
   if (statusFilter.length === 1) {
-    conditions.push("status = ?");
+    conditions.push("lower(COALESCE(status, 'draft')) = ?");
     bindings.push(statusFilter[0]);
   } else if (statusFilter.length > 1) {
-    conditions.push(`status IN (${statusFilter.map(() => "?").join(", ")})`);
+    conditions.push(`lower(COALESCE(status, 'draft')) IN (${statusFilter.map(() => "?").join(", ")})`);
     bindings.push(...statusFilter);
   }
   if (category) {
@@ -221,7 +373,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
   }
   const result = await db
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
@@ -248,7 +400,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     teaserMode: !full,
     full,
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
-    statusFilters: EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
     summary: summarizeEvents(visibleEvents),
     events: visibleEvents,
@@ -256,23 +408,31 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
 }
 
 export async function getEventDetailPayload(env: Env, viewer: SessionUser | null, slug: string, options: { full?: boolean } = {}) {
-  if (!env.DB) return demoEventDetailPayload(slug, false);
-  await ensureCompetitiveEventsSchema(env);
+  const normalizedSlug = cleanSlug(slug);
+  if (!normalizedSlug) return eventNotFoundPayload();
+  if (!env.DB) return demoEventDetailPayload(normalizedSlug, false) ?? eventNotFoundPayload();
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return schemaReady;
   const entitlement = await hasFullEventAccess(env, viewer);
   const full = options.full === true && entitlement;
   const event = await requireDb(env)
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
        FROM competitive_events
-       WHERE slug = ? AND visibility != 'private'
+       WHERE slug = ?
        LIMIT 1`,
     )
-    .bind(cleanSlug(slug))
+    .bind(normalizedSlug)
     .first<EventRow>();
-  if (!event) return demoEventDetailPayload(slug, entitlement);
+  if (event) {
+    const visibility = String(event.visibility ?? "public").trim().toLowerCase();
+    const status = String(event.status ?? "draft").trim().toLowerCase();
+    if (visibility === "private" || status === "draft") return eventNotFoundPayload();
+  }
+  if (!event) return demoEventDetailPayload(normalizedSlug, entitlement) ?? eventNotFoundPayload();
   const [servers, matches, activity] = await Promise.all([
     fetchEventServers(env, event.id, full ? 100 : 10),
     fetchEventMatches(env, event.id),
@@ -303,16 +463,32 @@ export async function getEventDetailPayload(env: Env, viewer: SessionUser | null
 
 export async function createCompetitiveEvent(env: Env, viewer: SessionUser | null, input: CreateCompetitiveEventInput) {
   if (!viewer) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to create events." };
-  await ensureCompetitiveEventsSchema(env);
-  const server = await fetchOwnedServer(env, viewer, input.hosting_server_id ?? input.server_id);
-  if (!server) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
-  const category = normalizeServerCategoryFromRecord(server);
-  if (!category) {
-    return { ok: false, status: 409, error: "NO_CATEGORY", message: "Set your server category before creating events." };
+  const creatorDenied = creatorEventAdminDeniedPayload(env, viewer);
+  if (creatorDenied) return creatorDenied;
+
+  const requestId = makeEventCreateRequestId();
+  const schemaReady = await validateCompetitiveEventCreationSchema(env, requestId);
+  if (!schemaReady.ok) return schemaReady;
+
+  const hostLookup = await fetchEventCreationHost(env, input.hosting_server_id ?? input.server_id, requestId);
+  if (!hostLookup.ok) return hostLookup;
+  const server = hostLookup.server;
+
+  let category: ServerCategory | null = null;
+  try {
+    category = normalizeServerCategoryFromRecord(server);
+  } catch (error) {
+    return eventCreateFailed("category_resolution", requestId, error);
   }
-  if (!serverHasEventEntitlement(server)) {
-    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Event creation is a Pro or Premium feature." };
+  if (!category) return { ok: false, status: 409, error: "NO_CATEGORY", message: "Set your server category before creating events." };
+
+  let hasEntitlement = false;
+  try {
+    hasEntitlement = serverHasEventEntitlement(server);
+  } catch (error) {
+    return eventCreateFailed("entitlement_lookup", requestId, error);
   }
+  if (!hasEntitlement) return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Event creation is a Pro or Premium feature." };
 
   const name = sanitizePlainText(input.name, 90);
   if (name.length < 3) return { ok: false, status: 400, error: "INVALID_NAME", message: "Event name must be at least 3 characters." };
@@ -334,61 +510,77 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
   const rewards = sanitizePlainText(input.rewards, 2000);
   const description = sanitizePlainText(input.description, 500);
   const db = requireDb(env);
-  const slug = await makeUniqueEventSlug(env, cleanSlug(name) || "dzn-event");
+  let slug: string;
+  try {
+    slug = await makeUniqueEventSlug(env, cleanSlug(name) || "dzn-event");
+  } catch (error) {
+    return eventCreateFailed("slug_lookup", requestId, error);
+  }
   const eventId = crypto.randomUUID();
   const registrationId = crypto.randomUUID();
-
-  await db
-    .prepare(
-      `INSERT INTO competitive_events (
-        id, name, slug, description, category, event_type, status, visibility, premium_tier,
-        server_limit, team_limit, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-    )
-    .bind(
-      eventId,
-      name,
-      slug,
-      description || null,
-      category,
-      eventType,
-      status,
-      visibility,
-      "pro",
-      serverLimit,
-      teamLimit,
-      startsAt,
-      endsAt,
-      viewer.id,
-      rules || "Same-category only. DZN dedupe and server-scope rules apply.",
-      rewards || null,
-    )
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, seed, registered_at)
-       VALUES (?, ?, ?, ?, 1, 1, CURRENT_TIMESTAMP)`,
-    )
-    .bind(registrationId, eventId, server.id, category)
-    .run();
-  await db
-    .prepare(
-      `UPDATE linked_servers
-       SET competitive_enabled = 1,
-           server_category = COALESCE(server_category, ?),
-           last_event_at = CURRENT_TIMESTAMP,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-    )
-    .bind(category, server.id)
-    .run();
-  await insertEventActivity(env, eventId, server.id, "event_created", `${serverDisplayName(server)} created ${name}.`, {
+  const activityId = crypto.randomUUID();
+  const activityMessage = `${serverDisplayName(server)} created ${name}.`;
+  const activityMetadata = JSON.stringify({
     category,
     event_type: eventType,
     visibility,
     strict_same_category: true,
     tournament_channel_configured: Boolean(sanitizeDiscordSnowflake(input.tournament_channel_id)),
   });
+
+  try {
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO competitive_events (
+            id, name, slug, description, category, event_type, status, visibility, premium_tier,
+            server_limit, team_limit, starts_at, ends_at, created_by, rules, rewards, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        )
+        .bind(
+          eventId,
+          name,
+          slug,
+          description || null,
+          category,
+          eventType,
+          status,
+          visibility,
+          "pro",
+          serverLimit,
+          teamLimit,
+          startsAt,
+          endsAt,
+          viewer.id,
+          rules || "Same-category only. DZN dedupe and server-scope rules apply.",
+          rewards || null,
+        ),
+      db
+        .prepare(
+          `INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, seed, registered_at)
+           VALUES (?, ?, ?, ?, 1, 1, CURRENT_TIMESTAMP)`,
+        )
+        .bind(registrationId, eventId, server.id, category),
+      db
+        .prepare(
+          `UPDATE linked_servers
+           SET competitive_enabled = 1,
+               server_category = COALESCE(server_category, ?),
+               last_event_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+        )
+        .bind(category, server.id),
+      db
+        .prepare(
+          `INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
+           VALUES (?, ?, ?, CASE WHEN changes() = 1 THEN 'event_created' ELSE NULL END, ?, ?, CURRENT_TIMESTAMP)`,
+        )
+        .bind(activityId, eventId, server.id, activityMessage, activityMetadata),
+    ]);
+  } catch (error) {
+    return eventCreateFailed("transactional_create", requestId, error);
+  }
 
   return {
     ok: true,
@@ -484,6 +676,10 @@ export async function createCategorySafeMatchmaking(env: Env, viewer: SessionUse
   preview?: boolean;
 }) {
   if (!viewer) return { ok: false, status: 401, error: "UNAUTHORIZED", message: "Log in with Discord to use matchmaking." };
+  if (input.preview === false && cleanSlug(input.event_slug ?? "")) {
+    const creatorDenied = creatorEventAdminDeniedPayload(env, viewer);
+    if (creatorDenied) return creatorDenied;
+  }
   await ensureCompetitiveEventsSchema(env);
   const primary = await fetchOwnedServer(env, viewer, input.server_id);
   if (!primary) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Server not found." };
@@ -522,6 +718,10 @@ export async function createCategorySafeMatchmaking(env: Env, viewer: SessionUse
       mmr_delta: Math.abs(Number(primary.event_mmr ?? 1000) - Number(opponent.event_mmr ?? 1000)),
     };
   }
+  if (!isPlatformCreatorEventAdmin(viewer, env)) {
+    const creatorDenied = creatorEventAdminDeniedPayload(env, viewer);
+    if (creatorDenied) return creatorDenied;
+  }
   const matchId = crypto.randomUUID();
   await requireDb(env)
     .prepare(
@@ -548,8 +748,9 @@ export async function getLiveEventFeedPayload(env: Env, limit = 25) {
       activity: demoActivity(),
     };
   }
-  await ensureCompetitiveEventsSchema(env);
-  const activity = await fetchEventActivity(env, null, sanitizeLimit(limit, 25, 50));
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return schemaReady;
+  const activity = await fetchPublicEventActivity(env, sanitizeLimit(limit, 25, 50));
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -560,7 +761,8 @@ export async function getLiveEventFeedPayload(env: Env, limit = 25) {
 
 export async function getServerEventsProfilePayload(env: Env, serverIdOrSlug: string, viewer: SessionUser | null) {
   if (!env.DB) return demoServerEventsProfile(serverIdOrSlug, false);
-  await ensureCompetitiveEventsSchema(env);
+  const schemaReady = await validateCompetitiveEventsReadSchema(env);
+  if (!schemaReady.ok) return schemaReady;
   const server = await fetchServerByIdOrSlug(env, serverIdOrSlug);
   if (!server) return demoServerEventsProfile(serverIdOrSlug, false);
   const category = normalizeServerCategoryFromRecord(server);
@@ -656,6 +858,32 @@ async function fetchEventActivity(env: Env, eventId: string | null, limit = 25) 
        LIMIT ?`,
     )
     .bind(...bindings)
+    .all<ActivityRow>();
+  return (result.results ?? []).map(toActivity);
+}
+
+async function fetchPublicEventActivity(env: Env, limit = 25) {
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT competitive_event_activity.id,
+              competitive_event_activity.event_id,
+              competitive_event_activity.server_id,
+              competitive_event_activity.activity_type,
+              competitive_event_activity.message,
+              competitive_event_activity.metadata,
+              competitive_event_activity.created_at,
+              competitive_events.name AS event_name,
+              competitive_events.slug AS event_slug,
+              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+              linked_servers.public_slug
+       FROM competitive_event_activity
+       JOIN competitive_events ON competitive_events.id = competitive_event_activity.event_id
+       LEFT JOIN linked_servers ON linked_servers.id = competitive_event_activity.server_id
+       WHERE ${PUBLIC_EVENT_SQL_PREDICATE}
+       ORDER BY datetime(competitive_event_activity.created_at) DESC
+       LIMIT ?`,
+    )
+    .bind(sanitizeLimit(limit, 25, 50))
     .all<ActivityRow>();
   return (result.results ?? []).map(toActivity);
 }
@@ -757,7 +985,7 @@ async function fetchServerRegisteredEvents(env: Env, serverId: string, statuses:
   const placeholders = statuses.map(() => "?").join(", ");
   const result = await requireDb(env)
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               competitive_event_servers.score AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
@@ -765,6 +993,7 @@ async function fetchServerRegisteredEvents(env: Env, serverId: string, statuses:
        JOIN competitive_events ON competitive_events.id = competitive_event_servers.event_id
        WHERE competitive_event_servers.server_id = ?
          AND competitive_events.status IN (${placeholders})
+         AND ${PUBLIC_EVENT_SQL_PREDICATE}
        ORDER BY datetime(COALESCE(competitive_events.starts_at, competitive_events.created_at)) DESC
        LIMIT 20`,
     )
@@ -776,14 +1005,14 @@ async function fetchServerRegisteredEvents(env: Env, serverId: string, statuses:
 async function fetchCompatibleEvents(env: Env, category: ServerCategory) {
   const result = await requireDb(env)
     .prepare(
-      `SELECT competitive_events.*,
+      `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
               (SELECT COUNT(*) FROM competitive_event_matches WHERE competitive_event_matches.event_id = competitive_events.id) AS match_count
        FROM competitive_events
        WHERE category = ?
          AND status IN ('registration_open', 'upcoming', 'standby')
-         AND visibility != 'private'
+         AND ${PUBLIC_EVENT_SQL_PREDICATE}
        ORDER BY datetime(COALESCE(starts_at, created_at)) ASC
        LIMIT 10`,
     )
@@ -802,10 +1031,12 @@ async function fetchServerMatches(env: Env, serverId: string) {
               right_server.public_slug AS right_slug,
               COALESCE(NULLIF(winner.display_name, ''), NULLIF(winner.hostname, ''), winner.server_name, winner.nitrado_service_name) AS winner_name
        FROM competitive_event_matches
+       JOIN competitive_events ON competitive_events.id = competitive_event_matches.event_id
        JOIN linked_servers AS left_server ON left_server.id = competitive_event_matches.left_server_id
        JOIN linked_servers AS right_server ON right_server.id = competitive_event_matches.right_server_id
        LEFT JOIN linked_servers AS winner ON winner.id = competitive_event_matches.winner_server_id
-       WHERE competitive_event_matches.left_server_id = ? OR competitive_event_matches.right_server_id = ?
+       WHERE (competitive_event_matches.left_server_id = ? OR competitive_event_matches.right_server_id = ?)
+         AND ${PUBLIC_EVENT_SQL_PREDICATE}
        ORDER BY datetime(competitive_event_matches.created_at) DESC
        LIMIT 12`,
     )
@@ -837,18 +1068,140 @@ async function hasFullEventAccess(env: Env, viewer: SessionUser | null) {
   return Boolean(row && isActiveSubscription(row.status) && FULL_EVENT_PLANS.includes(normalizePlanKey(row.plan_key)));
 }
 
+async function validateCompetitiveEventCreationSchema(env: Env, requestId: string): Promise<{ ok: true } | EventCreateFailure> {
+  try {
+    const db = requireDb(env);
+    for (const [tableName, requiredColumns] of Object.entries(EVENT_CREATION_REQUIRED_COLUMNS)) {
+      const columns = await db.prepare(`PRAGMA table_info(${tableName})`).all<{ name: string }>();
+      const names = new Set((columns.results ?? []).map((column) => column.name));
+      const missing = requiredColumns.filter((column) => !names.has(column));
+      if (missing.length > 0) {
+        logEventCreateFailure("schema_readiness", requestId, "missing_required_columns", { tableName, missingColumnCount: missing.length });
+        return {
+          ok: false,
+          status: 500,
+          error: "EVENT_SCHEMA_NOT_READY",
+          errorCode: "EVENT_SCHEMA_NOT_READY",
+          message: "Event creation schema is not ready.",
+          requestId,
+        };
+      }
+    }
+    return { ok: true };
+  } catch (error) {
+    return eventCreateFailed("schema_readiness", requestId, error);
+  }
+}
+
+async function fetchEventCreationHost(env: Env, serverId: string | null | undefined, requestId: string) {
+  const cleanId = cleanIdentifier(serverId);
+  if (!cleanId) return { ok: false as const, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
+
+  try {
+    const result = await requireDb(env)
+      .prepare(
+        `SELECT linked_servers.*,
+                server_subscriptions.plan_key,
+                server_subscriptions.status AS subscription_status
+         FROM linked_servers
+         LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+         WHERE linked_servers.id = ?
+           AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+         LIMIT 2`,
+      )
+      .bind(cleanId)
+      .all<ServerRow>();
+    const rows = result.results ?? [];
+    if (rows.length === 0) return { ok: false as const, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
+    if (rows.length > 1) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "INVALID_HOST_STATE",
+        message: "Hosting server has ambiguous billing or ownership state.",
+      };
+    }
+
+    const server = rows[0];
+    const status = String(server.status ?? "").trim().toLowerCase();
+    const visibility = String(server.listing_visibility ?? "public").trim().toLowerCase();
+    if (status === "archived" || visibility === "hidden") {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "INVALID_HOST_STATE",
+        message: "Hosting server is not eligible for official event creation.",
+      };
+    }
+    return { ok: true as const, server };
+  } catch (error) {
+    return eventCreateFailed("host_lookup", requestId, error);
+  }
+}
+
 function serverHasEventEntitlement(server: Pick<ServerRow, "plan_key" | "subscription_status">) {
   return isActiveSubscription(server.subscription_status) && FULL_EVENT_PLANS.includes(normalizePlanKey(server.plan_key));
 }
 
-async function insertEventActivity(env: Env, eventId: string | null, serverId: string | null, activityType: string, message: string, metadata: Record<string, unknown>) {
+export async function insertEventActivity(env: Env, eventId: string | null, serverId: string | null, activityType: string, message: string, metadata: Record<string, unknown>) {
   await requireDb(env)
     .prepare(
       `INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(crypto.randomUUID(), eventId, serverId, activityType, message, JSON.stringify(metadata))
-    .run();
+      .run();
+}
+
+function eventCreateFailed(stage: EventCreateStage, requestId: string, error: unknown): EventCreateFailure {
+  logEventCreateFailure(stage, requestId, error);
+  return {
+    ok: false,
+    status: 500,
+    error: "EVENT_CREATE_FAILED",
+    errorCode: "EVENT_CREATE_FAILED",
+    message: "Official event creation failed before completion.",
+    requestId,
+  };
+}
+
+function eventNotFoundPayload() {
+  return {
+    ok: false,
+    status: 404,
+    error: "EVENT_NOT_FOUND",
+    errorCode: "EVENT_NOT_FOUND",
+    message: "Event not found.",
+    source: "not_found",
+  };
+}
+
+function logEventCreateFailure(stage: EventCreateStage, requestId: string, error: unknown, extra: Record<string, unknown> = {}) {
+  const category = typeof error === "string" ? error : error instanceof Error ? error.name : "unknown_error";
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code ?? "unknown") : "unknown";
+  console.error(JSON.stringify({
+    event: "DZN_EVENT_CREATE_FAILED",
+    requestId,
+    stage,
+    category: sanitizeEventDiagnosticValue(category),
+    code: sanitizeEventDiagnosticValue(code),
+    ...extra,
+  }));
+}
+
+function sanitizeEventDiagnosticValue(value: unknown) {
+  return String(value ?? "unknown")
+    .replace(/\b\d{16,24}\b/g, "[redacted-id]")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted-token]")
+    .slice(0, 80);
+}
+
+function makeEventCreateRequestId() {
+  try {
+    return `event-create-${crypto.randomUUID().slice(0, 8)}`;
+  } catch {
+    return `event-create-${Date.now().toString(36)}`;
+  }
 }
 
 function toEventSummary(row: EventRow) {
@@ -998,6 +1351,18 @@ export function resolveEventStatusFilter(value: unknown): CompetitiveEventStatus
   return normalized ? [normalized] : [];
 }
 
+export function resolvePublicEventStatusFilter(value: unknown): { ok: true; statuses: PublicCompetitiveEventStatus[] } | { ok: false } {
+  const text = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!text || text === "all") return { ok: true, statuses: [] };
+  if (text === "active") return { ok: true, statuses: ["live"] };
+  if (text === "completed") return { ok: true, statuses: ["ended"] };
+  if (text === "upcoming") return { ok: true, statuses: ["upcoming", "registration_open", "standby"] };
+  if ((PUBLIC_EVENT_STATUSES as readonly string[]).includes(text)) {
+    return { ok: true, statuses: [text as PublicCompetitiveEventStatus] };
+  }
+  return { ok: false };
+}
+
 export function normalizeEventType(value: unknown): CompetitiveEventType | null {
   const text = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (text === "ctf") return "capture_the_flag";
@@ -1018,6 +1383,14 @@ export function eventStatusLabel(value: unknown) {
 function sanitizeLimit(value: unknown, fallback: number, max: number) {
   const parsed = Math.trunc(Number(value));
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+}
+
+function safeMissingCount(error: unknown) {
+  if (typeof error === "object" && error && "missingCount" in error) {
+    const count = Number((error as { missingCount?: unknown }).missingCount);
+    if (Number.isFinite(count) && count >= 0) return count;
+  }
+  return 1;
 }
 
 function cleanSlug(value: unknown) {
@@ -1105,20 +1478,57 @@ function demoEventsListPayload(options: EventListOptions, entitlement: boolean) 
     teaserMode: !full,
     full,
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
-    statusFilters: EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
     summary: summarizeEvents(events),
     events,
   };
 }
 
+function invalidPublicEventStatusPayload() {
+  return {
+    ok: false,
+    status: 400,
+    error: "INVALID_PUBLIC_EVENT_STATUS",
+    errorCode: "INVALID_PUBLIC_EVENT_STATUS",
+    message: "That event status is not available publicly.",
+    source: "invalid_filter",
+    generated_at: new Date().toISOString(),
+    teaserMode: true,
+    full: false,
+    categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
+    summary: summarizeEvents([]),
+    events: [],
+  };
+}
+
+function eventListSchemaUnavailablePayload(schemaReady: Extract<EventReadinessResult, { ok: false }>) {
+  return {
+    ...schemaReady,
+    generated_at: new Date().toISOString(),
+    source: "schema_unavailable",
+    teaserMode: true,
+    full: false,
+    categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
+    statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
+    typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
+    summary: summarizeEvents([]),
+    events: [],
+  };
+}
+
 function filterDemoEvents(options: EventListOptions, limit: number) {
-  const statusFilter = resolveEventStatusFilter(options.status);
+  const statusFilterResult = resolvePublicEventStatusFilter(options.status);
+  if (!statusFilterResult.ok) return [];
+  const statusFilter = statusFilterResult.statuses;
   const category = normalizeServerCategory(options.category);
   const type = normalizeEventType(options.type);
   return demoEvents()
     .filter((event) => {
-      const statusOk = statusFilter.length === 0 || statusFilter.includes(event.status);
+      const publicStatus = (PUBLIC_EVENT_STATUSES as readonly string[]).includes(event.status) ? event.status as PublicCompetitiveEventStatus : null;
+      const statusOk = Boolean(publicStatus) && (statusFilter.length === 0 || statusFilter.includes(publicStatus as PublicCompetitiveEventStatus));
       const categoryOk = !category || event.category === category;
       const typeOk = !type || event.event_type === type;
       return statusOk && categoryOk && typeOk;
@@ -1127,7 +1537,8 @@ function filterDemoEvents(options: EventListOptions, limit: number) {
 }
 
 function demoEventDetailPayload(slug: string, entitlement: boolean) {
-  const event = demoEvents().find((item) => item.slug === cleanSlug(slug)) ?? demoEvents()[0];
+  const event = demoEvents().find((item) => item.slug === cleanSlug(slug));
+  if (!event) return null;
   const leaderboard = demoServers(event.category).slice(0, entitlement ? 16 : 10);
   return {
     ok: true,

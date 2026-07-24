@@ -1,0 +1,50 @@
+name: DZN Performance Foundation CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  performance-foundation:
+    name: Local performance foundation checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+      DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Run workflow boundary tests
+        run: npm run test:github-workflows
+
+      - name: Run performance foundation tests
+        run: npm run test:performance-foundation
+
+      - name: Run creator governance regression tests
+        run: npm run test:creator-event-governance
+
+      - name: Run full local test suite
+        run: npm run test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build static runtime
+        run: npm run build
+
+      - name: Diff check
+        run: git diff --check

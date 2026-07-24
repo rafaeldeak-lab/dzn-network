@@ -1,5 +1,6 @@
 import { requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
+import { publicCacheHeaders } from "../../_lib/performance";
 import {
   PUBLIC_CURRENT_PLAYERS_SQL,
   PUBLIC_MAX_PLAYERS_SQL,
@@ -31,9 +32,8 @@ type RailRow = {
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
-  const headers = {
-    "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
-  };
+  const headers = publicCacheHeaders({ maxAge: 60, staleWhileRevalidate: 300 });
+  headers.set("x-dzn-cache-policy", "s-maxage=60; stale-while-revalidate=300");
 
   if (!env.DB) {
     return json({ ok: true, items: [], generated_at: new Date().toISOString() }, { headers });

@@ -165,13 +165,13 @@ assert.equal(leaderboardRoute.includes("refreshSeasonScores"), false, "Public le
 const cronRefreshRoute = source("functions/api/cron/seasons/refresh.ts");
 includesAll(cronRefreshRoute, ["requireCronSecret", "refreshActiveSeasonScores", "seasonsChecked", "entriesRefreshed", "snapshotsCreated", "warnings"]);
 const adminSeasonsRoute = source("functions/api/admin/seasons.ts");
-includesAll(adminSeasonsRoute, ["requireBadgeAdminUser", "getAdminSeasonManagement", "createAdminSeason", "activeSeasons", "upcomingSeasons", "completedSeasons", "warnings", "GET, POST, OPTIONS"]);
+includesAll(adminSeasonsRoute, ["requireBadgeAdminUser", "requirePlatformCreatorEventAdmin", "getAdminSeasonManagement", "createAdminSeason", "activeSeasons", "upcomingSeasons", "completedSeasons", "warnings", "GET, POST, OPTIONS"]);
 const adminSeasonUpdateRoute = source("functions/api/admin/seasons/[seasonId].ts");
-includesAll(adminSeasonUpdateRoute, ["requireBadgeAdminUser", "updateAdminSeason", "readJson", "PUT, OPTIONS"]);
+includesAll(adminSeasonUpdateRoute, ["requirePlatformCreatorEventAdmin", "updateAdminSeason", "readJson", "PUT, OPTIONS"]);
 const adminRefreshRoute = source("functions/api/admin/seasons/[seasonId]/refresh.ts");
-includesAll(adminRefreshRoute, ["requireBadgeAdminUser", "refreshSeasonScores", "allowCompleted: false", "refreshedEntries", "warnings"]);
+includesAll(adminRefreshRoute, ["requirePlatformCreatorEventAdmin", "refreshSeasonScores", "allowCompleted: false", "refreshedEntries", "warnings"]);
 const seasonFinaliseRoute = source("functions/api/admin/seasons/[seasonId]/finalise.ts");
-includesAll(seasonFinaliseRoute, ["requireBadgeAdminUser", "finaliseSeason", "entriesFinalised", "awardsCreated", "badgesAwarded", "warnings"]);
+includesAll(seasonFinaliseRoute, ["requirePlatformCreatorEventAdmin", "finaliseSeason", "entriesFinalised", "awardsCreated", "badgesAwarded", "warnings"]);
 const ownerSeasonStatusRoute = source("functions/api/servers/[serverId]/seasons/status.ts");
 includesAll(ownerSeasonStatusRoute, ["resolveOwnerVisualLoadoutServer", "status: access.status", "getServerSeasonStatus", "Season status is temporarily unavailable."]);
 const joinRoute = source("functions/api/servers/[serverId]/seasons/[seasonId]/join.ts");
@@ -331,7 +331,7 @@ async function runRefreshAutomationChecks() {
   });
   const completedResponse = await adminSeasonRefreshPost(makeContext(adminRequest, {
     DB: completedDb as unknown as D1Database,
-    DZN_ADMIN_DISCORD_IDS: "admin-discord",
+    DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678",
   } as Env, { seasonId: "season-completed" }));
   assert.equal(completedResponse.status, 200);
   const completedJson = await completedResponse.json() as { entriesRefreshed: number; snapshotsCreated: number; warnings: string[] };
@@ -357,8 +357,8 @@ async function runRefreshAutomationChecks() {
     method: "POST",
     headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
     body: "{}",
-  }), { DB: nonAdminDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-active" }));
-  assert.equal(nonAdmin.status, 403, "Admin season refresh must return 403 for non-admin users.");
+  }), { DB: nonAdminDb as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env, { seasonId: "season-active" }));
+  assert.equal(nonAdmin.status, 403, "Admin season refresh must return 403 for non-creator users.");
 
   const unauthAdminList = await adminSeasonsGet(makeContext(new Request("https://dzn.test/api/admin/seasons", {
     method: "GET",
@@ -374,14 +374,14 @@ async function runRefreshAutomationChecks() {
   const nonAdminList = await adminSeasonsGet(makeContext(new Request("https://dzn.test/api/admin/seasons", {
     method: "GET",
     headers: { cookie: "dzn_session=session-token" },
-  }), { DB: nonAdminListDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  }), { DB: nonAdminListDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "123456789012345678" } as Env));
   assert.equal(nonAdminList.status, 403, "Admin seasons listing must return 403 for non-admin users.");
 
   const adminListDb = createSeasonDb("completed");
   const adminList = await adminSeasonsGet(makeContext(new Request("https://dzn.test/api/admin/seasons?limit=10", {
     method: "GET",
     headers: { cookie: "dzn_session=session-token" },
-  }), { DB: adminListDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  }), { DB: adminListDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "123456789012345678" } as Env));
   assert.equal(adminList.status, 200);
   const adminListJson = await adminList.json() as {
     ok: boolean;
@@ -404,16 +404,16 @@ async function runRefreshAutomationChecks() {
     method: "POST",
     headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
     body: JSON.stringify(makeCreateSeasonBody("blocked-season")),
-  }), { DB: nonAdminCreateDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
-  assert.equal(nonAdminCreate.status, 403, "Non-admin users must not create seasons.");
+  }), { DB: nonAdminCreateDb as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env));
+  assert.equal(nonAdminCreate.status, 403, "Non-creator users must not create seasons.");
 
   const createDb = createSeasonDb("upcoming");
   const createResponse = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
     method: "POST",
     headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
     body: JSON.stringify(makeCreateSeasonBody("summer-deathmatch")),
-  }), { DB: createDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
-  assert.equal(createResponse.status, 201, "Admin users should be able to create a season.");
+  }), { DB: createDb as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env));
+  assert.equal(createResponse.status, 201, "The configured platform creator should be able to create a season.");
   const createJson = await createResponse.json() as { season: { slug: string; category: string; scoringRules: Record<string, unknown> } };
   assert.equal(createJson.season.slug, "summer-deathmatch");
   assert.equal(createJson.season.category, "deathmatch");
@@ -423,21 +423,21 @@ async function runRefreshAutomationChecks() {
     method: "POST",
     headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
     body: JSON.stringify(makeCreateSeasonBody("summer-deathmatch")),
-  }), { DB: createDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  }), { DB: createDb as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env));
   assert.equal(duplicateSlug.status, 409, "Duplicate season slugs must be rejected.");
 
   const invalidCategory = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
     method: "POST",
     headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
     body: JSON.stringify({ ...makeCreateSeasonBody("bad-category"), category: "HYBRID" }),
-  }), { DB: createSeasonDb("upcoming") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  }), { DB: createSeasonDb("upcoming") as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env));
   assert.equal(invalidCategory.status, 400, "Invalid season categories must be rejected.");
 
   const invalidDateRange = await adminSeasonsPost(makeContext(new Request("https://dzn.test/api/admin/seasons", {
     method: "POST",
     headers: { "content-type": "application/json", cookie: "dzn_session=session-token" },
     body: JSON.stringify({ ...makeCreateSeasonBody("bad-dates"), startsAt: "2026-09-01T00:00:00.000Z", endsAt: "2026-08-01T00:00:00.000Z" }),
-  }), { DB: createSeasonDb("upcoming") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env));
+  }), { DB: createSeasonDb("upcoming") as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env));
   assert.equal(invalidDateRange.status, 400, "Invalid season date ranges must be rejected.");
 
   const editDb = createSeasonDb("upcoming");
@@ -453,8 +453,8 @@ async function runRefreshAutomationChecks() {
       endsAt: "2026-09-01T00:00:00.000Z",
       scoringRules: getDefaultScoringRulesForCategory("DEATHMATCH"),
     }),
-  }), { DB: editDb as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-upcoming" }));
-  assert.equal(editResponse.status, 200, "Admin users should be able to edit an upcoming season.");
+  }), { DB: editDb as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env, { seasonId: "season-upcoming" }));
+  assert.equal(editResponse.status, 200, "The configured platform creator should be able to edit an upcoming season.");
   assert.equal(editDb.seasons[0]?.name, "Edited Upcoming Season");
   assert.equal(editDb.seasons[0]?.status, "registration_open");
 
@@ -470,7 +470,7 @@ async function runRefreshAutomationChecks() {
       endsAt: "2026-07-01T00:00:00.000Z",
       scoringRules: getDefaultScoringRulesForCategory("PVP"),
     }),
-  }), { DB: createSeasonDb("active") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-active" }));
+  }), { DB: createSeasonDb("active") as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env, { seasonId: "season-active" }));
   assert.equal(categoryLocked.status, 409, "Category changes must be blocked when entries exist.");
 
   const completedLocked = await adminSeasonPut(makeContext(new Request("https://dzn.test/api/admin/seasons/season-completed", {
@@ -485,7 +485,7 @@ async function runRefreshAutomationChecks() {
       endsAt: "2026-07-01T00:00:00.000Z",
       scoringRules: getDefaultScoringRulesForCategory("DEATHMATCH"),
     }),
-  }), { DB: createSeasonDb("completed") as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "admin-discord" } as Env, { seasonId: "season-completed" }));
+  }), { DB: createSeasonDb("completed") as unknown as D1Database, DZN_PLATFORM_CREATOR_DISCORD_ID: "123456789012345678" } as Env, { seasonId: "season-completed" }));
   assert.equal(completedLocked.status, 409, "Completed season destructive edits must be blocked.");
 }
 
@@ -594,7 +594,7 @@ class SeasonMemoryD1 {
       : [];
     this.sessionUser = sessionUser ?? {
       id: "admin-user",
-      discord_id: "admin-discord",
+      discord_id: "123456789012345678",
       username: "Admin",
       avatar: null,
     };

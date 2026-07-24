@@ -220,8 +220,8 @@ export function EventCreatePage() {
   return (
     <EventsShell>
       <HeaderLine
-        title="CREATE EVENT"
-        subtitle="Build a same-category tournament, challenge, or battle card for your verified DayZ community."
+        title="OFFICIAL EVENTS"
+        subtitle="Official DZN events are creator-managed. Use Event Control for creator-only official creation."
         action={<EventActionLink href="/events">Events Hub</EventActionLink>}
       />
       <EventTabs active="CTF Tournaments" />
@@ -356,6 +356,7 @@ export function EventsHubPage() {
         <main className="space-y-5">
           <PulseEventSpotlight event={(active[0] ?? upcoming[0] ?? data.events[0]) ?? null} />
           <ServerWarsTeaser />
+          <CommunitySuggestionsPanel />
           <SectionHeader title="Active Tournaments" href="/events/tournaments?status=active" />
           <div className="grid gap-4 lg:grid-cols-3">
             {(active.length ? active : data.events.slice(0, 3)).slice(0, 3).map((event) => <TournamentCard key={event.id} event={event} />)}
@@ -379,6 +380,34 @@ export function EventsHubPage() {
         </aside>
       </div>
     </EventsShell>
+  );
+}
+
+function CommunitySuggestionsPanel() {
+  const lanes = ["Trending", "New", "Shortlisted", "Accepted", "Converted into Events"];
+  return (
+    <section className="rounded-lg border border-cyan-300/18 bg-white/[0.035] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200">Community Suggestions</p>
+          <h2 className="mt-1 text-xl font-black text-white">Vote on future DZN competition ideas</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+            Public suggestions can be submitted and voted on after Discord login. Accepted ideas remain community suggestions until the platform creator converts them into private official drafts.
+          </p>
+        </div>
+        <EventActionLink href="/events/suggest">Open suggestion board</EventActionLink>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {lanes.map((lane) => (
+          <div key={lane} className="rounded-lg border border-white/10 bg-black/25 p-3">
+            <div className="flex items-center gap-2 text-xs font-black uppercase text-zinc-200">
+              <Swords className="h-3.5 w-3.5 text-cyan-200" />
+              {lane}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -407,7 +436,7 @@ export function EventsTournamentsPage() {
   const visibleEvents = useMemo(() => filterEventsForView(data.events, { status, type, category }), [category, data.events, status, type]);
   return (
     <EventsShell>
-      <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">Events Hub</EventActionLink><EventActionLink href="/events/create">Create Event</EventActionLink></div>} />
+      <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">Events Hub</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
       <EventTabs active={status === "active" || status === "live" ? "Active" : status === "completed" || status === "ended" ? "Completed" : status === "upcoming" ? "Upcoming" : "CTF Tournaments"} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
@@ -519,7 +548,7 @@ export function EventsChallengesPage() {
   const { data, loadState } = useEventsPayload("/api/events?type=kill_race&limit=24", fallback);
   return (
     <EventsShell>
-      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/create">Create Event</EventActionLink></div>} />
+      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
@@ -770,7 +799,7 @@ function PulseEventSpotlight({ event }: { event: CompetitiveEvent | null }) {
     <article className="relative overflow-hidden rounded-xl border border-violet-300/24 bg-[#050812] shadow-[0_28px_110px_rgba(0,0,0,0.34)]">
       {artwork ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={artwork} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover opacity-38" />
+        <img src={artwork} alt="" loading="lazy" decoding="async" width={1280} height={720} className="absolute inset-0 h-full w-full object-cover opacity-38" />
       ) : null}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.24),transparent_34%),radial-gradient(circle_at_88%_20%,rgba(249,115,22,0.22),transparent_34%),linear-gradient(90deg,rgba(5,8,18,0.96),rgba(5,8,18,0.72),rgba(5,8,18,0.96))]" />
       <div className="relative z-10 grid gap-5 p-5 lg:grid-cols-[1fr_auto] lg:items-end">
