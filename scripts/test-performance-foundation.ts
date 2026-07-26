@@ -21,9 +21,11 @@ import {
   projectSuggestionForOwnerTest,
   projectSuggestionForPublicTest,
   resetEventSuggestionSchemaReadinessForTests,
+  SUGGESTION_VOTE_CHANGE_COOLDOWN_MS,
   validateModerationTransition,
   validateEventSuggestionSchema,
   validateSuggestionInput,
+  voteOnEventSuggestion,
   type SuggestionSortRow,
 } from "../functions/_lib/event-suggestions";
 import {
@@ -68,6 +70,7 @@ async function main() {
   await assertCacheHelpers();
   await assertSuggestionHeadRoute();
   await assertSuggestionMutationAuthPrecedence();
+  await assertSuggestionVoteCooldownAtomicity();
   await assertBoundedJson();
   assertModerationTransitions();
   await assertModerationResponsePrivacy();
@@ -613,6 +616,130 @@ async function assertSuggestionMutationRouteAuthPrecedence(options: {
   await Promise.all(waits.splice(0));
 }
 
+async function assertSuggestionVoteCooldownAtomicity() {
+  const user = { id: "voter-user", discord_id: "990000000000009991", username: "Vote Test User", avatar: null };
+  const baseMs = Date.parse("2026-07-23T10:00:00.123Z");
+
+  const db = new SuggestionVoteCooldownDb();
+  const env = { DB: db as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(env);
+
+  const first = await withFixedNow(baseMs, () => voteOnEventSuggestion(env, user, "vote-target", 1));
+  assert.equal(first.status, 200, "first vote should create one row");
+  assert.equal(db.voteRows.length, 1, "first vote should create exactly one vote row");
+  assert.equal(db.voteRows[0]?.vote_value, 1);
+  assert.match(db.voteRows[0]?.created_at ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "new vote created_at must be ISO-8601 with millisecond precision");
+  assert.match(db.voteRows[0]?.updated_at ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "new vote updated_at must be ISO-8601 with millisecond precision");
+  assert.equal(db.suggestion.upvote_count, 1, "upvote counter should refresh after insert");
+  assert.equal(db.suggestion.downvote_count, 0);
+
+  const deniedChange = await withFixedNow(baseMs + 250, () => voteOnEventSuggestion(env, user, "vote-target", -1));
+  assert.equal(deniedChange.status, 429, "immediate vote change should be rate limited");
+  assert.equal("error" in deniedChange ? deniedChange.error : null, "VOTE_RATE_LIMITED");
+  assert.equal(db.voteRows[0]?.vote_value, 1, "denied change must not mutate the vote row");
+  assert.equal(db.suggestion.upvote_count, 1, "denied change must leave counters unchanged");
+  assert.equal(db.suggestion.downvote_count, 0);
+
+  const deniedRemoval = await withFixedNow(baseMs + 500, () => voteOnEventSuggestion(env, user, "vote-target", 0));
+  assert.equal(deniedRemoval.status, 429, "immediate vote removal should be rate limited");
+  assert.equal(db.voteRows.length, 1, "denied removal must keep the existing vote row");
+
+  const sameVote = await withFixedNow(baseMs + 600, () => voteOnEventSuggestion(env, user, "vote-target", 1));
+  assert.equal(sameVote.status, 200, "same vote should remain idempotent inside cooldown");
+  assert.equal(db.voteMutationChanges.filter((changes) => changes === 1).length, 1, "same-vote idempotency should not run another vote mutation");
+
+  const boundaryChange = await withFixedNow(baseMs + SUGGESTION_VOTE_CHANGE_COOLDOWN_MS, () => voteOnEventSuggestion(env, user, "vote-target", -1));
+  assert.equal(boundaryChange.status, 200, "change exactly at the cooldown boundary should succeed");
+  assert.equal(db.voteRows[0]?.vote_value, -1);
+  assert.equal(db.suggestion.upvote_count, 0);
+  assert.equal(db.suggestion.downvote_count, 1, "downvote counter should refresh after update");
+
+  const afterCooldownChange = await withFixedNow(baseMs + (SUGGESTION_VOTE_CHANGE_COOLDOWN_MS * 2) + 5, () => voteOnEventSuggestion(env, user, "vote-target", 1));
+  assert.equal(afterCooldownChange.status, 200, "change after the cooldown should succeed");
+  assert.equal(db.voteRows[0]?.vote_value, 1);
+  assert.equal(db.suggestion.upvote_count, 1);
+  assert.equal(db.suggestion.downvote_count, 0);
+
+  const removeAfterCooldown = await withFixedNow(baseMs + (SUGGESTION_VOTE_CHANGE_COOLDOWN_MS * 3) + 10, () => voteOnEventSuggestion(env, user, "vote-target", 0));
+  assert.equal(removeAfterCooldown.status, 200, "removal after the cooldown should succeed");
+  assert.equal(db.voteRows.length, 0);
+  assert.equal(db.suggestion.upvote_count, 0);
+  assert.equal(db.suggestion.downvote_count, 0, "counters should refresh after removal");
+
+  const noVoteRemoval = await withFixedNow(baseMs + 10, () => voteOnEventSuggestion(env, user, "vote-target", 0));
+  assert.equal(noVoteRemoval.status, 200, "removing a missing vote should remain idempotent");
+  assert.equal(db.voteRows.length, 0);
+
+  const historicalDb = new SuggestionVoteCooldownDb();
+  historicalDb.voteRows.push({
+    suggestion_id: "vote-target",
+    user_id: user.id,
+    vote_value: 1,
+    created_at: "2026-07-23 09:59:58",
+    updated_at: "2026-07-23 10:00:00",
+  });
+  const historicalEnv = { DB: historicalDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(historicalEnv);
+  const historicalChange = await withFixedNow(Date.parse("2026-07-23T10:00:01.500Z"), () => voteOnEventSuggestion(historicalEnv, user, "vote-target", -1));
+  assert.equal(historicalChange.status, 200, "historical whole-second timestamps should remain comparable");
+  assert.equal(historicalDb.voteRows[0]?.vote_value, -1);
+
+  const malformedDb = new SuggestionVoteCooldownDb();
+  malformedDb.voteRows.push({
+    suggestion_id: "vote-target",
+    user_id: user.id,
+    vote_value: 1,
+    created_at: "not-a-date",
+    updated_at: "not-a-date",
+  });
+  const malformedEnv = { DB: malformedDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(malformedEnv);
+  const malformedChange = await withFixedNow(baseMs + 10_000, () => voteOnEventSuggestion(malformedEnv, user, "vote-target", -1));
+  assert.equal(malformedChange.status, 429, "malformed vote timestamps must fail closed");
+  assert.equal(malformedDb.voteRows[0]?.vote_value, 1, "malformed timestamp must not bypass the mutation-time cooldown");
+
+  const raceDb = new SuggestionVoteCooldownDb();
+  raceDb.voteRows.push({
+    suggestion_id: "vote-target",
+    user_id: user.id,
+    vote_value: 1,
+    created_at: "2026-07-23T09:59:00.000Z",
+    updated_at: "2026-07-23T09:59:00.000Z",
+  });
+  raceDb.beforeNextVoteMutation = () => {
+    const row = raceDb.voteRows[0];
+    if (row) row.updated_at = new Date(baseMs + 100).toISOString();
+  };
+  const raceEnv = { DB: raceDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(raceEnv);
+  const racedChange = await withFixedNow(baseMs + 100, () => voteOnEventSuggestion(raceEnv, user, "vote-target", -1));
+  assert.equal(racedChange.status, 429, "transaction-time cooldown must prevent a stale pre-read overwrite");
+  assert.equal(raceDb.voteRows[0]?.vote_value, 1);
+  assert.equal(raceDb.voteRows.length, 1, "race protection must not create duplicate vote rows");
+
+  const idempotentRaceDb = new SuggestionVoteCooldownDb();
+  idempotentRaceDb.voteRows.push({
+    suggestion_id: "vote-target",
+    user_id: user.id,
+    vote_value: 1,
+    created_at: "2026-07-23T09:59:00.000Z",
+    updated_at: "2026-07-23T09:59:00.000Z",
+  });
+  idempotentRaceDb.beforeNextVoteMutation = () => {
+    const row = idempotentRaceDb.voteRows[0];
+    if (row) {
+      row.vote_value = -1;
+      row.updated_at = new Date(baseMs + 100).toISOString();
+    }
+  };
+  const idempotentRaceEnv = { DB: idempotentRaceDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(idempotentRaceEnv);
+  const idempotentRace = await withFixedNow(baseMs + 100, () => voteOnEventSuggestion(idempotentRaceEnv, user, "vote-target", -1));
+  assert.equal(idempotentRace.status, 200, "a concurrent request that already produced the desired vote should be treated as idempotent");
+  assert.equal(idempotentRaceDb.voteRows[0]?.vote_value, -1);
+  assert.equal(idempotentRaceDb.voteRows.length, 1);
+}
+
 function validSuggestionMutationBody() {
   return JSON.stringify({
     title: "Auth Precedence Preview Cup",
@@ -938,6 +1065,13 @@ function assertSuggestionApis() {
   assertIncludes(helper, "deterministicSuggestionEventId");
   assertIncludes(helper, "refreshSuggestionCountersStatement");
   assertIncludes(helper, "INSERT OR IGNORE INTO event_suggestion_reports");
+  assertIncludes(helper, "SUGGESTION_VOTE_CHANGE_COOLDOWN_MS = 1500", "vote cooldown must use one exported production constant");
+  const voteBody = helper.slice(helper.indexOf("export async function voteOnEventSuggestion"), helper.indexOf("export async function reportEventSuggestion"));
+  assertIncludes(voteBody, "toISOString()", "vote mutations must write explicit ISO timestamps");
+  assertIncludes(voteBody, "julianday(event_suggestion_votes.updated_at) <= julianday(?)", "vote updates must enforce cooldown in SQL");
+  assertIncludes(voteBody, "julianday(updated_at) <= julianday(?)", "vote removals must enforce cooldown in SQL");
+  assertIncludes(voteBody, "d1ChangedRows(mutationResult)", "vote cooldown must inspect D1 mutation row count");
+  assertNotIncludes(voteBody, "CURRENT_TIMESTAMP", "vote rows must not use whole-second CURRENT_TIMESTAMP");
   assertIncludes(helper, "creator_response = CASE", "moderation update must branch public/private creator responses");
   assertIncludes(helper, "ELSE NULL", "private moderation actions must clear creator_response");
   assertNotIncludes(helper, "SELECT * FROM event_suggestions WHERE id = ? LIMIT 1", "public/list paths should avoid broad suggestion reads");
@@ -1181,6 +1315,23 @@ function assertWorkflowBoundaries() {
   assertIncludes(autoUpdateWorkflow, "workflow_dispatch");
   assert.doesNotMatch(autoUpdateWorkflow, /^\s*(push|pull_request|schedule|workflow_run|repository_dispatch):/m, "DZN Auto Update Schedulers must remain manual-only");
 
+  const ownerPreviewWorkflow = source(".github/workflows/dzn-owner-console-preview.yml");
+  assertOrder(
+    ownerPreviewWorkflow,
+    "const hostAuthorization = await verifyHostAuthorization(stableUrl);",
+    "const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);",
+    "Phase 2A preview must complete host authorization before suggestion mutation probes",
+  );
+  assertIncludes(ownerPreviewWorkflow, "authMatrix.hostAuthorization = hostAuthorization", "host authorization evidence must be attached to auth-matrix.json");
+  assertIncludes(ownerPreviewWorkflow, "const suggestionVoteChangeCooldownMs = 1500", "preview vote verifier must use the production cooldown value");
+  assertIncludes(ownerPreviewWorkflow, "elapsedBeforeRemovalMs", "preview vote verifier must measure elapsed time before asserting 429");
+  assertIncludes(ownerPreviewWorkflow, "[200, 429]", "preview vote verifier must accept only 200 or 429 for the immediate timing-aware removal probe");
+  assertIncludes(ownerPreviewWorkflow, "remoteRateLimitTimingInconclusive", "preview vote verifier must record inconclusive remote timing");
+  assertIncludes(ownerPreviewWorkflow, "suggestionVoteChangeCooldownMs + 250", "preview vote verifier must wait the cooldown plus margin only after observing 429");
+  assertIncludes(ownerPreviewWorkflow, "localAtomicRateLimitTestPassed: true", "preview verifier must record deterministic local atomic vote coverage");
+  assertIncludes(ownerPreviewWorkflow, "cooldownMs: typeof details.cooldownMs", "vote failure summaries must include sanitized cooldown timing details");
+  assertNotIncludes(ownerPreviewWorkflow, "await new Promise((resolve) => setTimeout(resolve, 1700));", "preview verifier must not execute the old fixed-delay vote cleanup");
+
   if (existsSync(".github/workflows/dzn-performance-ci.yml")) {
     const ci = source(".github/workflows/dzn-performance-ci.yml");
     assertIncludes(ci, "pull_request");
@@ -1290,8 +1441,9 @@ class SuggestionMutationAuthDb {
   }
 
   async batch(statements: SuggestionMutationAuthStatement[]) {
-    for (const statement of statements) await statement.run();
-    return statements.map(() => ({ success: true }));
+    const results: unknown[] = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
   }
 
   sessionUser() {
@@ -1360,23 +1512,193 @@ class SuggestionMutationAuthStatement {
   async run() {
     if (/INSERT\s+INTO\s+event_suggestions/i.test(this.sql)) {
       this.db.suggestionRowsCreated += 1;
-      return { success: true };
+      return { success: true, meta: { changes: 1 } };
     }
     if (/INSERT\s+INTO\s+event_suggestion_votes/i.test(this.sql)) {
       this.db.voteRowsCreated += 1;
-      return { success: true };
+      return { success: true, meta: { changes: 1 } };
     }
     if (/INSERT\s+OR\s+IGNORE\s+INTO\s+event_suggestion_reports/i.test(this.sql)) {
       this.db.reportRowsCreated += 1;
-      return { success: true };
+      return { success: true, meta: { changes: 1 } };
     }
     if (/UPDATE\s+event_suggestions/i.test(this.sql)) {
-      return { success: true };
+      return { success: true, meta: { changes: 1 } };
     }
     if (/DELETE\s+FROM\s+event_suggestion_votes/i.test(this.sql)) {
-      return { success: true };
+      return { success: true, meta: { changes: 1 } };
     }
     throw new Error(`Unexpected suggestion mutation auth query: ${this.sql.slice(0, 120)}`);
+  }
+}
+
+type SuggestionVoteRow = {
+  suggestion_id: string;
+  user_id: string;
+  vote_value: number;
+  created_at: string;
+  updated_at: string;
+};
+
+class SuggestionVoteCooldownDb {
+  readonly suggestion = {
+    id: "vote-target",
+    submitted_by_user_id: "submitter-user",
+    public_status: "public_voting",
+    created_at: "2026-07-23T09:00:00.000Z",
+    upvote_count: 0,
+    downvote_count: 0,
+    report_count: 0,
+    hot_score: 0,
+  };
+  readonly voteRows: SuggestionVoteRow[] = [];
+  readonly voteMutationChanges: number[] = [];
+  beforeNextVoteMutation: (() => void) | null = null;
+
+  prepare(sql: string) {
+    return new SuggestionVoteCooldownStatement(this, sql);
+  }
+
+  async batch(statements: SuggestionVoteCooldownStatement[]) {
+    const results: unknown[] = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
+  }
+
+  findVote(suggestionId: string, userId: string) {
+    return this.voteRows.find((row) => row.suggestion_id === suggestionId && row.user_id === userId) ?? null;
+  }
+
+  applyVoteUpsert(bindings: unknown[]) {
+    this.runBeforeMutation();
+    const [suggestionId, userId, voteValue, createdAt, updatedAt, cutoff] = bindings.map(String);
+    const desiredVote = Number(voteValue);
+    const existing = this.findVote(suggestionId, userId);
+    let changes = 0;
+    if (!existing) {
+      this.voteRows.push({
+        suggestion_id: suggestionId,
+        user_id: userId,
+        vote_value: desiredVote,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      });
+      changes = 1;
+    } else if (timestampOnOrBefore(existing.updated_at, cutoff)) {
+      existing.vote_value = desiredVote;
+      existing.updated_at = updatedAt;
+      changes = 1;
+    }
+    this.voteMutationChanges.push(changes);
+    return changed(changes);
+  }
+
+  applyVoteDelete(bindings: unknown[]) {
+    this.runBeforeMutation();
+    const suggestionId = String(bindings[0] ?? "");
+    const userId = String(bindings[1] ?? "");
+    const cutoff = String(bindings[2] ?? "");
+    const index = this.voteRows.findIndex((row) => row.suggestion_id === suggestionId && row.user_id === userId);
+    let changes = 0;
+    if (index >= 0 && timestampOnOrBefore(this.voteRows[index]!.updated_at, cutoff)) {
+      this.voteRows.splice(index, 1);
+      changes = 1;
+    }
+    this.voteMutationChanges.push(changes);
+    return changed(changes);
+  }
+
+  refreshCounters() {
+    this.suggestion.upvote_count = this.voteRows.filter((row) => row.suggestion_id === this.suggestion.id && row.vote_value === 1).length;
+    this.suggestion.downvote_count = this.voteRows.filter((row) => row.suggestion_id === this.suggestion.id && row.vote_value === -1).length;
+    this.suggestion.report_count = 0;
+    this.suggestion.hot_score = this.suggestion.upvote_count - this.suggestion.downvote_count;
+    return changed(1);
+  }
+
+  private runBeforeMutation() {
+    const hook = this.beforeNextVoteMutation;
+    this.beforeNextVoteMutation = null;
+    if (hook) hook();
+  }
+}
+
+class SuggestionVoteCooldownStatement {
+  private bindings: unknown[] = [];
+
+  constructor(private readonly db: SuggestionVoteCooldownDb, private readonly sql: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all() {
+    if (/PRAGMA\s+table_info\(([^)]+)\)/i.test(this.sql)) {
+      const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1] ?? "";
+      return { results: (SUGGESTION_ROUTE_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
+    }
+    return { results: [] };
+  }
+
+  async first() {
+    if (/SELECT\s+id,\s+submitted_by_user_id,\s+public_status/i.test(this.sql)) {
+      return this.db.suggestion;
+    }
+    if (/SELECT\s+vote_value(?:,\s*updated_at)?\s+FROM\s+event_suggestion_votes/i.test(this.sql)) {
+      const row = this.db.findVote(String(this.bindings[0] ?? ""), String(this.bindings[1] ?? ""));
+      return row ? { vote_value: row.vote_value, updated_at: row.updated_at } : null;
+    }
+    if (/SELECT\s+upvote_count,\s+downvote_count,\s+report_count,\s+hot_score\s+FROM\s+event_suggestions/i.test(this.sql)) {
+      return {
+        upvote_count: this.db.suggestion.upvote_count,
+        downvote_count: this.db.suggestion.downvote_count,
+        report_count: this.db.suggestion.report_count,
+        hot_score: this.db.suggestion.hot_score,
+      };
+    }
+    return null;
+  }
+
+  async run() {
+    if (/INSERT\s+INTO\s+event_suggestion_votes/i.test(this.sql)) {
+      return this.db.applyVoteUpsert(this.bindings);
+    }
+    if (/DELETE\s+FROM\s+event_suggestion_votes/i.test(this.sql)) {
+      return this.db.applyVoteDelete(this.bindings);
+    }
+    if (/UPDATE\s+event_suggestions/i.test(this.sql)) {
+      return this.db.refreshCounters();
+    }
+    throw new Error(`Unexpected vote cooldown query: ${this.sql.slice(0, 120)}`);
+  }
+}
+
+function changed(changes: number) {
+  return { success: true, meta: { changes } };
+}
+
+function timestampOnOrBefore(value: string | null | undefined, cutoff: string) {
+  const valueMs = parseSqliteTimestampMs(value);
+  const cutoffMs = parseSqliteTimestampMs(cutoff);
+  return Number.isFinite(valueMs) && Number.isFinite(cutoffMs) && valueMs <= cutoffMs;
+}
+
+function parseSqliteTimestampMs(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) {
+    return Date.parse(`${text.replace(" ", "T")}Z`);
+  }
+  return Date.parse(text);
+}
+
+async function withFixedNow<T>(nowMs: number, run: () => T | Promise<T>) {
+  const originalNow = Date.now;
+  Date.now = () => nowMs;
+  try {
+    return await run();
+  } finally {
+    Date.now = originalNow;
   }
 }
 

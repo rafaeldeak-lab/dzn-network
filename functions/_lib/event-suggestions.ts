@@ -5,6 +5,7 @@ import type { Env, SessionUser } from "./types";
 export const SUGGESTION_PUBLIC_STATUSES = ["public_voting", "shortlisted", "accepted", "converted_to_event"] as const;
 export const SUGGESTION_STATUS_FILTERS = ["all_public", ...SUGGESTION_PUBLIC_STATUSES] as const;
 export const SUGGESTION_SORTS = ["trending", "newest", "most_supported", "most_active"] as const;
+export const SUGGESTION_VOTE_CHANGE_COOLDOWN_MS = 1500;
 
 export type EventSuggestionSort = typeof SUGGESTION_SORTS[number];
 export type EventSuggestionStatusFilter = typeof SUGGESTION_STATUS_FILTERS[number];
@@ -460,22 +461,43 @@ export async function voteOnEventSuggestion(env: Env, user: SessionUser | null, 
     const counts = await readSuggestionCounters(env, suggestionId);
     return { ok: true, status: 200, suggestionId, userVote: desiredVote, ...publicVoteCounters(counts) };
   }
-  if (existing?.updated_at && Date.now() - Date.parse(existing.updated_at) < 1500) {
-    return { ok: false, status: 429, error: "VOTE_RATE_LIMITED", message: "Wait briefly before changing your vote." };
-  }
+
+  const mutationNowMs = Date.now();
+  const mutationNowIso = new Date(mutationNowMs).toISOString();
+  const mutationCutoffIso = new Date(mutationNowMs - SUGGESTION_VOTE_CHANGE_COOLDOWN_MS).toISOString();
 
   const mutation = desiredVote === 0
-    ? db.prepare("DELETE FROM event_suggestion_votes WHERE suggestion_id = ? AND user_id = ?").bind(suggestionId, user.id)
+    ? db
+      .prepare(
+        `DELETE FROM event_suggestion_votes
+         WHERE suggestion_id = ?
+           AND user_id = ?
+           AND julianday(updated_at) <= julianday(?)`,
+      )
+      .bind(suggestionId, user.id, mutationCutoffIso)
     : db
       .prepare(
         `INSERT INTO event_suggestion_votes (suggestion_id, user_id, vote_value, created_at, updated_at)
-         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(suggestion_id, user_id) DO UPDATE SET
            vote_value = excluded.vote_value,
-           updated_at = CURRENT_TIMESTAMP`,
+           updated_at = excluded.updated_at
+         WHERE julianday(event_suggestion_votes.updated_at) <= julianday(?)`,
       )
-      .bind(suggestionId, user.id, desiredVote);
-  await db.batch([mutation, refreshSuggestionCountersStatement(db, suggestionId)]);
+      .bind(suggestionId, user.id, desiredVote, mutationNowIso, mutationNowIso, mutationCutoffIso);
+  const [mutationResult] = await db.batch([mutation, refreshSuggestionCountersStatement(db, suggestionId)]);
+  if (d1ChangedRows(mutationResult) !== 1) {
+    const current = await db
+      .prepare("SELECT vote_value FROM event_suggestion_votes WHERE suggestion_id = ? AND user_id = ? LIMIT 1")
+      .bind(suggestionId, user.id)
+      .first<{ vote_value: number | null }>();
+    const currentVote = Number(current?.vote_value ?? 0);
+    if (currentVote === desiredVote) {
+      const counts = await readSuggestionCounters(env, suggestionId);
+      return { ok: true, status: 200, suggestionId, userVote: desiredVote, ...publicVoteCounters(counts) };
+    }
+    return { ok: false, status: 429, error: "VOTE_RATE_LIMITED", message: "Wait briefly before changing your vote." };
+  }
   const counts = await readSuggestionCounters(env, suggestionId);
   return { ok: true, status: 200, suggestionId, userVote: desiredVote, ...publicVoteCounters(counts) };
 }
@@ -1026,6 +1048,13 @@ async function readSuggestionCounters(env: Env, suggestionId: string) {
   const downvoteCount = Number(row?.downvote_count ?? 0);
   const reportCount = Number(row?.report_count ?? 0);
   return { upvoteCount, downvoteCount, reportCount, netScore: upvoteCount - downvoteCount, hotScore: Number(row?.hot_score ?? 0) };
+}
+
+function d1ChangedRows(result: unknown) {
+  const meta = result && typeof result === "object" ? (result as { meta?: Record<string, unknown> }).meta : null;
+  const raw = meta?.changes ?? meta?.rows_written ?? meta?.rowsWritten ?? meta?.rows_affected ?? meta?.rowsAffected;
+  const changes = Number(raw ?? 0);
+  return Number.isFinite(changes) ? changes : 0;
 }
 
 function publicVoteCounters(counts: { upvoteCount: number; downvoteCount: number; netScore: number; hotScore: number }) {

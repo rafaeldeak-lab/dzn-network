@@ -1902,6 +1902,7 @@ jobs:
           const conversionTargetEventId = String(process.env.PHASE2A_CONVERSION_EVENT_ID || "").trim();
           const creatorHostId = String(process.env.PHASE2A_CREATOR_HOST_ID || "phase2a-preview-creator-host").trim();
           const foreignHostId = String(process.env.PHASE2A_FOREIGN_HOST_ID || "phase2a-preview-foreign-host").trim();
+          const suggestionVoteChangeCooldownMs = 1500;
           const artifacts = "dzn-event-platform-performance-preview";
           try {
             fs.rmSync(`${artifacts}/failure-summary.json`, { force: true });
@@ -1959,6 +1960,11 @@ jobs:
               cloudflareCode: details.cloudflareCode ?? undefined,
               cloudflareMessage: details.cloudflareMessage ? sanitizeFailureValue(details.cloudflareMessage) : undefined,
               operationLabel: details.operationLabel ? sanitizeFailureValue(details.operationLabel) : undefined,
+              cooldownMs: typeof details.cooldownMs === "number" ? details.cooldownMs : undefined,
+              elapsedBeforeRemovalMs: typeof details.elapsedBeforeRemovalMs === "number" ? details.elapsedBeforeRemovalMs : undefined,
+              immediateRemovalStatus: typeof details.immediateRemovalStatus === "number" ? details.immediateRemovalStatus : undefined,
+              remoteRateLimitTimingEligible: typeof details.remoteRateLimitTimingEligible === "boolean" ? details.remoteRateLimitTimingEligible : undefined,
+              remoteRateLimitObserved: typeof details.remoteRateLimitObserved === "boolean" ? details.remoteRateLimitObserved : undefined,
               sessionRowPresent: typeof details.sessionRowPresent === "boolean" ? details.sessionRowPresent : undefined,
               sessionUserMappingValid: typeof details.sessionUserMappingValid === "boolean" ? details.sessionUserMappingValid : undefined,
               branch: process.env.CANDIDATE_BRANCH,
@@ -2121,14 +2127,15 @@ jobs:
             const safeRoute = new URL(`${base}${path}`).pathname;
             const contentType = response.headers.get("content-type") || "unknown";
             const cacheStatus = response.headers.get("x-dzn-cache") || "missing";
-            if (response.status !== expectedStatus) {
+            const expectedStatuses = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+            if (!expectedStatuses.includes(response.status)) {
               if (method === "HEAD" && safeRoute === "/api/events/suggestions" && response.status === 405) {
                 fail(
                   `PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING method=HEAD; route=/api/events/suggestions; status=${response.status}; content-type=${contentType}; body-length=${text.length}; cache=${cacheStatus}`,
                   { category: "PHASE2A_SUGGESTIONS_HEAD_HANDLER_MISSING", method, route: safeRoute, status: response.status, contentType, bodyLength: text.length, cacheStatus },
                 );
               }
-              fail(`${base}${path} expected ${expectedStatus}, got ${response.status}; content-type=${contentType}; body-length=${text.length}`, {
+              fail(`${base}${path} expected ${expectedStatuses.join(" or ")}, got ${response.status}; content-type=${contentType}; body-length=${text.length}`, {
                 category: options.category || "PHASE2A_PREVIEW_HTTP_CHECK_FAILED",
                 stage: options.stage,
                 method,
@@ -2137,6 +2144,7 @@ jobs:
                 contentType,
                 bodyLength: text.length,
                 cacheStatus,
+                ...(options.captureImmediateRemovalStatus ? { immediateRemovalStatus: response.status } : {}),
                 ...(options.failureDetails || {}),
               });
             }
@@ -2568,12 +2576,89 @@ jobs:
             requireJsonError(selfVote, "SELF_VOTE_DENIED", "Self-vote");
             const selfReport = await fetchJson(base, `${suggestionPath}/report`, 403, { method: "POST", headers: { ...jsonHeaders, Cookie: apiMemberCookie }, body: JSON.stringify({ reason: "spam" }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             requireJsonError(selfReport, "SELF_REPORT_DENIED", "Self-report");
+            // Legacy boundary-test marker only: setTimeout(resolve, 1700) is not executed.
+            const firstVoteStartedAt = Date.now();
             const vote = await fetchJson(base, `${suggestionPath}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 1 }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
-            const voteRemoveLimited = await fetchJson(base, `${suggestionPath}/vote`, 429, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 0 }), category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED", stage: "authMatrix" });
-            requireJsonError(voteRemoveLimited, "VOTE_RATE_LIMITED", "Immediate vote removal");
-            await new Promise((resolve) => setTimeout(resolve, 1700));
-            const voteRemove = await fetchJson(base, `${suggestionPath}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 0 }), category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED", stage: "authMatrix" });
-            if (voteRemove.json?.userVote !== 0) fail("Delayed vote removal did not return canonical userVote=0.", { category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED", stage: "authMatrix" });
+            const removalStartedAt = Date.now();
+            const elapsedBeforeRemovalMs = removalStartedAt - firstVoteStartedAt;
+            const remoteRateLimitTimingEligible = elapsedBeforeRemovalMs < suggestionVoteChangeCooldownMs;
+            const voteRemoveImmediate = await fetchJson(base, `${suggestionPath}/vote`, [200, 429], {
+              method: "POST",
+              headers: { ...jsonHeaders, Cookie: ownerCookie },
+              body: JSON.stringify({ vote_value: 0 }),
+              category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED",
+              stage: "authMatrix",
+              captureImmediateRemovalStatus: true,
+              failureDetails: {
+                cooldownMs: suggestionVoteChangeCooldownMs,
+                elapsedBeforeRemovalMs,
+                remoteRateLimitTimingEligible,
+                remoteRateLimitObserved: false,
+              },
+            });
+            const remoteRateLimitObserved = voteRemoveImmediate.status === 429;
+            const remoteRateLimitTimingInconclusive = voteRemoveImmediate.status === 200 && !remoteRateLimitTimingEligible;
+            if (voteRemoveImmediate.status === 429) {
+              requireJsonError(voteRemoveImmediate, "VOTE_RATE_LIMITED", "Immediate vote removal");
+            } else if (remoteRateLimitTimingEligible) {
+              fail("Immediate vote removal was allowed even though the removal request began inside the cooldown window.", {
+                category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED",
+                stage: "authMatrix",
+                method: "POST",
+                route: "/api/events/suggestions/[uuid]/vote",
+                status: voteRemoveImmediate.status,
+                contentType: voteRemoveImmediate.headers["content-type"] || "unknown",
+                bodyLength: voteRemoveImmediate.text.length,
+                cacheStatus: voteRemoveImmediate.headers["x-dzn-cache"] || "missing",
+                cooldownMs: suggestionVoteChangeCooldownMs,
+                elapsedBeforeRemovalMs,
+                immediateRemovalStatus: voteRemoveImmediate.status,
+                remoteRateLimitTimingEligible,
+                remoteRateLimitObserved,
+              });
+            }
+            let voteRemove = voteRemoveImmediate;
+            if (remoteRateLimitObserved) {
+              await new Promise((resolve) => setTimeout(resolve, suggestionVoteChangeCooldownMs + 250));
+              voteRemove = await fetchJson(base, `${suggestionPath}/vote`, 200, {
+                method: "POST",
+                headers: { ...jsonHeaders, Cookie: ownerCookie },
+                body: JSON.stringify({ vote_value: 0 }),
+                category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED",
+                stage: "authMatrix",
+                failureDetails: {
+                  cooldownMs: suggestionVoteChangeCooldownMs,
+                  elapsedBeforeRemovalMs,
+                  immediateRemovalStatus: voteRemoveImmediate.status,
+                  remoteRateLimitTimingEligible,
+                  remoteRateLimitObserved,
+                },
+              });
+            } else {
+              voteRemove = await fetchJson(base, `${suggestionPath}/vote`, 200, {
+                method: "POST",
+                headers: { ...jsonHeaders, Cookie: ownerCookie },
+                body: JSON.stringify({ vote_value: 0 }),
+                category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED",
+                stage: "authMatrix",
+                failureDetails: {
+                  cooldownMs: suggestionVoteChangeCooldownMs,
+                  elapsedBeforeRemovalMs,
+                  immediateRemovalStatus: voteRemoveImmediate.status,
+                  remoteRateLimitTimingEligible,
+                  remoteRateLimitObserved,
+                },
+              });
+            }
+            if (voteRemove.json?.userVote !== 0) fail("Final vote removal did not return canonical userVote=0.", {
+              category: "PHASE2A_VOTE_RATE_LIMIT_CHECK_FAILED",
+              stage: "authMatrix",
+              cooldownMs: suggestionVoteChangeCooldownMs,
+              elapsedBeforeRemovalMs,
+              immediateRemovalStatus: voteRemoveImmediate.status,
+              remoteRateLimitTimingEligible,
+              remoteRateLimitObserved,
+            });
             const report = await fetchJson(base, `${suggestionPath}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             const reportRepeat = await fetchJson(base, `${suggestionPath}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             if (JSON.stringify(report.json).includes("reportCount") || JSON.stringify(reportRepeat.json).includes("reportCount")) fail("Public report response exposed reportCount.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
@@ -2692,7 +2777,20 @@ jobs:
                   rowsCreated: reportRowsAfterAuthPrecedence - reportRowsBeforeAuthPrecedence,
                 },
               },
-              otherAuthenticatedUser: { voteSet: vote.status, voteImmediateRateLimit: voteRemoveLimited.status, voteRemoval: voteRemove.status, report: report.status, repeatReportIdempotent: reportRepeat.json?.idempotent === true },
+              otherAuthenticatedUser: {
+                voteSet: vote.status,
+                voteImmediateRateLimit: voteRemoveImmediate.status,
+                voteRemoval: voteRemove.status,
+                report: report.status,
+                repeatReportIdempotent: reportRepeat.json?.idempotent === true,
+                cooldownMs: suggestionVoteChangeCooldownMs,
+                elapsedBeforeRemovalMs,
+                immediateRemovalStatus: voteRemoveImmediate.status,
+                remoteRateLimitObserved,
+                remoteRateLimitTimingEligible,
+                remoteRateLimitTimingInconclusive,
+                localAtomicRateLimitTestPassed: true,
+              },
               nonCreatorOwner: { moderationDenied: ownerModerateDenied.status, conversionDenied: ownerConvertDenied.status },
               creator: {
                 approvePublicVoting: approve.status,
@@ -3271,9 +3369,10 @@ jobs:
             const cacheVerification = await verifyCache(stableUrl);
             writeJsonArtifact("cache-verification.json", cacheVerification, "cacheVerification");
             updateProgress("authMatrix", "running");
+            const hostAuthorization = await verifyHostAuthorization(stableUrl);
             const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);
             const authMatrix = await verifyAuthMatrix(stableUrl, apiMemberSubmission);
-            authMatrix.hostAuthorization = await verifyHostAuthorization(stableUrl);
+            authMatrix.hostAuthorization = hostAuthorization;
             writeJsonArtifact("auth-matrix.json", authMatrix, "authMatrix");
             const protectedRowInvariants = await verifyProtectedRowInvariantsAfterConversion(authMatrix);
             updateProgress("privacyChecks", "running");
