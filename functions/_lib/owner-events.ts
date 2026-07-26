@@ -1,4 +1,5 @@
-import { getLinkedServersForUserSummary, requireDb } from "./db";
+import { requireDb } from "./db";
+import { listAuthorizedEventCreationHosts, type AuthorizedEventCreationHost } from "./event-hosts";
 import { isPlatformCreatorEventAdmin, isPlatformCreatorEventGovernanceConfigured } from "./platform-creator";
 import type { Env, SessionUser } from "./types";
 
@@ -8,6 +9,8 @@ export type OwnerEventControlPayload = {
   creatorEventAdmin: boolean;
   events: OwnerOfficialEventSummary[];
   linkedServers: OwnerEventLinkedServer[];
+  hostInventoryAvailable: boolean;
+  hostInventoryCount: number;
   warnings: string[];
   generatedAt: string;
 };
@@ -93,7 +96,16 @@ export async function getOwnerEventControlPayload(env: Env, user: SessionUser): 
     warnings.push(error instanceof Error ? "official_event_inventory_unavailable" : "official_event_inventory_unknown");
     return [] as OwnerOfficialEventSummary[];
   });
-  const linkedServers = creatorEventAdmin ? await readCreatorLinkedServers(env, user.id).catch(() => [] as OwnerEventLinkedServer[]) : [];
+  let linkedServers: OwnerEventLinkedServer[] = [];
+  let hostInventoryAvailable = !creatorEventAdmin ? false : true;
+  if (creatorEventAdmin) {
+    try {
+      linkedServers = await readCreatorLinkedServers(env, user);
+    } catch {
+      hostInventoryAvailable = false;
+      warnings.push("event_host_inventory_unavailable");
+    }
+  }
 
   return {
     ok: true,
@@ -101,6 +113,8 @@ export async function getOwnerEventControlPayload(env: Env, user: SessionUser): 
     creatorEventAdmin,
     events,
     linkedServers,
+    hostInventoryAvailable,
+    hostInventoryCount: linkedServers.length,
     warnings,
     generatedAt: new Date().toISOString(),
   };
@@ -144,9 +158,9 @@ async function readOfficialEvents(env: Env): Promise<OwnerOfficialEventSummary[]
   }));
 }
 
-async function readCreatorLinkedServers(env: Env, userId: string): Promise<OwnerEventLinkedServer[]> {
-  const servers = await getLinkedServersForUserSummary(env, userId);
-  return servers.map((server: Record<string, unknown>) => ({
+async function readCreatorLinkedServers(env: Env, user: SessionUser): Promise<OwnerEventLinkedServer[]> {
+  const servers = await listAuthorizedEventCreationHosts(env, user);
+  return servers.map((server: AuthorizedEventCreationHost) => ({
     id: String(server.id ?? ""),
     label: String(server.display_name ?? server.server_name ?? server.hostname ?? server.nitrado_service_name ?? server.id ?? "Linked server"),
     category: typeof server.server_category === "string" ? server.server_category : null,

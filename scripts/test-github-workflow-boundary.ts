@@ -1315,12 +1315,28 @@ assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Authentication-precede
 assert.equal(ownerPreviewPhase2ABlock.includes("suggestionMutationAuthPrecedence"), true, "Phase 2A privacy artifact must record suggestion mutation auth precedence.");
 assert.equal(ownerPreviewPhase2ABlock.includes("async function verifyHostAuthorization(base)"), true, "Phase 2A verifier must include official event host authorization checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("host-authorization.json"'), true, "Phase 2A verifier must persist sanitized host authorization evidence.");
-assert.equal(ownerPreviewPhase2ABlock.includes("Foreign-owned host attempt did not return the expected generic private/no-store denial."), true, "Phase 2A verifier must prove foreign host denial is generic and private.");
-assert.equal(ownerPreviewPhase2ABlock.includes("foreignHostEventRowsCreated"), true, "Phase 2A host artifact must record that foreign host attempts create no events.");
-assert.equal(ownerPreviewPhase2ABlock.includes("foreignHostMetadataUnchanged"), true, "Phase 2A host artifact must record that foreign host metadata is unchanged.");
-assert.equal(ownerPreviewPhase2ABlock.includes("ownedHostRegistrationRowsCreated"), true, "Phase 2A host artifact must record creator-owned host registration creation.");
-assert.equal(ownerPreviewPhase2ABlock.includes("transactionTimeOwnershipTestPassedLocally"), true, "Phase 2A host artifact must record the local transaction race test result.");
-assert.equal(ownerPreviewPhase2ABlock.includes("creatorHostOwnershipEnforced"), true, "Phase 2A privacy artifact must record creator host ownership enforcement.");
+for (const [needle, message] of [
+  ["previousFailureClassification", "Phase 2A host verifier must record a safe diagnosis for host-list mismatches."],
+  ["PHASE2A_HOST_INVENTORY_UNAVAILABLE", "Phase 2A host verifier must distinguish host inventory query failures."],
+  ["PHASE2A_CREATOR_HOST_NOT_LISTED", "Phase 2A host verifier must distinguish missing creator hosts."],
+  ["PHASE2A_FOREIGN_HOST_LISTED", "Phase 2A host verifier must distinguish foreign hosts leaking into the owner list."],
+  ["PHASE2A_HOST_FIXTURE_INELIGIBLE", "Phase 2A host verifier must distinguish fixture eligibility failures."],
+  ["PHASE2A_FOREIGN_HOST_DENIAL_FAILED", "Phase 2A host verifier must distinguish failed foreign-host denial."],
+  ["PHASE2A_OWNED_HOST_CREATE_FAILED", "Phase 2A host verifier must distinguish failed owned-host creation."],
+] as const) {
+  assert.equal(ownerPreviewPhase2ABlock.includes(needle), true, message);
+}
+assert.equal(ownerPreviewPhase2ABlock.indexOf("complete: false") < ownerPreviewPhase2ABlock.indexOf("PHASE2A_CREATOR_HOST_NOT_LISTED"), true, "Phase 2A host verifier must write a partial artifact before host-list assertions.");
+for (const [needle, message] of [
+  ["Foreign-owned host attempt did not return the expected generic private/no-store denial.", "Phase 2A verifier must prove foreign host denial is generic and private."],
+  ["foreignHostEventRowsCreated", "Phase 2A host artifact must record that foreign host attempts create no events."],
+  ["foreignHostMetadataUnchanged", "Phase 2A host artifact must record that foreign host metadata is unchanged."],
+  ["ownedHostRegistrationRowsCreated", "Phase 2A host artifact must record creator-owned host registration creation."],
+  ["transactionTimeOwnershipTestPassedLocally", "Phase 2A host artifact must record the local transaction race test result."],
+  ["creatorHostOwnershipEnforced", "Phase 2A privacy artifact must record creator host ownership enforcement."],
+] as const) {
+  assert.equal(ownerPreviewPhase2ABlock.includes(needle), true, message);
+}
 assert.equal(
   ownerPreviewPhase2AAuthMatrixBlock.indexOf("approve_public_voting") < ownerPreviewPhase2AAuthMatrixBlock.indexOf("`${suggestionPath}/vote`"),
   true,

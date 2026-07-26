@@ -15,9 +15,11 @@ import {
   sanitizeOwnerDiscordChannelMappingInput,
 } from "../functions/_lib/owner-discord-control";
 import { hmacSha256 } from "../functions/_lib/crypto";
+import { resolveAuthorizedEventCreationHost } from "../functions/_lib/event-hosts";
 import { getOwnerEventControlPayload } from "../functions/_lib/owner-events";
 import { onRequest as onPublicEventsListRequest } from "../functions/api/events";
 import { onRequest as onPublicEventDetailRequest } from "../functions/api/events/[slug]";
+import { onRequestGet as onOwnerEventsApiGet, onRequestPost as onOwnerEventsApiPost } from "../functions/api/owner/events";
 import { onRequestGet as onOwnerDraftEventGet } from "../functions/api/owner/events/[slug]";
 import { onRequestGet as onOwnerEventReviewPageGet } from "../functions/owner/events/review";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -184,9 +186,16 @@ for (const file of [
 const ownerEventsSource = readFileSync("functions/api/owner/events.ts", "utf8");
 assert.match(ownerEventsSource, /onRequestPost/);
 assert.match(ownerEventsSource, /requirePlatformCreatorEventAdmin/);
+assert.match(ownerEventsSource, /privateNoStoreHeaders/, "Owner Event Control API must be private/no-store.");
 const ownerEventsPost = ownerEventsSource.slice(ownerEventsSource.indexOf("export const onRequestPost"));
 assert.equal(ownerEventsPost.indexOf("requirePlatformCreatorEventAdmin") < ownerEventsPost.indexOf("readJson"), true, "Owner event create must authorize before request body parsing.");
 assert.doesNotMatch(ownerEventsSource, /DISCORD_BOT_TOKEN|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|encrypted_token|webhook/i);
+
+const ownerEventsHelperSource = readFileSync("functions/_lib/owner-events.ts", "utf8");
+assert.match(ownerEventsHelperSource, /listAuthorizedEventCreationHosts/, "Owner Event Control must use the shared event-host inventory helper.");
+assert.match(ownerEventsHelperSource, /hostInventoryAvailable/, "Owner Event Control must expose host inventory availability.");
+assert.match(ownerEventsHelperSource, /event_host_inventory_unavailable/, "Host inventory query failures must be explicit.");
+assert.doesNotMatch(ownerEventsHelperSource, /getLinkedServersForUserSummary/, "Owner Event Control must not depend on the generic dashboard server summary query.");
 
 for (const file of [
   "functions/owner/events.ts",
@@ -470,7 +479,7 @@ async function assertOwnerPrivateDraftReviewRoutes() {
     DB: db as unknown as D1Database,
     SESSION_SECRET: secret,
     DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
-    DZN_PLATFORM_OWNER_DISCORD_IDS: ownerUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
   } as Env;
 
   const anonymousPage = await onOwnerEventReviewPageGet(makeOwnerDraftReviewContext(env, "https://example.com/owner/events/review?slug=private-draft"));
@@ -556,6 +565,51 @@ async function assertOwnerPrivateDraftReviewRoutes() {
 
   const ownerInventory = await getOwnerEventControlPayload(env, creatorUser);
   assert.equal(ownerInventory.events.some((event) => event.status === "draft" && event.id === "private-draft-event"), true, "Owner event inventory must still include drafts.");
+  assert.equal(ownerInventory.hostInventoryAvailable, true, "Creator host inventory should be available when the focused event-host query succeeds.");
+  assert.equal(ownerInventory.hostInventoryCount, 1, "Only one creator-owned eligible host should be listed.");
+  assert.deepEqual(ownerInventory.linkedServers.map((server) => server.id), ["creator-event-host"], "Owner Event Control must list only authorized event hosts.");
+  assert.equal(ownerInventory.linkedServers.some((server) => server.id === "foreign-event-host"), false, "Foreign-owned eligible hosts must not be listed.");
+  assert.equal(ownerInventory.linkedServers.some((server) => server.id.includes("free") || server.id.includes("inactive") || server.id.includes("hidden") || server.id.includes("archived") || server.id.includes("merged") || server.id.includes("ambiguous")), false, "Ineligible owned hosts must not be listed.");
+  for (const listed of ownerInventory.linkedServers) {
+    const resolved = await resolveAuthorizedEventCreationHost(env, creatorUser, listed.id);
+    assert.equal(resolved.ok, true, "Every listed host must be accepted by the direct event-create resolver.");
+  }
+  for (const [serverId, expectedStatus, expectedError] of [
+    ["foreign-event-host", 404, "SERVER_NOT_FOUND"],
+    ["creator-free-host", 403, "PLAN_LOCKED"],
+    ["creator-inactive-host", 403, "PLAN_LOCKED"],
+    ["creator-hidden-host", 409, "INVALID_HOST_STATE"],
+    ["creator-archived-host", 409, "INVALID_HOST_STATE"],
+    ["creator-merged-host", 409, "INVALID_HOST_STATE"],
+    ["creator-ambiguous-host", 409, "INVALID_HOST_STATE"],
+  ] as const) {
+    const resolved = await resolveAuthorizedEventCreationHost(env, creatorUser, serverId);
+    assert.equal(resolved.ok, false, `${serverId} must be rejected by the direct event-create resolver.`);
+    if (!resolved.ok) {
+      assert.equal(resolved.status, expectedStatus, `${serverId} resolver status should match the safe host contract.`);
+      assert.equal(resolved.error, expectedError, `${serverId} resolver error should match the safe host contract.`);
+    }
+  }
+  const unavailableEnv = {
+    DB: new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { failHostInventory: true }) as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  const unavailableInventory = await getOwnerEventControlPayload(unavailableEnv, creatorUser);
+  assert.equal(unavailableInventory.hostInventoryAvailable, false, "Event-host query failure must not be reported as a valid empty inventory.");
+  assert.deepEqual(unavailableInventory.linkedServers, []);
+  assert.equal(unavailableInventory.warnings.includes("event_host_inventory_unavailable"), true);
+
+  const ownerEventsGet = await onOwnerEventsApiGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events", `dzn_session=${creatorToken}`));
+  assert.equal(ownerEventsGet.status, 200, "Owner Event Control GET should remain available to the configured creator.");
+  assert.match(ownerEventsGet.headers.get("cache-control") ?? "", /private,\s*no-store/, "Owner Event Control GET must be private/no-store.");
+  assert.equal(ownerEventsGet.headers.get("x-dzn-cache"), "BYPASS");
+  assert.match(ownerEventsGet.headers.get("vary") ?? "", /\bCookie\b/i);
+  const anonymousOwnerPost = await onOwnerEventsApiPost(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events"));
+  assert.equal(anonymousOwnerPost.status, 401, "Owner Event Control POST must require creator authentication before reading a body.");
+  assert.match(anonymousOwnerPost.headers.get("cache-control") ?? "", /private,\s*no-store/, "Owner Event Control POST denials must be private/no-store.");
+  assert.equal(anonymousOwnerPost.headers.get("x-dzn-cache"), "BYPASS");
 
   const publicEvent = await publicEventDetail(env, "public-live");
   assert.equal(publicEvent.status, 200, "Stored public events should remain publicly readable.");
@@ -672,8 +726,25 @@ function publicEventDetail(env: Env, slug: string, cookie?: string, search = "")
   });
 }
 
+type OwnerDraftReviewDbOptions = {
+  failHostInventory?: boolean;
+};
+
 class OwnerDraftReviewDb {
-  constructor(private readonly sessionUsersByHash: Map<string, SessionUser>) {}
+  private readonly hosts: Array<Record<string, unknown>>;
+
+  constructor(private readonly sessionUsersByHash: Map<string, SessionUser>, private readonly options: OwnerDraftReviewDbOptions = {}) {
+    this.hosts = [
+      this.hostRow("creator-event-host", "creator-user", "guild-creator-event-host", "Creator Event Host", "live", "public", null, "deathmatch", "pro", "active", 1),
+      this.hostRow("foreign-event-host", "foreign-user", "guild-foreign-event-host", "Foreign Event Host", "live", "public", null, "deathmatch", "premium", "active", 1),
+      this.hostRow("creator-free-host", "creator-user", "guild-creator-free-host", "Creator Free Host", "live", "public", null, "deathmatch", "free", "active", 1),
+      this.hostRow("creator-inactive-host", "creator-user", "guild-creator-inactive-host", "Creator Inactive Host", "live", "public", null, "deathmatch", "pro", "inactive", 1),
+      this.hostRow("creator-hidden-host", "creator-user", "guild-creator-hidden-host", "Creator Hidden Host", "live", "hidden", null, "deathmatch", "pro", "active", 1),
+      this.hostRow("creator-archived-host", "creator-user", "guild-creator-archived-host", "Creator Archived Host", "archived", "public", null, "deathmatch", "pro", "active", 1),
+      this.hostRow("creator-merged-host", "creator-user", "guild-creator-merged-host", "Creator Merged Host", "merged", "public", "creator-event-host", "deathmatch", "pro", "active", 1),
+      this.hostRow("creator-ambiguous-host", "creator-user", "guild-creator-ambiguous-host", "Creator Ambiguous Host", "live", "public", null, "deathmatch", "pro", "active", 2),
+    ];
+  }
 
   prepare(sql: string) {
     return new OwnerDraftReviewStatement(this, sql);
@@ -702,6 +773,20 @@ class OwnerDraftReviewDb {
 
   ownerEventRows() {
     return ["public-live", "unlisted-live", "private-live", "private-draft", "public-draft", "unlisted-draft"].map((slug) => this.eventBySlug(slug));
+  }
+
+  eventHostRowsForUser(userId: string) {
+    if (this.options.failHostInventory) throw new Error("Injected host inventory query failure.");
+    return this.hosts
+      .filter((host) => host.user_id === userId)
+      .filter((host) => this.hostAuthorized(host))
+      .map((host) => ({ ...host }));
+  }
+
+  eventHostByIdForUser(id: string, userId: string) {
+    if (this.options.failHostInventory) throw new Error("Injected host inventory query failure.");
+    const host = this.hosts.find((row) => row.id === id && row.user_id === userId);
+    return host ? [{ ...host }] : [];
   }
 
   tableColumns(table: string) {
@@ -741,6 +826,63 @@ class OwnerDraftReviewDb {
       match_count: 0,
     };
   }
+
+  private hostRow(
+    id: string,
+    userId: string,
+    guildId: string,
+    name: string,
+    status: string,
+    visibility: string,
+    mergedInto: string | null,
+    category: string | null,
+    planKey: string,
+    subscriptionStatus: string,
+    subscriptionRows: number,
+  ) {
+    const eligible = ["active", "trialing"].includes(subscriptionStatus) && ["pro", "premium", "network", "partner"].includes(planKey);
+    return {
+      id,
+      user_id: userId,
+      guild_id: guildId,
+      public_slug: id,
+      display_name: name,
+      hostname: name,
+      server_name: name,
+      nitrado_service_name: name,
+      server_type: category ? "DEATHMATCH" : null,
+      server_mode: null,
+      server_category: category,
+      competitive_enabled: 0,
+      verified_server: 1,
+      event_mmr: 1000,
+      season_points: 0,
+      event_wins: 0,
+      event_losses: 0,
+      event_draws: 0,
+      last_event_at: null,
+      current_players: 2,
+      max_players: 16,
+      status,
+      listing_visibility: visibility,
+      merged_into_server_id: mergedInto,
+      updated_at: "2026-07-23T00:00:00.000Z",
+      subscription_row_count: subscriptionRows,
+      eligible_subscription_count: eligible ? subscriptionRows : 0,
+      plan_key: planKey,
+      subscription_status: subscriptionStatus,
+    };
+  }
+
+  private hostAuthorized(host: Record<string, unknown>) {
+    const status = String(host.status ?? "pending").toLowerCase();
+    const visibility = String(host.listing_visibility ?? "public").toLowerCase();
+    return !["deleted", "merged", "archived"].includes(status)
+      && !String(host.merged_into_server_id ?? "")
+      && visibility !== "hidden"
+      && Number(host.subscription_row_count ?? 0) === 1
+      && Number(host.eligible_subscription_count ?? 0) === 1;
+  }
 }
 
 class OwnerDraftReviewStatement {
@@ -779,6 +921,12 @@ class OwnerDraftReviewStatement {
     }
     if (/FROM competitive_events/i.test(this.sql) && /ORDER BY datetime\(COALESCE\(competitive_events\.updated_at/i.test(this.sql)) {
       return { results: this.db.ownerEventRows() as T[] };
+    }
+    if (/FROM linked_servers/i.test(this.sql) && /linked_servers\.id = \?/i.test(this.sql) && /linked_servers\.user_id = \?/i.test(this.sql)) {
+      return { results: this.db.eventHostByIdForUser(String(this.values[0] ?? ""), String(this.values[1] ?? "")) as T[] };
+    }
+    if (/FROM linked_servers/i.test(this.sql) && /linked_servers\.user_id = \?/i.test(this.sql)) {
+      return { results: this.db.eventHostRowsForUser(String(this.values[0] ?? "")) as T[] };
     }
     if (/FROM competitive_event_servers/i.test(this.sql) || /FROM competitive_event_matches/i.test(this.sql) || /FROM competitive_event_activity/i.test(this.sql)) {
       return { results: [] as T[] };

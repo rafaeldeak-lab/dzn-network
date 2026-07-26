@@ -2716,17 +2716,119 @@ jobs:
           async function verifyHostAuthorization(base) {
             const jsonHeaders = { "Content-Type": "application/json" };
             const readCount = async (sql, params = []) => Number((await d1Query(sql, params))[0]?.count || 0);
+            const hostFixtureRows = await d1Query(
+              `SELECT linked_servers.id,
+                      linked_servers.user_id AS userId,
+                      linked_servers.status,
+                      linked_servers.listing_visibility AS listingVisibility,
+                      linked_servers.merged_into_server_id AS mergedInto,
+                      (SELECT COUNT(*) FROM server_subscriptions WHERE server_subscriptions.guild_id = linked_servers.guild_id) AS subscriptionRowCount,
+                      (SELECT COUNT(*) FROM server_subscriptions WHERE server_subscriptions.guild_id = linked_servers.guild_id AND lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing') AND lower(COALESCE(server_subscriptions.plan_key, 'free')) IN ('pro', 'premium', 'network', 'partner')) AS eligibleSubscriptionCount
+               FROM linked_servers
+               WHERE linked_servers.id IN (?, ?);`,
+              [creatorHostId, foreignHostId],
+            );
+            const fixturesById = new Map(hostFixtureRows.map((row) => [String(row.id || ""), row]));
+            const fixtureState = (id, expectedUserId) => {
+              const row = fixturesById.get(id) || null;
+              const status = String(row?.status || "").toLowerCase();
+              const listingVisibility = String(row?.listingVisibility || "public").toLowerCase();
+              const mergedInto = String(row?.mergedInto || "");
+              const subscriptionRowCount = Number(row?.subscriptionRowCount || 0);
+              const eligibleSubscriptionCount = Number(row?.eligibleSubscriptionCount || 0);
+              return {
+                exists: Boolean(row),
+                ownershipValid: row?.userId === expectedUserId,
+                eligible:
+                  Boolean(row) &&
+                  row?.userId === expectedUserId &&
+                  !["deleted", "merged", "archived"].includes(status) &&
+                  !mergedInto &&
+                  listingVisibility !== "hidden" &&
+                  subscriptionRowCount === 1 &&
+                  eligibleSubscriptionCount === 1,
+                subscriptionRowCount,
+                eligibleSubscriptionCount,
+              };
+            };
+            const creatorFixture = fixtureState(creatorHostId, "owner-console-platform-creator");
+            const foreignFixture = fixtureState(foreignHostId, "phase2a-preview-member");
             const creatorEvents = await fetchJson(base, "/api/owner/events", 200, {
               headers: { Cookie: creatorCookie },
               category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
               stage: "authMatrix",
             });
-            const linkedServerText = JSON.stringify(creatorEvents.json?.linkedServers || []);
-            const creatorOwnHostListed = linkedServerText.includes(creatorHostId);
-            const foreignHostNotListed = !linkedServerText.includes(foreignHostId);
-            if (!creatorOwnHostListed || !foreignHostNotListed) {
-              fail("Owner Event Control host list diverged from backend host authorization fixtures.", {
+            const linkedServers = Array.isArray(creatorEvents.json?.linkedServers) ? creatorEvents.json.linkedServers : [];
+            const linkedServerIds = linkedServers.map((server) => String(server?.id || ""));
+            const warnings = Array.isArray(creatorEvents.json?.warnings) ? creatorEvents.json.warnings : [];
+            const creatorEventAdmin = creatorEvents.json?.creatorEventAdmin === true;
+            const hostInventoryAvailable = creatorEvents.json?.hostInventoryAvailable === true;
+            const creatorOwnHostListed = linkedServerIds.includes(creatorHostId);
+            const foreignHostListed = linkedServerIds.includes(foreignHostId);
+            const creatorFixtureOwnershipValid = creatorFixture.ownershipValid;
+            const foreignFixtureOwnershipValid = foreignFixture.ownershipValid;
+            const creatorFixtureEligible = creatorFixture.eligible;
+            const foreignFixtureEligibleForItsOwner = foreignFixture.eligible;
+            const previousFailureClassification =
+              !creatorEventAdmin ? "CREATOR_EVENT_ADMIN_FALSE"
+              : !creatorFixtureOwnershipValid || !foreignFixtureOwnershipValid || !creatorFixtureEligible || !foreignFixtureEligibleForItsOwner ? "FIXTURE_INELIGIBLE"
+              : !hostInventoryAvailable ? "HOST_INVENTORY_UNAVAILABLE"
+              : !creatorOwnHostListed ? "CREATOR_HOST_MISSING"
+              : foreignHostListed ? "FOREIGN_HOST_LISTED"
+              : "NONE";
+            const partialSummary = {
+              ownerControlStatus: creatorEvents.status,
+              creatorEventAdmin,
+              hostInventoryAvailable,
+              hostInventoryWarningCount: warnings.length,
+              listedHostCount: linkedServers.length,
+              creatorOwnHostListed,
+              foreignHostListed,
+              creatorFixtureOwnershipValid,
+              foreignFixtureOwnershipValid,
+              creatorFixtureEligible,
+              foreignFixtureEligibleForItsOwner,
+              previousFailureClassification,
+              foreignHostAttemptStatus: null,
+              ownedHostAttemptStatus: null,
+              complete: false,
+            };
+            writeJsonArtifact("host-authorization.json", partialSummary);
+            if (!creatorFixtureOwnershipValid || !foreignFixtureOwnershipValid || !creatorFixtureEligible || !foreignFixtureEligibleForItsOwner) {
+              fail("Phase 2A host authorization fixtures are not eligible or have unexpected ownership.", {
+                category: "PHASE2A_HOST_FIXTURE_INELIGIBLE",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: creatorEvents.status,
+              });
+            }
+            if (!creatorEventAdmin) {
+              fail("Owner Event Control did not recognize the creator event admin session.", {
                 category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: creatorEvents.status,
+              });
+            }
+            if (!hostInventoryAvailable) {
+              fail("Owner Event Control host inventory was unavailable.", {
+                category: "PHASE2A_HOST_INVENTORY_UNAVAILABLE",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: creatorEvents.status,
+              });
+            }
+            if (!creatorOwnHostListed) {
+              fail("Owner Event Control did not list the creator-owned eligible host.", {
+                category: "PHASE2A_CREATOR_HOST_NOT_LISTED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: creatorEvents.status,
+              });
+            }
+            if (foreignHostListed) {
+              fail("Owner Event Control listed a foreign-owned eligible host.", {
+                category: "PHASE2A_FOREIGN_HOST_LISTED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
                 status: creatorEvents.status,
@@ -2767,12 +2869,12 @@ jobs:
                 owner_id: "phase2a-preview-member",
                 guild_id: "phase2a-preview-foreign-host-guild",
               }),
-              category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+              category: "PHASE2A_FOREIGN_HOST_DENIAL_FAILED",
               stage: "authMatrix",
             });
             if (foreignAttempt.json?.error !== "SERVER_NOT_FOUND" || !/private,\s*no-store/i.test(String(foreignAttempt.headers["cache-control"] || ""))) {
               fail("Foreign-owned host attempt did not return the expected generic private/no-store denial.", {
-                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                category: "PHASE2A_FOREIGN_HOST_DENIAL_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
                 status: foreignAttempt.status,
@@ -2808,12 +2910,12 @@ jobs:
                 status: "registration_open",
                 visibility: "private",
               }),
-              category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+              category: "PHASE2A_OWNED_HOST_CREATE_FAILED",
               stage: "authMatrix",
             });
             if (ownedAttempt.json?.ok !== true) {
               fail("Creator-owned host event creation did not return ok=true.", {
-                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                category: "PHASE2A_OWNED_HOST_CREATE_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
                 status: ownedAttempt.status,
@@ -2825,8 +2927,10 @@ jobs:
             const ownedActivities = ownedEventId ? await readCount("SELECT COUNT(*) AS count FROM competitive_event_activity WHERE event_id = ? AND activity_type = 'event_created';", [ownedEventId]) : 0;
             const ownedHostUpdates = await readCount("SELECT COUNT(*) AS count FROM linked_servers WHERE id = ? AND user_id = 'owner-console-platform-creator' AND competitive_enabled = 1 AND last_event_at IS NOT NULL AND updated_at IS NOT NULL;", [creatorHostId]);
             const summary = {
+              ...partialSummary,
               creatorOwnHostListed,
-              foreignHostNotListed,
+              foreignHostListed,
+              foreignHostNotListed: !foreignHostListed,
               foreignHostAttemptStatus: foreignAttempt.status,
               foreignHostEventRowsCreated: foreignEventRowsAfter - foreignEventsBefore,
               foreignHostRegistrationsCreated: foreignRegistrationsAfter - foreignRegistrationsBefore,
@@ -2840,21 +2944,33 @@ jobs:
               ownedHostCreatedByCreator: ownedRows[0]?.createdBy === "owner-console-platform-creator",
               ownedHostUpdated: ownedHostUpdates === 1,
               transactionTimeOwnershipTestPassedLocally: true,
+              complete: true,
             };
             if (
               summary.foreignHostEventRowsCreated !== 0 ||
               summary.foreignHostRegistrationsCreated !== 0 ||
               summary.foreignHostActivityRowsCreated !== 0 ||
               !summary.foreignHostMetadataUnchanged ||
-              !summary.foreignHostSubscriptionUnchanged ||
+              !summary.foreignHostSubscriptionUnchanged
+            ) {
+              writeJsonArtifact("host-authorization.json", summary);
+              fail("Foreign-owned host authorization verification failed.", {
+                category: "PHASE2A_FOREIGN_HOST_DENIAL_FAILED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: foreignAttempt.status,
+              });
+            }
+            if (
               summary.ownedHostEventRowsCreated !== 1 ||
               summary.ownedHostRegistrationRowsCreated !== 1 ||
               summary.ownedHostActivityRowsCreated !== 1 ||
               !summary.ownedHostCreatedByCreator ||
               !summary.ownedHostUpdated
             ) {
-              fail("Official event host authorization verification failed.", {
-                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+              writeJsonArtifact("host-authorization.json", summary);
+              fail("Creator-owned host authorization verification failed.", {
+                category: "PHASE2A_OWNED_HOST_CREATE_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
                 status: ownedAttempt.status,

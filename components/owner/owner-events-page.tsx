@@ -29,6 +29,8 @@ type OwnerEventsPayload = {
   creatorEventAdmin: boolean;
   events: OwnerEvent[];
   linkedServers: OwnerLinkedServer[];
+  hostInventoryAvailable?: boolean;
+  hostInventoryCount?: number;
   warnings: string[];
 };
 
@@ -216,7 +218,8 @@ function CreateOfficialEventPanel({ payload }: { payload: OwnerEventsPayload }) 
     () => payload.linkedServers.find((server) => server.id === selectedServerId) ?? payload.linkedServers[0] ?? null,
     [payload.linkedServers, selectedServerId],
   );
-  const canSubmit = Boolean(payload.creatorEventAdmin && selectedServer && form.name.trim().length >= 3 && !submitting);
+  const hostInventoryAvailable = payload.hostInventoryAvailable !== false;
+  const canSubmit = Boolean(payload.creatorEventAdmin && hostInventoryAvailable && selectedServer && form.name.trim().length >= 3 && !submitting);
   const updateField = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -286,8 +289,8 @@ function CreateOfficialEventPanel({ payload }: { payload: OwnerEventsPayload }) 
           </Field>
         </div>
         <Field label="Hosting server">
-          <select value={selectedServer?.id ?? ""} onChange={(event) => setSelectedServerId(event.target.value)} className={inputClass()}>
-            {payload.linkedServers.length ? payload.linkedServers.map((server) => (
+          <select value={selectedServer?.id ?? ""} onChange={(event) => setSelectedServerId(event.target.value)} disabled={!hostInventoryAvailable || !payload.linkedServers.length} className={inputClass()}>
+            {!hostInventoryAvailable ? <option value="">Host inventory temporarily unavailable</option> : payload.linkedServers.length ? payload.linkedServers.map((server) => (
               <option key={server.id} value={server.id}>{server.label}{server.category ? ` / ${server.category}` : ""}</option>
             )) : <option value="">No linked servers available for this creator session</option>}
           </select>
@@ -329,6 +332,7 @@ function CreateOfficialEventPanel({ payload }: { payload: OwnerEventsPayload }) 
         <Field label="Rewards">
           <textarea value={form.rewards} onChange={(event) => updateField("rewards", event.target.value)} maxLength={2000} className={`${inputClass()} min-h-20 resize-y`} />
         </Field>
+        {!hostInventoryAvailable ? <MessagePanel message={{ tone: "error", text: "Host inventory is temporarily unavailable." }} /> : null}
         {message ? <MessagePanel message={message} /> : null}
         <button disabled={!canSubmit} className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 disabled:cursor-not-allowed disabled:opacity-45">
           {submitting ? "Creating..." : "Create official event"}

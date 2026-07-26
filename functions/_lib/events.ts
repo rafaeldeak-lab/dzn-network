@@ -1,4 +1,5 @@
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
+import { EVENT_CREATE_HOST_TRANSACTION_PREDICATE, resolveAuthorizedEventCreationHost } from "./event-hosts";
 import { ensureBillingSchema, normalizePlanKey, type PlanKey } from "./plans";
 import {
   SERVER_CATEGORIES,
@@ -246,52 +247,6 @@ const EVENT_PUBLIC_SELECT_COLUMNS = `
   competitive_events.updated_at
 `;
 
-const EVENT_CREATE_HOST_SELECT_COLUMNS = `
-  linked_servers.id,
-  linked_servers.user_id,
-  linked_servers.guild_id,
-  linked_servers.public_slug,
-  linked_servers.display_name,
-  linked_servers.hostname,
-  linked_servers.server_name,
-  linked_servers.nitrado_service_name,
-  linked_servers.server_type,
-  linked_servers.server_mode,
-  linked_servers.server_category,
-  linked_servers.competitive_enabled,
-  linked_servers.verified_server,
-  linked_servers.event_mmr,
-  linked_servers.season_points,
-  linked_servers.event_wins,
-  linked_servers.event_losses,
-  linked_servers.event_draws,
-  linked_servers.last_event_at,
-  linked_servers.current_players,
-  linked_servers.max_players,
-  linked_servers.status,
-  linked_servers.listing_visibility,
-  linked_servers.merged_into_server_id,
-  linked_servers.updated_at,
-  server_subscriptions.plan_key,
-  server_subscriptions.status AS subscription_status
-`;
-
-const EVENT_CREATE_HOST_TRANSACTION_PREDICATE = `
-  linked_servers.id = ?
-  AND linked_servers.user_id = ?
-  AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'archived')
-  AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-  AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
-  AND EXISTS (
-    SELECT 1
-    FROM server_subscriptions
-    WHERE server_subscriptions.guild_id = linked_servers.guild_id
-      AND lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing')
-      AND lower(COALESCE(server_subscriptions.plan_key, 'free')) IN ('pro', 'premium', 'network', 'partner')
-    LIMIT 1
-  )
-`;
-
 const EVENT_READ_REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "starts_at", "ends_at", "created_at", "updated_at"],
   competitive_event_servers: ["event_id", "server_id", "score", "wins", "losses", "draws"],
@@ -459,7 +414,7 @@ export async function getEventDetailPayload(env: Env, viewer: SessionUser | null
   if (!normalizedSlug) return eventNotFoundPayload();
   if (!env.DB) return demoEventDetailPayload(normalizedSlug, false) ?? eventNotFoundPayload();
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
-  if (!schemaReady.ok) return schemaReady;
+  if (schemaReady.ok === false) return schemaReady;
   const entitlement = await hasFullEventAccess(env, viewer);
   const full = options.full === true && entitlement;
   const event = await requireDb(env)
@@ -517,8 +472,13 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
   const schemaReady = await validateCompetitiveEventCreationSchema(env, requestId);
   if (!schemaReady.ok) return schemaReady;
 
-  const hostLookup = await fetchEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id, requestId);
-  if (!hostLookup.ok) return hostLookup;
+  let hostLookup;
+  try {
+    hostLookup = await resolveAuthorizedEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id);
+  } catch (error) {
+    return eventCreateFailed("host_lookup", requestId, error);
+  }
+  if (hostLookup.ok === false) return hostLookup;
   const server = hostLookup.server;
 
   let category: ServerCategory | null = null;
@@ -1158,53 +1118,7 @@ async function validateCompetitiveEventCreationSchema(env: Env, requestId: strin
   }
 }
 
-async function fetchEventCreationHost(env: Env, viewer: SessionUser, serverId: string | null | undefined, requestId: string) {
-  const cleanId = cleanIdentifier(serverId);
-  if (!cleanId) return { ok: false as const, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
-
-  try {
-    const result = await requireDb(env)
-      .prepare(
-        `SELECT ${EVENT_CREATE_HOST_SELECT_COLUMNS}
-         FROM linked_servers
-         LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-         WHERE linked_servers.id = ?
-           AND linked_servers.user_id = ?
-           AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
-           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-          LIMIT 2`,
-      )
-      .bind(cleanId, viewer.id)
-      .all<ServerRow>();
-    const rows = result.results ?? [];
-    if (rows.length === 0) return { ok: false as const, status: 404, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
-    if (rows.length > 1) {
-      return {
-        ok: false as const,
-        status: 409,
-        error: "INVALID_HOST_STATE",
-        message: "Hosting server has ambiguous billing or ownership state.",
-      };
-    }
-
-    const server = rows[0];
-    const status = String(server.status ?? "").trim().toLowerCase();
-    const visibility = String(server.listing_visibility ?? "public").trim().toLowerCase();
-    if (status === "archived" || visibility === "hidden") {
-      return {
-        ok: false as const,
-        status: 409,
-        error: "INVALID_HOST_STATE",
-        message: "Hosting server is not eligible for official event creation.",
-      };
-    }
-    return { ok: true as const, server };
-  } catch (error) {
-    return eventCreateFailed("host_lookup", requestId, error);
-  }
-}
-
-function serverHasEventEntitlement(server: Pick<ServerRow, "plan_key" | "subscription_status">) {
+function serverHasEventEntitlement(server: { plan_key: string | null; subscription_status: string | null }) {
   return isActiveSubscription(server.subscription_status) && FULL_EVENT_PLANS.includes(normalizePlanKey(server.plan_key));
 }
 

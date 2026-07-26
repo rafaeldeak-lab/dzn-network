@@ -260,8 +260,8 @@ async function assertHostOwnershipAuthorization() {
     ["inactive subscription", { subscriptionStatus: "inactive" }, 403, "PLAN_LOCKED"],
     ["archived server", { hostStatus: "archived" }, 409, "INVALID_HOST_STATE"],
     ["hidden server", { hostVisibility: "hidden" }, 409, "INVALID_HOST_STATE"],
-    ["merged server", { hostStatus: "merged" }, 404, "SERVER_NOT_FOUND"],
-    ["merged target server", { hostMergedInto: "canonical-server" }, 404, "SERVER_NOT_FOUND"],
+    ["merged server", { hostStatus: "merged" }, 409, "INVALID_HOST_STATE"],
+    ["merged target server", { hostMergedInto: "canonical-server" }, 409, "INVALID_HOST_STATE"],
     ["deleted server", { hostStatus: "deleted" }, 404, "SERVER_NOT_FOUND"],
     ["ambiguous duplicate subscriptions", { duplicateHostSubscription: true }, 409, "INVALID_HOST_STATE"],
   ] as const) {
@@ -492,11 +492,7 @@ class MemoryD1 {
   lookupHostForCreate(id: string, userId: string) {
     const host = this.findHost(id);
     if (!host || host.user_id !== userId) return [];
-    const status = String(host.status ?? "pending").toLowerCase();
-    const mergedInto = String(host.merged_into_server_id ?? "");
-    if (["deleted", "merged"].includes(status) || mergedInto) return [];
-    const rows = [{ ...host }];
-    return this.options.duplicateHostSubscription ? [...rows, { ...host }] : rows;
+    return [this.withSubscriptionCounts(host)];
   }
 
   transactionHostAuthorized(id: string, userId: string) {
@@ -505,13 +501,32 @@ class MemoryD1 {
     const status = String(host.status ?? "pending").toLowerCase();
     const visibility = String(host.listing_visibility ?? "public").toLowerCase();
     const mergedInto = String(host.merged_into_server_id ?? "");
-    const plan = String(host.plan_key ?? "free").toLowerCase();
-    const subscriptionStatus = String(host.subscription_status ?? "").toLowerCase();
     return !["deleted", "merged", "archived"].includes(status)
       && !mergedInto
       && visibility !== "hidden"
-      && ["active", "trialing"].includes(subscriptionStatus)
+      && this.subscriptionRowCount(host) === 1
+      && this.eligibleSubscriptionCount(host) === 1;
+  }
+
+  private withSubscriptionCounts(host: Record<string, unknown>) {
+    return {
+      ...host,
+      subscription_row_count: this.subscriptionRowCount(host),
+      eligible_subscription_count: this.eligibleSubscriptionCount(host),
+    };
+  }
+
+  private subscriptionRowCount(host: Record<string, unknown>) {
+    return this.options.duplicateHostSubscription && host.id === this.host.id ? 2 : 1;
+  }
+
+  private eligibleSubscriptionCount(host: Record<string, unknown>) {
+    const plan = String(host.plan_key ?? "free").toLowerCase();
+    const subscriptionStatus = String(host.subscription_status ?? "").toLowerCase();
+    const eligible = ["active", "trialing"].includes(subscriptionStatus)
       && ["pro", "premium", "network", "partner"].includes(plan);
+    if (!eligible) return 0;
+    return this.subscriptionRowCount(host);
   }
 }
 
@@ -531,7 +546,7 @@ class MemoryStatement {
       if (table === this.db.options.missingSchemaTable) return { results: [] as T[] };
       return { results: schemaColumns(table).map((name) => ({ name })) as T[] };
     }
-    if (this.query.includes("FROM linked_servers") && this.query.includes("LEFT JOIN server_subscriptions")) {
+    if (this.query.includes("FROM linked_servers") && this.query.includes("linked_servers.id = ?") && this.query.includes("linked_servers.user_id = ?")) {
       if (this.db.options.failStage === "host_lookup") throw new InjectedStageError("host_lookup");
       if (this.db.options.hostMissing) return { results: [] as T[] };
       return { results: this.db.lookupHostForCreate(String(this.bindings[0] ?? ""), String(this.bindings[1] ?? "")) as T[] };
@@ -707,14 +722,20 @@ function assertSourceGovernance() {
   assertIncludes(createCompetitiveEventBody, "creatorEventAdminDeniedPayload(env, viewer)");
   assert.equal(createCompetitiveEventBody.includes("await ensureCompetitiveEventsSchema(env);"), false, "Official event creation must not run broad request-time schema mutation.");
   assertIncludes(createCompetitiveEventBody, "validateCompetitiveEventCreationSchema(env, requestId)");
-  assertIncludes(createCompetitiveEventBody, "fetchEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id, requestId)");
+  assertIncludes(createCompetitiveEventBody, "resolveAuthorizedEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id)");
   assertIncludes(createCompetitiveEventBody, "await db.batch([");
   assertIncludes(createCompetitiveEventBody, "transactional_create");
   assertIncludes(eventsLib, "HOST_AUTHORIZATION_CHANGED", "Official event creation must report transaction-time host authorization changes safely.");
   assertIncludes(createCompetitiveEventBody, "CASE WHEN changes() = 1 THEN 'event_created' ELSE NULL END", "Activity insert must fail the batch if the host update affects zero rows.");
-  assertIncludes(eventsLib, "linked_servers.user_id = ?", "Official host lookup and mutation must bind the host to the authenticated creator.");
+  const eventHostsLib = source("functions/_lib/event-hosts.ts");
+  assertIncludes(eventHostsLib, "listAuthorizedEventCreationHosts", "Owner Event Control must use the shared event-host inventory contract.");
+  assertIncludes(eventHostsLib, "resolveAuthorizedEventCreationHost", "Official event creation must use the shared event-host resolver.");
+  assertIncludes(eventHostsLib, "linked_servers.user_id = ?", "Official host lookup and mutation must bind the host to the authenticated creator.");
+  assertIncludes(eventHostsLib, "SELECT COUNT(*)", "Official host authorization must classify duplicate subscription rows deterministically.");
   assertIncludes(eventsLib, "EVENT_CREATE_HOST_TRANSACTION_PREDICATE", "Official event creation must repeat host ownership inside the transaction.");
-  assertIncludes(eventsLib, "server_subscriptions.plan_key", "Transaction-time host guard must include the eligible subscription predicate.");
+  assertIncludes(eventHostsLib, "EVENT_CREATE_HOST_TRANSACTION_PREDICATE", "Shared host module must own the transaction-time predicate.");
+  assertIncludes(eventHostsLib, ") = 1", "Transaction-time host guard must require exactly one subscription row.");
+  assertIncludes(eventHostsLib, "server_subscriptions.plan_key", "Transaction-time host guard must include the eligible subscription predicate.");
   assert.doesNotMatch(createCompetitiveEventBody, /compensateFailedEventCreate|compensation_cleanup|DELETE\s+FROM\s+competitive_events|DELETE\s+FROM\s+competitive_event_/i, "Official event creation must not use destructive compensation cleanup.");
   assert.doesNotMatch(eventsLib, /function\s+compensateFailedEventCreate|EventCreateHostState/i, "Compensating event-create cleanup helpers must be removed.");
   assertIncludes(eventsLib, "EVENT_SCHEMA_NOT_READY");
