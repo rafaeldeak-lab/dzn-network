@@ -1315,6 +1315,29 @@ assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Authentication-precede
 assert.equal(ownerPreviewPhase2ABlock.includes("suggestionMutationAuthPrecedence"), true, "Phase 2A privacy artifact must record suggestion mutation auth precedence.");
 assert.equal(ownerPreviewPhase2ABlock.includes("async function verifyHostAuthorization(base)"), true, "Phase 2A verifier must include official event host authorization checks.");
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("host-authorization.json"'), true, "Phase 2A verifier must persist sanitized host authorization evidence.");
+assert.equal(ownerPreviewPhase2ABlock.includes("Cloudflare read failed before route probes"), false, "Cloudflare verifier failures must be stage-aware rather than route-probe specific.");
+for (const [needle, message] of [
+  ["operationLabel", "Cloudflare/D1 verifier failures must carry a safe operation label."],
+  ["cloudflareCode", "Cloudflare verifier failures must persist the sanitized numeric Cloudflare code."],
+  ["cloudflareMessage", "Cloudflare verifier failures must persist a sanitized first Cloudflare error message."],
+  ["hostLinkedServerSchemaBeforeOwnerGet", "Host verifier must inspect linked-server schema before Owner Event Control GET."],
+  ["hostLinkedServerSchemaAfterOwnerGet", "Host verifier must inspect linked-server schema after Owner Event Control GET."],
+  ["eventHostRequiredColumnsPresentBeforeOwnerGet", "Host artifact must record pre-Owner-GET event-host column readiness as a boolean."],
+  ["eventHostRequiredColumnsPresentAfterOwnerGet", "Host artifact must record post-Owner-GET event-host column readiness as a boolean."],
+  ["PHASE2A_EVENT_HOST_SCHEMA_NOT_READY", "Host verifier must classify event-host schema readiness failures distinctly."],
+  ["hostCreatorFixtureRead", "Host verifier must use labelled simple D1 reads for the creator fixture."],
+  ["hostForeignFixtureRead", "Host verifier must use labelled simple D1 reads for the foreign fixture."],
+  ["hostCreatorSubscriptionRead", "Host verifier must use labelled simple D1 reads for creator fixture subscription state."],
+  ["hostForeignSubscriptionRead", "Host verifier must use labelled simple D1 reads for foreign fixture subscription state."],
+] as const) {
+  assert.equal(ownerPreviewPhase2ABlock.includes(needle), true, message);
+}
+assert.equal(ownerPreviewPhase2ABlock.includes("hostFixtureRows"), false, "Host verifier must not use the old compound fixture query before writing diagnostics.");
+assert.equal(
+  ownerPreviewPhase2ABlock.indexOf('writeJsonArtifact("host-authorization.json"') < ownerPreviewPhase2ABlock.indexOf("hostLinkedServerSchemaBeforeOwnerGet"),
+  true,
+  "Phase 2A host verifier must write an initial host artifact before remote schema reads.",
+);
 for (const [needle, message] of [
   ["previousFailureClassification", "Phase 2A host verifier must record a safe diagnosis for host-list mismatches."],
   ["PHASE2A_HOST_INVENTORY_UNAVAILABLE", "Phase 2A host verifier must distinguish host inventory query failures."],

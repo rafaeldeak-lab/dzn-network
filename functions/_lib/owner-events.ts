@@ -159,8 +159,9 @@ async function readOfficialEvents(env: Env): Promise<OwnerOfficialEventSummary[]
 }
 
 async function readCreatorLinkedServers(env: Env, user: SessionUser): Promise<OwnerEventLinkedServer[]> {
-  const servers = await listAuthorizedEventCreationHosts(env, user);
-  return servers.map((server: AuthorizedEventCreationHost) => ({
+  const result = await listAuthorizedEventCreationHosts(env, user);
+  if (!result.ok) throw new Error(result.error);
+  return result.hosts.map((server: AuthorizedEventCreationHost) => ({
     id: String(server.id ?? ""),
     label: String(server.display_name ?? server.server_name ?? server.hostname ?? server.nitrado_service_name ?? server.id ?? "Linked server"),
     category: typeof server.server_category === "string" ? server.server_category : null,

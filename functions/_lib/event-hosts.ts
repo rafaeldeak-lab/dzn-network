@@ -1,9 +1,37 @@
-import { requireDb } from "./db";
+import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { normalizePlanKey, type PlanKey } from "./plans";
 import type { Env, SessionUser } from "./types";
 
 const EVENT_HOST_PLANS: PlanKey[] = ["pro", "premium", "network", "partner"];
 const EVENT_HOST_ACTIVE_STATUSES = ["active", "trialing"] as const;
+const EVENT_HOST_LINKED_SERVER_REQUIRED_COLUMNS = [
+  "id",
+  "user_id",
+  "guild_id",
+  "public_slug",
+  "display_name",
+  "hostname",
+  "server_name",
+  "nitrado_service_name",
+  "server_type",
+  "server_mode",
+  "server_category",
+  "competitive_enabled",
+  "verified_server",
+  "event_mmr",
+  "season_points",
+  "event_wins",
+  "event_losses",
+  "event_draws",
+  "last_event_at",
+  "current_players",
+  "max_players",
+  "status",
+  "listing_visibility",
+  "merged_into_server_id",
+  "updated_at",
+] as const;
+const EVENT_HOST_SUBSCRIPTION_REQUIRED_COLUMNS = ["guild_id", "plan_key", "status"] as const;
 
 const EVENT_HOST_SELECT_COLUMNS = `
   linked_servers.id,
@@ -111,9 +139,110 @@ export type AuthorizedEventCreationHost = {
 
 export type EventCreationHostResolution =
   | { ok: true; server: AuthorizedEventCreationHost }
-  | { ok: false; status: 403 | 404 | 409; error: string; message: string };
+  | EventCreationHostFailure;
 
-export async function listAuthorizedEventCreationHosts(env: Env, viewer: SessionUser): Promise<AuthorizedEventCreationHost[]> {
+export type EventCreationHostFailure = {
+  ok: false;
+  status: 403 | 404 | 409 | 503;
+  error: string;
+  errorCode?: string;
+  message: string;
+};
+
+export type EventCreationHostListResult =
+  | { ok: true; hosts: AuthorizedEventCreationHost[] }
+  | EventCreationHostFailure;
+
+type EventHostSchemaReadinessResult =
+  | { ok: true }
+  | {
+      ok: false;
+      status: 503;
+      error: "EVENT_HOST_SCHEMA_NOT_READY" | "D1_UNAVAILABLE";
+      errorCode: "EVENT_HOST_SCHEMA_NOT_READY" | "D1_UNAVAILABLE";
+      message: string;
+      missingCount: number;
+    };
+
+const eventHostSchemaReadiness = new WeakMap<object, Promise<EventHostSchemaReadinessResult>>();
+
+export async function ensureEventHostSchema(env: Env): Promise<EventHostSchemaReadinessResult> {
+  if (!env.DB) {
+    return {
+      ok: false,
+      status: 503,
+      error: "D1_UNAVAILABLE",
+      errorCode: "D1_UNAVAILABLE",
+      message: "Event host inventory is temporarily unavailable.",
+      missingCount: 1,
+    };
+  }
+
+  const key = env.DB as unknown as object;
+  const existing = eventHostSchemaReadiness.get(key);
+  if (existing) return existing;
+
+  const promise = ensureEventHostSchemaNow(env)
+    .catch((error) => ({
+      ok: false as const,
+      status: 503 as const,
+      error: "EVENT_HOST_SCHEMA_NOT_READY" as const,
+      errorCode: "EVENT_HOST_SCHEMA_NOT_READY" as const,
+      message: "Event host inventory is temporarily unavailable.",
+      missingCount: safeMissingCount(error),
+    }))
+    .then((result) => {
+      if (!result.ok && eventHostSchemaReadiness.get(key) === promise) {
+        eventHostSchemaReadiness.delete(key);
+      }
+      return result;
+    });
+  eventHostSchemaReadiness.set(key, promise);
+  return promise;
+}
+
+export function resetEventHostSchemaReadinessForTests(env?: Env) {
+  if (env?.DB) eventHostSchemaReadiness.delete(env.DB as unknown as object);
+}
+
+async function ensureEventHostSchemaNow(env: Env): Promise<EventHostSchemaReadinessResult> {
+  const db = requireDb(env);
+  await ensureLinkedServerMetadataColumns(env);
+  const missing: string[] = [];
+  await collectMissingColumns(db, "linked_servers", EVENT_HOST_LINKED_SERVER_REQUIRED_COLUMNS, missing);
+  await collectMissingColumns(db, "server_subscriptions", EVENT_HOST_SUBSCRIPTION_REQUIRED_COLUMNS, missing);
+  if (missing.length) {
+    return {
+      ok: false,
+      status: 503,
+      error: "EVENT_HOST_SCHEMA_NOT_READY",
+      errorCode: "EVENT_HOST_SCHEMA_NOT_READY",
+      message: "Event host inventory is temporarily unavailable.",
+      missingCount: missing.length,
+    };
+  }
+  return { ok: true };
+}
+
+async function collectMissingColumns(db: D1Database, tableName: string, requiredColumns: readonly string[], missing: string[]) {
+  const info = await db.prepare(`PRAGMA table_info(${tableName})`).all<{ name: string }>();
+  const names = new Set((info.results ?? []).map((column) => column.name));
+  if (names.size === 0) {
+    missing.push(tableName);
+    return;
+  }
+  for (const column of requiredColumns) {
+    if (!names.has(column)) missing.push(`${tableName}.${column}`);
+  }
+}
+
+function safeMissingCount(error: unknown) {
+  return error instanceof Error && error.message ? 1 : 1;
+}
+
+export async function listAuthorizedEventCreationHosts(env: Env, viewer: SessionUser): Promise<EventCreationHostListResult> {
+  const schemaReady = await ensureEventHostSchema(env);
+  if (!schemaReady.ok) return schemaUnavailablePayload(schemaReady);
   const result = await requireDb(env)
     .prepare(
       `SELECT ${EVENT_HOST_SELECT_COLUMNS}
@@ -139,7 +268,7 @@ export async function listAuthorizedEventCreationHosts(env: Env, viewer: Session
     )
     .bind(viewer.id)
     .all<AuthorizedEventCreationHost>();
-  return result.results ?? [];
+  return { ok: true, hosts: result.results ?? [] };
 }
 
 export async function resolveAuthorizedEventCreationHost(
@@ -149,6 +278,8 @@ export async function resolveAuthorizedEventCreationHost(
 ): Promise<EventCreationHostResolution> {
   const cleanId = cleanEventHostId(serverId);
   if (!cleanId) return serverNotFoundPayload();
+  const schemaReady = await ensureEventHostSchema(env);
+  if (!schemaReady.ok) return schemaUnavailablePayload(schemaReady);
 
   const result = await requireDb(env)
     .prepare(
@@ -199,6 +330,16 @@ function hasEventHostEntitlement(server: Pick<AuthorizedEventCreationHost, "plan
 
 function serverNotFoundPayload() {
   return { ok: false as const, status: 404 as const, error: "SERVER_NOT_FOUND", message: "Hosting server not found." };
+}
+
+function schemaUnavailablePayload(result: Extract<EventHostSchemaReadinessResult, { ok: false }>): EventCreationHostFailure {
+  return {
+    ok: false,
+    status: result.status,
+    error: result.error,
+    errorCode: result.errorCode,
+    message: result.message,
+  };
 }
 
 function invalidHostStatePayload() {

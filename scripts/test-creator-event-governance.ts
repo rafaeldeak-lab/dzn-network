@@ -176,6 +176,15 @@ async function assertSuccessfulCreatorEventCreate() {
 async function assertSafeCreatorEventFailure(stage: CreatorEventFailureStage) {
   const env = memoryEnv({ failStage: stage });
   const result = await createCompetitiveEvent(env, creator, validCreateBody()) as Record<string, unknown>;
+  if (stage === "schema_readiness") {
+    assert.equal(result.status, 503, "Event-host schema readiness failures should return a safe HTTP 503.");
+    assert.equal(result.errorCode, "EVENT_HOST_SCHEMA_NOT_READY", "Event-host schema readiness failures should return the safe host schema code.");
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes("injected"), false, "Event-host schema readiness failures must not expose raw injected exceptions.");
+    assert.equal(serialized.includes("SELECT"), false, "Event-host schema readiness failures must not expose SQL.");
+    assertNoPartialEvent(env.DB, stage);
+    return;
+  }
   assert.equal(result.status, 500, `${stage} should return a safe HTTP 500.`);
   assert.equal(result.errorCode, "EVENT_CREATE_FAILED", `${stage} should return the safe error code.`);
   assert.match(String(result.requestId), /^event-create-/, `${stage} should include a safe request id.`);
@@ -568,6 +577,9 @@ class MemoryStatement {
   }
 
   async run() {
+    if (/ALTER\s+TABLE\s+linked_servers\s+ADD\s+COLUMN/i.test(this.query)) {
+      return { success: true };
+    }
     if (this.query.includes("INSERT INTO competitive_events")) {
       if (this.db.options.failStage === "event_insert") throw new InjectedStageError("event_insert");
       if (!this.db.transactionHostAuthorized(String(this.bindings[16] ?? ""), String(this.bindings[17] ?? ""))) {
@@ -668,7 +680,33 @@ function schemaColumns(table: string) {
     competitive_event_servers: ["id", "event_id", "server_id", "category", "approved", "seed", "registered_at"],
     competitive_event_matches: ["id", "event_id"],
     competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
-    linked_servers: ["id", "user_id", "guild_id", "server_category", "competitive_enabled", "last_event_at", "updated_at", "status", "listing_visibility", "merged_into_server_id"],
+    linked_servers: [
+      "id",
+      "user_id",
+      "guild_id",
+      "public_slug",
+      "display_name",
+      "hostname",
+      "server_name",
+      "nitrado_service_name",
+      "server_type",
+      "server_mode",
+      "server_category",
+      "competitive_enabled",
+      "verified_server",
+      "event_mmr",
+      "season_points",
+      "event_wins",
+      "event_losses",
+      "event_draws",
+      "last_event_at",
+      "current_players",
+      "max_players",
+      "status",
+      "listing_visibility",
+      "merged_into_server_id",
+      "updated_at",
+    ],
     server_subscriptions: ["guild_id", "plan_key", "status"],
   };
   return columns[table] ?? [];
@@ -730,6 +768,10 @@ function assertSourceGovernance() {
   const eventHostsLib = source("functions/_lib/event-hosts.ts");
   assertIncludes(eventHostsLib, "listAuthorizedEventCreationHosts", "Owner Event Control must use the shared event-host inventory contract.");
   assertIncludes(eventHostsLib, "resolveAuthorizedEventCreationHost", "Official event creation must use the shared event-host resolver.");
+  assertIncludes(eventHostsLib, "ensureEventHostSchema", "Event-host queries must run schema readiness before reading linked-server host columns.");
+  assertIncludes(eventHostsLib, "ensureLinkedServerMetadataColumns(env)", "Event-host readiness must invoke linked-server metadata readiness.");
+  assertIncludes(eventHostsLib, "EVENT_HOST_SCHEMA_NOT_READY", "Event-host schema failures must use a safe unavailable payload.");
+  assertIncludes(eventHostsLib, "eventHostSchemaReadiness.get(key) === promise", "Failed event-host readiness probes must use identity-safe eviction.");
   assertIncludes(eventHostsLib, "linked_servers.user_id = ?", "Official host lookup and mutation must bind the host to the authenticated creator.");
   assertIncludes(eventHostsLib, "SELECT COUNT(*)", "Official host authorization must classify duplicate subscription rows deterministically.");
   assertIncludes(eventsLib, "EVENT_CREATE_HOST_TRANSACTION_PREDICATE", "Official event creation must repeat host ownership inside the transaction.");

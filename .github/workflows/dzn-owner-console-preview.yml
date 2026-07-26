@@ -1925,6 +1925,7 @@ jobs:
             return String(value ?? "")
               .replace(/dzn_session=[^;\s"]+/gi, "dzn_session=[redacted-cookie]")
               .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "[uuid]")
+              .replace(/\b[0-9a-f]{32}\b/gi, "[redacted-id]")
               .replace(/[A-Za-z0-9_\-]{64,}/g, "[redacted]")
               .slice(0, 500);
           }
@@ -1955,6 +1956,9 @@ jobs:
               contentType: details.contentType ? sanitizeFailureValue(details.contentType) : undefined,
               bodyLength: details.bodyLength ?? undefined,
               cacheStatus: details.cacheStatus ? sanitizeFailureValue(details.cacheStatus) : undefined,
+              cloudflareCode: details.cloudflareCode ?? undefined,
+              cloudflareMessage: details.cloudflareMessage ? sanitizeFailureValue(details.cloudflareMessage) : undefined,
+              operationLabel: details.operationLabel ? sanitizeFailureValue(details.operationLabel) : undefined,
               sessionRowPresent: typeof details.sessionRowPresent === "boolean" ? details.sessionRowPresent : undefined,
               sessionUserMappingValid: typeof details.sessionUserMappingValid === "boolean" ? details.sessionUserMappingValid : undefined,
               branch: process.env.CANDIDATE_BRANCH,
@@ -1993,7 +1997,7 @@ jobs:
               previewDb: d1BindingId(configs.preview || {}),
             });
           }
-          async function cloudflare(path, init = {}) {
+          async function cloudflare(path, init = {}, operationLabel = "cloudflareRead") {
             const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}${path}`, {
               ...init,
               headers: {
@@ -2003,19 +2007,36 @@ jobs:
               },
             });
             const text = await response.text();
-            const parsed = text ? JSON.parse(text) : {};
+            let parsed = {};
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { success: false, errors: [{ code: "NON_JSON_RESPONSE", message: "Cloudflare returned a non-JSON response." }] };
+            }
             if (!response.ok || parsed.success === false) {
               const first = Array.isArray(parsed.errors) ? parsed.errors[0] : null;
-              fail(`Cloudflare read failed before route probes: status=${response.status}; code=${first?.code ?? "unknown"}`);
+              const cloudflareCode = first?.code ?? "unknown";
+              const cloudflareMessage = sanitizeFailureValue(first?.message || "Cloudflare request failed.");
+              fail(
+                `Cloudflare D1 read failed during ${activeStage}; operation=${operationLabel}; status=${response.status}; code=${cloudflareCode}; message=${cloudflareMessage}`,
+                {
+                  category: "PHASE2A_PREVIEW_VERIFICATION_FAILED",
+                  stage: activeStage,
+                  status: response.status,
+                  cloudflareCode,
+                  cloudflareMessage,
+                  operationLabel,
+                },
+              );
             }
             return parsed.result;
           }
-          async function d1Query(sql, params = []) {
+          async function d1Query(sql, params = [], operationLabel = "d1Read") {
             if (/\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|PRAGMA\s+wal_checkpoint)\b/i.test(sql)) fail("Phase 2A verification D1 query must be read-only.");
             const result = await cloudflare(`/d1/database/${previewId}/query`, {
               method: "POST",
               body: JSON.stringify({ sql, params }),
-            });
+            }, operationLabel);
             const first = Array.isArray(result) ? result[0] : result;
             return first?.results || [];
           }
@@ -2715,27 +2736,141 @@ jobs:
           }
           async function verifyHostAuthorization(base) {
             const jsonHeaders = { "Content-Type": "application/json" };
-            const readCount = async (sql, params = []) => Number((await d1Query(sql, params))[0]?.count || 0);
-            const hostFixtureRows = await d1Query(
-              `SELECT linked_servers.id,
-                      linked_servers.user_id AS userId,
-                      linked_servers.status,
-                      linked_servers.listing_visibility AS listingVisibility,
-                      linked_servers.merged_into_server_id AS mergedInto,
-                      (SELECT COUNT(*) FROM server_subscriptions WHERE server_subscriptions.guild_id = linked_servers.guild_id) AS subscriptionRowCount,
-                      (SELECT COUNT(*) FROM server_subscriptions WHERE server_subscriptions.guild_id = linked_servers.guild_id AND lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing') AND lower(COALESCE(server_subscriptions.plan_key, 'free')) IN ('pro', 'premium', 'network', 'partner')) AS eligibleSubscriptionCount
-               FROM linked_servers
-               WHERE linked_servers.id IN (?, ?);`,
-              [creatorHostId, foreignHostId],
-            );
-            const fixturesById = new Map(hostFixtureRows.map((row) => [String(row.id || ""), row]));
-            const fixtureState = (id, expectedUserId) => {
-              const row = fixturesById.get(id) || null;
+            const hostRequiredColumns = [
+              "id",
+              "user_id",
+              "guild_id",
+              "status",
+              "listing_visibility",
+              "merged_into_server_id",
+              "server_type",
+              "server_mode",
+              "server_category",
+              "competitive_enabled",
+              "last_event_at",
+              "updated_at",
+            ];
+            let hostReport = {
+              diagnosticStarted: true,
+              diagnosticOperation: "initial",
+              linkedServerSchemaChecked: false,
+              eventHostRequiredColumnsPresentBeforeOwnerGet: null,
+              eventHostRequiredColumnsPresentAfterOwnerGet: null,
+              ownerControlStatus: null,
+              creatorEventAdmin: null,
+              hostInventoryAvailable: null,
+              creatorOwnHostListed: null,
+              foreignHostListed: null,
+              foreignHostAttemptStatus: null,
+              ownedHostAttemptStatus: null,
+              complete: false,
+            };
+            const writeHostReport = (patch = {}) => {
+              hostReport = { ...hostReport, ...patch };
+              writeJsonArtifact("host-authorization.json", hostReport);
+              return hostReport;
+            };
+            const requiredHostColumnsPresent = (rows) => {
+              const columns = new Set((rows || []).map((row) => String(row?.name || "")));
+              return hostRequiredColumns.every((column) => columns.has(column));
+            };
+            const classifyHistoricalFailure = (beforePresent, afterPresent) => {
+              if (!beforePresent && afterPresent) return "EVENT_HOST_COLUMN_NOT_READY";
+              if (beforePresent && afterPresent) return "EVENT_HOST_SCHEMA_READY_QUERY_REJECTED";
+              if (!afterPresent) return "EVENT_HOST_COLUMN_NOT_READY";
+              return "OTHER_SAFE_D1_FAILURE";
+            };
+            const readCount = async (sql, params = [], operationLabel = "d1Read") => Number((await d1Query(sql, params, operationLabel))[0]?.count || 0);
+            writeHostReport();
+
+            const beforeSchema = await d1Query("PRAGMA table_info(linked_servers);", [], "hostLinkedServerSchemaBeforeOwnerGet");
+            const beforeRequiredColumnsPresent = requiredHostColumnsPresent(beforeSchema);
+            writeHostReport({
+              diagnosticOperation: "hostLinkedServerSchemaBeforeOwnerGet",
+              linkedServerSchemaChecked: true,
+              eventHostRequiredColumnsPresentBeforeOwnerGet: beforeRequiredColumnsPresent,
+            });
+
+            const creatorEvents = await fetchJson(base, "/api/owner/events", 200, {
+              headers: { Cookie: creatorCookie },
+              category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+              stage: "authMatrix",
+            });
+            const linkedServers = Array.isArray(creatorEvents.json?.linkedServers) ? creatorEvents.json.linkedServers : [];
+            const linkedServerIds = linkedServers.map((server) => String(server?.id || ""));
+            const warnings = Array.isArray(creatorEvents.json?.warnings) ? creatorEvents.json.warnings : [];
+            const creatorEventAdmin = creatorEvents.json?.creatorEventAdmin === true;
+            const hostInventoryAvailable = creatorEvents.json?.hostInventoryAvailable === true;
+            const creatorOwnHostListed = linkedServerIds.includes(creatorHostId);
+            const foreignHostListed = linkedServerIds.includes(foreignHostId);
+            writeHostReport({
+              diagnosticOperation: "ownerEventControlGet",
+              ownerControlStatus: creatorEvents.status,
+              creatorEventAdmin,
+              hostInventoryAvailable,
+              hostInventoryWarningCount: warnings.length,
+              listedHostCount: linkedServers.length,
+              creatorOwnHostListed,
+              foreignHostListed,
+            });
+
+            const afterSchema = await d1Query("PRAGMA table_info(linked_servers);", [], "hostLinkedServerSchemaAfterOwnerGet");
+            const afterRequiredColumnsPresent = requiredHostColumnsPresent(afterSchema);
+            const previousFailureClassification = classifyHistoricalFailure(beforeRequiredColumnsPresent, afterRequiredColumnsPresent);
+            writeHostReport({
+              diagnosticOperation: "hostLinkedServerSchemaAfterOwnerGet",
+              eventHostRequiredColumnsPresentAfterOwnerGet: afterRequiredColumnsPresent,
+              previousFailureClassification,
+            });
+            if (!afterRequiredColumnsPresent) {
+              fail("Event-host linked-server schema was not ready after Owner Event Control readiness.", {
+                category: "PHASE2A_EVENT_HOST_SCHEMA_NOT_READY",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+                status: creatorEvents.status,
+              });
+            }
+
+            const readHostFixture = async (id, expectedUserId, fixtureOperationLabel, subscriptionOperationLabel) => {
+              const rows = await d1Query(
+                `SELECT
+                   id,
+                   user_id AS userId,
+                   guild_id AS guildId,
+                   status,
+                   listing_visibility AS listingVisibility,
+                   merged_into_server_id AS mergedInto
+                 FROM linked_servers
+                 WHERE id = ?
+                 LIMIT 1`,
+                [id],
+                fixtureOperationLabel,
+              );
+              const row = rows[0] || null;
+              let subscriptionRowCount = 0;
+              let eligibleSubscriptionCount = 0;
+              if (row?.guildId) {
+                const subscriptionRows = await d1Query(
+                  `SELECT
+                     COUNT(*) AS subscriptionRowCount,
+                     COALESCE(SUM(
+                       CASE
+                         WHEN lower(COALESCE(status, '')) IN ('active', 'trialing')
+                          AND lower(COALESCE(plan_key, 'free')) IN ('pro', 'premium', 'network', 'partner')
+                         THEN 1 ELSE 0
+                       END
+                     ), 0) AS eligibleSubscriptionCount
+                   FROM server_subscriptions
+                   WHERE guild_id = ?`,
+                  [row.guildId],
+                  subscriptionOperationLabel,
+                );
+                subscriptionRowCount = Number(subscriptionRows[0]?.subscriptionRowCount || 0);
+                eligibleSubscriptionCount = Number(subscriptionRows[0]?.eligibleSubscriptionCount || 0);
+              }
               const status = String(row?.status || "").toLowerCase();
               const listingVisibility = String(row?.listingVisibility || "public").toLowerCase();
               const mergedInto = String(row?.mergedInto || "");
-              const subscriptionRowCount = Number(row?.subscriptionRowCount || 0);
-              const eligibleSubscriptionCount = Number(row?.eligibleSubscriptionCount || 0);
               return {
                 exists: Boolean(row),
                 ownershipValid: row?.userId === expectedUserId,
@@ -2751,32 +2886,14 @@ jobs:
                 eligibleSubscriptionCount,
               };
             };
-            const creatorFixture = fixtureState(creatorHostId, "owner-console-platform-creator");
-            const foreignFixture = fixtureState(foreignHostId, "phase2a-preview-member");
-            const creatorEvents = await fetchJson(base, "/api/owner/events", 200, {
-              headers: { Cookie: creatorCookie },
-              category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
-              stage: "authMatrix",
-            });
-            const linkedServers = Array.isArray(creatorEvents.json?.linkedServers) ? creatorEvents.json.linkedServers : [];
-            const linkedServerIds = linkedServers.map((server) => String(server?.id || ""));
-            const warnings = Array.isArray(creatorEvents.json?.warnings) ? creatorEvents.json.warnings : [];
-            const creatorEventAdmin = creatorEvents.json?.creatorEventAdmin === true;
-            const hostInventoryAvailable = creatorEvents.json?.hostInventoryAvailable === true;
-            const creatorOwnHostListed = linkedServerIds.includes(creatorHostId);
-            const foreignHostListed = linkedServerIds.includes(foreignHostId);
+            const creatorFixture = await readHostFixture(creatorHostId, "owner-console-platform-creator", "hostCreatorFixtureRead", "hostCreatorSubscriptionRead");
+            const foreignFixture = await readHostFixture(foreignHostId, "phase2a-preview-member", "hostForeignFixtureRead", "hostForeignSubscriptionRead");
             const creatorFixtureOwnershipValid = creatorFixture.ownershipValid;
             const foreignFixtureOwnershipValid = foreignFixture.ownershipValid;
             const creatorFixtureEligible = creatorFixture.eligible;
             const foreignFixtureEligibleForItsOwner = foreignFixture.eligible;
-            const previousFailureClassification =
-              !creatorEventAdmin ? "CREATOR_EVENT_ADMIN_FALSE"
-              : !creatorFixtureOwnershipValid || !foreignFixtureOwnershipValid || !creatorFixtureEligible || !foreignFixtureEligibleForItsOwner ? "FIXTURE_INELIGIBLE"
-              : !hostInventoryAvailable ? "HOST_INVENTORY_UNAVAILABLE"
-              : !creatorOwnHostListed ? "CREATOR_HOST_MISSING"
-              : foreignHostListed ? "FOREIGN_HOST_LISTED"
-              : "NONE";
-            const partialSummary = {
+            const partialSummary = writeHostReport({
+              diagnosticOperation: "hostFixtureReads",
               ownerControlStatus: creatorEvents.status,
               creatorEventAdmin,
               hostInventoryAvailable,
@@ -2792,8 +2909,7 @@ jobs:
               foreignHostAttemptStatus: null,
               ownedHostAttemptStatus: null,
               complete: false,
-            };
-            writeJsonArtifact("host-authorization.json", partialSummary);
+            });
             if (!creatorFixtureOwnershipValid || !foreignFixtureOwnershipValid || !creatorFixtureEligible || !foreignFixtureEligibleForItsOwner) {
               fail("Phase 2A host authorization fixtures are not eligible or have unexpected ownership.", {
                 category: "PHASE2A_HOST_FIXTURE_INELIGIBLE",

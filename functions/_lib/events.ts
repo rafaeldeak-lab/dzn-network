@@ -469,9 +469,6 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
   if (creatorDenied) return creatorDenied;
 
   const requestId = makeEventCreateRequestId();
-  const schemaReady = await validateCompetitiveEventCreationSchema(env, requestId);
-  if (!schemaReady.ok) return schemaReady;
-
   let hostLookup;
   try {
     hostLookup = await resolveAuthorizedEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id);
@@ -480,6 +477,8 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
   }
   if (hostLookup.ok === false) return hostLookup;
   const server = hostLookup.server;
+  const schemaReady = await validateCompetitiveEventCreationSchema(env, requestId);
+  if (!schemaReady.ok) return schemaReady;
 
   let category: ServerCategory | null = null;
   try {

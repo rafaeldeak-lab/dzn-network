@@ -15,7 +15,12 @@ import {
   sanitizeOwnerDiscordChannelMappingInput,
 } from "../functions/_lib/owner-discord-control";
 import { hmacSha256 } from "../functions/_lib/crypto";
-import { resolveAuthorizedEventCreationHost } from "../functions/_lib/event-hosts";
+import {
+  ensureEventHostSchema,
+  listAuthorizedEventCreationHosts,
+  resetEventHostSchemaReadinessForTests,
+  resolveAuthorizedEventCreationHost,
+} from "../functions/_lib/event-hosts";
 import { getOwnerEventControlPayload } from "../functions/_lib/owner-events";
 import { onRequest as onPublicEventsListRequest } from "../functions/api/events";
 import { onRequest as onPublicEventDetailRequest } from "../functions/api/events/[slug]";
@@ -574,6 +579,11 @@ async function assertOwnerPrivateDraftReviewRoutes() {
     const resolved = await resolveAuthorizedEventCreationHost(env, creatorUser, listed.id);
     assert.equal(resolved.ok, true, "Every listed host must be accepted by the direct event-create resolver.");
   }
+  const directHostList = await listAuthorizedEventCreationHosts(env, creatorUser);
+  assert.equal(directHostList.ok, true, "The shared event-host list helper should return an explicit successful result.");
+  if (directHostList.ok) {
+    assert.deepEqual(directHostList.hosts.map((server) => server.id), ["creator-event-host"]);
+  }
   for (const [serverId, expectedStatus, expectedError] of [
     ["foreign-event-host", 404, "SERVER_NOT_FOUND"],
     ["creator-free-host", 403, "PLAN_LOCKED"],
@@ -590,6 +600,73 @@ async function assertOwnerPrivateDraftReviewRoutes() {
       assert.equal(resolved.error, expectedError, `${serverId} resolver error should match the safe host contract.`);
     }
   }
+
+  const repairableDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingMergedIntoInitially: true });
+  const repairableEnv = {
+    DB: repairableDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(repairableEnv);
+  assert.equal(repairableDb.hasLinkedServerColumn("merged_into_server_id"), false, "The readiness fixture should start without the linked-server merge column.");
+  const repairedList = await listAuthorizedEventCreationHosts(repairableEnv, creatorUser);
+  assert.equal(repairedList.ok, true, "Event-host listing should invoke linked-server schema readiness before reading hosts.");
+  assert.equal(repairableDb.hasLinkedServerColumn("merged_into_server_id"), true, "Linked-server schema readiness should add the missing merge column.");
+  assert.equal(repairableDb.linkedServerAlterStatements.some((statement) => /merged_into_server_id/i.test(statement)), true, "The existing linked-server schema helper should be responsible for the missing merge column.");
+
+  const resolverRepairDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingMergedIntoInitially: true });
+  const resolverRepairEnv = {
+    DB: resolverRepairDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(resolverRepairEnv);
+  const repairedResolver = await resolveAuthorizedEventCreationHost(resolverRepairEnv, creatorUser, "creator-event-host");
+  assert.equal(repairedResolver.ok, true, "Direct event-host resolution should invoke schema readiness independently.");
+  assert.equal(resolverRepairDb.hasLinkedServerColumn("merged_into_server_id"), true);
+
+  const recoveringDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingCompetitiveEnabledInitially: true });
+  const recoveringEnv = {
+    DB: recoveringDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(recoveringEnv);
+  const firstReadiness = await ensureEventHostSchema(recoveringEnv);
+  assert.equal(firstReadiness.ok, false, "Missing event-host columns should produce a safe readiness failure.");
+  if (!firstReadiness.ok) {
+    assert.equal(firstReadiness.status, 503);
+    assert.equal(firstReadiness.error, "EVENT_HOST_SCHEMA_NOT_READY");
+  }
+  const failedList = await listAuthorizedEventCreationHosts(recoveringEnv, creatorUser);
+  assert.equal(failedList.ok, false, "A failed readiness result must not be reported as an empty host list.");
+  recoveringDb.addLinkedServerColumn("competitive_enabled");
+  const recoveredReadiness = await ensureEventHostSchema(recoveringEnv);
+  assert.equal(recoveredReadiness.ok, true, "Failed event-host readiness must be evicted so the same warm Env can recover.");
+  const linkedPragmaCallsAfterRecovery = recoveringDb.linkedServerPragmaCalls;
+  const cachedReadiness = await ensureEventHostSchema(recoveringEnv);
+  assert.equal(cachedReadiness.ok, true);
+  assert.equal(recoveringDb.linkedServerPragmaCalls, linkedPragmaCallsAfterRecovery, "Successful event-host readiness should remain cached.");
+
+  const concurrentDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingCompetitiveEnabledInitially: true });
+  const concurrentEnv = {
+    DB: concurrentDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(concurrentEnv);
+  const [concurrentA, concurrentB] = await Promise.all([ensureEventHostSchema(concurrentEnv), ensureEventHostSchema(concurrentEnv)]);
+  assert.equal(concurrentA.ok, false);
+  assert.equal(concurrentB.ok, false);
+  assert.equal(concurrentDb.linkedServerPragmaCalls, 2, "Concurrent event-host readiness calls should share one in-flight probe.");
+  concurrentDb.addLinkedServerColumn("competitive_enabled");
+  const retriedAfterConcurrentFailure = await ensureEventHostSchema(concurrentEnv);
+  assert.equal(retriedAfterConcurrentFailure.ok, true, "A settled failed shared readiness probe must not pin the warm process.");
+
   const unavailableEnv = {
     DB: new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { failHostInventory: true }) as unknown as D1Database,
     SESSION_SECRET: secret,
@@ -610,6 +687,42 @@ async function assertOwnerPrivateDraftReviewRoutes() {
   assert.equal(anonymousOwnerPost.status, 401, "Owner Event Control POST must require creator authentication before reading a body.");
   assert.match(anonymousOwnerPost.headers.get("cache-control") ?? "", /private,\s*no-store/, "Owner Event Control POST denials must be private/no-store.");
   assert.equal(anonymousOwnerPost.headers.get("x-dzn-cache"), "BYPASS");
+  const unavailableHostSchemaEnv = {
+    DB: new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingCompetitiveEnabledInitially: true }) as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  const unavailableHostSchemaInventory = await getOwnerEventControlPayload(unavailableHostSchemaEnv, creatorUser);
+  assert.equal(unavailableHostSchemaInventory.hostInventoryAvailable, false, "Owner Event Control must report unavailable host inventory on readiness failure.");
+  assert.deepEqual(unavailableHostSchemaInventory.linkedServers, []);
+  assert.equal(unavailableHostSchemaInventory.warnings.includes("event_host_inventory_unavailable"), true);
+  const unavailableHostSchemaPost = await onOwnerEventsApiPost(makeOwnerDraftReviewContext(
+    unavailableHostSchemaEnv,
+    "https://example.com/api/owner/events",
+    `dzn_session=${creatorToken}`,
+    "",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Unavailable Host Schema Event",
+        event_type: "community_cup",
+        hosting_server_id: "creator-event-host",
+        server_limit: 8,
+        team_limit: 8,
+        status: "registration_open",
+        visibility: "private",
+      }),
+    },
+  ));
+  assert.equal(unavailableHostSchemaPost.status, 503, "Owner Event Control POST must fail safely when event-host schema readiness fails.");
+  assert.match(unavailableHostSchemaPost.headers.get("cache-control") ?? "", /private,\s*no-store/);
+  assert.equal(unavailableHostSchemaPost.headers.get("x-dzn-cache"), "BYPASS");
+  const unavailableHostSchemaPayload = await unavailableHostSchemaPost.json() as { error: string; message: string; missingCount?: number };
+  assert.equal(unavailableHostSchemaPayload.error, "EVENT_HOST_SCHEMA_NOT_READY");
+  assert.equal(unavailableHostSchemaPayload.message, "Event host inventory is temporarily unavailable.");
+  assert.equal("missingCount" in unavailableHostSchemaPayload, false, "Owner POST host-schema failures must not expose schema detail counts.");
 
   const publicEvent = await publicEventDetail(env, "public-live");
   assert.equal(publicEvent.status, 200, "Stored public events should remain publicly readable.");
@@ -687,11 +800,11 @@ async function assertOwnerPrivateDraftReviewRoutes() {
   assert.equal(privateKnownDemoSlug.status, 404, "A private stored event using a known demo slug must not fall through to demo content.");
 }
 
-function makeOwnerDraftReviewContext(env: Env, url: string, cookie?: string, slug = ""): PagesContext {
-  const headers = new Headers();
+function makeOwnerDraftReviewContext(env: Env, url: string, cookie?: string, slug = "", requestInit: RequestInit = {}): PagesContext {
+  const headers = new Headers(requestInit.headers);
   if (cookie) headers.set("cookie", cookie);
   return {
-    request: new Request(url, { headers }),
+    request: new Request(url, { ...requestInit, headers }),
     env,
     params: { slug },
     waitUntil: () => undefined,
@@ -728,12 +841,48 @@ function publicEventDetail(env: Env, slug: string, cookie?: string, search = "")
 
 type OwnerDraftReviewDbOptions = {
   failHostInventory?: boolean;
+  missingMergedIntoInitially?: boolean;
+  missingCompetitiveEnabledInitially?: boolean;
 };
 
 class OwnerDraftReviewDb {
   private readonly hosts: Array<Record<string, unknown>>;
+  private readonly linkedServerColumns: Set<string>;
+  private readonly serverSubscriptionColumns = new Set(["guild_id", "plan_key", "status"]);
+  linkedServerPragmaCalls = 0;
+  serverSubscriptionPragmaCalls = 0;
+  readonly linkedServerAlterStatements: string[] = [];
 
   constructor(private readonly sessionUsersByHash: Map<string, SessionUser>, private readonly options: OwnerDraftReviewDbOptions = {}) {
+    this.linkedServerColumns = new Set([
+      "id",
+      "user_id",
+      "guild_id",
+      "public_slug",
+      "display_name",
+      "hostname",
+      "server_name",
+      "nitrado_service_name",
+      "server_type",
+      "server_mode",
+      "server_category",
+      "competitive_enabled",
+      "verified_server",
+      "event_mmr",
+      "season_points",
+      "event_wins",
+      "event_losses",
+      "event_draws",
+      "last_event_at",
+      "current_players",
+      "max_players",
+      "status",
+      "listing_visibility",
+      "merged_into_server_id",
+      "updated_at",
+    ]);
+    if (options.missingMergedIntoInitially) this.linkedServerColumns.delete("merged_into_server_id");
+    if (options.missingCompetitiveEnabledInitially) this.linkedServerColumns.delete("competitive_enabled");
     this.hosts = [
       this.hostRow("creator-event-host", "creator-user", "guild-creator-event-host", "Creator Event Host", "live", "public", null, "deathmatch", "pro", "active", 1),
       this.hostRow("foreign-event-host", "foreign-user", "guild-foreign-event-host", "Foreign Event Host", "live", "public", null, "deathmatch", "premium", "active", 1),
@@ -790,14 +939,29 @@ class OwnerDraftReviewDb {
   }
 
   tableColumns(table: string) {
+    if (table === "linked_servers") {
+      this.linkedServerPragmaCalls += 1;
+      return [...this.linkedServerColumns].map((name) => ({ name }));
+    }
+    if (table === "server_subscriptions") {
+      this.serverSubscriptionPragmaCalls += 1;
+      return [...this.serverSubscriptionColumns].map((name) => ({ name }));
+    }
     const columns: Record<string, string[]> = {
       competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "starts_at", "ends_at", "created_at", "updated_at"],
       competitive_event_servers: ["event_id", "server_id", "score", "wins", "losses", "draws"],
       competitive_event_matches: ["event_id", "match_status"],
       competitive_event_activity: ["event_id", "server_id", "activity_type", "message", "created_at"],
-      linked_servers: ["id", "public_slug", "server_category", "status"],
     };
     return (columns[table] ?? []).map((name) => ({ name }));
+  }
+
+  addLinkedServerColumn(name: string) {
+    this.linkedServerColumns.add(name);
+  }
+
+  hasLinkedServerColumn(name: string) {
+    return this.linkedServerColumns.has(name);
   }
 
   private eventRow(id: string, name: string, slug: string, status: string, visibility: string, rules = "Public rules", rewards = "Public rewards") {
@@ -932,5 +1096,15 @@ class OwnerDraftReviewStatement {
       return { results: [] as T[] };
     }
     return { results: [] as T[] };
+  }
+
+  async run() {
+    const linkedServerAlterMatch = this.sql.match(/ALTER\s+TABLE\s+linked_servers\s+ADD\s+COLUMN\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    if (linkedServerAlterMatch) {
+      this.db.addLinkedServerColumn(linkedServerAlterMatch[1]);
+      this.db.linkedServerAlterStatements.push(this.sql);
+      return { success: true };
+    }
+    return { success: true };
   }
 }
