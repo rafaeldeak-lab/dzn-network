@@ -5,7 +5,11 @@ import type { Env, SessionUser } from "./types";
 export const SUGGESTION_PUBLIC_STATUSES = ["public_voting", "shortlisted", "accepted", "converted_to_event"] as const;
 export const SUGGESTION_STATUS_FILTERS = ["all_public", ...SUGGESTION_PUBLIC_STATUSES] as const;
 export const SUGGESTION_SORTS = ["trending", "newest", "most_supported", "most_active"] as const;
+export const SUGGESTION_SUBMISSION_COOLDOWN_MS = 10 * 60 * 1000;
 export const SUGGESTION_VOTE_CHANGE_COOLDOWN_MS = 1500;
+
+const SUGGESTION_DAILY_LIMIT = 3;
+const SUGGESTION_DAILY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type EventSuggestionSort = typeof SUGGESTION_SORTS[number];
 export type EventSuggestionStatusFilter = typeof SUGGESTION_STATUS_FILTERS[number];
@@ -371,34 +375,58 @@ export async function createEventSuggestion(env: Env, user: SessionUser | null, 
   const validation = await validateSuggestionInput(input, env);
   if (!validation.ok) return validation;
   const db = requireDb(env);
-  const [duplicate, recent, today, recentTitles] = await Promise.all([
-    db.prepare("SELECT id FROM event_suggestions WHERE content_fingerprint = ? LIMIT 1").bind(validation.value.contentFingerprint).first<{ id: string }>(),
+  const mutationNowMs = Date.now();
+  const mutationNowIso = new Date(mutationNowMs).toISOString();
+  const mutationCutoffIso = new Date(mutationNowMs - SUGGESTION_SUBMISSION_COOLDOWN_MS).toISOString();
+  const dailyCutoffIso = new Date(mutationNowMs - SUGGESTION_DAILY_WINDOW_MS).toISOString();
+  const [recent, today, recentTitles] = await Promise.all([
     db.prepare("SELECT created_at FROM event_suggestions WHERE submitted_by_user_id = ? ORDER BY datetime(created_at) DESC LIMIT 1").bind(user.id).first<{ created_at: string }>(),
-    db.prepare("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = ? AND datetime(created_at) >= datetime('now', '-1 day')").bind(user.id).first<{ count: number | null }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM event_suggestions WHERE submitted_by_user_id = ? AND julianday(created_at) IS NOT NULL AND julianday(created_at) >= julianday(?)").bind(user.id, dailyCutoffIso).first<{ count: number | null }>(),
     db.prepare("SELECT normalized_title FROM event_suggestions WHERE submitted_by_user_id = ? ORDER BY datetime(created_at) DESC LIMIT 20").bind(user.id).all<{ normalized_title: string }>(),
   ]);
-  if (duplicate) return { ok: false, status: 409, error: "DUPLICATE_SUGGESTION", message: "A similar suggestion is already in review." };
+  if (recent && submissionTimestampBlocksCooldown(recent.created_at, mutationCutoffIso)) {
+    return { ok: false, status: 429, error: "SUBMISSION_COOLDOWN", message: "Wait before submitting another suggestion." };
+  }
+  if (Number(today?.count ?? 0) >= SUGGESTION_DAILY_LIMIT) {
+    return { ok: false, status: 429, error: "DAILY_LIMIT_REACHED", message: "Daily suggestion limit reached." };
+  }
   if ((recentTitles.results ?? []).some((row) => nearDuplicateScore(row.normalized_title, validation.value.normalizedTitle) >= 0.86)) {
     return { ok: false, status: 409, error: "NEAR_DUPLICATE_SUGGESTION", message: "A similar suggestion is already in review." };
   }
-  if (recent && Date.now() - Date.parse(recent.created_at) < 10 * 60 * 1000) {
-    return { ok: false, status: 429, error: "SUBMISSION_COOLDOWN", message: "Wait before submitting another suggestion." };
-  }
-  if (Number(today?.count ?? 0) >= 3) {
-    return { ok: false, status: 429, error: "DAILY_LIMIT_REACHED", message: "Daily suggestion limit reached." };
-  }
 
   const id = crypto.randomUUID();
-  const now = new Date().toISOString();
   try {
-    await db
+    const insert = await db
       .prepare(
         `INSERT INTO event_suggestions (
           id, submitted_by_user_id, title, description, normalized_title, content_fingerprint,
           competition_format, platform, map_name, suggested_server_id, open_to_any_server,
           suggested_date_start, suggested_date_end, structure_notes, moderation_status,
           public_status, hot_score, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_moderation', 'submitted', 0, ?, ?)`,
+        )
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_moderation', 'submitted', 0, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM event_suggestions
+          WHERE content_fingerprint = ?
+        )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM event_suggestions
+            WHERE submitted_by_user_id = ?
+              AND (
+                created_at IS NULL
+                OR julianday(created_at) IS NULL
+                OR julianday(created_at) > julianday(?)
+              )
+          )
+          AND (
+            SELECT COUNT(*)
+            FROM event_suggestions
+            WHERE submitted_by_user_id = ?
+              AND julianday(created_at) IS NOT NULL
+              AND julianday(created_at) >= julianday(?)
+          ) < ?`,
       )
       .bind(
         id,
@@ -415,10 +443,20 @@ export async function createEventSuggestion(env: Env, user: SessionUser | null, 
         validation.value.suggestedDateStart,
         validation.value.suggestedDateEnd,
         validation.value.structureNotes,
-        now,
-        now,
+        mutationNowIso,
+        mutationNowIso,
+        validation.value.contentFingerprint,
+        user.id,
+        mutationCutoffIso,
+        user.id,
+        dailyCutoffIso,
+        SUGGESTION_DAILY_LIMIT,
       )
       .run();
+    if (d1ChangedRows(insert) !== 1) {
+      const blocked = await classifyBlockedSuggestionSubmission(db, user.id, validation.value.contentFingerprint, mutationCutoffIso, dailyCutoffIso);
+      return blocked;
+    }
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return { ok: false, status: 409, error: "DUPLICATE_SUGGESTION", message: "A similar suggestion is already in review." };
@@ -1050,6 +1088,53 @@ async function readSuggestionCounters(env: Env, suggestionId: string) {
   return { upvoteCount, downvoteCount, reportCount, netScore: upvoteCount - downvoteCount, hotScore: Number(row?.hot_score ?? 0) };
 }
 
+async function classifyBlockedSuggestionSubmission(
+  db: D1Database,
+  userId: string,
+  contentFingerprint: string,
+  mutationCutoffIso: string,
+  dailyCutoffIso: string,
+) {
+  const recent = await db
+    .prepare(
+      `SELECT created_at
+       FROM event_suggestions
+       WHERE submitted_by_user_id = ?
+         AND (
+           created_at IS NULL
+           OR julianday(created_at) IS NULL
+           OR julianday(created_at) > julianday(?)
+         )
+       LIMIT 1`,
+    )
+    .bind(userId, mutationCutoffIso)
+    .first<{ created_at: string | null }>();
+  if (recent) {
+    return { ok: false as const, status: 429, error: "SUBMISSION_COOLDOWN", message: "Wait before submitting another suggestion." };
+  }
+  const today = await db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM event_suggestions
+       WHERE submitted_by_user_id = ?
+         AND julianday(created_at) IS NOT NULL
+         AND julianday(created_at) >= julianday(?)`,
+    )
+    .bind(userId, dailyCutoffIso)
+    .first<{ count: number | null }>();
+  if (Number(today?.count ?? 0) >= SUGGESTION_DAILY_LIMIT) {
+    return { ok: false as const, status: 429, error: "DAILY_LIMIT_REACHED", message: "Daily suggestion limit reached." };
+  }
+  const duplicate = await db
+    .prepare("SELECT id FROM event_suggestions WHERE content_fingerprint = ? LIMIT 1")
+    .bind(contentFingerprint)
+    .first<{ id: string }>();
+  if (duplicate) {
+    return { ok: false as const, status: 409, error: "DUPLICATE_SUGGESTION", message: "A similar suggestion is already in review." };
+  }
+  return { ok: false as const, status: 409, error: "SUGGESTION_NOT_ACCEPTED", message: "Suggestion could not be accepted. Refresh and try again." };
+}
+
 function d1ChangedRows(result: unknown) {
   const meta = result && typeof result === "object" ? (result as { meta?: Record<string, unknown> }).meta : null;
   const raw = meta?.changes ?? meta?.rows_written ?? meta?.rowsWritten ?? meta?.rows_affected ?? meta?.rowsAffected;
@@ -1428,6 +1513,20 @@ function normalizeDesiredVote(value: unknown) {
   const parsed = Number(value);
   if (parsed === 1 || parsed === -1 || parsed === 0) return parsed as -1 | 0 | 1;
   return null;
+}
+
+function submissionTimestampBlocksCooldown(value: string | null | undefined, cutoffIso: string) {
+  const valueMs = parseSuggestionTimestampMs(value);
+  const cutoffMs = parseSuggestionTimestampMs(cutoffIso);
+  return !Number.isFinite(valueMs) || !Number.isFinite(cutoffMs) || valueMs > cutoffMs;
+}
+
+function parseSuggestionTimestampMs(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) {
+    return Date.parse(`${text.replace(" ", "T")}Z`);
+  }
+  return Date.parse(text);
 }
 
 function nearDuplicateScore(left: string, right: string) {

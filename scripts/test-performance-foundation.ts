@@ -11,6 +11,7 @@ import {
 import { readBoundedJson } from "../functions/_lib/http";
 import {
   computeSuggestionHotScore,
+  createEventSuggestion,
   encodePublicSuggestionCursor,
   moderateSuggestionContent,
   moderateEventSuggestion,
@@ -21,6 +22,7 @@ import {
   projectSuggestionForOwnerTest,
   projectSuggestionForPublicTest,
   resetEventSuggestionSchemaReadinessForTests,
+  SUGGESTION_SUBMISSION_COOLDOWN_MS,
   SUGGESTION_VOTE_CHANGE_COOLDOWN_MS,
   validateModerationTransition,
   validateEventSuggestionSchema,
@@ -42,6 +44,7 @@ import {
 import { onRequestPost as onSuggestionReportPost } from "../functions/api/events/suggestions/[suggestionId]/report";
 import { onRequestPost as onSuggestionVotePost } from "../functions/api/events/suggestions/[suggestionId]/vote";
 import { shouldStartNavigationProgress } from "../components/site/navigation-progress";
+import { shouldApplySuggestionListResponse } from "../components/events/event-suggestions-page";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 function source(path: string) {
@@ -70,6 +73,7 @@ async function main() {
   await assertCacheHelpers();
   await assertSuggestionHeadRoute();
   await assertSuggestionMutationAuthPrecedence();
+  await assertSuggestionSubmissionThrottleAtomicity();
   await assertSuggestionVoteCooldownAtomicity();
   await assertBoundedJson();
   assertModerationTransitions();
@@ -616,6 +620,99 @@ async function assertSuggestionMutationRouteAuthPrecedence(options: {
   await Promise.all(waits.splice(0));
 }
 
+async function assertSuggestionSubmissionThrottleAtomicity() {
+  const user = { id: "submission-user", discord_id: "990000000000008888", username: "Submission Test User", avatar: null };
+  const otherUser = { id: "other-submission-user", discord_id: "990000000000008889", username: "Other Submission User", avatar: null };
+  const baseMs = Date.parse("2026-07-24T10:00:00.321Z");
+
+  const db = new SuggestionSubmissionThrottleDb();
+  const env = { DB: db as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(env);
+
+  const first = await withFixedNow(baseMs, () => createEventSuggestion(env, user, validSuggestionInput("Amber Strategy Gauntlet")));
+  assert.equal(first.status, 200, "first suggestion submission should succeed");
+  assert.equal(db.rows.length, 1, "first submission should create one row");
+  assert.match(db.rows[0]?.created_at ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "submission created_at must be ISO-8601 with millisecond precision");
+  assert.match(db.rows[0]?.updated_at ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "submission updated_at must be ISO-8601 with millisecond precision");
+
+  const immediateDuplicate = await withFixedNow(baseMs + 100, () => createEventSuggestion(env, user, validSuggestionInput("Amber Strategy Gauntlet")));
+  assert.equal(immediateDuplicate.status, 429, "immediate duplicate submission by the same user should be throttled");
+  assert.equal("error" in immediateDuplicate ? immediateDuplicate.error : null, "SUBMISSION_COOLDOWN");
+  assert.equal(db.rows.length, 1, "throttled duplicate must not create another suggestion");
+
+  const boundaryDb = new SuggestionSubmissionThrottleDb();
+  boundaryDb.seedSuggestion({ userId: user.id, title: "Boundary Anchor Trial", createdAt: new Date(baseMs).toISOString() });
+  const boundaryEnv = { DB: boundaryDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(boundaryEnv);
+  const beforeBoundary = await withFixedNow(baseMs + SUGGESTION_SUBMISSION_COOLDOWN_MS - 1, () => createEventSuggestion(boundaryEnv, user, validSuggestionInput("Copper Relay Summit")));
+  assert.equal(beforeBoundary.status, 429, "submission before the exact cooldown boundary should be denied");
+  const atBoundary = await withFixedNow(baseMs + SUGGESTION_SUBMISSION_COOLDOWN_MS, () => createEventSuggestion(boundaryEnv, user, validSuggestionInput("Ivory Compass Circuit")));
+  assert.equal(atBoundary.status, 200, "submission exactly at the cooldown boundary should be allowed");
+  assert.equal(boundaryDb.rows.length, 2, "boundary success should create one additional suggestion");
+
+  const malformedDb = new SuggestionSubmissionThrottleDb();
+  malformedDb.seedSuggestion({ userId: user.id, title: "Malformed Anchor Trial", createdAt: "not-a-date" });
+  const malformedEnv = { DB: malformedDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(malformedEnv);
+  const malformed = await withFixedNow(baseMs + SUGGESTION_SUBMISSION_COOLDOWN_MS * 2, () => createEventSuggestion(malformedEnv, user, validSuggestionInput("Topaz Relay Circuit")));
+  assert.equal(malformed.status, 429, "malformed submission timestamps must fail closed");
+  assert.equal(malformedDb.rows.length, 1, "malformed timestamp must not permit a new row");
+
+  const staleRaceDb = new SuggestionSubmissionThrottleDb();
+  staleRaceDb.beforeNextInsert = () => {
+    staleRaceDb.seedSuggestion({ userId: user.id, title: "Raced Anchor Trial", createdAt: new Date(baseMs + 10).toISOString() });
+  };
+  const staleRaceEnv = { DB: staleRaceDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(staleRaceEnv);
+  const staleRace = await withFixedNow(baseMs + 20, () => createEventSuggestion(staleRaceEnv, user, validSuggestionInput("Quartz Relay Circuit")));
+  assert.equal(staleRace.status, 429, "stale pre-read race must be blocked by the mutation-time cooldown");
+  assert.equal(staleRaceDb.insertChanges.at(-1), 0, "raced conditional insert should change zero rows");
+  assert.equal(staleRaceDb.rows.length, 1, "raced submission must not create a duplicate row");
+
+  const dailyRaceDb = new SuggestionSubmissionThrottleDb();
+  dailyRaceDb.seedSuggestion({ userId: user.id, title: "Daily One Trial", createdAt: new Date(baseMs - SUGGESTION_SUBMISSION_COOLDOWN_MS * 3).toISOString() });
+  dailyRaceDb.seedSuggestion({ userId: user.id, title: "Daily Two Trial", createdAt: new Date(baseMs - SUGGESTION_SUBMISSION_COOLDOWN_MS * 4).toISOString() });
+  dailyRaceDb.beforeNextInsert = () => {
+    dailyRaceDb.seedSuggestion({ userId: user.id, title: "Daily Three Trial", createdAt: new Date(baseMs - SUGGESTION_SUBMISSION_COOLDOWN_MS * 2).toISOString() });
+  };
+  const dailyRaceEnv = { DB: dailyRaceDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(dailyRaceEnv);
+  const dailyRace = await withFixedNow(baseMs, () => createEventSuggestion(dailyRaceEnv, user, validSuggestionInput("Sapphire Relay Circuit")));
+  assert.equal(dailyRace.status, 429, "stale pre-read daily quota race must be blocked by the mutation-time guard");
+  assert.equal("error" in dailyRace ? dailyRace.error : null, "DAILY_LIMIT_REACHED");
+  assert.equal(dailyRaceDb.insertChanges.at(-1), 0);
+  assert.equal(dailyRaceDb.rows.length, 3, "daily race should not insert a fourth row");
+
+  const concurrentDb = new SuggestionSubmissionThrottleDb({ readDelayMs: 5 });
+  const concurrentEnv = { DB: concurrentDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(concurrentEnv);
+  const [firstConcurrent, secondConcurrent] = await withFixedNow(baseMs, () => Promise.all([
+    createEventSuggestion(concurrentEnv, user, validSuggestionInput("Obsidian Relay Cup")),
+    createEventSuggestion(concurrentEnv, user, validSuggestionInput("Silver Compass Cup")),
+  ]));
+  assert.deepEqual([firstConcurrent.status, secondConcurrent.status].sort(), [200, 429], "two simultaneous submissions should allow exactly one row");
+  assert.equal(concurrentDb.rows.length, 1, "concurrent submissions must not create duplicate user rows inside the cooldown");
+  assert.equal(concurrentDb.insertChanges.filter((changes) => changes === 1).length, 1, "concurrent submissions should record exactly one successful insert");
+
+  const duplicateDb = new SuggestionSubmissionThrottleDb();
+  const duplicateEnv = { DB: duplicateDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(duplicateEnv);
+  const original = await withFixedNow(baseMs, () => createEventSuggestion(duplicateEnv, user, validSuggestionInput("Emerald Compass Trial")));
+  assert.equal(original.status, 200);
+  const duplicate = await withFixedNow(baseMs + SUGGESTION_SUBMISSION_COOLDOWN_MS + 1, () => createEventSuggestion(duplicateEnv, otherUser, validSuggestionInput("Emerald Compass Trial")));
+  assert.equal(duplicate.status, 409, "global duplicate prevention should still reject matching content");
+  assert.equal("error" in duplicate ? duplicate.error : null, "DUPLICATE_SUGGESTION");
+  assert.equal(duplicateDb.rows.length, 1, "duplicate prevention must not create another row");
+
+  const scopeDb = new SuggestionSubmissionThrottleDb();
+  scopeDb.seedSuggestion({ userId: user.id, title: "Rosewater Anchor Trial", createdAt: new Date(baseMs).toISOString() });
+  const scopeEnv = { DB: scopeDb as unknown as D1Database } as Env;
+  resetEventSuggestionSchemaReadinessForTests(scopeEnv);
+  const differentUser = await withFixedNow(baseMs + 50, () => createEventSuggestion(scopeEnv, otherUser, validSuggestionInput("Cobalt Compass Relay")));
+  assert.equal(differentUser.status, 200, "different users should retain independent submission cooldown scope");
+  assert.equal(scopeDb.rows.length, 2);
+}
+
 async function assertSuggestionVoteCooldownAtomicity() {
   const user = { id: "voter-user", discord_id: "990000000000009991", username: "Vote Test User", avatar: null };
   const baseMs = Date.parse("2026-07-23T10:00:00.123Z");
@@ -754,6 +851,21 @@ function validSuggestionMutationBody() {
     open_to_any_server: true,
     structure_notes: "Preview-only structure notes.",
   });
+}
+
+function validSuggestionInput(title: string) {
+  return {
+    title,
+    description: [
+      "This preview community proposal describes a fair seasonal server challenge where authenticated members can nominate balanced objectives, clear eligibility rules, transparent dispute handling, and creator reviewed scheduling for participating teams.",
+      "The suggestion keeps scoring manual, avoids public announcements until approved, and gives every eligible server equal treatment while the platform creator verifies details before any official event is created.",
+    ].join(" "),
+    competition_format: "community_challenge",
+    platform: "cross_platform",
+    map_name: "Chernarus",
+    open_to_any_server: true,
+    structure_notes: "Preview-only suggestion structure.",
+  };
 }
 
 function oversizedJsonBody(size: number) {
@@ -1065,6 +1177,12 @@ function assertSuggestionApis() {
   assertIncludes(helper, "deterministicSuggestionEventId");
   assertIncludes(helper, "refreshSuggestionCountersStatement");
   assertIncludes(helper, "INSERT OR IGNORE INTO event_suggestion_reports");
+  assertIncludes(helper, "SUGGESTION_SUBMISSION_COOLDOWN_MS = 10 * 60 * 1000", "submission cooldown must use one exported production constant");
+  const submitBody = helper.slice(helper.indexOf("export async function createEventSuggestion"), helper.indexOf("export async function voteOnEventSuggestion"));
+  assertIncludes(submitBody, "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_moderation', 'submitted', 0, ?, ?", "suggestion creation must gate insertion through a conditional SELECT");
+  assertIncludes(submitBody, "julianday(created_at) > julianday(?)", "suggestion creation must enforce cooldown at mutation time");
+  assertIncludes(submitBody, "julianday(created_at) >= julianday(?)", "suggestion creation must enforce daily limit at mutation time");
+  assertIncludes(submitBody, "d1ChangedRows(insert)", "suggestion creation must inspect D1 insert row count");
   assertIncludes(helper, "SUGGESTION_VOTE_CHANGE_COOLDOWN_MS = 1500", "vote cooldown must use one exported production constant");
   const voteBody = helper.slice(helper.indexOf("export async function voteOnEventSuggestion"), helper.indexOf("export async function reportEventSuggestion"));
   assertIncludes(voteBody, "toISOString()", "vote mutations must write explicit ISO timestamps");
@@ -1181,14 +1299,24 @@ function assertLoadingUx() {
   assertIncludes(progress, "shouldStartNavigationProgress");
   assertIncludes(progress, "popstate");
   assertIncludes(progress, "target.hasAttribute(\"download\")");
-  assertIncludes(progress, "event.defaultPrevented");
+  assertNotIncludes(progress, "if (event.defaultPrevented) return", "Next.js-managed Link navigation must be able to start progress after preventDefault");
   assertNotIncludes(progress, "capture: true", "progress bar must not start in capture phase before preventDefault");
   assertIncludes(progress, "unhandledrejection");
   assert.equal(shouldStartNavigationProgress({ href: "/events", button: 0 }, "https://dzn.test/"), true);
   assert.equal(shouldStartNavigationProgress({ href: "https://other.test/events", button: 0 }, "https://dzn.test/"), false);
   assert.equal(shouldStartNavigationProgress({ href: "/events#rules", button: 0 }, "https://dzn.test/events"), false);
+  assert.equal(shouldStartNavigationProgress({ href: "/events?sort=newest", button: 0 }, "https://dzn.test/events?sort=trending"), true);
+  assert.equal(shouldStartNavigationProgress({ href: "/events?sort=trending", button: 0 }, "https://dzn.test/events?sort=trending"), false);
   assert.equal(shouldStartNavigationProgress({ href: "/events", button: 0, ctrlKey: true }, "https://dzn.test/"), false);
   assert.equal(shouldStartNavigationProgress({ href: "/download", button: 0, download: true }, "https://dzn.test/"), false);
+
+  const publicSuggestionPage = source("components/events/event-suggestions-page.tsx");
+  assertIncludes(publicSuggestionPage, "AbortController", "suggestion list fetches must be abortable");
+  assertIncludes(publicSuggestionPage, "suggestionListRequestIdRef", "suggestion list fetches must be sequenced");
+  assertIncludes(publicSuggestionPage, "signal: controller.signal", "suggestion list fetches must pass abort signals");
+  assert.equal(shouldApplySuggestionListResponse({ requestId: 2, latestRequestId: 2 }), true, "latest suggestion response should update UI");
+  assert.equal(shouldApplySuggestionListResponse({ requestId: 1, latestRequestId: 2 }), false, "slow old suggestion response must be ignored");
+  assert.equal(shouldApplySuggestionListResponse({ requestId: 2, latestRequestId: 2, aborted: true }), false, "aborted suggestion response must not update UI");
 
   const css = source("app/globals.css");
   assertIncludes(css, ".dzn-navigation-progress");
@@ -1532,6 +1660,174 @@ class SuggestionMutationAuthStatement {
       return { success: true, meta: { changes: 1 } };
     }
     throw new Error(`Unexpected suggestion mutation auth query: ${this.sql.slice(0, 120)}`);
+  }
+}
+
+type SubmissionThrottleRow = {
+  id: string;
+  submitted_by_user_id: string;
+  title: string;
+  normalized_title: string;
+  content_fingerprint: string;
+  created_at: string;
+  updated_at: string;
+};
+
+class SuggestionSubmissionThrottleDb {
+  readonly rows: SubmissionThrottleRow[] = [];
+  readonly insertChanges: number[] = [];
+  beforeNextInsert: (() => void) | null = null;
+  private sequence = 0;
+  private readonly readDelayMs: number;
+
+  constructor(options: { readDelayMs?: number } = {}) {
+    this.readDelayMs = options.readDelayMs ?? 0;
+  }
+
+  prepare(sql: string) {
+    return new SuggestionSubmissionThrottleStatement(this, sql);
+  }
+
+  seedSuggestion(input: { userId: string; title: string; createdAt: string; contentFingerprint?: string }) {
+    this.sequence += 1;
+    const normalizedTitle = normalizeSuggestionText(input.title);
+    this.rows.push({
+      id: `seeded-submission-${this.sequence}`,
+      submitted_by_user_id: input.userId,
+      title: input.title,
+      normalized_title: normalizedTitle,
+      content_fingerprint: input.contentFingerprint ?? `seeded:${normalizedTitle}:${this.sequence}`,
+      created_at: input.createdAt,
+      updated_at: input.createdAt,
+    });
+  }
+
+  async maybeDelayRead() {
+    if (this.readDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.readDelayMs));
+  }
+
+  latestUserRow(userId: string) {
+    const rows = this.rows.filter((row) => row.submitted_by_user_id === userId);
+    return rows.sort((left, right) => parseSqliteTimestampMs(right.created_at) - parseSqliteTimestampMs(left.created_at))[0] ?? null;
+  }
+
+  blockingUserRow(userId: string, cutoff: string) {
+    return this.rows.find((row) => row.submitted_by_user_id === userId && !timestampOnOrBefore(row.created_at, cutoff)) ?? null;
+  }
+
+  dailyCount(userId: string, cutoff: string) {
+    const cutoffMs = parseSqliteTimestampMs(cutoff);
+    return this.rows.filter((row) => {
+      const rowMs = parseSqliteTimestampMs(row.created_at);
+      return row.submitted_by_user_id === userId && Number.isFinite(rowMs) && Number.isFinite(cutoffMs) && rowMs >= cutoffMs;
+    }).length;
+  }
+
+  findFingerprint(contentFingerprint: string) {
+    return this.rows.find((row) => row.content_fingerprint === contentFingerprint) ?? null;
+  }
+
+  recentTitles(userId: string) {
+    return this.rows
+      .filter((row) => row.submitted_by_user_id === userId)
+      .sort((left, right) => parseSqliteTimestampMs(right.created_at) - parseSqliteTimestampMs(left.created_at))
+      .slice(0, 20)
+      .map((row) => ({ normalized_title: row.normalized_title }));
+  }
+
+  applySuggestionInsert(bindings: unknown[]) {
+    const hook = this.beforeNextInsert;
+    this.beforeNextInsert = null;
+    if (hook) hook();
+
+    const id = String(bindings[0] ?? "");
+    const userId = String(bindings[1] ?? "");
+    const title = String(bindings[2] ?? "");
+    const normalizedTitle = String(bindings[4] ?? "");
+    const contentFingerprint = String(bindings[5] ?? "");
+    const createdAt = String(bindings[14] ?? "");
+    const updatedAt = String(bindings[15] ?? "");
+    const guardFingerprint = String(bindings[16] ?? "");
+    const cooldownUserId = String(bindings[17] ?? "");
+    const cooldownCutoff = String(bindings[18] ?? "");
+    const dailyUserId = String(bindings[19] ?? "");
+    const dailyCutoff = String(bindings[20] ?? "");
+    const dailyLimit = Number(bindings[21] ?? 3);
+
+    const blocked = Boolean(this.findFingerprint(guardFingerprint))
+      || Boolean(this.blockingUserRow(cooldownUserId, cooldownCutoff))
+      || this.dailyCount(dailyUserId, dailyCutoff) >= dailyLimit;
+    if (blocked) {
+      this.insertChanges.push(0);
+      return changed(0);
+    }
+
+    this.rows.push({
+      id,
+      submitted_by_user_id: userId,
+      title,
+      normalized_title: normalizedTitle,
+      content_fingerprint: contentFingerprint,
+      created_at: createdAt,
+      updated_at: updatedAt,
+    });
+    this.insertChanges.push(1);
+    return changed(1);
+  }
+}
+
+class SuggestionSubmissionThrottleStatement {
+  private bindings: unknown[] = [];
+
+  constructor(private readonly db: SuggestionSubmissionThrottleDb, private readonly sql: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all() {
+    const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1];
+    if (table) {
+      await this.db.maybeDelayRead();
+      return { results: (SUGGESTION_ROUTE_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
+    }
+    if (/SELECT\s+normalized_title\s+FROM\s+event_suggestions/i.test(this.sql)) {
+      await this.db.maybeDelayRead();
+      return { results: this.db.recentTitles(String(this.bindings[0] ?? "")) };
+    }
+    return { results: [] };
+  }
+
+  async first() {
+    if (/SELECT\s+created_at\s+FROM\s+event_suggestions\s+WHERE\s+submitted_by_user_id/i.test(this.sql) && /julianday\(created_at\)/i.test(this.sql)) {
+      await this.db.maybeDelayRead();
+      const row = this.db.blockingUserRow(String(this.bindings[0] ?? ""), String(this.bindings[1] ?? ""));
+      return row ? { created_at: row.created_at } : null;
+    }
+    if (/SELECT\s+created_at\s+FROM\s+event_suggestions\s+WHERE\s+submitted_by_user_id/i.test(this.sql)) {
+      await this.db.maybeDelayRead();
+      const row = this.db.latestUserRow(String(this.bindings[0] ?? ""));
+      return row ? { created_at: row.created_at } : null;
+    }
+    if (/SELECT\s+COUNT\(\*\)\s+AS\s+count\s+FROM\s+event_suggestions\s+WHERE\s+submitted_by_user_id/i.test(this.sql)) {
+      await this.db.maybeDelayRead();
+      return { count: this.db.dailyCount(String(this.bindings[0] ?? ""), String(this.bindings[1] ?? "")) };
+    }
+    if (/SELECT\s+id\s+FROM\s+event_suggestions\s+WHERE\s+content_fingerprint/i.test(this.sql)) {
+      await this.db.maybeDelayRead();
+      const row = this.db.findFingerprint(String(this.bindings[0] ?? ""));
+      return row ? { id: row.id } : null;
+    }
+    const rows = await this.all();
+    return rows.results[0] ?? null;
+  }
+
+  async run() {
+    if (/INSERT\s+INTO\s+event_suggestions/i.test(this.sql)) {
+      return this.db.applySuggestionInsert(this.bindings);
+    }
+    throw new Error(`Unexpected submission throttle query: ${this.sql.slice(0, 120)}`);
   }
 }
 

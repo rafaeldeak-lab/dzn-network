@@ -86,7 +86,6 @@ export function NavigationProgress() {
       const target = event.target instanceof Element ? event.target.closest("a") : null;
       if (!(target instanceof HTMLAnchorElement)) return;
       window.setTimeout(() => {
-        if (event.defaultPrevented) return;
         const shouldStart = shouldStartNavigationProgress({
           href: target.href,
           target: target.target,

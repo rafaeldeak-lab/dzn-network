@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, CheckCircle2, Flag, Lightbulb, Loader2, MessageSquareWarning, ShieldCheck } from "lucide-react";
 
 import { fetchJsonWithRetry, FetchJsonError } from "@/lib/client-fetch";
@@ -117,6 +117,21 @@ const REPORT_REASONS = [
 
 const MAX_ACCUMULATED_SUGGESTIONS = 100;
 
+type SuggestionListRequestState = {
+  requestId: number;
+  latestRequestId: number;
+  aborted?: boolean;
+};
+
+export function shouldApplySuggestionListResponse(state: SuggestionListRequestState) {
+  return !state.aborted && state.requestId === state.latestRequestId;
+}
+
+function isAbortedFetch(error: unknown) {
+  return (error instanceof FetchJsonError && error.aborted)
+    || (error instanceof DOMException && error.name === "AbortError");
+}
+
 const initialForm = {
   title: "",
   description: "",
@@ -148,6 +163,8 @@ export function EventSuggestionsPage() {
   const [reportDraft, setReportDraft] = useState<{ suggestion: Suggestion; reason: string; note: string } | null>(null);
   const [pendingReports, setPendingReports] = useState<Record<string, boolean>>({});
   const [reportMessage, setReportMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const suggestionListRequestIdRef = useRef(0);
+  const suggestionListAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -171,38 +188,80 @@ export function EventSuggestionsPage() {
   const wordCount = form.description.split(/\s+/).filter(Boolean).length;
   const canLoadMore = Boolean(nextCursor && suggestions.length < MAX_ACCUMULATED_SUGGESTIONS && !loadingMore);
 
+  const invalidateSuggestionListRequests = useCallback(() => {
+    suggestionListRequestIdRef.current += 1;
+    suggestionListAbortRef.current?.abort();
+    suggestionListAbortRef.current = null;
+  }, []);
+
   function updateField(key: keyof typeof form, value: string | boolean) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
   function changeSort(value: string) {
     if (value === sort) return;
+    invalidateSuggestionListRequests();
     setSort(value);
   }
 
   function changeStatus(value: string) {
     if (value === statusFilter) return;
+    invalidateSuggestionListRequests();
     setStatusFilter(value);
   }
 
   const loadSuggestions = useCallback(async (options: { append: boolean; cursor: string | null }) => {
+    const requestId = suggestionListRequestIdRef.current + 1;
+    suggestionListRequestIdRef.current = requestId;
+    suggestionListAbortRef.current?.abort();
+    const controller = new AbortController();
+    suggestionListAbortRef.current = controller;
     const params = new URLSearchParams({
       sort,
       status: statusFilter,
       limit: "20",
     });
     if (options.cursor) params.set("cursor", options.cursor);
-    const nextPayload = await fetchJsonWithRetry<SuggestionsPayload>(`/api/events/suggestions?${params.toString()}`, {
-      headers: { accept: "application/json" },
-      timeoutMs: 10_000,
-      retries: 1,
-    });
-    setLoadError(null);
-    setNextCursor(nextPayload.nextCursor);
-    setSuggestions((current) => {
-      const merged = options.append ? mergeSuggestions(current, nextPayload.suggestions) : dedupeSuggestions(nextPayload.suggestions);
-      return merged.slice(0, MAX_ACCUMULATED_SUGGESTIONS);
-    });
+    try {
+      const nextPayload = await fetchJsonWithRetry<SuggestionsPayload>(`/api/events/suggestions?${params.toString()}`, {
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+        timeoutMs: 10_000,
+        retries: 1,
+      });
+      if (!shouldApplySuggestionListResponse({
+        requestId,
+        latestRequestId: suggestionListRequestIdRef.current,
+        aborted: controller.signal.aborted,
+      })) {
+        return { requestId, applied: false, aborted: controller.signal.aborted };
+      }
+      setLoadError(null);
+      setNextCursor(nextPayload.nextCursor);
+      setSuggestions((current) => {
+        if (!shouldApplySuggestionListResponse({
+          requestId,
+          latestRequestId: suggestionListRequestIdRef.current,
+          aborted: controller.signal.aborted,
+        })) {
+          return current;
+        }
+        const merged = options.append ? mergeSuggestions(current, nextPayload.suggestions) : dedupeSuggestions(nextPayload.suggestions);
+        return merged.slice(0, MAX_ACCUMULATED_SUGGESTIONS);
+      });
+      return { requestId, applied: true, aborted: false };
+    } catch (error) {
+      if (isAbortedFetch(error) || !shouldApplySuggestionListResponse({
+        requestId,
+        latestRequestId: suggestionListRequestIdRef.current,
+        aborted: controller.signal.aborted,
+      })) {
+        return { requestId, applied: false, aborted: true };
+      }
+      throw error;
+    } finally {
+      if (suggestionListAbortRef.current === controller) suggestionListAbortRef.current = null;
+    }
   }, [sort, statusFilter]);
 
   useEffect(() => {
@@ -210,16 +269,25 @@ export function EventSuggestionsPage() {
     const timer = window.setTimeout(() => {
       if (!active) return;
       setLoadingInitial(true);
+      setLoadingMore(false);
       setLoadError(null);
       loadSuggestions({ append: false, cursor: null })
+        .then((result) => result)
         .catch((error) => {
-          if (!active) return;
+          if (!active || isAbortedFetch(error)) return;
           setLoadError(error instanceof Error ? error.message : "Suggestions could not be loaded.");
           setSuggestions([]);
           setNextCursor(null);
+          return null;
         })
-        .finally(() => {
-          if (active) setLoadingInitial(false);
+        .then((result) => {
+          if (!active) return;
+          if (result === null || (result && shouldApplySuggestionListResponse({
+            requestId: result.requestId,
+            latestRequestId: suggestionListRequestIdRef.current,
+          }))) {
+            setLoadingInitial(false);
+          }
         });
     }, 0);
     return () => {
@@ -228,6 +296,10 @@ export function EventSuggestionsPage() {
     };
   }, [loadSuggestions]);
 
+  useEffect(() => {
+    return () => invalidateSuggestionListRequests();
+  }, [invalidateSuggestionListRequests]);
+
   async function loadMore() {
     if (!canLoadMore) return;
     setLoadingMore(true);
@@ -235,6 +307,7 @@ export function EventSuggestionsPage() {
     try {
       await loadSuggestions({ append: true, cursor: nextCursor });
     } catch (error) {
+      if (isAbortedFetch(error)) return;
       setLoadError(error instanceof Error ? error.message : "More suggestions could not be loaded.");
     } finally {
       setLoadingMore(false);
@@ -244,12 +317,20 @@ export function EventSuggestionsPage() {
   async function retryCurrentList() {
     setLoadingInitial(true);
     setLoadError(null);
+    let requestId: number | null = null;
     try {
-      await loadSuggestions({ append: false, cursor: null });
+      const result = await loadSuggestions({ append: false, cursor: null });
+      requestId = result.requestId;
     } catch (error) {
+      if (isAbortedFetch(error)) return;
       setLoadError(error instanceof Error ? error.message : "Suggestions could not be loaded.");
     } finally {
-      setLoadingInitial(false);
+      if (requestId === null || shouldApplySuggestionListResponse({
+        requestId,
+        latestRequestId: suggestionListRequestIdRef.current,
+      })) {
+        setLoadingInitial(false);
+      }
     }
   }
 
