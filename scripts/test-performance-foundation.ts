@@ -12,6 +12,7 @@ import { readBoundedJson } from "../functions/_lib/http";
 import {
   computeSuggestionHotScore,
   createEventSuggestion,
+  convertSuggestionToEventDraft,
   encodePublicSuggestionCursor,
   moderateSuggestionContent,
   moderateEventSuggestion,
@@ -78,6 +79,7 @@ async function main() {
   await assertBoundedJson();
   assertModerationTransitions();
   await assertModerationResponsePrivacy();
+  await assertModerationAndConversionRaceIntegrity();
   await assertPublicEventProjectionPrivacy();
   await assertSchemaReadinessRecovery();
   assertSuggestionSchemaAndIndexes();
@@ -984,6 +986,136 @@ async function assertModerationResponsePrivacy() {
   }
 }
 
+async function assertModerationAndConversionRaceIntegrity() {
+  const creator = { id: "creator-user", discord_id: "111111111111111111", username: "Creator", avatar: null };
+
+  {
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: new ModerationPrivacyDb(moderationRow()) as unknown as D1Database,
+    } as Env & { DB: ModerationPrivacyDb };
+    const result = await moderateEventSuggestion(env, creator, "suggestion-review", {
+      action: "approve_public_voting",
+      reason: "Ready for public voting",
+      creator_response: "This suggestion is ready for public voting.",
+    });
+    assert.equal(result.status, 200, "successful approve should still succeed");
+    assert.equal(env.DB.actions.length, 1, "successful approve should record exactly one moderation action");
+    assert.equal(env.DB.actions[0]?.new_status, "public_voting", "audit row should reference the final transitioned state");
+    assert.match(String(env.DB.actions[0]?.created_at ?? ""), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "moderation action timestamp should be ISO UTC milliseconds");
+  }
+
+  {
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: new ModerationPrivacyDb(moderationRow()) as unknown as D1Database,
+    } as Env & { DB: ModerationPrivacyDb };
+    const result = await moderateEventSuggestion(env, creator, "suggestion-review", {
+      action: "reject",
+      reason: "The proposal needs a safer structure",
+    });
+    assert.equal(result.status, 200, "successful reject should still succeed");
+    assert.equal(env.DB.actions.length, 1, "successful reject should record exactly one moderation action");
+    assert.equal(env.DB.actions[0]?.new_status, "rejected", "reject audit should reference rejected final state");
+  }
+
+  {
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: new ModerationPrivacyDb(moderationRow()) as unknown as D1Database,
+    } as Env & { DB: ModerationPrivacyDb };
+    env.DB.beforeNextModerationUpdate = () => {
+      env.DB.row.moderation_status = "archived";
+      env.DB.row.public_status = "archived";
+    };
+    const result = await moderateEventSuggestion(env, creator, "suggestion-review", {
+      action: "approve_public_voting",
+      reason: "Ready for public voting",
+      creator_response: "This suggestion is ready for public voting.",
+    });
+    assert.equal(result.status, 409, "stale moderation request should fail with conflict");
+    assert.equal(result.error, "SUGGESTION_STATE_CONFLICT");
+    assert.equal(env.DB.actions.length, 0, "stale moderation request must not write a success audit action");
+  }
+
+  {
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: new ModerationPrivacyDb(moderationRow()) as unknown as D1Database,
+    } as Env & { DB: ModerationPrivacyDb };
+    env.DB.failNextModerationUpdate = true;
+    const result = await moderateEventSuggestion(env, creator, "suggestion-review", {
+      action: "approve_public_voting",
+      reason: "Ready for public voting",
+      creator_response: "This suggestion is ready for public voting.",
+    });
+    assert.equal(result.status, 409, "failed moderation update should not be reported as success");
+    assert.equal(env.DB.actions.length, 0, "failed moderation update must not write a success audit action");
+  }
+
+  {
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: new SuggestionConversionDb() as unknown as D1Database,
+    } as Env & { DB: SuggestionConversionDb };
+    const result = await convertSuggestionToEventDraft(env, creator, "convertible-suggestion", { reason: "Creator approved conversion" });
+    assert.equal(result.status, 200, "convertible suggestion should create a draft");
+    assert.equal(env.DB.events.length, 1, "successful conversion should create exactly one draft event");
+    assert.equal(env.DB.activities.length, 1, "successful conversion should create exactly one activity row");
+    assert.equal(env.DB.actions.length, 1, "successful conversion should create exactly one moderation action");
+    assert.equal(env.DB.row.converted_event_id, "suggestion-draft-convertible-suggestion");
+    assert.match(env.DB.events[0]?.created_at ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "draft event timestamp should be ISO UTC milliseconds");
+  }
+
+  {
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: new SuggestionConversionDb() as unknown as D1Database,
+    } as Env & { DB: SuggestionConversionDb };
+    env.DB.beforeNextConversionUpdate = () => {
+      env.DB.row.moderation_status = "archived";
+      env.DB.row.public_status = "archived";
+    };
+    const result = await convertSuggestionToEventDraft(env, creator, "convertible-suggestion", { reason: "Creator approved conversion" });
+    assert.equal(result.status, 409, "stale conversion should fail with conflict");
+    assert.equal(result.error, "SUGGESTION_STATE_CONFLICT");
+    assert.equal(env.DB.events.length, 0, "stale conversion must not create a draft event");
+    assert.equal(env.DB.activities.length, 0, "stale conversion must not create activity");
+    assert.equal(env.DB.actions.length, 0, "stale conversion must not create a moderation action");
+  }
+
+  {
+    const db = new SuggestionConversionDb();
+    db.row.converted_event_id = "suggestion-draft-convertible-suggestion";
+    db.events.push(conversionEventRow("suggestion-draft-convertible-suggestion", "convertible-suggestion"));
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: db as unknown as D1Database,
+    } as Env & { DB: SuggestionConversionDb };
+    const result = await convertSuggestionToEventDraft(env, creator, "convertible-suggestion", { reason: "Creator approved conversion" });
+    assert.equal(result.status, 200, "existing draft should return an idempotent result");
+    assert.equal("idempotent" in result && result.idempotent, true);
+    assert.equal(env.DB.events.length, 1, "existing draft must not be duplicated");
+    assert.equal(env.DB.actions.length, 0, "idempotent conversion must not write another moderation action");
+  }
+
+  {
+    const db = new SuggestionConversionDb({ mainReadBarrierTotal: 2 });
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: db as unknown as D1Database,
+    } as Env & { DB: SuggestionConversionDb };
+    const [first, second] = await Promise.all([
+      convertSuggestionToEventDraft(env, creator, "convertible-suggestion", { reason: "Creator approved conversion" }),
+      convertSuggestionToEventDraft(env, creator, "convertible-suggestion", { reason: "Creator approved conversion" }),
+    ]);
+    assert.equal([first.status, second.status].every((status) => status === 200), true, "concurrent conversions should be safe and idempotent");
+    assert.equal(env.DB.events.length, 1, "concurrent conversions must create at most one draft event");
+    assert.equal(env.DB.activities.length, 1, "concurrent conversions must create at most one conversion activity");
+    assert.equal(env.DB.actions.length, 1, "concurrent conversions must create only one success moderation action");
+  }
+}
+
 async function assertPublicEventProjectionPrivacy() {
   const db = new PublicEventProjectionDb();
   const env = { DB: db as unknown as D1Database } as Env;
@@ -1173,7 +1305,7 @@ function assertSuggestionApis() {
   assertIncludes(helper, "VOTE_RATE_LIMITED");
   assertIncludes(helper, "SELF_VOTE_DENIED");
   assertIncludes(helper, "SELF_REPORT_DENIED");
-  assertIncludes(helper, "INSERT OR IGNORE INTO competitive_events");
+  assertIncludes(helper, "INSERT INTO competitive_events");
   assertIncludes(helper, "deterministicSuggestionEventId");
   assertIncludes(helper, "refreshSuggestionCountersStatement");
   assertIncludes(helper, "INSERT OR IGNORE INTO event_suggestion_reports");
@@ -1192,6 +1324,14 @@ function assertSuggestionApis() {
   assertNotIncludes(voteBody, "CURRENT_TIMESTAMP", "vote rows must not use whole-second CURRENT_TIMESTAMP");
   assertIncludes(helper, "creator_response = CASE", "moderation update must branch public/private creator responses");
   assertIncludes(helper, "ELSE NULL", "private moderation actions must clear creator_response");
+  const moderationBody = helper.slice(helper.indexOf("export async function moderateEventSuggestion"), helper.indexOf("export async function convertSuggestionToEventDraft"));
+  assertIncludes(moderationBody, "WHERE changes() = 1", "moderation audit insert must be gated by the successful update");
+  assertIncludes(moderationBody, "d1ChangedRows(batchResult[0])", "moderation must inspect the update changed-row count");
+  const conversionBody = helper.slice(helper.indexOf("export async function convertSuggestionToEventDraft"), helper.indexOf("export async function validateEventSuggestionSchema"));
+  assertOrder(conversionBody, "UPDATE event_suggestions", "INSERT INTO competitive_events", "conversion must claim suggestion state before draft creation");
+  assertIncludes(conversionBody, "WHERE changes() = 1", "conversion side effects must be gated by the successful state transition");
+  assertIncludes(conversionBody, "d1ChangedRows(batchResult[0])", "conversion must inspect the state-transition changed-row count");
+  assertIncludes(conversionBody, "DRAFT_ALREADY_EXISTS", "conversion must fail safely when deterministic draft already exists");
   assertNotIncludes(helper, "SELECT * FROM event_suggestions WHERE id = ? LIMIT 1", "public/list paths should avoid broad suggestion reads");
   assert.doesNotMatch(helper, /DISCORD_BOT_TOKEN|discord\.com\/api|allowed_mentions|fetch\s*\(|runScheduled|dispatchDiscord|nitrado\.net/i, "suggestion helper must not send Discord or call automation/upstream systems");
   const publicProjection = helper.slice(helper.indexOf("function toPublicSuggestion"), helper.indexOf("function toOwnerSuggestion"));
@@ -2396,6 +2536,9 @@ function moderationRow() {
 
 class ModerationPrivacyDb {
   actions: Array<Record<string, unknown>> = [];
+  beforeNextModerationUpdate: (() => void) | null = null;
+  failNextModerationUpdate = false;
+  lastChanges = 0;
 
   constructor(public row: ReturnType<typeof moderationRow>) {}
 
@@ -2404,8 +2547,9 @@ class ModerationPrivacyDb {
   }
 
   async batch(statements: ModerationPrivacyStatement[]) {
-    for (const statement of statements) await statement.run();
-    return statements.map(() => ({ success: true }));
+    const results: unknown[] = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
   }
 }
 
@@ -2438,9 +2582,25 @@ class ModerationPrivacyStatement {
     if (this.sql.includes("UPDATE event_suggestions SET creator_response = NULL")) {
       this.db.row.creator_response = null;
       this.db.row.updated_at = "2026-07-23T10:01:00.000Z";
-      return { success: true };
+      this.db.lastChanges = 1;
+      return changed(1);
     }
     if (this.sql.includes("UPDATE event_suggestions") && this.sql.includes("moderation_status = ?")) {
+      const hook = this.db.beforeNextModerationUpdate;
+      this.db.beforeNextModerationUpdate = null;
+      if (hook) hook();
+      if (this.db.failNextModerationUpdate) {
+        this.db.failNextModerationUpdate = false;
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
+      const suggestionId = String(this.bindings[10] ?? "");
+      const expectedModeration = String(this.bindings[11] ?? "");
+      const expectedPublic = String(this.bindings[12] ?? "");
+      if (this.db.row.id !== suggestionId || this.db.row.moderation_status !== expectedModeration || this.db.row.public_status !== expectedPublic) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
       const publicResponseFlag = Number(this.bindings[3] ?? 0);
       const publicResponse = String(this.bindings[4] ?? "");
       this.db.row = {
@@ -2449,12 +2609,17 @@ class ModerationPrivacyStatement {
         public_status: String(this.bindings[1] ?? ""),
         creator_decision: String(this.bindings[2] ?? ""),
         creator_response: publicResponseFlag === 1 ? (publicResponse ? publicResponse : this.db.row.creator_response) : null,
-        updated_at: "2026-07-23T10:01:00.000Z",
-        moderated_at: "2026-07-23T10:01:00.000Z",
+        updated_at: String(this.bindings[9] ?? ""),
+        moderated_at: String(this.bindings[8] ?? ""),
       };
-      return { success: true };
+      this.db.lastChanges = 1;
+      return changed(1);
     }
     if (this.sql.includes("INSERT INTO event_suggestion_moderation_actions")) {
+      if (this.sql.includes("WHERE changes() = 1") && this.db.lastChanges !== 1) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
       this.db.actions.push({
         id: this.bindings[0],
         suggestion_id: this.bindings[1],
@@ -2463,10 +2628,257 @@ class ModerationPrivacyStatement {
         previous_status: this.bindings[4],
         new_status: this.bindings[5],
         safe_reason: this.bindings[6],
+        created_at: this.bindings[7],
       });
-      return { success: true };
+      this.db.lastChanges = 1;
+      return changed(1);
     }
     throw new Error(`Unexpected moderation privacy query: ${this.sql.slice(0, 120)}`);
+  }
+}
+
+function conversionSuggestionRow() {
+  return {
+    ...moderationRow(),
+    id: "convertible-suggestion",
+    title: "Creator Conversion Target",
+    description: "A deterministic conversion fixture with creator-reviewed wording and enough public-safe detail for draft creation.",
+    normalized_title: "creator conversion target",
+    content_fingerprint: "conversion-target-fingerprint",
+    competition_format: "server_vs_server",
+    moderation_status: "shortlisted",
+    public_status: "shortlisted",
+    converted_event_id: null as string | null,
+  };
+}
+
+function conversionEventRow(id: string, suggestionId: string) {
+  return {
+    id,
+    name: "Creator Conversion Target",
+    slug: `${suggestionId}-draft`,
+    description: "A deterministic conversion fixture with creator-reviewed wording and enough public-safe detail for draft creation.",
+    category: "modded",
+    event_type: "community_cup",
+    status: "draft",
+    visibility: "private",
+    premium_tier: "pro",
+    starts_at: null as string | null,
+    ends_at: null as string | null,
+    created_by: "creator-user",
+    rules: "Draft converted from community suggestion. Final rules must be reviewed and locked by the platform creator.",
+    rewards: null as string | null,
+    created_at: "2026-07-23T10:00:00.000Z",
+    updated_at: "2026-07-23T10:00:00.000Z",
+  };
+}
+
+class SuggestionConversionDb {
+  row = conversionSuggestionRow();
+  events: Array<ReturnType<typeof conversionEventRow>> = [];
+  activities: Array<Record<string, unknown>> = [];
+  actions: Array<Record<string, unknown>> = [];
+  beforeNextConversionUpdate: (() => void) | null = null;
+  lastChanges = 0;
+  private batchTail: Promise<unknown> = Promise.resolve();
+  private readonly mainReadBarrierTotal: number;
+  private mainReadCount = 0;
+  private mainReadResolvers: Array<() => void> = [];
+
+  constructor(options: { mainReadBarrierTotal?: number } = {}) {
+    this.mainReadBarrierTotal = options.mainReadBarrierTotal ?? 0;
+  }
+
+  prepare(sql: string) {
+    return new SuggestionConversionStatement(this, sql);
+  }
+
+  async batch(statements: SuggestionConversionStatement[]) {
+    const runBatch = async () => {
+      const snapshot = {
+        row: { ...this.row },
+        events: this.events.map((event) => ({ ...event })),
+        activities: this.activities.map((activity) => ({ ...activity })),
+        actions: this.actions.map((action) => ({ ...action })),
+        lastChanges: this.lastChanges,
+      };
+      const results: unknown[] = [];
+      try {
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      } catch (error) {
+        this.row = snapshot.row;
+        this.events = snapshot.events;
+        this.activities = snapshot.activities;
+        this.actions = snapshot.actions;
+        this.lastChanges = snapshot.lastChanges;
+        throw error;
+      }
+    };
+    const result = this.batchTail.then(runBatch, runBatch);
+    this.batchTail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async waitForMainReadBarrier() {
+    if (this.mainReadBarrierTotal <= 0) return;
+    this.mainReadCount += 1;
+    if (this.mainReadCount >= this.mainReadBarrierTotal) {
+      for (const resolve of this.mainReadResolvers.splice(0)) resolve();
+      return;
+    }
+    await new Promise<void>((resolve) => this.mainReadResolvers.push(resolve));
+  }
+
+  findEvent(id: string) {
+    return this.events.find((event) => event.id === id) ?? null;
+  }
+}
+
+class SuggestionConversionStatement {
+  private bindings: unknown[] = [];
+
+  constructor(private readonly db: SuggestionConversionDb, private readonly sql: string) {}
+
+  bind(...bindings: unknown[]) {
+    this.bindings = bindings;
+    return this;
+  }
+
+  async all() {
+    if (/PRAGMA\s+table_info\(([^)]+)\)/i.test(this.sql)) {
+      const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1] ?? "";
+      return { results: (SUGGESTION_ROUTE_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
+    }
+    return { results: [] };
+  }
+
+  async first() {
+    if (/FROM\s+event_suggestions/i.test(this.sql) && /LEFT\s+JOIN\s+competitive_events/i.test(this.sql)) {
+      await this.db.waitForMainReadBarrier();
+      const event = this.db.row.converted_event_id ? this.db.findEvent(this.db.row.converted_event_id) : null;
+      if (this.bindings[0] !== this.db.row.id) return null;
+      return {
+        ...this.db.row,
+        converted_event_slug: event?.slug ?? null,
+        converted_event_status: event?.status ?? null,
+        converted_event_visibility: event?.visibility ?? null,
+      };
+    }
+    if (/SELECT\s+id,\s+slug(?:,\s+status,\s+visibility)?\s+FROM\s+competitive_events/i.test(this.sql)) {
+      const event = this.db.findEvent(String(this.bindings[0] ?? ""));
+      if (!event) return null;
+      return {
+        id: event.id,
+        slug: event.slug,
+        status: event.status,
+        visibility: event.visibility,
+      };
+    }
+    if (/SELECT\s+converted_event_id(?:,\s*moderation_status,\s*public_status)?\s+FROM\s+event_suggestions/i.test(this.sql)) {
+      if (this.bindings[0] !== this.db.row.id) return null;
+      return {
+        converted_event_id: this.db.row.converted_event_id,
+        moderation_status: this.db.row.moderation_status,
+        public_status: this.db.row.public_status,
+      };
+    }
+    return null;
+  }
+
+  async run() {
+    if (/UPDATE\s+event_suggestions/i.test(this.sql) && /converted_event_id\s+=/i.test(this.sql)) {
+      const hook = this.db.beforeNextConversionUpdate;
+      this.db.beforeNextConversionUpdate = null;
+      if (hook) hook();
+      const eventId = String(this.bindings[0] ?? "");
+      const convertedAt = String(this.bindings[1] ?? "");
+      const suggestionId = String(this.bindings[3] ?? "");
+      const canClaim = this.db.row.id === suggestionId
+        && this.db.row.converted_event_id === null
+        && ["shortlisted", "accepted"].includes(this.db.row.moderation_status)
+        && ["shortlisted", "accepted"].includes(this.db.row.public_status);
+      if (!canClaim) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
+      this.db.row.converted_event_id = eventId;
+      this.db.row.public_status = "converted_to_event";
+      this.db.row.moderation_status = "converted_to_event";
+      this.db.row.creator_decision = "converted_to_event";
+      this.db.row.moderated_at = convertedAt;
+      this.db.row.updated_at = String(this.bindings[2] ?? "");
+      this.db.lastChanges = 1;
+      return changed(1);
+    }
+
+    if (/INSERT\s+INTO\s+competitive_events/i.test(this.sql)) {
+      if (this.sql.includes("WHERE changes() = 1") && this.db.lastChanges !== 1) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
+      const id = String(this.bindings[0] ?? "");
+      if (this.db.findEvent(id)) throw new Error("duplicate event id");
+      this.db.events.push({
+        id,
+        name: String(this.bindings[1] ?? ""),
+        slug: String(this.bindings[2] ?? ""),
+        description: String(this.bindings[3] ?? ""),
+        category: String(this.bindings[4] ?? ""),
+        event_type: String(this.bindings[5] ?? ""),
+        status: "draft",
+        visibility: "private",
+        premium_tier: "pro",
+        starts_at: this.bindings[6] === null ? null : String(this.bindings[6] ?? ""),
+        ends_at: this.bindings[7] === null ? null : String(this.bindings[7] ?? ""),
+        created_by: String(this.bindings[8] ?? ""),
+        rules: String(this.bindings[9] ?? ""),
+        rewards: null,
+        created_at: String(this.bindings[10] ?? ""),
+        updated_at: String(this.bindings[11] ?? ""),
+      });
+      this.db.lastChanges = 1;
+      return changed(1);
+    }
+
+    if (/INSERT\s+INTO\s+competitive_event_activity/i.test(this.sql)) {
+      if (this.sql.includes("WHERE changes() = 1") && this.db.lastChanges !== 1) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
+      this.db.activities.push({
+        id: this.bindings[0],
+        event_id: this.bindings[1],
+        server_id: null,
+        activity_type: "suggestion_converted_to_draft",
+        message: this.bindings[2],
+        metadata: this.bindings[3],
+        created_at: this.bindings[4],
+      });
+      this.db.lastChanges = 1;
+      return changed(1);
+    }
+
+    if (/INSERT\s+INTO\s+event_suggestion_moderation_actions/i.test(this.sql)) {
+      if (this.sql.includes("WHERE changes() = 1") && this.db.lastChanges !== 1) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
+      this.db.actions.push({
+        id: this.bindings[0],
+        suggestion_id: this.bindings[1],
+        actor_user_id: this.bindings[2],
+        action: "convert_to_event_draft",
+        previous_status: this.bindings[3],
+        new_status: "converted_to_event",
+        safe_reason: this.bindings[4],
+        created_at: this.bindings[5],
+      });
+      this.db.lastChanges = 1;
+      return changed(1);
+    }
+
+    throw new Error(`Unexpected conversion query: ${this.sql.slice(0, 120)}`);
   }
 }
 

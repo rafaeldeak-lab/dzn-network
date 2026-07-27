@@ -649,7 +649,8 @@ export async function moderateEventSuggestion(
     return { ok: true, status: 200, idempotent: true, suggestion: current };
   }
 
-  await db.batch([
+  const moderatedAt = new Date().toISOString();
+  const batchResult = await db.batch([
     db
       .prepare(
         `UPDATE event_suggestions
@@ -660,9 +661,9 @@ export async function moderateEventSuggestion(
                WHEN ? = 1 THEN CASE WHEN ? != '' THEN ? ELSE creator_response END
                ELSE NULL
              END,
-             published_at = CASE WHEN ? = 'public_voting' AND published_at IS NULL THEN CURRENT_TIMESTAMP ELSE published_at END,
-             moderated_at = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
+             published_at = CASE WHEN ? = 'public_voting' AND published_at IS NULL THEN ? ELSE published_at END,
+             moderated_at = ?,
+             updated_at = ?
          WHERE id = ?
            AND moderation_status = ?
            AND public_status = ?`,
@@ -675,6 +676,9 @@ export async function moderateEventSuggestion(
         creatorResponse,
         creatorResponse,
         target.public_status,
+        moderatedAt,
+        moderatedAt,
+        moderatedAt,
         suggestionId,
         existing.moderation_status,
         existing.public_status,
@@ -682,10 +686,25 @@ export async function moderateEventSuggestion(
     db
       .prepare(
         `INSERT INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE changes() = 1`,
       )
-      .bind(crypto.randomUUID(), suggestionId, user!.id, action, existing.moderation_status, target.moderation_status, reason || creatorResponse || "status update"),
+      .bind(crypto.randomUUID(), suggestionId, user!.id, action, existing.moderation_status, target.moderation_status, reason || creatorResponse || "status update", moderatedAt),
   ]);
+  if (d1ChangedRows(batchResult[0]) !== 1) {
+    const current = await loadOwnerSuggestion(env, suggestionId);
+    if (!current) return { ok: false, status: 404, error: "SUGGESTION_NOT_FOUND", message: "Suggestion not found." };
+    if (current.moderationStatus === target.moderation_status && current.publicStatus === target.public_status) {
+      return { ok: true, status: 200, idempotent: true, suggestion: current };
+    }
+    return {
+      ok: false,
+      status: 409,
+      error: "SUGGESTION_STATE_CONFLICT",
+      message: "Suggestion state changed before moderation could be recorded.",
+      suggestion: current,
+    };
+  }
   const updated = await loadOwnerSuggestion(env, suggestionId);
   return { ok: true, status: 200, idempotent: false, suggestion: updated };
 }
@@ -725,15 +744,43 @@ export async function convertSuggestionToEventDraft(env: Env, user: SessionUser 
   const reason = sanitizePlainText(input.reason, 500) || "creator conversion";
   const activityId = deterministicSuggestionActivityId(suggestionId);
   const moderationActionId = deterministicSuggestionModerationActionId(suggestionId);
+  const convertedAt = new Date().toISOString();
 
+  const existingDraft = await db.prepare("SELECT id, slug FROM competitive_events WHERE id = ? LIMIT 1").bind(eventId).first<{ id: string; slug: string }>();
+  if (existingDraft) {
+    const current = await db.prepare("SELECT converted_event_id FROM event_suggestions WHERE id = ? LIMIT 1").bind(suggestionId).first<{ converted_event_id: string | null }>();
+    if (current?.converted_event_id === existingDraft.id) {
+      return { ok: true, status: 200, idempotent: true, eventId: existingDraft.id, eventSlug: existingDraft.slug, message: "Suggestion already has a private event draft." };
+    }
+    return { ok: false, status: 409, error: "DRAFT_ALREADY_EXISTS", message: "A draft already exists for this suggestion." };
+  }
+
+  let batchResult: unknown[];
   try {
-    await db.batch([
+    batchResult = await db.batch([
       db
         .prepare(
-          `INSERT OR IGNORE INTO competitive_events (
+          `UPDATE event_suggestions
+           SET converted_event_id = ?,
+               public_status = 'converted_to_event',
+               moderation_status = 'converted_to_event',
+               creator_decision = 'converted_to_event',
+               moderated_at = ?,
+               updated_at = ?
+           WHERE id = ?
+             AND converted_event_id IS NULL
+             AND moderation_status IN ('shortlisted', 'accepted')
+             AND public_status IN ('shortlisted', 'accepted')`,
+        )
+        .bind(eventId, convertedAt, convertedAt, suggestionId),
+      db
+        .prepare(
+          `INSERT INTO competitive_events (
             id, name, slug, description, category, event_type, status, visibility, premium_tier,
             starts_at, ends_at, created_by, rules, rewards, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'draft', 'private', 'pro', ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          )
+          SELECT ?, ?, ?, ?, ?, ?, 'draft', 'private', 'pro', ?, ?, ?, ?, NULL, ?, ?
+          WHERE changes() = 1`,
         )
         .bind(
           eventId,
@@ -746,37 +793,42 @@ export async function convertSuggestionToEventDraft(env: Env, user: SessionUser 
           suggestion.suggested_date_end,
           user!.id,
           "Draft converted from community suggestion. Final rules must be reviewed and locked by the platform creator.",
+          convertedAt,
+          convertedAt,
         ),
       db
         .prepare(
-          `UPDATE event_suggestions
-           SET converted_event_id = COALESCE(converted_event_id, ?),
-               public_status = 'converted_to_event',
-               moderation_status = 'converted_to_event',
-               creator_decision = 'converted_to_event',
-               moderated_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?
-             AND converted_event_id IS NULL
-             AND moderation_status IN ('shortlisted', 'accepted')
-             AND public_status IN ('shortlisted', 'accepted')`,
+          `INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
+           SELECT ?, ?, NULL, 'suggestion_converted_to_draft', ?, ?, ?
+           WHERE changes() = 1`,
         )
-        .bind(eventId, suggestionId),
+        .bind(activityId, eventId, `Community suggestion converted to draft: ${suggestion.title}.`, JSON.stringify({ suggestion_id: suggestionId }), convertedAt),
       db
         .prepare(
-          `INSERT OR IGNORE INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
-           VALUES (?, ?, NULL, 'suggestion_converted_to_draft', ?, ?, CURRENT_TIMESTAMP)`,
+          `INSERT INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at)
+           SELECT ?, ?, ?, 'convert_to_event_draft', ?, 'converted_to_event', ?, ?
+           WHERE changes() = 1`,
         )
-        .bind(activityId, eventId, `Community suggestion converted to draft: ${suggestion.title}.`, JSON.stringify({ suggestion_id: suggestionId })),
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO event_suggestion_moderation_actions (id, suggestion_id, actor_user_id, action, previous_status, new_status, safe_reason, created_at)
-           VALUES (?, ?, ?, 'convert_to_event_draft', ?, 'converted_to_event', ?, CURRENT_TIMESTAMP)`,
-        )
-        .bind(moderationActionId, suggestionId, user!.id, suggestion.moderation_status, reason),
+        .bind(moderationActionId, suggestionId, user!.id, suggestion.moderation_status, reason, convertedAt),
     ]);
   } catch {
+    const conflictingDraft = await db.prepare("SELECT id, slug FROM competitive_events WHERE id = ? LIMIT 1").bind(eventId).first<{ id: string; slug: string }>();
+    if (conflictingDraft) {
+      return { ok: false, status: 409, error: "DRAFT_ALREADY_EXISTS", message: "A draft already exists for this suggestion." };
+    }
     return { ok: false, status: 500, error: "SUGGESTION_CONVERSION_FAILED", message: "Suggestion could not be converted safely." };
+  }
+  if (d1ChangedRows(batchResult[0]) !== 1) {
+    const current = await db.prepare("SELECT converted_event_id, moderation_status, public_status FROM event_suggestions WHERE id = ? LIMIT 1").bind(suggestionId).first<Pick<SuggestionRow, "converted_event_id" | "moderation_status" | "public_status">>();
+    if (!current) return { ok: false, status: 404, error: "SUGGESTION_NOT_FOUND", message: "Suggestion not found." };
+    if (current.converted_event_id) {
+      const event = await db.prepare("SELECT id, slug FROM competitive_events WHERE id = ? LIMIT 1").bind(current.converted_event_id).first<{ id: string; slug: string }>();
+      if (event) {
+        return { ok: true, status: 200, idempotent: true, eventId: event.id, eventSlug: event.slug, message: "Suggestion already has a private event draft." };
+      }
+      return { ok: false, status: 409, error: "SUGGESTION_ALREADY_TRANSITIONED", message: "Suggestion already moved to another state." };
+    }
+    return { ok: false, status: 409, error: "SUGGESTION_STATE_CONFLICT", message: "Suggestion state changed before conversion could be finalized." };
   }
 
   const [event, updatedSuggestion] = await Promise.all([
