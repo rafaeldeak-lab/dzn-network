@@ -1898,6 +1898,7 @@ jobs:
           const memberCookie = process.env.OWNER_CONSOLE_NON_OWNER_COOKIE || "";
           const apiMemberUserId = process.env.PHASE2A_API_MEMBER_USER_ID || "owner-console-non-owner-user";
           const apiMemberCookie = process.env.PHASE2A_API_MEMBER_COOKIE || "";
+          const phase2aRunKey = String(process.env.PHASE2A_RUN_KEY || "").trim();
           const conversionTargetId = String(process.env.PHASE2A_CONVERSION_TARGET_ID || "").trim();
           const conversionTargetEventId = String(process.env.PHASE2A_CONVERSION_EVENT_ID || "").trim();
           const creatorHostId = String(process.env.PHASE2A_CREATOR_HOST_ID || "phase2a-preview-creator-host").trim();
@@ -1978,6 +1979,12 @@ jobs:
             writeFailureSummary(category, message, details);
             console.error(message);
             process.exit(1);
+          }
+          if (!/^[1-9][0-9]*-[1-9][0-9]*$/.test(phase2aRunKey)) {
+            fail("Phase 2A run-scoped fixture key is missing or malformed.", {
+              category: "PHASE2A_RUN_SCOPED_FIXTURE_COLLISION",
+              stage: "verification",
+            });
           }
           if (!/^[A-Za-z0-9-]+$/.test(conversionTargetId) || conversionTargetId.length >= 72 || conversionTargetEventId !== `suggestion-draft-${conversionTargetId}`) {
             fail("Phase 2A run-scoped conversion fixture environment is missing or malformed.", {
@@ -2832,8 +2839,16 @@ jobs:
               },
             };
           }
-          async function verifyHostAuthorization(base) {
+          async function verifyHostAuthorization(base, runKey) {
             const jsonHeaders = { "Content-Type": "application/json" };
+            const safeRunKey = String(runKey || "").trim();
+            if (!/^[1-9][0-9]*-[1-9][0-9]*$/.test(safeRunKey)) {
+              fail("Phase 2A host authorization run key is missing or malformed.", {
+                category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
+                stage: "authMatrix",
+                route: "/api/owner/events",
+              });
+            }
             const hostRequiredColumns = [
               "id",
               "user_id",
@@ -2861,12 +2876,29 @@ jobs:
               foreignHostListed: null,
               foreignHostAttemptStatus: null,
               ownedHostAttemptStatus: null,
+              runKey: safeRunKey,
+              creatorHost: creatorHostId,
+              foreignHostCheckResult: "pending",
+              failureReason: null,
               complete: false,
             };
             const writeHostReport = (patch = {}) => {
               hostReport = { ...hostReport, ...patch };
               writeJsonArtifact("host-authorization.json", hostReport);
               return hostReport;
+            };
+            const logHostReport = (reason = "progress") => {
+              const foreignHostCheckResult =
+                hostReport.foreignHostCheckResult ||
+                (hostReport.foreignHostListed === null ? "pending" : hostReport.foreignHostListed ? "listed" : "absent");
+              console.log(
+                `Phase 2A host authorization: runKey=${safeRunKey}; creatorHost=${creatorHostId}; foreignHostCheck=${foreignHostCheckResult}; complete=${hostReport.complete === true}; reason=${sanitizeFailureValue(reason)}`,
+              );
+            };
+            const failHostAuthorization = (message, details = {}) => {
+              writeHostReport({ failureReason: message, complete: false });
+              logHostReport(message);
+              fail(message, details);
             };
             const requiredHostColumnsPresent = (rows) => {
               const columns = new Set((rows || []).map((row) => String(row?.name || "")));
@@ -2880,6 +2912,7 @@ jobs:
             };
             const readCount = async (sql, params = [], operationLabel = "d1Read") => Number((await d1Query(sql, params, operationLabel))[0]?.count || 0);
             writeHostReport();
+            logHostReport("started");
 
             const beforeSchema = await d1Query("PRAGMA table_info(linked_servers);", [], "hostLinkedServerSchemaBeforeOwnerGet");
             const beforeRequiredColumnsPresent = requiredHostColumnsPresent(beforeSchema);
@@ -2910,7 +2943,9 @@ jobs:
               listedHostCount: linkedServers.length,
               creatorOwnHostListed,
               foreignHostListed,
+              foreignHostCheckResult: foreignHostListed ? "listed" : "absent",
             });
+            logHostReport("owner event control host list read");
 
             const afterSchema = await d1Query("PRAGMA table_info(linked_servers);", [], "hostLinkedServerSchemaAfterOwnerGet");
             const afterRequiredColumnsPresent = requiredHostColumnsPresent(afterSchema);
@@ -2921,7 +2956,7 @@ jobs:
               previousFailureClassification,
             });
             if (!afterRequiredColumnsPresent) {
-              fail("Event-host linked-server schema was not ready after Owner Event Control readiness.", {
+              failHostAuthorization("Event-host linked-server schema was not ready after Owner Event Control readiness.", {
                 category: "PHASE2A_EVENT_HOST_SCHEMA_NOT_READY",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3006,10 +3041,12 @@ jobs:
               previousFailureClassification,
               foreignHostAttemptStatus: null,
               ownedHostAttemptStatus: null,
+              foreignHostCheckResult: foreignHostListed ? "listed" : "absent",
               complete: false,
             });
+            logHostReport("host fixture reads completed");
             if (!creatorFixtureOwnershipValid || !foreignFixtureOwnershipValid || !creatorFixtureEligible || !foreignFixtureEligibleForItsOwner) {
-              fail("Phase 2A host authorization fixtures are not eligible or have unexpected ownership.", {
+              failHostAuthorization("Phase 2A host authorization fixtures are not eligible or have unexpected ownership.", {
                 category: "PHASE2A_HOST_FIXTURE_INELIGIBLE",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3017,7 +3054,7 @@ jobs:
               });
             }
             if (!creatorEventAdmin) {
-              fail("Owner Event Control did not recognize the creator event admin session.", {
+              failHostAuthorization("Owner Event Control did not recognize the creator event admin session.", {
                 category: "PHASE2A_HOST_AUTHORIZATION_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3025,7 +3062,7 @@ jobs:
               });
             }
             if (!hostInventoryAvailable) {
-              fail("Owner Event Control host inventory was unavailable.", {
+              failHostAuthorization("Owner Event Control host inventory was unavailable.", {
                 category: "PHASE2A_HOST_INVENTORY_UNAVAILABLE",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3033,7 +3070,7 @@ jobs:
               });
             }
             if (!creatorOwnHostListed) {
-              fail("Owner Event Control did not list the creator-owned eligible host.", {
+              failHostAuthorization("Owner Event Control did not list the creator-owned eligible host.", {
                 category: "PHASE2A_CREATOR_HOST_NOT_LISTED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3041,7 +3078,7 @@ jobs:
               });
             }
             if (foreignHostListed) {
-              fail("Owner Event Control listed a foreign-owned eligible host.", {
+              failHostAuthorization("Owner Event Control listed a foreign-owned eligible host.", {
                 category: "PHASE2A_FOREIGN_HOST_LISTED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3049,8 +3086,8 @@ jobs:
               });
             }
 
-            const foreignName = `Phase2A Foreign Host Denied ${runKey}`;
-            const ownedName = `Phase2A Owned Host ${runKey}`;
+            const foreignName = `Phase2A Foreign Host Denied ${safeRunKey}`;
+            const ownedName = `Phase2A Owned Host ${safeRunKey}`;
             const foreignBeforeRows = await d1Query(
               "SELECT competitive_enabled AS competitiveEnabled, server_category AS serverCategory, last_event_at AS lastEventAt, updated_at AS updatedAt FROM linked_servers WHERE id = ? LIMIT 1;",
               [foreignHostId],
@@ -3087,7 +3124,7 @@ jobs:
               stage: "authMatrix",
             });
             if (foreignAttempt.json?.error !== "SERVER_NOT_FOUND" || !/private,\s*no-store/i.test(String(foreignAttempt.headers["cache-control"] || ""))) {
-              fail("Foreign-owned host attempt did not return the expected generic private/no-store denial.", {
+              failHostAuthorization("Foreign-owned host attempt did not return the expected generic private/no-store denial.", {
                 category: "PHASE2A_FOREIGN_HOST_DENIAL_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3128,7 +3165,7 @@ jobs:
               stage: "authMatrix",
             });
             if (ownedAttempt.json?.ok !== true) {
-              fail("Creator-owned host event creation did not return ok=true.", {
+              failHostAuthorization("Creator-owned host event creation did not return ok=true.", {
                 category: "PHASE2A_OWNED_HOST_CREATE_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3158,6 +3195,8 @@ jobs:
               ownedHostCreatedByCreator: ownedRows[0]?.createdBy === "owner-console-platform-creator",
               ownedHostUpdated: ownedHostUpdates === 1,
               transactionTimeOwnershipTestPassedLocally: true,
+              foreignHostCheckResult: "denied",
+              failureReason: null,
               complete: true,
             };
             if (
@@ -3168,7 +3207,8 @@ jobs:
               !summary.foreignHostSubscriptionUnchanged
             ) {
               writeJsonArtifact("host-authorization.json", summary);
-              fail("Foreign-owned host authorization verification failed.", {
+              hostReport = summary;
+              failHostAuthorization("Foreign-owned host authorization verification failed.", {
                 category: "PHASE2A_FOREIGN_HOST_DENIAL_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3183,7 +3223,8 @@ jobs:
               !summary.ownedHostUpdated
             ) {
               writeJsonArtifact("host-authorization.json", summary);
-              fail("Creator-owned host authorization verification failed.", {
+              hostReport = summary;
+              failHostAuthorization("Creator-owned host authorization verification failed.", {
                 category: "PHASE2A_OWNED_HOST_CREATE_FAILED",
                 stage: "authMatrix",
                 route: "/api/owner/events",
@@ -3191,6 +3232,8 @@ jobs:
               });
             }
             writeJsonArtifact("host-authorization.json", summary);
+            hostReport = summary;
+            logHostReport("completed");
             return summary;
           }
           async function verifyProtectedRowInvariantsAfterConversion(authMatrix) {
@@ -3369,7 +3412,7 @@ jobs:
             const cacheVerification = await verifyCache(stableUrl);
             writeJsonArtifact("cache-verification.json", cacheVerification, "cacheVerification");
             updateProgress("authMatrix", "running");
-            const hostAuthorization = await verifyHostAuthorization(stableUrl);
+            const hostAuthorization = await verifyHostAuthorization(stableUrl, phase2aRunKey);
             const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);
             const authMatrix = await verifyAuthMatrix(stableUrl, apiMemberSubmission);
             authMatrix.hostAuthorization = hostAuthorization;

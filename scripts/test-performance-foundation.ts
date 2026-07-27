@@ -1318,10 +1318,13 @@ function assertWorkflowBoundaries() {
   const ownerPreviewWorkflow = source(".github/workflows/dzn-owner-console-preview.yml");
   assertOrder(
     ownerPreviewWorkflow,
-    "const hostAuthorization = await verifyHostAuthorization(stableUrl);",
+    "const hostAuthorization = await verifyHostAuthorization(stableUrl, phase2aRunKey);",
     "const apiMemberSubmission = await verifyApiMemberSubmission(stableUrl, sessionVerification);",
     "Phase 2A preview must complete host authorization before suggestion mutation probes",
   );
+  assertIncludes(ownerPreviewWorkflow, "const phase2aRunKey = String(process.env.PHASE2A_RUN_KEY || \"\").trim()", "preview verifier must derive the run key in the verifier block");
+  assertIncludes(ownerPreviewWorkflow, "async function verifyHostAuthorization(base, runKey)", "host verifier must receive the run key explicitly");
+  assertIncludes(ownerPreviewWorkflow, "Phase 2A host authorization: runKey=", "host verifier must log safe run-key diagnostics");
   assertIncludes(ownerPreviewWorkflow, "authMatrix.hostAuthorization = hostAuthorization", "host authorization evidence must be attached to auth-matrix.json");
   assertIncludes(ownerPreviewWorkflow, "const suggestionVoteChangeCooldownMs = 1500", "preview vote verifier must use the production cooldown value");
   assertIncludes(ownerPreviewWorkflow, "elapsedBeforeRemovalMs", "preview vote verifier must measure elapsed time before asserting 429");

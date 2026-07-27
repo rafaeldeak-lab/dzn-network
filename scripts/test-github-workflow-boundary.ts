@@ -1313,7 +1313,10 @@ assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedMalformed
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("authenticatedOversizedReport"), true, "Phase 2A verifier must keep authenticated oversized reports at 413.");
 assert.equal(ownerPreviewPhase2AAuthMatrixBlock.includes("Authentication-precedence vote/report probes created mutation rows."), true, "Phase 2A verifier must prove auth-precedence vote/report probes create no rows.");
 assert.equal(ownerPreviewPhase2ABlock.includes("suggestionMutationAuthPrecedence"), true, "Phase 2A privacy artifact must record suggestion mutation auth precedence.");
-assert.equal(ownerPreviewPhase2ABlock.includes("async function verifyHostAuthorization(base)"), true, "Phase 2A verifier must include official event host authorization checks.");
+assert.equal(ownerPreviewPhase2ABlock.includes("const phase2aRunKey = String(process.env.PHASE2A_RUN_KEY"), true, "Phase 2A verifier must derive the run-scoped key in the verifier block.");
+assert.equal(ownerPreviewPhase2ABlock.includes("async function verifyHostAuthorization(base, runKey)"), true, "Phase 2A verifier must pass the run-scoped key explicitly into official event host authorization checks.");
+assert.equal(ownerPreviewPhase2ABlock.includes("const hostAuthorization = await verifyHostAuthorization(stableUrl, phase2aRunKey);"), true, "Phase 2A verifier must not rely on an undefined host runKey global.");
+assert.equal(ownerPreviewPhase2ABlock.includes("Phase 2A host authorization: runKey="), true, "Phase 2A host verifier must print safe run-key and completion diagnostics.");
 assert.equal(ownerPreviewPhase2ABlock.includes('writeJsonArtifact("host-authorization.json"'), true, "Phase 2A verifier must persist sanitized host authorization evidence.");
 assert.equal(ownerPreviewPhase2ABlock.includes("Cloudflare read failed before route probes"), false, "Cloudflare verifier failures must be stage-aware rather than route-probe specific.");
 for (const [needle, message] of [
