@@ -1114,6 +1114,29 @@ async function assertModerationAndConversionRaceIntegrity() {
     assert.equal(env.DB.activities.length, 1, "concurrent conversions must create at most one conversion activity");
     assert.equal(env.DB.actions.length, 1, "concurrent conversions must create only one success moderation action");
   }
+
+  {
+    const db = new SuggestionConversionDb();
+    db.throwDuplicateEventOnce = true;
+    db.afterDuplicateEventThrow = () => {
+      db.row.converted_event_id = "suggestion-draft-convertible-suggestion";
+      db.row.moderation_status = "converted_to_event";
+      db.row.public_status = "converted_to_event";
+      db.events.push(conversionEventRow("suggestion-draft-convertible-suggestion", "convertible-suggestion"));
+      db.activities.push({ id: "suggestion-conversion-activity-convertible-suggestion", event_id: "suggestion-draft-convertible-suggestion" });
+      db.actions.push({ id: "suggestion-conversion-action-convertible-suggestion", suggestion_id: "convertible-suggestion", action: "convert_to_event_draft" });
+    };
+    const env = {
+      DZN_PLATFORM_CREATOR_DISCORD_ID: "111111111111111111",
+      DB: db as unknown as D1Database,
+    } as Env & { DB: SuggestionConversionDb };
+    const result = await convertSuggestionToEventDraft(env, creator, "convertible-suggestion", { reason: "Creator approved conversion" });
+    assert.equal(result.status, 200, "duplicate draft races should return the existing draft instead of 500");
+    assert.equal("idempotent" in result && result.idempotent, true, "duplicate draft race should be reported as idempotent");
+    assert.equal(env.DB.events.length, 1, "duplicate draft race must not create another event");
+    assert.equal(env.DB.activities.length, 1, "duplicate draft race must not create another activity");
+    assert.equal(env.DB.actions.length, 1, "duplicate draft race must not create another success action");
+  }
 }
 
 async function assertPublicEventProjectionPrivacy() {
@@ -1328,7 +1351,10 @@ function assertSuggestionApis() {
   assertIncludes(moderationBody, "WHERE changes() = 1", "moderation audit insert must be gated by the successful update");
   assertIncludes(moderationBody, "d1ChangedRows(batchResult[0])", "moderation must inspect the update changed-row count");
   const conversionBody = helper.slice(helper.indexOf("export async function convertSuggestionToEventDraft"), helper.indexOf("export async function validateEventSuggestionSchema"));
+  const conversionClaimBody = conversionBody.slice(conversionBody.indexOf("UPDATE event_suggestions"), conversionBody.indexOf("INSERT INTO competitive_events"));
   assertOrder(conversionBody, "UPDATE event_suggestions", "INSERT INTO competitive_events", "conversion must claim suggestion state before draft creation");
+  assertNotIncludes(conversionClaimBody, "SET converted_event_id = ?", "conversion must not write the draft foreign key before the draft row exists");
+  assertOrder(conversionBody, "INSERT INTO competitive_events", "SET converted_event_id = ?", "conversion must link the draft only after the draft row exists");
   assertIncludes(conversionBody, "WHERE changes() = 1", "conversion side effects must be gated by the successful state transition");
   assertIncludes(conversionBody, "d1ChangedRows(batchResult[0])", "conversion must inspect the state-transition changed-row count");
   assertIncludes(conversionBody, "DRAFT_ALREADY_EXISTS", "conversion must fail safely when deterministic draft already exists");
@@ -2679,6 +2705,9 @@ class SuggestionConversionDb {
   activities: Array<Record<string, unknown>> = [];
   actions: Array<Record<string, unknown>> = [];
   beforeNextConversionUpdate: (() => void) | null = null;
+  throwDuplicateEventOnce = false;
+  afterDuplicateEventThrow: (() => void) | null = null;
+  afterNextBatchRollback: (() => void) | null = null;
   lastChanges = 0;
   private batchTail: Promise<unknown> = Promise.resolve();
   private readonly mainReadBarrierTotal: number;
@@ -2712,6 +2741,9 @@ class SuggestionConversionDb {
         this.activities = snapshot.activities;
         this.actions = snapshot.actions;
         this.lastChanges = snapshot.lastChanges;
+        const rollbackHook = this.afterNextBatchRollback;
+        this.afterNextBatchRollback = null;
+        if (rollbackHook) rollbackHook();
         throw error;
       }
     };
@@ -2787,13 +2819,12 @@ class SuggestionConversionStatement {
   }
 
   async run() {
-    if (/UPDATE\s+event_suggestions/i.test(this.sql) && /converted_event_id\s+=/i.test(this.sql)) {
+    if (/UPDATE\s+event_suggestions/i.test(this.sql) && /SET\s+public_status\s+=\s+'converted_to_event'/i.test(this.sql)) {
       const hook = this.db.beforeNextConversionUpdate;
       this.db.beforeNextConversionUpdate = null;
       if (hook) hook();
-      const eventId = String(this.bindings[0] ?? "");
-      const convertedAt = String(this.bindings[1] ?? "");
-      const suggestionId = String(this.bindings[3] ?? "");
+      const convertedAt = String(this.bindings[0] ?? "");
+      const suggestionId = String(this.bindings[2] ?? "");
       const canClaim = this.db.row.id === suggestionId
         && this.db.row.converted_event_id === null
         && ["shortlisted", "accepted"].includes(this.db.row.moderation_status)
@@ -2802,12 +2833,33 @@ class SuggestionConversionStatement {
         this.db.lastChanges = 0;
         return changed(0);
       }
-      this.db.row.converted_event_id = eventId;
       this.db.row.public_status = "converted_to_event";
       this.db.row.moderation_status = "converted_to_event";
       this.db.row.creator_decision = "converted_to_event";
       this.db.row.moderated_at = convertedAt;
-      this.db.row.updated_at = String(this.bindings[2] ?? "");
+      this.db.row.updated_at = String(this.bindings[1] ?? "");
+      this.db.lastChanges = 1;
+      return changed(1);
+    }
+
+    if (/UPDATE\s+event_suggestions/i.test(this.sql) && /SET\s+converted_event_id\s+=/i.test(this.sql)) {
+      if (this.sql.includes("WHERE changes() = 1") && this.db.lastChanges !== 1) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
+      const eventId = String(this.bindings[0] ?? "");
+      const suggestionId = String(this.bindings[2] ?? "");
+      const canPointToDraft = this.db.row.id === suggestionId
+        && this.db.row.converted_event_id === null
+        && this.db.row.moderation_status === "converted_to_event"
+        && this.db.row.public_status === "converted_to_event"
+        && Boolean(this.db.findEvent(eventId));
+      if (!canPointToDraft) {
+        this.db.lastChanges = 0;
+        return changed(0);
+      }
+      this.db.row.converted_event_id = eventId;
+      this.db.row.updated_at = String(this.bindings[1] ?? "");
       this.db.lastChanges = 1;
       return changed(1);
     }
@@ -2818,6 +2870,13 @@ class SuggestionConversionStatement {
         return changed(0);
       }
       const id = String(this.bindings[0] ?? "");
+      if (this.db.throwDuplicateEventOnce) {
+        this.db.throwDuplicateEventOnce = false;
+        const hook = this.db.afterDuplicateEventThrow;
+        this.db.afterDuplicateEventThrow = null;
+        if (hook) this.db.afterNextBatchRollback = hook;
+        throw new Error("duplicate event id");
+      }
       if (this.db.findEvent(id)) throw new Error("duplicate event id");
       this.db.events.push({
         id,
@@ -2841,7 +2900,7 @@ class SuggestionConversionStatement {
       return changed(1);
     }
 
-    if (/INSERT\s+INTO\s+competitive_event_activity/i.test(this.sql)) {
+    if (/INSERT(?:\s+OR\s+IGNORE)?\s+INTO\s+competitive_event_activity/i.test(this.sql)) {
       if (this.sql.includes("WHERE changes() = 1") && this.db.lastChanges !== 1) {
         this.db.lastChanges = 0;
         return changed(0);
@@ -2859,7 +2918,7 @@ class SuggestionConversionStatement {
       return changed(1);
     }
 
-    if (/INSERT\s+INTO\s+event_suggestion_moderation_actions/i.test(this.sql)) {
+    if (/INSERT(?:\s+OR\s+IGNORE)?\s+INTO\s+event_suggestion_moderation_actions/i.test(this.sql)) {
       if (this.sql.includes("WHERE changes() = 1") && this.db.lastChanges !== 1) {
         this.db.lastChanges = 0;
         return changed(0);
