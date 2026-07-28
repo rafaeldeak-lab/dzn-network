@@ -454,6 +454,11 @@ async function assertOwnerPrivateDraftReviewRoutes() {
 
   const ownerEventsUiSource = readFileSync("components/owner/owner-events-page.tsx", "utf8");
   assert.match(ownerEventsUiSource, /\/owner\/events\/review\?slug=/, "Owner UI must route private drafts to the creator review route.");
+  assert.match(ownerEventsUiSource, /createOfficialEventSuccessAction\(result,\s*form\)/, "Private official creation success must use the centralized success action.");
+  assert.match(ownerEventsUiSource, /owner_review_url/, "Owner UI must consume the owner review URL returned by event creation.");
+  assert.match(ownerEventsUiSource, /public_url/, "Owner UI must only consume public URLs explicitly returned as public-safe.");
+  assert.match(ownerEventsUiSource, /Review event/, "Private official creation success should label the CTA as an owner review action.");
+  assert.doesNotMatch(ownerEventsUiSource, /href:\s*`\/events\/\$\{result\.event_slug\}`/, "Private official creation success must not blindly point to public event detail.");
   assert.match(ownerEventsUiSource, /Review converted draft/);
   assert.doesNotMatch(ownerEventsUiSource, /`\/events\/\$\{suggestion\.convertedEventSlug\}`/, "Converted private draft links must not point to public event routes.");
 

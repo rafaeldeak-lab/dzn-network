@@ -65,6 +65,18 @@ type OwnerSuggestionsPayload = {
   message?: string;
 };
 
+type CreateOfficialEventResult = {
+  ok?: boolean;
+  event_slug?: string;
+  event_status?: string;
+  event_visibility?: string | null;
+  is_public?: boolean;
+  public_url?: string | null;
+  owner_review_url?: string | null;
+  message?: string;
+  error?: string;
+};
+
 type LoadState = "loading" | "ready" | "unauthorized" | "forbidden" | "error";
 
 const EVENT_TYPES = [
@@ -212,7 +224,7 @@ function CreateOfficialEventPanel({ payload }: { payload: OwnerEventsPayload }) 
     visibility: "public",
   });
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<{ tone: "error" | "success" | "info"; text: string; href?: string } | null>(null);
+  const [message, setMessage] = useState<{ tone: "error" | "success" | "info"; text: string; href?: string; actionLabel?: string } | null>(null);
 
   const selectedServer = useMemo(
     () => payload.linkedServers.find((server) => server.id === selectedServerId) ?? payload.linkedServers[0] ?? null,
@@ -239,14 +251,16 @@ function CreateOfficialEventPanel({ payload }: { payload: OwnerEventsPayload }) 
           team_limit: Number(form.team_limit),
         }),
       });
-      const result = await response.json() as { ok?: boolean; event_slug?: string; message?: string; error?: string };
+      const result = await response.json() as CreateOfficialEventResult;
       if (!response.ok || !result.ok || !result.event_slug) {
         throw new Error(result.message ?? result.error ?? "Official event could not be created.");
       }
+      const action = createOfficialEventSuccessAction(result, form);
       setMessage({
         tone: "success",
         text: result.message ?? "Official event created.",
-        href: `/events/${result.event_slug}`,
+        href: action.href,
+        actionLabel: action.label,
       });
     } catch (submitError) {
       setMessage({ tone: "error", text: submitError instanceof Error ? submitError.message : "Official event could not be created." });
@@ -376,6 +390,25 @@ function EventList({ events, creatorEventAdmin }: { events: OwnerEvent[]; creato
 
 function isPrivateDraftEvent(event: OwnerEvent) {
   return event.status === "draft" || event.visibility === "private";
+}
+
+export function createOfficialEventSuccessAction(
+  result: CreateOfficialEventResult,
+  form: { status: string; visibility: string },
+) {
+  const slug = typeof result.event_slug === "string" ? result.event_slug : "";
+  const status = String(result.event_status ?? form.status ?? "").trim().toLowerCase();
+  const visibility = String(result.event_visibility ?? form.visibility ?? "public").trim().toLowerCase();
+  const ownerReviewUrl = typeof result.owner_review_url === "string" && result.owner_review_url.startsWith("/owner/events/review?slug=")
+    ? result.owner_review_url
+    : `/owner/events/review?slug=${encodeURIComponent(slug)}`;
+  const publicUrl = typeof result.public_url === "string" && result.public_url.startsWith("/events/")
+    ? result.public_url
+    : `/events/${encodeURIComponent(slug)}`;
+  const publicSafe = result.is_public !== false && visibility !== "private" && status !== "draft";
+  return publicSafe
+    ? { href: publicUrl, label: "View public event" }
+    : { href: ownerReviewUrl, label: "Review event" };
 }
 
 function OwnerSuggestionModerationPanel({ creatorEventAdmin }: { creatorEventAdmin: boolean }) {
@@ -597,12 +630,12 @@ function StatusCard({ title, value, tone }: { title: string; value: string; tone
   );
 }
 
-function MessagePanel({ message }: { message: { tone: "error" | "success" | "info"; text: string; href?: string } }) {
+function MessagePanel({ message }: { message: { tone: "error" | "success" | "info"; text: string; href?: string; actionLabel?: string } }) {
   const color = message.tone === "success" ? "border-emerald-300/25 bg-emerald-300/[0.05] text-emerald-100" : message.tone === "error" ? "border-red-300/25 bg-red-300/[0.05] text-red-100" : "border-cyan-300/25 bg-cyan-300/[0.05] text-cyan-100";
   return (
     <div className={`rounded-lg border p-3 text-sm font-bold ${color}`}>
       {message.text}
-      {message.href ? <Link href={message.href} className="ml-3 underline">View event</Link> : null}
+      {message.href ? <Link href={message.href} className="ml-3 underline">{message.actionLabel ?? "Open event"}</Link> : null}
     </div>
   );
 }

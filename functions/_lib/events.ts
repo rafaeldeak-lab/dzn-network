@@ -609,11 +609,29 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
     status: 200,
     event_slug: slug,
     event_id: eventId,
+    event_status: status,
+    event_visibility: visibility,
+    is_public: isPublicEventSuccessDestination(status, visibility),
+    public_url: publicEventSuccessUrl(slug, status, visibility),
+    owner_review_url: ownerEventReviewUrl(slug),
     registration_id: registrationId,
     category,
     category_label: getServerCategoryLabel(category),
     message: "Event created. Only same-category servers can register.",
   };
+}
+
+function isPublicEventSuccessDestination(status: string | null | undefined, visibility: string | null | undefined) {
+  return String(visibility ?? "public").trim().toLowerCase() !== "private"
+    && String(status ?? "draft").trim().toLowerCase() !== "draft";
+}
+
+function publicEventSuccessUrl(slug: string, status: string | null | undefined, visibility: string | null | undefined) {
+  return isPublicEventSuccessDestination(status, visibility) ? `/events/${encodeURIComponent(slug)}` : null;
+}
+
+function ownerEventReviewUrl(slug: string) {
+  return `/owner/events/review?slug=${encodeURIComponent(slug)}`;
 }
 
 export async function joinCompetitiveEvent(env: Env, viewer: SessionUser | null, slug: string, serverId: string) {

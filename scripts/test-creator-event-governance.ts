@@ -104,6 +104,7 @@ async function main() {
   }
 
   await assertSuccessfulCreatorEventCreate();
+  await assertPrivateCreatorEventSuccessLinks();
   await assertSafeCreatorEventFailure("event_insert");
   await assertSafeCreatorEventFailure("registration_insert");
   await assertSafeCreatorEventFailure("host_update");
@@ -160,9 +161,12 @@ class NoWriteD1 {
 
 async function assertSuccessfulCreatorEventCreate() {
   const env = memoryEnv();
-  const result = await createCompetitiveEvent(env, creator, validCreateBody());
+  const result = await createCompetitiveEvent(env, creator, validCreateBody()) as Record<string, unknown>;
   assert.equal(result.status, 200, "Configured creator should be able to create a valid event.");
   assert.equal(result.ok, true, "Successful creator event response should be ok.");
+  assert.equal(result.is_public, true, "Public non-draft creations should be marked public-safe.");
+  assert.equal(result.public_url, `/events/${encodeURIComponent(String(result.event_slug))}`, "Public non-draft creations may link to the public event detail.");
+  assert.equal(result.owner_review_url, `/owner/events/review?slug=${encodeURIComponent(String(result.event_slug))}`, "Public creations should still return an owner review URL.");
   assert.equal(env.DB.createdEvents().length, 1, "Successful creator event create should insert one event.");
   assert.equal(env.DB.registrations.length, 1, "Successful creator event create should insert one host registration.");
   assert.equal(env.DB.activities.length, 1, "Successful creator event create should insert one activity row.");
@@ -171,6 +175,20 @@ async function assertSuccessfulCreatorEventCreate() {
   assert.equal(env.DB.host.server_category, "deathmatch", "Successful creator event create should keep the host category valid.");
   assert.equal(env.DB.existingEvents().length, 1, "Successful creator event create must not touch existing events.");
   assert.equal(env.DB.externalCalls, 0, "Creator event create must not call Discord, queues, schedulers, brackets, scores, or awards.");
+}
+
+async function assertPrivateCreatorEventSuccessLinks() {
+  const env = memoryEnv();
+  const result = await createCompetitiveEvent(env, creator, { ...validCreateBody(), visibility: "private" }) as Record<string, unknown>;
+  assert.equal(result.status, 200, "Configured creator should be able to create a private event.");
+  assert.equal(result.ok, true, "Private creator event response should be ok.");
+  assert.equal(result.is_public, false, "Private creations must not be marked public-safe.");
+  assert.equal(result.public_url, null, "Private creations must not return a public event detail URL.");
+  assert.equal(result.owner_review_url, `/owner/events/review?slug=${encodeURIComponent(String(result.event_slug))}`, "Private creations must return the owner review URL.");
+  assert.equal(env.DB.createdEvents().length, 1, "Private creator event create should insert exactly one event.");
+  assert.equal(env.DB.createdEvents()[0]?.visibility, "private", "Private creator event create must preserve private visibility.");
+  assert.equal(env.DB.registrations.length, 1, "Private creator event create should insert one host registration.");
+  assert.equal(env.DB.activities.length, 1, "Private creator event create should insert one activity row.");
 }
 
 async function assertSafeCreatorEventFailure(stage: CreatorEventFailureStage) {
@@ -763,6 +781,11 @@ function assertSourceGovernance() {
   assertIncludes(createCompetitiveEventBody, "resolveAuthorizedEventCreationHost(env, viewer, input.hosting_server_id ?? input.server_id)");
   assertIncludes(createCompetitiveEventBody, "await db.batch([");
   assertIncludes(createCompetitiveEventBody, "transactional_create");
+  assertIncludes(createCompetitiveEventBody, "public_url: publicEventSuccessUrl(slug, status, visibility)", "Official event creation must suppress public success URLs for private/draft events.");
+  assertIncludes(createCompetitiveEventBody, "owner_review_url: ownerEventReviewUrl(slug)", "Official event creation must return the owner review destination.");
+  assertIncludes(eventsLib, "function isPublicEventSuccessDestination", "Official event creation must centralize public success-link eligibility.");
+  assertIncludes(eventsLib, "visibility ?? \"public\"");
+  assertIncludes(eventsLib, "status ?? \"draft\"");
   assertIncludes(eventsLib, "HOST_AUTHORIZATION_CHANGED", "Official event creation must report transaction-time host authorization changes safely.");
   assertIncludes(createCompetitiveEventBody, "CASE WHEN changes() = 1 THEN 'event_created' ELSE NULL END", "Activity insert must fail the batch if the host update affects zero rows.");
   const eventHostsLib = source("functions/_lib/event-hosts.ts");
@@ -817,6 +840,11 @@ function assertSourceGovernance() {
   const ownerEventsPage = source("components/owner/owner-events-page.tsx");
   assertIncludes(ownerEventsPage, "/api/owner/events");
   assertIncludes(ownerEventsPage, "creatorEventAdmin");
+  assertIncludes(ownerEventsPage, "createOfficialEventSuccessAction(result, form)");
+  assertIncludes(ownerEventsPage, "owner_review_url");
+  assertIncludes(ownerEventsPage, "public_url");
+  assertIncludes(ownerEventsPage, "Review event");
+  assert.doesNotMatch(ownerEventsPage, /href:\s*`\/events\/\$\{result\.event_slug\}`/, "Private official creation success must not blindly link to the public event route.");
   const createPanel = ownerEventsPage.slice(ownerEventsPage.indexOf("function CreateOfficialEventPanel"));
   assert.equal(createPanel.indexOf("if (!payload.creatorEventAdmin)") < createPanel.indexOf("<form"), true, "Create controls must depend on server-confirmed capability data.");
   assert.doesNotMatch(ownerEventsPage, /DISCORD_BOT_TOKEN|DZN_PLATFORM_CREATOR_DISCORD_ID|channel_id|channelId|webhook|cookie/i, "Owner event page must not expose secret or Discord channel material.");

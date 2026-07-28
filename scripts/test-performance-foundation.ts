@@ -1447,6 +1447,9 @@ function assertSuggestionApis() {
   assertIncludes(ownerPage, "Convert to draft");
   assertIncludes(ownerPage, "/owner/events/review?slug=");
   assertIncludes(ownerPage, "Review converted draft");
+  assertIncludes(ownerPage, "createOfficialEventSuccessAction(result, form)", "official creation success must route through the public/private success-link helper");
+  assertIncludes(ownerPage, "Review event", "private official creation success must use owner-review CTA language");
+  assertNotIncludes(ownerPage, "href: `/events/${result.event_slug}`", "private official creation success must not blindly point to the public event route");
   assertNotIncludes(ownerPage, "`/events/${suggestion.convertedEventSlug}`", "converted draft links must not point to the public event route");
   assertIncludes(ownerPage, "Internal reason");
   assertIncludes(ownerPage, "Public response");
