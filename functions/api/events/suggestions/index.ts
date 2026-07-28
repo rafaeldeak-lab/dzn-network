@@ -1,7 +1,7 @@
 import { getSessionUser } from "../../../_lib/db";
 import { createEventSuggestion, listPublicEventSuggestions, unauthorizedSuggestionMutationPayload, type EventSuggestionInput } from "../../../_lib/event-suggestions";
 import { json, methodNotAllowed, readBoundedJson } from "../../../_lib/http";
-import { finalizeServerTiming, makeRequestId, measureD1, privateNoStoreHeaders, publicCacheHeaders, safePerformanceWarning, withPublicGetEdgeCache, type SafeRouteMetrics } from "../../../_lib/performance";
+import { finalizeServerTiming, hasPrivateRequestSignal, makeRequestId, measureD1, privateNoStoreHeaders, publicCacheHeaders, safePerformanceWarning, withPublicGetEdgeCache, type SafeRouteMetrics } from "../../../_lib/performance";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequestGet: PagesFunction = async (context) => {
@@ -14,14 +14,17 @@ export const onRequestGet: PagesFunction = async (context) => {
   return withPublicGetEdgeCache(context, {
     ttl: { maxAge: 15, staleWhileRevalidate: 45 },
     allowedParams: ["sort", "status", "limit", "cursor"],
-    cacheVersion: "event-suggestions-v2",
+    cacheVersion: "event-suggestions-v3",
     buildResponse: async () => {
       const url = new URL(request.url);
+      const privateSignal = hasPrivateRequestSignal(request);
+      const viewer = privateSignal ? await getSessionUser(env, request).catch(() => null) : null;
       const payload = await measureD1(metrics, () => listPublicEventSuggestions(env, {
         sort: url.searchParams.get("sort"),
         status: url.searchParams.get("status"),
         limit: url.searchParams.get("limit"),
         cursor: url.searchParams.get("cursor"),
+        viewerUserId: viewer?.id ?? null,
       }));
       metrics.resultCount = Array.isArray((payload as Record<string, unknown>).suggestions) ? ((payload as Record<string, unknown>).suggestions as unknown[]).length : 0;
       const headers = finalizeServerTiming(publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 }), metrics);

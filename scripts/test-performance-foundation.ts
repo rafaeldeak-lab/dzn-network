@@ -45,7 +45,7 @@ import {
 import { onRequestPost as onSuggestionReportPost } from "../functions/api/events/suggestions/[suggestionId]/report";
 import { onRequestPost as onSuggestionVotePost } from "../functions/api/events/suggestions/[suggestionId]/vote";
 import { shouldStartNavigationProgress } from "../components/site/navigation-progress";
-import { shouldApplySuggestionListResponse } from "../components/events/event-suggestions-page";
+import { nextSuggestionVote, shouldApplySuggestionListResponse } from "../components/events/event-suggestions-page";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 function source(path: string) {
@@ -73,6 +73,7 @@ async function main() {
   await assertServerSlugResolution();
   await assertCacheHelpers();
   await assertSuggestionHeadRoute();
+  await assertSuggestionViewerVoteHydration();
   await assertSuggestionMutationAuthPrecedence();
   await assertSuggestionSubmissionThrottleAtomicity();
   await assertSuggestionVoteCooldownAtomicity();
@@ -444,7 +445,7 @@ async function assertSuggestionHeadRoute() {
     assert.equal(await coldHead.text(), "", "cold HEAD response body should be empty");
     assert.equal(coldHead.headers.get("x-dzn-cache"), "BYPASS", "cold HEAD should bypass instead of populating cache");
     assertIncludes(coldHead.headers.get("cache-control") ?? "", "no-store", "cold HEAD bypass should be no-store");
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 0, "cold HEAD must not call Cache.put");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 0, "cold HEAD must not call Cache.put");
 
     const getAfterColdHead = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
     assert.equal(getAfterColdHead.status, 200, "GET after cold HEAD should return 200");
@@ -453,7 +454,7 @@ async function assertSuggestionHeadRoute() {
     assert.equal(getAfterColdHeadJson.ok, true, "GET after cold HEAD should return full JSON");
     assert.equal((getAfterColdHeadJson.suggestions ?? []).length, 1, "GET after cold HEAD should return suggestion rows");
     await Promise.all(waits.splice(0));
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 1, "first GET should store a valid body");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "first GET should store a valid body");
 
     const cachedGet = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
     assert.equal(cachedGet.headers.get("x-dzn-cache"), "HIT", "second GET should hit cached body");
@@ -463,7 +464,7 @@ async function assertSuggestionHeadRoute() {
     assert.equal(cachedHead.status, 200, "HEAD after cached GET should return 200");
     assert.equal(cachedHead.headers.get("x-dzn-cache"), "HIT", "HEAD after cached GET should report HIT");
     assert.equal(await cachedHead.text(), "", "HEAD after cached GET should return no body");
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 1, "cached HEAD must not replace the cached body");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "cached HEAD must not replace the cached body");
 
     const getAfterCachedHead = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
     assert.equal(getAfterCachedHead.status, 200, "GET after cached HEAD should still return 200");
@@ -478,7 +479,7 @@ async function assertSuggestionHeadRoute() {
 
     const malformedHead = await onSuggestionsRequestHead(makeSuggestionRouteContext(new Request(`${route}&cursor=${"x".repeat(2100)}`, { method: "HEAD" }), env, waitUntil));
     assert.equal(malformedHead.headers.get("x-dzn-cache"), "BYPASS", "malformed HEAD should bypass cache");
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v2"), 1, "malformed HEAD must not populate cache");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "malformed HEAD must not populate cache");
 
     const post = await onSuggestionsRequestPost(makeSuggestionRouteContext(new Request("https://example.test/api/events/suggestions", {
       method: "POST",
@@ -488,6 +489,67 @@ async function assertSuggestionHeadRoute() {
     assert.equal(post.status, 401, "anonymous POST should remain protected");
     assertIncludes(post.headers.get("cache-control") ?? "", "private, no-store", "mutation responses must remain private no-store");
     assert.equal(post.headers.get("x-dzn-cache"), "BYPASS", "mutation responses must bypass public cache");
+  } finally {
+    (cacheGlobal as { caches: unknown }).caches = originalCaches;
+  }
+}
+
+async function assertSuggestionViewerVoteHydration() {
+  const fakeCache = new FakeCache();
+  const cacheGlobal = globalThis as typeof globalThis & { caches?: unknown };
+  const originalCaches = cacheGlobal.caches;
+  (cacheGlobal as { caches: unknown }).caches = { default: fakeCache };
+  const waits: Promise<unknown>[] = [];
+  const waitUntil = (promise: Promise<unknown>) => waits.push(promise);
+  const route = "https://example.test/api/events/suggestions?sort=trending&status=all_public&limit=3";
+  try {
+    const db = new SuggestionRouteDb();
+    const anonymous = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), { DB: db as unknown as D1Database } as Env, waitUntil));
+    const anonymousPayload = JSON.parse(await anonymous.text());
+    assert.equal(anonymous.status, 200, "anonymous suggestion list should load");
+    assert.equal(anonymous.headers.get("x-dzn-cache"), "MISS", "anonymous suggestion list should remain publicly cacheable");
+    assert.equal(anonymousPayload.suggestions[0].userVote, 0, "anonymous suggestion list must project userVote=0");
+    assert.equal(JSON.stringify(anonymousPayload).includes("viewer-a"), false, "anonymous payload must not contain viewer identity");
+    assert.equal(db.sessionQueries, 0, "anonymous suggestion list must not resolve session state");
+    assert.equal(db.viewerVoteQueries, 0, "anonymous suggestion list must not query viewer votes");
+    await Promise.all(waits.splice(0));
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "anonymous suggestion list may populate shared cache");
+
+    const cachedAnonymous = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), { DB: db as unknown as D1Database } as Env, waitUntil));
+    assert.equal(cachedAnonymous.headers.get("x-dzn-cache"), "HIT", "anonymous suggestion list should reuse public cache");
+    assert.equal(JSON.parse(await cachedAnonymous.text()).suggestions[0].userVote, 0, "cached anonymous suggestion list must stay non-personalized");
+
+    db.sessionUser = { id: "viewer-a", discord_id: "990000000000000001", username: "Viewer A", avatar: null };
+    db.viewerVotes.set("viewer-a", new Map([["phase2a-route-head-test", 1]]));
+    const matchBeforeAuth = fakeCache.matchCalls.length;
+    const putBeforeAuth = fakeCache.putCalls.length;
+    const authenticated = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route, { headers: { cookie: "dzn_session=viewer-a" } }), { DB: db as unknown as D1Database, SESSION_SECRET: "test" } as Env, waitUntil));
+    const authenticatedPayload = JSON.parse(await authenticated.text());
+    assert.equal(authenticated.status, 200, "authenticated suggestion list should load");
+    assert.equal(authenticatedPayload.suggestions[0].userVote, 1, "authenticated suggestion list must hydrate the verified viewer's upvote");
+    assertIncludes(authenticated.headers.get("cache-control") ?? "", "private, no-store", "authenticated suggestion list must be private no-store");
+    assert.equal(authenticated.headers.get("x-dzn-cache"), "BYPASS", "authenticated suggestion list must bypass shared cache");
+    assertIncludes(authenticated.headers.get("vary") ?? "", "Cookie", "authenticated suggestion list must vary on Cookie");
+    assert.equal(fakeCache.matchCalls.length, matchBeforeAuth, "authenticated suggestion list must not call Cache.match");
+    assert.equal(fakeCache.putCalls.length, putBeforeAuth, "authenticated suggestion list must not call Cache.put");
+    assert.equal(JSON.stringify(authenticatedPayload).includes("viewer-a"), false, "authenticated payload must not expose viewer identity");
+    assert.equal(db.viewerVoteQueries, 1, "authenticated suggestion list must query viewer votes once for the current page");
+
+    db.sessionUser = { id: "viewer-b", discord_id: "990000000000000002", username: "Viewer B", avatar: null };
+    db.viewerVotes.set("viewer-b", new Map([["phase2a-route-head-test", -1]]));
+    const otherUser = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route, { headers: { cookie: "dzn_session=viewer-b" } }), { DB: db as unknown as D1Database, SESSION_SECRET: "test" } as Env, waitUntil));
+    assert.equal(JSON.parse(await otherUser.text()).suggestions[0].userVote, -1, "different authenticated users must receive only their own persisted vote");
+
+    db.sessionUser = null;
+    const invalidSession = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route, { headers: { cookie: "dzn_session=expired" } }), { DB: db as unknown as D1Database, SESSION_SECRET: "test" } as Env, waitUntil));
+    const invalidPayload = JSON.parse(await invalidSession.text());
+    assert.equal(invalidPayload.suggestions[0].userVote, 0, "invalid sessions must fall back to public userVote=0");
+    assertIncludes(invalidSession.headers.get("cache-control") ?? "", "private, no-store", "invalid session list must remain private no-store");
+    assert.equal(invalidSession.headers.get("x-dzn-cache"), "BYPASS", "invalid session list must bypass cache");
+
+    const authHead = await onSuggestionsRequestHead(makeSuggestionRouteContext(new Request(route, { method: "HEAD", headers: { cookie: "dzn_session=viewer-a" } }), { DB: db as unknown as D1Database, SESSION_SECRET: "test" } as Env, waitUntil));
+    assert.equal(await authHead.text(), "", "authenticated HEAD must remain bodyless");
+    assert.equal(authHead.headers.get("x-dzn-cache"), "BYPASS", "authenticated HEAD must bypass shared cache");
   } finally {
     (cacheGlobal as { caches: unknown }).caches = originalCaches;
   }
@@ -1347,6 +1409,14 @@ function assertSuggestionApis() {
   assertIncludes(submitBody, "julianday(created_at) >= julianday(?)", "suggestion creation must enforce daily limit at mutation time");
   assertIncludes(submitBody, "d1ChangedRows(insert)", "suggestion creation must inspect D1 insert row count");
   assertIncludes(helper, "SUGGESTION_VOTE_CHANGE_COOLDOWN_MS = 1500", "vote cooldown must use one exported production constant");
+  assertIncludes(helper, "PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE", "public suggestion server eligibility must use one shared SQL predicate");
+  assertIncludes(helper, "lower(COALESCE(linked_servers.status, 'pending')) = 'live'", "public suggestion server projection must require a currently live server");
+  assertIncludes(helper, "lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'", "public suggestion server projection must reject hidden servers");
+  assertIncludes(helper, "trim(linked_servers.merged_into_server_id) = ''", "public suggestion server projection must reject merged servers");
+  assertIncludes(helper, "CASE\n    WHEN ${PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE}", "public suggestion reads must redact server fields in SQL");
+  assertIncludes(helper, "loadViewerVotesForSuggestions", "public suggestion list must hydrate verified viewer votes only after page rows are selected");
+  assertIncludes(helper, "WHERE user_id = ?", "viewer vote hydration must be scoped to the verified viewer");
+  assertIncludes(helper, "suggestion_id IN", "viewer vote hydration must be bounded to the current page's suggestion ids");
   const voteBody = helper.slice(helper.indexOf("export async function voteOnEventSuggestion"), helper.indexOf("export async function reportEventSuggestion"));
   assertIncludes(voteBody, "toISOString()", "vote mutations must write explicit ISO timestamps");
   assertIncludes(voteBody, "julianday(event_suggestion_votes.updated_at) <= julianday(?)", "vote updates must enforce cooldown in SQL");
@@ -1396,9 +1466,31 @@ function assertSuggestionApis() {
   });
   assert.equal(publishedPublic.convertedEventId, "event-public", "published public event id may be exposed");
   assert.equal(publishedPublic.convertedEventSlug, "public-event-slug", "published public event link may be exposed");
+  const unavailableServerPublic = projectSuggestionForPublicTest({
+    open_to_any_server: 0,
+    suggested_server_id: "internal-hidden-server",
+    suggested_server_slug: null,
+    suggested_server_name: null,
+  });
+  assert.equal(unavailableServerPublic.suggestedServerScope, "specific_server_unavailable", "public projection must not relabel a hidden targeted server as open to any server");
+  assert.equal(unavailableServerPublic.suggestedServerSlug, null, "public projection must redact hidden server slug");
+  assert.equal(unavailableServerPublic.suggestedServerName, null, "public projection must redact hidden server name");
+  assert.equal(JSON.stringify(unavailableServerPublic).includes("internal-hidden-server"), false, "public projection must not expose internal linked server id");
+  assert.equal(unavailableServerPublic.userVote, 0, "anonymous/public projection should default userVote to 0");
+  const ownerServerProjection = projectSuggestionForOwnerTest({
+    open_to_any_server: 0,
+    suggested_server_id: "internal-hidden-server",
+    suggested_server_slug: "historical-public-slug",
+    suggested_server_name: "Historical Server Name",
+  });
+  assert.equal(ownerServerProjection.suggestedServerSlug, "historical-public-slug", "owner projection may retain historical server slug");
+  assert.equal(ownerServerProjection.suggestedServerName, "Historical Server Name", "owner projection may retain historical server name");
 
   const publicRoute = source("functions/api/events/suggestions/index.ts");
   assertIncludes(publicRoute, "withPublicGetEdgeCache");
+  assertIncludes(publicRoute, "hasPrivateRequestSignal(request)");
+  assertIncludes(publicRoute, "getSessionUser(env, request).catch(() => null)");
+  assertIncludes(publicRoute, "viewerUserId: viewer?.id ?? null");
   assertIncludes(publicRoute, "allowedParams: [\"sort\", \"status\", \"limit\", \"cursor\"]");
   assertIncludes(publicRoute, "unauthorizedSuggestionMutationPayload(\"submit\")");
   assertIncludes(publicRoute, "readBoundedJson<EventSuggestionInput>(request, 12 * 1024)");
@@ -1443,6 +1535,9 @@ function assertSuggestionApis() {
   assertIncludes(publicPage, "suggested_server_slug");
   assertIncludes(publicPage, "Submit report");
   assertIncludes(publicPage, "pendingVotes");
+  assertIncludes(publicPage, "nextSuggestionVote");
+  assertIncludes(publicPage, "suggestion.userVote");
+  assertIncludes(publicPage, "Specific Server Unavailable");
   assertIncludes(publicPage, "Draft under creator review");
   assertNotIncludes(publicPage, "reportCount", "public board must not expose report counts");
   assertNotIncludes(publicPage, "Most Discussed");
@@ -1476,16 +1571,39 @@ function assertLoadingUx() {
   assertIncludes(progress, "shouldStartNavigationProgress");
   assertIncludes(progress, "popstate");
   assertIncludes(progress, "target.hasAttribute(\"download\")");
+  assertIncludes(progress, "const currentHref = window.location.href;", "navigation progress must capture the current URL synchronously during the click");
+  assertIncludes(progress, "const shouldStart = shouldStartNavigationProgress(navigationTarget, currentHref);", "navigation progress must evaluate intent before deferring");
+  assertIncludes(progress, "window.setTimeout(() => {\n        start();\n      }, 0);", "deferred navigation progress callback must only start progress");
+  const onClickBlock = progress.slice(progress.indexOf("const onClick = (event: MouseEvent)"), progress.indexOf("const onPopState"));
+  const deferredBlock = onClickBlock.slice(onClickBlock.indexOf("window.setTimeout"));
+  assertNotIncludes(deferredBlock, "window.location.href", "deferred navigation progress callback must not reread the current URL");
+  assertNotIncludes(deferredBlock, "target.href", "deferred navigation progress callback must not reread the target href");
+  assertNotIncludes(deferredBlock, "event.button", "deferred navigation progress callback must not reread mouse state");
+  assertNotIncludes(deferredBlock, "event.metaKey", "deferred navigation progress callback must not reread modifier state");
   assertNotIncludes(progress, "if (event.defaultPrevented) return", "Next.js-managed Link navigation must be able to start progress after preventDefault");
   assertNotIncludes(progress, "capture: true", "progress bar must not start in capture phase before preventDefault");
   assertIncludes(progress, "unhandledrejection");
   assert.equal(shouldStartNavigationProgress({ href: "/events", button: 0 }, "https://dzn.test/"), true);
+  const nextLinkShouldStart = shouldStartNavigationProgress({ href: "/events", button: 0 }, "https://dzn.test/");
+  assert.equal(nextLinkShouldStart, true, "internal Next-style target must be evaluated against the pre-navigation URL");
+  assert.equal(nextLinkShouldStart && shouldStartNavigationProgress({ href: "/events", button: 0 }, "https://dzn.test/events"), false, "the old post-navigation current URL would suppress progress");
   assert.equal(shouldStartNavigationProgress({ href: "https://other.test/events", button: 0 }, "https://dzn.test/"), false);
   assert.equal(shouldStartNavigationProgress({ href: "/events#rules", button: 0 }, "https://dzn.test/events"), false);
   assert.equal(shouldStartNavigationProgress({ href: "/events?sort=newest", button: 0 }, "https://dzn.test/events?sort=trending"), true);
   assert.equal(shouldStartNavigationProgress({ href: "/events?sort=trending", button: 0 }, "https://dzn.test/events?sort=trending"), false);
   assert.equal(shouldStartNavigationProgress({ href: "/events", button: 0, ctrlKey: true }, "https://dzn.test/"), false);
+  assert.equal(shouldStartNavigationProgress({ href: "/events", button: 0, metaKey: true }, "https://dzn.test/"), false);
+  assert.equal(shouldStartNavigationProgress({ href: "/events", button: 0, shiftKey: true }, "https://dzn.test/"), false);
+  assert.equal(shouldStartNavigationProgress({ href: "/events", button: 0, altKey: true }, "https://dzn.test/"), false);
+  assert.equal(shouldStartNavigationProgress({ href: "/events", button: 1 }, "https://dzn.test/"), false);
+  assert.equal(shouldStartNavigationProgress({ href: "/events", button: 2 }, "https://dzn.test/"), false);
   assert.equal(shouldStartNavigationProgress({ href: "/download", button: 0, download: true }, "https://dzn.test/"), false);
+  assert.equal(nextSuggestionVote(1, 1), 0, "persisted upvote clicked again must remove the vote");
+  assert.equal(nextSuggestionVote(-1, -1), 0, "persisted downvote clicked again must remove the vote");
+  assert.equal(nextSuggestionVote(1, -1), -1, "persisted upvote clicked down must switch to downvote");
+  assert.equal(nextSuggestionVote(-1, 1), 1, "persisted downvote clicked up must switch to upvote");
+  assert.equal(nextSuggestionVote(0, 1), 1, "empty vote clicked up must upvote");
+  assert.equal(nextSuggestionVote(0, -1), -1, "empty vote clicked down must downvote");
 
   const publicSuggestionPage = source("components/events/event-suggestions-page.tsx");
   assertIncludes(publicSuggestionPage, "AbortController", "suggestion list fetches must be abortable");
@@ -1703,15 +1821,20 @@ function makeSuggestionRouteContext(
 }
 
 class SuggestionRouteDb {
+  sessionQueries = 0;
+  viewerVoteQueries = 0;
+  sessionUser: { id: string; discord_id: string; username: string; avatar: string | null } | null = null;
+  readonly viewerVotes = new Map<string, Map<string, -1 | 1>>();
+
   prepare(sql: string) {
-    return new SuggestionRouteStatement(sql);
+    return new SuggestionRouteStatement(this, sql);
   }
 }
 
 class SuggestionRouteStatement {
   private bindings: unknown[] = [];
 
-  constructor(private readonly sql: string) {}
+  constructor(private readonly db: SuggestionRouteDb, private readonly sql: string) {}
 
   bind(...bindings: unknown[]) {
     this.bindings = bindings;
@@ -1723,6 +1846,17 @@ class SuggestionRouteStatement {
       const table = this.sql.match(/PRAGMA\s+table_info\(([^)]+)\)/i)?.[1] ?? "";
       return { results: (SUGGESTION_ROUTE_COLUMNS[table] ?? []).map((name, cid) => ({ cid, name, type: "TEXT", notnull: 0, dflt_value: null, pk: 0 })) };
     }
+    if (/FROM\s+event_suggestion_votes/i.test(this.sql)) {
+      this.db.viewerVoteQueries += 1;
+      const userId = String(this.bindings[0] ?? "");
+      const suggestionIds = new Set(this.bindings.slice(1).map((value) => String(value ?? "")));
+      const userVotes = this.db.viewerVotes.get(userId) ?? new Map<string, -1 | 1>();
+      return {
+        results: [...userVotes.entries()]
+          .filter(([suggestionId]) => suggestionIds.has(suggestionId))
+          .map(([suggestion_id, vote_value]) => ({ suggestion_id, vote_value })),
+      };
+    }
     if (this.sql.includes("FROM event_suggestions")) {
       const limit = Number(this.bindings[this.bindings.length - 1] ?? 20);
       return { results: [suggestionRouteRow()].slice(0, limit) };
@@ -1731,6 +1865,10 @@ class SuggestionRouteStatement {
   }
 
   async first() {
+    if (this.sql.includes("FROM sessions") && this.sql.includes("JOIN users")) {
+      this.db.sessionQueries += 1;
+      return this.db.sessionUser;
+    }
     const rows = await this.all();
     return rows.results[0] ?? null;
   }
@@ -2488,7 +2626,7 @@ const SUGGESTION_ROUTE_COLUMNS: Record<string, string[]> = {
   event_suggestion_servers: ["suggestion_id", "linked_server_id", "relationship_type", "created_at"],
   competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "created_by"],
   competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
-  linked_servers: ["id", "public_slug", "status"],
+  linked_servers: ["id", "public_slug", "status", "listing_visibility", "merged_into_server_id", "display_name", "hostname", "server_name", "nitrado_service_name"],
 };
 
 function suggestionRouteRow() {

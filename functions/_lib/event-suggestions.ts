@@ -108,6 +108,11 @@ type SuggestionRow = {
   converted_event_visibility?: string | null;
 };
 
+type ViewerVoteRow = {
+  suggestion_id: string | null;
+  vote_value: number | null;
+};
+
 type VoteRow = {
   vote_value: number | null;
   updated_at: string | null;
@@ -179,6 +184,13 @@ const SUGGESTION_SELECT_COLUMNS = `
   competitive_events.visibility AS converted_event_visibility
 `;
 
+const PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE = `
+  linked_servers.id IS NOT NULL
+  AND lower(COALESCE(linked_servers.status, 'pending')) = 'live'
+  AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
+  AND (linked_servers.merged_into_server_id IS NULL OR trim(linked_servers.merged_into_server_id) = '')
+`;
+
 const PUBLIC_SUGGESTION_SELECT_COLUMNS = `
   event_suggestions.id,
   event_suggestions.submitted_by_user_id,
@@ -190,8 +202,16 @@ const PUBLIC_SUGGESTION_SELECT_COLUMNS = `
   event_suggestions.platform,
   event_suggestions.map_name,
   event_suggestions.suggested_server_id,
-  linked_servers.public_slug AS suggested_server_slug,
-  COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS suggested_server_name,
+  CASE
+    WHEN ${PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE}
+    THEN linked_servers.public_slug
+    ELSE NULL
+  END AS suggested_server_slug,
+  CASE
+    WHEN ${PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE}
+    THEN COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name)
+    ELSE NULL
+  END AS suggested_server_name,
   event_suggestions.open_to_any_server,
   event_suggestions.suggested_date_start,
   event_suggestions.suggested_date_end,
@@ -255,7 +275,7 @@ const REQUIRED_SUGGESTION_TABLES: Record<string, readonly string[]> = {
   event_suggestion_moderation_actions: ["id", "suggestion_id", "actor_user_id", "action", "created_at"],
   competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "created_by"],
   competitive_event_activity: ["id", "event_id", "server_id", "activity_type", "message", "metadata", "created_at"],
-  linked_servers: ["id", "public_slug", "status"],
+  linked_servers: ["id", "public_slug", "status", "listing_visibility", "merged_into_server_id", "display_name", "hostname", "server_name", "nitrado_service_name"],
 };
 
 const COMPETITION_FORMATS = new Set([
@@ -324,7 +344,7 @@ const schemaReadiness = new WeakMap<object, Map<string, Promise<SchemaReadyResul
 
 export async function listPublicEventSuggestions(
   env: Env,
-  options: { sort?: string | null; status?: string | null; limit?: number | string | null; cursor?: string | null } = {},
+  options: { sort?: string | null; status?: string | null; limit?: number | string | null; cursor?: string | null; viewerUserId?: string | null } = {},
 ) {
   if (!env.DB) return unavailableSuggestionList("d1_unavailable");
   const schema = await validateEventSuggestionSchema(env, { conversion: false });
@@ -355,9 +375,10 @@ export async function listPublicEventSuggestions(
     .all<SuggestionRow>();
   const resultRows = rows.results ?? [];
   const pageRows = resultRows.slice(0, limit);
+  const viewerVotes = options.viewerUserId ? await loadViewerVotesForSuggestions(db, options.viewerUserId, pageRows.map((row) => row.id)) : new Map<string, -1 | 1>();
   return {
     ok: true,
-    suggestions: pageRows.map(toPublicSuggestion),
+    suggestions: pageRows.map((row) => toPublicSuggestion(row, viewerVotes.get(row.id) ?? 0)),
     nextCursor: resultRows.length > limit ? makeCursor(pageRows[pageRows.length - 1], sort, statusFilter) : null,
     generatedAt: new Date().toISOString(),
     source: "live",
@@ -1274,13 +1295,33 @@ async function resolvePublicSuggestionServer(env: Env, submittedSlug: string) {
          COALESCE(NULLIF(display_name, ''), NULLIF(hostname, ''), server_name, nitrado_service_name) AS server_name
        FROM linked_servers
        WHERE lower(public_slug) = ?
-         AND lower(status) = 'live'
-         AND lower(COALESCE(listing_visibility, 'public')) != 'hidden'
-         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+         AND ${PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE}
        LIMIT 1`,
     )
     .bind(slug)
     .first<{ id: string; public_slug: string; server_name: string }>();
+}
+
+async function loadViewerVotesForSuggestions(db: D1Database, viewerUserId: string, suggestionIds: readonly string[]) {
+  const ids = [...new Set(suggestionIds.filter(Boolean))].slice(0, 100);
+  const votes = new Map<string, -1 | 1>();
+  if (!ids.length) return votes;
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = await db
+    .prepare(
+      `SELECT suggestion_id, vote_value
+       FROM event_suggestion_votes
+       WHERE user_id = ?
+         AND suggestion_id IN (${placeholders})`,
+    )
+    .bind(viewerUserId, ...ids)
+    .all<ViewerVoteRow>();
+  for (const row of rows.results ?? []) {
+    const suggestionId = typeof row.suggestion_id === "string" ? row.suggestion_id : "";
+    const vote = Number(row.vote_value);
+    if (suggestionId && (vote === 1 || vote === -1)) votes.set(suggestionId, vote);
+  }
+  return votes;
 }
 
 function suggestionCursorWhere(sort: EventSuggestionSort, cursor: PublicSuggestionCursorPayload) {
@@ -1436,7 +1477,7 @@ function requiresReason(action: string) {
   return ["request_revision", "reject", "archive", "restore"].includes(action);
 }
 
-function toPublicSuggestion(row: SuggestionRow) {
+function toPublicSuggestion(row: SuggestionRow, userVote: -1 | 0 | 1 = 0) {
   const upvotes = Number(row.upvote_count ?? 0);
   const downvotes = Number(row.downvote_count ?? 0);
   const total = upvotes + downvotes;
@@ -1444,6 +1485,7 @@ function toPublicSuggestion(row: SuggestionRow) {
     row.converted_event_visibility === "public" &&
     row.converted_event_status !== "draft" &&
     Boolean(row.converted_event_slug);
+  const suggestedServerUnavailable = !row.open_to_any_server && Boolean(row.suggested_server_id) && !row.suggested_server_slug && !row.suggested_server_name;
   return {
     id: row.id,
     title: row.title,
@@ -1451,7 +1493,7 @@ function toPublicSuggestion(row: SuggestionRow) {
     competitionFormat: row.competition_format,
     platform: row.platform,
     mapName: row.map_name,
-    suggestedServerScope: row.open_to_any_server ? "open_to_any_server" : "specific_server",
+    suggestedServerScope: row.open_to_any_server ? "open_to_any_server" : suggestedServerUnavailable ? "specific_server_unavailable" : "specific_server",
     suggestedServerSlug: row.suggested_server_slug ?? null,
     suggestedServerName: row.suggested_server_name ?? null,
     status: row.public_status,
@@ -1462,6 +1504,7 @@ function toPublicSuggestion(row: SuggestionRow) {
     downvotes,
     netScore: upvotes - downvotes,
     totalVotes: total,
+    userVote,
     votePercentage: total ? Math.round((upvotes / total) * 100) : null,
     hotScore: Number(row.hot_score ?? 0),
     submittedAt: row.created_at,

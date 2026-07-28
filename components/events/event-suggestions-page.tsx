@@ -24,6 +24,7 @@ type Suggestion = {
   downvotes: number;
   netScore: number;
   totalVotes: number;
+  userVote: -1 | 0 | 1;
   votePercentage: number | null;
   submittedAt: string;
 };
@@ -50,7 +51,7 @@ type VotePayload = {
   upvoteCount: number;
   downvoteCount: number;
   netScore: number;
-  userVote: number;
+  userVote: -1 | 0 | 1;
   message?: string;
 };
 
@@ -127,6 +128,10 @@ export function shouldApplySuggestionListResponse(state: SuggestionListRequestSt
   return !state.aborted && state.requestId === state.latestRequestId;
 }
 
+export function nextSuggestionVote(previousVote: -1 | 0 | 1, clickedVote: -1 | 1): -1 | 0 | 1 {
+  return previousVote === clickedVote ? 0 : clickedVote;
+}
+
 function isAbortedFetch(error: unknown) {
   return (error instanceof FetchJsonError && error.aborted)
     || (error instanceof DOMException && error.name === "AbortError");
@@ -157,7 +162,7 @@ export function EventSuggestionsPage() {
   const [form, setForm] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
-  const [voteState, setVoteState] = useState<Record<string, number>>({});
+  const [voteState, setVoteState] = useState<Record<string, -1 | 0 | 1>>({});
   const [pendingVotes, setPendingVotes] = useState<Record<string, boolean>>({});
   const [serverOptions, setServerOptions] = useState<PublicServerOption[]>([]);
   const [reportDraft, setReportDraft] = useState<{ suggestion: Suggestion; reason: string; note: string } | null>(null);
@@ -367,8 +372,8 @@ export function EventSuggestionsPage() {
 
   async function vote(suggestion: Suggestion, value: 1 | -1) {
     if (pendingVotes[suggestion.id]) return;
-    const previousVote = voteState[suggestion.id] ?? 0;
-    const nextVote = previousVote === value ? 0 : value;
+    const previousVote = voteState[suggestion.id] ?? suggestion.userVote ?? 0;
+    const nextVote = nextSuggestionVote(previousVote, value);
     const previousSuggestion = suggestions.find((item) => item.id === suggestion.id) ?? suggestion;
     setPendingVotes((current) => ({ ...current, [suggestion.id]: true }));
     setVoteState((current) => ({ ...current, [suggestion.id]: nextVote }));
@@ -388,6 +393,7 @@ export function EventSuggestionsPage() {
         downvotes: result.downvoteCount,
         netScore: result.netScore,
         totalVotes: result.upvoteCount + result.downvoteCount,
+        userVote: result.userVote,
         votePercentage: result.upvoteCount + result.downvoteCount ? Math.round((result.upvoteCount / (result.upvoteCount + result.downvoteCount)) * 100) : null,
       } : item));
       setVoteState((current) => ({ ...current, [suggestion.id]: result.userVote }));
@@ -485,7 +491,7 @@ export function EventSuggestionsPage() {
                     setReportMessage(null);
                     setReportDraft({ suggestion: next, reason: "unsafe_content", note: "" });
                   }}
-                  vote={voteState[suggestion.id] ?? 0}
+                  vote={voteState[suggestion.id] ?? suggestion.userVote ?? 0}
                   votePending={Boolean(pendingVotes[suggestion.id])}
                   reportPending={Boolean(pendingReports[suggestion.id])}
                 />
@@ -666,7 +672,7 @@ function SuggestionCard({
         <span>{formatLabel(suggestion.platform)}</span>
         {suggestion.mapName ? <><span>/</span><span>{suggestion.mapName}</span></> : null}
         <span>/</span>
-        <span>{suggestion.suggestedServerName ?? formatLabel(suggestion.suggestedServerScope)}</span>
+        <span>{suggestedServerLabel(suggestion)}</span>
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -747,6 +753,12 @@ function formatLabel(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function suggestedServerLabel(suggestion: Suggestion) {
+  if (suggestion.suggestedServerName) return suggestion.suggestedServerName;
+  if (suggestion.suggestedServerScope === "specific_server_unavailable") return "Specific Server Unavailable";
+  return formatLabel(suggestion.suggestedServerScope);
+}
+
 function mergeSuggestions(current: Suggestion[], incoming: Suggestion[]) {
   const byId = new Map(current.map((item) => [item.id, item]));
   for (const item of incoming) byId.set(item.id, item);
@@ -757,7 +769,7 @@ function dedupeSuggestions(incoming: Suggestion[]) {
   return mergeSuggestions([], incoming);
 }
 
-function applyOptimisticVote(suggestion: Suggestion, previousVote: number, nextVote: number): Suggestion {
+function applyOptimisticVote(suggestion: Suggestion, previousVote: -1 | 0 | 1, nextVote: -1 | 0 | 1): Suggestion {
   let upvotes = suggestion.upvotes;
   let downvotes = suggestion.downvotes;
   if (previousVote === 1) upvotes -= 1;
@@ -773,6 +785,7 @@ function applyOptimisticVote(suggestion: Suggestion, previousVote: number, nextV
     downvotes,
     netScore: upvotes - downvotes,
     totalVotes,
+    userVote: nextVote,
     votePercentage: totalVotes ? Math.round((upvotes / totalVotes) * 100) : null,
   };
 }

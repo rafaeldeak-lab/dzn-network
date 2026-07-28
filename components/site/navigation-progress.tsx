@@ -85,18 +85,21 @@ export function NavigationProgress() {
     const onClick = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target.closest("a") : null;
       if (!(target instanceof HTMLAnchorElement)) return;
+      const currentHref = window.location.href;
+      const navigationTarget: NavigationTarget = {
+        href: target.href,
+        target: target.target,
+        download: target.hasAttribute("download"),
+        button: event.button,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+      };
+      const shouldStart = shouldStartNavigationProgress(navigationTarget, currentHref);
+      if (!shouldStart) return;
       window.setTimeout(() => {
-        const shouldStart = shouldStartNavigationProgress({
-          href: target.href,
-          target: target.target,
-          download: target.hasAttribute("download"),
-          button: event.button,
-          metaKey: event.metaKey,
-          ctrlKey: event.ctrlKey,
-          shiftKey: event.shiftKey,
-          altKey: event.altKey,
-        }, window.location.href);
-        if (shouldStart) start();
+        start();
       }, 0);
     };
 

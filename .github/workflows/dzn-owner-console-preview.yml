@@ -1413,6 +1413,9 @@ jobs:
             .filter(Boolean);
           const creatorId = String(process.env.DZN_PLATFORM_CREATOR_DISCORD_ID || "").trim();
           const serverSubquery = "(SELECT id FROM linked_servers WHERE public_slug = 'owner-console-nuketown' OR id = 'owner-console-nuketown' LIMIT 1)";
+          const publicSuggestionServerSubquery = "(SELECT id FROM linked_servers WHERE id = 'phase2a-preview-public-suggestion-server' LIMIT 1)";
+          const hiddenSuggestionServerSubquery = "(SELECT id FROM linked_servers WHERE id = 'phase2a-preview-hidden-suggestion-server' LIMIT 1)";
+          const mergedSuggestionServerSubquery = "(SELECT id FROM linked_servers WHERE id = 'phase2a-preview-merged-suggestion-server' LIMIT 1)";
           const now = "2026-07-22T20:00:00.000Z";
           const users = [
             ["phase2a-preview-member", "990000000000002001", "Phase2A Member"],
@@ -1430,6 +1433,9 @@ jobs:
             ["phase2a-preview-tie-a", "phase2a-preview-member", "Tie Break Alpha", "Equal score cursor pagination fixture alpha with deterministic ordering.", "stat_race", "pc", "Chernarus", null, 1, "public_voting", "public_voting", null, 3, 0, 0, 5.0],
             ["phase2a-preview-tie-b", "phase2a-preview-other-member", "Tie Break Bravo", "Equal score cursor pagination fixture bravo with deterministic ordering.", "stat_race", "pc", "Chernarus", null, 1, "public_voting", "public_voting", null, 3, 0, 0, 5.0],
             ["phase2a-preview-server-linked", "phase2a-preview-member", "Nuketown Server Trial", "A public suggestion linked through a public server slug instead of an internal browser ID.", "server_vs_server", "cross_platform", "Chernarus", serverSubquery, 0, "public_voting", "public_voting", null, 2, 0, 0, 4.5],
+            ["phase2a-preview-visible-server-suggestion", "phase2a-preview-member", "Visible Server Projection", "A public suggestion linked to a currently public server whose display identity may remain public.", "server_vs_server", "cross_platform", "Chernarus", publicSuggestionServerSubquery, 0, "public_voting", "public_voting", null, 2, 0, 0, 4.4],
+            ["phase2a-preview-hidden-server-suggestion", "phase2a-preview-member", "Hidden Server Projection", "A public suggestion linked to a server that is hidden after submission and must not leak its identity.", "server_vs_server", "cross_platform", "Chernarus", hiddenSuggestionServerSubquery, 0, "public_voting", "public_voting", null, 2, 0, 0, 4.3],
+            ["phase2a-preview-merged-server-suggestion", "phase2a-preview-member", "Merged Server Projection", "A public suggestion linked to a merged server and must not leak its old or target identity.", "server_vs_server", "cross_platform", "Chernarus", mergedSuggestionServerSubquery, 0, "public_voting", "public_voting", null, 2, 0, 0, 4.2],
             ["phase2a-preview-open-any", "phase2a-preview-other-member", "Open Host Challenge", "An open-to-any-server suggestion for route and filter coverage.", "community_challenge", "unsure", "Any official map", null, 1, "accepted", "accepted", null, 5, 0, 0, 7.5],
             [conversionTargetId, "phase2a-preview-other-member", `Verifier Conversion Target ${runKey}`, "A deterministic run-scoped shortlisted suggestion reserved for the preview verifier conversion sequence and concurrency checks.", "community_challenge", "pc", "Chernarus", null, 1, "shortlisted", "shortlisted", null, 0, 0, 0, 6.25],
           ];
@@ -1499,6 +1505,15 @@ jobs:
           for (const [id, userId, guildId, discordGuildId, serviceId, name, slug, planKey, status, category] of hostServers) {
             statements.push(`INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name, server_name, display_name, hostname, server_type, server_category, tags_json, region, status, public_slug, listing_visibility, lifecycle_status, lifecycle_reason, lifecycle_updated_at, created_at, updated_at) VALUES (${sql(id)}, ${sql(userId)}, ${sql(guildId)}, ${sql(discordGuildId)}, ${sql(serviceId)}, ${sql(name)}, ${sql(name)}, ${sql(name)}, ${sql(name)}, 'DEATHMATCH', ${sql(category)}, ${sql(JSON.stringify(["deathmatch", "phase2a-preview"]))}, 'EU', 'live', ${sql(slug)}, 'public', 'active_live', 'phase2a_host_authorization_fixture', ${sql(now)}, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET guild_id = excluded.guild_id, discord_guild_id = excluded.discord_guild_id, nitrado_service_id = excluded.nitrado_service_id, nitrado_service_name = excluded.nitrado_service_name, server_name = excluded.server_name, display_name = excluded.display_name, hostname = excluded.hostname, server_type = excluded.server_type, server_category = excluded.server_category, tags_json = excluded.tags_json, region = excluded.region, status = excluded.status, public_slug = excluded.public_slug, listing_visibility = excluded.listing_visibility, lifecycle_status = excluded.lifecycle_status, lifecycle_reason = excluded.lifecycle_reason, lifecycle_updated_at = excluded.lifecycle_updated_at, updated_at = excluded.updated_at;`);
             statements.push(`INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, plan_key, status, created_at, updated_at) VALUES (${sql(`${id}-subscription`)}, ${sql(guildId)}, ${userId === "owner-console-platform-creator" ? sql(creatorId) : sql("990000000000002001")}, ${sql(planKey)}, ${sql(status)}, ${sql(now)}, ${sql(now)}) ON CONFLICT(guild_id) DO UPDATE SET owner_discord_id = excluded.owner_discord_id, plan_key = excluded.plan_key, status = excluded.status, updated_at = excluded.updated_at;`);
+          }
+          const visibilityServers = [
+            ["phase2a-preview-public-suggestion-server", "phase2a-preview-public-suggestion-guild", "Phase2A Public Suggestion Server", "phase2a-preview-public-suggestion-server", "live", "public", null],
+            ["phase2a-preview-hidden-suggestion-server", "phase2a-preview-hidden-suggestion-guild", "Phase2A Hidden Suggestion Server", "phase2a-preview-hidden-suggestion-server", "live", "hidden", null],
+            ["phase2a-preview-merged-suggestion-server", "phase2a-preview-merged-suggestion-guild", "Phase2A Merged Suggestion Server", "phase2a-preview-merged-suggestion-server", "merged", "public", "phase2a-preview-public-suggestion-server"],
+          ];
+          for (const [id, guildId, name, slug, status, listingVisibility, mergedInto] of visibilityServers) {
+            statements.push(`INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, icon, icon_url, permissions, is_owner, created_at, updated_at) VALUES (${sql(`${id}-guild-row`)}, ${sql(guildId)}, ${sql("phase2a-preview-member")}, ${sql(name)}, NULL, NULL, '8', 1, ${sql(now)}, ${sql(now)}) ON CONFLICT(guild_id) DO UPDATE SET owner_user_id = excluded.owner_user_id, name = excluded.name, updated_at = excluded.updated_at;`);
+            statements.push(`INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name, server_name, display_name, hostname, server_type, server_category, tags_json, region, status, public_slug, listing_visibility, merged_into_server_id, lifecycle_status, lifecycle_reason, lifecycle_updated_at, created_at, updated_at) VALUES (${sql(id)}, ${sql("phase2a-preview-member")}, ${sql(guildId)}, ${sql(`${id}-guild-row`)}, ${sql(`${id}-service`)}, ${sql(name)}, ${sql(name)}, ${sql(name)}, ${sql(name)}, 'DEATHMATCH', 'deathmatch', ${sql(JSON.stringify(["deathmatch", "phase2a-preview"]))}, 'EU', ${sql(status)}, ${sql(slug)}, ${sql(listingVisibility)}, ${mergedInto ? sql(mergedInto) : "NULL"}, 'active_live', 'phase2a_suggestion_visibility_fixture', ${sql(now)}, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET guild_id = excluded.guild_id, discord_guild_id = excluded.discord_guild_id, nitrado_service_id = excluded.nitrado_service_id, nitrado_service_name = excluded.nitrado_service_name, server_name = excluded.server_name, display_name = excluded.display_name, hostname = excluded.hostname, server_type = excluded.server_type, server_category = excluded.server_category, tags_json = excluded.tags_json, region = excluded.region, status = excluded.status, public_slug = excluded.public_slug, listing_visibility = excluded.listing_visibility, merged_into_server_id = excluded.merged_into_server_id, lifecycle_status = excluded.lifecycle_status, lifecycle_reason = excluded.lifecycle_reason, lifecycle_updated_at = excluded.lifecycle_updated_at, updated_at = excluded.updated_at;`);
           }
           const eventFixtures = [
             ["phase2a-preview-private-draft-event", "Phase 2A Private Draft", "phase2a-preview-private-draft", "Private draft converted from a preview suggestion; not public.", "deathmatch", "community_cup", "draft", "private", "pro", "Draft rules pending creator review.", null],
@@ -2388,6 +2403,29 @@ jobs:
             for (const forbidden of ["reportCount", "reportReasons", "reporterUserId", "submittedByUserId", "discord_id", "phase2a-preview-private-draft-event", "phase2a-preview-private-draft"]) {
               if (publicText.includes(forbidden)) fail(`Public cached suggestion JSON exposed ${forbidden}.`);
             }
+            const findSuggestion = (payload, id) => (payload?.suggestions || []).find((item) => item?.id === id) || null;
+            const publicVisibilityList = await fetchJson(base, "/api/events/suggestions?sort=trending&status=all_public&limit=30", 200, { category: "PHASE2A_SUGGESTION_SERVER_VISIBILITY_FAILED", stage: "cacheVerification" });
+            const visibleServerSuggestion = findSuggestion(publicVisibilityList.json, "phase2a-preview-visible-server-suggestion");
+            const hiddenServerSuggestion = findSuggestion(publicVisibilityList.json, "phase2a-preview-hidden-server-suggestion");
+            const mergedServerSuggestion = findSuggestion(publicVisibilityList.json, "phase2a-preview-merged-server-suggestion");
+            if (!visibleServerSuggestion || visibleServerSuggestion.suggestedServerSlug !== "phase2a-preview-public-suggestion-server" || visibleServerSuggestion.suggestedServerName !== "Phase2A Public Suggestion Server") {
+              fail("Public suggestion list did not retain a currently visible server identity.", { category: "PHASE2A_SUGGESTION_SERVER_VISIBILITY_FAILED", stage: "cacheVerification", route: "/api/events/suggestions" });
+            }
+            if (!hiddenServerSuggestion || hiddenServerSuggestion.suggestedServerSlug !== null || hiddenServerSuggestion.suggestedServerName !== null || hiddenServerSuggestion.suggestedServerScope !== "specific_server_unavailable") {
+              fail("Public suggestion list exposed or mislabeled a hidden server identity.", { category: "PHASE2A_SUGGESTION_SERVER_VISIBILITY_FAILED", stage: "cacheVerification", route: "/api/events/suggestions" });
+            }
+            if (!mergedServerSuggestion || mergedServerSuggestion.suggestedServerSlug !== null || mergedServerSuggestion.suggestedServerName !== null || mergedServerSuggestion.suggestedServerScope !== "specific_server_unavailable") {
+              fail("Public suggestion list exposed or mislabeled a merged server identity.", { category: "PHASE2A_SUGGESTION_SERVER_VISIBILITY_FAILED", stage: "cacheVerification", route: "/api/events/suggestions" });
+            }
+            if (JSON.stringify(hiddenServerSuggestion).includes("phase2a-preview-hidden-suggestion-server") || JSON.stringify(hiddenServerSuggestion).includes("Phase2A Hidden Suggestion Server") || JSON.stringify(mergedServerSuggestion).includes("phase2a-preview-merged-suggestion-server") || JSON.stringify(mergedServerSuggestion).includes("Phase2A Merged Suggestion Server")) {
+              fail("Public suggestion projection leaked hidden or merged server identity.", { category: "PHASE2A_SUGGESTION_SERVER_VISIBILITY_FAILED", stage: "cacheVerification", route: "/api/events/suggestions" });
+            }
+            const ownerVisibilityList = await fetchJson(base, "/api/owner/events/suggestions?status=all&limit=100", 200, { headers: { Cookie: creatorCookie }, category: "PHASE2A_SUGGESTION_SERVER_VISIBILITY_FAILED", stage: "cacheVerification" });
+            const ownerHiddenServerSuggestion = findSuggestion(ownerVisibilityList.json, "phase2a-preview-hidden-server-suggestion");
+            const ownerMergedServerSuggestion = findSuggestion(ownerVisibilityList.json, "phase2a-preview-merged-server-suggestion");
+            if (!ownerHiddenServerSuggestion || ownerHiddenServerSuggestion.suggestedServerSlug !== "phase2a-preview-hidden-suggestion-server" || ownerHiddenServerSuggestion.suggestedServerName !== "Phase2A Hidden Suggestion Server" || !ownerMergedServerSuggestion || ownerMergedServerSuggestion.suggestedServerSlug !== "phase2a-preview-merged-suggestion-server") {
+              fail("Owner suggestion inventory did not retain historical linked-server context.", { category: "PHASE2A_SUGGESTION_SERVER_VISIBILITY_FAILED", stage: "cacheVerification", route: "/api/owner/events/suggestions" });
+            }
             if (second.headers["x-dzn-cache-meta"] || stale.headers["x-dzn-cache-meta"] || refreshed.headers["x-dzn-cache-meta"]) fail("x-dzn-cache-meta reached the browser.");
             return {
               firstCache: first.headers["x-dzn-cache"] || null,
@@ -2403,6 +2441,12 @@ jobs:
               setCookiePresent: Boolean(second.headers["set-cookie"]),
               privateDraftLinkExposed: publicText.includes("phase2a-preview-private-draft"),
               reportCountExposed: publicText.includes("reportCount"),
+              suggestionServerVisibility: {
+                visibleServerProjected: visibleServerSuggestion?.suggestedServerSlug === "phase2a-preview-public-suggestion-server",
+                hiddenServerRedacted: hiddenServerSuggestion?.suggestedServerSlug === null && hiddenServerSuggestion?.suggestedServerName === null && hiddenServerSuggestion?.suggestedServerScope === "specific_server_unavailable",
+                mergedServerRedacted: mergedServerSuggestion?.suggestedServerSlug === null && mergedServerSuggestion?.suggestedServerName === null && mergedServerSuggestion?.suggestedServerScope === "specific_server_unavailable",
+                ownerHistoricalProjectionRetained: ownerHiddenServerSuggestion?.suggestedServerSlug === "phase2a-preview-hidden-suggestion-server" && ownerMergedServerSuggestion?.suggestedServerSlug === "phase2a-preview-merged-suggestion-server",
+              },
               duplicateParameters: {
                 trendingNewest: { status: duplicateA.status, cache: duplicateA.headers["x-dzn-cache"] || null, sort: duplicateA.json?.sort || null },
                 newestTrending: { status: duplicateB.status, cache: duplicateB.headers["x-dzn-cache"] || null, sort: duplicateB.json?.sort || null },
@@ -2586,6 +2630,23 @@ jobs:
             // Legacy boundary-test marker only: setTimeout(resolve, 1700) is not executed.
             const firstVoteStartedAt = Date.now();
             const vote = await fetchJson(base, `${suggestionPath}/vote`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ vote_value: 1 }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
+            const findSuggestionInList = (payload, id) => (payload?.suggestions || []).find((item) => item?.id === id) || null;
+            const viewerVotePath = "/api/events/suggestions?sort=newest&status=all_public&limit=100";
+            const anonymousVoteList = await fetchJson(base, viewerVotePath, 200, { category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix" });
+            const anonymousVoteSuggestion = findSuggestionInList(anonymousVoteList.json, createdId);
+            const ownerVoteList = await fetchJson(base, viewerVotePath, 200, { headers: { Cookie: ownerCookie }, category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix" });
+            const ownerVoteSuggestion = findSuggestionInList(ownerVoteList.json, createdId);
+            const otherUserVoteList = await fetchJson(base, viewerVotePath, 200, { headers: { Cookie: apiMemberCookie }, category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix" });
+            const otherUserVoteSuggestion = findSuggestionInList(otherUserVoteList.json, createdId);
+            if (!anonymousVoteSuggestion || anonymousVoteSuggestion.userVote !== 0 || !isPublicBoundedCache(anonymousVoteList.headers)) {
+              fail("Anonymous suggestion list did not preserve public userVote=0 cache semantics.", { category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix", route: "/api/events/suggestions", cacheStatus: anonymousVoteList.headers["x-dzn-cache"] || "missing" });
+            }
+            if (!ownerVoteSuggestion || ownerVoteSuggestion.userVote !== 1 || !isPrivateNoStore(ownerVoteList.headers) || ownerVoteList.headers["x-dzn-cache"] !== "BYPASS" || !headerHasToken(ownerVoteList.headers, "vary", "Cookie")) {
+              fail("Authenticated suggestion list did not hydrate the verified viewer vote privately.", { category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix", route: "/api/events/suggestions", cacheStatus: ownerVoteList.headers["x-dzn-cache"] || "missing" });
+            }
+            if (!otherUserVoteSuggestion || otherUserVoteSuggestion.userVote === 1 || !isPrivateNoStore(otherUserVoteList.headers) || ownerVoteList.text.includes("owner-console-platform-owner")) {
+              fail("Suggestion list leaked a viewer vote or identity across authenticated users.", { category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix", route: "/api/events/suggestions", cacheStatus: otherUserVoteList.headers["x-dzn-cache"] || "missing" });
+            }
             const removalStartedAt = Date.now();
             const elapsedBeforeRemovalMs = removalStartedAt - firstVoteStartedAt;
             const remoteRateLimitTimingEligible = elapsedBeforeRemovalMs < suggestionVoteChangeCooldownMs;
@@ -2666,6 +2727,19 @@ jobs:
               remoteRateLimitTimingEligible,
               remoteRateLimitObserved,
             });
+            const ownerVoteListAfterRemoval = await fetchJson(base, viewerVotePath, 200, { headers: { Cookie: ownerCookie }, category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix" });
+            const ownerVoteSuggestionAfterRemoval = findSuggestionInList(ownerVoteListAfterRemoval.json, createdId);
+            if (!ownerVoteSuggestionAfterRemoval || ownerVoteSuggestionAfterRemoval.userVote !== 0 || !isPrivateNoStore(ownerVoteListAfterRemoval.headers) || ownerVoteListAfterRemoval.headers["x-dzn-cache"] !== "BYPASS") {
+              fail("Authenticated suggestion list did not reflect persisted vote removal.", { category: "PHASE2A_VIEWER_VOTE_HYDRATION_FAILED", stage: "authMatrix", route: "/api/events/suggestions", cacheStatus: ownerVoteListAfterRemoval.headers["x-dzn-cache"] || "missing" });
+            }
+            const viewerVoteHydration = {
+              anonymousUserVote: anonymousVoteSuggestion.userVote,
+              anonymousPublicCache: isPublicBoundedCache(anonymousVoteList.headers),
+              ownerUserVoteAfterSet: ownerVoteSuggestion.userVote,
+              ownerPrivateBypass: isPrivateNoStore(ownerVoteList.headers) && ownerVoteList.headers["x-dzn-cache"] === "BYPASS",
+              otherUserDidNotInheritOwnerVote: otherUserVoteSuggestion.userVote !== 1,
+              ownerUserVoteAfterRemoval: ownerVoteSuggestionAfterRemoval.userVote,
+            };
             const report = await fetchJson(base, `${suggestionPath}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             const reportRepeat = await fetchJson(base, `${suggestionPath}/report`, 200, { method: "POST", headers: { ...jsonHeaders, Cookie: ownerCookie }, body: JSON.stringify({ reason: "spam", note: "Preview-only report." }), category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
             if (JSON.stringify(report.json).includes("reportCount") || JSON.stringify(reportRepeat.json).includes("reportCount")) fail("Public report response exposed reportCount.", { category: "PHASE2A_AUTH_MATRIX_FAILED", stage: "authMatrix" });
@@ -2797,6 +2871,7 @@ jobs:
                 remoteRateLimitTimingEligible,
                 remoteRateLimitTimingInconclusive,
                 localAtomicRateLimitTestPassed: true,
+                viewerVoteHydration,
               },
               nonCreatorOwner: { moderationDenied: ownerModerateDenied.status, conversionDenied: ownerConvertDenied.status },
               creator: {
@@ -3440,6 +3515,18 @@ jobs:
               eventDetailSessionCacheIsolated: cacheVerification.eventApi.publicDetailFullNoStore && cacheVerification.eventApi.authenticatedDetailNoStore && cacheVerification.eventApi.invalidSessionDetailNoStore,
               publicEventListVaryCookie: cacheVerification.eventApi.publicListVaryCookie,
               publicEventDetailVaryCookie: cacheVerification.eventApi.publicDetailVaryCookie,
+              persistedViewerVoteHydration:
+                authMatrix.otherAuthenticatedUser.viewerVoteHydration.anonymousUserVote === 0 &&
+                authMatrix.otherAuthenticatedUser.viewerVoteHydration.anonymousPublicCache === true &&
+                authMatrix.otherAuthenticatedUser.viewerVoteHydration.ownerUserVoteAfterSet === 1 &&
+                authMatrix.otherAuthenticatedUser.viewerVoteHydration.ownerPrivateBypass === true &&
+                authMatrix.otherAuthenticatedUser.viewerVoteHydration.otherUserDidNotInheritOwnerVote === true &&
+                authMatrix.otherAuthenticatedUser.viewerVoteHydration.ownerUserVoteAfterRemoval === 0,
+              publicSuggestionServerVisibility:
+                cacheVerification.suggestionServerVisibility.visibleServerProjected === true &&
+                cacheVerification.suggestionServerVisibility.hiddenServerRedacted === true &&
+                cacheVerification.suggestionServerVisibility.mergedServerRedacted === true &&
+                cacheVerification.suggestionServerVisibility.ownerHistoricalProjectionRetained === true,
               publicEventDraftsExcluded: cacheVerification.eventApi.publicDraftAbsent && cacheVerification.eventApi.unlistedDraftAbsent && cacheVerification.eventApi.privateDraftAbsent,
               publicStatusFiltersOmitDraft: cacheVerification.eventApi.statusFiltersOmitDraft,
               publicStatusDraftRejected: cacheVerification.eventApi.statusDraftRejected === 400,
@@ -3558,6 +3645,8 @@ jobs:
               `- Private/draft conversion activity excluded from public live feed: ${privacyChecks.privateDraftConversionActivityExcludedFromPublicFeed ? "passed" : "failed"}`,
               `- Public non-draft event activity still visible: ${privacyChecks.publicNonDraftActivityAppears ? "passed" : "failed"}`,
               `- Creator host ownership enforced: ${privacyChecks.creatorHostOwnershipEnforced ? "passed" : "failed"}`,
+              `- Persisted viewer-vote hydration: ${privacyChecks.persistedViewerVoteHydration ? "passed" : "failed"}`,
+              `- Public suggestion server visibility recheck: ${privacyChecks.publicSuggestionServerVisibility ? "passed" : "failed"}`,
               `- Suggestion mutation auth precedence: ${privacyChecks.suggestionMutationAuthPrecedence ? "passed" : "failed"}`,
               `- Duplicate allowed cache parameters bypass shared cache: ${privacyChecks.duplicateAllowedCacheParametersBypass ? "passed" : "failed"}`,
               `- Protected preview session/event row invariants: ${privacyChecks.protectedRowsPreserved ? "passed" : "failed"}`,
