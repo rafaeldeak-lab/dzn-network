@@ -3338,6 +3338,7 @@ jobs:
             const publicActivityAppears = feedText.includes("phase2a-preview-public-live-event") && feedText.includes("Phase 2A public live fixture activity.");
             const cacheControl = String(liveFeed.headers["cache-control"] || "");
             const publicCacheSafe = /public,\s*max-age=\d+/i.test(cacheControl) && !/no-store/i.test(cacheControl);
+            const publicCacheStaleWhileRevalidate = /stale-while-revalidate=\d+/i.test(cacheControl);
             const summary = {
               publicLiveFeedStatus: liveFeed.status,
               privateConversionActivityRetainedInternally: Number(privateActivityRows[0]?.count || 0) === 1,
@@ -3346,15 +3347,17 @@ jobs:
               privateDraftConversionActivityAbsent: leakedMarkers.length === 0,
               leakedMarkerCount: leakedMarkers.length,
               publicCacheSafe,
+              publicCacheStaleWhileRevalidate,
               cacheStatus: liveFeed.headers["x-dzn-cache"] || "missing",
             };
-            if (!summary.privateConversionActivityRetainedInternally || !summary.privateOrDraftActivityRowsExistInternally || !summary.publicNonDraftActivityAppears || !summary.privateDraftConversionActivityAbsent || !summary.publicCacheSafe) {
+            if (!summary.privateConversionActivityRetainedInternally || !summary.privateOrDraftActivityRowsExistInternally || !summary.publicNonDraftActivityAppears || !summary.privateDraftConversionActivityAbsent || !summary.publicCacheSafe || !summary.publicCacheStaleWhileRevalidate) {
               fail("Public event live feed exposed private/draft activity or lost safe public cache headers.", {
                 category: "PHASE2A_PUBLIC_EVENT_PROJECTION_FAILED",
                 stage: "privacyChecks",
                 route: "/api/events/live-feed",
                 status: liveFeed.status,
                 cacheStatus: summary.cacheStatus,
+                publicCacheStaleWhileRevalidate: summary.publicCacheStaleWhileRevalidate,
               });
             }
             return summary;

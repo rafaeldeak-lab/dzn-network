@@ -230,6 +230,14 @@ jobs:
           npm run test:server-advertising-packages
           git diff --check
 
+      - name: Verify production creator env readiness
+        run: |
+          set -euo pipefail
+
+          npx wrangler pages secret list --project-name "${PRODUCTION_PROJECT}" > owner-console-creator-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" owner-console-creator-pages-secrets.txt
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true"
+
       - name: Provision owner console production env
         run: |
           set -euo pipefail
@@ -244,8 +252,10 @@ jobs:
 
           npx wrangler pages secret list --project-name "${PRODUCTION_PROJECT}" | tee owner-console-pages-secrets.txt
           grep -q "DZN_PLATFORM_OWNER_DISCORD_IDS" owner-console-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" owner-console-pages-secrets.txt
           grep -q "DZN_DISCORD_NOTIFICATIONS_ENABLED" owner-console-pages-secrets.txt
           echo "DZN_PLATFORM_OWNER_DISCORD_IDS listed after rollout: true"
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed after rollout: true"
           echo "DZN_DISCORD_NOTIFICATIONS_ENABLED listed after rollout: true"
 
       - name: Deploy production Pages from approved owner console commit

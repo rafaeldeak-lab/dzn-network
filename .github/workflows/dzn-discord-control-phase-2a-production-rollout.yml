@@ -410,8 +410,10 @@ jobs:
 
           npx wrangler pages secret list --project-name "${{ inputs.production_pages_project_name }}" > discord-phase-2a-production-pages-secrets.txt
           grep -q "DZN_PLATFORM_OWNER_DISCORD_IDS" discord-phase-2a-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" discord-phase-2a-production-pages-secrets.txt
           grep -q "DZN_DISCORD_NOTIFICATIONS_ENABLED" discord-phase-2a-production-pages-secrets.txt
           echo "DZN_PLATFORM_OWNER_DISCORD_IDS listed in production Pages secrets: true"
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true"
           echo "DZN_DISCORD_NOTIFICATIONS_ENABLED listed in production Pages secrets: true"
 
       - name: Create production D1 Time Travel bookmark

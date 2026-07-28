@@ -257,7 +257,9 @@ jobs:
           set -euo pipefail
           npx wrangler pages secret list --project-name "${{ inputs.production_pages_project_name }}" | tee discord-control-production-pages-secrets.txt
           grep -q "DZN_PLATFORM_OWNER_DISCORD_IDS" discord-control-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" discord-control-production-pages-secrets.txt
           echo "DZN_PLATFORM_OWNER_DISCORD_IDS listed in production Pages secrets: true"
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true"
 
       - name: Deploy production Pages from approved Discord Control commit
         run: |

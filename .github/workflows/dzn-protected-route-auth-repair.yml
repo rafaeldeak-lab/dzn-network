@@ -109,6 +109,8 @@ jobs:
           else
             echo "DZN_CRON_SECRET listed before repair: false"
           fi
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" pages-secrets-before.txt
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed before repair: true"
 
       - name: Provision production Pages cron secret
         run: |
@@ -126,9 +128,11 @@ jobs:
           grep -q "DZN_CRON_SECRET" pages-secrets-after.txt
           grep -q "DZN_PULSE_ENABLED" pages-secrets-after.txt
           grep -q "DZN_DISCORD_NOTIFICATIONS_ENABLED" pages-secrets-after.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" pages-secrets-after.txt
           echo "DZN_CRON_SECRET listed after repair: true"
           echo "DZN_PULSE_ENABLED listed after repair: true"
           echo "DZN_DISCORD_NOTIFICATIONS_ENABLED listed after repair: true"
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed after repair: true"
 
       - name: Redeploy production Pages with existing flags
         run: |

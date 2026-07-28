@@ -222,12 +222,20 @@ function assertCursorPagination() {
 
 async function assertCacheHelpers() {
   const publicHeaders = publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 }, "MISS");
-  assertIncludes(publicHeaders.get("cache-control") ?? "", "public, max-age=15");
+  assertIncludes(publicHeaders.get("cache-control") ?? "", "public, max-age=15, stale-while-revalidate=45");
+  assertIncludes(publicHeaders.get("cdn-cache-control") ?? "", "max-age=15, stale-while-revalidate=45");
   assertNotIncludes(publicHeaders.get("cache-control") ?? "", "s-maxage", "public cache headers must not claim s-maxage SWR");
-  assertNotIncludes(publicHeaders.get("cache-control") ?? "", "stale-while-revalidate", "browser cache policy must not expose internal stale retention");
+  const noSwrHeaders = publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 0 }, "MISS");
+  assertNotIncludes(noSwrHeaders.get("cache-control") ?? "", "stale-while-revalidate", "zero stale-while-revalidate must be omitted");
+  const noSwrDefaultHeaders = publicCacheHeaders({ maxAge: 15 }, "MISS");
+  assertNotIncludes(noSwrDefaultHeaders.get("cache-control") ?? "", "stale-while-revalidate", "absent stale-while-revalidate must be omitted");
+  const staleIfErrorHeaders = publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45, staleIfError: 120 }, "MISS");
+  assertIncludes(staleIfErrorHeaders.get("cache-control") ?? "", "stale-if-error=120");
+  assertIncludes(staleIfErrorHeaders.get("cdn-cache-control") ?? "", "stale-if-error=120");
   assert.equal(publicHeaders.get("x-dzn-cache"), "MISS");
   const privateHeaders = privateNoStoreHeaders();
   assertIncludes(privateHeaders.get("cache-control") ?? "", "private, no-store");
+  assertNotIncludes(privateHeaders.get("cache-control") ?? "", "stale-while-revalidate", "no-store responses must not include stale-while-revalidate");
   assert.equal(privateHeaders.get("x-dzn-cache"), "BYPASS");
   assert.equal(hasPrivateRequestSignal(new Request("https://example.test/api", { headers: { authorization: "Bearer secret" } })), true);
   assert.equal(hasPrivateRequestSignal(new Request("https://example.test/api", { headers: { cookie: "dzn_session=abc" } })), true);
@@ -1629,6 +1637,7 @@ function assertWorkflowBoundaries() {
   assertIncludes(ownerPreviewWorkflow, "remoteRateLimitTimingInconclusive", "preview vote verifier must record inconclusive remote timing");
   assertIncludes(ownerPreviewWorkflow, "suggestionVoteChangeCooldownMs + 250", "preview vote verifier must wait the cooldown plus margin only after observing 429");
   assertIncludes(ownerPreviewWorkflow, "localAtomicRateLimitTestPassed: true", "preview verifier must record deterministic local atomic vote coverage");
+  assertIncludes(ownerPreviewWorkflow, "publicCacheStaleWhileRevalidate", "preview live-feed verifier must require stale-while-revalidate on public cache headers");
   assertIncludes(ownerPreviewWorkflow, "cooldownMs: typeof details.cooldownMs", "vote failure summaries must include sanitized cooldown timing details");
   assertNotIncludes(ownerPreviewWorkflow, "await new Promise((resolve) => setTimeout(resolve, 1700));", "preview verifier must not execute the old fixed-delay vote cleanup");
 

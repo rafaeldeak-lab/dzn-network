@@ -4,12 +4,17 @@ import type { Env, SessionUser } from "./types";
 
 export const PLATFORM_CREATOR_EVENT_ADMIN_CAPABILITY = "platform_creator_event_admin" as const;
 
+export type PlatformCreatorEnvReadiness =
+  | { ok: true; configuredDiscordId: string }
+  | { ok: false; reason: "creator_env_missing" | "creator_env_invalid" };
+
 export type PlatformCreatorEventAdminAuthResult =
   | { ok: true; user: SessionUser; capability: typeof PLATFORM_CREATOR_EVENT_ADMIN_CAPABILITY }
   | {
       ok: false;
       status: 401 | 403;
-      reason: "unauthorized" | "creator_event_governance_not_configured" | "forbidden";
+      reason: "unauthorized" | "creator_access_not_configured" | "forbidden";
+      readinessReason?: "creator_env_missing" | "creator_env_invalid";
     };
 
 export function parsePlatformCreatorDiscordId(value: unknown): string | null {
@@ -20,16 +25,30 @@ export function parsePlatformCreatorDiscordId(value: unknown): string | null {
 }
 
 export function isPlatformCreatorEventGovernanceConfigured(env: Pick<Env, "DZN_PLATFORM_CREATOR_DISCORD_ID"> | Record<string, unknown>) {
-  return parsePlatformCreatorDiscordId((env as Record<string, unknown>).DZN_PLATFORM_CREATOR_DISCORD_ID) !== null;
+  return getPlatformCreatorEnvReadiness(env).ok;
+}
+
+export function getPlatformCreatorEnvReadiness(
+  env: Pick<Env, "DZN_PLATFORM_CREATOR_DISCORD_ID"> | Record<string, unknown>,
+): PlatformCreatorEnvReadiness {
+  const rawValue = (env as Record<string, unknown>).DZN_PLATFORM_CREATOR_DISCORD_ID;
+  if (rawValue === undefined || rawValue === null || rawValue === "") {
+    return { ok: false, reason: "creator_env_missing" };
+  }
+  const configuredDiscordId = parsePlatformCreatorDiscordId(rawValue);
+  if (!configuredDiscordId) {
+    return { ok: false, reason: "creator_env_invalid" };
+  }
+  return { ok: true, configuredDiscordId };
 }
 
 export function isPlatformCreatorEventAdmin(
   user: Pick<SessionUser, "discord_id"> | null,
   env: Pick<Env, "DZN_PLATFORM_CREATOR_DISCORD_ID"> | Record<string, unknown>,
 ) {
-  const configuredDiscordId = parsePlatformCreatorDiscordId((env as Record<string, unknown>).DZN_PLATFORM_CREATOR_DISCORD_ID);
-  if (!configuredDiscordId || !user?.discord_id) return false;
-  return user.discord_id === configuredDiscordId;
+  const readiness = getPlatformCreatorEnvReadiness(env);
+  if (!readiness.ok || !user?.discord_id) return false;
+  return user.discord_id === readiness.configuredDiscordId;
 }
 
 export function authorizePlatformCreatorEventAdmin(
@@ -40,11 +59,12 @@ export function authorizePlatformCreatorEventAdmin(
     return { ok: false, status: 401, reason: "unauthorized" };
   }
 
-  if (!isPlatformCreatorEventGovernanceConfigured(env)) {
-    return { ok: false, status: 403, reason: "creator_event_governance_not_configured" };
+  const readiness = getPlatformCreatorEnvReadiness(env);
+  if (!readiness.ok) {
+    return { ok: false, status: 403, reason: "creator_access_not_configured", readinessReason: readiness.reason };
   }
 
-  if (!isPlatformCreatorEventAdmin(user, env)) {
+  if (user.discord_id !== readiness.configuredDiscordId) {
     return { ok: false, status: 403, reason: "forbidden" };
   }
 
@@ -66,13 +86,15 @@ export function creatorEventAdminDeniedPayload(
       message: "Log in with Discord to manage official DZN events.",
     };
   }
-  if (auth.reason === "creator_event_governance_not_configured") {
+  if (auth.reason === "creator_access_not_configured") {
+    const envReason = auth.readinessReason ?? "creator_env_missing";
     return {
       ok: false,
       status: 403,
-      error: "CREATOR_EVENT_GOVERNANCE_NOT_CONFIGURED",
-      errorCode: "CREATOR_EVENT_GOVERNANCE_NOT_CONFIGURED",
-      message: "Creator event governance is not configured.",
+      error: "CREATOR_ACCESS_NOT_CONFIGURED",
+      errorCode: "CREATOR_ACCESS_NOT_CONFIGURED",
+      reason: envReason ?? "creator_access_not_configured",
+      message: envReason === "creator_env_invalid" ? "Creator event governance is misconfigured." : "Creator event governance is not configured.",
     };
   }
   return {

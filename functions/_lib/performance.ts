@@ -2,7 +2,8 @@ import { secureHeaders } from "./http";
 
 export type PublicCacheTtl = {
   maxAge: number;
-  staleWhileRevalidate: number;
+  staleWhileRevalidate?: number | null;
+  staleIfError?: number | null;
 };
 
 export type CacheStatus = "HIT" | "MISS" | "STALE" | "BYPASS";
@@ -35,9 +36,9 @@ export function privateNoStoreHeaders(headers?: HeadersInit) {
 
 export function publicCacheHeaders(ttl: PublicCacheTtl, status: CacheStatus = "MISS", headers?: HeadersInit) {
   const next = secureHeaders(headers);
-  const maxAge = boundedSeconds(ttl.maxAge);
-  next.set("cache-control", `public, max-age=${maxAge}`);
-  next.set("cdn-cache-control", `max-age=${maxAge}`);
+  const directives = publicCacheDirectives(ttl);
+  next.set("cache-control", directives.cacheControl);
+  next.set("cdn-cache-control", directives.cdnCacheControl);
   next.set("x-dzn-cache", status);
   if (!next.has("server-timing")) next.set("server-timing", `dzn-cache;desc="${status}"`);
   return next;
@@ -265,6 +266,31 @@ function boundedSeconds(value: number) {
   return Math.max(0, Math.min(3600, Math.trunc(value || 0)));
 }
 
+function boundedOptionalSeconds(value: number | null | undefined) {
+  if (!Number.isFinite(value) || !value) return 0;
+  return boundedSeconds(Number(value));
+}
+
+function publicCacheDirectives(ttl: PublicCacheTtl) {
+  const maxAge = boundedSeconds(ttl.maxAge);
+  const cacheControl = [`public`, `max-age=${maxAge}`];
+  const cdnCacheControl = [`max-age=${maxAge}`];
+  const staleWhileRevalidate = boundedOptionalSeconds(ttl.staleWhileRevalidate);
+  const staleIfError = boundedOptionalSeconds(ttl.staleIfError);
+  if (staleWhileRevalidate > 0) {
+    cacheControl.push(`stale-while-revalidate=${staleWhileRevalidate}`);
+    cdnCacheControl.push(`stale-while-revalidate=${staleWhileRevalidate}`);
+  }
+  if (staleIfError > 0) {
+    cacheControl.push(`stale-if-error=${staleIfError}`);
+    cdnCacheControl.push(`stale-if-error=${staleIfError}`);
+  }
+  return {
+    cacheControl: cacheControl.join(", "),
+    cdnCacheControl: cdnCacheControl.join(", "),
+  };
+}
+
 function appendServerTiming(current: string | null, next: string) {
   return current && current.trim() ? `${current}, ${next}` : next;
 }
@@ -289,7 +315,7 @@ function parseCacheMetadata(value: string | null, version: string): CacheMetadat
 function makeCacheMetadata(ttl: PublicCacheTtl, version: string): CacheMetadata {
   const cachedAt = Date.now();
   const freshUntil = cachedAt + boundedSeconds(ttl.maxAge) * 1000;
-  const staleUntil = freshUntil + boundedSeconds(ttl.staleWhileRevalidate) * 1000;
+  const staleUntil = freshUntil + boundedOptionalSeconds(ttl.staleWhileRevalidate) * 1000;
   return { version, cachedAt, freshUntil, staleUntil };
 }
 

@@ -133,7 +133,7 @@ jobs:
           set -euo pipefail
           npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-before.txt
 
-          for name in DISCORD_CLIENT_SECRET SESSION_SECRET; do
+          for name in DISCORD_CLIENT_SECRET SESSION_SECRET DZN_PLATFORM_CREATOR_DISCORD_ID; do
             if grep -q "$name" pages-secrets-before.txt; then
               echo "$name listed before repair: true"
             else
@@ -163,7 +163,7 @@ jobs:
               --project-name "${PRODUCTION_PAGES_PROJECT_NAME}"
 
           npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-after.txt
-          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET DISCORD_REDIRECT_URI DZN_APP_URL SESSION_SECRET DZN_PULSE_ENABLED DZN_DISCORD_NOTIFICATIONS_ENABLED; do
+          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET DISCORD_REDIRECT_URI DZN_APP_URL SESSION_SECRET DZN_PULSE_ENABLED DZN_DISCORD_NOTIFICATIONS_ENABLED DZN_PLATFORM_CREATOR_DISCORD_ID; do
             grep -q "$name" pages-secrets-after.txt
             echo "$name listed after repair: true"
           done

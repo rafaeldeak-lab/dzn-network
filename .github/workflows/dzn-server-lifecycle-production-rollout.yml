@@ -549,6 +549,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          npx wrangler pages secret list --project-name "${{ inputs.production_pages_project_name }}" > lifecycle-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" lifecycle-production-pages-secrets.txt
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true"
+
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false npm run build
           npx wrangler pages deploy out \
             --project-name "${{ inputs.production_pages_project_name }}" \

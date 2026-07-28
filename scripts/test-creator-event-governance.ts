@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import {
   authorizePlatformCreatorEventAdmin,
   creatorEventAdminDeniedPayload,
+  getPlatformCreatorEnvReadiness,
   isPlatformCreatorEventAdmin,
   parsePlatformCreatorDiscordId,
   PLATFORM_CREATOR_EVENT_ADMIN_CAPABILITY,
@@ -52,6 +53,10 @@ assert.equal(isPlatformCreatorEventAdmin(creator, { DZN_PLATFORM_CREATOR_DISCORD
 assert.equal(isPlatformCreatorEventAdmin({ discord_id: ` ${creatorDiscordId}` }, { DZN_PLATFORM_CREATOR_DISCORD_ID: creatorDiscordId }), false);
 assert.equal(isPlatformCreatorEventAdmin(creator, { DZN_PLATFORM_CREATOR_DISCORD_ID: `${creatorDiscordId},222222222222222222` }), false);
 assert.equal(isPlatformCreatorEventAdmin(creator, { DZN_PLATFORM_OWNER_DISCORD_IDS: creatorDiscordId }), false, "Platform-owner allowlist alone must not grant creator event capability.");
+assert.deepEqual(getPlatformCreatorEnvReadiness({}), { ok: false, reason: "creator_env_missing" });
+assert.deepEqual(getPlatformCreatorEnvReadiness({ DZN_PLATFORM_CREATOR_DISCORD_ID: "" }), { ok: false, reason: "creator_env_missing" });
+assert.deepEqual(getPlatformCreatorEnvReadiness({ DZN_PLATFORM_CREATOR_DISCORD_ID: "not-a-discord-id" }), { ok: false, reason: "creator_env_invalid" });
+assert.deepEqual(getPlatformCreatorEnvReadiness({ DZN_PLATFORM_CREATOR_DISCORD_ID: creatorDiscordId }), { ok: true, configuredDiscordId: creatorDiscordId });
 assert.deepEqual(authorizePlatformCreatorEventAdmin({ DZN_PLATFORM_CREATOR_DISCORD_ID: creatorDiscordId }, null), {
   ok: false,
   status: 401,
@@ -60,7 +65,14 @@ assert.deepEqual(authorizePlatformCreatorEventAdmin({ DZN_PLATFORM_CREATOR_DISCO
 assert.deepEqual(authorizePlatformCreatorEventAdmin({}, creator), {
   ok: false,
   status: 403,
-  reason: "creator_event_governance_not_configured",
+  reason: "creator_access_not_configured",
+  readinessReason: "creator_env_missing",
+});
+assert.deepEqual(authorizePlatformCreatorEventAdmin({ DZN_PLATFORM_CREATOR_DISCORD_ID: "not-a-discord-id" }, creator), {
+  ok: false,
+  status: 403,
+  reason: "creator_access_not_configured",
+  readinessReason: "creator_env_invalid",
 });
 assert.equal(authorizePlatformCreatorEventAdmin({ DZN_PLATFORM_CREATOR_DISCORD_ID: creatorDiscordId }, creator).ok, true);
 
@@ -76,6 +88,10 @@ async function main() {
     const env = noWriteEnv(badConfig);
     const result = await createCompetitiveEvent(env, creator, validCreateBody());
     assert.equal(result.status, 403, "Missing or malformed creator configuration must fail closed.");
+    assert.equal(result.error, "CREATOR_ACCESS_NOT_CONFIGURED", "Missing or malformed creator configuration must use the safe access-not-configured code.");
+    const readinessReason = "reason" in result ? String(result.reason ?? "") : "";
+    assert.match(readinessReason, /^creator_env_(missing|invalid)$/, "Missing or malformed creator configuration must include a safe readiness reason.");
+    assert.equal(JSON.stringify(result).includes(creatorDiscordId), false, "Creator authorization failures must not leak a configured Discord ID.");
     assert.equal(env.DB.prepareCount, 0, "Failed creator configuration must not run schema helpers or writes.");
   }
 
@@ -753,6 +769,10 @@ function assertSourceGovernance() {
 
   const creatorHelper = source("functions/_lib/platform-creator.ts");
   assertIncludes(creatorHelper, "DZN_PLATFORM_CREATOR_DISCORD_ID");
+  assertIncludes(creatorHelper, "getPlatformCreatorEnvReadiness");
+  assertIncludes(creatorHelper, "creator_env_missing");
+  assertIncludes(creatorHelper, "creator_env_invalid");
+  assertIncludes(creatorHelper, "CREATOR_ACCESS_NOT_CONFIGURED");
   assertIncludes(creatorHelper, "value !== value.trim()");
   assertIncludes(creatorHelper, "^\\d{5,32}$");
   assertIncludes(creatorHelper, "Only the DZN platform creator can manage official DZN events.");
@@ -858,6 +878,36 @@ function assertSourceGovernance() {
   assertIncludes(autoUpdateWorkflow, "workflow_dispatch:");
   assert.doesNotMatch(autoUpdateWorkflow, /^\s*push:|^\s*pull_request:|^\s*schedule:/m, "Auto Update Scheduler must remain manual backup only.");
   assert.doesNotMatch(autoUpdateWorkflow, /DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED:\s*["']true["']|DZN_DISCORD_NOTIFICATIONS_ENABLED:\s*["']true["']/);
+
+  for (const [label, path] of [
+    ["pages runtime production deploy", ".github/workflows/dzn-pages-runtime-production-deploy.yml"],
+    ["owner console production rollout", ".github/workflows/dzn-owner-console-production-rollout.yml"],
+    ["discord control production rollout", ".github/workflows/dzn-discord-control-production-rollout.yml"],
+    ["discord control phase 2a production rollout", ".github/workflows/dzn-discord-control-phase-2a-production-rollout.yml"],
+    ["discord server announcements production rollout", ".github/workflows/dzn-discord-server-announcements-production-rollout.yml"],
+    ["server lifecycle production rollout", ".github/workflows/dzn-server-lifecycle-production-rollout.yml"],
+    ["server advertising production rollout", ".github/workflows/dzn-server-advertising-production-rollout.yml"],
+    ["pulse production rollout", ".github/workflows/dzn-pulse-production-rollout.yml"],
+  ] as const) {
+    const workflow = source(path);
+    assertIncludes(workflow, "npx wrangler pages secret list", `${label} must inspect production Pages secret names.`);
+    assertIncludes(workflow, "grep -q \"DZN_PLATFORM_CREATOR_DISCORD_ID\"", `${label} must verify the creator env name before deployment.`);
+    assertIncludes(workflow, "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true", `${label} must report creator env readiness safely.`);
+    assert.doesNotMatch(workflow, /npx wrangler pages secret put DZN_PLATFORM_CREATOR_DISCORD_ID/, `${label} must not provision production creator env from GitHub.`);
+  }
+
+  for (const [label, path] of [
+    ["protected route auth repair", ".github/workflows/dzn-protected-route-auth-repair.yml"],
+    ["production Discord auth repair", ".github/workflows/dzn-production-discord-auth-repair.yml"],
+  ] as const) {
+    const workflow = source(path);
+    assertIncludes(workflow, "DZN_PLATFORM_CREATOR_DISCORD_ID", `${label} must verify existing production creator env before redeploy.`);
+    assert.doesNotMatch(workflow, /npx wrangler pages secret put DZN_PLATFORM_CREATOR_DISCORD_ID/, `${label} must not provision production creator env from GitHub.`);
+  }
+
+  const readonlyDiagnosticsWorkflow = source(".github/workflows/dzn-production-readonly-diagnostics.yml");
+  assertIncludes(readonlyDiagnosticsWorkflow, "\"DZN_PLATFORM_CREATOR_DISCORD_ID\"", "Read-only production diagnostics must inspect creator env readiness.");
+  assertIncludes(readonlyDiagnosticsWorkflow, "Production creator access env is missing: DZN_PLATFORM_CREATOR_DISCORD_ID", "Read-only preflight must fail safely when creator env is absent.");
 }
 
 void main();
