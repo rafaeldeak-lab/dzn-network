@@ -1,4 +1,5 @@
 name: DZN Owner Console Preview
+# GitHub Support diagnostic: workflow registration refresh only; no runtime behavior change.
 
 on:
   workflow_dispatch:
