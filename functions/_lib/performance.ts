@@ -1,5 +1,7 @@
 import { secureHeaders } from "./http";
 
+// GitHub Support diagnostic: source registration refresh only; no runtime behavior change.
+
 export type PublicCacheTtl = {
   maxAge: number;
   staleWhileRevalidate?: number | null;
