@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
+import { isDznOperatorsEnabled } from "@/lib/operators/feature-flags";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
-type SiteHeaderActive = "features" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
+type SiteHeaderActive = "features" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard" | "operators";
 
 type SiteHeaderProps = {
   active?: SiteHeaderActive;
@@ -55,6 +56,7 @@ export function SiteHeader({
 
   const authLoading = checkingAccount || checking;
   const resolvedAuthenticated = authenticated ?? fetchedAuthenticated;
+  const operatorsEnabled = isDznOperatorsEnabled();
 
   return (
     <DznPulseProvider>
@@ -86,6 +88,11 @@ export function SiteHeader({
           <Link href="/events" aria-current={active === "events" ? "page" : undefined}>
             Events
           </Link>
+          {operatorsEnabled ? (
+            <Link href="/operators" aria-current={active === "operators" ? "page" : undefined}>
+              Operators
+            </Link>
+          ) : null}
         </div>
 
         <div className="dzn-header-actions">
