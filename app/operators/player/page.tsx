@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { OperatorPlayerProfile } from "@/components/operators/engagement/operator-player-profile";
+import { FullOperatorPlayerProfile } from "@/components/operators/full-studio/full-operator-player-profile";
 import { OperatorFeatureGuard } from "@/components/operators/operator-feature-guard";
 import { SiteHeader } from "@/components/site-header";
 import { getDznOperatorsFeatureFlags } from "@/lib/operators/feature-flags";
@@ -19,7 +20,7 @@ export default function OperatorsPlayerRoute() {
       <main className="min-h-screen overflow-x-hidden bg-[#02030a] text-zinc-100">
         <SiteHeader active="operators" returnTo="/operators/player" />
         <Suspense fallback={<QueryPageFallback title="Loading Operator profile" />}>
-          <OperatorPlayerProfile />
+          {flags.fullStudioEnabled ? <FullOperatorPlayerProfile /> : <OperatorPlayerProfile />}
         </Suspense>
       </main>
     </OperatorFeatureGuard>
