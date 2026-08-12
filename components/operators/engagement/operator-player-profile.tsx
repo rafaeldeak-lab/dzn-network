@@ -29,12 +29,15 @@ export function OperatorPlayerProfile() {
           </article>
         ) : (
           <>
-            <div className="grid gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
+            <div className="grid items-start gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
               <OperatorCard presentation={{ ...presentation, displayName: profile.favouriteLoadoutLabel, callSign: profile.displayName }} compact />
               <article className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-200">Public Operator profile</p>
                 <h1 className="mt-2 text-4xl font-black uppercase text-white">{profile.displayName}</h1>
                 <p className="mt-2 text-sm font-bold text-zinc-300">Public DZN identifier: {profile.publicRef} · Linked server: {profile.linkedServerName}</p>
+                <p className="mt-3 rounded-lg border border-cyan-300/18 bg-cyan-300/10 p-3 text-xs font-black uppercase text-cyan-100">
+                  Preview data - not live network standings. Public aggregate values are demo-safe and non-authoritative.
+                </p>
                 <p className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-3 text-xs font-black uppercase text-emerald-100">
                   No raw coordinates, private Discord ID, internal database ID, session metadata, or authentication data is exposed.
                 </p>
@@ -56,7 +59,7 @@ export function OperatorPlayerProfile() {
 function ProfileDetails({ profile }: { profile: NonNullable<ReturnType<typeof buildOperatorPlayerProfile>> }) {
   const rank = getOperatorRankProgress(profile.totalXp);
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <section className="grid gap-5">
         <article className="rounded-lg border border-cyan-300/18 bg-cyan-300/[0.045] p-5">
           <div className="flex items-center gap-4">

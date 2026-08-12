@@ -23,14 +23,14 @@ export function OperatorEngagementDashboard({ demoMode }: { demoMode: boolean })
   const nextStreakReward = OPERATOR_STREAK_REWARDS[DEMO_OPERATOR_STATE.dailyStreak.current % OPERATOR_STREAK_REWARDS.length];
 
   return (
-    <main className="min-h-screen bg-[#02030a] text-zinc-100">
+    <main className="min-h-screen overflow-x-hidden bg-[#02030a] text-zinc-100">
       <SiteHeader active="operators" returnTo="/operators" />
       <OperatorSectionNav engagementEnabled />
       <section className="relative overflow-hidden border-b border-white/10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_6%,rgba(139,92,246,.18),transparent_30%),radial-gradient(circle_at_10%_0%,rgba(34,211,238,.18),transparent_32%),linear-gradient(180deg,#06101d,#02030a)]" />
         <div className="relative mx-auto grid max-w-7xl gap-6 px-4 py-8 xl:grid-cols-[minmax(0,1fr)_380px]">
           <div>
-            <h1 className="max-w-4xl text-5xl font-black uppercase leading-[0.96] text-white md:text-6xl">
+            <h1 className="max-w-4xl break-words text-4xl font-black uppercase leading-[0.96] text-white sm:text-5xl md:text-6xl">
               DZN Operators Daily Engagement
             </h1>
             <p className="mt-4 max-w-3xl text-sm font-bold leading-6 text-zinc-300">
@@ -52,8 +52,8 @@ export function OperatorEngagementDashboard({ demoMode }: { demoMode: boolean })
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-5 px-4 py-8 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,.7fr)]">
-        <div className="grid gap-5">
+      <section className="mx-auto grid max-w-7xl items-start gap-5 px-4 py-8 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,.7fr)]">
+        <div className="grid content-start gap-5">
           <article className="rounded-lg border border-cyan-300/16 bg-cyan-300/[0.045] p-5">
             <div className="flex items-center gap-4">
               <OperatorRankEmblem label={rank.currentRank.displayName} level={rank.currentRank.level} active />
@@ -76,15 +76,16 @@ export function OperatorEngagementDashboard({ demoMode }: { demoMode: boolean })
               <p className="text-[10px] font-black uppercase tracking-[0.16em] text-orange-200">Daily login streak</p>
               <h2 className="mt-1 text-2xl font-black uppercase text-white">{DEMO_OPERATOR_STATE.dailyStreak.current}-day signal</h2>
               <OperatorResetCountdown label="Daily reset" resetAt={getNextOperatorDailyReset(OPERATOR_DEMO_NOW)} />
-              <div className="mt-4 grid grid-cols-7 gap-2">
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
                 {OPERATOR_STREAK_REWARDS.map((reward, index) => {
                   const day = index + 1;
                   const claimed = DEMO_OPERATOR_STATE.dailyStreak.claimedCycleDays.includes(day);
                   const current = day === DEMO_OPERATOR_STATE.dailyStreak.current + 1;
                   return (
-                    <div key={reward.id} className={`rounded-lg border p-2 text-center ${claimed ? "border-emerald-300/30 bg-emerald-300/12" : current ? "border-orange-300/35 bg-orange-300/12" : "border-white/10 bg-black/24"}`}>
+                    <div key={reward.id} className={`min-h-20 rounded-lg border p-2 text-center ${claimed ? "border-emerald-300/30 bg-emerald-300/12" : current ? "border-orange-300/35 bg-orange-300/12" : "border-white/10 bg-black/24"}`}>
                       <p className="text-[10px] font-black uppercase text-zinc-400">Day {day}</p>
-                      <p className="mt-1 truncate text-[10px] font-black uppercase text-white">{claimed ? "Claimed" : current ? "Current" : "Upcoming"}</p>
+                      <p className="mt-1 text-[10px] font-black uppercase leading-4 text-white">{claimed ? "Claimed" : current ? "Current" : "Upcoming"}</p>
+                      <p className="mt-1 text-[10px] font-bold leading-4 text-zinc-300">{reward.exactContents}</p>
                     </div>
                   );
                 })}

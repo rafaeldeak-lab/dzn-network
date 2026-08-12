@@ -37,7 +37,7 @@ export function OperatorHub({ demoMode }: OperatorHubProps) {
   const premiumItems = DZN_OPERATOR_CATALOG.items.filter((item) => item.entitlement === "premium").slice(0, 8);
 
   return (
-    <main className="min-h-screen bg-[#02030a] text-zinc-100">
+    <main className="min-h-screen overflow-x-hidden bg-[#02030a] text-zinc-100">
       <SiteHeader active="operators" returnTo="/operators" />
       <section className="relative overflow-hidden border-b border-white/10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_12%,rgba(249,115,22,.17),transparent_28%),radial-gradient(circle_at_14%_0%,rgba(34,211,238,.16),transparent_30%),linear-gradient(180deg,#06101d,#02030a)]" />

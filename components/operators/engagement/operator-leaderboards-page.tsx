@@ -42,7 +42,7 @@ export function OperatorLeaderboardsPage() {
           <p className="mt-3 text-sm font-bold leading-6 text-zinc-300">
             Preview data - not live network standings. Top Operators are featured in the weekly DZN Spotlight with no competitive advantage.
           </p>
-          <div className="mt-4 flex gap-2 overflow-x-auto" role="tablist" aria-label="Leaderboard periods">
+          <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Leaderboard periods">
             {periods.map((entry) => (
               <button
                 key={entry}
@@ -50,7 +50,7 @@ export function OperatorLeaderboardsPage() {
                 role="tab"
                 aria-selected={period === entry}
                 onClick={() => setPeriod(entry)}
-                className={`min-h-11 shrink-0 rounded-lg px-4 text-xs font-black uppercase focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 ${
+                className={`min-h-11 rounded-lg px-4 text-xs font-black uppercase focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 ${
                   period === entry ? "bg-cyan-300 text-slate-950" : "border border-white/10 bg-black/24 text-zinc-200"
                 }`}
               >
@@ -71,7 +71,7 @@ export function OperatorLeaderboardsPage() {
           </article>
         ) : null}
 
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,.9fr)]">
+        <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,.9fr)]">
           <article className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
             <h2 className="text-2xl font-black uppercase text-white">Player Operator XP</h2>
             <div className="mt-4 grid gap-3" role="list" aria-label="Player Operator leaderboard rows">

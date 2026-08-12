@@ -30,6 +30,9 @@ export function OperatorServerDashboard() {
               <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-200">Server Operator Dashboard</p>
               <h1 className="mt-2 text-4xl font-black uppercase text-white">{server.serverName}</h1>
               <p className="mt-2 text-sm font-bold text-zinc-300">{server.mapName} · {server.category} · {server.playerSlots}</p>
+              <p className="mt-3 rounded-lg border border-cyan-300/18 bg-cyan-300/10 p-3 text-xs font-black uppercase text-cyan-100">
+                Preview data - aggregate community presentation only, not live ADM telemetry or authoritative leaderboard standing.
+              </p>
               <p className="mt-3 rounded-lg border border-white/10 bg-black/24 p-3 text-xs font-black uppercase text-zinc-200">
                 Read-only Phase 2 UI foundation. No owner XP grants, reward editing, leaderboard manipulation, production write APIs, or D1 writes.
               </p>
@@ -40,7 +43,7 @@ export function OperatorServerDashboard() {
                 <ServerStat label="Active Operators" value={String(server.activeOperators)} />
               </div>
             </article>
-            <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
               <div className="grid gap-5">
                 <article className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
                   <div className="flex flex-wrap items-center justify-between gap-3">

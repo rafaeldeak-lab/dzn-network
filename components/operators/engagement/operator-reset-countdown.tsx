@@ -22,10 +22,12 @@ export function OperatorResetCountdown({ resetAt, label }: OperatorResetCountdow
   }, []);
 
   const remaining = now === null || !Number.isFinite(resetTime) ? "UTC reset window" : formatRemaining(resetTime - now);
+  const dateLabel = Number.isFinite(resetTime) ? formatUtcDate(resetTime) : "UTC schedule unavailable";
 
   return (
-    <p className="text-xs font-black uppercase text-cyan-100" aria-live="polite">
-      {label}: {remaining} · {new Date(Number.isFinite(resetTime) ? resetTime : 0).toISOString().replace(".000Z", " UTC")}
+    <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-black uppercase text-cyan-100" aria-live="polite">
+      <span>{label}: {remaining}</span>
+      <span className="text-cyan-100/70">{dateLabel}</span>
     </p>
   );
 }
@@ -38,4 +40,17 @@ function formatRemaining(ms: number): string {
   const mins = minutes % 60;
   if (days > 0) return `${days}d ${hours}h`;
   return `${hours}h ${mins}m`;
+}
+
+const UTC_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatUtcDate(ms: number): string {
+  const date = new Date(ms);
+  if (!Number.isFinite(date.getTime())) return "UTC schedule unavailable";
+  const day = date.getUTCDate();
+  const month = UTC_MONTHS[date.getUTCMonth()];
+  const year = date.getUTCFullYear();
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${day} ${month} ${year}, ${hour}:${minute} UTC`;
 }

@@ -16,7 +16,7 @@ export default function OperatorsPlayerRoute() {
 
   return (
     <OperatorFeatureGuard enabled={flags.enabled && flags.engagementEnabled}>
-      <main className="min-h-screen bg-[#02030a] text-zinc-100">
+      <main className="min-h-screen overflow-x-hidden bg-[#02030a] text-zinc-100">
         <SiteHeader active="operators" returnTo="/operators/player" />
         <Suspense fallback={<QueryPageFallback title="Loading Operator profile" />}>
           <OperatorPlayerProfile />

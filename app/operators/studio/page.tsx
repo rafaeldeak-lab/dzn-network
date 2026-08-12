@@ -15,7 +15,7 @@ export default function OperatorsStudioPage() {
 
   return (
     <OperatorFeatureGuard enabled={flags.enabled}>
-      <main className="min-h-screen bg-[#02030a] text-zinc-100">
+      <main className="min-h-screen overflow-x-hidden bg-[#02030a] text-zinc-100">
         <SiteHeader active="operators" returnTo="/operators/studio" />
         <section className="mx-auto max-w-7xl px-4 py-8">
           <div className="mb-6 rounded-lg border border-white/10 bg-white/[0.035] p-5">

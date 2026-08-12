@@ -176,6 +176,51 @@ for (const route of [
 assert.equal(readFileSync("app/operators/player/page.tsx", "utf8").includes("<Suspense"), true, "Player query page remains static-export safe.");
 assert.equal(readFileSync("app/operators/server/page.tsx", "utf8").includes("<Suspense"), true, "Server query page remains static-export safe.");
 
+const sectionNavSource = readFileSync("components/operators/engagement/operator-section-nav.tsx", "utf8");
+assert.equal(sectionNavSource.includes("flex flex-wrap gap-2"), true, "Operators section navigation wraps instead of forcing mobile overflow.");
+assert.equal(sectionNavSource.includes("overflow-x-auto"), false, "Operators section navigation should not depend on hidden horizontal scrolling.");
+
+const resetCountdownSource = readFileSync("components/operators/engagement/operator-reset-countdown.tsx", "utf8");
+assert.equal(resetCountdownSource.includes("formatUtcDate"), true, "Reset countdowns use compact UTC labels.");
+assert.equal(resetCountdownSource.includes("toISOString().replace"), false, "Reset countdowns should not expose long ISO strings in mobile cards.");
+
+const dashboardSource = readFileSync("components/operators/engagement/operator-engagement-dashboard.tsx", "utf8");
+assert.equal(dashboardSource.includes("break-words text-4xl"), true, "Dashboard hero title remains safe on small mobile.");
+assert.equal(dashboardSource.includes("grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7"), true, "Daily streak rewards remain readable on mobile.");
+
+const playerProfileSource = readFileSync("components/operators/engagement/operator-player-profile.tsx", "utf8");
+const serverDashboardSource = readFileSync("components/operators/engagement/operator-server-dashboard.tsx", "utf8");
+assert.equal(playerProfileSource.includes("Preview data - not live network standings"), true, "Player profile labels preview data clearly.");
+assert.equal(serverDashboardSource.includes("Preview data - aggregate community presentation only"), true, "Server dashboard labels aggregate demo data clearly.");
+
+const operatorRouteSources = [
+  "app/operators/challenges/page.tsx",
+  "app/operators/leaderboards/page.tsx",
+  "app/operators/player/page.tsx",
+  "app/operators/rank/page.tsx",
+  "app/operators/server/page.tsx",
+  "app/operators/studio/page.tsx",
+].map((route) => readFileSync(route, "utf8"));
+for (const source of operatorRouteSources) {
+  assert.equal(source.includes("overflow-x-hidden"), true, "Operators routes clip accidental horizontal overflow.");
+}
+
+const operatorUiSource = [
+  "app/operators/page.tsx",
+  "app/operators/challenges/page.tsx",
+  "app/operators/leaderboards/page.tsx",
+  "app/operators/player/page.tsx",
+  "app/operators/rank/page.tsx",
+  "app/operators/server/page.tsx",
+  "app/operators/studio/page.tsx",
+  "components/operators/engagement/operator-engagement-dashboard.tsx",
+  "components/operators/engagement/operator-leaderboards-page.tsx",
+  "components/operators/engagement/operator-player-profile.tsx",
+  "components/operators/engagement/operator-server-dashboard.tsx",
+  "components/operators/operator-hub.tsx",
+].map((route) => readFileSync(route, "utf8")).join("\n");
+assert.equal(/https?:\/\//.test(operatorUiSource), false, "Operators UI should not introduce external image or asset URLs.");
+
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts: Record<string, string> };
 assert.equal(packageJson.scripts["test:dzn-operators-engagement"], "tsx scripts/test-dzn-operators-engagement.ts");
 assert.equal(packageJson.scripts.test.includes("npm run test:dzn-operators && npm run test:dzn-operators-engagement"), true);
