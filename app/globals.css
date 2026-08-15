@@ -3010,9 +3010,30 @@ button.dzn-header-action {
   }
 }
 
+@media (max-width: 1360px) {
+  .dzn-header-nav {
+    gap: 12px;
+    padding-inline: 12px;
+  }
+
+  .dzn-header-logo {
+    width: 152px;
+    height: 57px;
+    flex-basis: 152px;
+  }
+
+  .dzn-header-links {
+    gap: clamp(14px, 1.6vw, 22px);
+  }
+
+  .dzn-header-action {
+    padding-inline: 10px;
+  }
+}
+
 @media (max-width: 1260px) {
   .dzn-header-nav {
-    gap: 18px;
+    gap: 12px;
     padding-inline: 14px;
   }
 
@@ -3023,11 +3044,11 @@ button.dzn-header-action {
   }
 
   .dzn-header-links {
-    gap: 26px;
+    gap: 16px;
   }
 
   .dzn-header-action {
-    padding-inline: 14px;
+    padding-inline: 10px;
   }
 }
 
