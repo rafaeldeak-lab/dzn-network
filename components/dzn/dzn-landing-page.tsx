@@ -34,8 +34,8 @@ import type { Variants } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
-import { SiteHeader } from "@/components/site-header";
 import { LiveServerRail } from "@/components/servers/live-server-rail";
+import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
@@ -756,12 +756,11 @@ export function DznLandingPage() {
       >
         <HomeAliveBackground reducedMotion={Boolean(reduceMotion)} />
         <LoadingOverlay isVisible={isLoading} />
-        <SiteHeader
+        <SiteHeaderAuthState
           authenticated={authState.status === "logged_in"}
           checkingAccount={authState.status === "loading"}
           returnTo="/"
         />
-
         <motion.main
           initial="hidden"
           animate="show"

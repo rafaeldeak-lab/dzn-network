@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { BetaTicker } from "@/components/site/beta-ticker";
+import { SiteHeaderRoot } from "@/components/site-header";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,6 +31,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-[#02030a] text-zinc-100">
+        <SiteHeaderRoot />
         {children}
         <BetaTicker />
       </body>

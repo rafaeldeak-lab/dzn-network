@@ -22,7 +22,6 @@ import {
   Trophy,
 } from "lucide-react";
 
-import { DznLogo } from "@/components/dzn/dzn-logo";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import {
   fallbackActivity,
@@ -607,8 +606,7 @@ function EventsShell({ children }: { children: ReactNode }) {
         <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_24%_0%,rgba(124,58,237,0.18),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(14,165,233,0.12),transparent_30%),linear-gradient(180deg,#02030a,#050816_48%,#02030a)]" />
         <div className="relative grid min-h-screen lg:grid-cols-[220px_1fr]">
           <aside className="hidden border-r border-white/8 bg-black/28 p-4 backdrop-blur-xl lg:block">
-            <DznLogo />
-            <nav className="mt-6 space-y-1">
+            <nav className="space-y-1">
               {nav.map((item) => {
                 const active = isSidebarItemActive(pathname, item.href);
                 const Icon = item.icon;
@@ -627,15 +625,6 @@ function EventsShell({ children }: { children: ReactNode }) {
             </nav>
           </aside>
           <div className="min-w-0">
-            <header className="sticky top-0 z-20 border-b border-white/8 bg-[#02030a]/86 px-4 py-3 backdrop-blur-xl lg:hidden">
-              <div className="flex items-center justify-between gap-3">
-                <DznLogo />
-                <div className="flex items-center gap-2">
-                  <DznPulseBell />
-                  <Link href="/events" className="rounded-lg border border-violet-300/30 bg-violet-500/16 px-3 py-2 text-xs font-black uppercase text-white">Events</Link>
-                </div>
-              </div>
-            </header>
             <PulseEventsDesktopBell />
             <div className="flex w-full max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
           </div>

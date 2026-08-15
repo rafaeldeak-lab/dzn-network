@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 
 function source(path: string) {
@@ -149,6 +149,7 @@ includesAll(publicServersRoute, [
 ]);
 
 const landing = source("components/dzn/dzn-landing-page.tsx");
+const rootLayout = source("app/layout.tsx");
 includesAll(landing, [
   "dzn:lastGoodHomeStats",
   "loadLastGoodHomeStats",
@@ -180,10 +181,15 @@ assert.equal(landing.includes("setData(emptyHomeStats"), false, "Homepage refres
 assert.equal(landing.includes("Live refresh recovering. Showing last known data."), false, "Homepage must not show stale-data warning when valid data is visible.");
 assert.equal(landing.includes("Network stats refresh failed. Showing last known values."), false, "Homepage refresh failures with visible data should stay silent.");
 includesAll(landing, [
-  "SiteHeader",
+  "SiteHeaderAuthState",
   "authenticated={authState.status === \"logged_in\"}",
   "checkingAccount={authState.status === \"loading\"}",
 ]);
+includesAll(rootLayout, [
+  "SiteHeaderRoot",
+  "<SiteHeaderRoot />",
+]);
+assert.equal((rootLayout.match(/<SiteHeaderRoot \/>/g) ?? []).length, 1, "Root layout must mount exactly one persistent shared header.");
 assert.equal(landing.includes("function Navbar"), false, "Homepage must use the shared SiteHeader instead of the duplicate local navbar.");
 
 const leaderboards = source("app/leaderboards/page.tsx");
@@ -201,8 +207,6 @@ includesAll(leaderboards, [
   "Leaderboard data could not be loaded right now.",
   "KillProjectileAccent",
   "AnimatedBullet",
-  "SiteHeader",
-  "active=\"leaderboards\"",
   "leaderboard-ref-page",
   "leaderboard-ref-hero-art",
   "leaderboard-ref-stats",
@@ -278,6 +282,7 @@ includesAll(logSettingsRoute, [
 assert.equal(leaderboards.includes("Live refresh recovering. Showing last known data."), false, "Leaderboards must not show stale-data warning when valid data is visible.");
 assert.equal(leaderboards.includes("Live data refresh failed. Showing last known leaderboard."), false, "Leaderboards refresh failures with visible data should stay silent.");
 assert.equal(leaderboards.includes("function LeaderboardNav"), false, "Leaderboards page must use the shared SiteHeader instead of a duplicate local nav.");
+assert.equal(leaderboards.includes("<SiteHeader"), false, "Leaderboards page must not remount the root shared header.");
 assert.equal(leaderboards.includes("leaderboard-ref-nav"), false, "Leaderboards page must not render the old local nav classes.");
 assert.equal(leaderboards.includes("Real players."), false, "Leaderboards page must not render the redundant lower CTA card.");
 assert.equal(leaderboards.includes("Real action."), false, "Leaderboards page must not render the redundant lower CTA card.");
@@ -370,9 +375,27 @@ includesAll(globals, [
 ]);
 
 const siteHeader = source("components/site-header.tsx");
+const approvedHeaderLogoAssets = [
+  "dzn-server-wars-logo-loop-v2.mp4",
+  "dzn-server-wars-logo-loop-v2.webm",
+  "dzn-server-wars-logo-poster-v2.jpg",
+];
+assert.deepEqual(
+  readdirSync("public/media/server-wars-logo").sort(),
+  [...approvedHeaderLogoAssets].sort(),
+  "Persistent header logo media directory must contain only the approved V2 assets.",
+);
 includesAll(siteHeader, [
   "SiteHeader",
-  "/media/dzn-logo.png",
+  "SiteHeaderRoot",
+  "HeaderLogoVideo",
+  "/media/server-wars-logo/dzn-server-wars-logo-loop-v2.webm",
+  "/media/server-wars-logo/dzn-server-wars-logo-loop-v2.mp4",
+  "/media/server-wars-logo/dzn-server-wars-logo-poster-v2.jpg",
+  "preload=\"metadata\"",
+  "disablePictureInPicture",
+  "playsInline",
+  "document.addEventListener(\"visibilitychange\"",
   "DZN_PUBLIC_DISCORD_INVITE_URL",
   "/#features",
   "/leaderboards",
@@ -389,6 +412,14 @@ includesAll(siteHeader, [
   "dzn-header-links",
   "dzn-header-actions",
 ]);
+for (const oldLogoPath of [
+  "/media/dzn-logo.png",
+  "/media/server-wars-logo/dzn-server-wars-logo-loop.webm",
+  "/media/server-wars-logo/dzn-server-wars-logo-loop.mp4",
+  "/media/server-wars-logo/dzn-server-wars-logo-poster.jpg",
+]) {
+  assert.equal(siteHeader.includes(oldLogoPath), false, `SiteHeader must not reference obsolete logo asset ${oldLogoPath}.`);
+}
 
 const publicDiscordConfig = source("lib/public-discord.ts");
 includesAll(publicDiscordConfig, [
@@ -438,8 +469,6 @@ for (const removedAnimation of ["leaderboard-ref-bullet-spin", "leaderboard-ref-
 
 const publicNetwork = source("components/network/public-network.tsx");
 includesAll(publicNetwork, [
-  "SiteHeader",
-  "active=\"servers\"",
   "dzn:lastGoodPublicNetwork:",
   "loadPublicNetworkCache",
   "savePublicNetworkCache",
@@ -455,9 +484,17 @@ includesAll(publicNetwork, [
   "Server list unavailable",
   "payload = data.data && !data.servers && !data.server ? data.data : data",
 ]);
+assert.equal(publicNetwork.includes("<SiteHeader"), false, "Public server browsing must not remount the root shared header.");
 assert.equal(publicNetwork.includes("setServer(null);\n      setServers([]);\n      setStats(null);"), false, "Public network load start must not clear cached server/listing data.");
 assert.equal(publicNetwork.includes("Live refresh recovering. Showing last known data."), false, "Public network must not show stale-data warning when valid data is visible.");
 assert.equal(publicNetwork.includes("Live data refresh failed. Showing last known public data."), false, "Public network refresh failures with visible data should stay silent.");
+
+const eventsPlatform = source("components/events/events-platform.tsx");
+assert.equal(eventsPlatform.includes("<SiteHeader"), false, "Events platform must not remount the root shared header.");
+assert.equal(eventsPlatform.includes("<DznLogo"), false, "Events platform must not render a duplicate DZN logo beside the root header.");
+
+const serverWarsPlatform = source("components/server-wars/server-wars-platform.tsx");
+assert.equal(serverWarsPlatform.includes("<SiteHeader"), false, "Server Wars pages must not remount the root shared header.");
 
 const changedFiles = execSync("git diff --name-only", { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
 const allowsTelemetryAdmSyncChange =

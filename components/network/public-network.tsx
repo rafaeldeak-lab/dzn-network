@@ -42,7 +42,6 @@ import Link from "next/link";
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { LiveServerRail } from "@/components/servers/live-server-rail";
-import { SiteHeader } from "@/components/site-header";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import type { PlanVisualTreatment, ProfileFrameVisual, ServerThemeBannerVisual, VisualBadge } from "@/lib/badges/visuals";
 import type { PublicLockedBadge } from "@/lib/badges/rules";
@@ -565,7 +564,6 @@ export function PublicNetwork() {
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
       <AnimatedBackground />
       <div className="relative z-10 flex min-h-screen flex-col">
-        <SiteHeader active="servers" returnTo="/servers" />
         <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-5 py-6 sm:px-6 lg:px-8">
           {slug ? (
             <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />

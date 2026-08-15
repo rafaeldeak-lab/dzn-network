@@ -2778,7 +2778,7 @@ body.dzn-owner-console-active .dzn-beta-ticker {
 
 .dzn-header-shell {
   width: 100%;
-  padding: 14px clamp(10px, 2vw, 24px) 10px;
+  padding: 20px clamp(10px, 2vw, 24px) 10px;
   position: relative;
   z-index: 50;
 }
@@ -2809,15 +2809,17 @@ body.dzn-owner-console-active .dzn-beta-ticker {
   align-items: center;
   justify-content: center;
   width: 176px;
-  height: 58px;
+  height: 66px;
   flex: 0 0 176px;
   border-radius: 18px;
+  overflow: visible;
   text-decoration: none;
   background:
     linear-gradient(135deg, rgba(88, 28, 135, 0.42), rgba(2, 6, 23, 0.76));
   border: 1px solid rgba(192, 132, 252, 0.48);
   box-shadow:
-    0 0 24px rgba(168, 85, 247, 0.22),
+    0 0 24px rgba(168, 85, 247, 0.24),
+    0 0 34px rgba(109, 40, 217, 0.16),
     inset 0 0 18px rgba(255, 255, 255, 0.035);
 }
 
@@ -2839,17 +2841,20 @@ body.dzn-owner-console-active .dzn-beta-ticker {
 .dzn-header-logo-frame {
   display: grid;
   place-items: center;
-  width: 112px;
-  height: 48px;
+  width: 100%;
+  height: 100%;
+  border-radius: 17px;
   overflow: hidden;
 }
 
-.dzn-header-logo-frame img {
+.dzn-header-logo-media {
   display: block;
-  width: 108px;
-  height: auto;
-  max-height: 46px;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+  user-select: none;
 }
 
 .dzn-header-links {
@@ -2983,16 +2988,9 @@ button.dzn-header-action {
   }
 
   .dzn-header-logo {
-    width: 152px;
-    flex-basis: 152px;
-  }
-
-  .dzn-header-logo-frame {
-    width: 96px;
-  }
-
-  .dzn-header-logo-frame img {
-    width: 94px;
+    width: 176px;
+    height: 66px;
+    flex-basis: 176px;
   }
 
   .dzn-header-links {
@@ -3016,8 +3014,9 @@ button.dzn-header-action {
   }
 
   .dzn-header-logo {
-    width: 150px;
-    flex-basis: 150px;
+    width: 152px;
+    height: 57px;
+    flex-basis: 152px;
   }
 
   .dzn-header-links {
@@ -3037,19 +3036,9 @@ button.dzn-header-action {
   }
 
   .dzn-header-logo {
-    width: 146px;
+    width: 144px;
     height: 54px;
-    flex-basis: 146px;
-  }
-
-  .dzn-header-logo-frame {
-    width: 94px;
-    height: 42px;
-  }
-
-  .dzn-header-logo-frame img {
-    width: 92px;
-    max-height: 40px;
+    flex-basis: 144px;
   }
 
   .dzn-header-links {
@@ -3075,7 +3064,7 @@ button.dzn-header-action {
 
 @media (max-width: 720px) {
   .dzn-header-shell {
-    padding-inline: 8px;
+    padding: 18px 8px 10px;
   }
 
   .dzn-header-nav {
@@ -3092,6 +3081,17 @@ button.dzn-header-action {
   .dzn-header-action {
     width: 100%;
     padding-inline: 10px;
+  }
+
+  .dzn-header-logo {
+    width: 112px;
+    height: 42px;
+    flex-basis: 112px;
+    border-radius: 14px;
+  }
+
+  .dzn-header-logo-frame {
+    border-radius: 13px;
   }
 }
 

@@ -5,7 +5,6 @@ import { Activity, ArrowRight, Compass, Crosshair, Hammer, Lock, Map, RadioTower
 import Link from "next/link";
 
 import { AnimatedBullet, KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
-import { SiteHeader } from "@/components/site-header";
 import { ServerWarsTeaser } from "@/components/server-wars/server-wars-platform";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
@@ -295,8 +294,6 @@ export default function LeaderboardsPage() {
     <main className="leaderboard-ref-page leaderboard-reference-page dzn-leaderboard-page relative min-h-screen overflow-hidden bg-[#02030a] px-3 py-2 text-white sm:px-4 lg:px-5">
       <span className="leaderboard-ref-embers" aria-hidden="true" />
       <div className="leaderboard-ref-shell leaderboard-reference-shell relative z-10 mx-auto flex min-h-screen max-w-[1500px] flex-col">
-        <SiteHeader active="leaderboards" returnTo="/leaderboards" />
-
         <section className="leaderboard-ref-hero leaderboard-reference-hero dzn-leaderboard-hero">
           <div className="leaderboard-ref-hero-art" aria-hidden="true" />
           <div className="leaderboard-ref-hero-copy leaderboard-reference-hero-copy dzn-leaderboard-hero__copy">
