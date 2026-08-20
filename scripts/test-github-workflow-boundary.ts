@@ -761,19 +761,71 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("OWNER_CONSOLE_REMOTE_BRANC
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview does not accept tag refs."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview does not accept pull-request merge refs."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview must never run from main, master, or production."), true);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/event-platform-performance-foundation may only run event-platform-performance-preview mode."), true);
-function acceptsOwnerConsolePreviewRef(input: { refName: string; ref?: string; sha?: string }) {
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/event-platform-performance-foundation may only run event-platform-performance-preview or billing-phase-1-preview mode."), true);
+assert.equal(ownerPreviewDispatchBlock.includes("- billing-phase-1-preview"), true, "Billing Phase 1 preview must be an explicit workflow mode choice.");
+assert.equal(ownerPreviewDispatchBlock.includes("confirm_billing_phase_1_preview:"), true, "Billing Phase 1 preview must require its own confirmation input.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_BILLING_PHASE_1_PREVIEW"), true, "Billing Phase 1 preview must require the exact approval phrase.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_only must equal PREVIEW_ONLY for billing-phase-1-preview mode."), true, "Billing Phase 1 preview must still require PREVIEW_ONLY.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("BILLING_PHASE_1_PREVIEW_PROJECT_NAME: dzn-network-owner-console-preview-billing-phase-1"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("BILLING_PHASE_1_PREVIEW_DB_PREFIX: dzn_network_db_owner_console_preview_billing_phase_1_"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("BILLING_PHASE_1_PREVIEW_CONFIRMATION: APPROVE_BILLING_PHASE_1_PREVIEW"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("BILLING_PHASE_1_PREVIEW_STABLE_URL: https://dzn-network-owner-console-preview-billing-phase-1.pages.dev"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes('PREVIEW_DB_NAME="${BILLING_PHASE_1_PREVIEW_DB_PREFIX}${CANDIDATE_SHORT_SHA}"'), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Billing Phase 1 preview D1 database name must be candidate-derived."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Refusing Billing Phase 1 preview for production D1 database name."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("Refusing Billing Phase 1 preview for production Pages project."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Install Billing preview dependencies"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.indexOf("- name: Install Billing preview dependencies") < dznOwnerConsolePreviewWorkflow.indexOf("- name: Validate preview-only inputs"), true, "Billing dependencies must install before Billing validation/preflight.");
+function acceptsOwnerConsolePreviewRef(input: {
+  refName: string;
+  ref?: string;
+  sha?: string;
+  mode?: string;
+  checkedOutSha?: string;
+  remoteHead?: string;
+  confirmPreviewOnly?: string;
+  confirmBilling?: string;
+  previewProjectName?: string;
+  previewDbName?: string;
+}) {
   const ref = input.ref ?? `refs/heads/${input.refName}`;
   const sha = input.sha ?? "184c0fe214810e2343abd7780b9e3e4f24945863";
+  const mode = input.mode ?? (input.refName === "feature/event-platform-performance-foundation" ? "event-platform-performance-preview" : "full-preview");
+  const shortSha = sha.slice(0, 7);
+  const previewProjectName = input.previewProjectName ?? (mode === "billing-phase-1-preview" ? "dzn-network-owner-console-preview-billing-phase-1" : "dzn-network-owner-console-preview");
+  const previewDbName = input.previewDbName ?? (mode === "billing-phase-1-preview" ? `dzn_network_db_owner_console_preview_billing_phase_1_${shortSha}` : "dzn_network_db_owner_console_preview");
   if (!input.refName || !sha) return false;
   if (!["refs/heads/feature/owner-console", "refs/heads/feature/creator-only-event-governance", "refs/heads/feature/event-platform-performance-foundation"].includes(ref)) return false;
   if (!["feature/owner-console", "feature/creator-only-event-governance", "feature/event-platform-performance-foundation"].includes(input.refName)) return false;
   if (["main", "master", "production"].includes(input.refName)) return false;
+  if (input.checkedOutSha && input.checkedOutSha !== sha) return false;
+  if (input.remoteHead && input.remoteHead !== sha) return false;
+  if (input.refName === "feature/event-platform-performance-foundation" && !["event-platform-performance-preview", "billing-phase-1-preview"].includes(mode)) return false;
+  if (mode === "billing-phase-1-preview") {
+    if (input.refName !== "feature/event-platform-performance-foundation") return false;
+    if ((input.confirmPreviewOnly ?? "PREVIEW_ONLY") !== "PREVIEW_ONLY") return false;
+    if ((input.confirmBilling ?? "APPROVE_BILLING_PHASE_1_PREVIEW") !== "APPROVE_BILLING_PHASE_1_PREVIEW") return false;
+    if (previewProjectName !== "dzn-network-owner-console-preview-billing-phase-1") return false;
+    if (previewProjectName === "dzn-network") return false;
+    if (previewDbName !== `dzn_network_db_owner_console_preview_billing_phase_1_${shortSha}`) return false;
+    if (previewDbName === "dzn_network_db") return false;
+  }
   return /^[a-f0-9]{40}$/.test(sha);
 }
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/creator-only-event-governance" }), true);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/owner-console" }), true);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation" }), true);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview" }), true);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview", confirmPreviewOnly: "PREVIEW_ONLY " }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview", confirmBilling: "approve_billing_phase_1_preview" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/owner-console", mode: "billing-phase-1-preview" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/creator-only-event-governance", mode: "billing-phase-1-preview" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "full-preview" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview", checkedOutSha: "284c0fe214810e2343abd7780b9e3e4f24945863" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview", remoteHead: "284c0fe214810e2343abd7780b9e3e4f24945863" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview", previewProjectName: "dzn-network" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview", previewDbName: "dzn_network_db" }), false);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "billing-phase-1-preview", previewDbName: "dzn_network_db_owner_console_preview_billing_phase_1_stale00" }), false);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "main", ref: "refs/heads/main" }), false);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "master", ref: "refs/heads/master" }), false);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "production", ref: "refs/heads/production" }), false);
@@ -1019,7 +1071,10 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("db:migrate:remote"), false
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db --remote"), false);
 
 const ownerPreviewValidateInputsStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Validate preview-only inputs");
-const ownerPreviewInstallStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Install");
+const ownerPreviewInstallStart = indexOfOrFail(
+  dznOwnerConsolePreviewWorkflow,
+  "- name: Install\n        if: ${{ inputs.mode == 'full-preview'",
+);
 const ownerPreviewVerifyExistingStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify existing creator-governance preview");
 const ownerPreviewPhase2APreflightStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Preflight event platform performance preview");
 const ownerPreviewPhase2AMigrateStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Apply only Phase 2A migration 0057 to preview");
@@ -1144,7 +1199,11 @@ assert.equal(ownerPreviewValidateBlock.includes("event-platform-performance-prev
 assert.equal(ownerPreviewValidateBlock.includes("APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW"), true, "Phase 2A preview mode must require exact confirmation.");
 assert.equal(ownerPreviewValidateBlock.includes('PREVIEW_DB_NAME="${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}"'), true, "Phase 2A preview must use the fixed reusable preview DB.");
 assert.equal(ownerPreviewValidateBlock.includes("Event platform performance preview must use the fixed reusable preview D1."), true, "Phase 2A preview DB must not come from user input.");
-assert.equal(ownerPreviewValidateBlock.includes('if [ "${MODE}" = "full-preview" ]; then'), true, "Owner preview session/Discord secrets must only be generated for full-preview.");
+assert.equal(
+  ownerPreviewValidateBlock.includes('if [ "${MODE}" = "full-preview" ] || [ "${MODE}" = "billing-phase-1-preview" ]; then'),
+  true,
+  "Owner preview session/Discord secrets must only be generated for full-preview and billing-phase-1-preview.",
+);
 assert.equal(ownerPreviewPhase2ABlock.includes("event-platform-performance-preview"), true, "Phase 2A preview steps must be explicitly mode-gated.");
 assert.equal(ownerPreviewPhase2ABlock.includes("dzn-network-owner-console-preview"), true, "Phase 2A preview must use the fixed owner-console preview project.");
 assert.equal(ownerPreviewPhase2ABlock.includes("dzn_network_db_owner_console_preview_creator_governance_0919c46"), true, "Phase 2A preview must use the fixed reusable preview D1.");

@@ -16,6 +16,7 @@ on:
           - repair-rebound-discord-preview
           - verify-existing-creator-governance-preview
           - event-platform-performance-preview
+          - billing-phase-1-preview
       confirm_preview_only:
         description: Must equal PREVIEW_ONLY
         required: false
@@ -70,6 +71,10 @@ on:
         default: ""
       confirm_event_platform_performance_preview:
         description: Must equal APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW for Phase 2A performance preview mode
+        required: false
+        default: ""
+      confirm_billing_phase_1_preview:
+        description: Must equal APPROVE_BILLING_PHASE_1_PREVIEW for Billing Phase 1 preview mode
         required: false
         default: ""
 
@@ -132,6 +137,11 @@ jobs:
       EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME: dzn_network_db_owner_console_preview_creator_governance_0919c46
       EVENT_PLATFORM_PERFORMANCE_PREVIEW_CONFIRMATION: APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW
       EVENT_PLATFORM_PERFORMANCE_PREVIEW_SEED_PREFIX: phase2a-preview-
+      CONFIRM_BILLING_PHASE_1_PREVIEW: ${{ inputs.confirm_billing_phase_1_preview }}
+      BILLING_PHASE_1_PREVIEW_PROJECT_NAME: dzn-network-owner-console-preview-billing-phase-1
+      BILLING_PHASE_1_PREVIEW_DB_PREFIX: dzn_network_db_owner_console_preview_billing_phase_1_
+      BILLING_PHASE_1_PREVIEW_CONFIRMATION: APPROVE_BILLING_PHASE_1_PREVIEW
+      BILLING_PHASE_1_PREVIEW_STABLE_URL: https://dzn-network-owner-console-preview-billing-phase-1.pages.dev
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
       PRODUCTION_D1_DATABASE_NAME: dzn_network_db
       D1_ACCOUNT_DATABASE_LIMIT: "10"
@@ -151,6 +161,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      - name: Install Billing preview dependencies
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        run: npm ci
 
       - name: Validate preview-only inputs
         run: bash -e scripts/github-actions/dzn-owner-console-preview/01-validate-preview-only-inputs.sh

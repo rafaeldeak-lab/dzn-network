@@ -43,8 +43,8 @@ case "${CANDIDATE_BRANCH}" in
     exit 1
     ;;
 esac
-if [ "${CANDIDATE_BRANCH}" = "feature/event-platform-performance-foundation" ] && [ "${MODE}" != "event-platform-performance-preview" ]; then
-  echo "::error::feature/event-platform-performance-foundation may only run event-platform-performance-preview mode."
+if [ "${CANDIDATE_BRANCH}" = "feature/event-platform-performance-foundation" ] && [ "${MODE}" != "event-platform-performance-preview" ] && [ "${MODE}" != "billing-phase-1-preview" ]; then
+  echo "::error::feature/event-platform-performance-foundation may only run event-platform-performance-preview or billing-phase-1-preview mode."
   exit 1
 fi
 
@@ -70,6 +70,10 @@ if [ "${MODE}" = "verify-existing-creator-governance-preview" ]; then
   PREVIEW_DB_NAME="${EXISTING_CREATOR_GOVERNANCE_PREVIEW_DB_NAME}"
 elif [ "${MODE}" = "event-platform-performance-preview" ]; then
   PREVIEW_DB_NAME="${EVENT_PLATFORM_PERFORMANCE_PREVIEW_DB_NAME}"
+elif [ "${MODE}" = "billing-phase-1-preview" ]; then
+  PREVIEW_PROJECT_NAME="${BILLING_PHASE_1_PREVIEW_PROJECT_NAME}"
+  PREVIEW_DB_NAME="${BILLING_PHASE_1_PREVIEW_DB_PREFIX}${CANDIDATE_SHORT_SHA}"
+  PREVIEW_BASE_URL="${BILLING_PHASE_1_PREVIEW_STABLE_URL}"
 elif [ "${MODE}" = "full-preview" ] && [ "${CANDIDATE_BRANCH}" = "feature/creator-only-event-governance" ]; then
   PREVIEW_DB_NAME="dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}"
 else
@@ -88,7 +92,9 @@ fi
   printf "OWNER_CONSOLE_CANDIDATE_TREE_SHA=%s\n" "$CHECKED_OUT_TREE"
   printf "OWNER_CONSOLE_REMOTE_BRANCH_HEAD=%s\n" "$REMOTE_FEATURE_HEAD"
   printf "OWNER_CONSOLE_CREATOR_EVENT_NAME=%s\n" "$CREATOR_EVENT_NAME"
+  printf "PREVIEW_PROJECT_NAME=%s\n" "$PREVIEW_PROJECT_NAME"
   printf "PREVIEW_DB_NAME=%s\n" "$PREVIEW_DB_NAME"
+  printf "PREVIEW_BASE_URL=%s\n" "$PREVIEW_BASE_URL"
 } >> "$GITHUB_ENV"
 
 if [ "${MODE}" = "activate-rebound-discord-preview" ]; then
@@ -97,9 +103,9 @@ if [ "${MODE}" = "activate-rebound-discord-preview" ]; then
 fi
 
 case "${MODE}" in
-  full-preview|cleanup-preview-d1|rebind-preview-d1|repair-rebound-discord-preview|verify-existing-creator-governance-preview|event-platform-performance-preview) ;;
+  full-preview|cleanup-preview-d1|rebind-preview-d1|repair-rebound-discord-preview|verify-existing-creator-governance-preview|event-platform-performance-preview|billing-phase-1-preview) ;;
   *)
-    echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, repair-rebound-discord-preview, verify-existing-creator-governance-preview, or event-platform-performance-preview mode."
+    echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, repair-rebound-discord-preview, verify-existing-creator-governance-preview, event-platform-performance-preview, or billing-phase-1-preview mode."
     exit 1
     ;;
 esac
@@ -199,6 +205,52 @@ if [ "${MODE}" = "event-platform-performance-preview" ]; then
   fi
   if [ "${EVENT_PLATFORM_PERFORMANCE_PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
     echo "::error::Refusing event platform performance preview for production Pages project."
+    exit 1
+  fi
+fi
+if [ "${MODE}" = "billing-phase-1-preview" ]; then
+  if [ "${CANDIDATE_BRANCH}" != "feature/event-platform-performance-foundation" ]; then
+    echo "::error::billing-phase-1-preview mode may only run from feature/event-platform-performance-foundation."
+    exit 1
+  fi
+  if [ "${CONFIRM_PREVIEW_ONLY}" != "PREVIEW_ONLY" ]; then
+    echo "::error::confirm_preview_only must equal PREVIEW_ONLY for billing-phase-1-preview mode."
+    exit 1
+  fi
+  if [ "${CONFIRM_BILLING_PHASE_1_PREVIEW}" != "${BILLING_PHASE_1_PREVIEW_CONFIRMATION}" ]; then
+    echo "::error::confirm_billing_phase_1_preview must equal APPROVE_BILLING_PHASE_1_PREVIEW for billing-phase-1-preview mode."
+    exit 1
+  fi
+  if [ "${BILLING_PHASE_1_PREVIEW_PROJECT_NAME}" != "dzn-network-owner-console-preview-billing-phase-1" ]; then
+    echo "::error::Billing Phase 1 preview project constant mismatch."
+    exit 1
+  fi
+  if [ "${PREVIEW_PROJECT_NAME}" != "${BILLING_PHASE_1_PREVIEW_PROJECT_NAME}" ]; then
+    echo "::error::Billing Phase 1 preview must use the dedicated Billing preview Pages project."
+    exit 1
+  fi
+  if [ "${BILLING_PHASE_1_PREVIEW_DB_PREFIX}" != "dzn_network_db_owner_console_preview_billing_phase_1_" ]; then
+    echo "::error::Billing Phase 1 preview D1 prefix constant mismatch."
+    exit 1
+  fi
+  if [ "${PREVIEW_DB_NAME}" != "${BILLING_PHASE_1_PREVIEW_DB_PREFIX}${CANDIDATE_SHORT_SHA}" ]; then
+    echo "::error::Billing Phase 1 preview D1 database name must be candidate-derived."
+    exit 1
+  fi
+  if ! [[ "${PREVIEW_DB_NAME}" =~ ^dzn_network_db_owner_console_preview_billing_phase_1_[a-f0-9]{7}$ ]]; then
+    echo "::error::Billing Phase 1 preview D1 database name is malformed."
+    exit 1
+  fi
+  if [ "${BILLING_PHASE_1_PREVIEW_STABLE_URL}" != "https://dzn-network-owner-console-preview-billing-phase-1.pages.dev" ] || [ "${PREVIEW_BASE_URL}" != "${BILLING_PHASE_1_PREVIEW_STABLE_URL}" ]; then
+    echo "::error::Billing Phase 1 preview stable URL constant mismatch."
+    exit 1
+  fi
+  if [ "${PREVIEW_DB_NAME}" = "${PRODUCTION_D1_DATABASE_NAME}" ] || [ "${PREVIEW_DB_NAME}" = "${DETECTED_PRODUCTION_D1_DATABASE_NAME:-}" ]; then
+    echo "::error::Refusing Billing Phase 1 preview for production D1 database name."
+    exit 1
+  fi
+  if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
+    echo "::error::Refusing Billing Phase 1 preview for production Pages project."
     exit 1
   fi
 fi
@@ -379,7 +431,7 @@ if ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
   exit 1
 fi
 
-if [ "${MODE}" = "full-preview" ]; then
+if [ "${MODE}" = "full-preview" ] || [ "${MODE}" = "billing-phase-1-preview" ]; then
   OWNER_PREVIEW_SESSION_SECRET="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
   echo "::add-mask::$OWNER_PREVIEW_SESSION_SECRET"
   printf "OWNER_PREVIEW_SESSION_SECRET=%s\n" "$OWNER_PREVIEW_SESSION_SECRET" >> "$GITHUB_ENV"
@@ -492,6 +544,14 @@ NODE
     echo "- Event platform performance preview confirmation accepted: true"
     echo "- D1 database creation/deletion path enabled: false"
     echo "- Only migration 0057 may be applied: true"
+  fi
+  if [ "${MODE}" = "billing-phase-1-preview" ]; then
+    echo "- Billing Phase 1 preview project: ${BILLING_PHASE_1_PREVIEW_PROJECT_NAME}"
+    echo "- Billing Phase 1 preview database: ${PREVIEW_DB_NAME}"
+    echo "- Billing Phase 1 preview stable URL: ${BILLING_PHASE_1_PREVIEW_STABLE_URL}"
+    echo "- Billing Phase 1 preview confirmation accepted: true"
+    echo "- Billing Phase 1 preview D1 name candidate-derived: true"
+    echo "- Billing Phase 1 preview branch guard: feature/event-platform-performance-foundation"
   fi
   echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
   echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"
