@@ -20,6 +20,7 @@ Canonical clean worktree for this recovery:
 - Divergence at recovery start: `origin/release/event-platform-phase-2a...origin/feature/event-platform-performance-foundation = 0 10`.
 - Phase 0 recovery code commit: `96c40f7d648f0b16680dcb80b4d639c4c7157a2e`.
 - Phase 0 recovery handoff commit: this document commit.
+- Billing Phase 1 linked-server Nitrado integrity code commit: `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`.
 
 Old chat transcripts, interrupted Codex edits, and dirty local worktrees are not Git truth. Use remote branch history and committed files as the source of truth.
 
@@ -39,10 +40,15 @@ Latest completed billing commits:
 
 - `8db588f8562270ff2eb9a99c94442e9ff68ca639` - linked-server allowance reservation lifecycle.
 - `75d76f325521d33854974f1f71a07a4fe509bac6` - reservation-aware linked-server allowance reporting.
+- `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02` - linked-server Nitrado credential integrity.
 
 Current billing state:
 
 - Reservation lifecycle and reporting are committed on the active feature branch.
+- Linked-server Nitrado credential lookup is now exact to authenticated owner and linked-server ID for targeted server-scoped onboarding and Nitrado routes.
+- Cross-owner service conflicts are blocked with safe 409 `nitrado_service_already_linked` responses.
+- Same-owner duplicate service linking reuses one canonical linked-server ID, safely reassigns same-owner credentials, retires temporary blank drafts as merged, and handles reservations deterministically.
+- Client onboarding preserves `validatedLinkedServerId` through direct and browse-services flows and clears stale linked-server state when validation context changes.
 - Event Suggestions remains migration `0057_event_suggestions_phase_2a.sql`.
 - Billing Integrity is migration `0058_billing_phase_1_integrity.sql`.
 - `npm run test:billing-integrity` is the canonical focused billing integrity suite.
@@ -66,11 +72,23 @@ Production Pages stable-alias and runtime health must be verified from the deplo
 
 ## Current Hard Blockers
 
-The repository blockers targeted by Phase 0 are resolved after validation and push. The remaining known integrity work is deferred to the next authorised slice below.
+The repository blockers targeted by Phase 0 are resolved after validation and push. The linked-server Nitrado integrity slice is complete in code commit `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`; the remaining authorized work is the guarded isolated preview slice below.
+
+The canonical clean worktree remains authoritative:
+
+`C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-phase0-clean-20260820-155027`
+
+The older dirty worktree and backups remain frozen and were not modified:
+
+- `C:\Users\rafae\OneDrive\Desktop\DZN-Network`
+- `C:\Users\rafae\Desktop\DZN-Audits\backups\phase0-dirty-backup-20260820-151344`
+- `C:\Users\rafae\Desktop\DZN-Audits\backups\phase1-linked-server-integrity-20260820-165515`
+
+No preview, deployment, production workflow dispatch, remote migration, production D1 access/write, D1 bookmark, secret/env change, Stripe change, Discord flag/message, ADM trigger, Nitrado trigger, scheduler trigger, or advertising trigger occurred in the linked-server integrity slice.
 
 ## Next Authorised Slice
 
-Audit and selectively reimplement the preserved exact linked-server Nitrado token association, cross-owner service ownership conflict protection, same-owner idempotent canonical server reuse and deterministic onboarding integrity work against the clean post-Phase-0 branch. Do not apply the preserved dirty patch wholesale.
+Build and run a guarded Billing Phase 1 isolated preview covering migrations 0057 and 0058, exact linked-server Nitrado credential association, cross-owner conflict protection, same-owner canonical reuse, allowance integrity and onboarding verification. No production deployment or production migration.
 
 ## Deferred Areas
 
