@@ -10,6 +10,7 @@ import {
 import {
   ensureDraftLinkedServer,
   LinkedServerAllowanceExceededError,
+  NitradoServiceAlreadyLinkedError,
   normalizeTags,
   saveLinkedServerNitradoService,
   storePendingNitradoToken,
@@ -70,17 +71,23 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       serverCategory,
     );
 
+    await storePendingNitradoToken(env, user.id, linkedServerId, token);
+
     if (service) {
-      const savedLinkedServerId = await saveLinkedServerNitradoService(env, linkedServerId, service, body.serverType, tags, serverCategory);
-      await storePendingNitradoToken(env, user.id, savedLinkedServerId, token);
-      return json({ tokenValid: true, linkedServerId: savedLinkedServerId, service });
+      const attachment = await saveLinkedServerNitradoService(env, user.id, linkedServerId, service, body.serverType, tags, serverCategory);
+      return json({ tokenValid: true, linkedServerId: attachment.linkedServerId, service });
     }
 
-    await storePendingNitradoToken(env, user.id, linkedServerId, token);
     return json({ tokenValid: true, linkedServerId });
   } catch (error) {
     if (error instanceof LinkedServerAllowanceExceededError) {
       return json({ error: error.message }, { status: 402 });
+    }
+    if (error instanceof NitradoServiceAlreadyLinkedError) {
+      return json({
+        error: "This Nitrado service is already linked to another DZN owner.",
+        error_code: error.code,
+      }, { status: 409 });
     }
     if (error instanceof NitradoServiceLookupError) {
       if (error.code === "invalid_token") return json({ error: "Invalid token", tokenValid: false }, { status: 400 });

@@ -71,17 +71,18 @@ export async function validateNitradoToken(data: {
   tags: string[];
   serviceId?: string;
 }) {
-  return request<{ tokenValid: boolean; linkedServerId?: string; service?: NitradoService }>("/api/nitrado/validate-token", {
+  return request<{ tokenValid: boolean; linkedServerId: string; service?: NitradoService }>("/api/nitrado/validate-token", {
     method: "POST",
     body: JSON.stringify(data),
   });
 }
 
-export async function getNitradoServices() {
-  return request<{ services: NitradoService[] }>("/api/nitrado/services");
+export async function getNitradoServices(linkedServerId: string) {
+  return request<{ services: NitradoService[] }>(`/api/nitrado/services?linked_server_id=${encodeURIComponent(linkedServerId)}`);
 }
 
 export async function saveOnboarding(data: {
+  linkedServerId: string;
   discordGuildId: string;
   serverType: string;
   server_category?: string | null;

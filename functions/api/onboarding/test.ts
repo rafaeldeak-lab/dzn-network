@@ -3,7 +3,7 @@ import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_li
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
-import { getLatestNitradoToken } from "../../_lib/onboarding";
+import { getNitradoTokenForLinkedServer } from "../../_lib/onboarding";
 import { planAdmBackfillJobsForServer } from "../../_lib/adm-sync";
 import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -29,13 +29,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   let nitradoToken = "";
   if (!isMockNitrado(env.MOCK_NITRADO)) {
     try {
-      const latestToken = await getLatestNitradoToken(env, user.id);
-      if (!latestToken) {
+      const exactToken = await getNitradoTokenForLinkedServer(env, user.id, linkedServer.id);
+      if (!exactToken) {
         tokenValid = false;
         tokenErrorCode = "missing_nitrado_token";
         tokenErrorMessage = "No saved Nitrado token was found. Paste your Nitrado long-life token and validate this service again.";
       } else {
-        nitradoToken = latestToken;
+        nitradoToken = exactToken;
       }
     } catch (error) {
       tokenValid = false;

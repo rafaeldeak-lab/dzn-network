@@ -13,7 +13,10 @@ import {
   ensureLinkedServerAllowanceReservationSchema,
   expireLinkedServerAllowanceReservations,
   getLinkedServerAllowanceUsageForUser,
+  getNitradoTokenForLinkedServer,
   linkedServerAllowanceLimitMessage,
+  moveNitradoConnectionsForLinkedServer,
+  NitradoServiceAlreadyLinkedError,
   releaseLinkedServerAllowanceReservation,
   reserveLinkedServerAllowance,
   saveLinkedServerNitradoService,
@@ -21,6 +24,7 @@ import {
 } from "../functions/_lib/onboarding";
 import { getOwnerBillingStatus, upsertBillingAccount, upsertOwnerEntitlements, type PlanKey } from "../functions/_lib/plans";
 import { onRequest as billingStatusHandler } from "../functions/api/billing/status";
+import { onRequest as nitradoServicesHandler } from "../functions/api/nitrado/services";
 import { onRequest as validateNitradoTokenHandler } from "../functions/api/nitrado/validate-token";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
 import { summarizeAdmBackfillForSetup } from "../functions/api/onboarding/test";
@@ -172,6 +176,11 @@ function createSqliteEnv(options: Partial<Env> = {}) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE UNIQUE INDEX idx_linked_servers_active_service_id
+    ON linked_servers(nitrado_service_id)
+    WHERE nitrado_service_id IS NOT NULL
+      AND lower(COALESCE(status, 'pending')) NOT IN ('merged', 'deleted');
   `);
 
   const env = {
@@ -238,6 +247,10 @@ function reservationStatus(db: SqliteD1Database, reservationId: string) {
 
 function reservationCount(db: SqliteD1Database, where = "1 = 1") {
   return Number(db.sqlite.prepare(`SELECT COUNT(*) AS count FROM linked_server_allowance_reservations WHERE ${where}`).get()?.count ?? 0);
+}
+
+function rowCount(db: SqliteD1Database, table: string, where = "1 = 1") {
+  return Number(db.sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).get()?.count ?? 0);
 }
 
 function normalizeSql(value: string) {
@@ -865,7 +878,7 @@ async function assertDraftAndServiceAttachmentLifecycle() {
   assert.equal(reusedLinkedServerId, linkedServerId, "Repeated validation should reuse the draft linked server.");
   assert.equal(reservationCount(db, "status = 'active'"), 1, "Repeated validation must not double-reserve.");
 
-  const savedLinkedServerId = await saveLinkedServerNitradoService(env, linkedServerId, {
+  const attachment = await saveLinkedServerNitradoService(env, "attach-user", linkedServerId, {
     id: "service-attach",
     name: "Attached DayZ",
     game: "DayZ",
@@ -874,7 +887,9 @@ async function assertDraftAndServiceAttachmentLifecycle() {
     ipAddress: "203.0.113.99",
     playerSlots: 60,
   }, "PVP", ["KOS"], "pvp");
-  assert.equal(savedLinkedServerId, linkedServerId);
+  assert.equal(attachment.linkedServerId, linkedServerId);
+  assert.equal(attachment.createdNewCanonicalServer, true);
+  assert.equal(attachment.reservationCompleted, true);
   assert.equal(reservationCount(db, "status = 'active'"), 0, "Service attachment should complete the active reservation.");
   assert.equal(reservationCount(db, "status = 'completed'"), 1);
   assert.equal(await countLinkedServersForUser(env, "attach-user", { now: "2026-08-20T00:00:00.000Z" }), 1);
@@ -901,7 +916,7 @@ async function assertFailedServiceAttachmentReleasesReservation() {
     END;
   `);
   await assert.rejects(
-    () => saveLinkedServerNitradoService(env, linkedServerId, {
+    () => saveLinkedServerNitradoService(env, "fail-attach-user", linkedServerId, {
       id: "service-fail",
       name: "Failing DayZ",
       game: "DayZ",
@@ -910,6 +925,215 @@ async function assertFailedServiceAttachmentReleasesReservation() {
   );
   assert.equal(reservationCount(db, "status = 'active'"), 0, "Failed attachment path should not leave active reservations.");
   assert.equal(reservationCount(db, "status = 'released' AND release_reason = 'service_attachment_failed'"), 1);
+}
+
+async function assertExactLinkedServerTokenIsolation() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "token-owner", discordUserId: "token-owner-discord", planKey: "pro", status: "active" });
+  await seedOwner(env, db, { userId: "foreign-token-owner", discordUserId: "foreign-token-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "token-server-a", userId: "token-owner", serviceId: "token-svc-a", status: "live" });
+  insertLinkedServer(db, { id: "token-server-b", userId: "token-owner", serviceId: "token-svc-b", status: "live" });
+  insertLinkedServer(db, { id: "token-server-empty", userId: "token-owner", serviceId: "token-svc-empty", status: "live" });
+  insertLinkedServer(db, { id: "token-server-foreign", userId: "foreign-token-owner", serviceId: "token-svc-foreign", status: "live" });
+
+  await storePendingNitradoToken(env, "token-owner", "token-server-a", "server-a-token-value");
+  await storePendingNitradoToken(env, "token-owner", "token-server-b", "server-b-newer-token-value");
+  await storePendingNitradoToken(env, "foreign-token-owner", "token-server-foreign", "foreign-token-value");
+
+  assert.equal(await getNitradoTokenForLinkedServer(env, "token-owner", "token-server-a"), "server-a-token-value", "Server A must use its exact token even when Server B has a newer token.");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "token-owner", "token-server-b"), "server-b-newer-token-value", "Server B must use its exact token.");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "token-owner", "token-server-empty"), null, "A server with no exact token must not fall back to another server.");
+  await assert.rejects(
+    () => getNitradoTokenForLinkedServer(env, "token-owner", "token-server-foreign"),
+    /Linked server not found/i,
+    "Foreign linkedServerId must not decrypt another owner's token.",
+  );
+  await assert.rejects(
+    () => getNitradoTokenForLinkedServer({ ...env, TOKEN_ENCRYPTION_KEY: undefined } as Env, "token-owner", "token-server-a"),
+    /TOKEN_ENCRYPTION_KEY is not configured/i,
+    "Missing encryption key should be safely classified by callers.",
+  );
+
+  db.sqlite
+    .prepare(
+      `INSERT INTO nitrado_connections (
+        id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag, created_at, updated_at
+      ) VALUES ('bad-token-row', 'token-owner', 'token-server-a', 'not-valid-ciphertext', 'not-valid-iv', 'not-valid-tag', '2026-08-20T01:00:00.000Z', '2026-08-20T01:00:00.000Z')`,
+    )
+    .run();
+  await assert.rejects(
+    () => getNitradoTokenForLinkedServer(env, "token-owner", "token-server-a"),
+    /decrypt|operation|authentication|cipher|iv|key|data|invalid/i,
+    "Invalid encrypted data should surface as a safe decryption failure.",
+  );
+}
+
+async function assertCredentialReassociationIntegrity() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "move-owner", discordUserId: "move-owner-discord", planKey: "pro", status: "active" });
+  await seedOwner(env, db, { userId: "move-foreign", discordUserId: "move-foreign-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "move-source", userId: "move-owner", status: "pending" });
+  insertLinkedServer(db, { id: "move-target", userId: "move-owner", serviceId: "move-target-service", status: "live" });
+  insertLinkedServer(db, { id: "move-foreign-source", userId: "move-foreign", status: "pending" });
+  insertLinkedServer(db, { id: "move-foreign-target", userId: "move-foreign", serviceId: "move-foreign-service", status: "live" });
+  await storePendingNitradoToken(env, "move-owner", "move-source", "move-owner-token");
+  await storePendingNitradoToken(env, "move-foreign", "move-foreign-source", "move-foreign-token");
+
+  const moved = await moveNitradoConnectionsForLinkedServer(env, "move-owner", "move-source", "move-target");
+  assert.equal(moved.moved, 1, "Same-owner credentials should move to the canonical server.");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "move-owner", "move-target"), "move-owner-token");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "move-owner", "move-source"), null);
+  assert.equal(rowCount(db, "nitrado_connections", "user_id = 'move-foreign' AND linked_server_id = 'move-foreign-source'"), 1, "Other users' credentials must not move.");
+
+  const repeated = await moveNitradoConnectionsForLinkedServer(env, "move-owner", "move-source", "move-target");
+  assert.equal(repeated.moved, 0, "Repeated reassociation should be idempotent.");
+  await assert.rejects(
+    () => moveNitradoConnectionsForLinkedServer(env, "move-owner", "move-foreign-source", "move-target"),
+    /Linked server not found/i,
+    "Foreign source linked servers must not be reassociated.",
+  );
+}
+
+async function assertCrossOwnerServiceConflictProtection() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "owner-a", discordUserId: "owner-a-discord", planKey: "pro", status: "active" });
+  await seedOwner(env, db, { userId: "owner-b", discordUserId: "owner-b-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "owner-a-canonical", userId: "owner-a", serviceId: "shared-service", status: "live" });
+  const source = await ensureDraftLinkedServer(env, "owner-b", "owner-b-guild", "PVP", [], "pvp");
+  await storePendingNitradoToken(env, "owner-b", source, "owner-b-token");
+
+  await assert.rejects(
+    () => saveLinkedServerNitradoService(env, "owner-b", source, {
+      id: "shared-service",
+      name: "Shared Service",
+      game: "DayZ",
+    }, "PVP", [], "pvp"),
+    NitradoServiceAlreadyLinkedError,
+    "Cross-owner service takeover should be rejected.",
+  );
+
+  const ownerRow = db.sqlite.prepare("SELECT user_id, nitrado_service_name, server_name FROM linked_servers WHERE id = 'owner-a-canonical'").get();
+  assert.equal(ownerRow?.user_id, "owner-a", "Existing service ownership must not transfer.");
+  assert.equal(ownerRow?.server_name, "owner-a-canonical", "Foreign metadata/listing must not be updated.");
+  assert.equal(rowCount(db, "linked_servers", "nitrado_service_id = 'shared-service' AND lower(COALESCE(status, 'pending')) != 'merged'"), 1, "No duplicate committed server should be created.");
+  assert.equal(rowCount(db, "nitrado_connections", "user_id = 'owner-b' AND linked_server_id = 'owner-a-canonical'"), 0, "Foreign credential association must not occur.");
+  assert.equal(reservationCount(db, "user_id = 'owner-b' AND status = 'released' AND release_reason = 'nitrado_service_already_linked'"), 1, "Cross-owner conflicts should release the source reservation.");
+}
+
+async function assertSameOwnerCanonicalReuseIntegrity() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "reuse-owner", discordUserId: "reuse-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "reuse-canonical", userId: "reuse-owner", serviceId: "reuse-service", status: "live" });
+  const source = await ensureDraftLinkedServer(env, "reuse-owner", "reuse-owner-guild", "PVP", [], "pvp");
+  await storePendingNitradoToken(env, "reuse-owner", source, "reuse-source-token");
+
+  const first = await saveLinkedServerNitradoService(env, "reuse-owner", source, {
+    id: "reuse-service",
+    name: "Reuse Service",
+    game: "DayZ",
+  }, "PVP", [], "pvp");
+  assert.equal(first.linkedServerId, "reuse-canonical");
+  assert.equal(first.reusedSameOwnerCanonicalServer, true);
+  assert.equal(first.sourceDraftMerged, true);
+  assert.equal(first.reservationReleased, true);
+  assert.equal(await getNitradoTokenForLinkedServer(env, "reuse-owner", "reuse-canonical"), "reuse-source-token", "Source credentials should move to the canonical server.");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "reuse-owner", source), null, "Source draft should no longer hold the credential.");
+  const sourceRow = db.sqlite.prepare("SELECT status, merged_into_server_id FROM linked_servers WHERE id = ?").get(source);
+  assert.equal(sourceRow?.status, "merged", "Temporary blank draft should be retired as merged.");
+  assert.equal(sourceRow?.merged_into_server_id, "reuse-canonical", "Merged source should point to the canonical server.");
+  assert.equal(rowCount(db, "linked_servers", "nitrado_service_id = 'reuse-service' AND lower(COALESCE(status, 'pending')) != 'merged'"), 1, "Same-owner reuse must not leave duplicate committed servers.");
+  assert.equal(await countLinkedServersForUser(env, "reuse-owner", { now: "2026-08-20T00:00:00.000Z" }), 1, "Same-owner reuse must not consume another allowance.");
+
+  const repeated = await saveLinkedServerNitradoService(env, "reuse-owner", source, {
+    id: "reuse-service",
+    name: "Reuse Service",
+    game: "DayZ",
+  }, "PVP", [], "pvp");
+  assert.equal(repeated.linkedServerId, "reuse-canonical", "Repeated same-owner reuse should converge on the same canonical ID.");
+  assert.equal(reservationCount(db, "user_id = 'reuse-owner' AND status = 'released'"), 1, "Repeated reuse must not create duplicate reservation releases.");
+}
+
+async function assertFirstTimeLinkAndRouteContracts() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "route-user", discordUserId: "route-discord", planKey: "pro", status: "active" });
+  const source = await ensureDraftLinkedServer(env, "route-user", "route-user-guild", "PVP", ["KOS"], "pvp");
+  await storePendingNitradoToken(env, "route-user", source, "route-user-token");
+  const session = await createSession(env, "route-user");
+
+  const servicesResponse = await nitradoServicesHandler(makeContext(
+    nitradoServicesHandler,
+    new Request(`https://local.test/api/nitrado/services?linked_server_id=${encodeURIComponent(source)}`, {
+      headers: { cookie: `dzn_session=${session.token}` },
+    }),
+    env,
+  ));
+  assert.equal(servicesResponse.status, 200, "Service discovery should accept the exact owned linkedServerId.");
+  assert.equal(JSON.stringify(await servicesResponse.json()).includes("encrypted_token"), false, "Service responses must not expose encrypted token fields.");
+
+  const unauthorizedResponse = await nitradoServicesHandler(makeContext(
+    nitradoServicesHandler,
+    new Request(`https://local.test/api/nitrado/services?linked_server_id=${encodeURIComponent(source)}`),
+    { ...env, MOCK_AUTH: undefined } as Env,
+  ));
+  assert.equal(unauthorizedResponse.status, 401, "Unauthorized service discovery should remain protected.");
+
+  const missingLinkedServerResponse = await nitradoServicesHandler(makeContext(
+    nitradoServicesHandler,
+    new Request("https://local.test/api/nitrado/services", {
+      headers: { cookie: `dzn_session=${session.token}` },
+    }),
+    env,
+  ));
+  assert.equal(missingLinkedServerResponse.status, 400, "Service discovery should require linked_server_id.");
+
+  const foreignResponse = await nitradoServicesHandler(makeContext(
+    nitradoServicesHandler,
+    new Request("https://local.test/api/nitrado/services?linked_server_id=foreign-server", {
+      headers: { cookie: `dzn_session=${session.token}` },
+    }),
+    env,
+  ));
+  assert.equal(foreignResponse.status, 404, "Foreign linkedServerId should produce a safe not-found response.");
+
+  const attachment = await saveLinkedServerNitradoService(env, "route-user", source, {
+    id: "route-first-service",
+    name: "Route First Service",
+    game: "DayZ",
+  }, "PVP", ["KOS"], "pvp");
+  assert.equal(attachment.linkedServerId, source, "First-time linking should bind the exact source draft.");
+  assert.equal(attachment.createdNewCanonicalServer, true);
+  assert.equal(attachment.reservationCompleted, true);
+  assert.equal(await getNitradoTokenForLinkedServer(env, "route-user", source), "route-user-token", "First-time claim should keep the exact token on the canonical server.");
+}
+
+function assertLinkedServerClientAndRouteStaticContracts() {
+  const onboardingSource = readFileSync("functions/_lib/onboarding.ts", "utf8");
+  const saveSource = readFileSync("functions/api/onboarding/save.ts", "utf8");
+  const servicesSource = readFileSync("functions/api/nitrado/services.ts", "utf8");
+  const testSource = readFileSync("functions/api/onboarding/test.ts", "utf8");
+  const admPathSource = readFileSync("functions/api/nitrado/test-adm-path.ts", "utf8");
+  const apiSource = readFileSync("components/onboarding/api.ts", "utf8");
+  const wizardSource = readFileSync("components/onboarding/setup-wizard.tsx", "utf8");
+  const normalizedSaveSource = saveSource.replace(/\r\n/g, "\n");
+
+  for (const [label, source] of [
+    ["onboarding save", saveSource],
+    ["nitrado services", servicesSource],
+    ["onboarding test", testSource],
+    ["ADM path test", admPathSource],
+  ] as const) {
+    assert.equal(source.includes("getLatestNitradoToken"), false, `${label} must not use the user-global latest-token fallback.`);
+  }
+  assert.equal(saveSource.includes("linkLatestNitradoConnection"), false, "Onboarding save must not use global latest-connection reassignment.");
+  assert.equal(servicesSource.includes("linked_server_id"), true, "Nitrado services route must require linked_server_id.");
+  assert.equal(apiSource.includes("getNitradoServices(linkedServerId: string)"), true, "Client service discovery should require linkedServerId.");
+  assert.equal(apiSource.includes("linkedServerId: string;"), true, "Client save contract should require linkedServerId.");
+  assert.equal(wizardSource.includes("validatedLinkedServerId"), true, "Setup wizard should retain a validated linkedServerId.");
+  assert.equal(wizardSource.includes("getNitradoServices(validation.linkedServerId)"), true, "Browse flow should pass the source linkedServerId into service discovery.");
+  assert.equal(wizardSource.includes("linkedServerId: validatedLinkedServerId"), true, "Save flow should use the retained linkedServerId.");
+  assert.equal(onboardingSource.includes("DELETE FROM linked_servers"), false, "Service attachment must not delete linked-server rows.");
+  assert.equal(normalizedSaveSource.includes("const createdNewLinkedServer = attachment.createdNewCanonicalServer"), true, "New-server announcements should be gated on genuinely new canonical servers.");
+  assert.equal(normalizedSaveSource.includes("WHERE id = ?\n          AND user_id = ?"), true, "Onboarding save linked-server writes should be constrained by canonical id and user id.");
 }
 
 async function assertExpiredReservationLifecycle() {
@@ -952,6 +1176,8 @@ async function assertTokenWriteFailureReleasesReservation() {
 async function assertOnboardingSaveFailureReleasesReservationWithoutDeletingServer() {
   const { db, env } = createSqliteEnv();
   await seedOwner(env, db, { userId: "save-user", discordUserId: "save-discord", planKey: "pro", status: "active" });
+  const linkedServerId = await ensureDraftLinkedServer(env, "save-user", "save-user-guild", "PVP", ["KOS"], "pvp");
+  await storePendingNitradoToken(env, "save-user", linkedServerId, "long-enough-token");
   const session = await createSession(env, "save-user");
   const request = new Request("https://local.test/api/onboarding/save", {
     method: "POST",
@@ -960,25 +1186,22 @@ async function assertOnboardingSaveFailureReleasesReservationWithoutDeletingServ
       cookie: `dzn_session=${session.token}`,
     },
     body: JSON.stringify({
+      linkedServerId,
       discordGuildId: "save-user-guild",
       serverType: "PVP",
       server_category: "pvp",
       tags: ["KOS"],
-      nitradoServiceId: "900001",
+      nitradoServiceId: "18765761",
     }),
   });
 
-  await assert.rejects(
-    async () => {
-      await saveOnboardingHandler(makeContext(saveOnboardingHandler, request, env));
-    },
-    /no such table: kill_events/i,
-  );
+  const response = await saveOnboardingHandler(makeContext(saveOnboardingHandler, request, env));
+  assert.equal(response.status, 500, "The existing missing automation-table fixture should still fail after the linked-server write.");
 
   assert.equal(reservationCount(db, "status = 'active'"), 0, "Failed onboarding save should release active reservations.");
   assert.equal(reservationCount(db, "status = 'released' AND release_reason = 'onboarding_save_failed'"), 1);
   assert.equal(
-    Number(db.sqlite.prepare("SELECT COUNT(*) AS count FROM linked_servers WHERE user_id = 'save-user' AND nitrado_service_id = '900001'").get()?.count ?? 0),
+    Number(db.sqlite.prepare("SELECT COUNT(*) AS count FROM linked_servers WHERE user_id = 'save-user' AND nitrado_service_id = '18765761'").get()?.count ?? 0),
     1,
     "The failed post-write path must not delete the linked-server row it wrote.",
   );
@@ -1032,6 +1255,12 @@ async function run() {
   await assertBillingStatusPlanNormalization();
   await assertDraftAndServiceAttachmentLifecycle();
   await assertFailedServiceAttachmentReleasesReservation();
+  await assertExactLinkedServerTokenIsolation();
+  await assertCredentialReassociationIntegrity();
+  await assertCrossOwnerServiceConflictProtection();
+  await assertSameOwnerCanonicalReuseIntegrity();
+  await assertFirstTimeLinkAndRouteContracts();
+  assertLinkedServerClientAndRouteStaticContracts();
   await assertExpiredReservationLifecycle();
   await assertTokenWriteFailureReleasesReservation();
   await assertOnboardingSaveFailureReleasesReservationWithoutDeletingServer();

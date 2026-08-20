@@ -39,11 +39,33 @@ type LinkedServerAllowanceReservationRow = {
   expires_at: string;
 };
 
+type OwnedLinkedServerRow = {
+  id: string;
+  user_id: string;
+  guild_id: string;
+  discord_guild_id: string;
+  discord_id: string | null;
+  nitrado_service_id: string | null;
+  status: string | null;
+  merged_into_server_id: string | null;
+};
+
 export type LinkedServerAllowanceUsage = {
   limit: number;
   used: number;
   remaining: number;
   canLinkMore: boolean;
+};
+
+export type LinkedServerNitradoServiceAttachmentResult = {
+  linkedServerId: string;
+  createdNewCanonicalServer: boolean;
+  reusedSameOwnerCanonicalServer: boolean;
+  sourceDraftMerged: boolean;
+  reservationCompleted: boolean;
+  reservationReleased: boolean;
+  pendingReservationAction: "complete" | "release" | null;
+  sourceLinkedServerId: string;
 };
 
 export class LinkedServerAllowanceExceededError extends Error {
@@ -55,6 +77,42 @@ export class LinkedServerAllowanceExceededError extends Error {
     this.name = "LinkedServerAllowanceExceededError";
     this.limit = limit;
     this.currentCount = currentCount;
+  }
+}
+
+export class LinkedServerOwnershipError extends Error {
+  readonly code = "linked_server_not_found";
+
+  constructor() {
+    super("Linked server not found");
+    this.name = "LinkedServerOwnershipError";
+  }
+}
+
+export class ExactLinkedServerCredentialMissingError extends Error {
+  readonly code = "missing_nitrado_token";
+
+  constructor() {
+    super("No saved Nitrado token was found for this linked server.");
+    this.name = "ExactLinkedServerCredentialMissingError";
+  }
+}
+
+export class NitradoServiceAlreadyLinkedError extends Error {
+  readonly code = "nitrado_service_already_linked";
+
+  constructor() {
+    super("This Nitrado service is already linked to another DZN owner.");
+    this.name = "NitradoServiceAlreadyLinkedError";
+  }
+}
+
+export class NitradoServiceClaimConflictError extends Error {
+  readonly code = "nitrado_service_claim_conflict";
+
+  constructor() {
+    super("DZN could not safely claim this Nitrado service. Try again.");
+    this.name = "NitradoServiceClaimConflictError";
   }
 }
 
@@ -291,6 +349,57 @@ export async function getLatestNitradoToken(env: Env, userId: string) {
   return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
 }
 
+export async function assertLinkedServerOwnedByUser(env: Env, userId: string, linkedServerId: string) {
+  return loadOwnedLinkedServer(env, userId, linkedServerId);
+}
+
+export async function getNitradoTokenForLinkedServer(
+  env: Env,
+  userId: string,
+  linkedServerId: string,
+): Promise<string | null> {
+  if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
+  const db = requireDb(env);
+  await loadOwnedLinkedServer(env, userId, linkedServerId);
+  const row = await db
+    .prepare(
+      `SELECT encrypted_token, token_iv, token_auth_tag
+       FROM nitrado_connections
+       WHERE user_id = ?
+         AND linked_server_id = ?
+       ORDER BY updated_at DESC, created_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(userId, linkedServerId)
+    .first<{ encrypted_token: string; token_iv: string; token_auth_tag: string }>();
+
+  if (!row) return null;
+  return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+}
+
+export async function moveNitradoConnectionsForLinkedServer(
+  env: Env,
+  userId: string,
+  sourceLinkedServerId: string,
+  targetLinkedServerId: string,
+) {
+  if (sourceLinkedServerId === targetLinkedServerId) return { moved: 0 };
+  const db = requireDb(env);
+  await loadOwnedLinkedServer(env, userId, sourceLinkedServerId);
+  await loadOwnedLinkedServer(env, userId, targetLinkedServerId);
+  const result = await db
+    .prepare(
+      `UPDATE nitrado_connections
+       SET linked_server_id = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = ?
+         AND linked_server_id = ?`,
+    )
+    .bind(targetLinkedServerId, userId, sourceLinkedServerId)
+    .run();
+  return { moved: runChanges(result) };
+}
+
 export async function linkLatestNitradoConnection(env: Env, userId: string, linkedServerId: string) {
   const db = requireDb(env);
   await db
@@ -314,70 +423,270 @@ export function findService(services: NitradoService[], id: string) {
 
 export async function saveLinkedServerNitradoService(
   env: Env,
+  userId: string,
   linkedServerId: string,
   service: NitradoService,
   serverType: ServerType,
   tags: string[],
   serverCategory?: string | null,
-) {
+  options: { finalizeReservation?: boolean } = {},
+): Promise<LinkedServerNitradoServiceAttachmentResult> {
   const db = requireDb(env);
   await ensureLinkedServerMetadataColumns(env);
   await ensureLinkedServerAllowanceReservationSchema(env);
-  const draft = await db
+  const source = await loadOwnedLinkedServer(env, userId, linkedServerId);
+  const finalizeReservation = options.finalizeReservation ?? true;
+
+  const existingService = await db
+    .prepare(
+      `SELECT id, user_id
+       FROM linked_servers
+       WHERE nitrado_service_id = ?
+         AND id != ?
+         AND lower(COALESCE(status, 'pending')) NOT IN ('merged', 'deleted')
+         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+       ORDER BY
+         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
+         updated_at DESC,
+         created_at DESC,
+         id DESC
+       LIMIT 1`,
+    )
+    .bind(service.id, linkedServerId)
+    .first<{ id: string; user_id: string }>();
+
+  if (existingService) {
+    if (existingService.user_id !== userId) {
+      await releaseActiveLinkedServerReservation(env, userId, linkedServerId, "nitrado_service_already_linked");
+      throw new NitradoServiceAlreadyLinkedError();
+    }
+    return reuseSameOwnerCanonicalServer(env, {
+      userId,
+      source,
+      canonicalLinkedServerId: existingService.id,
+      service,
+      serverType,
+      tags,
+      serverCategory,
+      finalizeReservation,
+    });
+  }
+
+  if (isActiveUnmergedSource(source) && normalizeServiceId(source.nitrado_service_id) === service.id) {
+    await updateCanonicalServiceDetails(env, {
+      linkedServerId,
+      userId,
+      service,
+      serverType,
+      tags,
+      serverCategory,
+      syncGuildFromSource: false,
+      source,
+    });
+    return {
+      linkedServerId,
+      createdNewCanonicalServer: false,
+      reusedSameOwnerCanonicalServer: false,
+      sourceDraftMerged: false,
+      reservationCompleted: false,
+      reservationReleased: false,
+      pendingReservationAction: null,
+      sourceLinkedServerId: linkedServerId,
+    };
+  }
+
+  const sourceServiceId = normalizeServiceId(source.nitrado_service_id);
+  if (sourceServiceId && sourceServiceId !== service.id) {
+    throw new NitradoServiceClaimConflictError();
+  }
+
+  const reservation = await reserveLinkedServerAllowance(env, {
+    userId,
+    discordUserId: source.discord_id,
+    linkedServerId,
+  });
+  if (!reservation.ok) {
+    throw new LinkedServerAllowanceExceededError(reservation.limit, reservation.currentCount);
+  }
+
+  try {
+    const slug = await uniquePublicSlug(env, service.name, linkedServerId);
+    const result = await db
+      .prepare(
+        `UPDATE linked_servers SET
+          nitrado_service_id = ?,
+          nitrado_service_name = ?,
+          server_name = ?,
+          server_type = ?,
+          server_category = COALESCE(?, server_category),
+          tags_json = ?,
+          region = ?,
+          game = ?,
+          platform = ?,
+          ip_address = ?,
+          player_slots = ?,
+          status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
+          public_slug = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND user_id = ?
+          AND (nitrado_service_id IS NULL OR nitrado_service_id = '' OR nitrado_service_id = ?)`,
+      )
+      .bind(
+        service.id,
+        service.name,
+        service.name,
+        serverType,
+        serverCategory ?? null,
+        JSON.stringify(tags),
+        service.ipAddress ?? service.region ?? null,
+        service.game ?? null,
+        service.platform ?? null,
+        service.ipAddress ?? null,
+        service.playerSlots ?? null,
+        slug,
+        linkedServerId,
+        userId,
+        service.id,
+      )
+      .run();
+
+    if (runChanges(result) < 1) {
+      throw new NitradoServiceClaimConflictError();
+    }
+
+    let reservationCompleted = false;
+    if (finalizeReservation) {
+      await completeLinkedServerAllowanceReservation(env, reservation.reservationId, linkedServerId);
+      reservationCompleted = true;
+    }
+
+    return {
+      linkedServerId,
+      createdNewCanonicalServer: true,
+      reusedSameOwnerCanonicalServer: false,
+      sourceDraftMerged: false,
+      reservationCompleted,
+      reservationReleased: false,
+      pendingReservationAction: finalizeReservation ? null : "complete",
+      sourceLinkedServerId: linkedServerId,
+    };
+  } catch (error) {
+    const raceResult = await resolveServiceClaimRace(env, {
+      userId,
+      source,
+      service,
+      serverType,
+      tags,
+      serverCategory,
+      finalizeReservation,
+    }).catch((raceError) => {
+      if (raceError instanceof NitradoServiceAlreadyLinkedError || raceError instanceof NitradoServiceClaimConflictError) {
+        throw raceError;
+      }
+      return null;
+    });
+    if (raceResult) return raceResult;
+    await releaseLinkedServerAllowanceReservation(env, {
+      reservationId: reservation.reservationId,
+      reason: "service_attachment_failed",
+    }).catch(() => null);
+    if (isUniqueConstraintError(error)) {
+      const winner = await findActiveLinkedServerForService(env, service.id, linkedServerId);
+      if (winner?.user_id && winner.user_id !== userId) {
+        throw new NitradoServiceAlreadyLinkedError();
+      }
+    }
+    throw error;
+  }
+}
+
+async function loadOwnedLinkedServer(env: Env, userId: string, linkedServerId: string) {
+  const normalizedLinkedServerId = linkedServerId.trim();
+  if (!normalizedLinkedServerId) throw new LinkedServerOwnershipError();
+  const db = requireDb(env);
+  await ensureLinkedServerMetadataColumns(env);
+  const row = await db
     .prepare(
       `SELECT linked_servers.id,
               linked_servers.user_id,
               linked_servers.guild_id,
               linked_servers.discord_guild_id,
+              linked_servers.nitrado_service_id,
+              linked_servers.status,
+              linked_servers.merged_into_server_id,
               users.discord_id
        FROM linked_servers
        LEFT JOIN users ON users.id = linked_servers.user_id
        WHERE linked_servers.id = ?
+         AND linked_servers.user_id = ?
        LIMIT 1`,
     )
-    .bind(linkedServerId)
-    .first<{ id: string; user_id: string; guild_id: string; discord_guild_id: string; discord_id: string | null }>();
-  if (!draft) throw new Error("Linked server draft not found");
+    .bind(normalizedLinkedServerId, userId)
+    .first<OwnedLinkedServerRow>();
+  if (!row) throw new LinkedServerOwnershipError();
+  return row;
+}
 
-  const existingService = await db
-    .prepare(
-      `SELECT id
-       FROM linked_servers
-       WHERE nitrado_service_id = ?
-         AND id != ?
-         AND lower(COALESCE(status, 'pending')) != 'merged'
-         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
-       ORDER BY
-         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
-         updated_at DESC,
-         created_at DESC
-       LIMIT 1`,
-    )
-    .bind(service.id, linkedServerId)
-    .first<{ id: string }>();
+async function reuseSameOwnerCanonicalServer(
+  env: Env,
+  input: {
+    userId: string;
+    source: OwnedLinkedServerRow;
+    canonicalLinkedServerId: string;
+    service: NitradoService;
+    serverType: ServerType;
+    tags: string[];
+    serverCategory?: string | null;
+    finalizeReservation: boolean;
+  },
+): Promise<LinkedServerNitradoServiceAttachmentResult> {
+  await moveNitradoConnectionsForLinkedServer(env, input.userId, input.source.id, input.canonicalLinkedServerId);
+  await updateCanonicalServiceDetails(env, {
+    linkedServerId: input.canonicalLinkedServerId,
+    userId: input.userId,
+    service: input.service,
+    serverType: input.serverType,
+    tags: input.tags,
+    serverCategory: input.serverCategory,
+    syncGuildFromSource: false,
+    source: input.source,
+  });
+  const sourceDraftMerged = await mergeSourceDraftIntoCanonical(env, input.userId, input.source.id, input.canonicalLinkedServerId);
+  const reservationReleased = input.finalizeReservation
+    ? await releaseActiveLinkedServerReservation(env, input.userId, input.source.id, "same_owner_canonical_reuse")
+    : false;
+  return {
+    linkedServerId: input.canonicalLinkedServerId,
+    createdNewCanonicalServer: false,
+    reusedSameOwnerCanonicalServer: true,
+    sourceDraftMerged,
+    reservationCompleted: false,
+    reservationReleased,
+    pendingReservationAction: input.finalizeReservation ? null : "release",
+    sourceLinkedServerId: input.source.id,
+  };
+}
 
-  const targetLinkedServerId = existingService?.id ?? linkedServerId;
-  const slug = await uniquePublicSlug(env, service.name, targetLinkedServerId);
-  let reservationId: string | null = null;
-  if (existingService) {
-    reservationId = (await getActiveLinkedServerAllowanceReservation(env, draft.user_id, linkedServerId))?.id ?? null;
-  } else {
-    const reservation = await reserveLinkedServerAllowance(env, {
-      userId: draft.user_id,
-      discordUserId: draft.discord_id,
-      linkedServerId,
-    });
-    if (!reservation.ok) {
-      throw new LinkedServerAllowanceExceededError(reservation.limit, reservation.currentCount);
-    }
-    reservationId = reservation.reservationId;
-  }
-
-  try {
+async function updateCanonicalServiceDetails(
+  env: Env,
+  input: {
+    linkedServerId: string;
+    userId: string;
+    service: NitradoService;
+    serverType: ServerType;
+    tags: string[];
+    serverCategory?: string | null;
+    syncGuildFromSource: boolean;
+    source: OwnedLinkedServerRow;
+  },
+) {
+  const db = requireDb(env);
+  const slug = await uniquePublicSlug(env, input.service.name, input.linkedServerId);
+  if (input.syncGuildFromSource) {
     await db
       .prepare(
         `UPDATE linked_servers SET
-          user_id = ?,
           guild_id = ?,
           discord_guild_id = ?,
           nitrado_service_id = ?,
@@ -394,62 +703,166 @@ export async function saveLinkedServerNitradoService(
           status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
           public_slug = ?,
           updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
+        WHERE id = ?
+          AND user_id = ?`,
       )
       .bind(
-        draft.user_id,
-        draft.guild_id,
-        draft.discord_guild_id,
-        service.id,
-        service.name,
-        service.name,
-        serverType,
-        serverCategory ?? null,
-        JSON.stringify(tags),
-        service.ipAddress ?? service.region ?? null,
-        service.game ?? null,
-        service.platform ?? null,
-        service.ipAddress ?? null,
-        service.playerSlots ?? null,
+        input.source.guild_id,
+        input.source.discord_guild_id,
+        input.service.id,
+        input.service.name,
+        input.service.name,
+        input.serverType,
+        input.serverCategory ?? null,
+        JSON.stringify(input.tags),
+        input.service.ipAddress ?? input.service.region ?? null,
+        input.service.game ?? null,
+        input.service.platform ?? null,
+        input.service.ipAddress ?? null,
+        input.service.playerSlots ?? null,
         slug,
-        targetLinkedServerId,
+        input.linkedServerId,
+        input.userId,
       )
       .run();
-
-    if (existingService) {
-      await db
-        .prepare(
-          `DELETE FROM linked_servers
-           WHERE id = ?
-             AND user_id = ?
-             AND lower(COALESCE(status, 'pending')) = 'pending'
-             AND (nitrado_service_id IS NULL OR nitrado_service_id = '')`,
-        )
-        .bind(linkedServerId, draft.user_id)
-        .run();
-    }
-
-    if (reservationId) {
-      if (existingService) {
-        await releaseLinkedServerAllowanceReservation(env, {
-          reservationId,
-          reason: "service_already_attached",
-        });
-      } else {
-        await completeLinkedServerAllowanceReservation(env, reservationId, targetLinkedServerId);
-      }
-    }
-  } catch (error) {
-    if (reservationId) {
-      await releaseLinkedServerAllowanceReservation(env, {
-        reservationId,
-        reason: "service_attachment_failed",
-      }).catch(() => null);
-    }
-    throw error;
+    return;
   }
 
-  return targetLinkedServerId;
+  await db
+    .prepare(
+      `UPDATE linked_servers SET
+        nitrado_service_id = ?,
+        nitrado_service_name = ?,
+        server_name = ?,
+        server_type = ?,
+        server_category = COALESCE(?, server_category),
+        tags_json = ?,
+        region = ?,
+        game = ?,
+        platform = ?,
+        ip_address = ?,
+        player_slots = ?,
+        status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
+        public_slug = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND user_id = ?`,
+    )
+    .bind(
+      input.service.id,
+      input.service.name,
+      input.service.name,
+      input.serverType,
+      input.serverCategory ?? null,
+      JSON.stringify(input.tags),
+      input.service.ipAddress ?? input.service.region ?? null,
+      input.service.game ?? null,
+      input.service.platform ?? null,
+      input.service.ipAddress ?? null,
+      input.service.playerSlots ?? null,
+      slug,
+      input.linkedServerId,
+      input.userId,
+    )
+    .run();
+}
+
+async function mergeSourceDraftIntoCanonical(env: Env, userId: string, sourceLinkedServerId: string, canonicalLinkedServerId: string) {
+  if (sourceLinkedServerId === canonicalLinkedServerId) return false;
+  const result = await requireDb(env)
+    .prepare(
+      `UPDATE linked_servers
+       SET status = 'merged',
+           merged_into_server_id = ?,
+           merged_at = COALESCE(merged_at, CURRENT_TIMESTAMP),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?
+         AND user_id = ?
+         AND lower(COALESCE(status, 'pending')) = 'pending'
+         AND (nitrado_service_id IS NULL OR nitrado_service_id = '')`,
+    )
+    .bind(canonicalLinkedServerId, sourceLinkedServerId, userId)
+    .run();
+  return runChanges(result) > 0;
+}
+
+async function releaseActiveLinkedServerReservation(env: Env, userId: string, linkedServerId: string, reason: string) {
+  const activeReservation = await getActiveLinkedServerAllowanceReservation(env, userId, linkedServerId);
+  if (!activeReservation) return false;
+  await releaseLinkedServerAllowanceReservation(env, {
+    reservationId: activeReservation.id,
+    reason,
+  });
+  return true;
+}
+
+async function resolveServiceClaimRace(
+  env: Env,
+  input: {
+    userId: string;
+    source: OwnedLinkedServerRow;
+    service: NitradoService;
+    serverType: ServerType;
+    tags: string[];
+    serverCategory?: string | null;
+    finalizeReservation: boolean;
+  },
+): Promise<LinkedServerNitradoServiceAttachmentResult | null> {
+  const winner = await findActiveLinkedServerForService(env, input.service.id, input.source.id);
+  if (!winner) return null;
+  if (winner.user_id !== input.userId) {
+    await releaseActiveLinkedServerReservation(env, input.userId, input.source.id, "nitrado_service_already_linked");
+    throw new NitradoServiceAlreadyLinkedError();
+  }
+  return reuseSameOwnerCanonicalServer(env, {
+    userId: input.userId,
+    source: input.source,
+    canonicalLinkedServerId: winner.id,
+    service: input.service,
+    serverType: input.serverType,
+    tags: input.tags,
+    serverCategory: input.serverCategory,
+    finalizeReservation: input.finalizeReservation,
+  });
+}
+
+async function findActiveLinkedServerForService(env: Env, serviceId: string, excludedLinkedServerId: string) {
+  return requireDb(env)
+    .prepare(
+      `SELECT id, user_id
+       FROM linked_servers
+       WHERE nitrado_service_id = ?
+         AND id != ?
+         AND lower(COALESCE(status, 'pending')) NOT IN ('merged', 'deleted')
+         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+       ORDER BY
+         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
+         updated_at DESC,
+         created_at DESC,
+         id DESC
+       LIMIT 1`,
+    )
+    .bind(serviceId, excludedLinkedServerId)
+    .first<{ id: string; user_id: string }>();
+}
+
+function isActiveUnmergedSource(source: OwnedLinkedServerRow) {
+  const status = (source.status ?? "pending").toLowerCase();
+  return status !== "merged" && status !== "deleted" && !source.merged_into_server_id;
+}
+
+function normalizeServiceId(value: string | null | undefined) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isUniqueConstraintError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /unique|constraint|idx_linked_servers_active_service_id/i.test(message);
+}
+
+function runChanges(result: unknown) {
+  const changes = (result as { meta?: { changes?: unknown } })?.meta?.changes;
+  return typeof changes === "number" ? changes : 0;
 }
 
 export async function ensureLinkedServerAllowanceReservationSchema(env: Env) {

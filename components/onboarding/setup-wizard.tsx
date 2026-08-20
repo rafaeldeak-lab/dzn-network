@@ -138,6 +138,7 @@ export function SetupWizard() {
   const [webInterfaceUrl, setWebInterfaceUrl] = useState("");
   const [detectedServiceId, setDetectedServiceId] = useState("");
   const [validatedService, setValidatedService] = useState<NitradoService | null>(null);
+  const [validatedLinkedServerId, setValidatedLinkedServerId] = useState("");
   const [directServiceValidated, setDirectServiceValidated] = useState(false);
   const [selectedService, setSelectedService] = useState("");
   const [message, setMessage] = useState("");
@@ -174,6 +175,7 @@ export function SetupWizard() {
         const linkedServer = auth.linkedServer;
         if (linkedServer?.guild_id) {
           setSelectedGuild(linkedServer.guild_id);
+          setValidatedLinkedServerId(linkedServer.id);
         } else if (guildResult.guilds[0]) {
           setSelectedGuild(guildResult.guilds[0].guild_id);
         }
@@ -195,6 +197,7 @@ export function SetupWizard() {
           setPublicListing(publicListingFromLinkedServer(linkedServer));
           setServices([existingService]);
           setValidatedService(existingService);
+          setValidatedLinkedServerId(linkedServer.id);
           setSelectedService(existingService.id);
           setTokenValid(true);
           setDirectServiceValidated(true);
@@ -202,6 +205,7 @@ export function SetupWizard() {
         }
       } catch {
         setAuthenticated(false);
+        setValidatedLinkedServerId("");
       } finally {
         setLoading(false);
       }
@@ -221,9 +225,18 @@ export function SetupWizard() {
     try {
       const result = await getGuilds({ fresh: true });
       setGuilds(result.guilds);
-      setSelectedGuild((current) => current && result.guilds.some((guild) => guild.guild_id === current)
-        ? current
-        : result.guilds[0]?.guild_id ?? "");
+      const nextSelectedGuild = selectedGuild && result.guilds.some((guild) => guild.guild_id === selectedGuild)
+        ? selectedGuild
+        : result.guilds[0]?.guild_id ?? "";
+      setSelectedGuild(nextSelectedGuild);
+      if (nextSelectedGuild !== selectedGuild) {
+        setValidatedLinkedServerId("");
+        setTokenValid(false);
+        setValidatedService(null);
+        setDirectServiceValidated(false);
+        setSelectedService("");
+        setServices([]);
+      }
       setGuildRefreshMessage("Discord servers refreshed.");
       console.log("DZN DISCORD GUILDS REFRESHED");
     } catch (error) {
@@ -290,6 +303,7 @@ export function SetupWizard() {
   async function validateTokenWithServiceId() {
     setBusy(true);
     setMessage("");
+    setValidatedLinkedServerId("");
     try {
       const normalizedServiceId = serviceIdInput.trim();
       if (!normalizedServiceId) throw new Error("Nitrado Service ID is required");
@@ -303,6 +317,7 @@ export function SetupWizard() {
       });
       setTokenInput("");
       setTokenValid(true);
+      setValidatedLinkedServerId(result.linkedServerId);
       setChecks(null);
       setVerificationProgress((current) => ({
         ...current,
@@ -316,6 +331,8 @@ export function SetupWizard() {
       setDirectServiceValidated(true);
       setStep(4);
     } catch (error) {
+      setTokenValid(false);
+      setValidatedLinkedServerId("");
       setMessage(error instanceof Error ? error.message : "Nitrado token validation failed");
     } finally {
       setBusy(false);
@@ -325,8 +342,9 @@ export function SetupWizard() {
   async function findServicesInstead() {
     setBusy(true);
     setMessage("");
+    setValidatedLinkedServerId("");
     try {
-      await validateNitradoToken({
+      const validation = await validateNitradoToken({
         token: tokenInput,
         discordGuildId: selectedGuild,
         serverType,
@@ -335,6 +353,7 @@ export function SetupWizard() {
       });
       setTokenInput("");
       setTokenValid(true);
+      setValidatedLinkedServerId(validation.linkedServerId);
       setChecks(null);
       setVerificationProgress((current) => ({
         ...current,
@@ -342,11 +361,13 @@ export function SetupWizard() {
       }));
       setDirectServiceValidated(false);
       setValidatedService(null);
-      const serviceResult = await getNitradoServices();
+      const serviceResult = await getNitradoServices(validation.linkedServerId);
       setServices(serviceResult.services);
       if (serviceResult.services[0]) setSelectedService(serviceResult.services[0].id);
       setStep(4);
     } catch (error) {
+      setTokenValid(false);
+      setValidatedLinkedServerId("");
       setMessage(error instanceof Error ? error.message : "Nitrado service discovery failed");
     } finally {
       setBusy(false);
@@ -357,9 +378,12 @@ export function SetupWizard() {
     setBusy(true);
     setMessage("");
     try {
+      if (!validatedLinkedServerId) throw new Error("Validate your Nitrado token before saving.");
       await saveOnboarding({
+        linkedServerId: validatedLinkedServerId,
         discordGuildId: selectedGuild,
         serverType,
+        server_category: serverCategory || null,
         tags: selectedTags,
         ...publicListing,
         nitradoServiceId: selectedService,
@@ -458,6 +482,7 @@ export function SetupWizard() {
   }
 
   async function signOut() {
+    setValidatedLinkedServerId("");
     clearClientAuthState();
     await logoutAndRedirect();
   }
@@ -545,6 +570,12 @@ export function SetupWizard() {
                     selectedGuild={selectedGuild}
                     setSelectedGuild={(value) => {
                       setSelectedGuild(value);
+                      setValidatedLinkedServerId("");
+                      setTokenValid(false);
+                      setValidatedService(null);
+                      setDirectServiceValidated(false);
+                      setSelectedService("");
+                      setServices([]);
                       setBotStatus(null);
                       setBotStatusMessage("");
                       setChecks(null);
