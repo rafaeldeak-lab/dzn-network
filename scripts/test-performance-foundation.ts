@@ -52,6 +52,20 @@ function source(path: string) {
   return readFileSync(path, "utf8");
 }
 
+function expandOwnerConsolePreviewWorkflow(sourceText: string) {
+  return sourceText.replace(
+    /^        run: bash -e (scripts\/github-actions\/dzn-owner-console-preview\/[^\s]+\.sh)$/gm,
+    (_match, scriptPath: string) => {
+      const script = source(scriptPath).replace(/\r?\n$/, "");
+      const indentedScript = script
+        .split(/\r?\n/)
+        .map((line) => (line.length > 0 ? `          ${line}` : ""))
+        .join("\n");
+      return `        run: |\n${indentedScript}`;
+    },
+  );
+}
+
 function assertIncludes(file: string, snippet: string, label = snippet) {
   assert.equal(file.includes(snippet), true, `Expected ${label}`);
 }
@@ -1738,7 +1752,7 @@ function assertWorkflowBoundaries() {
   assertIncludes(autoUpdateWorkflow, "workflow_dispatch");
   assert.doesNotMatch(autoUpdateWorkflow, /^\s*(push|pull_request|schedule|workflow_run|repository_dispatch):/m, "DZN Auto Update Schedulers must remain manual-only");
 
-  const ownerPreviewWorkflow = source(".github/workflows/dzn-owner-console-preview.yml");
+  const ownerPreviewWorkflow = expandOwnerConsolePreviewWorkflow(source(".github/workflows/dzn-owner-console-preview.yml"));
   assertOrder(
     ownerPreviewWorkflow,
     "const hostAuthorization = await verifyHostAuthorization(stableUrl, phase2aRunKey);",

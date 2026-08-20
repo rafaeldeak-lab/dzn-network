@@ -1,0 +1,11 @@
+set -euo pipefail
+npm run lint
+npm run build
+npm run test
+npm run test:owner-console
+npm run test:creator-event-governance
+npm run test:public-access-gating
+npm run test:server-lifecycle-resource-control
+npm run test:server-advertising-packages
+npm run test:github-workflows
+git diff --check

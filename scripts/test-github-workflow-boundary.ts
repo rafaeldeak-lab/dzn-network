@@ -5,6 +5,20 @@ function read(path: string) {
   return readFileSync(path, "utf8");
 }
 
+function expandOwnerConsolePreviewWorkflow(source: string) {
+  return source.replace(
+    /^        run: bash -e (scripts\/github-actions\/dzn-owner-console-preview\/[^\s]+\.sh)$/gm,
+    (_match, scriptPath: string) => {
+      const script = read(scriptPath).replace(/\r?\n$/, "");
+      const indentedScript = script
+        .split(/\r?\n/)
+        .map((line) => (line.length > 0 ? `          ${line}` : ""))
+        .join("\n");
+      return `        run: |\n${indentedScript}`;
+    },
+  );
+}
+
 function extractInsertColumns(source: string, table: string) {
   const match = source.match(new RegExp(`INSERT\\s+INTO\\s+${table}\\s*\\(([\\s\\S]*?)\\)\\s*VALUES`, "i"));
   assert.notEqual(match, null, `Expected lifecycle preview seed INSERT INTO ${table}.`);
@@ -125,7 +139,7 @@ const dznPulseProductionRolloutWorkflow = read(".github/workflows/dzn-pulse-prod
 const dznServerLifecyclePreviewWorkflow = read(".github/workflows/dzn-server-lifecycle-preview.yml");
 const dznServerLifecycleProductionRolloutWorkflow = read(".github/workflows/dzn-server-lifecycle-production-rollout.yml");
 const dznPagesRuntimeProductionDeployWorkflow = read(".github/workflows/dzn-pages-runtime-production-deploy.yml");
-const dznOwnerConsolePreviewWorkflow = read(".github/workflows/dzn-owner-console-preview.yml");
+const dznOwnerConsolePreviewWorkflow = expandOwnerConsolePreviewWorkflow(read(".github/workflows/dzn-owner-console-preview.yml"));
 const dznOwnerConsoleProductionRolloutWorkflow = read(".github/workflows/dzn-owner-console-production-rollout.yml");
 const dznDiscordControlPreviewWorkflow = read(".github/workflows/dzn-discord-control-preview.yml");
 const dznDiscordControlProductionRolloutWorkflow = read(".github/workflows/dzn-discord-control-production-rollout.yml");
