@@ -29,7 +29,7 @@ The default branch copy was not the failing version. The oversized workflow was 
 - `npm run lint`: passed with 12 existing warnings and 0 errors.
 - `npx tsc --noEmit --pretty false`: failed only on the known untouched `functions/api/onboarding/test.ts` `AdmImportJobProgressResult` property errors (`adm_file`, `id`, `line_start`, `line_end`).
 - Workflow-size staged `git diff --check`: passed.
-- Repository-wide `git diff --check`: currently blocked by unrelated onboarding whitespace in `functions/api/onboarding/save.ts`, which is outside this workflow-size refactor and was not staged.
+- Repository-wide `git diff --check`: passed on the final check after dispatch verification documentation.
 
 ## Remote Verification
 
